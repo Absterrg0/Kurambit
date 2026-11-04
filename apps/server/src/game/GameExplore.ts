@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This service owns the native process, filesystem and loopback boundary of exploration sessions.
 import * as NodeFSP from "node:fs/promises";
-import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
@@ -9,7 +8,6 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -27,6 +25,9 @@ import {
   GameExploreActResult,
   GameExploreCloseResult,
   type GameExploreStep,
+  type GameExploreInspection,
+  type GameExploreUiControl,
+  type GameExploreUiResult,
   type GameConsoleMessage,
   type GamePlaytestProbe,
   type GameViewport,
@@ -37,15 +38,21 @@ import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as ExploreSheet from "./exploreSheet.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameEngine from "./GameEngine.ts";
-import * as GameExploreNative from "./gameExploreNative.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import { openExploreWeb, webStepIssues, type ExploreWebHandle } from "./gameExploreWeb.ts";
+import { insideGame } from "./GameProjectService.ts";
+import { findXvfbRun, xvfbRunArgs } from "./displayHost.ts";
+import {
+  listenForRunner,
+  type PlayActObservation,
+  type PlayObservation,
+  type PlaySession,
+} from "./playSession.ts";
+import { openWebPlaySession } from "./webPlaySession.ts";
 import { requireChromium } from "./gameChromium.ts";
-import { userDirConfigIssues } from "./gameNativeUserDir.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 import { snapshotBuildSource } from "./sourceSnapshot.ts";
 
@@ -78,6 +85,26 @@ const EXPLORE_PLAYER_ROOM: MemoryRoom = {
 };
 
 const isGameOperationError = Schema.is(GameOperationError);
+
+/** Nominal commanded game time; a process runner's tap spans its physics-frame hold. */
+const exploreStepNominalMs = (step: GameExploreStep, target: "native" | "web"): number => {
+  if ("press" in step) return target === "native" ? 170 : 50;
+  if ("waitMs" in step) return step.waitMs;
+  if ("holdMs" in step) return step.holdMs;
+  if ("ui" in step) return 100;
+  return 0;
+};
+
+const exploreStepsNominalMs = (
+  steps: readonly GameExploreStep[],
+  target: "native" | "web",
+): number => {
+  let total = 0;
+  // Whole milliseconds, so every sum of them is exact and the input cap and
+  // the void rule never disagree in the last bit.
+  for (const step of steps) total += Math.round(exploreStepNominalMs(step, target));
+  return total;
+};
 
 /**
  * Bounded, persistent exploration sessions on the current game sources:
@@ -149,19 +176,6 @@ const make = Effect.gen(function* () {
   );
   const snapshot = (root: string, project: string) =>
     Effect.promise((signal) => snapshotBuildSource(root, project, { signal }));
-  interface ExploreNativeConn {
-    socket: NodeNet.Socket;
-    lineState: GameExploreNative.NativeLineState;
-    token: string;
-    hasDisplay: boolean;
-    pid: number;
-    server: NodeNet.Server;
-    nextId: number;
-  }
-  interface ExploreWebConn {
-    handle: ExploreWebHandle;
-    server: { url: string; close: () => Promise<void> };
-  }
   interface ExploreSession {
     readonly id: string;
     readonly root: string;
@@ -171,10 +185,16 @@ const make = Effect.gen(function* () {
     readonly viewport: GameViewport;
     /** Honest boot timing, frozen with the session. */
     readonly bootMs: number | null;
-    readonly profileDir: string;
     readonly traceDir: string;
-    readonly native: ExploreNativeConn | null;
-    readonly web: ExploreWebConn | null;
+    readonly play: PlaySession;
+    /** Browser sessions run in real time and press for 50 ms; process runners hold the game and tap for 170 ms. */
+    readonly target: "native" | "web";
+    /** Whether acts can keep a picture: false for a headless runner. */
+    readonly pictures: boolean;
+    /** Ends what the launch started (process tree, served folder), after the session closed. */
+    readonly release: Effect.Effect<void>;
+    /** Removed on close; pictures in the trace dir stay as evidence. */
+    readonly scratch: ReadonlyArray<string>;
     readonly lock: Semaphore.Semaphore;
     lastActiveMs: number;
     readonly wallDeadlineMs: number;
@@ -199,39 +219,42 @@ const make = Effect.gen(function* () {
     readonly failure?: string;
     readonly execution?: "unknown";
     readonly screenText?: Record<string, string>;
-    readonly ui?: ReadonlyArray<{
-      readonly id: string;
-      readonly kind: string;
-      readonly label: string;
-      readonly enabled: boolean;
-      readonly rect: {
-        readonly x: number;
-        readonly y: number;
-        readonly width: number;
-        readonly height: number;
-      };
-    }>;
+    readonly ui?: ReadonlyArray<GameExploreUiControl>;
     readonly errors?: ReadonlyArray<{ readonly message: string; readonly where: string }>;
-    readonly uiResults?: ReadonlyArray<{
-      readonly id: string;
-      readonly action: string;
-      readonly received: boolean;
-      readonly detail: string;
-    }>;
-    readonly inspections?: ReadonlyArray<{
-      readonly path: string;
-      readonly values: Record<string, string | number | boolean | Array<number> | null>;
-      readonly error?: string;
-    }>;
+    readonly uiResults?: ReadonlyArray<GameExploreUiResult>;
+    readonly inspections?: ReadonlyArray<GameExploreInspection>;
     readonly screenshotReason?: string;
   }
+  /** The control-tree fields of an observation, copied where the runner sent them. */
+  const observedFields = (
+    o: PlayObservation & Pick<Partial<PlayActObservation>, "uiResults" | "inspections">,
+  ) => ({
+    ...(o.screenText === undefined ? {} : { screenText: { ...o.screenText } }),
+    ...(o.ui === undefined ? {} : { ui: o.ui.map((c) => ({ ...c, rect: { ...c.rect } })) }),
+    ...(o.errors === undefined ? {} : { errors: o.errors.map((e) => ({ ...e })) }),
+    ...(o.uiResults === undefined ? {} : { uiResults: o.uiResults.map((u) => ({ ...u })) }),
+    ...(o.inspections === undefined
+      ? {}
+      : { inspections: o.inspections.map((e) => ({ ...e, values: { ...e.values } })) }),
+  });
   const exploreScratchBase = () => NodePath.join(NodeOS.tmpdir(), "game-explore");
   const exploreInvalid = (path: string, detail: string) =>
     new GameOperationError({ operation: "Explore session", path, reason: "invalid-input", detail });
-  const exploreNativeStepIssues = (steps: readonly GameExploreStep[]): readonly string[] => {
+  /** What this session's runner cannot play, before any input goes out. */
+  const exploreSessionStepIssues = (
+    session: ExploreSession,
+    steps: readonly GameExploreStep[],
+  ): readonly string[] => {
     const issues: string[] = [];
+    const can = session.play.capabilities;
     for (const [index, step] of steps.entries()) {
       if ("ui" in step) {
+        if (!can.has("ui")) {
+          issues.push(
+            `Step ${index + 1} is a ui step: ui steps list native controls, which a browser game has none of.`,
+          );
+          continue;
+        }
         if (step.ui.id.length === 0 || step.ui.id.length > 200)
           issues.push(`Step ${index + 1} ui id must contain 1–200 characters.`);
         if (step.ui.action !== "click" && step.ui.action !== "drag")
@@ -239,6 +262,12 @@ const make = Effect.gen(function* () {
         if (step.ui.action === "drag" && (step.ui.to === undefined || step.ui.to.length === 0))
           issues.push(`Step ${index + 1} ui drag needs a to id.`);
       } else if ("inspect" in step) {
+        if (!can.has("inspect")) {
+          issues.push(
+            `Step ${index + 1} is an inspect step: read-only reflection lists native nodes, which a browser game has none of.`,
+          );
+          continue;
+        }
         if (step.inspect.path.length === 0 || step.inspect.path.length > 500)
           issues.push(`Step ${index + 1} inspect path must contain 1–500 characters.`);
         const properties = step.inspect.properties ?? [];
@@ -253,42 +282,6 @@ const make = Effect.gen(function* () {
     }
     return issues;
   };
-  /**
-   * Ends a native session's tracked process tree by PID only. The quit line
-   * asks the runner to exit itself; the tracked stop ends the whole owned
-   * group (xvfb-run plus its display server and Godot child) when it lingers.
-   * Never matches processes by name.
-   */
-  const closeNativeConn = (session: ExploreSession) =>
-    Effect.gen(function* () {
-      const conn = session.native;
-      if (conn === null) return;
-      yield* Effect.promise(async () => {
-        // Ask the runner to exit itself, then end the tracked tree by PID.
-        // The quit line is flushed with end(); the tracked stop below ends
-        // the whole owned group if the runner lingers. Never match by name.
-        try {
-          const sock = conn.socket;
-          if (!sock.destroyed) {
-            await new Promise<void>((resolve) => {
-              const done = () => resolve();
-              sock.end(JSON.stringify({ op: "quit", id: conn.nextId++ }) + "\n", done);
-              // @effect-diagnostics-next-line globalTimers:off -- Best-effort quit flush on a raw socket; the tracked stop below still ends the tree.
-              setTimeout(done, 2_000);
-            });
-          }
-        } catch {
-          // Best effort; the tracked stop below still ends the tree.
-        }
-        try {
-          conn.socket.destroy();
-        } catch {
-          // Already gone.
-        }
-        await new Promise<void>((resolve) => conn.server.close(() => resolve()));
-      });
-      yield* processes.stop(session.root).pipe(Effect.ignore);
-    });
   // Worktree judges own different roots; a session in one game must not
   // consume another game's play budget. The thread lease still owns input.
   const exploreStartLock = Semaphore.makeUnsafe(1);
@@ -437,37 +430,22 @@ const make = Effect.gen(function* () {
         session.closed = true;
         session.closeReason = reason;
         session.closedAt = DateTime.formatIso(yield* DateTime.now);
-        if (session.native !== null)
-          yield* closeNativeConn(session).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Closing a native exploration session failed.", {
-                sessionId: session.id,
-                cause,
-              }),
-            ),
-          );
-        if (session.web !== null)
-          yield* Effect.promise(() =>
-            (async () => {
-              try {
-                await session.web!.handle.close();
-              } finally {
-                await session.web!.server.close();
-              }
-            })(),
-          ).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Closing a web exploration session failed.", {
-                sessionId: session.id,
-                cause,
-              }),
-            ),
-          );
+        yield* Effect.promise(() => session.play.close()).pipe(
+          Effect.andThen(session.release),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Closing an exploration session failed.", {
+              sessionId: session.id,
+              cause,
+            }),
+          ),
+        );
         yield* Effect.promise(() =>
-          NodeFSP.rm(session.profileDir, { recursive: true, force: true }),
+          Promise.all(
+            session.scratch.map((dir) => NodeFSP.rm(dir, { recursive: true, force: true })),
+          ),
         ).pipe(
           Effect.catchCause((cause) =>
-            Effect.logWarning("Removing an exploration profile failed.", {
+            Effect.logWarning("Removing exploration scratch failed.", {
               sessionId: session.id,
               cause,
             }),
@@ -519,11 +497,219 @@ const make = Effect.gen(function* () {
       );
     return null;
   };
+  interface OpenedPlay {
+    readonly play: PlaySession;
+    readonly release: Effect.Effect<void>;
+    readonly scratch: ReadonlyArray<string>;
+    readonly pictures: boolean;
+    readonly bootMs: number;
+    readonly inputNote: string;
+  }
+  const exploreFailure = (root: string, cause: unknown) =>
+    isGameOperationError(cause)
+      ? cause
+      : new GameOperationError({
+          operation: "Explore session",
+          path: root,
+          reason: "command-failed",
+          detail: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        });
   /**
-   * Opens a native exploration session on the current game sources. No
-   * export is built or served: Godot runs the real main scene under a
-   * server-owned runner script (ignored builds/logs only) and talks back
-   * over loopback TCP. The game tree stays paused between acts.
+   * Starts the engine's runner process on a private display (headless when
+   * the engine runs without one and xvfb-run is missing) and waits for its
+   * hello. Everything it started is ended on any failure, by PID only.
+   */
+  const openRunner = (input: {
+    readonly root: string;
+    readonly backend: GameEngine.GameEngineBackend;
+    readonly projectDir: string;
+    readonly player: string | null;
+    readonly viewport: GameViewport;
+    readonly id: string;
+    readonly traceDir: string;
+    readonly bootTimeoutMs: number;
+    readonly what: string;
+  }) =>
+    Effect.gen(function* () {
+      const { root, backend } = input;
+      const launch = backend.playProcess;
+      if (launch === null)
+        return yield* exploreInvalid(
+          root,
+          `${backend.profile.displayName} games play in the browser.`,
+        );
+      const xvfb = yield* Effect.promise(() => findXvfbRun());
+      const scriptDir = NodePath.join(root, "builds/logs", `game-explore-${input.id}`);
+      const requestPath = NodePath.join(input.traceDir, "request.json");
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(input.traceDir, { recursive: true }),
+        catch: (cause) =>
+          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
+      });
+      const listener = yield* Effect.tryPromise({
+        try: () => listenForRunner(),
+        catch: (cause) =>
+          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
+      });
+      const dropScratch = Effect.promise(() =>
+        Promise.all([
+          NodeFSP.rm(input.traceDir, { recursive: true, force: true }),
+          NodeFSP.rm(scriptDir, { recursive: true, force: true }),
+        ]),
+      ).pipe(Effect.ignore);
+      const dropAll = Effect.gen(function* () {
+        yield* processes.stop(root).pipe(Effect.ignore);
+        yield* Effect.promise(() => listener.drop());
+        yield* dropScratch;
+      });
+      return yield* Effect.gen(function* () {
+        const spec = yield* launch({
+          projectDir: input.projectDir,
+          player: input.player,
+          requestPath,
+          scriptDir,
+          traceDir: input.traceDir,
+          viewport: input.viewport,
+          display: xvfb !== null,
+        });
+        yield* Effect.tryPromise({
+          try: () => listener.writeRequest(requestPath, spec.request),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "Explore session",
+              path: root,
+              reason: "io",
+              cause,
+            }),
+        });
+        // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs; the run's game time uses the controlled clock.
+        const bootWallStart = Date.now();
+        const launched = yield* processes.start({
+          root,
+          executable: xvfb ?? spec.executable,
+          args:
+            xvfb === null
+              ? [...spec.args]
+              : xvfbRunArgs(input.viewport, [spec.executable, ...spec.args]),
+          ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
+          operation: "explore-play",
+          timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
+          env: spec.env,
+          envMode: "replace",
+          ownedProcessGroup: true,
+        });
+        const play = yield* Effect.tryPromise({
+          try: (signal) =>
+            listener.accept({
+              timeoutMs: input.bootTimeoutMs,
+              what: input.what,
+              signal,
+              alive: () => processes.list(root).some((entry) => entry.pid === launched.pid),
+            }),
+          catch: (cause) => exploreFailure(root, cause),
+        });
+        // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
+        const bootMs = Date.now() - bootWallStart;
+        return {
+          play,
+          release: processes.stop(root).pipe(Effect.ignore),
+          scratch: spec.scratch,
+          pictures: xvfb !== null,
+          bootMs,
+          inputNote: spec.inputNote,
+        } satisfies OpenedPlay;
+      }).pipe(
+        Effect.tapError(() => dropAll),
+        Effect.onInterrupt(() => dropAll),
+      );
+    });
+  /** Registers an opened session and says what it is. */
+  const exploreRegister = (
+    threadId: ThreadId,
+    root: string,
+    opened: OpenedPlay,
+    input: {
+      readonly id: string;
+      readonly traceDir: string;
+      readonly sourceId: string;
+      readonly viewport: GameViewport;
+      readonly target: "native" | "web";
+      readonly opening: string;
+      /** What the session plays: the sources themselves or a player built from them. */
+      readonly plays: string;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const { play } = opened;
+      const live: ExploreSession = {
+        id: input.id,
+        root,
+        threadId,
+        buildId: input.sourceId,
+        sourceId: input.sourceId,
+        viewport: { ...input.viewport },
+        bootMs: opened.bootMs,
+        traceDir: input.traceDir,
+        play,
+        target: input.target,
+        pictures: opened.pictures,
+        release: opened.release,
+        scratch: opened.scratch,
+        lock: Semaphore.makeUnsafe(1),
+        lastActiveMs: now,
+        wallDeadlineMs: now + GAME_EXPLORE_BOUNDS.wallTtlMs,
+        calls: 0,
+        totalSteps: 0,
+        totalNominalMs: 0,
+        images: 0,
+        actions: [],
+        closed: false,
+        closeReason: null,
+        closedAt: null,
+      };
+      const boot = play.boot;
+      if (boot.probe !== null)
+        live.actions.push({
+          index: 0,
+          steps: [],
+          executedInputSteps: 0,
+          nominalMs: 0,
+          probe: {
+            gameState: { ...boot.probe.gameState },
+            player: boot.probe.player === null ? null : { ...boot.probe.player },
+          },
+          screenshot: "",
+          consoleMessages: [...(boot.consoleMessages ?? [])],
+          consoleTruncated: 0,
+          ...observedFields(boot),
+        });
+      exploreLive.set(root, live);
+      const held = input.target === "native";
+      const noPicture = opened.pictures
+        ? ""
+        : "Runs headless without a picture (xvfb-run was not found on PATH): state, text, ui and errors stay available. ";
+      return {
+        sessionId: input.id,
+        buildId: input.sourceId,
+        sourceId: input.sourceId,
+        viewport: { ...input.viewport },
+        booted: true,
+        bootMs: opened.bootMs,
+        message:
+          `${input.opening} exploration session ${input.id.slice(0, 8)} opened on ${input.plays} ${input.sourceId.slice(0, 12)} ` +
+          `at ${input.viewport.width}x${input.viewport.height} (${held ? "paused between calls" : "real time: the game keeps running between calls"}). ` +
+          `${opened.inputNote}${exploreBudget} Act with input steps${play.capabilities.has("ui") ? " plus ui and inspect steps" : ""}, then game_explore_close. ` +
+          `${noPicture}This session never qualifies the build.`,
+        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
+        wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
+        idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
+      } satisfies typeof GameExploreStartResult.Type;
+    });
+  /**
+   * Opens a session on the current game sources played by the engine's own
+   * runner: no export is built or served. The game is held between acts.
    */
   const exploreStartNative = (
     threadId: ThreadId,
@@ -555,306 +741,43 @@ const make = Effect.gen(function* () {
           () => "",
         ),
       );
-      const dirIssues = userDirConfigIssues(projectText);
-      if (dirIssues.length > 0) return yield* exploreInvalid(root, dirIssues.join(" "));
-      const baseViewport = backend.projectSettings(projectText).viewport;
+      const viewport = backend.projectSettings(projectText).viewport;
       if (
-        baseViewport.width > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
-        baseViewport.height > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
-        baseViewport.width < EXPLORE_CAPTURE_BOUNDS.minDimension ||
-        baseViewport.height < EXPLORE_CAPTURE_BOUNDS.minDimension
+        viewport.width > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
+        viewport.height > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
+        viewport.width < EXPLORE_CAPTURE_BOUNDS.minDimension ||
+        viewport.height < EXPLORE_CAPTURE_BOUNDS.minDimension
       )
         return yield* exploreInvalid(
           root,
-          `The game's base viewport (${baseViewport.width}x${baseViewport.height}) does not fit the capture bounds. Change display/window/size in project.godot first.`,
+          `The game's base viewport (${viewport.width}x${viewport.height}) does not fit the capture bounds. Change display/window/size in project.godot first.`,
         );
       const id = NodeCrypto.randomUUID();
       const traceDir = NodePath.join(exploreScratchBase(), id);
-      const staged = yield* Effect.tryPromise({
-        try: () => GameExploreNative.stageNativeScript(root, id, traceDir),
-        catch: (cause) =>
-          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
-      });
-      // profileDir reuses the finalize removal: the runner script and request
-      // live under ignored builds/logs and are removed again on close.
-      const profileDir = staged.scriptDir;
-      const token = GameExploreNative.nativeSessionToken();
-      const now = yield* Clock.currentTimeMillis;
-      const dropScratch = Effect.promise(() =>
-        Promise.all([
-          NodeFSP.rm(traceDir, { recursive: true, force: true }),
-          NodeFSP.rm(staged.scriptDir, { recursive: true, force: true }),
-        ]),
-      ).pipe(Effect.ignore);
-      const cleanupChild = processes.stop(root).pipe(Effect.ignore);
-      // The TCP server owns the boot handshake; the tracked child is stopped
-      // on any exit before the session registers, by PID only.
-      const dropAll = Effect.gen(function* () {
-        yield* cleanupChild;
-        yield* dropScratch;
-      });
-      const server: NodeNet.Server = yield* Effect.tryPromise({
-        try: async () => {
-          const listener = NodeNet.createServer();
-          await new Promise<void>((resolve, reject) => {
-            listener.once("error", reject);
-            listener.listen(0, "127.0.0.1", () => {
-              listener.off("error", reject);
-              resolve();
-            });
-          });
-          return listener;
-        },
-        catch: (cause) =>
-          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
-      });
-      const lineState: GameExploreNative.NativeLineState = {
-        buffer: "",
-        notify: null,
-        closed: false,
-      };
-      let runnerSocket: NodeNet.Socket | null = null;
-      server.on("connection", (sock) => {
-        if (runnerSocket !== null) {
-          sock.destroy();
-          return;
-        }
-        runnerSocket = sock;
-        GameExploreNative.attachLineState(sock, lineState);
-      });
-      const port = (server.address() as NodeNet.AddressInfo).port;
-      yield* Effect.tryPromise({
-        try: () =>
-          GameExploreNative.writeNativeRequest(staged.requestPath, {
-            port,
-            token,
-            expectedUserDataPrefix: staged.isolation.dataDir,
-          }),
-        catch: (cause) =>
-          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
-      }).pipe(
-        Effect.tapError(() => dropAll),
-        Effect.onInterrupt(() => dropAll),
-      );
-      const xvfb = yield* Effect.promise(() => GameExploreNative.findXvfb()).pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      const hasDisplay = xvfb !== null;
-      const godotArgs = GameExploreNative.nativeGodotArgs({
-        projectDir: ctx.projectDir,
-        scriptPath: staged.scriptPath,
-        requestPath: staged.requestPath,
-        width: baseViewport.width,
-        height: baseViewport.height,
-        hasDisplay,
-      });
-      const launched = yield* (
-        hasDisplay
-          ? processes.start({
-              root,
-              executable: xvfb!,
-              args: [
-                "-a",
-                "-s",
-                // Xvfb rejects a screen without depth ("Invalid screen
-                // configuration"), and xvfb-run still runs Godot against the
-                // dead display, so every native boot times out with no
-                // picture. Keep the x24 depth the helper uses.
-                `-screen 0 ${baseViewport.width}x${baseViewport.height}x24`,
-                ctx.binary.path,
-                ...godotArgs,
-              ],
-              operation: "explore-native",
-              timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
-              env: GameExploreNative.nativeChildEnv(staged.isolation),
-              envMode: "replace",
-              ownedProcessGroup: true,
-            })
-          : processes.start({
-              root,
-              executable: ctx.binary.path,
-              args: [...godotArgs],
-              operation: "explore-native",
-              timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
-              env: GameExploreNative.nativeChildEnv(staged.isolation),
-              envMode: "replace",
-              ownedProcessGroup: true,
-            })
-      ).pipe(
-        Effect.tapError(() => dropAll),
-        Effect.onInterrupt(() => dropAll),
-      );
-      const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
-      if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
-      const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
-      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs; the run's game time uses the controlled clock.
-      const bootWallStart = Date.now();
-      let everConnected = false;
-      const markConnected = () => {
-        everConnected = true;
-      };
-      server.on("connection", markConnected);
-      const hello = yield* Effect.tryPromise({
-        try: (signal) =>
-          (async () => {
-            const timeout = AbortSignal.timeout(bootTimeoutMs);
-            const combined =
-              signal === undefined || signal.aborted ? timeout : AbortSignal.any([signal, timeout]);
-            for (;;) {
-              let line: string | null;
-              try {
-                line = await GameExploreNative.nextRunnerLine(lineState, combined);
-              } catch (cause) {
-                if (signal?.aborted) throw new Error("aborted", { cause });
-                throw new GameOperationError({
-                  operation: "Explore session",
-                  path: root,
-                  reason: "command-failed",
-                  detail: `The native game did not boot within ${bootTimeoutMs}ms; no exploration session was opened. ${cause instanceof Error ? cause.message : String(cause)}`,
-                  ...(cause === undefined ? {} : { cause }),
-                });
-              }
-              if (line === null) {
-                // The runner connected and went away without a hello.
-                if (everConnected)
-                  throw new GameOperationError({
-                    operation: "Explore session",
-                    path: root,
-                    reason: "command-failed",
-                    detail:
-                      "The native runner exited before booting; no exploration session was opened.",
-                  });
-                continue;
-              }
-              const text = String(line).trim();
-              if (text === "") continue;
-              let parsed: unknown = null;
-              try {
-                parsed = JSON.parse(text);
-              } catch {
-                continue;
-              }
-              if (typeof parsed !== "object" || parsed === null) continue;
-              const record = parsed as Record<string, unknown>;
-              if (typeof record["error"] === "string")
-                throw new GameOperationError({
-                  operation: "Explore session",
-                  path: root,
-                  reason: "command-failed",
-                  detail: record["error"] as string,
-                });
-              if (record["token"] !== token)
-                throw new GameOperationError({
-                  operation: "Explore session",
-                  path: root,
-                  reason: "command-failed",
-                  detail: "The native runner presented a wrong session token.",
-                });
-              return record;
-            }
-          })(),
-        catch: (cause) =>
-          isGameOperationError(cause)
-            ? cause
-            : new GameOperationError({
-                operation: "Explore session",
-                path: root,
-                reason: "command-failed",
-                detail: cause instanceof Error ? cause.message : String(cause),
-                cause,
-              }),
-      }).pipe(
-        Effect.tapError(() => dropAll),
-        Effect.onInterrupt(() => dropAll),
-      );
-      const clean = GameExploreNative.sanitizeNativeObservation(hello);
-      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs; the run's game time uses the controlled clock.
-      const bootMs = Date.now() - bootWallStart;
-      if (runnerSocket === null)
-        return yield* exploreInvalid(
-          root,
-          "The native runner never connected; no session was opened.",
-        );
-      const live: ExploreSession = {
-        id,
+      const opened = yield* openRunner({
         root,
-        threadId,
-        buildId: before.sourceId,
-        sourceId: before.sourceId,
-        viewport: { width: baseViewport.width, height: baseViewport.height },
-        bootMs,
-        profileDir,
+        backend,
+        projectDir: ctx.projectDir,
+        player: null,
+        viewport,
+        id,
         traceDir,
-        native: {
-          socket: runnerSocket!,
-          lineState,
-          token,
-          hasDisplay,
-          pid: launched.pid,
-          server,
-          nextId: 1,
-        },
-        web: null,
-        lock: Semaphore.makeUnsafe(1),
-        lastActiveMs: now,
-        wallDeadlineMs: now + GAME_EXPLORE_BOUNDS.wallTtlMs,
-        calls: 0,
-        totalSteps: 0,
-        totalNominalMs: 0,
-        images: 0,
-        actions: [],
-        closed: false,
-        closeReason: null,
-        closedAt: null,
-      };
-      if (clean.probe !== null) {
-        live.actions.push({
-          index: 0,
-          steps: [],
-          executedInputSteps: 0,
-          nominalMs: 0,
-          probe: {
-            gameState: { ...clean.probe.gameState },
-            player: clean.probe.player === null ? null : { ...clean.probe.player },
-          },
-          screenshot: "",
-          consoleMessages: [],
-          consoleTruncated: 0,
-          screenText: { ...clean.screenText },
-          ui: clean.ui.map((control) => ({
-            ...control,
-            rect: { ...control.rect },
-          })),
-          errors: clean.errors.map((error) => ({ ...error })),
-        });
-      }
-      exploreLive.set(root, live);
-      const noPicture =
-        " Runs headless without a picture (xvfb-run was not found on PATH): state, text, ui and errors stay available.";
-      return {
-        sessionId: id,
-        buildId: before.sourceId,
+        bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
+        what: "The native runner",
+      });
+      return yield* exploreRegister(threadId, root, opened, {
+        id,
+        traceDir,
         sourceId: before.sourceId,
-        viewport: { width: baseViewport.width, height: baseViewport.height },
-        booted: true,
-        bootMs,
-        message:
-          `Native exploration session ${id.slice(0, 8)} opened on the current sources ${before.sourceId.slice(0, 12)} ` +
-          `at ${baseViewport.width}x${baseViewport.height} (paused between calls). ` +
-          `${exploreBudget} Act with input steps plus ui and inspect steps, then game_explore_close. ` +
-          (hasDisplay ? "" : noPicture + " ") +
-          `This session never qualifies the build.`,
-        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
-        wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
-        idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
-      } satisfies typeof GameExploreStartResult.Type;
+        viewport,
+        target: "native",
+        opening: "Native",
+        plays: "the current sources",
+      });
     });
   /**
    * Opens a session on a built player of the current sources (see
-   * GamePlayer), on a private display. The player speaks the native runner's
-   * protocol over loopback TCP (Unity's template StudioProbe), so acts,
-   * pictures, probe reads and closing share the native path. The game is
-   * paused between acts.
+   * GamePlayer), on a private display. The game is held between acts.
    */
   const exploreStartPlayer = (
     threadId: ThreadId,
@@ -864,214 +787,47 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       // The player is already built: the engine's executable is not needed again.
-      const backend = yield* engines.backendFor((yield* projects.read(root)).engine.name);
+      const manifest = yield* projects.read(root);
+      const backend = yield* engines.backendFor(manifest.engine.name);
       const engine = backend.profile.displayName;
-      const launch = backend.player?.session;
       const viewport = backend.profile.viewport;
-      if (launch === undefined || viewport === null)
+      if (viewport === null)
         return yield* exploreInvalid(root, `${engine} games play no prepared player.`);
-      const { player, sourceId } = prepared;
       // Where the player came from stays in the server log: a blind sample's
       // notes reach its comparator verbatim, and a sample that waited on a
       // build must read the same as one that did not.
       yield* Effect.logInfo(`${engine} explore session plays its player`, {
         root,
-        sourceId,
+        sourceId: prepared.sourceId,
         origin: prepared.origin,
         ms: prepared.ms,
       });
-      const xvfb = yield* Effect.promise(() => GameExploreNative.findXvfb()).pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      if (xvfb === null)
-        return yield* exploreInvalid(
-          root,
-          `${engine} exploration needs xvfb-run for the player's private display; install the system Xvfb package.`,
-        );
       const id = NodeCrypto.randomUUID();
       const traceDir = NodePath.join(exploreScratchBase(), id);
-      const token = GameExploreNative.nativeSessionToken();
-      const requestPath = NodePath.join(traceDir, "request.json");
-      const playerHome = NodePath.join(traceDir, "home");
-      const dropScratch = Effect.promise(() =>
-        NodeFSP.rm(traceDir, { recursive: true, force: true }),
-      ).pipe(Effect.ignore);
-      const server: NodeNet.Server = yield* Effect.tryPromise({
-        try: async () => {
-          await NodeFSP.mkdir(playerHome, { recursive: true });
-          const listener = NodeNet.createServer();
-          await new Promise<void>((resolve, reject) => {
-            listener.once("error", reject);
-            listener.listen(0, "127.0.0.1", () => {
-              listener.off("error", reject);
-              resolve();
-            });
-          });
-          return listener;
-        },
-        catch: (cause) =>
-          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
-      });
-      const lineState: GameExploreNative.NativeLineState = {
-        buffer: "",
-        notify: null,
-        closed: false,
-      };
-      let runnerSocket: NodeNet.Socket | null = null;
-      server.on("connection", (sock) => {
-        if (runnerSocket !== null) {
-          sock.destroy();
-          return;
-        }
-        runnerSocket = sock;
-        GameExploreNative.attachLineState(sock, lineState);
-      });
-      const port = (server.address() as NodeNet.AddressInfo).port;
-      const dropAll = Effect.gen(function* () {
-        yield* processes.stop(root).pipe(Effect.ignore);
-        yield* Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())));
-        yield* dropScratch;
-      });
-      yield* Effect.tryPromise({
-        // @effect-diagnostics-next-line preferSchemaOverJson:off -- The player's request file is the runner protocol's fixed two-field JSON.
-        try: () => NodeFSP.writeFile(requestPath, JSON.stringify({ port, token })),
-        catch: (cause) =>
-          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
-      }).pipe(Effect.tapError(() => dropAll));
-      const session = launch({ player, requestPath, traceDir, home: playerHome, viewport });
-      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
-      const bootWallStart = Date.now();
-      const launched = yield* processes
-        .start({
-          root,
-          executable: xvfb,
-          args: ["-a", "-s", `-screen 0 ${viewport.width}x${viewport.height}x24`, ...session.args],
-          operation: "explore-unity",
-          timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
-          env: session.env,
-          envMode: "replace",
-          ownedProcessGroup: true,
-        })
-        .pipe(Effect.tapError(() => dropAll));
-      const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
-      const hello = yield* Effect.tryPromise({
-        try: async (signal) => {
-          const timeout = AbortSignal.timeout(bootTimeoutMs);
-          const combined = signal.aborted ? timeout : AbortSignal.any([signal, timeout]);
-          for (;;) {
-            const line = await GameExploreNative.nextRunnerLine(lineState, combined).catch(
-              (cause: unknown) => {
-                throw new Error(
-                  `The ${engine} player did not report in within ${bootTimeoutMs}ms; no exploration session was opened. Player log: ${NodePath.join(traceDir, "player.log")}`,
-                  { cause },
-                );
-              },
-            );
-            if (line === null) {
-              if (runnerSocket !== null)
-                throw new Error(`The ${engine} player exited before booting.`);
-              continue;
-            }
-            let parsed: unknown = null;
-            try {
-              // @effect-diagnostics-next-line preferSchemaOverJson:off -- Runner protocol lines are sanitized field by field below.
-              parsed = JSON.parse(line);
-            } catch {
-              continue;
-            }
-            if (typeof parsed !== "object" || parsed === null) continue;
-            const record = parsed as Record<string, unknown>;
-            if (record["token"] !== token)
-              throw new Error(`The ${engine} player presented a wrong session token.`);
-            return record;
-          }
-        },
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "Explore session",
-            path: root,
-            reason: "command-failed",
-            detail: cause instanceof Error ? cause.message : String(cause),
-            cause,
-          }),
-      }).pipe(Effect.tapError(() => dropAll));
-      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
-      const bootMs = Date.now() - bootWallStart;
-      const clean = GameExploreNative.sanitizeNativeObservation(hello);
-      const now = yield* Clock.currentTimeMillis;
-      const live: ExploreSession = {
-        id,
+      const opened = yield* openRunner({
         root,
-        threadId,
-        buildId: sourceId,
-        sourceId: sourceId,
-        viewport: { ...viewport },
-        bootMs,
-        // Close removes the player's scratch HOME; pictures and player.log stay as evidence.
-        profileDir: playerHome,
+        backend,
+        projectDir: insideGame(root, backend.projectDirectory(manifest)),
+        player: prepared.player,
+        viewport,
+        id,
         traceDir,
-        native: {
-          socket: runnerSocket!,
-          lineState,
-          token,
-          hasDisplay: true,
-          pid: launched.pid,
-          server,
-          nextId: 1,
-        },
-        web: null,
-        lock: Semaphore.makeUnsafe(1),
-        lastActiveMs: now,
-        wallDeadlineMs: now + GAME_EXPLORE_BOUNDS.wallTtlMs,
-        calls: 0,
-        totalSteps: 0,
-        totalNominalMs: 0,
-        images: 0,
-        actions: [],
-        closed: false,
-        closeReason: null,
-        closedAt: null,
-      };
-      if (clean.probe !== null)
-        live.actions.push({
-          index: 0,
-          steps: [],
-          executedInputSteps: 0,
-          nominalMs: 0,
-          probe: {
-            gameState: { ...clean.probe.gameState },
-            player: clean.probe.player === null ? null : { ...clean.probe.player },
-          },
-          screenshot: "",
-          consoleMessages: [],
-          consoleTruncated: 0,
-          screenText: { ...clean.screenText },
-          ui: clean.ui.map((control) => ({ ...control, rect: { ...control.rect } })),
-          errors: clean.errors.map((error) => ({ ...error })),
-        });
-      exploreLive.set(root, live);
-      return {
-        sessionId: id,
-        buildId: sourceId,
-        sourceId: sourceId,
-        viewport: { ...viewport },
-        booted: true,
-        bootMs,
-        message:
-          `${engine} exploration session ${id.slice(0, 8)} opened on a Linux player of the current sources ${sourceId.slice(0, 12)} ` +
-          `at ${viewport.width}x${viewport.height} (paused between calls). ${session.inputNote}` +
-          `${exploreBudget} Act with input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
-        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
-        wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
-        idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
-      } satisfies typeof GameExploreStartResult.Type;
+        bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
+        what: `The ${engine} player (log: ${NodePath.join(traceDir, "player.log")})`,
+      });
+      return yield* exploreRegister(threadId, root, opened, {
+        id,
+        traceDir,
+        sourceId: prepared.sourceId,
+        viewport,
+        target: "native",
+        opening: engine,
+        plays: "a Linux player of the current sources",
+      });
     });
   /**
-   * Opens a web exploration session on the current game sources. The static
-   * folder is served over loopback and headless Chromium plays it in real
-   * time: real keyboard and mouse input, screenshots, console errors and the
-   * game's read-only `window.__studio` probe. There is no pause between
-   * calls; waits and holds advance game time as they run.
+   * Opens a session on the current sources of a browser game: the static
+   * folder served over loopback, played in headless Chromium in real time.
    */
   const exploreStartWeb = (
     threadId: ThreadId,
@@ -1093,8 +849,6 @@ const make = Effect.gen(function* () {
           root,
           "The game sources could not be identified before the web session ran; the result would not be current.",
         );
-      const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
-      if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
       const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
       const executable = yield* requireChromium("Explore session", root);
       const id = NodeCrypto.randomUUID();
@@ -1104,7 +858,6 @@ const make = Effect.gen(function* () {
         catch: (cause) =>
           new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
       });
-      const profileDir = NodePath.join(traceDir, "chrome-profile");
       const server = yield* Effect.tryPromise({
         try: () => serveGameDirectory(root, ctx.projectName),
         catch: (cause) =>
@@ -1116,89 +869,40 @@ const make = Effect.gen(function* () {
             cause,
           }),
       });
-      const now = yield* Clock.currentTimeMillis;
       const dropServer = Effect.promise(() => server.close()).pipe(Effect.ignore);
-      const handle = yield* Effect.tryPromise({
+      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
+      const bootWallStart = Date.now();
+      const play = yield* Effect.tryPromise({
         try: (signal) =>
-          openExploreWeb({
+          openWebPlaySession({
             executable,
             url: server.url,
-            profileDirectory: profileDir,
             width: viewport.width,
             height: viewport.height,
             bootTimeoutMs,
             signal,
           }),
-        catch: (cause) =>
-          isGameOperationError(cause)
-            ? cause
-            : new GameOperationError({
-                operation: "Explore session",
-                path: root,
-                reason: "command-failed",
-                detail: cause instanceof Error ? cause.message : String(cause),
-                cause,
-              }),
+        catch: (cause) => exploreFailure(root, cause),
       }).pipe(
         Effect.tapError(() => dropServer),
         Effect.onInterrupt(() => dropServer),
       );
-      const live: ExploreSession = {
-        id,
-        root,
+      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
+      const bootMs = Date.now() - bootWallStart;
+      return yield* exploreRegister(
         threadId,
-        buildId: before.sourceId,
-        sourceId: before.sourceId,
-        viewport: { ...handle.viewport },
-        bootMs: handle.bootMs,
-        profileDir,
-        traceDir,
-        native: null,
-        web: { handle, server },
-        lock: Semaphore.makeUnsafe(1),
-        lastActiveMs: now,
-        wallDeadlineMs: now + GAME_EXPLORE_BOUNDS.wallTtlMs,
-        calls: 0,
-        totalSteps: 0,
-        totalNominalMs: 0,
-        images: 0,
-        actions: [],
-        closed: false,
-        closeReason: null,
-        closedAt: null,
-      };
-      if (handle.bootProbe !== null) {
-        live.actions.push({
-          index: 0,
-          steps: [],
-          executedInputSteps: 0,
-          nominalMs: 0,
-          probe: {
-            gameState: { ...handle.bootProbe.gameState },
-            player: handle.bootProbe.player === null ? null : { ...handle.bootProbe.player },
-          },
-          screenshot: "",
-          consoleMessages: [...handle.bootConsole],
-          consoleTruncated: 0,
-        });
-      }
-      exploreLive.set(root, live);
-      return {
-        sessionId: id,
-        buildId: before.sourceId,
-        sourceId: before.sourceId,
-        viewport: { ...handle.viewport },
-        booted: true,
-        bootMs: handle.bootMs,
-        message:
-          `Web exploration session ${id.slice(0, 8)} opened on the current sources ${before.sourceId.slice(0, 12)} ` +
-          `at ${handle.viewport.width}x${handle.viewport.height} (real time: the game keeps running between calls). ` +
-          `${exploreBudget} Act with input steps, then game_explore_close. ` +
-          `This session never qualifies the build.`,
-        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
-        wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
-        idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
-      } satisfies typeof GameExploreStartResult.Type;
+        root,
+        { play, release: dropServer, scratch: [], pictures: true, bootMs, inputNote: "" },
+        {
+          id,
+          traceDir,
+          sourceId: before.sourceId,
+          viewport,
+          target: "web",
+          opening: "Web",
+          plays: "the current sources",
+        },
+      );
     });
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
     Effect.gen(function* () {
@@ -1232,10 +936,8 @@ const make = Effect.gen(function* () {
             : playsPlayer
               ? EXPLORE_PLAYER_ROOM
               : null;
-      if (playsPlayer) {
-        const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
-        if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
-      }
+      const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
+      if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
       // The player build takes minutes and is the game's own exclusive
       // operation; the start lock is held only to launch and register.
       // The editor that builds it refuses at once when memory is short; that
@@ -1299,222 +1001,22 @@ const make = Effect.gen(function* () {
       );
     });
   /**
-   * Runs one native act through the runner's TCP connection and persists the
-   * returned picture where one exists. Headless runs keep no picture; the
-   * session stays usable for state, text, ui and errors.
+   * Runs one act through the session and keeps the picture the runner wrote,
+   * when it is really there. A held runner kept the game frozen while the
+   * caller thought; a browser game kept running, so waits and holds in the
+   * steps already advanced it.
    */
-  const exploreActNative = (
+  const exploreActOnce = (
     session: ExploreSession,
     input: typeof GameExploreActInput.Type,
     callIndex: number,
     nominalMs: number,
   ) =>
     Effect.gen(function* () {
-      const conn = session.native!;
       const file = `act-${String(callIndex).padStart(2, "0")}-observe.png`;
-      const screenshotPath = conn.hasDisplay ? NodePath.join(session.traceDir, file) : null;
-      const failAct = Effect.gen(function* () {
-        session.actions.push({
-          index: callIndex,
-          steps: [...input.steps],
-          executedInputSteps: 0,
-          nominalMs: 0,
-          probe: null,
-          screenshot: "",
-          consoleMessages: [],
-          consoleTruncated: 0,
-          execution: "unknown",
-          failure:
-            "Act failed or was interrupted after possible partial execution. Exact input progress is unknown.",
-        });
-        yield* exploreFinalize(session, "act-failed");
-      });
+      const screenshotPath = session.pictures ? NodePath.join(session.traceDir, file) : null;
       const reply = yield* Effect.tryPromise({
-        try: (signal) =>
-          (async () => {
-            const id = conn.nextId++;
-            conn.socket.write(
-              JSON.stringify({ id, op: "act", steps: [...input.steps], screenshotPath }) + "\n",
-            );
-            const timeout = AbortSignal.timeout(120_000);
-            const combined =
-              signal === undefined || signal.aborted ? timeout : AbortSignal.any([signal, timeout]);
-            for (;;) {
-              let line: string | null;
-              try {
-                line = await GameExploreNative.nextRunnerLine(conn.lineState, combined);
-              } catch (cause) {
-                if (signal?.aborted) throw new Error("aborted");
-                if (cause === undefined) throw new Error("The native act timed out after 120s.");
-                throw new Error("The native act timed out after 120s.", { cause });
-              }
-              if (line === null) throw new Error("The native session closed.");
-              const text = String(line).trim();
-              if (text === "") continue;
-              let parsed: unknown = null;
-              try {
-                parsed = JSON.parse(text);
-              } catch {
-                continue;
-              }
-              if (typeof parsed !== "object" || parsed === null) continue;
-              const record = parsed as Record<string, unknown>;
-              if (record["id"] !== id) continue;
-              if (record["ok"] !== true)
-                throw new Error(
-                  typeof record["error"] === "string"
-                    ? (record["error"] as string)
-                    : "The native act failed.",
-                );
-              return record;
-            }
-          })(),
-        catch: (cause) =>
-          isGameOperationError(cause)
-            ? cause
-            : new GameOperationError({
-                operation: "Explore session",
-                path: session.id,
-                reason: "command-failed",
-                detail: cause instanceof Error ? cause.message : String(cause),
-                cause,
-              }),
-      }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? failAct : Effect.void)));
-      const clean = GameExploreNative.sanitizeNativeObservation(reply);
-      const executedInputSteps =
-        typeof reply["executedInputSteps"] === "number"
-          ? (reply["executedInputSteps"] as number)
-          : 0;
-      // The runner writes the picture directly to the trace dir; the act only
-      // keeps it when the file is really there.
-      let keptScreenshot = "";
-      let screenshotReason: string | undefined = undefined;
-      if (screenshotPath !== null && reply["screenshot"] === true) {
-        const present = yield* Effect.promise(() =>
-          NodeFSP.stat(screenshotPath)
-            .then((stat) => stat.isFile() && stat.size > 0)
-            .catch(() => false),
-        );
-        if (present) keptScreenshot = file;
-        else
-          screenshotReason =
-            "The native picture was unavailable even though a display was expected; state, text, ui and errors stay available.";
-      } else if (screenshotPath === null) {
-        screenshotReason =
-          "xvfb-run was not found on PATH, so the native session runs headless without a picture. State, text, ui and errors stay available.";
-      }
-      const probe =
-        clean.probe === null
-          ? null
-          : {
-              gameState: { ...clean.probe.gameState },
-              player: clean.probe.player === null ? null : { ...clean.probe.player },
-            };
-      session.actions.push({
-        index: callIndex,
-        steps: [...input.steps],
-        executedInputSteps,
-        nominalMs,
-        probe,
-        screenshot: keptScreenshot,
-        consoleMessages: [],
-        consoleTruncated: 0,
-        screenText: { ...clean.screenText },
-        ui: clean.ui.map((control) => ({ ...control, rect: { ...control.rect } })),
-        errors: clean.errors.map((error) => ({ ...error })),
-        uiResults: clean.uiResults.map((result) => ({ ...result })),
-        inspections: clean.inspections.map((entry) => ({ ...entry, values: { ...entry.values } })),
-        ...(screenshotReason === undefined ? {} : { screenshotReason }),
-      });
-      session.totalNominalMs += nominalMs;
-      if (keptScreenshot !== "") session.images += 1;
-      session.lastActiveMs = yield* Clock.currentTimeMillis;
-      const received = clean.uiResults.filter((result) => result.received).length;
-      return {
-        sessionId: session.id,
-        callIndex,
-        executedInputSteps,
-        nominalMs,
-        probe,
-        screenshotPath:
-          keptScreenshot === "" ? null : NodePath.join(session.traceDir, keptScreenshot),
-        ...(screenshotReason === undefined ? {} : { screenshotReason }),
-        screenText: { ...clean.screenText },
-        ui: clean.ui.map((control) => ({ ...control, rect: { ...control.rect } })),
-        errors: clean.errors.map((error) => ({ ...error })),
-        uiResults: clean.uiResults.map((result) => ({ ...result })),
-        inspections: clean.inspections.map((entry) => ({ ...entry, values: { ...entry.values } })),
-        consoleMessages: [],
-        consoleTruncated: 0,
-        message:
-          `Act ${callIndex} ran ${input.steps.length} step(s) ` +
-          `(${executedInputSteps} input, +${nominalMs}ms nominal); ` +
-          (clean.uiResults.length > 0
-            ? `${received}/${clean.uiResults.length} ui action(s) received; `
-            : "") +
-          `${explorePace(session)} ` +
-          `This observation is descriptive only, never a verdict.`,
-        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls - callIndex,
-        totalNominalMs: session.totalNominalMs,
-      } satisfies typeof GameExploreActResult.Type;
-    }).pipe(
-      Effect.onExit((exit) =>
-        exit._tag === "Failure" && !session.closed
-          ? Effect.gen(function* () {
-              if (!session.actions.some((action) => action.index === callIndex))
-                yield* Effect.gen(function* () {
-                  session.actions.push({
-                    index: callIndex,
-                    steps: [...input.steps],
-                    executedInputSteps: 0,
-                    nominalMs: 0,
-                    probe: null,
-                    screenshot: "",
-                    consoleMessages: [],
-                    consoleTruncated: 0,
-                    execution: "unknown",
-                    failure:
-                      "Observation failed after possible partial execution. Exact input progress is unknown.",
-                  });
-                  yield* exploreFinalize(session, "act-failed");
-                });
-            })
-          : Effect.void,
-      ),
-    );
-  /**
-   * Runs one web act through headless Chromium and persists the returned
-   * picture. The game runs in real time, so waits and holds in the steps
-   * already advanced it; captures cost nothing extra.
-   */
-  const exploreActWeb = (
-    session: ExploreSession,
-    input: typeof GameExploreActInput.Type,
-    callIndex: number,
-    nominalMs: number,
-  ) =>
-    Effect.gen(function* () {
-      const conn = session.web!;
-      const file = `act-${String(callIndex).padStart(2, "0")}-observe.png`;
-      const screenshotPath = NodePath.join(session.traceDir, file);
-      const failAct = Effect.gen(function* () {
-        session.actions.push({
-          index: callIndex,
-          steps: [...input.steps],
-          executedInputSteps: 0,
-          nominalMs: 0,
-          probe: null,
-          screenshot: "",
-          consoleMessages: [],
-          consoleTruncated: 0,
-          execution: "unknown",
-          failure:
-            "Act failed or was interrupted after possible partial execution. Exact input progress is unknown.",
-        });
-        yield* exploreFinalize(session, "act-failed");
-      });
-      const observed = yield* Effect.tryPromise({
-        try: (signal) => conn.handle.act([...input.steps], callIndex, signal),
+        try: (signal) => session.play.act([...input.steps], screenshotPath, signal),
         catch: (cause) =>
           new GameOperationError({
             operation: "Explore session",
@@ -1523,65 +1025,72 @@ const make = Effect.gen(function* () {
             detail:
               cause instanceof Error && cause.message !== "aborted"
                 ? cause.message.slice(0, 500)
-                : "The web act failed.",
+                : "The act failed.",
             cause,
           }),
-      }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? failAct : Effect.void)));
+      });
       let keptScreenshot = "";
       let screenshotReason: string | undefined = undefined;
-      if (observed.screenshotData !== "") {
-        const written = yield* Effect.promise(() =>
-          NodeFSP.writeFile(screenshotPath, Buffer.from(observed.screenshotData, "base64"))
-            .then(() =>
-              NodeFSP.stat(screenshotPath).then(
-                (stat) => stat.isFile() && stat.size > 0,
-                () => false,
-              ),
-            )
-            .catch(() => false),
-        );
-        if (written) keptScreenshot = file;
-        else
-          screenshotReason =
-            "The browser picture could not be saved; state and console messages stay available.";
-      } else {
+      if (screenshotPath === null)
         screenshotReason =
-          "The browser returned no picture for this act; state and console messages stay available.";
-      }
+          "xvfb-run was not found on PATH, so the native session runs headless without a picture. State, text, ui and errors stay available.";
+      else if (
+        reply.screenshot &&
+        (yield* Effect.promise(() =>
+          NodeFSP.stat(screenshotPath)
+            .then((stat) => stat.isFile() && stat.size > 0)
+            .catch(() => false),
+        ))
+      )
+        keptScreenshot = file;
+      else
+        screenshotReason =
+          session.target === "web"
+            ? "The browser returned no picture for this act; state and console messages stay available."
+            : "The native picture was unavailable even though a display was expected; state, text, ui and errors stay available.";
       const probe =
-        observed.probe === null
+        reply.probe === null
           ? null
           : {
-              gameState: { ...observed.probe.gameState },
-              player: observed.probe.player === null ? null : { ...observed.probe.player },
+              gameState: { ...reply.probe.gameState },
+              player: reply.probe.player === null ? null : { ...reply.probe.player },
             };
+      const observed = observedFields(reply);
+      const consoleMessages = [...(reply.consoleMessages ?? [])];
+      const consoleTruncated = reply.consoleTruncated ?? 0;
       session.actions.push({
         index: callIndex,
         steps: [...input.steps],
-        executedInputSteps: observed.executedInputSteps,
+        executedInputSteps: reply.executedInputSteps,
         nominalMs,
         probe,
         screenshot: keptScreenshot,
-        consoleMessages: [...observed.consoleMessages],
-        consoleTruncated: observed.consoleTruncated,
+        consoleMessages,
+        consoleTruncated,
+        ...observed,
         ...(screenshotReason === undefined ? {} : { screenshotReason }),
       });
       session.totalNominalMs += nominalMs;
       if (keptScreenshot !== "") session.images += 1;
       session.lastActiveMs = yield* Clock.currentTimeMillis;
+      const uiResults = observed.uiResults ?? [];
+      const received = uiResults.filter((result) => result.received).length;
       return {
         sessionId: session.id,
         callIndex,
-        executedInputSteps: observed.executedInputSteps,
+        executedInputSteps: reply.executedInputSteps,
         nominalMs,
         probe,
-        screenshotPath: keptScreenshot === "" ? null : screenshotPath,
+        screenshotPath:
+          keptScreenshot === "" ? null : NodePath.join(session.traceDir, keptScreenshot),
         ...(screenshotReason === undefined ? {} : { screenshotReason }),
-        consoleMessages: [...observed.consoleMessages],
-        consoleTruncated: observed.consoleTruncated,
+        ...observedFields(reply),
+        consoleMessages,
+        consoleTruncated,
         message:
           `Act ${callIndex} ran ${input.steps.length} step(s) ` +
-          `(${observed.executedInputSteps} input, +${nominalMs}ms nominal); ` +
+          `(${reply.executedInputSteps} input, +${nominalMs}ms nominal); ` +
+          (uiResults.length > 0 ? `${received}/${uiResults.length} ui action(s) received; ` : "") +
           `${explorePace(session)} ` +
           `This observation is descriptive only, never a verdict.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls - callIndex,
@@ -1591,23 +1100,21 @@ const make = Effect.gen(function* () {
       Effect.onExit((exit) =>
         exit._tag === "Failure" && !session.closed
           ? Effect.gen(function* () {
-              if (!session.actions.some((action) => action.index === callIndex))
-                yield* Effect.gen(function* () {
-                  session.actions.push({
-                    index: callIndex,
-                    steps: [...input.steps],
-                    executedInputSteps: 0,
-                    nominalMs: 0,
-                    probe: null,
-                    screenshot: "",
-                    consoleMessages: [],
-                    consoleTruncated: 0,
-                    execution: "unknown",
-                    failure:
-                      "Observation failed after possible partial execution. Exact input progress is unknown.",
-                  });
-                  yield* exploreFinalize(session, "act-failed");
-                });
+              if (session.actions.some((action) => action.index === callIndex)) return;
+              session.actions.push({
+                index: callIndex,
+                steps: [...input.steps],
+                executedInputSteps: 0,
+                nominalMs: 0,
+                probe: null,
+                screenshot: "",
+                consoleMessages: [],
+                consoleTruncated: 0,
+                execution: "unknown",
+                failure:
+                  "Act failed or was interrupted after possible partial execution. Exact input progress is unknown.",
+              });
+              yield* exploreFinalize(session, "act-failed");
             })
           : Effect.void,
       ),
@@ -1635,10 +1142,7 @@ const make = Effect.gen(function* () {
           session.id,
           `This session used its ${GAME_EXPLORE_BOUNDS.maxCalls} act calls; close it and start a new exploration.`,
         );
-      const nominalMs = GameExploreNative.exploreStepsNominalMs(
-        input.steps,
-        session.web === null ? "native" : "web",
-      );
+      const nominalMs = exploreStepsNominalMs(input.steps, session.target);
       if (!Number.isFinite(nominalMs) || nominalMs < 0)
         return yield* exploreInvalid(session.id, "The act has an invalid duration.");
       if (nominalMs > GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall)
@@ -1648,14 +1152,9 @@ const make = Effect.gen(function* () {
         );
       const stepIssues = exploreStepIssues(input.steps);
       if (stepIssues.length > 0) return yield* exploreInvalid(session.id, stepIssues.join("\n"));
-      if (session.web !== null) {
-        const webIssues = webStepIssues(input.steps);
-        if (webIssues.length > 0) return yield* exploreInvalid(session.id, webIssues.join("\n"));
-      } else {
-        const nativeIssues = exploreNativeStepIssues(input.steps);
-        if (nativeIssues.length > 0)
-          return yield* exploreInvalid(session.id, nativeIssues.join("\n"));
-      }
+      const sessionIssues = exploreSessionStepIssues(session, input.steps);
+      if (sessionIssues.length > 0)
+        return yield* exploreInvalid(session.id, sessionIssues.join("\n"));
       return yield* session.lock.withPermits(1)(
         Effect.gen(function* () {
           if (session.closed || exploreLive.get(session.root) !== session)
@@ -1707,8 +1206,7 @@ const make = Effect.gen(function* () {
           }
           // Headless native acts persist no picture, so the image bound only
           // covers acts that actually keep one. Web acts always keep one.
-          const keepsImage =
-            session.web !== null || (session.native !== null && session.native.hasDisplay);
+          const keepsImage = session.pictures;
           if (keepsImage && session.images + 1 > GAME_EXPLORE_BOUNDS.maxImages)
             return yield* exploreInvalid(
               session.id,
@@ -1717,11 +1215,9 @@ const make = Effect.gen(function* () {
           const callIndex = session.calls + 1;
           session.calls = callIndex;
           session.totalSteps += input.steps.length;
-          return yield* (
-            session.web !== null
-              ? exploreActWeb(session, input, callIndex, nominalMs)
-              : exploreActNative(session, input, callIndex, nominalMs)
-          ).pipe(Effect.ensuring(persistSession(session)));
+          return yield* exploreActOnce(session, input, callIndex, nominalMs).pipe(
+            Effect.ensuring(persistSession(session)),
+          );
         }),
       );
     });

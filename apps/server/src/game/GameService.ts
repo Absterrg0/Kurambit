@@ -403,31 +403,27 @@ const make = Effect.gen(function* () {
   // per checkout as busy.
   const botRunIn = Effect.fnUntraced(function* (root: string, input: GameBotRunInput) {
     const engine = engineProfile((yield* projects.read(root)).engine.name);
-    if (engine.botRefusal !== null)
-      return yield* new GameOperationError({
-        operation: "Bot run",
-        path: root,
-        reason: "invalid-input",
-        detail: engine.botRefusal,
-      });
     yield* gate.admit(
       "Bot run",
       root,
       BOT_ROOM,
-      Effect.gen(function* () {
-        // An engine with no import step (three.js) succeeds here at once.
-        const imported = yield* engines.importProject(root);
-        if (!imported.success)
-          return yield* new GameOperationError({
-            operation: "Bot run",
-            path: imported.path ?? root,
-            reason: "command-failed",
-            detail:
-              `The ${engine.displayName} import failed before the bot run started.\n${imported.message}`.slice(
-                -2000,
-              ),
-          });
-      }),
+      // A prepared player imports in its own build, and only when it builds.
+      engine.play === "player"
+        ? Effect.void
+        : Effect.gen(function* () {
+            // An engine with no import step (three.js) succeeds here at once.
+            const imported = yield* engines.importProject(root);
+            if (!imported.success)
+              return yield* new GameOperationError({
+                operation: "Bot run",
+                path: imported.path ?? root,
+                reason: "command-failed",
+                detail:
+                  `The ${engine.displayName} import failed before the bot run started.\n${imported.message}`.slice(
+                    -2000,
+                  ),
+              });
+          }),
     );
     return yield* gameBot.run(root, input);
   });
@@ -879,6 +875,7 @@ const make = Effect.gen(function* () {
 });
 export const layer = Layer.effect(GameService, make).pipe(
   Layer.provide(GameExplore.layer),
+  Layer.provide(GameBot.layer),
   Layer.provide(GameExport.layer),
   Layer.provide(GamePlayer.layer),
   Layer.provide(GameMemoryGate.layer),
@@ -887,6 +884,5 @@ export const layer = Layer.effect(GameService, make).pipe(
   Layer.provide(GameUnity.layer),
   Layer.provide(GameBlender.layer),
   Layer.provide(GameAssetLibrary.layer),
-  Layer.provide(GameBot.layer),
   Layer.provideMerge(GameOperations.layer),
 );

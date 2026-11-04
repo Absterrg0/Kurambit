@@ -533,36 +533,63 @@ export const makeUnityBackend = (
       open: (ctx) =>
         live.hold(ctx.root)(Effect.promise(() => NodeFSP.writeFile(warmMarker(ctx), "warm\n"))),
     },
+    // The prepared player of the current sources plays; the editor is not needed again.
+    playProcess: (input) =>
+      Effect.gen(function* () {
+        if (input.player === null)
+          return yield* new GameOperationError({
+            operation: "Play session",
+            path: input.projectDir,
+            reason: "invalid-input",
+            detail: "A Unity session plays a prepared player, and none was given.",
+          });
+        if (!input.display)
+          return yield* new GameOperationError({
+            operation: "Play session",
+            path: input.projectDir,
+            reason: "tool-missing",
+            detail:
+              "A Unity session needs xvfb-run for the player's private display; install the system Xvfb package.",
+          });
+        const home = NodePath.join(input.traceDir, "home");
+        yield* Effect.tryPromise({
+          try: () => NodeFSP.mkdir(home, { recursive: true }),
+          catch: (cause) =>
+            new GameOperationError({ operation: "Play session", path: home, reason: "io", cause }),
+        });
+        return {
+          executable: input.player,
+          args: [
+            "-kurambitExplore",
+            input.requestPath,
+            "-screen-fullscreen",
+            "0",
+            "-screen-width",
+            String(input.viewport.width),
+            "-screen-height",
+            String(input.viewport.height),
+            "-force-glcore",
+            "-logFile",
+            NodePath.join(input.traceDir, "player.log"),
+          ],
+          // The player keeps its prefs and log under the session's scratch HOME,
+          // never the user's ~/.config/unity3d.
+          env: {
+            ...GameProcesses.engineChildEnv(),
+            HOME: home,
+            XDG_CONFIG_HOME: NodePath.join(home, ".config"),
+            LIBGL_ALWAYS_SOFTWARE: "1",
+            LP_NUM_THREADS: "2",
+          },
+          request: {},
+          scratch: [home],
+          inputNote: "Keys and mouse go in through the Input System. ",
+        };
+      }),
     player: {
       build: buildPlayer,
       export: exportPlayer,
       executable: PLAYER_EXECUTABLE,
-      session: ({ player, requestPath, traceDir, home, viewport }) => ({
-        args: [
-          player,
-          "-kurambitExplore",
-          requestPath,
-          "-screen-fullscreen",
-          "0",
-          "-screen-width",
-          String(viewport.width),
-          "-screen-height",
-          String(viewport.height),
-          "-force-glcore",
-          "-logFile",
-          NodePath.join(traceDir, "player.log"),
-        ],
-        // The player keeps its prefs and log under the session's scratch HOME,
-        // never the user's ~/.config/unity3d.
-        env: {
-          ...GameProcesses.engineChildEnv(),
-          HOME: home,
-          XDG_CONFIG_HOME: NodePath.join(home, ".config"),
-          LIBGL_ALWAYS_SOFTWARE: "1",
-          LP_NUM_THREADS: "2",
-        },
-        inputNote: "Keys and mouse go in through the Input System. ",
-      }),
     },
   };
 };

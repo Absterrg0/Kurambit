@@ -1,18 +1,17 @@
-// @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off -- This module owns headless Chromium for web exploration sessions: wall-clock boot polling and real-time input.
+// @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off preferSchemaOverJson:off -- This module owns headless Chromium for browser play sessions: wall-clock boot polling and real-time input.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
-import {
-  type GameConsoleMessage,
-  type GameExploreStep,
-  type GamePlaytestProbe,
-} from "@kurambit/contracts";
+import type { GameConsoleMessage, GameExploreStep } from "@kurambit/contracts";
 import {
   READ_STUDIO_READY,
   READ_STUDIO_STATE,
+  STUDIO_SET_STATE,
   chromiumLaunchArgs,
   toPlaywrightKey,
 } from "./gameChromium.ts";
+import { asGameState } from "./gameBotRuntime.ts";
 import { chromiumChildEnv } from "./gameWebServer.ts";
+import { parseLine, sanitizeProbe, type PlaySession } from "./playSession.ts";
 
 // Playwright needs its files on disk; createRequire also resolves it from a Node SEA executable.
 const requirePlaywright = NodeModule.createRequire(import.meta.url);
@@ -21,67 +20,8 @@ const loadPlaywright = () =>
 
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 500;
-
-export interface ExploreWebObservation {
-  readonly executedInputSteps: number;
-  readonly nominalMs: number;
-  readonly probe: GamePlaytestProbe | null;
-  readonly screenshotData: string;
-  readonly consoleMessages: readonly GameConsoleMessage[];
-  readonly consoleTruncated: number;
-}
-
-export interface ExploreWebHandle {
-  readonly viewport: { width: number; height: number };
-  readonly bootMs: number | null;
-  readonly bootProbe: GamePlaytestProbe | null;
-  readonly bootConsole: readonly GameConsoleMessage[];
-  /** Executes steps in real time against the live page, then samples one observation. */
-  readonly act: (
-    steps: readonly GameExploreStep[],
-    firstStepIndex: number,
-    signal?: AbortSignal,
-  ) => Promise<ExploreWebObservation>;
-  readonly close: () => Promise<void>;
-}
-
-const sanitizeProbe = (value: unknown): GamePlaytestProbe | null => {
-  if (typeof value !== "string") return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null) return null;
-  const record = parsed as Record<string, unknown>;
-  const gameState: Record<string, number | boolean | string> = {};
-  const rawState =
-    typeof record["gameState"] === "object" && record["gameState"] !== null
-      ? (record["gameState"] as Record<string, unknown>)
-      : {};
-  for (const [key, entry] of Object.entries(rawState)) {
-    if (Object.keys(gameState).length >= 64 || key.length > 64) break;
-    if (typeof entry === "number" && Number.isFinite(entry)) gameState[key] = entry;
-    else if (typeof entry === "boolean") gameState[key] = entry;
-    else if (typeof entry === "string") gameState[key] = entry.slice(0, 256);
-  }
-  let player: { x: number; y: number; z: number } | null = null;
-  const rawPlayer =
-    typeof record["player"] === "object" && record["player"] !== null
-      ? (record["player"] as Record<string, unknown>)
-      : null;
-  if (
-    rawPlayer !== null &&
-    typeof rawPlayer["x"] === "number" &&
-    typeof rawPlayer["y"] === "number" &&
-    typeof rawPlayer["z"] === "number"
-  )
-    player = { x: rawPlayer["x"], y: rawPlayer["y"], z: rawPlayer["z"] };
-  const hudText =
-    typeof record["hudText"] === "string" ? record["hudText"].slice(0, 2000) : undefined;
-  return hudText === undefined ? { gameState, player } : { gameState, player, hudText };
-};
+const MAX_PAGE_ERRORS = 100;
+const TICK_MS = 100;
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -100,29 +40,28 @@ const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 
-const stepDurationMs = (step: GameExploreStep): number => {
-  if ("press" in step) return 50;
-  if ("waitMs" in step) return step.waitMs;
-  if ("holdMs" in step) return step.holdMs;
-  return 0;
-};
+export interface WebPlaySession extends PlaySession {
+  /** Writes the page's current picture: the browser is its own display host. */
+  readonly still: (path: string) => Promise<void>;
+}
 
 /**
- * Opens a web exploration session: headless Chromium on the served static
- * project, real input, no pause. The caller owns the server URL and closes
- * the handle; a launch that races an abort closes what it opened.
+ * The browser host of the play-session protocol: headless Chromium on a
+ * served static folder, real keyboard and mouse through the browser, and the
+ * page's read-only `window.__studio` bridge (ready, getState, setState) for
+ * what the game sees. A page is never held: the game runs between acts, and
+ * waits and holds advance it as they run. Pages read no control tree, so the
+ * session has no ui or inspect steps; the caller owns the served URL.
  */
-export const openExploreWeb = async (input: {
+export const openWebPlaySession = async (input: {
   readonly executable: string;
   readonly url: string;
-  readonly profileDirectory: string;
   readonly width: number;
   readonly height: number;
   readonly bootTimeoutMs: number;
   readonly signal?: AbortSignal | undefined;
-}): Promise<ExploreWebHandle> => {
+}): Promise<WebPlaySession> => {
   input.signal?.throwIfAborted();
-  await NodeFSP.mkdir(input.profileDirectory, { recursive: true });
   const { chromium } = loadPlaywright();
   const browser = await chromium
     .launch({
@@ -141,7 +80,7 @@ export const openExploreWeb = async (input: {
   }
   try {
     const page = await browser.newPage({ viewport: { width: input.width, height: input.height } });
-    const pending: Array<{ level: GameConsoleMessage["level"]; text: string }> = [];
+    const pending: GameConsoleMessage[] = [];
     let dropped = 0;
     const record = (level: GameConsoleMessage["level"], text: string): void => {
       // The browser's own chrome, not the game: a missing favicon is not a
@@ -152,6 +91,13 @@ export const openExploreWeb = async (input: {
         dropped += 1;
       }
       pending.push({ level, text: text.slice(0, MAX_MESSAGE_CHARS) });
+    };
+    // Page errors and console errors for the tick stream, with the stack as `where`.
+    const pageErrors: Array<{ message: string; where: string }> = [];
+    let pageErrorsSeen = 0;
+    const pageError = (message: string, stack: string | undefined): void => {
+      if (pageErrors.length < MAX_PAGE_ERRORS)
+        pageErrors.push({ message: message.slice(0, 500), where: (stack ?? "").slice(0, 200) });
     };
     page.on("console", (message) => {
       const type = String(message.type() ?? "log");
@@ -165,30 +111,34 @@ export const openExploreWeb = async (input: {
               : "log",
         message.text().trim() || `console ${type}()`,
       );
+      if (type === "error") pageError(message.text(), undefined);
     });
     page.on("pageerror", (error) => {
       record("error", error instanceof Error ? error.message : String(error));
+      pageError(
+        error instanceof Error ? error.message : String(error),
+        error instanceof Error ? error.stack : undefined,
+      );
     });
-    const drain = (): { messages: readonly GameConsoleMessage[]; truncated: number } => {
+    const drain = (): { messages: GameConsoleMessage[]; truncated: number } => {
       const messages = [...pending];
       pending.length = 0;
       const truncated = dropped;
       dropped = 0;
       return { messages, truncated };
     };
-    const bootWallStart = Date.now();
+    const readState = async (): Promise<Record<string, unknown> | null> => {
+      const raw: unknown = await page.evaluate(READ_STUDIO_STATE).catch(() => null);
+      return typeof raw === "string" ? parseLine(raw) : null;
+    };
     let booted = false;
     try {
       await page.goto(input.url, { timeout: input.bootTimeoutMs, waitUntil: "load" });
       const bootDeadline = Date.now() + input.bootTimeoutMs;
       while (!booted && Date.now() < bootDeadline) {
         await sleep(500, input.signal);
-        input.signal?.throwIfAborted();
         try {
-          if ((await page.evaluate(READ_STUDIO_READY)) === true) {
-            booted = true;
-            break;
-          }
+          booted = (await page.evaluate(READ_STUDIO_READY)) === true;
         } catch {
           // Evaluations race the page navigation; keep polling until the deadline.
         }
@@ -200,24 +150,18 @@ export const openExploreWeb = async (input: {
     if (!booted) {
       await browser.close().catch(() => undefined);
       throw new Error(
-        "The three.js page never reported ready (window.__studio.ready stayed false); no exploration session was opened.",
+        "The three.js page never reported ready (window.__studio.ready stayed false); no session was opened.",
       );
     }
-    const bootMs = Date.now() - bootWallStart;
-    const bootProbe = sanitizeProbe(await page.evaluate(READ_STUDIO_STATE).catch(() => null));
-    const bootDrained = drain();
+    const bootProbe = sanitizeProbe(await readState());
+    const bootConsole = drain();
     let pointer: { x: number; y: number } | null = null;
-    const centre = (): { x: number; y: number } => ({
-      x: Math.round(input.width / 2),
-      y: Math.round(input.height / 2),
-    });
-    const act: ExploreWebHandle["act"] = async (steps, firstStepIndex, actSignal) => {
-      void firstStepIndex;
-      actSignal?.throwIfAborted();
+    const centre = () => ({ x: Math.round(input.width / 2), y: Math.round(input.height / 2) });
+    const act: PlaySession["act"] = async (steps, screenshotPath, signal) => {
+      signal?.throwIfAborted();
       let executedInputSteps = 0;
-      let nominalMs = 0;
       const held: string[] = [];
-      // Each step releases its own keys, as the native runner does: a key held
+      // Each step releases its own keys, as the process runners do: a key held
       // into the next step would move the player through it, and pressing the
       // same key again would arrive as auto-repeat, which games ignore.
       const holdKeys = async (keys: ReadonlyArray<string>, ms: number) => {
@@ -226,7 +170,7 @@ export const openExploreWeb = async (input: {
           await page.keyboard.down(key);
           held.push(key);
         }
-        await sleep(ms, actSignal);
+        await sleep(ms, signal);
         for (const key of mapped) {
           await page.keyboard.up(key);
           held.splice(held.indexOf(key), 1);
@@ -234,10 +178,10 @@ export const openExploreWeb = async (input: {
         executedInputSteps += 1;
       };
       try {
-        for (const step of steps) {
-          actSignal?.throwIfAborted();
+        for (const step of steps as readonly GameExploreStep[]) {
+          signal?.throwIfAborted();
           if ("waitMs" in step) {
-            await sleep(step.waitMs, actSignal);
+            await sleep(step.waitMs, signal);
           } else if ("screenshot" in step) {
             // The act's single persisted frame is the observation; a labelled
             // mid-route capture adds no second persisted image.
@@ -256,7 +200,7 @@ export const openExploreWeb = async (input: {
             const { from, to } = step.drag;
             await page.mouse.move(from.x, from.y);
             await page.mouse.down();
-            await sleep(step.holdMs, actSignal);
+            await sleep(step.holdMs, signal);
             await page.mouse.move(to.x, to.y, { steps: 8 });
             await page.mouse.up();
             pointer = { x: to.x, y: to.y };
@@ -279,57 +223,107 @@ export const openExploreWeb = async (input: {
           } else if ("press" in step) {
             await holdKeys([step.press], 50);
           } else {
-            // ui/inspect steps never reach the runner: act validation refuses
-            // them for web sessions before any browser work.
-            throw new Error("Unsupported web step: ui and inspect steps are native-only.");
+            // The session lists no ui or inspect capability, so explore refuses
+            // those steps before any browser work.
+            throw new Error("Unsupported browser step: ui and inspect steps need a control tree.");
           }
-          nominalMs += stepDurationMs(step);
-          actSignal?.throwIfAborted();
+          signal?.throwIfAborted();
         }
       } finally {
         for (const key of held.splice(0)) await page.keyboard.up(key).catch(() => undefined);
       }
-      const probe = sanitizeProbe(await page.evaluate(READ_STUDIO_STATE).catch(() => null));
-      const shot = await page.screenshot({ type: "png" }).catch(() => null);
+      const probe = sanitizeProbe(await readState());
+      const shot =
+        screenshotPath === null ? null : await page.screenshot({ type: "png" }).catch(() => null);
+      const saved =
+        shot !== null && screenshotPath !== null
+          ? await NodeFSP.writeFile(screenshotPath, shot).then(
+              () => true,
+              () => false,
+            )
+          : false;
       const drained = drain();
       return {
-        executedInputSteps,
-        nominalMs,
         probe,
-        screenshotData: shot === null ? "" : shot.toString("base64"),
+        executedInputSteps,
+        screenshot: saved,
         consoleMessages: drained.messages,
         consoleTruncated: drained.truncated,
       };
     };
-    const close = async (): Promise<void> => {
-      await browser.close().catch(() => undefined);
-    };
-    return {
-      viewport: { width: input.width, height: input.height },
-      bootMs,
-      bootProbe,
-      bootConsole: bootDrained.messages,
+    // Real-time play: the host paces the ticks, since the page streams nothing.
+    let tickStart = 0;
+    let realtimeStart = 0;
+    let ticks = 0;
+    const keysDown = new Set<string>();
+    const session: WebPlaySession = {
+      protocol: 1,
+      capabilities: new Set(["realtime", "setState"]),
+      boot: { probe: bootProbe, consoleMessages: bootConsole.messages },
+      bootPerf: null,
       act,
-      close,
+      realtime: async () => {
+        realtimeStart = Date.now();
+        tickStart = 0;
+      },
+      nextTick: async () => {
+        const wait = tickStart + TICK_MS - Date.now();
+        if (wait > 0) await sleep(wait);
+        tickStart = Date.now();
+        const state = await readState();
+        if (state === null) return null;
+        ticks += 1;
+        const errors = pageErrors
+          .slice(pageErrorsSeen)
+          .map((entry) => ({ ...entry, kind: "page" as const }));
+        pageErrorsSeen = pageErrors.length;
+        const player = sanitizeProbe({ gameState: {}, player: state["player"] })?.player ?? null;
+        return {
+          op: "tick",
+          tick: ticks,
+          t: (Date.now() - realtimeStart) / 1000,
+          probe: {
+            gameState: asGameState(state["gameState"]),
+            player,
+            hudText: typeof state["hudText"] === "string" ? state["hudText"] : "",
+          },
+          errors,
+        };
+      },
+      input: async ({ held, taps, clicks }) => {
+        const wanted = new Set(held);
+        for (const key of wanted)
+          if (!keysDown.has(key)) {
+            await page.keyboard.down(toPlaywrightKey(key)).catch(() => undefined);
+            keysDown.add(key);
+          }
+        for (const key of keysDown)
+          if (!wanted.has(key)) {
+            await page.keyboard.up(toPlaywrightKey(key)).catch(() => undefined);
+            keysDown.delete(key);
+          }
+        for (const tap of taps) {
+          await page.keyboard.down(toPlaywrightKey(tap)).catch(() => undefined);
+          await sleep(15);
+          await page.keyboard.up(toPlaywrightKey(tap)).catch(() => undefined);
+        }
+        for (const click of clicks)
+          if ("x" in click)
+            await page.mouse.click(Math.round(click.x), Math.round(click.y)).catch(() => undefined);
+      },
+      setState: async (target, values) => {
+        await page.evaluate(STUDIO_SET_STATE, { target, values }).catch(() => false);
+      },
+      still: async (path) => {
+        await page.screenshot({ path }).catch(() => undefined);
+      },
+      close: async () => {
+        await browser.close().catch(() => undefined);
+      },
     };
+    return session;
   } catch (cause) {
     await browser.close().catch(() => undefined);
     throw cause;
   }
-};
-
-/** Web acts never carry ui or inspect steps: those list native controls. */
-export const webStepIssues = (steps: readonly GameExploreStep[]): readonly string[] => {
-  const issues: string[] = [];
-  for (const [index, step] of steps.entries()) {
-    if ("ui" in step)
-      issues.push(
-        `Step ${index + 1} is a ui step: ui steps list native controls, which a browser game has none of.`,
-      );
-    else if ("inspect" in step)
-      issues.push(
-        `Step ${index + 1} is an inspect step: read-only reflection lists native nodes, which a browser game has none of.`,
-      );
-  }
-  return issues;
 };

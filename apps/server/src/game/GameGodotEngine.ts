@@ -14,6 +14,8 @@ import * as GameToolchain from "./GameToolchain.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { GODOT_CHECK_SCRIPT } from "./godotCheckScript.ts";
+import { GODOT_PLAY_RUNNER } from "./godotPlayRunner.ts";
+import { prepareNativeUserIsolation, userDirConfigIssues } from "./gameNativeUserDir.ts";
 import { RawCheckResult, parseGodotIssues } from "./godotCheckOutput.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
@@ -65,6 +67,75 @@ export const makeGodotBackend = (
       return {
         result: response(run),
         issues: parseGodotIssues(`${run.stdout}\n${run.stderr}`),
+      };
+    });
+  /**
+   * The play runner runs the real main scene from current sources (no
+   * export) under a server-owned script in ignored builds/logs. The child
+   * sees the allowlisted engine base plus software GL and a per-run XDG trio,
+   * so the project's scripts cannot read server secrets and user:// stays in
+   * the isolation the runner checks. HOME stays the real one (Godot resolves
+   * editor config under it). Without a private display it runs headless.
+   */
+  const playProcess: NonNullable<GameEngineBackend["playProcess"]> = (input) =>
+    Effect.gen(function* () {
+      const binary = yield* tools.executable("godot");
+      const settings = NodePath.join(input.projectDir, "project.godot");
+      const projectText = yield* Effect.promise(() =>
+        NodeFSP.readFile(settings, "utf8").catch(() => ""),
+      );
+      const dirIssues = userDirConfigIssues(projectText);
+      if (dirIssues.length > 0)
+        return yield* new GameOperationError({
+          operation: "Play session",
+          path: settings,
+          reason: "invalid-input",
+          detail: dirIssues.join(" "),
+        });
+      const scriptPath = NodePath.join(input.scriptDir, "play.gd");
+      const isolation = yield* Effect.tryPromise({
+        try: async () => {
+          await NodeFSP.mkdir(input.scriptDir, { recursive: true });
+          await NodeFSP.writeFile(scriptPath, GODOT_PLAY_RUNNER);
+          return prepareNativeUserIsolation(input.traceDir);
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "Play session",
+            path: input.scriptDir,
+            reason: "io",
+            cause,
+          }),
+      });
+      const env: NodeJS.ProcessEnv = {
+        ...GameProcesses.engineChildEnv(),
+        LIBGL_ALWAYS_SOFTWARE: "1",
+        LP_NUM_THREADS: "2",
+        ...isolation.env,
+      };
+      for (const name of GameProcesses.DISPLAY_VARIABLES) delete env[name];
+      const size = `${input.viewport.width}x${input.viewport.height}`;
+      const runner = ["--path", input.projectDir, "--script", scriptPath, "--", input.requestPath];
+      return {
+        executable: binary.path,
+        args: input.display
+          ? [
+              "--display-driver",
+              "x11",
+              "--rendering-method",
+              "gl_compatibility",
+              "--audio-driver",
+              "Dummy",
+              "--resolution",
+              size,
+              ...runner,
+            ]
+          : ["--headless", "--audio-driver", "Dummy", "--resolution", size, ...runner],
+        env,
+        cwd: input.projectDir,
+        request: { expectedUserDataPrefix: isolation.dataDir },
+        scratch: [input.scriptDir],
+        inputNote: "",
       };
     });
   return {
@@ -199,6 +270,7 @@ export const makeGodotBackend = (
         });
         return response(run, input.outputPath);
       }),
+    playProcess,
     editor: null,
     player: null,
   };
