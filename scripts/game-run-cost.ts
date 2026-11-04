@@ -7,7 +7,7 @@
 //
 // The harness-versus-raw comparison is the same report on two games: one made
 // by a production run, one by a single plain thread on the same brief and model.
-import { DatabaseSync } from "node:sqlite";
+import * as NodeSqlite from "node:sqlite";
 
 const [file, game, ...rest] = process.argv.slice(2);
 if (file === undefined || game === undefined) {
@@ -17,7 +17,7 @@ if (file === undefined || game === undefined) {
 const sinceAt = rest.indexOf("--since");
 const since = sinceAt >= 0 ? (rest[sinceAt + 1] ?? "") : "";
 
-const db = new DatabaseSync(file, { readOnly: true });
+const db = new NodeSqlite.DatabaseSync(file, { readOnly: true });
 const projects = db
   .prepare(
     `select distinct project_id as id from orchestration_v2_projection_threads
