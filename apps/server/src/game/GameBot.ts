@@ -541,23 +541,41 @@ const make = Effect.gen(function* () {
                     : String(cause).slice(0, 2000),
                   cause,
                 );
-          const opened: BotLaunch = isWeb
-            ? yield* Effect.tryPromise({
+          // Whichever launch completes is stopped exactly once, however the
+          // run ends: the finalizer below stops what reached `launched`, and a
+          // launch that resolves after an interrupt (Effect no longer awaits
+          // it) stops itself. Chromium is not in session.pids, so drop() alone
+          // would never end it.
+          let launched: BotLaunch | null = null;
+          const keep = async (signal: AbortSignal, launch: Promise<BotLaunch>) => {
+            const opened = await launch;
+            if (signal.aborted) {
+              await opened.stop();
+              throw new Error("Bot run stopped.");
+            }
+            launched = opened;
+            return opened;
+          };
+          const open = isWeb
+            ? Effect.tryPromise({
                 try: (signal) =>
-                  launchPageBot({
-                    root,
-                    projectDir,
-                    chrome: chrome!,
-                    ffmpeg,
-                    viewport,
-                    runDir,
-                    videoPath,
-                    session,
+                  keep(
                     signal,
-                  }),
+                    launchPageBot({
+                      root,
+                      projectDir,
+                      chrome: chrome!,
+                      ffmpeg,
+                      viewport,
+                      runDir,
+                      videoPath,
+                      session,
+                      signal,
+                    }),
+                  ),
                 catch: failed,
               })
-            : yield* Effect.gen(function* () {
+            : Effect.gen(function* () {
                 const launch = backend.playProcess;
                 if (launch === null)
                   return yield* opError(
@@ -571,7 +589,7 @@ const make = Effect.gen(function* () {
                   catch: (cause) => opError("Bot run", runDir, "io", undefined, cause),
                 });
                 const requestPath = NodePath.join(runDir, "request.json");
-                const spec = yield* launch({
+                return yield* launch({
                   projectDir,
                   player,
                   requestPath,
@@ -579,51 +597,64 @@ const make = Effect.gen(function* () {
                   traceDir: runDir,
                   viewport,
                   display: true,
-                }).pipe(Effect.tapError(() => Effect.promise(() => listener.drop())));
-                return yield* Effect.tryPromise({
-                  try: (signal) =>
-                    launchProcessBot({
-                      spec,
-                      listener,
-                      requestPath,
-                      xvfb: xvfb!,
-                      ffmpeg,
-                      viewport,
-                      runDir,
-                      videoPath,
-                      session,
-                      signal,
+                }).pipe(
+                  Effect.flatMap((spec) =>
+                    Effect.tryPromise({
+                      try: (signal) =>
+                        keep(
+                          signal,
+                          launchProcessBot({
+                            spec,
+                            listener,
+                            requestPath,
+                            xvfb: xvfb!,
+                            ffmpeg,
+                            viewport,
+                            runDir,
+                            videoPath,
+                            session,
+                            signal,
+                          }),
+                        ),
+                      catch: failed,
                     }),
-                  catch: failed,
-                });
+                  ),
+                  // Dropping twice is harmless; a listener nobody accepted on is not.
+                  Effect.onError(() => Effect.promise(() => listener.drop())),
+                );
               });
-          const one = yield* Effect.tryPromise({
-            try: (signal) =>
-              playBot(jevApi, opened, {
-                root,
-                runId,
-                runDir,
-                childPath,
-                videoPath,
-                tracePath,
-                botFile,
-                decider,
-                mode,
-                jevLive,
-                seconds,
-                ffmpeg,
-                jevKey,
-                jevBase,
-                policyNote,
-                session,
-                signal,
-                runIndex: index,
-                runTotal: count,
-                seed: NodeCrypto.randomInt(1_000_000_000),
-                priorRuns: [...priorRuns],
+          const one = yield* open.pipe(
+            Effect.flatMap((opened) =>
+              Effect.tryPromise({
+                try: (signal) =>
+                  playBot(jevApi, opened, {
+                    root,
+                    runId,
+                    runDir,
+                    childPath,
+                    videoPath,
+                    tracePath,
+                    botFile,
+                    decider,
+                    mode,
+                    jevLive,
+                    seconds,
+                    ffmpeg,
+                    jevKey,
+                    jevBase,
+                    policyNote,
+                    session,
+                    signal,
+                    runIndex: index,
+                    runTotal: count,
+                    seed: NodeCrypto.randomInt(1_000_000_000),
+                    priorRuns: [...priorRuns],
+                  }),
+                catch: failed,
               }),
-            catch: failed,
-          }).pipe(Effect.ensuring(Effect.promise(() => opened.stop())));
+            ),
+            Effect.ensuring(Effect.promise(async () => launched?.stop())),
+          );
           out.push(one);
           runs.set(runId, { root, result: one });
           if (runs.size > GAME_BOT_BOUNDS.maxRuns) {

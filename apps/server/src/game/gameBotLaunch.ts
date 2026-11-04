@@ -106,6 +106,8 @@ export const launchPageBot = async (input: {
   readonly signal: AbortSignal | undefined;
 }): Promise<BotLaunch> => {
   if (input.session.stopped) throw new Error("Bot run stopped.");
+  const framesDir = NodePath.join(input.runDir, "frames");
+  await NodeFSP.mkdir(framesDir, { recursive: true });
   const serve = await serveGameDirectory(
     input.root,
     NodePath.relative(input.root, input.projectDir) || ".",
@@ -121,8 +123,6 @@ export const launchPageBot = async (input: {
     await serve.close().catch(() => undefined);
     throw stoppedError(input.session, error);
   });
-  const framesDir = NodePath.join(input.runDir, "frames");
-  await NodeFSP.mkdir(framesDir, { recursive: true });
   let shots = 0;
   let stopped = false;
   return {

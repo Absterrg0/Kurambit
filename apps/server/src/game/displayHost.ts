@@ -109,6 +109,30 @@ const exited = (child: NodeChildProcess.ChildProcess, ms: number): Promise<void>
     });
   });
 
+// A child that ignores its first signal (ffmpeg stuck on a dead display, a
+// wedged Xvfb) would outlive the run, so the stop escalates to SIGKILL.
+const stopChild = async (
+  child: NodeChildProcess.ChildProcess | undefined,
+  first: NodeJS.Signals,
+  graceMs: number,
+): Promise<void> => {
+  if (child === undefined) return;
+  const steps: ReadonlyArray<readonly [NodeJS.Signals, number]> = [
+    [first, graceMs],
+    ["SIGTERM", 2000],
+    ["SIGKILL", 1000],
+  ];
+  for (const [signal, ms] of steps) {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    try {
+      child.kill(signal);
+    } catch {
+      return;
+    }
+    await exited(child, ms);
+  }
+};
+
 /**
  * One private display recorded to one video: Xvfb on a free display number
  * and a continuous ffmpeg x11grab of it. Per-tick screenshots never happen
@@ -127,23 +151,11 @@ export const openRecordedDisplay = async (input: {
   if (display === null) throw new Error("No free private X display.");
   let xvfb: NodeChildProcess.ChildProcess | undefined;
   let ffmpeg: NodeChildProcess.ChildProcess | undefined;
-  const finishVideo = async (): Promise<void> => {
-    try {
-      // SIGINT lets ffmpeg finalize the mp4.
-      if (ffmpeg !== undefined && ffmpeg.exitCode === null) ffmpeg.kill("SIGINT");
-    } catch {
-      /* gone */
-    }
-    if (ffmpeg !== undefined) await exited(ffmpeg, 15_000);
-  };
+  // SIGINT lets ffmpeg finalize the mp4.
+  const finishVideo = (): Promise<void> => stopChild(ffmpeg, "SIGINT", 15_000);
   const release = async (): Promise<void> => {
     await finishVideo();
-    try {
-      xvfb?.kill("SIGTERM");
-    } catch {
-      /* gone */
-    }
-    if (xvfb !== undefined) await exited(xvfb, 3000);
+    await stopChild(xvfb, "SIGTERM", 3000);
     claimed.delete(display);
   };
   try {
