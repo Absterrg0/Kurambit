@@ -62,6 +62,38 @@ interface GamePlayerBuild {
   readonly sourceId: string | null;
 }
 
+/** What a play session's launch is given; the engine says how its runner starts from it. */
+export interface PlayProcessInput {
+  /** The engine project directory the sources play from. */
+  readonly projectDir: string;
+  /** The prepared player executable, for engines whose games play one; null otherwise. */
+  readonly player: string | null;
+  /** Where the runner reads its play-session request. */
+  readonly requestPath: string;
+  /** An ignored directory inside the game for runner files. */
+  readonly scriptDir: string;
+  /** Scratch outside the game for the process's own state and logs. */
+  readonly traceDir: string;
+  readonly viewport: GameViewport;
+  /** Whether a private display exists; without one the runner must run headless or refuse. */
+  readonly display: boolean;
+}
+
+/** One runner process: the caller puts it on a display, tracks it and ends it. */
+export interface PlayProcess {
+  readonly executable: string;
+  readonly args: ReadonlyArray<string>;
+  /** The whole environment, display variables stripped; the display host adds its own. */
+  readonly env: NodeJS.ProcessEnv;
+  readonly cwd?: string;
+  /** Engine fields of the request beside the port and token. */
+  readonly request: { readonly expectedUserDataPrefix?: string };
+  /** Directories that hold nothing worth keeping once the session ends. */
+  readonly scratch: ReadonlyArray<string>;
+  /** A line for the session message about how input reaches the game; empty when nothing to add. */
+  readonly inputNote: string;
+}
+
 /**
  * One engine backend. It owns engine execution, configuration and parsing:
  * process arguments, runner scripts, project-settings formats and output
@@ -131,6 +163,14 @@ export interface GameEngineBackend {
     readonly open: (ctx: GameEngineContext) => Effect.Effect<void, GameOperationError>;
   } | null;
   /**
+   * How a play session (exploration or a bot) starts this engine's runner, a
+   * process speaking the play-session protocol over loopback. Null for
+   * engines whose games play as a browser page, which the browser host opens.
+   */
+  readonly playProcess:
+    | ((input: PlayProcessInput) => Effect.Effect<PlayProcess, GameOperationError>)
+    | null;
+  /**
    * For engines whose games ship and play as a built player folder rather
    * than one exported file; null otherwise.
    */
@@ -155,19 +195,6 @@ export interface GameEngineBackend {
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /** The Linux player's file inside a player folder. */
     readonly executable: string;
-    /** How one explore session runs the Linux player under xvfb-run. */
-    readonly session: (input: {
-      readonly player: string;
-      readonly requestPath: string;
-      readonly traceDir: string;
-      readonly home: string;
-      readonly viewport: GameViewport;
-    }) => {
-      readonly args: ReadonlyArray<string>;
-      readonly env: NodeJS.ProcessEnv;
-      /** What the session message adds about input. */
-      readonly inputNote: string;
-    };
   } | null;
 }
 

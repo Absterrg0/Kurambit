@@ -9,7 +9,6 @@ export const THREE_PROFILE: GameEngineProfile = {
   layout: { assets: "assets", ui: "ui", library: "library", blender: "assets/blender" },
   viewport: THREE_VIEWPORT,
   play: "browser",
-  botRefusal: null,
   // The release is a static copy of the folder: its entry proves the staging,
   // and Play needs the entry and the gameplay module.
   web: { exported: ["index.html"], served: ["index.html", "main.js"] },
@@ -19,6 +18,8 @@ export const THREE_PROFILE: GameEngineProfile = {
   },
   run: {
     skill: "three",
+    // The play runner lives in the server (Godot's runner script, the browser host).
+    harnessFiles: null,
     parallelSamples: true,
     warmEditor: false,
     sources: { extensions: [".js", ".mjs"], under: "" },

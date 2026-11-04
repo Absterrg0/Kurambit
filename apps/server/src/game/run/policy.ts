@@ -1,7 +1,7 @@
 // PURE. Every loop decision: stage order, round structure, keep or revert, stalls, the
 // pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
 import type { GameBotDecider, ThreadId } from "@kurambit/contracts";
-import { laneBots, laneProfile } from "../engineProfile.ts";
+import { laneProfile } from "../engineProfile.ts";
 import * as Roles from "./roles.ts";
 import { BLANK } from "./state.ts";
 import type {
@@ -953,7 +953,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "review-facts":
       return go({ kind: "facts", id });
     case "tester":
-      return tester(Roles.testerPlay(n, r.jev, state.lane), CAP.tester);
+      return tester(Roles.testerPlay(n, r.jev), CAP.tester);
     case "tester-write":
       return tester(Roles.testerWrite(n, r.move), CAP.write, [`.studio/tester-${n}.md`]);
     case "tester-duty":
@@ -1425,12 +1425,7 @@ const applyRound = (
       const bot = testedBot(res, r);
       const notes = res.kind === "done" ? textOf(res, `.studio/tester-${r.n}.md`) : "";
       const testerNotes = notes.length > 20 ? notes : r.testerNotes;
-      if (
-        r.phase === "tester-write" &&
-        res.kind === "done" &&
-        res.botsAfter <= r.botsBefore &&
-        laneBots(lane)
-      ) {
+      if (r.phase === "tester-write" && res.kind === "done" && res.botsAfter <= r.botsBefore) {
         logs.push(`round ${r.n}: tester ran no bot; one follow-up turn asks for it`);
         return at({ phase: "tester-duty", testerNotes, ...bot });
       }
@@ -1452,9 +1447,6 @@ const applyRound = (
         return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
       }
       const question = Roles.roundQuestion(Roles.roundDirection(r.direction, r.repeating, lane));
-      const lanePlaysBots = laneBots(lane);
-      if (!lanePlaysBots)
-        logs.push(`round ${r.n}: bot runs do not play ${lane} games; bot facts are skipped`);
       const cmp = newCompare(
         question,
         r.candidate,
@@ -1463,7 +1455,7 @@ const applyRound = (
         // Which comparator sees the candidate as A is a coin too, so no
         // ordinal (thread order, step id) can tell a judge which build is new.
         bit(input.coin, 2) ? ["y", "x"] : ["x", "y"],
-        lanePlaysBots ? r.bot : "",
+        r.bot,
         r.botDecider,
       );
       return at({ phase: "compare", cmp });

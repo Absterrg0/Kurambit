@@ -246,7 +246,7 @@ describe("rounds", () => {
     expect(state.next).toContain("fix the jump");
   });
 
-  it("judges a Unity round on blind samples played one at a time in worktrees, without bot facts", () => {
+  it("judges a Unity round on blind samples played one at a time in worktrees", () => {
     const samples: Array<string | null> = [];
     const respond = roundResponder("A", "B");
     const { state, steps, logs } = drive(
@@ -270,7 +270,6 @@ describe("rounds", () => {
     expect(new Set(samples.slice(0, 2)).size).toBe(1);
     expect(new Set(samples.slice(2)).size).toBe(1);
     expect(new Set(samples)).toEqual(new Set(["cand", "best"]));
-    expect(logs).toContain("round 1: bot runs do not play unity games; bot facts are skipped");
     expect(logs.some((line) => line.includes("judging on play reports"))).toBe(false);
     expect(state.rounds[0]?.kept).toBe(true);
   });

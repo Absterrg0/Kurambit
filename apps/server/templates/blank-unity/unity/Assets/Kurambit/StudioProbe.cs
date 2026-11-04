@@ -6,11 +6,17 @@
 // snapshot: GameState's public primitive members, the world position of the
 // GameObject tagged "Player", and the text visible UI shows.
 //
-// A player started with `-kurambitExplore <request.json>` also connects out to
-// the loopback port named in that file and plays the steps Kurambit sends, one
-// act at a time, with the game paused (Time.timeScale 0) between acts. Input is
-// queued through the Input System on a virtual keyboard and mouse, so the game
-// receives real device events. Without that argument nothing here runs.
+// A player started with `-kurambitExplore <request.json>` is also Unity's
+// runner of Kurambit's play-session protocol (packages/contracts
+// gamePlaySession.ts): it connects out to the loopback port named in that
+// file, says hello, and plays the steps Kurambit sends one act at a time with
+// the game paused (Time.timeScale 0) between acts. After `realtime` the game
+// runs at its own speed for good while held keys, taps and clicks stream in
+// and one tick observation goes out every 100 ms, which is what a bot plays
+// on. Input is queued through the Input System on a virtual keyboard and
+// mouse, so the game receives real device events. Without that argument
+// nothing here runs. Kurambit owns this file and refreshes it at the start of
+// a production run.
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
@@ -40,6 +46,12 @@ namespace Kurambit
         private const int MaxText = 128;
         private const int MaxErrors = 20;
         private const float PressSeconds = 0.17f;
+        private const float TickSeconds = 0.1f;
+        private const int TickErrors = 10;
+        private const int TickUi = 32;
+        private const int MaxLandmarks = 16;
+        private const float RoomDistance = 6f;
+        private const float DropDistance = 4f;
 
         private static StudioProbe instance;
         private readonly ConcurrentQueue<string> inbox = new ConcurrentQueue<string>();
@@ -54,6 +66,12 @@ namespace Kurambit
         private readonly HashSet<Key> held = new HashSet<Key>();
         private Vector2 pointer;
         private bool pointerSet;
+        private bool realtime;
+        private float realtimeStart;
+        private float nextTickAt;
+        private int ticks;
+        private readonly HashSet<Key> streamHeld = new HashSet<Key>();
+        private readonly Dictionary<Key, float> tapEnds = new Dictionary<Key, float>();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
@@ -169,7 +187,7 @@ namespace Kurambit
             return string.Join("/", parts);
         }
 
-        // --- explore runner ---
+        // --- play-session runner ---
 
         private void Awake()
         {
@@ -250,8 +268,12 @@ namespace Kurambit
             reader.Start();
             yield return new WaitForEndOfFrame();
             var hello = Observation();
+            hello["op"] = "hello";
+            hello["protocol"] = 1;
             hello["token"] = token;
-            hello["screenshot"] = false;
+            hello["engine"] = "unity";
+            hello["capabilities"] = new List<object> { "realtime", "ui", "inspect" };
+            hello["body"] = Body();
             Send(hello);
             Pause();
         }
@@ -280,16 +302,51 @@ namespace Kurambit
 
         private void Update()
         {
-            if (acting || stream == null) return;
-            if (!inbox.TryDequeue(out var line)) return;
-            if (!(Json.Parse(line) is Dictionary<string, object> message)) return;
-            var op = message.TryGetValue("op", out var o) ? o as string : null;
-            if (op == "quit")
+            if (stream == null) return;
+            if (realtime)
             {
-                Application.Quit();
+                while (inbox.TryDequeue(out var streamed)) Handle(streamed);
+                ReleaseEndedTaps();
+                if (Time.unscaledTime >= nextTickAt)
+                {
+                    nextTickAt = Time.unscaledTime + TickSeconds;
+                    Send(Tick());
+                }
                 return;
             }
-            if (op == "act") StartCoroutine(Act(message));
+            if (acting || !inbox.TryDequeue(out var line)) return;
+            Handle(line);
+        }
+
+        private void Handle(string line)
+        {
+            if (!(Json.Parse(line) is Dictionary<string, object> message)) return;
+            var op = message.TryGetValue("op", out var o) ? o as string : null;
+            var id = message.TryGetValue("id", out var i) ? i : 0;
+            switch (op)
+            {
+                case "quit":
+                    Send(new Dictionary<string, object> { ["op"] = "reply", ["id"] = id, ["ok"] = true });
+                    Application.Quit();
+                    break;
+                case "act" when !realtime:
+                    StartCoroutine(Act(message));
+                    break;
+                case "realtime" when !realtime:
+                    // The game gets its own time scale back for good: from here
+                    // on its pause screens pause it, never the runner.
+                    realtime = true;
+                    Time.timeScale = gameTimeScale;
+                    realtimeStart = Time.time;
+                    nextTickAt = Time.unscaledTime + TickSeconds;
+                    break;
+                case "input" when realtime:
+                    StreamInput(message);
+                    break;
+                case "setState":
+                    Send(new Dictionary<string, object> { ["op"] = "reply", ["id"] = id, ["ok"] = false, ["error"] = "Unity games take no state writes." });
+                    break;
+            }
         }
 
         private void Pause()
@@ -340,6 +397,7 @@ namespace Kurambit
                 reply["inspections"] = inspections;
                 reply["screenshot"] = shotPath != null && Capture(shotPath);
             }
+            reply["op"] = "reply";
             reply["id"] = id;
             Pause();
             Send(reply);
@@ -524,6 +582,187 @@ namespace Kurambit
             if (name.Length >= 2 && name[0] == 'F' && int.TryParse(name.Substring(1), out var f) && f >= 1 && f <= 12)
                 return Enum.TryParse(name, out key);
             return false;
+        }
+
+        // --- real-time play ---
+
+        private void StreamInput(Dictionary<string, object> message)
+        {
+            streamHeld.Clear();
+            if (message.GetValueOrDefault("held") is List<object> heldNames)
+                foreach (var name in heldNames)
+                    if (TryKey(name as string, out var key)) streamHeld.Add(key);
+            if (message.GetValueOrDefault("taps") is List<object> tapNames)
+                foreach (var name in tapNames)
+                    if (TryKey(name as string, out var key)) tapEnds[key] = Time.unscaledTime + PressSeconds;
+            QueueStreamKeys();
+            if (!(message.GetValueOrDefault("clicks") is List<object> clicks)) return;
+            foreach (var raw in clicks)
+            {
+                if (!(raw is Dictionary<string, object> click)) continue;
+                if (click.GetValueOrDefault("id") is string controlId && controlId != "")
+                {
+                    var target = FindControl(controlId);
+                    if (target == null) continue;
+                    var rect = ScreenRect((RectTransform)target.transform);
+                    StartCoroutine(Click(new Vector2(Number(rect["x"]) + Number(rect["width"]) / 2f, Number(rect["y"]) + Number(rect["height"]) / 2f), "left"));
+                }
+                else if (click.ContainsKey("x") && click.ContainsKey("y"))
+                    StartCoroutine(Click(new Vector2(Number(click["x"]), Number(click["y"])), "left"));
+            }
+        }
+
+        private void ReleaseEndedTaps()
+        {
+            if (tapEnds.Count == 0) return;
+            var ended = new List<Key>();
+            foreach (var entry in tapEnds)
+                if (Time.unscaledTime >= entry.Value) ended.Add(entry.Key);
+            if (ended.Count == 0) return;
+            foreach (var key in ended) tapEnds.Remove(key);
+            QueueStreamKeys();
+        }
+
+        private void QueueStreamKeys()
+        {
+            var down = new HashSet<Key>(streamHeld);
+            foreach (var key in tapEnds.Keys) down.Add(key);
+            var array = new Key[down.Count];
+            down.CopyTo(array);
+            InputSystem.QueueStateEvent(keyboard, new KeyboardState(array));
+        }
+
+        private Dictionary<string, object> Tick()
+        {
+            ticks++;
+            List<object> drained;
+            lock (errors)
+            {
+                drained = new List<object>(errors.GetRange(0, Math.Min(errors.Count, TickErrors)));
+                errors.Clear();
+            }
+            var player = FindPlayer();
+            return new Dictionary<string, object>
+            {
+                ["op"] = "tick",
+                ["tick"] = ticks,
+                ["t"] = Time.time - realtimeStart,
+                ["probe"] = Snapshot(),
+                ["body"] = Body(),
+                ["visible"] = Visible(player),
+                ["room"] = Room(player),
+                ["errors"] = drained,
+                ["sweep"] = null,
+                ["perf"] = null,
+            };
+        }
+
+        private static GameObject FindPlayer()
+        {
+            try { return GameObject.FindWithTag("Player"); } catch (UnityException) { return null; }
+        }
+
+        private static Dictionary<string, object> Body()
+        {
+            var player = FindPlayer();
+            if (player == null) return new Dictionary<string, object> { ["present"] = false };
+            var body = new Dictionary<string, object> { ["present"] = true, ["dim"] = "3d", ["onGround"] = null, ["touching"] = 0 };
+            var velocity = Vector3.zero;
+            if (player.TryGetComponent<CharacterController>(out var controller))
+            {
+                body["onGround"] = controller.isGrounded;
+                velocity = controller.velocity;
+            }
+            else if (player.TryGetComponent<Rigidbody>(out var rigid)) velocity = rigid.linearVelocity;
+            else if (player.TryGetComponent<Rigidbody2D>(out var rigid2D))
+            {
+                body["dim"] = "2d";
+                body["vx"] = rigid2D.linearVelocity.x;
+                body["vy"] = rigid2D.linearVelocity.y;
+                return body;
+            }
+            body["vx"] = velocity.x;
+            body["vy"] = velocity.y;
+            body["vz"] = velocity.z;
+            return body;
+        }
+
+        // The nearest named objects around a 3D player, with distance and the
+        // bearing from the camera's flat forward, as the bot kit reads them.
+        private static List<object> Visible(GameObject player)
+        {
+            var visible = new List<object>();
+            foreach (var selectable in Selectable.allSelectablesArray)
+            {
+                if (visible.Count >= TickUi) break;
+                if (selectable == null || !selectable.isActiveAndEnabled) continue;
+                var label = selectable.GetComponentInChildren<TMPro.TMP_Text>()?.text ?? selectable.GetComponentInChildren<Text>()?.text ?? "";
+                visible.Add(new Dictionary<string, object> { ["kind"] = selectable.GetType().Name, ["label"] = Clip(label.Trim(), 80) });
+            }
+            if (player == null || player.GetComponent<Rigidbody2D>() != null) return visible;
+            var at = player.transform.position;
+            var camera = Camera.main;
+            var forward = camera != null ? camera.transform.forward : Vector3.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.0001f) forward = Vector3.forward;
+            forward.Normalize();
+            var found = new List<Dictionary<string, object>>();
+            var pending = new Stack<Transform>();
+            foreach (var top in player.scene.GetRootGameObjects()) pending.Push(top.transform);
+            var visited = 0;
+            while (pending.Count > 0 && visited < 300)
+            {
+                var node = pending.Pop();
+                visited++;
+                if (!node.gameObject.activeInHierarchy) continue;
+                foreach (Transform child in node) pending.Push(child);
+                if (node == player.transform || node.IsChildOf(player.transform)) continue;
+                var position = node.position;
+                var offset = new Vector2(position.x - at.x, position.z - at.z);
+                var cross = forward.x * offset.y - forward.z * offset.x;
+                var dot = forward.x * offset.x + forward.z * offset.y;
+                var inView = true;
+                if (camera != null)
+                {
+                    var viewport = camera.WorldToViewportPoint(position);
+                    inView = viewport.z > 0f && viewport.x >= 0f && viewport.x <= 1f && viewport.y >= 0f && viewport.y <= 1f;
+                }
+                found.Add(new Dictionary<string, object>
+                {
+                    ["label"] = Clip(node.name, 40),
+                    ["dist"] = Mathf.Round(offset.magnitude * 10f) / 10f,
+                    ["bearing"] = Mathf.Round(Mathf.Atan2(cross, dot) * Mathf.Rad2Deg),
+                    ["dy"] = Mathf.Round((position.y - at.y) * 10f) / 10f,
+                    ["inView"] = inView,
+                });
+            }
+            found.Sort((a, b) => ((float)a["dist"]).CompareTo((float)b["dist"]));
+            for (var i = 0; i < found.Count && i < MaxLandmarks; i++) visible.Add(found[i]);
+            return visible;
+        }
+
+        // Clearance rays along the world axes (forward = -Z) and the floor
+        // depth 1.2 m ahead each way, skipping the player's own colliders.
+        private static object Room(GameObject player)
+        {
+            if (player == null || player.GetComponentInChildren<Collider>() == null) return null;
+            var from = player.transform.position + Vector3.up * 0.5f;
+            var room = new Dictionary<string, object>();
+            var directions = new (string, Vector3)[] { ("forward", Vector3.back), ("back", Vector3.forward), ("left", Vector3.left), ("right", Vector3.right) };
+            foreach (var (name, direction) in directions)
+            {
+                room[name] = Mathf.Round(Clearance(player, from, direction, RoomDistance) * 10f) / 10f;
+                room["drop_" + name] = Mathf.Round(Clearance(player, from + direction * 1.2f, Vector3.down, DropDistance) * 10f) / 10f;
+            }
+            return room;
+        }
+
+        private static float Clearance(GameObject player, Vector3 from, Vector3 direction, float range)
+        {
+            var nearest = range;
+            foreach (var hit in Physics.RaycastAll(from, direction, range, ~0, QueryTriggerInteraction.Ignore))
+                if (!hit.transform.IsChildOf(player.transform) && hit.distance < nearest) nearest = hit.distance;
+            return nearest;
         }
 
         // --- observation ---

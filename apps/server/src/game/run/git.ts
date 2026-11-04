@@ -203,6 +203,27 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
     return sha;
   });
 
+  // Commits only `paths`, leaving the rest of the tree as it is; returns HEAD.
+  const commitPaths = Effect.fn("RunGit.commitPaths")(function* (
+    message: string,
+    paths: ReadonlyArray<string>,
+  ) {
+    const added = yield* exec(root, ["add", "-A", "--", ...paths], SLOW_MS);
+    if (added.code !== 0) return yield* fail("commit", "add failed", added);
+    const staged = yield* exec(root, ["diff", "--cached", "--quiet", "--", ...paths], SLOW_MS);
+    if (staged.code === 1) {
+      const done = yield* exec(
+        root,
+        [...IDENTITY, "commit", "-qm", message.slice(0, 200), "--", ...paths],
+        SLOW_MS,
+      );
+      if (done.code !== 0) return yield* fail("commit", "commit failed", done);
+    } else if (staged.code !== 0) return yield* fail("commit", "diff failed", staged);
+    const sha = yield* head;
+    if (sha.length === 0) return yield* fail("commit", "no HEAD after commit");
+    return sha;
+  });
+
   const changedSince = Effect.fn("RunGit.changedSince")(function* (base: string) {
     const result = yield* exec(
       root,
@@ -518,5 +539,15 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
     ),
   );
 
-  return { run, untrack, current, keptCommit, restoreBuild, sameBuild, uncommitted, summary };
+  return {
+    run,
+    commitPaths,
+    untrack,
+    current,
+    keptCommit,
+    restoreBuild,
+    sameBuild,
+    uncommitted,
+    summary,
+  };
 };

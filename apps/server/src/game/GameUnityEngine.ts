@@ -330,19 +330,31 @@ export const makeUnityBackend = (
             () => false,
           ),
         );
+        // Unity still reports "Succeeded" when scene objects lost their
+        // scripts, and that player runs a game whose behaviour is gone (it
+        // boots, nothing moves). Every sample and bot would play it, so it
+        // is a failed build, named in Unity's own words.
+        const detached = Array.isArray(report["warnings"])
+          ? report["warnings"]
+              .map((entry) => String((entry as Record<string, unknown> | null)?.["message"] ?? ""))
+              .filter((message) => message.includes("is missing or no valid script is attached"))
+          : [];
         const succeeded =
           report["status"] === "completed" &&
           ours(report) &&
           report["result"] === "Succeeded" &&
-          present;
+          present &&
+          detached.length === 0;
         return asResult(
           last.process,
           succeeded,
           succeeded
             ? `Unity ${input.preset} player built.`
-            : !ours(report)
-              ? `The Unity ${input.preset} build ended without its own report (status ${String(report["status"] ?? "none")}, build ${String(report["buildId"] ?? "none")}, expected ${String(buildId ?? input.outputPath)}).`
-              : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${buildErrors(report["errors"]).slice(0, 1500)}`,
+            : detached.length > 0 && ours(report) && report["result"] === "Succeeded"
+              ? `The Unity ${input.preset} build lost scripts on ${detached.length} scene object(s), so the player would not run them; fix the scripts or their references and rebuild:\n${[...new Set(detached)].slice(0, 6).join("\n")}`
+              : !ours(report)
+                ? `The Unity ${input.preset} build ended without its own report (status ${String(report["status"] ?? "none")}, build ${String(report["buildId"] ?? "none")}, expected ${String(buildId ?? input.outputPath)}).`
+                : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${buildErrors(report["errors"]).slice(0, 1500)}`,
           input.outputPath,
         );
       }).pipe(
@@ -533,36 +545,63 @@ export const makeUnityBackend = (
       open: (ctx) =>
         live.hold(ctx.root)(Effect.promise(() => NodeFSP.writeFile(warmMarker(ctx), "warm\n"))),
     },
+    // The prepared player of the current sources plays; the editor is not needed again.
+    playProcess: (input) =>
+      Effect.gen(function* () {
+        if (input.player === null)
+          return yield* new GameOperationError({
+            operation: "Play session",
+            path: input.projectDir,
+            reason: "invalid-input",
+            detail: "A Unity session plays a prepared player, and none was given.",
+          });
+        if (!input.display)
+          return yield* new GameOperationError({
+            operation: "Play session",
+            path: input.projectDir,
+            reason: "tool-missing",
+            detail:
+              "A Unity session needs xvfb-run for the player's private display; install the system Xvfb package.",
+          });
+        const home = NodePath.join(input.traceDir, "home");
+        yield* Effect.tryPromise({
+          try: () => NodeFSP.mkdir(home, { recursive: true }),
+          catch: (cause) =>
+            new GameOperationError({ operation: "Play session", path: home, reason: "io", cause }),
+        });
+        return {
+          executable: input.player,
+          args: [
+            "-kurambitExplore",
+            input.requestPath,
+            "-screen-fullscreen",
+            "0",
+            "-screen-width",
+            String(input.viewport.width),
+            "-screen-height",
+            String(input.viewport.height),
+            "-force-glcore",
+            "-logFile",
+            NodePath.join(input.traceDir, "player.log"),
+          ],
+          // The player keeps its prefs and log under the session's scratch HOME,
+          // never the user's ~/.config/unity3d.
+          env: {
+            ...GameProcesses.engineChildEnv(),
+            HOME: home,
+            XDG_CONFIG_HOME: NodePath.join(home, ".config"),
+            LIBGL_ALWAYS_SOFTWARE: "1",
+            LP_NUM_THREADS: "2",
+          },
+          request: {},
+          scratch: [home],
+          inputNote: "Keys and mouse go in through the Input System. ",
+        };
+      }),
     player: {
       build: buildPlayer,
       export: exportPlayer,
       executable: PLAYER_EXECUTABLE,
-      session: ({ player, requestPath, traceDir, home, viewport }) => ({
-        args: [
-          player,
-          "-kurambitExplore",
-          requestPath,
-          "-screen-fullscreen",
-          "0",
-          "-screen-width",
-          String(viewport.width),
-          "-screen-height",
-          String(viewport.height),
-          "-force-glcore",
-          "-logFile",
-          NodePath.join(traceDir, "player.log"),
-        ],
-        // The player keeps its prefs and log under the session's scratch HOME,
-        // never the user's ~/.config/unity3d.
-        env: {
-          ...GameProcesses.engineChildEnv(),
-          HOME: home,
-          XDG_CONFIG_HOME: NodePath.join(home, ".config"),
-          LIBGL_ALWAYS_SOFTWARE: "1",
-          LP_NUM_THREADS: "2",
-        },
-        inputNote: "Keys and mouse go in through the Input System. ",
-      }),
     },
   };
 };

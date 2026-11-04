@@ -93,7 +93,8 @@ and checked, played and exported with the same `game_*` tools as a Godot game.
     A clean check proves it compiles and boots, not that it is fun.
 16. Export checklist: `game_export` Linux builds `builds/linux/` (the
     executable, `game_Data/` and `UnityPlayer.so` together); Windows builds
-    `builds/windows/`. Web is refused. Bot runs do not play Unity yet.
+    `builds/windows/`. Web is refused. Bot runs play the same Linux player as
+    `game_explore_*`, at normal speed; they take no `setState` writes.
 17. Work in `./unity` plus VISION.md, PLAN.md and NOTES.md. Never commit,
     never reset git, never use subagents. Never touch `Library/`, `Temp/`,
     `Logs/` or `UserSettings/`; they are the editor's caches.

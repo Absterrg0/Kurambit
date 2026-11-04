@@ -60,6 +60,8 @@ export class GamePlayer extends Context.Service<
      */
     readonly prepare: (root: string) => Effect.Effect<
       {
+        /** The player executable. */
+        readonly player: string;
         readonly origin: PlayerOrigin;
         readonly ms: number;
         readonly sourceId: string;
@@ -238,7 +240,12 @@ ${built.result.message}`.slice(0, 3000),
         return ready;
       }),
     );
-    return { origin: prepared.origin, ms: prepared.ms, sourceId: prepared.sourceId };
+    return {
+      player: prepared.player,
+      origin: prepared.origin,
+      ms: prepared.ms,
+      sourceId: prepared.sourceId,
+    };
   });
 
   const warmEditor = Effect.fn("GamePlayer.warmEditor")(function* (root: string) {

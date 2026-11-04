@@ -408,6 +408,57 @@ export const layer = Layer.effect(
         ),
       );
 
+    const templatesDir = async () => {
+      const [bundled, monorepo] = Templates.templateDirectoryCandidates(
+        NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
+        NodePath.join,
+      );
+      return (await NodeFSP.access(bundled).then(
+        () => true,
+        () => false,
+      ))
+        ? bundled
+        : monorepo;
+    };
+
+    // The engine's in-game play runner speaks this server's protocol, so a new
+    // run brings it up to date in a commit of its own on trunk, right after
+    // init: riding in a role's commit, it would force that role through a boot
+    // and be lost with it when the role is rejected, or land on a leftover
+    // round branch instead of trunk.
+    const refreshHarnessFiles = (
+      git: ReturnType<typeof makeGit>,
+      root: string,
+      lane: string,
+      log: (line: string) => Effect.Effect<void>,
+    ) =>
+      Effect.gen(function* () {
+        const owned = laneProfile(lane).run.harnessFiles;
+        if (owned === null) return null;
+        const templates = yield* Effect.promise(templatesDir);
+        const paths = owned.files.map((file) => NodePath.join(lane, file));
+        const copied = yield* Effect.promise(async () => {
+          try {
+            for (const file of owned.files) {
+              const to = NodePath.join(root, lane, file);
+              await NodeFSP.mkdir(NodePath.dirname(to), { recursive: true });
+              await NodeFSP.copyFile(NodePath.join(templates, owned.template, lane, file), to);
+            }
+            return null;
+          } catch (error) {
+            return String(error).slice(0, 300);
+          }
+        });
+        if (copied !== null) {
+          yield* log(`harness files not refreshed: ${copied}`);
+          return null;
+        }
+        const before = yield* git.current;
+        const sha = yield* git.commitPaths(`harness: refresh ${owned.files.join(", ")}`, paths);
+        yield* log(`harness files refreshed on ${before} at ${sha.slice(0, 8)}`);
+        return sha;
+      }).pipe(Effect.uninterruptible);
+
     // Skill pack, bot kit and the run-state ignores, so the committed tree each
     // worktree role starts from has them. Only a new run refreshes the skills
     // and the kit: a resume after a server update would otherwise change them
@@ -420,16 +471,7 @@ export const layer = Layer.effect(
       fresh: boolean,
     ) =>
       Effect.promise(async () => {
-        const [bundled, monorepo] = Templates.templateDirectoryCandidates(
-          NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
-          NodePath.join,
-        );
-        const templates = (await NodeFSP.access(bundled).then(
-          () => true,
-          () => false,
-        ))
-          ? bundled
-          : monorepo;
+        const templates = await templatesDir();
         await NodeFSP.mkdir(NodePath.join(root, ".studio", "bot"), { recursive: true });
         const copy = async (from: string, to: string) => {
           const present = await NodeFSP.access(to).then(
@@ -619,7 +661,17 @@ export const layer = Layer.effect(
               );
             });
           case "git":
-            return gitStep(d.deps.game, git, root, step.op);
+            return gitStep(d.deps.game, git, root, step.op).pipe(
+              Effect.flatMap((done) =>
+                step.op._tag !== "init" || !done.git.ok
+                  ? Effect.succeed(done)
+                  : refreshHarnessFiles(git, root, state.lane, log).pipe(
+                      Effect.map((sha) =>
+                        sha === null ? done : { ...done, git: { ...done.git, sha } },
+                      ),
+                    ),
+              ),
+            );
           case "boot":
             return bootStep(d.deps.game, { creator: d.creator, root, lane: state.lane, log });
           case "facts":

@@ -324,6 +324,8 @@ export const makeThreeBackend = (): GameEngineBackend => {
         };
         return response(run, input.outputPath);
       }),
+    // The browser host opens the page itself: there is no runner process.
+    playProcess: null,
     editor: null,
     player: null,
   };

@@ -32,8 +32,6 @@ export interface GameEngineProfile {
    * the sources once per source identity.
    */
   readonly play: "browser" | "native" | "player";
-  /** Why bot runs refuse this engine's games; null when they play them. */
-  readonly botRefusal: string | null;
   /**
    * The files of a Web release, relative to its directory: `exported` must be
    * nonempty after an export, `served` must stay present for Play. Null when
@@ -51,6 +49,16 @@ export interface GameEngineProfile {
   readonly run: {
     /** This engine's skill in the studio pack; a run keeps it and drops the other engines'. */
     readonly skill: string;
+    /**
+     * Files in the game the harness owns, under the engine directory: its
+     * in-game play runner. A fresh run copies them from the engine's starter
+     * template (`template`, a directory under the server templates), so games
+     * made before a protocol change play by the current one.
+     */
+    readonly harnessFiles: {
+      readonly template: string;
+      readonly files: ReadonlyArray<string>;
+    } | null;
     /** Whether a comparison's two samples may play at once. */
     readonly parallelSamples: boolean;
     /** Whether the project's first editor open is paid before the first root role's clock. */
@@ -97,9 +105,6 @@ export const laneUi = (lane: string): string =>
 /** Game-relative directory library packs land in. */
 export const laneLibrary = (lane: string): string =>
   `${laneAssets(lane)}/${laneProfile(lane).layout.library}`;
-
-/** Bot runs play the lane's games unless its engine refuses them; explore play is then the evidence. */
-export const laneBots = (lane: string): boolean => laneProfile(lane).botRefusal === null;
 
 /** Every engine's skill name, for dropping the ones a lane does not use. */
 export const ENGINE_SKILLS: ReadonlyArray<string> = PROFILES.map((profile) => profile.run.skill);

@@ -3,7 +3,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { assetListSummary, assetUseSummary, readAssetUse } from "./assetUse.ts";
-import { laneBots, laneProfile } from "../engineProfile.ts";
+import { laneProfile } from "../engineProfile.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { modelFacts } from "./modelFacts.ts";
 
@@ -108,5 +108,5 @@ export const reviewerFacts = async (root: string, lane: string): Promise<string>
   // Only the notable image facts: the reviewer judges the whole game, not each file.
   const sprites = (await spriteFacts(root, lane)).notable;
   const modelNotes = (await modelFacts(root, lane)).notable;
-  return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. ${await assetFacts(root, lane)}${sprites.length > 0 ? ` ${sprites}` : ""}${modelNotes.length > 0 ? ` Models: ${modelNotes}.` : ""} Bots: ${laneBots(lane) ? await botLine(root) : "bot runs do not play this engine's games"}.${report.length > 0 ? `\nPlayer report (facts from bot runs across the game, no interpretation):\n${report}` : "\nNo player report recorded yet."}`;
+  return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. ${await assetFacts(root, lane)}${sprites.length > 0 ? ` ${sprites}` : ""}${modelNotes.length > 0 ? ` Models: ${modelNotes}.` : ""} Bots: ${await botLine(root)}.${report.length > 0 ? `\nPlayer report (facts from bot runs across the game, no interpretation):\n${report}` : "\nNo player report recorded yet."}`;
 };

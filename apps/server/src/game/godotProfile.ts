@@ -8,7 +8,6 @@ export const GODOT_PROFILE: GameEngineProfile = {
   layout: { assets: "assets", ui: "ui", library: "library", blender: "assets/blender" },
   viewport: null,
   play: "native",
-  botRefusal: null,
   web: {
     exported: ["index.html", "index.wasm", "index.js", "index.pck"],
     served: ["index.html", "index.js", "index.wasm", "index.pck"],
@@ -21,6 +20,8 @@ export const GODOT_PROFILE: GameEngineProfile = {
   },
   run: {
     skill: "godot-game",
+    // The play runner lives in the server (Godot's runner script, the browser host).
+    harnessFiles: null,
     parallelSamples: true,
     warmEditor: false,
     sources: { extensions: [".gd"], under: "" },

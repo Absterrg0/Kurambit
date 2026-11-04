@@ -9,7 +9,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import {
   GAME_BOT_BOUNDS,
-  GameEngineId,
   GameOperationError,
   type GameBotMode,
   type GameBotPerf,
@@ -20,15 +19,15 @@ import {
   type GameBotViewResult,
 } from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import * as GameToolchain from "./GameToolchain.ts";
-import { prepareNativeUserIsolation } from "./gameNativeUserDir.ts";
+import * as GameEngine from "./GameEngine.ts";
+import * as GamePlayer from "./GamePlayer.ts";
+import * as GameProjectService from "./GameProjectService.ts";
+import { insideGame } from "./GameProjectService.ts";
 import { findExecutable } from "./GameProcesses.ts";
-import { nativeSessionToken } from "./gameExploreNative.ts";
-import { GODOT_BOT_SCRIPT } from "./godotBotScript.ts";
-import { engineProfile } from "./engineProfile.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
-import { parseGodotViewport } from "./godotViewport.ts";
 import { requireChromium } from "./gameChromium.ts";
+import { launchPageBot, launchProcessBot } from "./gameBotLaunch.ts";
+import { playBot, type BotLaunch } from "./gameBotPlay.ts";
 import {
   botEnding,
   botFinalState,
@@ -37,10 +36,7 @@ import {
   opError,
   type Session,
 } from "./gameBotRuntime.ts";
-import { runNativeBot } from "./gameBotNative.ts";
-import { runWebBot } from "./gameBotWeb.ts";
-
-const isEngineId = Schema.is(GameEngineId);
+import { listenForRunner } from "./playSession.ts";
 
 /** The Jev key lives in the server secret store under this name; bots never see it. */
 export const GAME_BOT_JEV_SECRET = "game-bot-jev-api-key";
@@ -380,7 +376,9 @@ const buildPlayerReport = async (
 };
 
 const make = Effect.gen(function* () {
-  const tools = yield* GameToolchain.GameToolchain;
+  const engines = yield* GameEngine.GameEngine;
+  const players = yield* GamePlayer.GamePlayer;
+  const projects = yield* GameProjectService.GameProjectService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const sessions = new Map<string, Session>();
   const runs = new Map<string, { root: string; result: GameBotRunResult }>();
@@ -449,32 +447,22 @@ const make = Effect.gen(function* () {
       // across runs). Ten at most; each run gets its own directory.
       const count = Math.min(10, Math.max(1, Math.floor(input.runs ?? 1)));
       const pathEnv = process.env.PATH ?? "";
-      const manifest = yield* Effect.promise(() =>
-        NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")
-          .then(
-            (text) =>
-              JSON.parse(text) as {
-                godotProject?: unknown;
-                engine?: { name?: unknown };
-              },
-          )
-          .catch((): { godotProject?: unknown; engine?: { name?: unknown } } => ({})),
-      );
-      const godotProject =
-        typeof manifest.godotProject === "string" ? manifest.godotProject : "godot";
-      // A browser engine's bot plays the page in Chromium; every other plays the Godot native runner.
-      const engineName = manifest.engine?.name;
-      const engine = isEngineId(engineName) ? engineProfile(engineName) : null;
-      const isWeb = engine?.play === "browser";
-      const projectText = isWeb
-        ? ""
-        : yield* Effect.promise(() =>
-            NodeFSP.readFile(NodePath.join(root, godotProject, "project.godot"), "utf8").catch(
+      // The engine says how its game plays: a browser page, its runner on the
+      // sources, or a prepared player. Everything else here is the same run.
+      const manifest = yield* projects.read(root);
+      const backend = yield* engines.backendFor(manifest.engine.name);
+      const profile = backend.profile;
+      const projectDir = insideGame(root, backend.projectDirectory(manifest));
+      const isWeb = profile.play === "browser";
+      const viewport =
+        profile.viewport ??
+        backend.projectSettings(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(projectDir, backend.projectSettingsFile), "utf8").catch(
               () => "",
             ),
-          );
-      const viewport = engine?.viewport ?? parseGodotViewport(projectText);
-      const godot = isWeb ? null : yield* tools.executable("godot");
+          ),
+        ).viewport;
       const chrome = isWeb ? yield* requireChromium("Bot run", root) : null;
       const ffmpeg = yield* Effect.promise(() =>
         findExecutable("ffmpeg", { pathEnv, override: process.env.KURAMBIT_FFMPEG }),
@@ -498,6 +486,9 @@ const make = Effect.gen(function* () {
           "tool-missing",
           "Xvfb is needed for the run's private display.",
         );
+      // A player of the current sources, built once per source identity; an
+      // editor that just built it closes, so it never plays beside the run.
+      const player = profile.play === "player" ? (yield* players.prepare(root)).player : null;
       let jevKey: string | null = null;
       let jevBase = JEV_DEFAULT_BASE;
       let policyNote: string | null = null;
@@ -538,10 +529,105 @@ const make = Effect.gen(function* () {
             try: () => NodeFSP.writeFile(childPath, GAME_BOT_CHILD_JS),
             catch: (cause) => opError("Bot run", childPath, "io", undefined, cause),
           });
-          const one = isWeb
-            ? yield* Effect.tryPromise({
+          const failed = (cause: unknown) =>
+            isGameOperationError(cause)
+              ? cause
+              : opError(
+                  "Bot run",
+                  root,
+                  "command-failed",
+                  cause instanceof Error
+                    ? cause.message.slice(0, 2000)
+                    : String(cause).slice(0, 2000),
+                  cause,
+                );
+          // Whichever launch completes is stopped exactly once, however the
+          // run ends: the finalizer below stops what reached `launched`, and a
+          // launch that resolves after an interrupt (Effect no longer awaits
+          // it) stops itself. Chromium is not in session.pids, so drop() alone
+          // would never end it.
+          let launched: BotLaunch | null = null;
+          const keep = async (signal: AbortSignal, launch: Promise<BotLaunch>) => {
+            const opened = await launch;
+            if (signal.aborted) {
+              await opened.stop();
+              throw new Error("Bot run stopped.");
+            }
+            launched = opened;
+            return opened;
+          };
+          const open = isWeb
+            ? Effect.tryPromise({
                 try: (signal) =>
-                  runWebBot(jevApi, {
+                  keep(
+                    signal,
+                    launchPageBot({
+                      root,
+                      projectDir,
+                      chrome: chrome!,
+                      ffmpeg,
+                      viewport,
+                      runDir,
+                      videoPath,
+                      session,
+                      signal,
+                    }),
+                  ),
+                catch: failed,
+              })
+            : Effect.gen(function* () {
+                const launch = backend.playProcess;
+                if (launch === null)
+                  return yield* opError(
+                    "Bot run",
+                    root,
+                    "invalid-input",
+                    `${profile.displayName} games have no runner process.`,
+                  );
+                const listener = yield* Effect.tryPromise({
+                  try: () => listenForRunner(),
+                  catch: (cause) => opError("Bot run", runDir, "io", undefined, cause),
+                });
+                const requestPath = NodePath.join(runDir, "request.json");
+                return yield* launch({
+                  projectDir,
+                  player,
+                  requestPath,
+                  scriptDir: runDir,
+                  traceDir: runDir,
+                  viewport,
+                  display: true,
+                }).pipe(
+                  Effect.flatMap((spec) =>
+                    Effect.tryPromise({
+                      try: (signal) =>
+                        keep(
+                          signal,
+                          launchProcessBot({
+                            spec,
+                            listener,
+                            requestPath,
+                            xvfb: xvfb!,
+                            ffmpeg,
+                            viewport,
+                            runDir,
+                            videoPath,
+                            session,
+                            signal,
+                          }),
+                        ),
+                      catch: failed,
+                    }),
+                  ),
+                  // Dropping twice is harmless; a listener nobody accepted on is not.
+                  Effect.onError(() => Effect.promise(() => listener.drop())),
+                );
+              });
+          const one = yield* open.pipe(
+            Effect.flatMap((opened) =>
+              Effect.tryPromise({
+                try: (signal) =>
+                  playBot(jevApi, opened, {
                     root,
                     runId,
                     runDir,
@@ -553,9 +639,6 @@ const make = Effect.gen(function* () {
                     mode,
                     jevLive,
                     seconds,
-                    viewport,
-                    projectDir: NodePath.join(root, godotProject),
-                    chrome: chrome!,
                     ffmpeg,
                     jevKey,
                     jevBase,
@@ -567,77 +650,11 @@ const make = Effect.gen(function* () {
                     seed: NodeCrypto.randomInt(1_000_000_000),
                     priorRuns: [...priorRuns],
                   }),
-                catch: (cause) =>
-                  isGameOperationError(cause)
-                    ? cause
-                    : opError(
-                        "Bot run",
-                        root,
-                        "command-failed",
-                        cause instanceof Error
-                          ? cause.message.slice(0, 2000)
-                          : String(cause).slice(0, 2000),
-                        cause,
-                      ),
-              })
-            : yield* Effect.gen(function* () {
-                const scriptPath = NodePath.join(runDir, "bot.gd");
-                const requestPath = NodePath.join(runDir, "request.json");
-                const isolation = yield* Effect.tryPromise({
-                  try: () => prepareNativeUserIsolation(runDir),
-                  catch: (cause) => opError("Bot run", runDir, "io", undefined, cause),
-                });
-                yield* Effect.tryPromise({
-                  try: () => NodeFSP.writeFile(scriptPath, GODOT_BOT_SCRIPT),
-                  catch: (cause) => opError("Bot run", scriptPath, "io", undefined, cause),
-                });
-                return yield* Effect.tryPromise({
-                  try: (signal) =>
-                    runNativeBot(jevApi, {
-                      root,
-                      runId,
-                      runDir,
-                      scriptPath,
-                      requestPath,
-                      childPath,
-                      videoPath,
-                      tracePath,
-                      botFile,
-                      decider,
-                      mode,
-                      jevLive,
-                      seconds,
-                      token: nativeSessionToken(),
-                      isolation,
-                      viewport,
-                      godotPath: godot!.path,
-                      projectDir: NodePath.join(root, godotProject),
-                      ffmpeg,
-                      xvfb: xvfb!,
-                      jevKey,
-                      jevBase,
-                      policyNote,
-                      session,
-                      signal,
-                      runIndex: index,
-                      runTotal: count,
-                      seed: NodeCrypto.randomInt(1_000_000_000),
-                      priorRuns: [...priorRuns],
-                    }),
-                  catch: (cause) =>
-                    isGameOperationError(cause)
-                      ? cause
-                      : opError(
-                          "Bot run",
-                          root,
-                          "command-failed",
-                          cause instanceof Error
-                            ? cause.message.slice(0, 2000)
-                            : String(cause).slice(0, 2000),
-                          cause,
-                        ),
-                });
-              });
+                catch: failed,
+              }),
+            ),
+            Effect.ensuring(Effect.promise(async () => launched?.stop())),
+          );
           out.push(one);
           runs.set(runId, { root, result: one });
           if (runs.size > GAME_BOT_BOUNDS.maxRuns) {

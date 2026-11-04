@@ -1,8 +1,7 @@
-// @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off globalFetch:off preferSchemaOverJson:off -- Shared by the bot launchers: private displays, pids, runner line JSON, run frames and the Jev call.
+// @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off globalFetch:off preferSchemaOverJson:off -- Shared by bot runs: pids, child lines, run frames and the Jev call.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
-import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import * as NodeReadline from "node:readline";
 import {
@@ -58,59 +57,6 @@ const alive = (pid: number | undefined): boolean => {
   }
 };
 
-// Displays this process picked and has not let go: two runs at once (a blind
-// comparison's bot on both builds) both see a number free before either's Xvfb
-// writes its lock, and the second would then play on the first one's display.
-export const claimed = new Set<number>();
-
-/** A free private X display, preferring above the live-Blender range; the caller releases it. */
-export const pickDisplay = async (): Promise<number | null> => {
-  const taken = async (n: number): Promise<boolean> => {
-    try {
-      await NodeFSP.access(`/tmp/.X${n}-lock`);
-      return true;
-    } catch {
-      /* candidate */
-    }
-    return new Promise<boolean>((resolve) => {
-      const s = NodeNet.connect(6000 + n, "127.0.0.1");
-      s.once("connect", () => {
-        s.destroy();
-        resolve(true);
-      });
-      s.once("error", () => {
-        s.destroy();
-        resolve(false);
-      });
-    });
-  };
-  const ranges: number[] = [];
-  for (let n = 251; n < 350; n++) ranges.push(n);
-  for (let n = 119; n < 251; n++) ranges.push(n);
-  for (const n of ranges) {
-    if (claimed.has(n) || (await taken(n)) || claimed.has(n)) continue;
-    claimed.add(n);
-    return n;
-  }
-  return null;
-};
-
-export const waitDisplay = async (n: number, timeoutMs: number): Promise<boolean> => {
-  // Readiness is the server's lock file: this platform's Xvfb build never
-  // listens on TCP, so a TCP probe would wait out the whole timeout.
-  const end = Date.now() + timeoutMs;
-  while (Date.now() < end) {
-    try {
-      await NodeFSP.access(`/tmp/.X${n}-lock`);
-      return true;
-    } catch {
-      /* not yet */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return false;
-};
-
 export const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -156,16 +102,6 @@ export const createLineReader = (stream: NodeJS.ReadableStream): LineReader => {
     },
     close: () => rl.close(),
   };
-};
-
-export const parseLine = (line: string): Record<string, unknown> | null => {
-  try {
-    const parsed: unknown = JSON.parse(line);
-    if (typeof parsed === "object" && parsed !== null) return parsed as Record<string, unknown>;
-    return null;
-  } catch {
-    return null;
-  }
 };
 
 export const asNumber = (value: unknown): number | null =>
@@ -252,17 +188,6 @@ export const posOf = (obs: Record<string, unknown>): [number, number, number] | 
   return null;
 };
 
-export const MOVERS = new Set([
-  "W",
-  "A",
-  "S",
-  "D",
-  "ArrowUp",
-  "ArrowDown",
-  "ArrowLeft",
-  "ArrowRight",
-  "Space",
-]);
 export const FRACTION_RE = /(\d+)\s*\/\s*(\d+)/g;
 
 export const killPid = (pid: number | undefined): void => {
