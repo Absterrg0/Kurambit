@@ -773,8 +773,17 @@ const usable = (s: Sample | null) =>
   s !== null && s.phase === "done" && validatePlayEvidence(s.evidence, s.evidence) === null;
 const sampleFile = (s: Pick<Sample, "label">) => `.studio/play-${s.label}.md`;
 
-// A held play stands in for a fresh one only under the budget its player had.
-const SAMPLE_BUDGET = `input ${Roles.SAMPLE_INPUT_MS} ms, floor ${PLAY_FLOOR_MS} ms, turn ${CAP.judge} ms`;
+// A held play stands in for a fresh one only when a fresh player would be the same:
+// the same budget, model (a run without one uses its creator chat's) and
+// instructions. Otherwise a stale report's voice or strictness could tell judges
+// which side is old, or skew the verdict.
+const fnv = (text: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16);
+};
+const playerKey = (s: RunState, question: string) =>
+  `input ${Roles.SAMPLE_INPUT_MS} ms, floor ${PLAY_FLOOR_MS} ms, turn ${CAP.judge} ms; player ${s.provider ?? ""}/${s.model ?? ""}/${s.variant ?? ""} via ${s.model === null ? s.creator : ""}; prompt ${fnv(Roles.samplePlay(question, ""))}`;
 const reusable = (s: Sample) => usable(s) && s.notes.trim().length > 0;
 
 // The blind play a kept round's merge may carry to the new best: the
@@ -786,7 +795,7 @@ const heldPlay = (s: RunState, r: Round): Played | null => {
     return {
       sha: r.cmp.x,
       question: r.cmp.question,
-      budget: SAMPLE_BUDGET,
+      budget: playerKey(s, r.cmp.question),
       round: r.n,
       branch: r.branch,
       sample: mine,
@@ -804,7 +813,7 @@ const gateCompare = (s: RunState, r: Round, c: Compare, logs: string[]): Compare
     held === null ||
     held.sha !== s.best ||
     held.question !== c.question ||
-    held.budget !== SAMPLE_BUDGET ||
+    held.budget !== playerKey(s, c.question) ||
     !reusable(held.sample)
   )
     return c;

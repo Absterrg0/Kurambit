@@ -1374,6 +1374,13 @@ describe("ladder", () => {
         );
     });
 
+    it("plays both builds when the run's player changed since the held play", () => {
+      const respond = merging(true);
+      const held = oneRound(atLadder(), respond).state;
+      for (const patch of [{ model: "another-model" }, { creator: "thread:another-chat" }])
+        expect(samples(oneRound({ ...held, ...patch }, respond).steps)).toBe(4);
+    });
+
     it("never reuses in a finish round, which asks its own question", () => {
       const respond = merging(true);
       const held = oneRound(atLadder(), respond).state;
