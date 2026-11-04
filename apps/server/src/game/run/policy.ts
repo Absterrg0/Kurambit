@@ -401,6 +401,14 @@ const settleRung = (
 };
 
 // A reviewer's one ladder change goes in as the next rung; one open at a time.
+// Why the ladder takes no reviewer's rung now, or null when it does.
+const insertionRefused = (ladder: Ladder): string | null =>
+  ladder.rungs.some((x) => x.from === "reviewer" && x.status === "todo")
+    ? "an earlier one is still open"
+    : ladder.rungs.length >= LADDER_MAX
+      ? `the ladder already has ${LADDER_MAX} rungs`
+      : null;
+
 const insertRung = (
   ladder: Ladder,
   change: (id: number) => ReturnType<typeof parseRungChange>,
@@ -409,14 +417,7 @@ const insertRung = (
 ): Ladder => {
   const parsed = change(Math.max(0, ...ladder.rungs.map((x) => x.id)) + 1);
   if (parsed === null) return ladder;
-  const refused =
-    "error" in parsed
-      ? `wrong shape (${parsed.error})`
-      : ladder.rungs.some((x) => x.from === "reviewer" && x.status === "todo")
-        ? "an earlier one is still open"
-        : ladder.rungs.length >= LADDER_MAX
-          ? `the ladder already has ${LADDER_MAX} rungs`
-          : null;
+  const refused = "error" in parsed ? `wrong shape (${parsed.error})` : insertionRefused(ladder);
   if (refused !== null || "error" in parsed) {
     logs.push(`round ${n}: the reviewer's ladder change was not taken: ${refused}`);
     return ladder;
@@ -427,6 +428,19 @@ const insertRung = (
     ...ladder,
     rungs: at < 0 ? [...ladder.rungs, parsed.rung] : ladder.rungs.toSpliced(at, 0, parsed.rung),
   };
+};
+
+/** Why the run would not take a reviewer's ladder change now, or null when it would. */
+export const rungChangeRefused = (
+  state: RunState,
+  change: Parameters<typeof rungOfChange>[0],
+): string | null => {
+  const t = state.task;
+  if (t._tag !== "round" || t.rung === null || state.ladder === null)
+    return "this round builds no rung, so it takes no ladder change";
+  const rung = rungOfChange(change, 0);
+  if ("error" in rung) return `the rung has the wrong shape (${rung.error})`;
+  return insertionRefused(state.ladder);
 };
 
 // ── Creator decisions (Guided). ───────────────────────────────────────────

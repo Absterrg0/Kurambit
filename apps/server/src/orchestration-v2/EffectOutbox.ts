@@ -4,6 +4,7 @@ import {
   CommandId,
   GameRunId,
   GameRunStepId,
+  PositiveInt,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -122,6 +123,7 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     type: Schema.Literal("game-run.step.execute"),
     runId: GameRunId,
     stepId: GameRunStepId,
+    attempt: PositiveInt,
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.decision.wake"),
@@ -141,6 +143,7 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     type: Schema.Literal("game-run.step.deadline"),
     runId: GameRunId,
     stepId: GameRunStepId,
+    attempt: PositiveInt,
   }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;

@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import {
+  CommandId,
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
@@ -37,6 +38,15 @@ export const gameRunStepId = (runId: GameRunId, seq: number): GameRunStepId =>
   GameRunStepId.make(`${runId}:step:${seq}`);
 export const gameRunRoundId = (runId: GameRunId, round: number): GameRunRoundId =>
   GameRunRoundId.make(`${runId}:round:${round}`);
+/**
+ * The command id that reports a step's work. A step that runs again after a
+ * resume is a new attempt, so its report never meets the receipt of an earlier one.
+ */
+export const gameRunStepCommandId = (
+  stepId: GameRunStepId,
+  attempt: number,
+  action: "start" | "complete" | "fail",
+): CommandId => CommandId.make(`game-run:${stepId}:attempt:${attempt}:${action}`);
 
 // ── The demo ladder as the run holds it. ───────────────────────────────────
 export const GameRunRung = Schema.Struct({
@@ -264,14 +274,16 @@ const BotResult = Schema.Struct({
   fact: Schema.Struct(BotFactFields),
 });
 
+// Usage limits, a provider that stays down and memory that stays short end the run resumably.
+const EndedResult = Schema.Struct({
+  kind: Schema.Literal("ended"),
+  ending: Schema.Literals(["usage-limit", "provider-down", "low-memory"]),
+  reason: Schema.String,
+});
+
 export const GameRunStepResult = Schema.Union([
   GameRunRoleDone,
-  // Usage limits, a provider that stays down and memory that stays short end the run resumably.
-  Schema.Struct({
-    kind: Schema.Literal("ended"),
-    ending: Schema.Literals(["usage-limit", "provider-down", "low-memory"]),
-    reason: Schema.String,
-  }),
+  EndedResult,
   FailedResult,
   Schema.Struct({ kind: Schema.Literal("git"), git: GameRunGitOutcome }),
   Schema.Struct({ kind: Schema.Literal("boot"), ok: Schema.Boolean, detail: Schema.String }),
@@ -668,6 +680,8 @@ export const GameRunStep = Schema.Struct({
   runId: GameRunId,
   threadId: ThreadId,
   seq: PositiveInt,
+  /** Counts the times the step was planned: a resume runs an unfinished step again. */
+  attempt: PositiveInt,
   kind: Schema.Literals([
     "role",
     "git",
@@ -691,6 +705,8 @@ export const GameRunStep = Schema.Struct({
   ),
   /** A pair keeps its halves' results in `step`; this is a single step's result, or an ending. */
   result: Schema.NullOr(GameRunStepResult),
+  /** A pair's halves that ended the run, held until every half is in: then the first one lands. */
+  endedHalves: Schema.Array(Schema.Struct({ seq: PositiveInt, result: EndedResult })),
   /**
    * What landing this step's result asks of the game folder: records to write
    * and role threads whose worktrees go. Done before the run's next step.
@@ -728,6 +744,7 @@ export const GameRunRefusalReason = Schema.Literals([
   "wrong-thread",
   "wrong-kind",
   "invalid-submission",
+  "stale-attempt",
   "no-decision",
   "stale-decision",
   "invalid-answer",

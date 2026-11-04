@@ -43,6 +43,7 @@ import type {
   RunAttemptId,
 } from "@kurambit/contracts";
 import {
+  isGameRunEventType,
   GameRun as GameRunSchema,
   GameRunRound as GameRunRoundSchema,
   GameRunStep as GameRunStepSchema,
@@ -942,11 +943,7 @@ function applyToGameRunRecords(
   }
 }
 
-const isGameRunEvent = (event: OrchestrationV2DomainEvent) =>
-  event.type === "game-run.created" ||
-  event.type === "game-run.updated" ||
-  event.type === "game-run-step.updated" ||
-  event.type === "game-run-round.recorded";
+const isGameRunEvent = (event: OrchestrationV2DomainEvent) => isGameRunEventType(event.type);
 
 /**
  * Provider sessions are process-scoped: one session row can be bound to several app

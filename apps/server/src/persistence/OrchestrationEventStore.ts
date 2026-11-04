@@ -61,6 +61,7 @@ export class OrchestrationEventStore extends Context.Service<
       readonly threadId?: ThreadId;
       readonly commandId?: CommandId;
       readonly eventType?: OrchestrationV2DomainEvent["type"];
+      readonly excludeEventTypes?: ReadonlyArray<OrchestrationV2DomainEvent["type"]>;
       readonly limit?: number;
       readonly skipUnknownEventTypes?: boolean;
     }) => Stream.Stream<OrchestrationV2StoredEvent, OrchestrationEventStoreError>;
@@ -70,6 +71,7 @@ export class OrchestrationEventStore extends Context.Service<
       readonly afterSequence: number;
       readonly throughSequence: number;
       readonly maxEvents: number;
+      readonly excludeEventTypes?: ReadonlyArray<OrchestrationV2DomainEvent["type"]>;
     }) => Effect.Effect<
       {
         readonly eventCount: number;
@@ -396,6 +398,7 @@ const makeEventStore = Effect.gen(function* () {
     readonly threadId?: ThreadId;
     readonly commandId?: CommandId;
     readonly eventType?: OrchestrationV2DomainEvent["type"];
+    readonly excludeEventTypes?: ReadonlyArray<OrchestrationV2DomainEvent["type"]>;
     readonly onlyAgentEvents?: boolean;
     readonly limit: number;
   }) =>
@@ -437,6 +440,9 @@ const makeEventStore = Effect.gen(function* () {
           ...(input.threadId === undefined ? [] : [sql`stream_id = ${input.threadId}`]),
           ...(input.commandId === undefined ? [] : [sql`command_id = ${input.commandId}`]),
           ...(input.eventType === undefined ? [] : [sql`event_type = ${input.eventType}`]),
+          ...(input.excludeEventTypes === undefined || input.excludeEventTypes.length === 0
+            ? []
+            : [sql`event_type NOT IN ${sql.in(input.excludeEventTypes)}`]),
         ])}
       ORDER BY sequence ASC
       LIMIT ${input.limit}
@@ -563,6 +569,9 @@ const makeEventStore = Effect.gen(function* () {
           ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
           ...(input?.commandId === undefined ? {} : { commandId: input.commandId }),
           ...(input?.eventType === undefined ? {} : { eventType: input.eventType }),
+          ...(input?.excludeEventTypes === undefined
+            ? {}
+            : { excludeEventTypes: input.excludeEventTypes }),
           onlyAgentEvents: true,
           limit: pageLimit,
         }).pipe(
@@ -612,6 +621,11 @@ const makeEventStore = Effect.gen(function* () {
           AND application_event_version = 2
           AND sequence > ${input.afterSequence}
           AND sequence <= ${input.throughSequence}
+          ${
+            input.excludeEventTypes === undefined || input.excludeEventTypes.length === 0
+              ? sql``
+              : sql`AND event_type NOT IN ${sql.in(input.excludeEventTypes)}`
+          }
         ORDER BY sequence ASC
         LIMIT ${Math.max(0, Math.floor(input.maxEvents)) + 1}
       )

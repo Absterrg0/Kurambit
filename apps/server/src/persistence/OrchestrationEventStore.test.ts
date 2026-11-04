@@ -514,6 +514,46 @@ layer("OrchestrationEventStore", (it) => {
       );
     }),
   );
+  it.effect("leaves a game run's events out of a chat's replay and its measure", () =>
+    Effect.gen(function* () {
+      const store = yield* OrchestrationEventStore.OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("game-run-replay-thread");
+      const baseline = yield* store.latestApplicationSequence;
+      let streamVersion = 0;
+      const insert = (id: string, type: string) =>
+        sql<{ readonly sequence: number }>`
+          INSERT INTO orchestration_events (
+            event_id, aggregate_kind, stream_id, stream_version, event_type,
+            occurred_at, actor_kind, payload_json, metadata_json, application_event_version
+          ) VALUES (
+            ${id}, 'thread', ${threadId}, ${streamVersion++}, ${type},
+            '2026-11-05T00:00:00.000Z', 'server', '{}', '{}', 2
+          ) RETURNING sequence
+        `.pipe(Effect.map((rows) => rows[0]!.sequence));
+      yield* insert("game-run-replay-1", "game-run.updated");
+      yield* insert("game-run-replay-2", "thread.metadata-updated");
+      const head = yield* insert("game-run-replay-3", "game-run-step.updated");
+      const range = { threadId, afterSequence: baseline, throughSequence: head, maxEvents: 128 };
+      const excludeEventTypes = ["game-run.updated", "game-run-step.updated"] as const;
+      assert.equal((yield* store.getAgentReplayStats(range)).eventCount, 3);
+      assert.equal(
+        (yield* store.getAgentReplayStats({ ...range, excludeEventTypes })).eventCount,
+        1,
+      );
+      // The excluded rows are never read, so their payloads are never decoded.
+      const replayed = yield* store
+        .readAgentEvents({
+          threadId,
+          afterSequence: head - 1,
+          throughSequence: head,
+          excludeEventTypes,
+        })
+        .pipe(Stream.runCollect);
+      assert.equal(Array.from(replayed).length, 0);
+    }),
+  );
+
   it.effect("measures only a bounded thread replay before decoding its payloads", () =>
     Effect.gen(function* () {
       const store = yield* OrchestrationEventStore.OrchestrationEventStore;

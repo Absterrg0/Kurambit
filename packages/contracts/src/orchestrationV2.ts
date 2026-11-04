@@ -1651,6 +1651,16 @@ const OrchestrationV2EventBase = Schema.Struct({
   occurredAt: Schema.DateTimeUtc,
 });
 
+export const GAME_RUN_EVENT_TYPES = [
+  "game-run.created",
+  "game-run.updated",
+  "game-run-step.updated",
+  "game-run-round.recorded",
+] as const;
+const gameRunEventTypes: ReadonlySet<string> = new Set(GAME_RUN_EVENT_TYPES);
+/** A game run's records are read from its projection, never from the chat's event stream. */
+export const isGameRunEventType = (type: string): boolean => gameRunEventTypes.has(type);
+
 // A game run's records carry no DateTime fields, so stored and live events share one shape.
 function gameRunEventMembers<const Base extends Schema.Struct.Fields>(base: Base) {
   return [
@@ -3081,15 +3091,22 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     type: Schema.Literal("game-run.step.complete"),
     ...GameRunCommandFields,
     stepId: GameRunStepId,
+    /** The attempt that did the work; its command id is `gameRunStepCommandId(stepId, attempt, "complete")`. */
+    attempt: PositiveInt,
     result: GameRunStepResult,
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.step.fail"),
     ...GameRunCommandFields,
     stepId: GameRunStepId,
+    attempt: PositiveInt,
     reason: Schema.String,
   }),
-  /** The decision's deadline effect fired; the run takes the default if it is still due. */
+  /**
+   * The decision's deadline effect fired; the run takes the default if it is
+   * still due. Its command id derives from that effect's id, so each deadline
+   * gets its own receipt and one that fired early never refuses a later one.
+   */
   Schema.Struct({
     type: Schema.Literal("game-run.decision.expire"),
     ...GameRunCommandFields,

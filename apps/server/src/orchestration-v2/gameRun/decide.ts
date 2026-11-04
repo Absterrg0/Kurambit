@@ -11,7 +11,7 @@ import {
   type GameRunStep,
   type GameRunStepId,
   type GameRunStepResult,
-  type GameRunSubmission,
+  GameRunSubmission,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2GameRunCommand,
   type ProjectId,
@@ -247,8 +247,11 @@ const stepRecord = (
   existing !== null && existing.seq === step.id
     ? {
         ...existing,
+        attempt: existing.attempt + 1,
         step,
         status: "planned",
+        result: null,
+        endedHalves: [],
         logs: [...existing.logs, ...logs],
         completedAt: null,
       }
@@ -257,11 +260,13 @@ const stepRecord = (
         runId: run.id,
         threadId: run.threadId,
         seq: step.id,
+        attempt: 1,
         kind: step.kind,
         step,
         status: "planned",
         roles: rolesOf(step),
         result: null,
+        endedHalves: [],
         outputs: { files: [], release: [] },
         logs,
         plannedAt: work.at,
@@ -316,7 +321,14 @@ const advance = (
             Math.max(work.now, decisionDue(step)),
           ),
         ]
-      : [effectFor({ type: "game-run.step.execute", runId: run.id, stepId: record.id })];
+      : [
+          effectFor({
+            type: "game-run.step.execute",
+            runId: run.id,
+            stepId: record.id,
+            attempt: record.attempt,
+          }),
+        ];
   return { state: next, step: record, effects };
 };
 
@@ -393,10 +405,17 @@ const land = (
     logs: [...record.logs, ...applied.logs],
     completedAt: work.at,
   };
+  // An owed half's own record continues the pair's attempts: its reports so far used the pair's.
   const owed =
     held === null || held.id === record.seq
       ? []
-      : [{ ...stepRecord(work, run, held, [], null), status: "cancelled" as const }];
+      : [
+          {
+            ...stepRecord(work, run, held, [], null),
+            attempt: record.attempt,
+            status: "cancelled" as const,
+          },
+        ];
   const next = advance(work, run, applied.state, null);
   return settle(
     work,
@@ -586,7 +605,12 @@ const steer = (work: Work, command: Command<"game-run.steer">) =>
     const before = toState(run, work.records.rounds, inFlight);
     const noted = { ...before, steer: [...before.steer, command.note.trim()] };
     if (run.status === "ended" && run.ending !== null && REOPENED_BY_NOTE.has(run.ending)) {
-      const next = advance(work, run, Policy.reopen(noted, work.now), null);
+      // The round the note buys gets the run's budget afresh, as a resume does.
+      const budgeted = {
+        ...noted,
+        budgetEndsAt: run.budgetMinutes === null ? null : work.now + run.budgetMinutes * 60_000,
+      };
+      const next = advance(work, run, Policy.reopen(budgeted, work.now), null);
       return Result.succeed(
         settle(work, run, before, next.state, next.step === null ? [] : [next.step], next.effects),
       );
@@ -680,11 +704,22 @@ const currentStep = (work: Work, run: GameRun, stepId: GameRunStepId) => {
   return Result.succeed({ record, seq });
 };
 
+const isSubmission = Schema.is(GameRunSubmission);
+
 /** Why a submission does not fit what its step asks for, or null when it does. */
 const submissionProblem = (
+  state: State.RunState,
   asked: Policy.Asked,
   submission: GameRunSubmission,
 ): { readonly reason: GameRunRefusalReason; readonly message: string } | null => {
+  // The command was decoded at its transport; a ladder's rung count and every
+  // length bound are checked again here, where the run relies on them.
+  if (!isSubmission(submission))
+    return {
+      reason: "invalid-submission",
+      message:
+        "The submission does not have the shape its kind needs (a ladder has 4 to 7 rungs of 2 to 4 checks).",
+    };
   if (asked.kind === null)
     return {
       reason: "wrong-kind",
@@ -716,9 +751,12 @@ const submissionProblem = (
     if ("error" in ladder) return { reason: "invalid-submission", message: ladder.error };
   }
   if (submission._tag === "ledger" && submission.rungChange !== undefined) {
-    const rung = State.rungOfChange(submission.rungChange, 0);
-    if ("error" in rung)
-      return { reason: "invalid-submission", message: `The ladder change: ${rung.error}` };
+    const refused = Policy.rungChangeRefused(state, submission.rungChange);
+    if (refused !== null)
+      return {
+        reason: "invalid-submission",
+        message: `The ladder change is not taken: ${refused}. Submit the ledger without it.`,
+      };
   }
   return null;
 };
@@ -730,12 +768,14 @@ const submit = (work: Work, command: Command<"game-run.submit">) =>
       const entry = record.roles.find((r) => r.seq === seq);
       if (role === null || entry === undefined)
         return refuse("wrong-kind", "This step is not a role turn; it takes no submission.");
+      // A role's thread is known from game-run.step.start, which its launch
+      // dispatches before the role's first turn.
       if (entry.threadId !== command.roleThreadId)
         return refuse("wrong-thread", "This thread is not the role this step runs.");
       if (record.step.kind === "pair" && record.step.results.some((r) => r.id === seq))
         return refuse("stale-step", "This role's turn already finished.");
       const state = toState(run, work.records.rounds, record);
-      const problem = submissionProblem(Policy.asked(state, role), command.submission);
+      const problem = submissionProblem(state, Policy.asked(state, role), command.submission);
       if (problem !== null) return refuse(problem.reason, problem.message);
       const updated: GameRunStep = {
         ...record,
@@ -799,6 +839,7 @@ const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
         type: "game-run.step.deadline" as const,
         runId: run.id,
         stepId: command.stepId,
+        attempt: record.attempt,
       };
       return Result.succeed(
         settle(
@@ -817,10 +858,16 @@ const stepResult = (
   work: Work,
   runId: GameRunId,
   stepId: GameRunStepId,
+  attempt: number,
   result: GameRunStepResult,
 ) =>
   Result.flatMap(live(work, runId), (run) =>
     Result.flatMap(currentStep(work, run, stepId), ({ record, seq }) => {
+      if (attempt !== record.attempt)
+        return refuse(
+          "stale-attempt",
+          `Attempt ${attempt} of step ${stepId} was superseded; the step runs as attempt ${record.attempt}.`,
+        );
       const step = record.step;
       if (step.kind === "decide")
         return refuse("wrong-kind", "A decision is answered with game-run.decide.");
@@ -840,7 +887,7 @@ const stepResult = (
       const status = landed.kind === "failed" ? "failed" : "completed";
       const state = toState(run, work.records.rounds, record);
       const input = { now: work.now, coin: work.input.coin, id: work.input.id };
-      if (step.kind !== "pair" || landed.kind === "ended")
+      if (step.kind !== "pair")
         return Result.succeed(
           land(
             work,
@@ -852,35 +899,42 @@ const stepResult = (
             status,
           ),
         );
-      if (landed.kind !== "done" && landed.kind !== "failed" && landed.kind !== "bot")
+      if (landed.kind === "decided" || !["done", "failed", "bot", "ended"].includes(landed.kind))
         return refuse("wrong-kind", `A pair half cannot finish with a ${landed.kind} result.`);
-      if (step.results.some((r) => r.id === seq))
+      if (step.results.some((r) => r.id === seq) || record.endedHalves.some((r) => r.seq === seq))
         return refuse("stale-step", `Step ${stepId} already finished.`);
-      const pair: State.PairStep = {
-        ...step,
-        results: [...step.results, { id: seq, result: landed }],
-      };
-      // A pair lands once both halves are in; until then it stays in flight with what it has.
-      if (pair.halves.some((h) => !pair.results.some((r) => r.id === h.id)))
-        return Result.succeed(
-          settle(
-            work,
-            run,
-            state,
-            { ...state, inFlight: pair },
-            [{ ...record, step: pair, status: "running" }],
-            [],
-          ),
-        );
+      // A half that ends the run waits for its partner like any other, so the
+      // partner's finished work is recorded before the run ends.
+      const endedHalves =
+        landed.kind === "ended"
+          ? [...record.endedHalves, { seq, result: landed }]
+          : record.endedHalves;
+      const pair: State.PairStep =
+        landed.kind === "done" || landed.kind === "failed" || landed.kind === "bot"
+          ? { ...step, results: [...step.results, { id: seq, result: landed }] }
+          : step;
       const withPair = { ...state, inFlight: pair };
+      const held = { ...record, step: pair, endedHalves };
+      if (
+        pair.halves.some(
+          (h) =>
+            !pair.results.some((r) => r.id === h.id) && !endedHalves.some((r) => r.seq === h.id),
+        )
+      )
+        return Result.succeed(
+          settle(work, run, state, withPair, [{ ...held, status: "running" }], []),
+        );
+      const ended = endedHalves[0]?.result ?? null;
       return Result.succeed(
         land(
           work,
           run,
           withPair,
-          { ...record, step: pair },
-          Policy.applyPair(withPair, pair, input),
-          null,
+          held,
+          ended === null
+            ? Policy.applyPair(withPair, pair, input)
+            : Policy.applyResult(withPair, pair, ended, input),
+          ended,
           "completed",
         ),
       );
@@ -917,9 +971,9 @@ export const decide = (
     case "game-run.step.start":
       return stepStart(work, command);
     case "game-run.step.complete":
-      return stepResult(work, command.runId, command.stepId, command.result);
+      return stepResult(work, command.runId, command.stepId, command.attempt, command.result);
     case "game-run.step.fail":
-      return stepResult(work, command.runId, command.stepId, {
+      return stepResult(work, command.runId, command.stepId, command.attempt, {
         kind: "failed",
         reason: command.reason,
       });

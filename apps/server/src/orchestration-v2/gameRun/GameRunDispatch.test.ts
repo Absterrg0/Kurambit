@@ -109,7 +109,12 @@ it.effect("game-run.start commits its records, receipt and effect together, once
     const queued = yield* outbox.listByCommandId(CommandId.make("game-run-start-1"));
     assert.deepEqual(
       queued.map((effect) => [effect.request, effect.status]),
-      [[{ type: "game-run.step.execute", runId, stepId: gameRunStepId(runId, 1) }, "pending"]],
+      [
+        [
+          { type: "game-run.step.execute", runId, stepId: gameRunStepId(runId, 1), attempt: 1 },
+          "pending",
+        ],
+      ],
     );
     // A run's steps are not chat activity.
     assert.deepEqual((yield* projections.getThread(threadId)).updatedAt, threadBefore.updatedAt);

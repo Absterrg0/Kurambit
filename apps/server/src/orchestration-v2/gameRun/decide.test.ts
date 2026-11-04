@@ -12,7 +12,9 @@ import {
   type OrchestrationV2GameRunCommand,
   ProjectId,
   ProviderInstanceId,
+  type GameRunRungChange,
   ThreadId,
+  gameRunStepCommandId,
   gameRunStepId,
 } from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
@@ -106,9 +108,11 @@ const started = (profile: "guided" | "autopilot" = "autopilot") =>
     runtimeMode: "full-access",
   }).records;
 
-const complete = (records: Records, result: GameRunStepResult, ms = T0) =>
-  accept(records, { type: "game-run.step.complete", runId, stepId: stepOf(records).id, result }, ms)
+const complete = (records: Records, result: GameRunStepResult, ms = T0) => {
+  const { id, attempt } = stepOf(records);
+  return accept(records, { type: "game-run.step.complete", runId, stepId: id, attempt, result }, ms)
     .records;
+};
 
 const gitOk = (patch: Partial<Policy.GitOutcome> = {}): GameRunStepResult => ({
   kind: "git",
@@ -184,6 +188,41 @@ const lookAndState = State.ladderOf([
 if ("error" in lookAndState) throw new Error(lookAndState.error);
 const ladder = lookAndState.ladder;
 
+/** A ladder round at its blind comparison: the policy plans both samples as one pair. */
+const comparing = () => {
+  const base = complete(started(), gitOk());
+  const round = Policy.reopen(
+    { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+    T0,
+  ).task;
+  if (round._tag !== "round") throw new Error("expected a round");
+  return resumedAt(base, {
+    ladder,
+    task: {
+      ...round,
+      rung: ladder.rungs[0]!.id,
+      phase: "compare",
+      branch: "round-1",
+      candidate: "cafe",
+      cmp: {
+        question: "Which build plays better?",
+        x: "cafe",
+        y: "c0ffee",
+        xFirst: true,
+        orders: ["x", "y"],
+        samples: [],
+        bot: "",
+        botDecider: "policy",
+        bots: [],
+        botWithheld: "",
+        judges: [],
+        reused: null,
+      },
+    },
+  });
+};
+const players = [ThreadId.make("thread:player-1"), ThreadId.make("thread:player-2")] as const;
+
 describe("game-run commands", () => {
   it("start plans the run's first step and the effect that executes it", () => {
     const { records, decision } = accept(none, {
@@ -207,6 +246,7 @@ describe("game-run commands", () => {
           type: "game-run.step.execute",
           runId,
           stepId: gameRunStepId(runId, 1),
+          attempt: 1,
         },
       },
     ]);
@@ -235,6 +275,7 @@ describe("game-run commands", () => {
         type: "game-run.step.complete",
         runId,
         stepId: init!.id,
+        attempt: 1,
         result: gitOk(),
       }).reason,
     ).toBe("stale-step");
@@ -243,6 +284,7 @@ describe("game-run commands", () => {
         type: "game-run.step.complete",
         runId,
         stepId: vision!.id,
+        attempt: 1,
         result: gitOk(),
       }).reason,
     ).toBe("wrong-kind");
@@ -295,6 +337,9 @@ describe("game-run commands", () => {
     );
     expect(noHow).toMatchObject({ reason: "invalid-submission" });
     expect(noHow.message).toContain('needs "how"');
+    expect(
+      refusal(asked, submit(planner, { _tag: "ladder", rungs: rungs.slice(0, 3) })).reason,
+    ).toBe("invalid-submission");
 
     const submitted = accept(asked, submit(planner, { _tag: "ladder", rungs })).records;
     expect(stepOf(submitted).roles[0]?.submission?._tag).toBe("ladder");
@@ -348,45 +393,16 @@ describe("game-run commands", () => {
   });
 
   it("a pair lands only once both halves are in, and a half never lands twice", () => {
-    const base = complete(started(), gitOk());
-    const round = Policy.reopen(
-      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
-      T0,
-    ).task;
-    if (round._tag !== "round") throw new Error("expected a round");
-    const atCompare = resumedAt(base, {
-      ladder,
-      task: {
-        ...round,
-        rung: ladder.rungs[0]!.id,
-        phase: "compare",
-        branch: "round-1",
-        candidate: "cafe",
-        cmp: {
-          question: "Which build plays better?",
-          x: "cafe",
-          y: "c0ffee",
-          xFirst: true,
-          orders: ["x", "y"],
-          samples: [],
-          bot: "",
-          botDecider: "policy",
-          bots: [],
-          botWithheld: "",
-          judges: [],
-          reused: null,
-        },
-      },
-    });
+    const atCompare = comparing();
     const pair = stepOf(atCompare);
     if (pair.step.kind !== "pair") throw new Error("expected a pair");
     const [first, second] = pair.step.halves;
-    const players = [ThreadId.make("thread:player-1"), ThreadId.make("thread:player-2")];
     const half = (records: Records, seq: number, player: ThreadId) =>
       accept(records, {
         type: "game-run.step.complete",
         runId,
         stepId: gameRunStepId(runId, seq),
+        attempt: stepOf(records).attempt,
         result: roleDone(player),
       });
     const one = half(atCompare, first!.id, players[0]!);
@@ -397,6 +413,7 @@ describe("game-run commands", () => {
         type: "game-run.step.complete",
         runId,
         stepId: gameRunStepId(runId, first!.id),
+        attempt: 1,
         result: roleDone(players[0]!),
       }).reason,
     ).toBe("stale-step");
@@ -409,6 +426,125 @@ describe("game-run commands", () => {
     ).toEqual(players);
   });
 
+  it("a half that ends the run waits for its partner, whose work is kept", () => {
+    const atCompare = comparing();
+    const pair = stepOf(atCompare);
+    if (pair.step.kind !== "pair") throw new Error("expected a pair");
+    const [first, second] = pair.step.halves;
+    const limited = accept(atCompare, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: gameRunStepId(runId, first!.id),
+      attempt: pair.attempt,
+      result: { kind: "ended", ending: "usage-limit", reason: "limit reached" },
+    }).records;
+    expect(runOf(limited)).toMatchObject({ status: "running", ending: null });
+    expect(stepOf(limited).endedHalves.map((h) => h.seq)).toEqual([first!.id]);
+    const ended = accept(limited, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: gameRunStepId(runId, second!.id),
+      attempt: pair.attempt,
+      result: roleDone(players[1]),
+    }).records;
+    expect(runOf(ended)).toMatchObject({
+      status: "ended",
+      ending: "usage-limit",
+      inFlight: pair.seq,
+    });
+    const held = stepOf(ended);
+    expect(held.status).toBe("cancelled");
+    expect(held.step.kind === "pair" ? held.step.results.map((r) => r.id) : null).toEqual([
+      second!.id,
+    ]);
+    // On resume only the half that never finished plays again.
+    const resumed = accept(ended, { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed)).toMatchObject({ attempt: pair.attempt + 1, endedHalves: [] });
+  });
+
+  it("a step that ended on a usage limit runs again as a new attempt after a resume", () => {
+    const limited = complete(started(), {
+      kind: "ended",
+      ending: "usage-limit",
+      reason: "limit reached",
+    });
+    expect(runOf(limited)).toMatchObject({ status: "ended", ending: "usage-limit", inFlight: 1 });
+    expect(stepOf(limited)).toMatchObject({ status: "cancelled", attempt: 1 });
+    const { records: resumed, decision } = accept(limited, { type: "game-run.resume", runId });
+    expect(stepOf(resumed)).toMatchObject({ status: "planned", attempt: 2, result: null });
+    expect(decision.effects.map((e) => e.request)).toEqual([
+      { type: "game-run.step.execute", runId, stepId: gameRunStepId(runId, 1), attempt: 2 },
+    ]);
+    // The first attempt's report names a different command, and the run refuses it.
+    expect(gameRunStepCommandId(gameRunStepId(runId, 1), 1, "complete")).not.toBe(
+      gameRunStepCommandId(gameRunStepId(runId, 1), 2, "complete"),
+    );
+    expect(
+      refusal(resumed, {
+        type: "game-run.step.complete",
+        runId,
+        stepId: gameRunStepId(runId, 1),
+        attempt: 1,
+        result: gitOk(),
+      }).reason,
+    ).toBe("stale-attempt");
+    const landed = complete(resumed, gitOk());
+    expect(landed.steps.find((s) => s.seq === 1)).toMatchObject({
+      status: "completed",
+      attempt: 2,
+    });
+    expect(stepOf(landed).step).toMatchObject({ role: "vision" });
+  });
+
+  it("a reviewer's ladder change the run would not take is refused in-turn", () => {
+    const base = complete(started(), gitOk());
+    const round = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    ).task;
+    if (round._tag !== "round") throw new Error("expected a round");
+    const open = {
+      ...ladder,
+      rungs: ladder.rungs.with(1, { ...ladder.rungs[1]!, from: "reviewer" as const }),
+    };
+    const reviewer = ThreadId.make("thread:reviewer");
+    const atReview = resumedAt(base, {
+      ladder: open,
+      task: { ...round, rung: open.rungs[0]!.id, phase: "review-write", branch: "round-1" },
+    });
+    const write = stepOf(atReview);
+    const launched = accept(atReview, {
+      type: "game-run.step.start",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+    }).records;
+    const ledger = (rungChange?: GameRunRungChange) =>
+      ({
+        type: "game-run.submit",
+        runId,
+        stepId: write.id,
+        roleThreadId: reviewer,
+        submission: {
+          _tag: "ledger",
+          ledger: "1. The jump clips through ledges.",
+          ...(rungChange === undefined ? {} : { rungChange }),
+        },
+      }) as const;
+    const change = {
+      why: "the core is unplayable",
+      is: "The player can land on ledges.",
+      checks: [
+        { what: "landing holds", how: "jump onto three ledges" },
+        { what: "no clipping", how: "walk along the ledge" },
+      ],
+    };
+    const refused = refusal(launched, ledger(change));
+    expect(refused.reason).toBe("invalid-submission");
+    expect(refused.message).toContain("an earlier one is still open");
+    accept(launched, ledger());
+  });
+
   it("an unanswered decision takes its default only once it is due", () => {
     let records = complete(started("guided"), gitOk({ branch: "main", sha: "s1" }));
     records = complete(records, roleDone(planner));
@@ -417,6 +553,7 @@ describe("game-run commands", () => {
       type: "game-run.step.complete",
       runId,
       stepId: stepOf(records).id,
+      attempt: stepOf(records).attempt,
       result: { kind: "boot", ok: true, detail: "boot clean" },
     });
     records = asked.records;
@@ -478,6 +615,7 @@ describe("game-run commands", () => {
         type: "game-run.step.complete",
         runId,
         stepId: gameRunStepId(runId, 1),
+        attempt: 1,
         result: gitOk(),
       }).reason,
     ).toBe("run-ended");
@@ -510,6 +648,9 @@ describe("game-run commands", () => {
           ending: "done",
           inFlight: null,
           stage: "round-4",
+          // The budget it had is long spent.
+          budgetMinutes: 60,
+          budgetEndsAt: T0 - MIN,
           ladder: {
             ...ladder,
             rungs: ladder.rungs.map((r) => ({ ...r, status: "done" as const })),
@@ -518,7 +659,11 @@ describe("game-run commands", () => {
       ],
     };
     const { records } = accept(finished, { type: "game-run.steer", runId, note: "Brighter sky." });
-    expect(runOf(records)).toMatchObject({ status: "running", ending: null });
+    expect(runOf(records)).toMatchObject({
+      status: "running",
+      ending: null,
+      budgetEndsAt: T0 + 60 * MIN,
+    });
     expect(stepOf(records).step).toMatchObject({ op: { _tag: "start-round" } });
     expect(stepOf(records).logs.join("\n")).toContain("finish round");
   });
