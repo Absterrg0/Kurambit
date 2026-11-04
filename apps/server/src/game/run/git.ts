@@ -440,7 +440,9 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
   // Run state is harness bookkeeping, never game content: tracked copies from
   // before the ignore rule leave the index, never the disk.
   const untrack = (paths: ReadonlyArray<string>) =>
-    exec(root, ["rm", "--cached", "-q", "--ignore-unmatch", "--", ...paths]).pipe(Effect.asVoid);
+    exec(root, ["rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", ...paths]).pipe(
+      Effect.asVoid,
+    );
 
   // A kept round's build: its branch tip, provided trunk still contains it.
   const keptCommit = Effect.fn("RunGit.keptCommit")(function* (branch: string, trunk: string) {

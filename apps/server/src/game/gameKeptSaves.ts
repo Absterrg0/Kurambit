@@ -38,6 +38,8 @@ export const keptSavesDir = async (root: string, engine: string): Promise<string
   await NodeFSP.mkdir(dir, { recursive: true });
   const realDir = await NodeFSP.realpath(dir);
   if (!isPathInside(realDir, NodePath.join(realRoot, KEPT_SAVES_DIR))) throw refuse(realDir);
+  // Ignored however old the game's own .gitignore is, so saves never reach a commit.
+  await NodeFSP.writeFile(NodePath.join(root, KEPT_SAVES_DIR, ".gitignore"), "*\n");
   return dir;
 };
 

@@ -373,19 +373,27 @@ export const openWebPlaySession = async (input: {
         await page.screenshot({ path }).catch(() => undefined);
       },
       close: async () => {
-        if (keptStorage !== null) {
-          // Leaving the page fires pagehide as closing the tab would, so a game
-          // that saves then (the starter shell's progress does) has written it.
-          await page.goto("about:blank", { timeout: 5_000 }).catch(() => undefined);
-          const state = await context.storageState().catch(() => null);
-          // A page that never answered keeps the last saves rather than erasing them.
-          if (state !== null)
-            await writeKeptStorage(
-              keptStorage,
-              state.origins.find((entry) => entry.origin === origin)?.localStorage ?? [],
-            ).catch(() => undefined);
+        try {
+          if (keptStorage !== null) {
+            // Leaving the page fires pagehide as closing the tab would, so a game
+            // that saves then (the starter shell's progress does) has written it.
+            await page.goto("about:blank", { timeout: 5_000 }).catch(() => undefined);
+            // storageState has no timeout and reads through the page, so a game
+            // whose main thread is stuck would hold the close forever.
+            const state = await Promise.race([
+              context.storageState().catch(() => null),
+              sleep(3_000).then(() => null),
+            ]);
+            // A page that never answered keeps the last saves rather than erasing them.
+            if (state !== null)
+              await writeKeptStorage(
+                keptStorage,
+                state.origins.find((entry) => entry.origin === origin)?.localStorage ?? [],
+              ).catch(() => undefined);
+          }
+        } finally {
+          await browser.close().catch(() => undefined);
         }
-        await browser.close().catch(() => undefined);
       },
     };
     return session;
