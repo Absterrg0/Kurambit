@@ -68,6 +68,7 @@ export * from "./clientRpcPermissions.ts";
 export * from "./game.ts";
 export * from "./gameAssets.ts";
 export * from "./gameExplore.ts";
+export * from "./gamePlaySession.ts";
 export * from "./gameBot.ts";
 export * from "./gameRun.ts";
 export * from "./gameBlender.ts";
