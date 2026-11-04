@@ -41,17 +41,21 @@ export const launchProcessBot = async (input: {
     if (session.stopped) throw new Error("Bot run stopped.");
     await listener.writeRequest(input.requestPath, spec.request);
     const log = NodeFS.openSync(NodePath.join(input.runDir, "game.log"), "w");
-    game = await input.host.launch(
-      {
-        executable: spec.executable,
-        args: spec.args,
-        env: spec.env,
-        cwd: spec.cwd,
-        stdio: ["ignore", log, log],
-      },
-      input.viewport,
-    );
-    NodeFS.closeSync(log);
+    try {
+      game = await input.host.launch(
+        {
+          executable: spec.executable,
+          args: spec.args,
+          env: spec.env,
+          cwd: spec.cwd,
+          stdio: ["ignore", log, log],
+        },
+        input.viewport,
+      );
+    } finally {
+      // The child keeps its own copy.
+      NodeFS.closeSync(log);
+    }
     const child = game.process.child;
     session.processes.push(game.process);
     const play = await listener.accept({
