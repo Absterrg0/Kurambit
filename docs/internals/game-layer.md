@@ -20,7 +20,7 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   and session lists skip it, and it has none of the subagent run takeover, controls or completion
   delivery, which would tie a role to the creator's live turn. State is `.studio/run.json` +
   `.studio/rounds.jsonl` plus git, so a crash resumes from the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE/ART lines.
-- `GameBot` plays a model-written bot file in real time on a private display and records video plus
+- `GameBot` plays a model-written bot file in real time, on every engine, and records video plus
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameUnity` does the same for Unity: one batchmode editor on a private display
   (one per server, since an editor costs 2-3 GB), reached through the official `unity` CLI and its
@@ -49,10 +49,11 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 - An engine is two modules, and core code asks them instead of naming the engine. Its profile
   (`godotProfile.ts`, `threeProfile.ts`, `unityProfile.ts`, read through `engineProfile.ts`) is pure
   data the services and the run's pure policy share: directories, export targets, how its games play
-  (a browser page, the engine's native runner, or a built player), bot duty, Web build files,
-  check messages, its skill and its prompt lines. Its backend (`GameGodotEngine`, `GameThreeEngine`,
+  (a browser page, the engine's native runner, or a built player), the in-game runner files the
+  harness owns, Web build files, check messages, its skill and its prompt lines. Its backend (`GameGodotEngine`, `GameThreeEngine`,
   `GameUnityEngine`, registered in `GameEngine`) holds the behaviour that differs: import, check,
-  export readiness and preset, export release, and two optional capabilities, `editor` (a live
+  export readiness and preset, export release, how a play session starts its runner process
+  (`playProcess`; null for a browser page), and two optional capabilities, `editor` (a live
   editor that refuses a second user) and `player` (a player folder built from the sources). Godot owns the native process boundary (headless editor import, check script,
   export presets; Web, Linux and Windows releases). three.js owns a headless-Chromium boundary
   instead: the static folder is the game, so import is a no-op success, check loads the page
@@ -78,16 +79,13 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   recompiles its scripts anyway. The editor is
   needed there only to build the Linux player; the role runner closes it before removing the
   worktree, which removes the copy too. Other checkouts whose `.git` is a file (submodules) are
-  refused. The loop drops bot duty and bot facts for the Unity lane.
-- Web play shares the services: `gameExploreWeb` opens real-time headless-Chromium sessions on
-  the served static folder (real keyboard/mouse, one screenshot per act, console errors, the
-  read-only `window.__studio` probe; no pause between acts). `gameChromium` resolves the
-  executable (`KURAMBIT_CHROME` override, then host lookup) and holds the `__studio`
+  refused.
+- Web play shares the services: the browser host (`webPlaySession`) opens real-time
+  headless-Chromium sessions on the served static folder (real keyboard/mouse, the read-only
+  `window.__studio` probe, console and page errors; no pause between acts). `gameChromium`
+  resolves the executable (`KURAMBIT_CHROME` override, then host lookup) and holds the `__studio`
   snippets; `gameWebServer` serves a game-relative directory over loopback for check/explore/bot
-  without touching Preview state. `GameBot` plays three.js games in the same Chromium lane:
-  identical bot-child protocol and trace shape, stills stitched to video with ffmpeg, the
-  overlap/long-fall detectors not applicable, id-clicks counted and skipped (no control tree),
-  explicit state writes through the game's own `setState`.
+  without touching Preview state.
 - Unity play is a real Linux player of the current sources, built once per source identity
   under `builds/logs/unity-play-*`, run under xvfb-run. The role runner makes a Unity sample's
   worktree itself and readies its player before the thread exists, so neither side of a
@@ -96,14 +94,41 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   commit), else a build in the worktree. The main checkout keeps its three most recently built or
   copied players, so a best that keeps being sampled stays reusable; a best whose player was
   pruned builds in its worktree, still outside its clock. Where a player came from stays out of the explore result, since sample notes reach
-  the blind comparator verbatim. The template's `StudioProbe.cs` speaks
-  the Godot native runner's TCP protocol, so acts, pictures, probe reads and close share that
-  path; input is queued on virtual Input System devices, which is why the lane asks games to read
-  input through the Input System.
+  the blind comparator verbatim. Bot runs play the same prepared player. The template's
+  `StudioProbe.cs` is Unity's play-session runner; input is queued on virtual Input System
+  devices, which is why the lane asks games to read input through the Input System.
 - `GameExplore` routes by the engine's play kind with an explicit target override:
   `game_explore_start` defaults to the game's lane, Godot web and native-on-three are refused plainly. The same
   content-addressed export machinery (hash, compare, move into place, select) serves both lanes;
   the expected-files check is engine-aware.
+
+## Play sessions
+
+Exploration and bots are clients of one play-session protocol
+([gamePlaySession.ts](../../packages/contracts/src/gamePlaySession.ts)), versioned, so neither
+knows which engine runs the game. A session opens held: the runner says hello with its
+capabilities, plays discrete acts with the game paused between them (exploration), and after
+`realtime` lets the game run for good while held keys, taps and clicks stream in and one tick
+observation goes out every 100 ms (bots). The policy that plays, the detectors, the video and the
+reports are shared; an engine adds only how a session launches.
+
+- Godot's runner is one GDScript ([godotPlayRunner.ts](../../apps/server/src/game/godotPlayRunner.ts))
+  the server writes under the game's ignored `builds/logs/` for each session, so it always matches
+  the server.
+- Unity's runner is `Assets/Kurambit/StudioProbe.cs` inside the game, because a player only runs
+  code it was built with. The harness owns that file: a fresh production run copies it from the
+  template (`profile.run.harnessFiles`), and its first commit carries it. A game whose probe predates
+  the versioned protocol still explores (it reads as protocol 0, acts only) but refuses bots with a
+  message saying so, until a fresh run refreshes it.
+- three.js has no runner process. The browser host speaks the protocol to the page through the
+  shell's `window.__studio` bridge, which the game owns and may have edited, so the protocol stays in
+  the server instead of the page. Pages read no control tree: no ui or inspect steps, and a bot's
+  id-clicks are skipped and counted.
+
+Process runners connect out to a loopback port with a per-session token. Pictures and video belong
+to the display host ([displayHost.ts](../../apps/server/src/game/displayHost.ts)), not the engine:
+exploration runs under `xvfb-run` and the runner writes each act's picture; a bot run gets its own
+Xvfb display recorded by ffmpeg x11grab, and the browser host stitches one still per second.
 
 ## Tools
 
@@ -186,7 +211,7 @@ The Godot starter's main scene is a genre-free demo shell (title, pause, setting
 and it ships the `Juice` feel kit, because weak builder models skip or break both when they write
 them from scratch; the manifest's gameplay scene (`scenes/game.tscn`) is the seam the shell
 instances, so the check boots both. The shell pauses with `SceneTree.paused`, which is why the
-native explore runner resumes the game's own pause after each act instead of forcing it off.
+Godot play runner resumes the game's own pause after each act instead of forcing it off.
 The shells carry the controls as named actions (the Godot InputMap, `web/shell/controls.js`,
 `Controls.cs` over the Unity Input System)
 that players rebind on the Controls screen; every default keeps a keyboard key, because explore
