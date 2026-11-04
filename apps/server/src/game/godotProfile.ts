@@ -31,6 +31,8 @@ export const GODOT_PROFILE: GameEngineProfile = {
         "When TEMPLATE.md describes the demo shell, use it: gameplay goes in godot/scenes/game.tscn, a run ends with GameState.win or GameState.lose, every player action gets an answer through Juice, values that must survive a retry go in KEEP_ACROSS_RUNS, and you build no menus of your own. ",
       art: "A 3D game needs real 3D models as GLB, library or Blender models (game_blender_* tools; rigged characters where they move), then imported and checked in the engine; code-built primitives are placeholders, same as 2D. ",
       titleArt: "",
+      stateHook:
+        "A setup target of the game's own is a branch in func studio_set_state(target: String, values: Dictionary) -> bool on the GameState autoload, returning true when it put the game there. ",
     },
   },
 };

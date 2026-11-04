@@ -610,7 +610,13 @@ func _apply_set_state(msg: Dictionary) -> Dictionary:
 						(p as CharacterBody3D).velocity = Vector3.ZERO
 					applied.append("position")
 		return {"op": "reply", "id": id_val, "ok": true, "applied": applied}
-	return {"op": "reply", "id": id_val, "ok": false, "error": "Unknown setState target %s." % target}
+	# Any other target is the game's own state jump (a check's setup, a bot's shortcut).
+	var hook := _game_state()
+	if hook != null and (hook as Object).has_method("studio_set_state"):
+		if (hook as Object).call("studio_set_state", target, values) == true:
+			return {"op": "reply", "id": id_val, "ok": true, "applied": [target]}
+		return {"op": "reply", "id": id_val, "ok": false, "error": "GameState.studio_set_state refused %s." % target}
+	return {"op": "reply", "id": id_val, "ok": false, "error": "Unknown setState target %s: add it to GameState.studio_set_state(target, values)." % target}
 
 # --- probe, body, visible, room, sweep (pure reads) ---
 

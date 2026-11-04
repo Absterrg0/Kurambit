@@ -51,6 +51,8 @@ export interface PlaySession {
     >;
   }) => Promise<void>;
   readonly setState: (target: string, values: Record<string, unknown>) => Promise<void>;
+  /** The state writes the game refused so far, with its reason. */
+  readonly refusedStates: () => ReadonlyArray<{ readonly target: string; readonly error: string }>;
   /** Asks the runner to quit and lets go of the connection. Idempotent. */
   readonly close: () => Promise<void>;
 }
@@ -293,6 +295,9 @@ const socketSession = (
   );
   let nextId = 1;
   let closed = false;
+  // Real-time play does not wait on a state write's reply; it is read with the ticks.
+  const pendingStates = new Map<unknown, string>();
+  const refused: Array<{ target: string; error: string }> = [];
   const send = (command: PlaySessionCommand): void => {
     if (!socket.destroyed) socket.write(`${JSON.stringify(command)}\n`);
   };
@@ -326,12 +331,27 @@ const socketSession = (
         const line = await lines.next(deadline - Date.now());
         if (line === "timeout" || line === "closed") return null;
         const record = parseLine(line.trim());
+        if (record !== null && replyOf(record) && pendingStates.has(record["id"])) {
+          const target = pendingStates.get(record["id"])!;
+          pendingStates.delete(record["id"]);
+          if (record["ok"] !== true && refused.length < 20)
+            refused.push({
+              target,
+              error:
+                typeof record["error"] === "string" ? record["error"].slice(0, 300) : "refused",
+            });
+        }
         if (record !== null && tickOf(record)) return record;
       }
     },
     input: async ({ held, taps, clicks }) =>
       send({ op: "input", held: [...held], taps: [...taps], clicks: [...clicks] }),
-    setState: async (target, values) => send({ op: "setState", id: nextId++, target, values }),
+    setState: async (target, values) => {
+      const id = nextId++;
+      pendingStates.set(id, target);
+      send({ op: "setState", id, target, values });
+    },
+    refusedStates: () => refused,
     close: async () => {
       if (closed) return;
       closed = true;

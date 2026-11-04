@@ -188,6 +188,7 @@ export const checkBot = (spec: {
   readonly what: string;
   readonly from: CheckStart;
   readonly setup: string | null;
+  readonly values?: Readonly<Record<string, unknown>>;
   readonly input: ReadonlyArray<CheckInput>;
   readonly keys: ReadonlyArray<string>;
   readonly needles: ReadonlyArray<string>;
@@ -198,6 +199,7 @@ export const switchMargin = 0;
 export const stallSeconds = ${Math.ceil(inputMs(spec.input) / 1000) + 30};
 const from = ${JSON.stringify(spec.from)};
 const setup = ${JSON.stringify(spec.setup)};
+const values = ${JSON.stringify(spec.values ?? {})};
 const input = ${JSON.stringify(spec.input)};
 const keys = ${JSON.stringify(spec.keys)};
 const needles = ${JSON.stringify(spec.needles.map((n) => n.toLowerCase()))};
@@ -238,7 +240,7 @@ export function observe(api, last) {
   if (phase === "wait" && end !== null && t - since >= 0.5) {
     onTitleAtStart = from === "play" && end?.state === "title";
     start = end;
-    if (setup !== null) api.setState(setup, {});
+    if (setup !== null) api.setState(setup, values);
     phase = "setup";
     since = t;
   }

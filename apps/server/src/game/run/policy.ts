@@ -2205,7 +2205,7 @@ const applyRound = (
           fixes: r.fixes + 1,
           block: {
             ...r.block,
-            direction: Roles.fixChecks(failed, rung),
+            direction: Roles.fixChecks(failed, rung, s.lane),
             msLeft: FIX_MS,
             quiet: 0,
             turns: Math.max(1, r.block.turns),

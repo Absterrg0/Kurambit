@@ -77,6 +77,14 @@ export function installStudio({ ui, player, setState, hold }) {
     // no targets and refuses; a game with levels exports its own setState from
     // main.js (every call is reported, and verdicts still come from real input after).
     setState(target, values) {
+      // "game_state" writes run values directly, as every engine's runner does;
+      // any other target is the game's own state jump (exported from main.js).
+      if (target === "game_state") {
+        for (const [key, value] of Object.entries(values ?? {}))
+          if (["number", "boolean", "string"].includes(typeof value) && key.length <= 64)
+            GameState[key] = value;
+        return true;
+      }
       return typeof setState === "function" ? setState(target, values ?? {}) === true : false;
     },
   };

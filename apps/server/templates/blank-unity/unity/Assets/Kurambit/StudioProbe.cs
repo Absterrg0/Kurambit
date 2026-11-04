@@ -130,6 +130,63 @@ namespace Kurambit
             }
         }
 
+        // The same targets every engine's runner takes: "game_state" writes public
+        // GameState fields, "player" moves the Player-tagged object, and any other
+        // target is the game's own state jump, GameState.StudioSetState(target, values).
+        private static Dictionary<string, object> ApplySetState(object id, Dictionary<string, object> message)
+        {
+            Dictionary<string, object> Reply(bool ok, string error, List<object> applied) => ok
+                ? new Dictionary<string, object> { ["op"] = "reply", ["id"] = id, ["ok"] = true, ["applied"] = applied }
+                : new Dictionary<string, object> { ["op"] = "reply", ["id"] = id, ["ok"] = false, ["error"] = error };
+            var target = message.TryGetValue("target", out var t) ? Convert.ToString(t) : "";
+            var values = message.TryGetValue("values", out var v) ? v as Dictionary<string, object> : null;
+            if (values == null) return Reply(false, "setState values must be an object.", null);
+            var applied = new List<object>();
+            var state = GameState.Instance;
+            if (target == "game_state")
+            {
+                foreach (var pair in values)
+                {
+                    var field = typeof(GameState).GetField(pair.Key, BindingFlags.Public | BindingFlags.Instance);
+                    if (field == null || pair.Value == null) continue;
+                    try
+                    {
+                        field.SetValue(state, field.FieldType.IsEnum
+                            ? Enum.Parse(field.FieldType, Convert.ToString(pair.Value), true)
+                            : Convert.ChangeType(pair.Value, field.FieldType, System.Globalization.CultureInfo.InvariantCulture));
+                        applied.Add(pair.Key);
+                    }
+                    catch (Exception) { }
+                }
+                return Reply(true, null, applied);
+            }
+            if (target == "player")
+            {
+                GameObject player = null;
+                try { player = GameObject.FindWithTag("Player"); } catch (UnityException) { }
+                if (player == null) return Reply(false, "No Player-tagged object.", null);
+                if (values.TryGetValue("position", out var p) && p is List<object> xyz && xyz.Count == 3)
+                {
+                    player.transform.position = new Vector3(Convert.ToSingle(xyz[0]), Convert.ToSingle(xyz[1]), Convert.ToSingle(xyz[2]));
+                    var body = player.GetComponent<Rigidbody>();
+                    if (body != null) body.linearVelocity = Vector3.zero;
+                    applied.Add("position");
+                }
+                return Reply(true, null, applied);
+            }
+            var hook = typeof(GameState).GetMethod("StudioSetState", BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
+            if (hook == null) return Reply(false, $"Unknown setState target {target}: add it to GameState.StudioSetState(string target, Dictionary<string, object> values).", null);
+            try
+            {
+                var ok = hook.Invoke(hook.IsStatic ? null : state, new object[] { target, values });
+                return ok is bool yes && yes ? Reply(true, null, new List<object> { target }) : Reply(false, $"GameState.StudioSetState refused {target}.", null);
+            }
+            catch (Exception error)
+            {
+                return Reply(false, $"GameState.StudioSetState failed: {error.InnerException?.Message ?? error.Message}", null);
+            }
+        }
+
         private static object PlayerPosition()
         {
             GameObject player = null;
@@ -272,7 +329,7 @@ namespace Kurambit
             hello["protocol"] = 1;
             hello["token"] = token;
             hello["engine"] = "unity";
-            hello["capabilities"] = new List<object> { "realtime", "ui", "inspect" };
+            hello["capabilities"] = new List<object> { "realtime", "ui", "inspect", "setState" };
             hello["body"] = Body();
             Send(hello);
             Pause();
@@ -344,7 +401,7 @@ namespace Kurambit
                     StreamInput(message);
                     break;
                 case "setState":
-                    Send(new Dictionary<string, object> { ["op"] = "reply", ["id"] = id, ["ok"] = false, ["error"] = "Unity games take no state writes." });
+                    Send(ApplySetState(id, message));
                     break;
             }
         }

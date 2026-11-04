@@ -573,6 +573,14 @@ export const playBot = async (
       () => undefined,
     );
     await launch.snapshot(NodePath.join(args.runDir, "frames", END_FRAME)).catch(() => undefined);
+    // Writes the runner never got (it predates them) are refusals too, said plainly.
+    const refusedStates = [
+      ...play.refusedStates(),
+      ...refusedSetStates.map(({ target }) => ({
+        target,
+        error: `this game's runner takes no state writes, so ${target} was never sent; the game's harness files predate them`,
+      })),
+    ];
     await play.close();
     await sleep(500);
     await launch.finishVideo();
@@ -679,6 +687,7 @@ export const playBot = async (
       jev,
       policyNote,
       usedSetState,
+      ...(refusedStates.length > 0 ? { refusedStates } : {}),
       findings: allFindings,
       finalState: lastGameState,
       ...(perf === null ? {} : { perf }),

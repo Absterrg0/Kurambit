@@ -308,6 +308,7 @@ export const openWebPlaySession = async (input: {
     let realtimeStart = 0;
     let ticks = 0;
     const keysDown = new Set<string>();
+    const refused: Array<{ target: string; error: string }> = [];
     const session: WebPlaySession = {
       protocol: 1,
       capabilities: new Set(["realtime", "setState"]),
@@ -367,8 +368,14 @@ export const openWebPlaySession = async (input: {
         // Playwright evaluates a string as an expression and never calls it, so the
         // call and its JSON argument are part of the expression.
         const call = `(${STUDIO_SET_STATE})(${JSON.stringify({ target, values })})`;
-        await page.evaluate(call).catch(() => false);
+        const ok = await page.evaluate(call).catch(() => false);
+        if (ok !== true && refused.length < 20)
+          refused.push({
+            target,
+            error: `Unknown setState target ${target}: the game's setState in web/main.js did not accept it.`,
+          });
       },
+      refusedStates: () => refused,
       still: async (path) => {
         await page.screenshot({ path }).catch(() => undefined);
       },

@@ -36,6 +36,13 @@ const RungCheck = Schema.Struct({
   kind: Schema.optionalKey(Schema.Literals(["state", "look"])),
   from: Schema.optionalKey(Schema.Literals(["play", "title"])),
   setup: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(80))),
+  // What the setup target is given: values for "game_state", a position for "player".
+  values: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Array(Schema.Number)]),
+    ),
+  ),
   input: Schema.optionalKey(Schema.Array(CheckInput).check(Schema.isMaxLength(30))),
   expect: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
 });

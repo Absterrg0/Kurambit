@@ -73,6 +73,8 @@ export interface GameEngineProfile {
       readonly art: string;
       /** Appended to the art stage's title-art sentence. */
       readonly titleArt: string;
+      /** Where a game defines its own setState targets (a check's setup jumps there). */
+      readonly stateHook: string;
     };
   };
 }

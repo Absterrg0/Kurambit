@@ -117,6 +117,10 @@ export const GameBotRunResult = Schema.Struct({
   policyNote: Schema.NullOr(Schema.String),
   /** True when the bot used an explicit set-state write; the trace lists each one. */
   usedSetState: Schema.Boolean,
+  /** State writes the game refused, with its reason; absent when none was. */
+  refusedStates: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ target: Schema.String, error: Schema.String })),
+  ),
   findings: Schema.Array(GameBotFinding),
   finalState: Schema.Record(
     Schema.String,
@@ -156,6 +160,10 @@ export const GameBotViewResult = Schema.Struct({
   decisions: Schema.Int,
   jev: Schema.NullOr(GameBotJevUsage),
   usedSetState: Schema.Boolean,
+  /** State writes the game refused, with its reason; absent when none was. */
+  refusedStates: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ target: Schema.String, error: Schema.String })),
+  ),
   findings: Schema.Array(GameBotFinding),
   tracePath: Schema.String,
   videoPath: Schema.String,

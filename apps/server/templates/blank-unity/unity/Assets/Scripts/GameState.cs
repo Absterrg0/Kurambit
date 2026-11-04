@@ -16,6 +16,16 @@
 ///   public float health = 3f;
 ///   public int best;
 ///   public static readonly string[] KeepAcrossRuns = { "best" };
+///
+/// The harness can jump the game to a named state (a check's setup, a bot's
+/// shortcut to late content). "game_state" and "player" are built in; add the
+/// game's own targets here and return true when the game is there:
+///
+///   public static bool StudioSetState(string target, Dictionary<string, object> values)
+///   {
+///       if (target == "boss_room") { Player.Teleport(new Vector3(40, 1, 0)); return true; }
+///       return false;
+///   }
 /// </summary>
 public sealed partial class GameState
 {

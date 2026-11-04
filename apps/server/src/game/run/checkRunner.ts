@@ -54,6 +54,7 @@ export const runStateChecks = (
           what: c.what,
           from: c.from ?? "play",
           setup: c.setup ?? null,
+          ...(c.values === undefined ? {} : { values: c.values }),
           input,
           keys: keysOf(parsed.terms),
           needles: needlesOf(parsed.terms),
@@ -75,6 +76,8 @@ export const runStateChecks = (
             `the scenario did not finish in ${seconds} s (${result.status.state}; ${result.status.note.slice(0, 200)})`,
           );
         const verdict = evaluate(parsed.terms, seen);
+        const refusal = result.refusedStates?.[0];
+        const setup = refusal === undefined ? "" : `setup refused: ${refusal.error}; `;
         const title =
           (seen.stuckOnTitle ?? 0) > 0
             ? `the scenario meant to start in a run never left the title (Enter pressed ${seen.stuckOnTitle} times; make Enter start a run from the title, or start the check from the title); `
@@ -87,7 +90,7 @@ export const runStateChecks = (
           k,
           what: c.what,
           pass: verdict.pass,
-          evidence: `${title}${verdict.detail}${missing}`.slice(0, 600),
+          evidence: `${setup}${title}${verdict.detail}${missing}`.slice(0, 600),
           frame: result.frames.at(-1) ?? "",
         };
       }),
