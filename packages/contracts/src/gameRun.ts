@@ -412,3 +412,93 @@ export const gameRunRoleLabel = (role: string): string => {
       return role;
   }
 };
+
+// ── The demo ladder and what run roles submit. ─────────────────────────────
+const RunLine = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(600));
+const CheckInput = Schema.Union([
+  Schema.Struct({ hold: Schema.String.check(Schema.isNonEmpty()), ms: Schema.Number }),
+  Schema.Struct({ press: Schema.String.check(Schema.isNonEmpty()) }),
+  Schema.Struct({ wait: Schema.Number }),
+]);
+/**
+ * One check of a rung. A "state" check is a scenario and an expectation the
+ * harness plays and scores; a "look" check (the default, and every check of an
+ * older ladder) is judged by a tester from play, as `how` says.
+ */
+export const GameRunRungCheck = Schema.Struct({
+  what: RunLine,
+  how: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(600))),
+  kind: Schema.optionalKey(Schema.Literals(["state", "look"])),
+  from: Schema.optionalKey(Schema.Literals(["play", "title"])),
+  setup: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(80))),
+  /** What the setup target is given: values for "game_state", a position for "player". */
+  values: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Array(Schema.Number)]),
+    ),
+  ),
+  input: Schema.optionalKey(Schema.Array(CheckInput).check(Schema.isMaxLength(30))),
+  expect: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
+});
+export type GameRunRungCheck = typeof GameRunRungCheck.Type;
+export const GameRunRungFields = {
+  is: RunLine,
+  checks: Schema.Array(GameRunRungCheck).check(Schema.isMinLength(2), Schema.isMaxLength(4)),
+};
+export const GameRunLadder = Schema.Struct({
+  rungs: Schema.Array(Schema.Struct(GameRunRungFields)).check(
+    Schema.isMinLength(4),
+    Schema.isMaxLength(7),
+  ),
+});
+export type GameRunLadder = typeof GameRunLadder.Type;
+/** A reviewer's one ladder change: a rung that unblocks the ladder, and why. */
+export const GameRunRungChange = Schema.Struct({ why: RunLine, ...GameRunRungFields });
+export type GameRunRungChange = typeof GameRunRungChange.Type;
+
+const Reasons = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4000));
+/**
+ * What a run role hands the run, by the kind its step asks for. The run reads
+ * only these, never a file a role wrote, so a format slip is refused in-turn.
+ */
+export const GameRunSubmission = Schema.Union([
+  Schema.TaggedStruct("checks", {
+    /** The rung's look checks, by their number in the rung. */
+    checks: Schema.Array(
+      Schema.Struct({
+        check: PositiveInt,
+        pass: Schema.Boolean,
+        evidence: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(600)),
+      }),
+    ).check(Schema.isMaxLength(4)),
+    notes: Schema.String.check(Schema.isMaxLength(8000)),
+  }),
+  Schema.TaggedStruct("ladder", { rungs: GameRunLadder.fields.rungs }),
+  Schema.TaggedStruct("verdict", { verdict: Schema.Literals(["A", "B", "TIE"]), reasons: Reasons }),
+  Schema.TaggedStruct("select", { pick: Schema.Literals(["A", "B"]), reasons: Reasons }),
+  Schema.TaggedStruct("ship", { ship: Schema.Boolean, reasons: Reasons }),
+  Schema.TaggedStruct("ledger", {
+    ledger: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(8000)),
+    rungChange: Schema.optionalKey(GameRunRungChange),
+  }),
+  Schema.TaggedStruct("report", {
+    report: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(8000)),
+  }),
+]);
+export type GameRunSubmission = typeof GameRunSubmission.Type;
+export type GameRunSubmissionKind = GameRunSubmission["_tag"];
+export const GameRunSubmissionKind = Schema.Literals([
+  "checks",
+  "ladder",
+  "verdict",
+  "select",
+  "ship",
+  "ledger",
+  "report",
+]);
+
+export const GameRunSubmitInput = Schema.Struct({ submission: GameRunSubmission });
+export type GameRunSubmitInput = typeof GameRunSubmitInput.Type;
+export const GameRunSubmitResult = Schema.Struct({ message: Schema.String });
+export type GameRunSubmitResult = typeof GameRunSubmitResult.Type;
