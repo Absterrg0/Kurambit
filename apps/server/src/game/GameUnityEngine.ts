@@ -565,6 +565,17 @@ export const makeUnityBackend = (
             detail:
               "Kurambit does not play Unity games on macOS yet: it builds and plays Linux and Windows players only. The Unity editor tools still work here.",
           });
+        // A Windows player keeps PlayerPrefs in the registry and saves under the
+        // LocalLow known folder, neither of which HOME moves: a session could
+        // read earlier sessions and write the user's real prefs and saves.
+        if (HOST_OS === "win32")
+          return yield* new GameOperationError({
+            operation: "Play session",
+            path: input.projectDir,
+            reason: "unsupported-platform",
+            detail:
+              "Kurambit does not play Unity games on Windows yet: a session cannot be kept apart from the user's own Unity prefs and saves there. The Unity editor tools still work here.",
+          });
         if (input.window === null)
           return yield* new GameOperationError({
             operation: "Play session",

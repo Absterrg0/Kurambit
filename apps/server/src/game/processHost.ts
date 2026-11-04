@@ -1,4 +1,4 @@
-// @effect-diagnostics globalTimers:off nodeBuiltinImport:off preferSchemaOverJson:off -- The game layer's one native process boundary: spawn, tree stops, OS process facts and launch records.
+// @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off preferSchemaOverJson:off -- The game layer's one native process boundary: spawn, tree stops, OS process facts and launch records.
 /**
  * Every process the game layer starts goes through here, on every OS.
  *
@@ -300,6 +300,7 @@ public static class KurambitJob {
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetProcessTimes(IntPtr process, out long creation, out long exit, out long kernel, out long user);
   static IntPtr job;
   public static void Create() {
     job = CreateJobObject(IntPtr.Zero, null);
@@ -307,9 +308,16 @@ public static class KurambitJob {
     info.BasicLimitInformation.LimitFlags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     if (job == IntPtr.Zero || !SetInformationJobObject(job, 9, ref info, (uint)Marshal.SizeOf(typeof(Extended)))) throw new Exception("CreateJobObject failed");
   }
-  public static bool Assign(uint pid) {
-    var process = OpenProcess(0x0101, false, pid); // PROCESS_TERMINATE | PROCESS_SET_QUOTA
+  // notAfter: the spawn's FILETIME. A process created later holds a reused pid
+  // (the child already exited) and must never join a kill-on-close job.
+  public static bool Assign(uint pid, long notAfter) {
+    var process = OpenProcess(0x0501, false, pid); // PROCESS_TERMINATE | PROCESS_SET_QUOTA | PROCESS_QUERY_INFORMATION
     if (process == IntPtr.Zero) return false;
+    long created, exited, kernel, user;
+    if (!GetProcessTimes(process, out created, out exited, out kernel, out user) || created > notAfter) {
+      CloseHandle(process);
+      return false;
+    }
     var ok = AssignProcessToJobObject(job, process);
     CloseHandle(process);
     return ok;
@@ -318,8 +326,10 @@ public static class KurambitJob {
 '@
 [KurambitJob]::Create()
 while ($null -ne ($line = [Console]::In.ReadLine())) {
+  $parts = $line.Split(' ')
   $id = [uint32]0
-  if ([uint32]::TryParse($line, [ref]$id)) { [void][KurambitJob]::Assign($id) }
+  $notAfter = [int64]0
+  if ($parts.Length -eq 2 -and [uint32]::TryParse($parts[0], [ref]$id) -and [int64]::TryParse($parts[1], [ref]$notAfter)) { [void][KurambitJob]::Assign($id, $notAfter) }
 }
 `;
 
@@ -344,7 +354,10 @@ const joinWindowsJob = (pid: number): void => {
     helper.unref();
     jobHelper = helper;
   }
-  jobHelper.stdin?.write(`${pid}\n`);
+  // FILETIME (100 ns since 1601) of now, just after the spawn returned, with a
+  // little slack for clock granularity.
+  const notAfter = (BigInt(Date.now() + 50) + 11_644_473_600_000n) * 10_000n;
+  jobHelper.stdin?.write(`${pid} ${notAfter}\n`);
 };
 
 export interface SpawnOwnedOptions {

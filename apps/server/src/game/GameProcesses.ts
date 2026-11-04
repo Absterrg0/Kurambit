@@ -84,6 +84,11 @@ export const engineChildEnv = (extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv => 
   if (source.TEMP !== undefined) env.TEMP = source.TEMP;
   if (source.TMP !== undefined) env.TMP = source.TMP;
   if (source.TMPDIR !== undefined) env.TMPDIR = source.TMPDIR;
+  // Godot on Windows finds its config, export templates and user:// through
+  // these; without them it falls back to the working directory (the game root).
+  if (HOST_OS === "win32")
+    for (const key of ["APPDATA", "LOCALAPPDATA", "USERPROFILE"] as const)
+      if (source[key] !== undefined) env[key] = source[key];
   if (extra !== undefined) for (const [key, value] of Object.entries(extra)) env[key] = value;
   return env;
 };
