@@ -83,8 +83,8 @@ empty one.
 ## Run the production loop
 
 The **Run** tab in the stage drives the whole build: vision, prototypes, a blind pick, plan, art,
-then round after round of building, playtesting and judging until a ship review passes, the
-budget ends, the run stalls, or you stop it. A new game starts its run on its own. To run again, or to run a game you
+then round after round of building, playtesting and judging until the ladder is done and a ship
+review passes, polishing stops improving the game, the budget ends, the run stalls, or you stop it. A new game starts its run on its own. To run again, or to run a game you
 opened, give a one-line brief and an optional budget in minutes, then **Start run**. The status
 line says what the run is doing, how long it has been going and what comes next; the sidebar and
 **Your games** say a game's run is working and on which step. The timeline starts with the
@@ -114,9 +114,10 @@ a Steam demo (the core loop end to end, a complete first area with a win and a l
 a title-to-ending flow, feel and audio), each with checks a player could verify. Each round builds
 the next step. A tester plays it and passes or fails each check, and the round is kept when every
 check passes and the blind judges do not find the old build clearly better. A step that does not
-land in two rounds is set aside and tried once more after the rest. When the ladder is done, or
-the last fifth of the budget begins, rounds turn to fixing the biggest weaknesses and the ship
-review. The **Ladder** list on the Run tab shows which steps landed, which one is being built and
+land in two rounds is set aside and tried once more after the rest. When the ladder is done, a
+ship review plays the whole game. If it is not ready, rounds fix what the review named, and the run
+stops at the first such round the blind judges do not find better, so tokens go to polish only while
+polish shows. Ask in the chat to keep going. The last fifth of a budget turns rounds to polish too. The **Ladder** list on the Run tab shows which steps landed, which one is being built and
 which were set aside and why; each round shows how many of its checks passed.
 
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this

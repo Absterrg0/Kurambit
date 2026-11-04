@@ -2488,14 +2488,30 @@ const finishRound = (
     lastDirection: r.direction,
     ending,
   };
-  // Only a finish round's review can send the game to the ship check.
-  if (
-    r.rung === null &&
-    ending === null &&
-    state.stallStreak < 3 &&
-    state.steer.length === 0 &&
-    parseStatus(next) === "ready"
-  )
-    return { ...state, task: { _tag: "ship", n: r.n, phase: "play", thread: null } };
+  const ship: RunState["task"] = { _tag: "ship", n: r.n, phase: "play", thread: null };
+  if (ending !== null || state.steer.length > 0) return { ...state, task: newRound(state, now) };
+  // A finished ladder is the demo the run set out to build: the ship check plays
+  // it before any polish is paid for.
+  if (r.rung !== null && state.ladder !== null && ladderDone(state.ladder)) {
+    logs.push(`round ${r.n}: the ladder is done; the ship check plays the game`);
+    return { ...state, task: ship };
+  }
+  if (r.rung === null) {
+    // Polish is paid for only while it measurably improves the game: the first
+    // finish round that keeps nothing ends the run, and the creator can ask for more.
+    if (settled.record.kept !== true) {
+      logs.push(
+        `round ${r.n}: this finish round kept nothing; the run ends here rather than spend more on polish`,
+      );
+      return { ...state, ending: "plateau", task: newRound(state, now) };
+    }
+    // Only a finish round's review can send the game to the ship check.
+    if (state.stallStreak < 3 && parseStatus(next) === "ready") return { ...state, task: ship };
+  }
   return { ...state, task: newRound(state, now) };
 };
+
+// Every rung landed, or came back once and was set aside again.
+const ladderDone = (ladder: Ladder): boolean =>
+  ladder.rungs.length > 0 &&
+  ladder.rungs.every((x) => x.status === "done" || (x.status === "set-aside" && x.back));

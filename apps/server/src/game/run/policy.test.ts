@@ -1178,6 +1178,29 @@ describe("ladder", () => {
     expect(starts.slice(2)).toEqual([null, null]);
   });
 
+  it("plays the ship check once the ladder is done, and ends on a finish round that keeps nothing", () => {
+    const ladder = fresh();
+    const lastOpen = {
+      ...ladder,
+      rungs: ladder.rungs.map((x, i) => (i < 3 ? { ...x, status: "done" as const } : x)),
+    };
+    const landed = oneRound(atLadder({ ladder: lastOpen }), ladderResponder("A", "B"));
+    expect(landed.state.task._tag).toBe("ship");
+    expect(landed.logs.some((l) => l.includes("the ladder is done; the ship check"))).toBe(true);
+    // The ship check said no: the run polishes, and a tie keeps nothing, so it ends.
+    const polishing = atLadder({
+      ladder: { ...ladder, rungs: ladder.rungs.map((x) => ({ ...x, status: "done" as const })) },
+      shipNoReasons: "the ending is abrupt",
+    });
+    const tie = oneRound(polishing, ladderResponder("TIE", "TIE"));
+    expect(tie.state.rounds.at(-1)?.kept).toBe(false);
+    expect(tie.state.ending).toBe("plateau");
+    // A finish round that is kept goes on.
+    const kept = oneRound(polishing, ladderResponder("A", "B"));
+    expect(kept.state.rounds.at(-1)?.kept).toBe(true);
+    expect(kept.state.ending).toBeNull();
+  });
+
   it("does not keep or judge a round whose checks fail, and sets the rung aside after two", () => {
     const respond = ladderResponder("A", "B", [true, false]);
     const one = oneRound(atLadder(), respond);

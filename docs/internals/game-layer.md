@@ -211,7 +211,9 @@ result is not known to come from the same bot. The reviewer's next.md is a ledge
 rung, never a round's goal; the reviewer may add one rung through `.studio/rung-change.json`
 when something blocks the ladder, one open at a time. The old round shape (the review's top flaw,
 judged on that flaw, STATUS: ready to the ship review) runs only as finish rounds, once the
-ladder is done or the budget's last fifth begins. A run.json from before the ladder writes one at
+ladder is done or the budget's last fifth begins. The run's end point is evidence, not a round
+count: a finished ladder goes straight to the ship check, and the first finish round that keeps
+nothing ends the run ("plateau"), since a tie or a loss shows nothing more the run can buy. A run.json from before the ladder writes one at
 its next round start.
 
 Before the

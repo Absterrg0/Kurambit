@@ -450,6 +450,7 @@ const ENDING: Record<string, string> = {
   budget: "Budget spent",
   failed: "Failed",
   stalled: "Stalled",
+  plateau: "Done polishing",
   "usage-limit": "Usage limit",
   "provider-down": "Provider down",
   "low-memory": "Memory short",
