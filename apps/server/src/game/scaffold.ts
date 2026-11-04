@@ -1,14 +1,13 @@
 import {
   GAME_TEMPLATES,
   THREE_PINNED_VERSION,
-  THREE_PROJECT_DIRECTORY,
   UNITY_MIN_VERSION,
-  UNITY_PROJECT_DIRECTORY,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameEngineId,
   type GameManifest,
 } from "@kurambit/contracts";
+import { engineProfile } from "./engineProfile.ts";
 
 /** The engine a create request builds for. Omitted means the Godot native lane. */
 export const createEngine = (input: GameCreateInput): GameEngineId => input.engine ?? "godot";
@@ -35,12 +34,7 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
           ? { name: "unity", version: UNITY_MIN_VERSION }
           : { name: "godot", version: "4.7.2" },
     // The engine project directory for every lane, despite the legacy name.
-    godotProject:
-      engine === "three"
-        ? THREE_PROJECT_DIRECTORY
-        : engine === "unity"
-          ? UNITY_PROJECT_DIRECTORY
-          : "godot",
+    godotProject: engineProfile(engine).projectDirectory,
     assets: [],
   };
 }

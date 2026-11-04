@@ -23,6 +23,7 @@ import {
 } from "./gameChromium.ts";
 import { chromiumChildEnv, serveGameDirectory } from "./gameWebServer.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
+import { THREE_PROFILE } from "./threeProfile.ts";
 
 // Playwright needs its files on disk; createRequire also resolves it from a Node SEA executable.
 const requirePlaywright = NodeModule.createRequire(import.meta.url);
@@ -241,9 +242,7 @@ export const makeThreeBackend = (): GameEngineBackend => {
       };
     });
   return {
-    id: "three",
-    displayName: "three.js",
-    exportTargets: ["Web"],
+    profile: THREE_PROFILE,
     resolveProject: (root, manifest) =>
       Effect.gen(function* () {
         if (manifest.engine.name !== "three")
@@ -266,6 +265,9 @@ export const makeThreeBackend = (): GameEngineBackend => {
     projectSettingsFile: "index.html",
     projectDirectory: (manifest) => manifest.godotProject,
     projectSettings: () => ({ viewport: { ...THREE_VIEWPORT } }),
+    // A static copy needs no export templates and no preset.
+    exportReady: () => Effect.void,
+    exportPreset: (_ctx, target) => Effect.succeed({ name: target, added: false }),
     parseDiagnostics: (output: string) => {
       const found: GameCheckIssue[] = [];
       for (const line of output.split("\n")) {
@@ -322,5 +324,7 @@ export const makeThreeBackend = (): GameEngineBackend => {
         };
         return response(run, input.outputPath);
       }),
+    editor: null,
+    player: null,
   };
 };

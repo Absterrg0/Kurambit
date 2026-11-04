@@ -6,6 +6,7 @@ export const GODOT_PROFILE: GameEngineProfile = {
   projectDirectory: "godot",
   exportTargets: ["Web", "Linux", "Windows"],
   layout: { assets: "assets", ui: "ui", library: "library", blender: "assets/blender" },
+  viewport: null,
   play: "native",
   botRefusal: null,
   web: {

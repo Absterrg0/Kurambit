@@ -1,8 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- This backend owns the Unity editor boundary: CLI arguments (JSON-valued Pipeline parameters), build outputs and log parsing.
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import {
+  GameOperationError,
   UNITY_VIEWPORT,
   type GameActionResult,
   type GameCheckIssue,
@@ -13,11 +15,16 @@ import type * as GameUnity from "./GameUnity.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { consoleIssues, parseCSharpDiagnostics } from "./unityDiagnostics.ts";
-import type { GameEngineBackend } from "./GameEngine.ts";
+import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
+import * as GameProcesses from "./GameProcesses.ts";
+import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
+import { UNITY_PROFILE } from "./unityProfile.ts";
 
 /** Frames the check lets the main scene run in play mode before it reads the console. */
 const CHECK_FRAMES = 120;
 const BUILD_TIMEOUT_MS = 30 * 60_000;
+/** The Linux player's file inside a player folder. */
+const PLAYER_EXECUTABLE = "game.x86_64";
 
 const unityTarget = (target: string) =>
   target === "Windows" ? "StandaloneWindows64" : "StandaloneLinux64";
@@ -345,10 +352,154 @@ export const makeUnityBackend = (
       );
     }).pipe(live.hold(ctx.root));
 
+  /**
+   * A Unity player is a folder (the executable, its `game_Data/` and the
+   * engine runtime library), so it builds into a staging folder and replaces
+   * the destination only once its files check out and the sources did not
+   * change during the build. The caller imports first.
+   */
+  const buildPlayer: NonNullable<GameEngineBackend["player"]>["build"] = (ctx, input) =>
+    Effect.gen(function* () {
+      const { root, projectName } = ctx;
+      const { target, destination, operation } = input;
+      const snapshot = Effect.promise((signal) =>
+        snapshotBuildSource(root, projectName, { signal }),
+      );
+      const executable = target === "Windows" ? "game.exe" : PLAYER_EXECUTABLE;
+      const staging = NodePath.join(
+        NodePath.dirname(destination),
+        `.${NodePath.basename(destination)}-${NodeCrypto.randomUUID()}`,
+      );
+      return yield* Effect.gen(function* () {
+        const before = yield* snapshot;
+        // An interrupted build leaves its staging folder; only this build's own name prefix is cleared.
+        yield* Effect.promise(async () => {
+          const parent = NodePath.dirname(destination);
+          const prefix = `.${NodePath.basename(destination)}-`;
+          for (const name of await NodeFSP.readdir(parent).catch(() => [] as string[]))
+            if (name.startsWith(prefix))
+              await NodeFSP.rm(NodePath.join(parent, name), { recursive: true, force: true });
+        });
+        yield* Effect.tryPromise({
+          try: () => NodeFSP.mkdir(staging, { recursive: true }),
+          catch: (cause) =>
+            new GameOperationError({ operation, path: staging, reason: "io", cause }),
+        });
+        const result = yield* runExportRelease(ctx, {
+          preset: target,
+          outputPath: NodePath.join(staging, executable),
+          operation,
+        });
+        if (!result.success) return { result, sourceId: null };
+        // Unity names this debug-symbol folder itself: it is never shipped.
+        yield* Effect.promise(() =>
+          NodeFSP.rm(NodePath.join(staging, "game_BackUpThisFolder_ButDontShipItWithYourGame"), {
+            recursive: true,
+            force: true,
+          }),
+        );
+        const runtime = target === "Windows" ? "UnityPlayer.dll" : "UnityPlayer.so";
+        const missing = yield* Effect.promise(async () => {
+          const absent: string[] = [];
+          for (const [name, kind] of [
+            [executable, "file"],
+            ["game_Data", "directory"],
+            [runtime, "file"],
+          ] as const) {
+            const stat = await NodeFSP.stat(NodePath.join(staging, name)).catch(() => null);
+            if (
+              stat === null ||
+              (kind === "file" ? !stat.isFile() || stat.size === 0 : !stat.isDirectory())
+            )
+              absent.push(name);
+          }
+          return absent;
+        });
+        if (missing.length > 0)
+          return {
+            result: {
+              ...result,
+              success: false,
+              message:
+                `The Unity ${target} build is missing ${missing.join(", ")}; nothing was replaced.\n${result.message}`.slice(
+                  -4096,
+                ),
+            },
+            sourceId: null,
+          };
+        const comparison = comparedSource(before, yield* snapshot, "export");
+        if (comparison.kind !== "current")
+          return {
+            result: { ...result, success: false, message: comparison.detail },
+            sourceId: null,
+          };
+        yield* Effect.tryPromise({
+          try: async () => {
+            const old = `${destination}.old-${NodeCrypto.randomUUID()}`;
+            const existing = await NodeFSP.stat(destination).catch(() => null);
+            if (existing !== null) await NodeFSP.rename(destination, old);
+            try {
+              await NodeFSP.rename(staging, destination);
+            } catch (cause) {
+              // The previous build goes back rather than leaving no build at all.
+              if (existing !== null) await NodeFSP.rename(old, destination).catch(() => undefined);
+              throw cause;
+            }
+            await NodeFSP.rm(old, { recursive: true, force: true });
+          },
+          catch: (cause) =>
+            new GameOperationError({
+              operation,
+              path: destination,
+              reason: "io",
+              detail: "The checked Unity build could not be moved into place.",
+              cause,
+            }),
+        });
+        return {
+          result: { ...result, path: NodePath.join(destination, executable) },
+          sourceId: comparison.sourceId,
+        };
+      }).pipe(
+        Effect.ensuring(
+          Effect.promise(() => NodeFSP.rm(staging, { recursive: true, force: true })),
+        ),
+      );
+    });
+
+  const exportPlayer: NonNullable<GameEngineBackend["player"]>["export"] = (ctx, target) =>
+    Effect.gen(function* () {
+      const directory = target === "Windows" ? "builds/windows" : "builds/linux";
+      // One hold for import and build: another game cannot take the editor between them.
+      const built = yield* live.hold(ctx.root)(
+        Effect.gen(function* () {
+          const imported = (yield* importProject(ctx)).result;
+          if (!imported.success) return { result: imported, sourceId: null };
+          return yield* buildPlayer(ctx, {
+            target,
+            destination: NodePath.join(ctx.root, directory),
+            operation: `export-${target.toLowerCase()}`,
+          });
+        }),
+      );
+      if (!built.result.success) return built.result;
+      return {
+        ...built.result,
+        message:
+          target === "Windows"
+            ? "Unity Windows x86_64 build ready at builds/windows/game.exe with game_Data/, UnityPlayer.dll and MonoBleedingEdge/ beside it; ship the whole folder. This machine did not run it on Windows."
+            : "Unity Linux x86_64 build ready at builds/linux/game.x86_64 with game_Data/ and UnityPlayer.so beside it; ship the whole folder.",
+      };
+    });
+
+  // Unity creates Library/ as soon as it starts importing, so a warm-up cut
+  // short (stop, restart, memory) leaves one behind. Only a finished open
+  // writes this marker (Library/ is gitignored), so a partial one is redone.
+  const warmMarker = (ctx: GameEngineContext) =>
+    NodePath.join(ctx.projectDir, "Library", "kurambit-warm");
+
   return {
-    id: "unity",
-    displayName: "Unity",
-    exportTargets: ["Linux", "Windows"],
+    profile: UNITY_PROFILE,
     resolveProject: (root, manifest) =>
       Effect.gen(function* () {
         const projectDir = insideGame(root, manifest.godotProject);
@@ -365,6 +516,53 @@ export const makeUnityBackend = (
     parseDiagnostics: (output) => parseCSharpDiagnostics(output, "unity").errors,
     importProject,
     runCheck,
+    // Players build in the live editor (player.export): no export templates and no preset.
+    exportReady: () => Effect.void,
+    exportPreset: (_ctx, target) => Effect.succeed({ name: target, added: false }),
     runExportRelease,
+    editor: {
+      hold: live.hold,
+      close: live.stop,
+      warm: (ctx) =>
+        Effect.promise(() =>
+          NodeFSP.access(warmMarker(ctx)).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      open: (ctx) =>
+        live.hold(ctx.root)(Effect.promise(() => NodeFSP.writeFile(warmMarker(ctx), "warm\n"))),
+    },
+    player: {
+      build: buildPlayer,
+      export: exportPlayer,
+      executable: PLAYER_EXECUTABLE,
+      session: ({ player, requestPath, traceDir, home, viewport }) => ({
+        args: [
+          player,
+          "-kurambitExplore",
+          requestPath,
+          "-screen-fullscreen",
+          "0",
+          "-screen-width",
+          String(viewport.width),
+          "-screen-height",
+          String(viewport.height),
+          "-force-glcore",
+          "-logFile",
+          NodePath.join(traceDir, "player.log"),
+        ],
+        // The player keeps its prefs and log under the session's scratch HOME,
+        // never the user's ~/.config/unity3d.
+        env: {
+          ...GameProcesses.engineChildEnv(),
+          HOME: home,
+          XDG_CONFIG_HOME: NodePath.join(home, ".config"),
+          LIBGL_ALWAYS_SOFTWARE: "1",
+          LP_NUM_THREADS: "2",
+        },
+        inputNote: "Keys and mouse go in through the Input System. ",
+      }),
+    },
   };
 };

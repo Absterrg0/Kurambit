@@ -16,6 +16,7 @@ import { makeGodotBackend } from "./GameGodotEngine.ts";
 import { makeThreeBackend } from "./GameThreeEngine.ts";
 import * as GameUnity from "./GameUnity.ts";
 import { makeUnityBackend } from "./GameUnityEngine.ts";
+import type { GameEngineProfile, GameExportTarget } from "./engineProfile.ts";
 
 /**
  * The game engines this build runs. The manifest still names one, so a
@@ -55,19 +56,21 @@ export interface GameEngineCheckReport {
   readonly run: GameProcessResult;
 }
 
+/** A player build's outcome; `sourceId` names the sources it was built from, null when it failed. */
+interface GamePlayerBuild {
+  readonly result: GameActionResult;
+  readonly sourceId: string | null;
+}
+
 /**
  * One engine backend. It owns engine execution, configuration and parsing:
  * process arguments, runner scripts, project-settings formats and output
- * diagnostics. The core (GameService) owns everything else — stage order,
- * source binding, cancellation and operation ownership — and calls this
- * interface for the production import/check/export slice.
+ * diagnostics. The core (GameService and its parts) owns everything else —
+ * stage order, source binding, cancellation and operation ownership — and
+ * asks this interface, never the engine's name, wherever engines differ.
  */
 export interface GameEngineBackend {
-  readonly id: SupportedGameEngineId;
-  /** Short human name for honest operation messages ("Godot", "three.js", "Unity"). */
-  readonly displayName: string;
-  /** Which export targets this engine can release. Anything else is refused plainly. */
-  readonly exportTargets: ReadonlyArray<"Web" | "Linux" | "Windows">;
+  readonly profile: GameEngineProfile;
   readonly resolveProject: (
     root: string,
     manifest: GameManifest,
@@ -90,6 +93,19 @@ export interface GameEngineBackend {
     ctx: GameEngineContext,
     input: { readonly gameplayScene: string },
   ) => Effect.Effect<GameEngineCheckReport, GameOperationError>;
+  /** Refuses an export the installed engine cannot make (missing export templates), before any import. */
+  readonly exportReady: (
+    binary: GameEngineBinary,
+    target: GameExportTarget,
+  ) => Effect.Effect<void, GameOperationError>;
+  /**
+   * The export preset a release uses, settled after the import and before the
+   * source identity is taken, because the preset is part of the sources.
+   */
+  readonly exportPreset: (
+    ctx: GameEngineContext,
+    target: GameExportTarget,
+  ) => Effect.Effect<{ readonly name: string; readonly added: boolean }, GameOperationError>;
   /** Run one export-release invocation and map the process outcome. */
   readonly runExportRelease: (
     ctx: GameEngineContext,
@@ -99,15 +115,60 @@ export interface GameEngineBackend {
       readonly operation: string;
     },
   ) => Effect.Effect<GameActionResult, GameOperationError>;
-}
-
-export interface ResolvedGameEngine {
-  readonly backend: GameEngineBackend;
-  readonly binary: GameEngineBinary;
-  /** Absolute directory of the engine project. */
-  readonly cwd: string;
-  /** The manifest's project directory name (usually `godot`). */
-  readonly project: string;
+  /**
+   * The game's one live editor, for engines that refuse a second editor on an
+   * open project; null when every operation runs its own process.
+   */
+  readonly editor: {
+    /** Runs work holding the editor, so another game cannot take it in between. */
+    readonly hold: (
+      root: string,
+    ) => <A, E, R>(work: Effect.Effect<A, E, R>) => Effect.Effect<A, E | GameOperationError, R>;
+    readonly close: (root: string) => Effect.Effect<void>;
+    /** Whether the project's first full import already ran. */
+    readonly warm: (ctx: GameEngineContext) => Effect.Effect<boolean>;
+    /** Opens the editor once (the project's first full import) and records it. */
+    readonly open: (ctx: GameEngineContext) => Effect.Effect<void, GameOperationError>;
+  } | null;
+  /**
+   * For engines whose games ship and play as a built player folder rather
+   * than one exported file; null otherwise.
+   */
+  readonly player: {
+    /**
+     * Builds a player of the current sources into `destination`, replacing
+     * it only once the build's files check out and the sources did not
+     * change meanwhile. The caller imports first.
+     */
+    readonly build: (
+      ctx: GameEngineContext,
+      input: {
+        readonly target: "Linux" | "Windows";
+        readonly destination: string;
+        readonly operation: string;
+      },
+    ) => Effect.Effect<GamePlayerBuild, GameOperationError>;
+    /** A release export: import and build into builds/linux or builds/windows. */
+    readonly export: (
+      ctx: GameEngineContext,
+      target: "Linux" | "Windows",
+    ) => Effect.Effect<GameActionResult, GameOperationError>;
+    /** The Linux player's file inside a player folder. */
+    readonly executable: string;
+    /** How one explore session runs the Linux player under xvfb-run. */
+    readonly session: (input: {
+      readonly player: string;
+      readonly requestPath: string;
+      readonly traceDir: string;
+      readonly home: string;
+      readonly viewport: GameViewport;
+    }) => {
+      readonly args: ReadonlyArray<string>;
+      readonly env: NodeJS.ProcessEnv;
+      /** What the session message adds about input. */
+      readonly inputNote: string;
+    };
+  } | null;
 }
 
 const unsupportedEngine = (engineName: string) =>
@@ -132,11 +193,18 @@ export class GameEngine extends Context.Service<
       engineName: string,
     ) => Effect.Effect<GameEngineBackend, GameOperationError>;
     /**
-     * Resolve a game's engine: validate the manifest's engine first, then
-     * resolve the executable. An unsupported engine never reaches the
-     * toolchain lookup.
+     * Resolve a game's engine and its project context: validate the
+     * manifest's engine first, then resolve the executable. An unsupported
+     * engine never reaches the toolchain lookup.
      */
-    readonly resolve: (root: string) => Effect.Effect<ResolvedGameEngine, GameOperationError>;
+    readonly context: (
+      root: string,
+    ) => Effect.Effect<
+      { readonly backend: GameEngineBackend; readonly ctx: GameEngineContext },
+      GameOperationError
+    >;
+    /** The engine's import of the game's project, as an action result. */
+    readonly importProject: (root: string) => Effect.Effect<GameActionResult, GameOperationError>;
   }
 >()("kurambit/game/GameEngine") {}
 
@@ -156,18 +224,17 @@ const make = Effect.gen(function* () {
       ? Effect.fail(unsupportedEngine(engineName))
       : Effect.succeed(backend);
   };
-  const resolve = Effect.fn("GameEngine.resolve")(function* (root: string) {
+  const context = Effect.fn("GameEngine.context")(function* (root: string) {
     const manifest = yield* projects.read(root);
     const backend = yield* backendFor(manifest.engine.name);
     const project = yield* backend.resolveProject(root, manifest);
-    return {
-      backend,
-      binary: project.binary,
-      cwd: project.projectDir,
-      project: project.projectName,
-    };
+    return { backend, ctx: { root, ...project } };
   });
-  return GameEngine.of({ backendFor, resolve });
+  const importProject = Effect.fn("GameEngine.importProject")(function* (root: string) {
+    const { backend, ctx } = yield* context(root);
+    return (yield* backend.importProject(ctx)).result;
+  });
+  return GameEngine.of({ backendFor, context, importProject });
 });
 
 export const layer = Layer.effect(GameEngine, make);

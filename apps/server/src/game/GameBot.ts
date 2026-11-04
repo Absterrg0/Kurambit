@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import {
   GAME_BOT_BOUNDS,
+  GameEngineId,
   THREE_VIEWPORT,
   GameOperationError,
   type GameBotFinding,
@@ -32,6 +33,7 @@ import { prepareNativeUserIsolation, type NativeUserIsolation } from "./gameNati
 import { engineChildEnv, findExecutable } from "./GameProcesses.ts";
 import { nativeChildEnv, nativeGodotArgs, nativeSessionToken } from "./gameExploreNative.ts";
 import { GODOT_BOT_SCRIPT } from "./godotBotScript.ts";
+import { engineProfile } from "./engineProfile.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import {
@@ -45,6 +47,7 @@ import {
 import { chromiumChildEnv, serveGameDirectory } from "./gameWebServer.ts";
 
 // Playwright needs its files on disk; createRequire also resolves it from a Node SEA executable.
+const isEngineId = Schema.is(GameEngineId);
 const playRequire = NodeModule.createRequire(import.meta.url);
 const loadPlaywright = () => playRequire("playwright-core") as typeof import("playwright-core");
 
@@ -2562,7 +2565,10 @@ const make = Effect.gen(function* () {
       );
       const godotProject =
         typeof manifest.godotProject === "string" ? manifest.godotProject : "godot";
-      const isWeb = manifest.engine?.name === "three";
+      // A browser engine's bot plays the page in Chromium; every other plays the Godot native runner.
+      const engineName = manifest.engine?.name;
+      const engine = isEngineId(engineName) ? engineProfile(engineName) : null;
+      const isWeb = engine?.play === "browser";
       const projectText = isWeb
         ? ""
         : yield* Effect.promise(() =>
@@ -2570,7 +2576,7 @@ const make = Effect.gen(function* () {
               () => "",
             ),
           );
-      const viewport = isWeb ? { ...THREE_VIEWPORT } : parseGodotViewport(projectText);
+      const viewport = engine?.viewport ?? parseGodotViewport(projectText);
       const godot = isWeb ? null : yield* tools.executable("godot");
       const chrome = isWeb ? yield* requireChromium("Bot run", root) : null;
       const ffmpeg = yield* Effect.promise(() =>

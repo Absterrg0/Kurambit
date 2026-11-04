@@ -2,7 +2,7 @@
 // play, which harness duties apply and the engine's own prompt lines. No I/O, so the run's
 // pure policy reads it too. Engine behaviour (processes, editors, exports) is the
 // backend's, in GameEngine.ts; each backend carries its engine's profile.
-import type { GameEngineId } from "@kurambit/contracts";
+import type { GameEngineId, GameViewport } from "@kurambit/contracts";
 import { GODOT_PROFILE } from "./godotProfile.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
 import { UNITY_PROFILE } from "./unityProfile.ts";
@@ -24,6 +24,8 @@ export interface GameEngineProfile {
     readonly library: string;
     readonly blender: string;
   };
+  /** The fixed resolution its games boot, explore and bot-play at; null when the project settings declare it. */
+  readonly viewport: GameViewport | null;
   /**
    * How explore sessions and bot runs play a game: a page in headless
    * Chromium, the engine's own runner on the sources, or a player built from

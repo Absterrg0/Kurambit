@@ -1,4 +1,4 @@
-import { UNITY_PROJECT_DIRECTORY } from "@kurambit/contracts";
+import { UNITY_VIEWPORT, UNITY_PROJECT_DIRECTORY } from "@kurambit/contracts";
 import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const UNITY_PROFILE: GameEngineProfile = {
@@ -8,6 +8,7 @@ export const UNITY_PROFILE: GameEngineProfile = {
   exportTargets: ["Linux", "Windows"],
   // Unity imports only what sits under Assets/, and its template's folders are capitalised.
   layout: { assets: "Assets", ui: "UI", library: "Library", blender: "Assets/Blender" },
+  viewport: UNITY_VIEWPORT,
   play: "player",
   botRefusal:
     "Bot runs do not play Unity games yet. Play a Unity game with game_explore_start/act/close, which runs a real Linux build with real input.",

@@ -10,13 +10,15 @@ import {
   type GameProcessResult,
 } from "@kurambit/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
-import type * as GameToolchain from "./GameToolchain.ts";
+import * as GameToolchain from "./GameToolchain.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { GODOT_CHECK_SCRIPT } from "./godotCheckScript.ts";
 import { RawCheckResult, parseGodotIssues } from "./godotCheckOutput.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
+import { GODOT_PROFILE } from "./godotProfile.ts";
+import { planWindowsPreset } from "./windowsPreset.ts";
 
 const decodeCheckResult = Schema.decodeUnknownSync(RawCheckResult);
 
@@ -66,9 +68,7 @@ export const makeGodotBackend = (
       };
     });
   return {
-    id: "godot",
-    displayName: "Godot",
-    exportTargets: ["Web", "Linux", "Windows"],
+    profile: GODOT_PROFILE,
     resolveProject: (root, manifest) =>
       Effect.gen(function* () {
         const binary = yield* tools.executable("godot");
@@ -149,6 +149,36 @@ export const makeGodotBackend = (
           ),
         );
       }),
+    exportReady: (godot, target) =>
+      Effect.gen(function* () {
+        const templates = godot.templates;
+        if (
+          templates === null ||
+          !(yield* Effect.promise(() => GameToolchain.hasBaseExportTemplates(templates)))
+        )
+          return yield* new GameOperationError({
+            operation: "Godot export",
+            path: godot.templates ?? godot.path,
+            reason: "templates-missing",
+            detail: `Godot executable: ${godot.path} (${godot.version}).`,
+          });
+        if (
+          target === "Windows" &&
+          !(yield* Effect.promise(() => GameToolchain.hasWindowsExportTemplates(templates)))
+        )
+          return yield* new GameOperationError({
+            operation: "Godot Windows export",
+            path: godot.templates ?? godot.path,
+            reason: "templates-missing",
+            detail: `Windows x86_64 export templates for Godot ${godot.version} are missing from ${godot.templates ?? "the template directory"}. Ask the user to add them in the Godot editor (Editor > Manage Export Templates) or from the export templates .tpz on https://godotengine.org/download; Web and Linux exports keep working meanwhile. Godot executable: ${godot.path}.`,
+          });
+      }),
+    exportPreset: (ctx, target) =>
+      target === "Windows"
+        ? ensureWindowsPreset(NodePath.join(ctx.projectDir, "export_presets.cfg")).pipe(
+            Effect.map((plan) => ({ name: plan.name, added: plan.text !== null })),
+          )
+        : Effect.succeed({ name: target, added: false }),
     runExportRelease: (ctx, input) =>
       Effect.gen(function* () {
         const run = yield* processes.run({
@@ -169,8 +199,64 @@ export const makeGodotBackend = (
         });
         return response(run, input.outputPath);
       }),
+    editor: null,
+    player: null,
   };
 };
+
+/**
+ * Ensures the project has a usable Windows Desktop preset. Its text is
+ * written atomically because a half-written preset would break every later
+ * export; a preset the creator already wrote is never rewritten.
+ */
+const ensureWindowsPreset = (presetsPath: string) =>
+  Effect.gen(function* () {
+    const existing = yield* Effect.tryPromise({
+      try: async () => {
+        try {
+          return await NodeFSP.readFile(presetsPath, "utf8");
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+          throw cause;
+        }
+      },
+      catch: (cause) =>
+        new GameOperationError({
+          operation: "export-windows",
+          path: presetsPath,
+          reason: "io",
+          cause,
+        }),
+    });
+    const plan = planWindowsPreset(existing);
+    if (!plan.ok)
+      return yield* new GameOperationError({
+        operation: "export-windows",
+        path: presetsPath,
+        reason: "invalid-input",
+        detail: plan.detail,
+      });
+    if (plan.text !== null) {
+      const text = plan.text;
+      const temporary = `${presetsPath}.${NodeCrypto.randomUUID()}.tmp`;
+      yield* Effect.tryPromise({
+        try: async () => {
+          await NodeFSP.writeFile(temporary, text, "utf8");
+          await NodeFSP.rename(temporary, presetsPath);
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "export-windows",
+            path: presetsPath,
+            reason: "io",
+            detail:
+              "The Windows export preset could not be added; existing presets were left as they were.",
+            cause,
+          }),
+      }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(temporary, { force: true }))));
+    }
+    return plan;
+  });
 
 const decodeText = <A>(decode: (input: unknown) => A, text: string | null): A | null => {
   if (text === null) return null;

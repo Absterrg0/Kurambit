@@ -1,4 +1,4 @@
-import { THREE_PROJECT_DIRECTORY } from "@kurambit/contracts";
+import { THREE_VIEWPORT, THREE_PROJECT_DIRECTORY } from "@kurambit/contracts";
 import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const THREE_PROFILE: GameEngineProfile = {
@@ -7,6 +7,7 @@ export const THREE_PROFILE: GameEngineProfile = {
   projectDirectory: THREE_PROJECT_DIRECTORY,
   exportTargets: ["Web"],
   layout: { assets: "assets", ui: "ui", library: "library", blender: "assets/blender" },
+  viewport: THREE_VIEWPORT,
   play: "browser",
   botRefusal: null,
   // The release is a static copy of the folder: its entry proves the staging,
