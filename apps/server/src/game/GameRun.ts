@@ -473,7 +473,8 @@ export const layer = (options: { readonly stateDir: string }) => {
           return true;
         };
         const skills = NodePath.join(root, "studio-skills");
-        if (await copy(NodePath.join(templates, "studio"), skills)) await keepLaneSkill(skills, lane);
+        if (await copy(NodePath.join(templates, "studio"), skills))
+          await keepLaneSkill(skills, lane);
         await copy(
           NodePath.join(templates, "bot-kit"),
           NodePath.join(root, ".studio", "bot", "kit"),
