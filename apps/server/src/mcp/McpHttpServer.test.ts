@@ -27,6 +27,7 @@ import {
 } from "effect/http";
 
 import * as GameService from "../game/GameService.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
@@ -40,6 +41,10 @@ const threadId = ThreadId.make("thread-mcp-test");
 const tabId = PreviewTabId.make("tab-mcp-test");
 const alternateTabId = PreviewTabId.make("tab-mcp-alternate");
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+// Every caller here is a creator thread; only its record's thread is read.
+const layerCreatorThreads = Layer.mock(ThreadManagementService.ThreadManagementService)({
+  getThreadRecords: () => Effect.succeed({ thread: {} } as never),
+});
 const invocation = {
   environmentId,
   requestNamespace: "provider-session-mcp-test",
@@ -715,6 +720,12 @@ it.effect("terminates HTTP MCP sessions with DELETE", () =>
         issuedAt: 1,
       };
       const layerServer = McpHttpServer.layerMcpTransport.pipe(
+        Layer.provide(layerCreatorThreads),
+        Layer.provide(
+          Layer.mock(McpHttpServer.McpClientAuthenticator)({
+            authenticate: () => Effect.succeed(undefined),
+          }),
+        ),
         Layer.provide(
           Layer.mock(McpSessionRegistry.McpSessionRegistry)({
             resolve: (presented) =>
@@ -969,6 +980,7 @@ it.effect("admits provider and OAuth client credentials and points only clients 
         }),
       ).pipe(
         Layer.provideMerge(McpHttpServer.layerMcpTransport),
+        Layer.provide(layerCreatorThreads),
         Layer.provide(
           Layer.mock(McpSessionRegistry.McpSessionRegistry)({
             resolve: (token) =>

@@ -77,6 +77,14 @@ export const OrchestrationV2CreationSource = Schema.Literals([
 ]);
 export type OrchestrationV2CreationSource = typeof OrchestrationV2CreationSource.Type;
 
+/**
+ * A thread launched by a server job rather than a person. A production run's
+ * role threads carry `game_run`: the MCP server keeps them from the thread,
+ * worktree and project tools, which would tell a blind judge which build is which.
+ */
+export const OrchestrationV2ThreadLauncher = Schema.Literal("game_run");
+export type OrchestrationV2ThreadLauncher = typeof OrchestrationV2ThreadLauncher.Type;
+
 export const OrchestrationV2ThreadHistoryOrigin = Schema.Literals(["native", "v1_import"]);
 export type OrchestrationV2ThreadHistoryOrigin = typeof OrchestrationV2ThreadHistoryOrigin.Type;
 
@@ -369,6 +377,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
+  launchedBy: Schema.optional(OrchestrationV2ThreadLauncher),
   lineage: OrchestrationV2AppThreadLineage,
   forkedFrom: Schema.NullOr(
     Schema.Union([
@@ -2593,6 +2602,7 @@ export const OrchestrationV2Command = Schema.Union([
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
     /** Groups the new thread as a `role` child of a thread in the same project. */
     parentThreadId: Schema.optional(ThreadId),
+    launchedBy: Schema.optional(OrchestrationV2ThreadLauncher),
     importedNativeThread: Schema.optional(
       Schema.Struct({
         ref: Schema.Struct({

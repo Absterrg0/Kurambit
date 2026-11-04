@@ -41,7 +41,6 @@ export const runBotFact = (
     fact: { ending: "error", seconds: 0, final: {}, note: plain(note, ctx.root) },
   });
   const vcs = deps.vcs;
-  if (vcs === null) return Effect.succeed(errorFact("no git service to check out the build"));
   const branch = `studio-wt/${ctx.runId}-${step.id}-bot`;
   // A resumed step reuses the name, so whatever an interrupted attempt left
   // under it goes first. Best effort: a leftover that stays makes the create fail.

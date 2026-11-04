@@ -291,7 +291,10 @@ it.effect(
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const projections = yield* ProjectionStore.ProjectionStoreV2;
       const projectId = ProjectId.make("project:role-lineage");
-      const create = (id: string, extra: { parentThreadId?: ThreadId; projectId?: ProjectId }) =>
+      const create = (
+        id: string,
+        extra: { parentThreadId?: ThreadId; projectId?: ProjectId; launchedBy?: "game_run" },
+      ) =>
         orchestrator.dispatch({
           type: "thread.create",
           commandId: CommandId.make(`create-${id}`),
@@ -304,12 +307,13 @@ it.effect(
           branch: null,
           worktreePath: null,
           ...(extra.parentThreadId === undefined ? {} : { parentThreadId: extra.parentThreadId }),
+          ...(extra.launchedBy === undefined ? {} : { launchedBy: extra.launchedBy }),
           createdBy: "user",
           creationSource: "server",
         });
       const creator = ThreadId.make("thread:role-creator");
       yield* create(creator, {});
-      yield* create("thread:role-tester", { parentThreadId: creator });
+      yield* create("thread:role-tester", { parentThreadId: creator, launchedBy: "game_run" });
       assert.deepStrictEqual(
         (yield* projections.getThread(ThreadId.make("thread:role-tester"))).lineage,
         {
@@ -319,6 +323,11 @@ it.effect(
         },
       );
       assert.isNull((yield* projections.getThread(creator)).lineage.relationshipToParent);
+      assert.equal(
+        (yield* projections.getThread(ThreadId.make("thread:role-tester"))).launchedBy,
+        "game_run",
+      );
+      assert.isUndefined((yield* projections.getThread(creator)).launchedBy);
 
       // A missing parent only loses the grouping: rejecting would block a
       // stable launch command id on every retry.
