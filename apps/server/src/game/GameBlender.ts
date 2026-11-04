@@ -1,5 +1,4 @@
 // @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off preferSchemaOverJson:off -- This service owns the native filesystem, process, and MCP-stdio boundary; wall-clock pids and JSON code strings are the domain here.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
@@ -38,16 +37,25 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { renderSprites } from "./blenderSprites.ts";
 import { engineProfile } from "./engineProfile.ts";
 import {
-  alive,
+  commandFlag,
+  commandHas,
   displayInRange,
   findXvfb,
   memoryShortfall,
   pickDisplay,
   readRecord,
-  reapVerified,
   underIdleMemoryFloor,
-  type RecordedPid,
 } from "./liveProcess.ts";
+import {
+  LAUNCH_ENV,
+  adoptLaunch,
+  launchToken,
+  spawnOwned,
+  stopRecorded,
+  type LaunchRecord,
+  type OwnedProcess,
+  type ProcessFacts,
+} from "./processHost.ts";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
@@ -95,9 +103,8 @@ interface Session {
   readonly display: string;
   readonly port: number;
   readonly homeDir: string;
-  readonly blenderPid: number;
-  readonly xvfbPid: number;
-  readonly mcpPid: number;
+  readonly blender: OwnedProcess;
+  readonly xvfb: OwnedProcess;
   readonly client: Client;
   readonly transport: StdioClientTransport;
   /** What this session was launched from; its own pids are verified against these. */
@@ -253,9 +260,9 @@ interface SessionRecord {
   readonly bootPy: string;
   readonly xvfb: string;
   readonly uvx: string;
-  readonly blenderPid?: number;
-  readonly xvfbPid?: number;
-  readonly mcpPid?: number;
+  readonly blenderLaunch?: LaunchRecord;
+  readonly xvfbLaunch?: LaunchRecord;
+  readonly mcpLaunch?: LaunchRecord;
 }
 
 /** The executables this server would launch now; a recorded pid must still run one of them. */
@@ -266,49 +273,60 @@ interface LiveExecutables {
 }
 
 /**
- * A recorded pid is ours only while its argv still names the binary this
- * server would launch (from the live toolchain, never the record) and this
- * session's own boot script, display or port; a reused pid, another game's
- * session or a forged record never matches.
+ * A recorded launch is ours only while it verifies (pid, start time and
+ * token; see processHost) and still runs the binary this server would
+ * launch (from the live toolchain, never the record) with this session's
+ * own boot script, display or port.
  */
 const recordedOwners = (
   record: Partial<SessionRecord>,
   live: LiveExecutables,
   bootPy: string,
-): ReadonlyArray<RecordedPid> => [
+): ReadonlyArray<{ readonly launch: unknown; readonly owns: (facts: ProcessFacts) => boolean }> => [
   {
-    pid: record.mcpPid,
+    launch: record.mcpLaunch,
     // uvx re-execs as its sibling `uv tool uvx ...`, so match the directory.
-    owns: (argv) =>
+    owns: (facts) =>
       live.uvx !== null &&
-      argv[0] !== undefined &&
-      NodePath.dirname(argv[0]) === NodePath.dirname(live.uvx) &&
-      argv.includes(PINNED_PKG) &&
-      argv[argv.indexOf("--port") + 1] === String(record.port),
+      commandHas(facts, PINNED_PKG) &&
+      (facts.argv === null ||
+        (facts.argv[0] !== undefined &&
+          NodePath.dirname(facts.argv[0]) === NodePath.dirname(live.uvx))) &&
+      commandFlag(facts, "--port", String(record.port)),
   },
   {
-    pid: record.blenderPid,
-    owns: (argv) => live.blender !== null && argv[0] === live.blender && argv.includes(bootPy),
+    launch: record.blenderLaunch,
+    owns: (facts) =>
+      live.blender !== null && commandHas(facts, live.blender) && commandHas(facts, bootPy),
   },
   {
-    pid: record.xvfbPid,
-    owns: (argv) =>
+    launch: record.xvfbLaunch,
+    owns: (facts) =>
       live.xvfb !== null &&
-      argv[0] === live.xvfb &&
+      commandHas(facts, live.xvfb) &&
       displayInRange(record.display, DISPLAYS.first, DISPLAYS.last) &&
-      argv[1] === record.display,
+      commandHas(facts, record.display!),
   },
 ];
 
-/** SIGTERM the recorded pids that are verifiably ours, wait, then SIGKILL stragglers. */
+/** Stops the recorded launches that are verifiably ours, with their trees. */
 const reapRecorded = async (homeDir: string, live: LiveExecutables): Promise<void> => {
   const file = NodePath.join(homeDir, SESSION_FILE);
   const record = await readRecord<SessionRecord>(file);
   if (record === null) return;
-  await reapVerified(recordedOwners(record, live, NodePath.join(homeDir, "boot_server.py")), {
-    waitMs: 5_000,
-    pollMs: 100,
-  });
+  const owners = recordedOwners(record, live, NodePath.join(homeDir, "boot_server.py"));
+  await stopRecorded(
+    owners.map((owner) => owner.launch),
+    {
+      waitMs: 5_000,
+      owns: (facts) =>
+        owners.some(
+          (owner) =>
+            (owner.launch as Partial<LaunchRecord> | undefined)?.pid === facts.pid &&
+            owner.owns(facts),
+        ),
+    },
+  );
   await NodeFSP.rm(file, { force: true });
 };
 
@@ -395,15 +413,6 @@ const make = Effect.gen(function* () {
     return env;
   });
 
-  const killPid = (pid: number | undefined): void => {
-    if (pid === undefined || pid <= 0 || !alive(pid)) return;
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      /* gone */
-    }
-  };
-
   const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/blender-live");
 
   const liveExecutables: Effect.Effect<LiveExecutables> = Effect.gen(function* () {
@@ -424,10 +433,10 @@ const make = Effect.gen(function* () {
     const session = sessions.get(root);
     if (session !== undefined) {
       sessions.delete(root);
-      killPid(session.mcpPid);
-      killPid(session.blenderPid);
-      killPid(session.xvfbPid);
+      // Closing the client ends the MCP child it spawned.
       void session.client.close().catch(() => undefined);
+      session.blender.signal("SIGTERM");
+      session.xvfb.signal("SIGTERM");
     }
     return session;
   };
@@ -480,8 +489,8 @@ const make = Effect.gen(function* () {
       const existing = sessions.get(root);
       if (
         existing !== undefined &&
-        alive(existing.blenderPid) &&
-        alive(existing.xvfbPid) &&
+        existing.blender.running() &&
+        existing.xvfb.running() &&
         now - existing.lastActive < IDLE_MS
       ) {
         existing.lastActive = now;
@@ -594,25 +603,24 @@ const make = Effect.gen(function* () {
       };
       // Written as each pid appears, so a crash mid-start still leaves the
       // next ensure or game_stop something to reap.
-      const remember = (pids: Partial<SessionRecord>) =>
+      const remember = (launches: Partial<SessionRecord>) =>
         Effect.tryPromise({
           try: () => {
-            record = { ...record, ...pids };
+            record = { ...record, ...launches };
             return NodeFSP.writeFile(NodePath.join(homeDir, SESSION_FILE), JSON.stringify(record));
           },
           catch: (cause) => opError("blender-live", SESSION_FILE, "io", undefined, cause),
         });
-      const xvfb = NodeChildProcess.spawn(xvfbPath, [display, "-screen", "0", "1280x800x24"], {
+      const xvfb = spawnOwned(xvfbPath, [display, "-screen", "0", "1280x800x24"], {
         env: sessionEnv(homeDir, null),
-        detached: true,
         stdio: "ignore",
+        tree: false,
       });
-      xvfb.unref();
-      if (xvfb.pid === undefined) {
+      xvfb.child.unref();
+      const xvfbLaunch = yield* Effect.promise(() => xvfb.record);
+      if (xvfbLaunch === null)
         return yield* opError("blender-live", display, "io", "Xvfb did not start.");
-      }
-      const xvfbPid = xvfb.pid;
-      yield* remember({ xvfbPid });
+      yield* remember({ xvfbLaunch });
       yield* Effect.tryPromise({
         try: () =>
           NodeFSP.writeFile(
@@ -630,32 +638,40 @@ const make = Effect.gen(function* () {
           .then(() => [blendPath])
           .catch(() => [] as string[]),
       );
-      const spawned = yield* Effect.sync(() => {
+      const blenderProcess = yield* Effect.sync(() => {
         const logFd = NodeFS.openSync(logPath, "w");
+        // Blender hands what follows `--` to Python and ignores it, so the
+        // token rides the command line where an OS hides environments.
+        const token = launchToken();
         // cwd is the game root so relative paths in model code land in the game.
-        const child = NodeChildProcess.spawn(blender.path, [...reopen, "--python", bootPy], {
+        const owned = spawnOwned(blender.path, [...reopen, "--python", bootPy, "--", token], {
           cwd: root,
           env: withBinDir({ ...sessionEnv(homeDir, display), ...addonKeys }, uv.binDir),
-          detached: true,
           stdio: ["ignore", logFd, logFd],
+          tree: true,
+          window: true,
+          token,
         });
-        child.unref();
+        owned.child.unref();
         try {
           NodeFS.closeSync(logFd);
         } catch {
           /* the child keeps its copy */
         }
-        return child.pid;
+        return owned;
       });
-      if (spawned === undefined) {
-        killPid(xvfbPid);
+      const stopStarted = Effect.sync(() => {
+        blenderProcess.signal("SIGTERM");
+        xvfb.signal("SIGTERM");
+      });
+      const blenderLaunch = yield* Effect.promise(() => blenderProcess.record);
+      if (blenderLaunch === null) {
+        yield* stopStarted;
         return yield* opError("blender-live", root, "io", "Blender did not start.");
       }
-      const blenderPid = spawned;
-      yield* remember({ blenderPid });
+      yield* remember({ blenderLaunch });
       if (!(yield* Effect.promise(() => waitPort(port, 90_000)))) {
-        killPid(blenderPid);
-        killPid(xvfbPid);
+        yield* stopStarted;
         return yield* opError(
           "blender-live",
           logPath,
@@ -682,10 +698,11 @@ const make = Effect.gen(function* () {
       // The server logs every command it relays; keep that beside the
       // session instead of in Kurambit's own stderr.
       const mcpLog = NodeFS.openSync(NodePath.join(homeDir, "mcp.log"), "w");
+      const mcpToken = launchToken();
       const transport = new StdioClientTransport({
         command: uv.uvx,
         args: [PINNED_PKG, "--port", String(port)],
-        env: mcpEnv,
+        env: { ...mcpEnv, [LAUNCH_ENV]: mcpToken },
         stderr: mcpLog,
       });
       const client = new Client({ name: "kurambit-game-blender", version: "1.0.0" }, {});
@@ -700,20 +717,14 @@ const make = Effect.gen(function* () {
             cause,
           ),
       }).pipe(
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            killPid(blenderPid);
-            killPid(xvfbPid);
-          }),
-        ),
+        Effect.tapError(() => stopStarted),
         Effect.ensuring(Effect.sync(() => NodeFS.closeSync(mcpLog))),
       );
       void connected;
       const mcpPid = transport.pid;
       if (mcpPid === null) {
         void client.close().catch(() => undefined);
-        killPid(blenderPid);
-        killPid(xvfbPid);
+        yield* stopStarted;
         return yield* opError(
           "blender-live",
           PINNED_PKG,
@@ -721,16 +732,16 @@ const make = Effect.gen(function* () {
           "The pinned MCP server connected but reported no pid, so it could not be stopped later.",
         );
       }
-      yield* remember({ mcpPid });
+      const mcpLaunch = yield* Effect.promise(() => adoptLaunch(mcpPid, mcpToken));
+      if (mcpLaunch !== null) yield* remember({ mcpLaunch });
       const startedAt = yield* Clock.currentTimeMillis;
       const session: Session = {
         root,
         display,
         port,
         homeDir,
-        blenderPid,
-        xvfbPid,
-        mcpPid,
+        blender: blenderProcess,
+        xvfb,
         client,
         transport,
         live: { blender: blender.path, uvx: uv.uvx, xvfb: xvfbPath },

@@ -1,5 +1,4 @@
 // @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off -- Bot launches: the runner process on a recorded private display, or a Chromium page with stills; by pid.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -7,10 +6,11 @@ import type { GameViewport } from "@kurambit/contracts";
 import { openRecordedDisplay } from "./displayHost.ts";
 import type { PlayProcess } from "./GameEngine.ts";
 import type { BotLaunch } from "./gameBotPlay.ts";
-import { BOOT_TIMEOUT_MS, headlessEnv, killPid, sleep, type Session } from "./gameBotRuntime.ts";
+import { BOOT_TIMEOUT_MS, headlessEnv, type Session } from "./gameBotRuntime.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 import type { listenForRunner } from "./playSession.ts";
 import { openWebPlaySession } from "./webPlaySession.ts";
+import { runOwned, spawnOwned, type OwnedProcess } from "./processHost.ts";
 
 const stoppedError = (session: Session, error: unknown): unknown =>
   session.stopped ? new Error("Bot run stopped.") : error;
@@ -34,22 +34,12 @@ export const launchProcessBot = async (input: {
 }): Promise<BotLaunch> => {
   const { spec, listener, session } = input;
   let display: Awaited<ReturnType<typeof openRecordedDisplay>> | null = null;
-  let game: NodeChildProcess.ChildProcess | undefined;
+  let game: OwnedProcess | undefined;
   let stopped = false;
   const stop = async (): Promise<void> => {
     if (stopped) return;
     stopped = true;
-    if (game !== undefined && game.exitCode === null) {
-      killPid(game.pid);
-      const end = Date.now() + 3000;
-      while (game.exitCode === null && Date.now() < end) await sleep(100);
-      if (game.exitCode === null)
-        try {
-          game.kill("SIGKILL");
-        } catch {
-          /* gone */
-        }
-    }
+    await game?.stop({ graceMs: 3000 });
     await display?.release();
     await listener.drop();
   };
@@ -62,18 +52,20 @@ export const launchProcessBot = async (input: {
       viewport: input.viewport,
       videoPath: input.videoPath,
       logDir: input.runDir,
-      track: (pid) => session.pids.push(pid),
+      track: (owned) => session.processes.push(owned),
     });
     const log = NodeFS.openSync(NodePath.join(input.runDir, "game.log"), "w");
-    const child = NodeChildProcess.spawn(spec.executable, [...spec.args], {
+    const owned = spawnOwned(spec.executable, spec.args, {
       env: { ...spec.env, DISPLAY: display.display },
-      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
-      detached: true,
+      cwd: spec.cwd,
       stdio: ["ignore", log, log],
+      tree: true,
+      window: true,
     });
-    game = child;
+    game = owned;
+    const child = owned.child;
     child.unref();
-    if (child.pid !== undefined) session.pids.push(child.pid);
+    session.processes.push(owned);
     const play = await listener.accept({
       timeoutMs: BOOT_TIMEOUT_MS,
       what: "The game's runner",
@@ -143,40 +135,24 @@ export const launchPageBot = async (input: {
     snapshot: (path) => play.still(path),
     finishVideo: async () => {
       if (shots === 0) return;
-      await new Promise<void>((resolve) => {
-        const child = NodeChildProcess.spawn(
-          input.ffmpeg,
-          [
-            "-y",
-            "-framerate",
-            "2",
-            "-i",
-            NodePath.join(framesDir, "shot-%04d.png"),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-pix_fmt",
-            "yuv420p",
-            input.videoPath,
-          ],
-          { env: headlessEnv(), stdio: "ignore" },
-        );
-        const timer = setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            /* gone */
-          }
-          resolve();
-        }, 120_000);
-        const done = () => {
-          clearTimeout(timer);
-          resolve();
-        };
-        child.once("exit", done);
-        child.once("error", done);
-      });
+      await runOwned(
+        input.ffmpeg,
+        [
+          "-y",
+          "-framerate",
+          "2",
+          "-i",
+          NodePath.join(framesDir, "shot-%04d.png"),
+          "-c:v",
+          "libx264",
+          "-preset",
+          "veryfast",
+          "-pix_fmt",
+          "yuv420p",
+          input.videoPath,
+        ],
+        { env: headlessEnv(), timeoutMs: 120_000 },
+      );
     },
     stop: async () => {
       if (stopped) return;

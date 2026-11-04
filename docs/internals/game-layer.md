@@ -25,11 +25,12 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameUnity` does the same for Unity: one batchmode editor on a private display
   (one per server, since an editor costs 2-3 GB), reached through the official `unity` CLI and its
-  `unity mcp` server, with the same session.json pid records, reaping and idle shutdown
-  (`liveProcess.ts` holds the shared display, record and reap code). A record's pids are signalled
-  only while their argv names the executables the live toolchain would launch now, never paths
-  from the record, and of the editor's process tree only processes running from a detected editor's
-  directory, the CLI or Xvfb; a Unity Licensing Client is never signalled. Unity also keeps a copy of
+  `unity mcp` server, with the same session.json launch records, reaping and idle shutdown
+  (`liveProcess.ts` holds the shared display and record code). A record is acted on only while its
+  process still verifies as the launch (below) and its command line names the executables the live
+  toolchain would launch now, never paths from the record; of the editor's process tree only
+  processes running from a detected editor's directory, the CLI or Xvfb are signalled, and a Unity
+  Licensing Client never is. Unity also keeps a copy of
   its record under the server state dir, reaped at startup, so a crashed server's editor dies
   even if its game is never reopened. Every call or operation holds the editor; another game's
   open closes it only while it is idle, and fails `busy` naming the holder otherwise.
@@ -37,6 +38,17 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   detected, and never installs them: they are other vendors' software with their own upkeep and
   licences on every OS. It fetches only harness plumbing (uv, the Unity CLI) itself; `GamePreview` serves builds;
   `GameProcesses` tracks child processes; `GameOperations` keeps the last operation per game.
+- Every process the game layer starts goes through one process host
+  ([processHost.ts](../../apps/server/src/game/processHost.ts)), the only per-OS process code. A
+  child carries a fresh launch token in its environment (and on its command line where the program
+  ignores extra arguments: the Unity editor, Blender), and its launch record is pid, OS start time
+  and token. A record is signalled only while the live process has that start time and carries that
+  token, so a reused pid or a record an agent wrote never names another process. A tree is a
+  process group on Linux and macOS; on Windows every owned child joins one kill-on-close Job Object
+  held by a helper whose stdin is the server's pipe, so the tree dies with the server however it
+  exits, and a tree stop is `taskkill /T /F`. Free memory is `os.freemem()` (libuv's MemAvailable
+  on Linux). Every in-game runner quits when its control socket closes, so a crashed server leaves
+  no game running; only the live editors outlive it, and their records reap them.
 - `GameAssetLibrary` serves the curated CC0 library in `assetLibraryCatalog.ts`. Each pack is a
   download URL pinned by SHA-256 and size, fetched on first look into `asset-library/` beside Kurambit's
   tools folder, and unpacked with path, link and size limits. Bytes that differ from the pin are

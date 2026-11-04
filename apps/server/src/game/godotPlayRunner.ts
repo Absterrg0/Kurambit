@@ -160,9 +160,11 @@ func _serve() -> void:
 	var dead_pump := 0
 	while _running:
 		await physics_frame
+		# A peer leaves CONNECTED only when the harness is gone; the game
+		# quits with it, so a crashed server never leaves a game running.
 		if _peer.get_status() != 2:
 			dead_pump += 1
-			if dead_pump > 300:
+			if dead_pump > 10:
 				return
 			continue
 		dead_pump = 0

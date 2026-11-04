@@ -1,11 +1,11 @@
 // @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off -- The private display host: Xvfb, ffmpeg x11grab and display locks, by pid and by number.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import type { GameViewport } from "@kurambit/contracts";
 import { engineChildEnv, findExecutable } from "./GameProcesses.ts";
+import { runOwned, spawnOwned, type OwnedProcess } from "./processHost.ts";
 
 /**
  * Where game processes get a screen: a private X display, never the user's.
@@ -99,39 +99,13 @@ const waitDisplay = async (n: number, timeoutMs: number): Promise<boolean> => {
   return false;
 };
 
-const exited = (child: NodeChildProcess.ChildProcess, ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) return resolve();
-    const timer = setTimeout(resolve, ms);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-
 // A child that ignores its first signal (ffmpeg stuck on a dead display, a
 // wedged Xvfb) would outlive the run, so the stop escalates to SIGKILL.
 const stopChild = async (
-  child: NodeChildProcess.ChildProcess | undefined,
+  owned: OwnedProcess | undefined,
   first: NodeJS.Signals,
   graceMs: number,
-): Promise<void> => {
-  if (child === undefined) return;
-  const steps: ReadonlyArray<readonly [NodeJS.Signals, number]> = [
-    [first, graceMs],
-    ["SIGTERM", 2000],
-    ["SIGKILL", 1000],
-  ];
-  for (const [signal, ms] of steps) {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    try {
-      child.kill(signal);
-    } catch {
-      return;
-    }
-    await exited(child, ms);
-  }
-};
+): Promise<void> => owned?.stop({ first, graceMs });
 
 /**
  * One private display recorded to one video: Xvfb on a free display number
@@ -145,12 +119,12 @@ export const openRecordedDisplay = async (input: {
   readonly viewport: GameViewport;
   readonly videoPath: string;
   readonly logDir: string;
-  readonly track: (pid: number) => void;
+  readonly track: (owned: OwnedProcess) => void;
 }) => {
   const display = await pickDisplay();
   if (display === null) throw new Error("No free private X display.");
-  let xvfb: NodeChildProcess.ChildProcess | undefined;
-  let ffmpeg: NodeChildProcess.ChildProcess | undefined;
+  let xvfb: OwnedProcess | undefined;
+  let ffmpeg: OwnedProcess | undefined;
   // SIGINT lets ffmpeg finalize the mp4.
   const finishVideo = (): Promise<void> => stopChild(ffmpeg, "SIGINT", 15_000);
   const release = async (): Promise<void> => {
@@ -160,21 +134,17 @@ export const openRecordedDisplay = async (input: {
   };
   try {
     const { width, height } = input.viewport;
-    xvfb = NodeChildProcess.spawn(
-      input.xvfb,
-      [`:${display}`, "-screen", "0", `${width}x${height}x24`],
-      {
-        env: engineChildEnv(),
-        detached: true,
-        stdio: "ignore",
-      },
-    );
-    xvfb.unref();
-    if (xvfb.pid !== undefined) input.track(xvfb.pid);
+    xvfb = spawnOwned(input.xvfb, [`:${display}`, "-screen", "0", `${width}x${height}x24`], {
+      env: engineChildEnv(),
+      stdio: "ignore",
+      tree: false,
+    });
+    xvfb.child.unref();
+    input.track(xvfb);
     if (!(await waitDisplay(display, 15_000)))
       throw new Error("The private display did not start.");
     const log = NodeFS.openSync(NodePath.join(input.logDir, "ffmpeg.log"), "w");
-    ffmpeg = NodeChildProcess.spawn(
+    ffmpeg = spawnOwned(
       input.ffmpeg,
       [
         "-y",
@@ -194,43 +164,32 @@ export const openRecordedDisplay = async (input: {
         "yuv420p",
         input.videoPath,
       ],
-      { env: engineChildEnv(), detached: false, stdio: ["ignore", log, log] },
+      { env: engineChildEnv(), stdio: ["ignore", log, log], tree: false },
     );
-    if (ffmpeg.pid !== undefined) input.track(ffmpeg.pid);
+    input.track(ffmpeg);
   } catch (error) {
     await release();
     throw error;
   }
   const { width, height } = input.viewport;
-  const snapshot = (path: string): Promise<void> =>
-    new Promise<void>((resolve) => {
-      const child = NodeChildProcess.spawn(
-        input.ffmpeg,
-        [
-          "-y",
-          "-f",
-          "x11grab",
-          "-video_size",
-          `${width}x${height}`,
-          "-i",
-          `:${display}`,
-          "-frames:v",
-          "1",
-          path,
-        ],
-        { env: engineChildEnv(), stdio: "ignore" },
-      );
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve();
-      }, 10_000);
-      const done = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      child.once("exit", done);
-      child.once("error", done);
-    });
+  const snapshot = async (path: string): Promise<void> => {
+    await runOwned(
+      input.ffmpeg,
+      [
+        "-y",
+        "-f",
+        "x11grab",
+        "-video_size",
+        `${width}x${height}`,
+        "-i",
+        `:${display}`,
+        "-frames:v",
+        "1",
+        path,
+      ],
+      { env: engineChildEnv(), timeoutMs: 10_000 },
+    );
+  };
   return {
     /** The DISPLAY value a process plays on. */
     display: `:${display}`,

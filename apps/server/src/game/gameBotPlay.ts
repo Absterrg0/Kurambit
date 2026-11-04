@@ -1,5 +1,5 @@
 // @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off preferSchemaOverJson:off -- One real-time bot run over a play session: the bot child by pid, wall-clock ticks and line JSON.
-import * as NodeChildProcess from "node:child_process";
+import type * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -22,7 +22,6 @@ import {
   END_FRAME,
   extractRunFrames,
   frozenScreenFinding,
-  killPid,
   perfFrom,
   posOf,
   sleep,
@@ -31,6 +30,7 @@ import {
   type Session,
 } from "./gameBotRuntime.ts";
 import { parseLine, type PlaySession } from "./playSession.ts";
+import { spawnOwned, type OwnedProcess } from "./processHost.ts";
 
 const END_SETTLE_MS = 1500;
 
@@ -127,12 +127,13 @@ export const playBot = async (
         : "This game's in-game runner does not play in real time, so bots cannot drive it.",
     );
   let botChild: NodeChildProcess.ChildProcess | undefined;
+  let botProcess: OwnedProcess | undefined;
   const readers: LineReader[] = [];
   try {
     // The bot child: allowlisted environment only, so no key or display
     // route can reach it. Game data reaches it only through our messages.
     const childLog = NodeFS.openSync(NodePath.join(args.runDir, "child-stderr.log"), "w");
-    botChild = NodeChildProcess.spawn(
+    const owned = spawnOwned(
       process.execPath,
       [args.childPath, args.botFile, args.decider, args.mode, args.jevLive ? "jev-live" : "no-jev"],
       {
@@ -144,11 +145,13 @@ export const playBot = async (
           LANG: process.env.LANG ?? "C.UTF-8",
         },
         cwd: args.root,
-        detached: false,
         stdio: ["pipe", "pipe", childLog],
+        tree: false,
       },
     );
-    if (botChild.pid !== undefined) args.session.pids.push(botChild.pid);
+    botProcess = owned;
+    botChild = owned.child;
+    args.session.processes.push(owned);
     const childLines = createLineReader(botChild.stdout!);
     readers.push(childLines);
     let goal = "play the game";
@@ -693,14 +696,7 @@ export const playBot = async (
     };
   } finally {
     for (const reader of readers) reader.close();
-    if (botChild !== undefined) {
-      killPid(botChild.pid);
-      try {
-        botChild.kill("SIGTERM");
-      } catch {
-        /* gone */
-      }
-    }
+    botProcess?.signal("SIGTERM");
   }
 };
 

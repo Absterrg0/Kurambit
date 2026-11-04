@@ -1,5 +1,4 @@
 // @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off globalFetch:off preferSchemaOverJson:off -- Shared by bot runs: pids, child lines, run frames and the Jev call.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -11,6 +10,7 @@ import {
   type GameBotPerf,
 } from "@kurambit/contracts";
 import { engineChildEnv } from "./GameProcesses.ts";
+import { runOwned, type OwnedProcess } from "./processHost.ts";
 
 const JEV_MODEL = "jev-latest";
 const JEV_TIMEOUT_MS = 4000;
@@ -24,12 +24,12 @@ export const CHILD_FIRST_INPUT_MS = 400;
 export const CHILD_EXTRA_MS = 30;
 export const BOOT_TIMEOUT_MS = 90_000;
 
-/** One bot run call: a stop flips `stopped`, and the run's pids are killed by number. */
+/** One bot run call: a stop flips `stopped` and stops every process the run started. */
 export interface Session {
   readonly root: string;
   readonly runId: string;
   stopped: boolean;
-  readonly pids: number[];
+  readonly processes: OwnedProcess[];
 }
 
 export const opError = (
@@ -46,16 +46,6 @@ export const opError = (
     ...(detail === undefined ? {} : { detail }),
     ...(cause === undefined ? {} : { cause }),
   });
-
-const alive = (pid: number | undefined): boolean => {
-  if (pid === undefined || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 export const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -189,15 +179,6 @@ export const posOf = (obs: Record<string, unknown>): [number, number, number] | 
 };
 
 export const FRACTION_RE = /(\d+)\s*\/\s*(\d+)/g;
-
-export const killPid = (pid: number | undefined): void => {
-  if (!alive(pid)) return;
-  try {
-    process.kill(pid!, "SIGTERM");
-  } catch {
-    /* gone */
-  }
-};
 
 /** Jev decisions for one bot service: the warm pool state is shared by its runs. */
 export const makeJev = () => {
@@ -400,19 +381,7 @@ export const extractRunFrames = async (
   const framesDir = NodePath.join(runDir, "frames");
   await NodeFSP.mkdir(framesDir, { recursive: true });
   const runFfmpeg = (args: ReadonlyArray<string>) =>
-    new Promise<void>((resolve) => {
-      const child = NodeChildProcess.spawn(ffmpeg, args, { env: headlessEnv(), stdio: "ignore" });
-      child.once("exit", () => resolve());
-      child.once("error", () => resolve());
-      setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* gone */
-        }
-        resolve();
-      }, 120_000).unref?.();
-    });
+    runOwned(ffmpeg, args, { env: headlessEnv(), timeoutMs: 120_000 });
   await runFfmpeg([
     "-y",
     "-i",
