@@ -5,6 +5,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
+import type { GameRunCheckOutcome } from "@kurambit/contracts";
 import type * as GameService from "../GameService.ts";
 import {
   checkBot,
@@ -20,15 +21,7 @@ import type { Rung } from "./state.ts";
 /** Generated check bots: run state, ignored by git and rewritten each time. */
 export const CHECK_BOT_DIR = ".studio/bot/checks";
 
-export type CheckOutcome = {
-  /** Index into the rung's checks. */
-  readonly k: number;
-  readonly what: string;
-  readonly pass: boolean;
-  readonly evidence: string;
-  /** The check run's last frame (where the scenario ended), "" when none was taken. */
-  readonly frame: string;
-};
+export type CheckOutcome = GameRunCheckOutcome;
 
 export const runStateChecks = (
   game: GameService.GameService["Service"],

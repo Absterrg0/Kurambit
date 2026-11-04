@@ -2,6 +2,9 @@ import {
   CheckpointId,
   CheckpointScopeId,
   CommandId,
+  GameRunId,
+  GameRunStepId,
+  PositiveInt,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -114,6 +117,34 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     type: Schema.Literal("delegated-tasks.stop"),
     reason: Schema.optional(Schema.String),
   }),
+  // A game run's step: its handler starts the work and returns at once; the
+  // work reports back with game-run.step.complete or game-run.step.fail.
+  Schema.Struct({
+    type: Schema.Literal("game-run.step.execute"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    attempt: PositiveInt,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("game-run.decision.wake"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    decisionId: Schema.String,
+  }),
+  // Due when the default would fire; game-run.decision.expire checks it again.
+  Schema.Struct({
+    type: Schema.Literal("game-run.decision.deadline"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    decisionId: Schema.String,
+  }),
+  // Due at a role turn's cap: the role thread's run is interrupted.
+  Schema.Struct({
+    type: Schema.Literal("game-run.step.deadline"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    attempt: PositiveInt,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -127,6 +158,11 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "attachment.cleanup",
   "thread-title.generate",
   "delegated-tasks.stop",
+  // Every game-run step is safe to repeat, and each command it leads to is checked again.
+  "game-run.step.execute",
+  "game-run.decision.wake",
+  "game-run.decision.deadline",
+  "game-run.step.deadline",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

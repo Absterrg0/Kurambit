@@ -57,6 +57,15 @@ import {
 } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
+import { GameRunProfile, GameRunSubmission } from "./gameRun.ts";
+import {
+  GameRun,
+  GameRunId,
+  GameRunRound,
+  GameRunStep,
+  GameRunStepId,
+  GameRunStepResult,
+} from "./gameRunRecords.ts";
 import {
   TurnTokenUsage,
   ToolActivitySurface,
@@ -1642,6 +1651,30 @@ const OrchestrationV2EventBase = Schema.Struct({
   occurredAt: Schema.DateTimeUtc,
 });
 
+export const GAME_RUN_EVENT_TYPES = [
+  "game-run.created",
+  "game-run.updated",
+  "game-run-step.updated",
+  "game-run-round.recorded",
+] as const;
+const gameRunEventTypes: ReadonlySet<string> = new Set(GAME_RUN_EVENT_TYPES);
+/** A game run's records are read from its projection, never from the chat's event stream. */
+export const isGameRunEventType = (type: string): boolean => gameRunEventTypes.has(type);
+
+// A game run's records carry no DateTime fields, so stored and live events share one shape.
+function gameRunEventMembers<const Base extends Schema.Struct.Fields>(base: Base) {
+  return [
+    Schema.Struct({ ...base, type: Schema.Literal("game-run.created"), payload: GameRun }),
+    Schema.Struct({ ...base, type: Schema.Literal("game-run.updated"), payload: GameRun }),
+    Schema.Struct({ ...base, type: Schema.Literal("game-run-step.updated"), payload: GameRunStep }),
+    Schema.Struct({
+      ...base,
+      type: Schema.Literal("game-run-round.recorded"),
+      payload: GameRunRound,
+    }),
+  ] as const;
+}
+
 // Historical PR events and schedule attribution remain decodable; their runtime producers were removed.
 export const OrchestrationV2DomainEvent = Schema.Union([
   Schema.Struct({
@@ -1785,6 +1818,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
     type: Schema.Literal("context-transfer.updated"),
     payload: OrchestrationV2ContextTransfer,
   }),
+  ...gameRunEventMembers(OrchestrationV2EventBase.fields),
 ]);
 export type OrchestrationV2DomainEvent = typeof OrchestrationV2DomainEvent.Type;
 
@@ -2592,6 +2626,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
     type: Schema.Literal("context-transfer.updated"),
     payload: OrchestrationV2ContextTransferJson,
   }),
+  ...gameRunEventMembers(OrchestrationV2JsonEventBaseFields),
 ]);
 export type OrchestrationV2DomainEventJson = typeof OrchestrationV2DomainEventJson.Type;
 
@@ -2987,6 +3022,100 @@ export const OrchestrationV2Command = Schema.Union([
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
 /**
+ * The production run, on the game's creator thread. Agents and the Game panel
+ * reach these through server services, never `dispatchCommand`: a role's
+ * submission or a step's result must come from the harness.
+ */
+const GameRunCommandFields = { commandId: CommandId, threadId: ThreadId, runId: GameRunId };
+export const OrchestrationV2GameRunCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("game-run.start"),
+    ...GameRunCommandFields,
+    /** The engine project directory the game's manifest names. */
+    lane: TrimmedNonEmptyString,
+    brief: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(8000)),
+    artDirection: Schema.optional(Schema.String),
+    budgetMinutes: Schema.optional(PositiveInt),
+    profile: Schema.optional(GameRunProfile),
+    modelSelection: ModelSelection,
+    runtimeMode: RuntimeMode,
+  }),
+  /** Continues a run that ended resumably (budget, a provider or memory outage, a failure, a stop). */
+  Schema.Struct({
+    type: Schema.Literal("game-run.resume"),
+    ...GameRunCommandFields,
+    budgetMinutes: Schema.optional(PositiveInt),
+    profile: Schema.optional(GameRunProfile),
+    modelSelection: Schema.optional(ModelSelection),
+    runtimeMode: Schema.optional(RuntimeMode),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("game-run.stop"),
+    ...GameRunCommandFields,
+    reason: Schema.optional(Schema.String),
+  }),
+  /** A creator's note for the next round; on a finished run it buys one round. */
+  Schema.Struct({
+    type: Schema.Literal("game-run.steer"),
+    ...GameRunCommandFields,
+    note: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4000)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("game-run.profile.set"),
+    ...GameRunCommandFields,
+    profile: GameRunProfile,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("game-run.decide"),
+    ...GameRunCommandFields,
+    decisionId: TrimmedNonEmptyString,
+    answer: TrimmedNonEmptyString,
+    notes: Schema.optional(Schema.String.check(Schema.isMaxLength(20_000))),
+  }),
+  /** A role's typed result, checked against what its step asks for. */
+  Schema.Struct({
+    type: Schema.Literal("game-run.submit"),
+    ...GameRunCommandFields,
+    stepId: GameRunStepId,
+    roleThreadId: ThreadId,
+    submission: GameRunSubmission,
+  }),
+  /** A step's execution began: a role's thread exists, or a decision reached the creator's agent. */
+  Schema.Struct({
+    type: Schema.Literal("game-run.step.start"),
+    ...GameRunCommandFields,
+    stepId: GameRunStepId,
+    roleThreadId: Schema.optional(ThreadId),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("game-run.step.complete"),
+    ...GameRunCommandFields,
+    stepId: GameRunStepId,
+    /** The attempt that did the work; its command id is `gameRunStepCommandId(stepId, attempt, "complete")`. */
+    attempt: PositiveInt,
+    result: GameRunStepResult,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("game-run.step.fail"),
+    ...GameRunCommandFields,
+    stepId: GameRunStepId,
+    attempt: PositiveInt,
+    reason: Schema.String,
+  }),
+  /**
+   * The decision's deadline effect fired; the run takes the default if it is
+   * still due. Its command id derives from that effect's id, so each deadline
+   * gets its own receipt and one that fired early never refuses a later one.
+   */
+  Schema.Struct({
+    type: Schema.Literal("game-run.decision.expire"),
+    ...GameRunCommandFields,
+    decisionId: TrimmedNonEmptyString,
+  }),
+]);
+export type OrchestrationV2GameRunCommand = typeof OrchestrationV2GameRunCommand.Type;
+
+/**
  * Commands only the server dispatches. They stay out of
  * `OrchestrationV2Command`, the `dispatchCommand` payload, so no client can
  * send them.
@@ -3068,6 +3197,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     evidenceDirectory: Schema.NullOr(TrimmedNonEmptyString),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
+  ...OrchestrationV2GameRunCommand.members,
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;
 

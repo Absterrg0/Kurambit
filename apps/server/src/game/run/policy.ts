@@ -1,10 +1,23 @@
 // PURE. Every loop decision: stage order, the ladder, round structure, keep or revert,
 // stalls, the pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
-import type { GameBotDecider, ThreadId } from "@kurambit/contracts";
+import type {
+  GameBotDecider,
+  GameRunGitOutcome,
+  GameRunSubmission,
+  GameRunSubmissionKind,
+  ThreadId,
+} from "@kurambit/contracts";
 import { laneProfile } from "../engineProfile.ts";
 import * as Roles from "./roles.ts";
-import { BLANK, isStateCheck, parseLadder, parseRungChange } from "./state.ts";
-import type { CheckOutcome } from "./checkRunner.ts";
+import type * as State from "./state.ts";
+import {
+  BLANK,
+  isStateCheck,
+  ladderOf,
+  parseLadder,
+  parseRungChange,
+  rungOfChange,
+} from "./state.ts";
 import type {
   Block,
   BotFact,
@@ -80,56 +93,9 @@ const LADDER_MAX = 10;
 
 export type Inputs = { readonly now: number; readonly coin: number; readonly id: string };
 
-export type RoleDone = {
-  readonly kind: "done";
-  readonly threadId: ThreadId;
-  readonly text: string;
-  readonly files: Readonly<Record<string, string>>;
-  readonly evidence: Evidence | null;
-  readonly timedOut: boolean;
-  readonly budgetCut: boolean;
-  readonly elapsedMs: number;
-  readonly sourceBefore: string;
-  readonly sourceAfter: string;
-  readonly botsBefore: number;
-  readonly botsAfter: number;
-  /** The play bot this turn last ran and its decider, null when it ran none. */
-  readonly bot: { readonly file: string; readonly decider: GameBotDecider } | null;
-  /** The step's sheet when the runner drew one, else "". */
-  readonly sheet: string;
-};
-/** One shape for every git op; each op fills the fields it knows. */
-export type GitOutcome = {
-  readonly ok: boolean;
-  readonly sha: string;
-  readonly branch: string;
-  readonly changed: boolean;
-  readonly entered: boolean;
-  readonly lines: number;
-  readonly detail: string;
-  /** ff-merge: the merged tip is the same blind build as the op's `played` sha. */
-  readonly same: boolean;
-};
-export type StepResult =
-  | RoleDone
-  | {
-      readonly kind: "ended";
-      readonly ending: "usage-limit" | "provider-down" | "low-memory";
-      readonly reason: string;
-    }
-  | { readonly kind: "failed"; readonly reason: string }
-  | { readonly kind: "git"; readonly git: GitOutcome }
-  | { readonly kind: "boot"; readonly ok: boolean; readonly detail: string }
-  | { readonly kind: "facts"; readonly jev: boolean; readonly code: string }
-  | { readonly kind: "checks"; readonly results: ReadonlyArray<CheckOutcome> }
-  | { readonly kind: "bot"; readonly fact: Omit<BotFact, "side"> }
-  | { readonly kind: "note" }
-  | {
-      readonly kind: "decided";
-      readonly answer: string;
-      readonly notes: string;
-      readonly by: Decided["by"];
-    };
+export type RoleDone = State.RoleDone;
+export type GitOutcome = GameRunGitOutcome;
+export type StepResult = State.StepResult;
 
 export type Planned =
   | {
@@ -148,7 +114,25 @@ export type Applied = {
   readonly release: ReadonlyArray<ThreadId>;
 };
 
-// ── Declared lines. Code never interprets any other prose. ─────────────────
+// ── What a role hands the run. ─────────────────────────────────────────────
+type Submitted<K extends GameRunSubmissionKind> = Extract<GameRunSubmission, { readonly _tag: K }>;
+const isKind = <K extends GameRunSubmissionKind>(
+  submission: GameRunSubmission,
+  kind: K,
+): submission is Submitted<K> => submission._tag === kind;
+/** The typed submission a role turn made, when it is the kind its step asks for. */
+const submitted = <K extends GameRunSubmissionKind>(
+  res: StepResult,
+  kind: K,
+): Submitted<K> | null =>
+  res.kind === "done" && res.submission !== undefined && isKind(res.submission, kind)
+    ? res.submission
+    : null;
+// Later roles and the creator read these files, so a submission lands there too.
+const ladderJson = (rungs: Submitted<"ladder">["rungs"]) =>
+  `${JSON.stringify({ rungs }, null, 2)}\n`;
+
+// ── Declared lines: the old loop's prose. Code never interprets any other. ──
 const lastDeclared = (text: string, re: RegExp): string | null => {
   const found = [...text.matchAll(re)].at(-1);
   return found === undefined ? null : (found[1] ?? "").toUpperCase();
@@ -187,6 +171,14 @@ const parseChecks = (text: string, rung: Rung): Round["checks"] => {
     };
   });
 };
+// A tester's look-check results by their number in the rung; the run's own scoring covers state checks.
+const submittedChecksOf = (sub: Submitted<"checks">, rung: Rung): Round["checks"] =>
+  rung.checks.map((check, i) => {
+    const said = sub.checks.findLast((c) => c.check === i + 1);
+    return said === undefined
+      ? { what: check.what, pass: false, evidence: "the tester submitted no result for this check" }
+      : { what: check.what, pass: said.pass, evidence: said.evidence.slice(0, 400) };
+  });
 const reasonsAfter = (text: string, re: RegExp): string => {
   const lines = text.split("\n");
   const at = lines.findLastIndex((line) => re.test(line));
@@ -328,8 +320,18 @@ type Taken =
   | { readonly kind: "fix"; readonly thread: ThreadId; readonly error: string };
 
 // One fix turn for a ladder of the wrong shape; after it the run goes on without one.
-const takeLadder = (res: StepResult, last: boolean, logs: string[]): Taken => {
-  const parsed = parseLadder(res.kind === "done" ? (res.files[LADDER] ?? "") : "");
+const takeLadder = (
+  res: StepResult,
+  last: boolean,
+  logs: string[],
+  files: Array<{ path: string; text: string }>,
+): Taken => {
+  const sub = submitted(res, "ladder");
+  const parsed =
+    sub !== null
+      ? ladderOf(sub.rungs)
+      : parseLadder(res.kind === "done" ? (res.files?.[LADDER] ?? "") : "");
+  if ("ladder" in parsed && sub !== null) files.push({ path: LADDER, text: ladderJson(sub.rungs) });
   if ("ladder" in parsed) {
     logs.push(
       `ladder: ${parsed.ladder.rungs.length} rungs`,
@@ -399,17 +401,23 @@ const settleRung = (
 };
 
 // A reviewer's one ladder change goes in as the next rung; one open at a time.
-const insertRung = (ladder: Ladder, text: string, n: number, logs: string[]): Ladder => {
-  const parsed = parseRungChange(text, Math.max(0, ...ladder.rungs.map((x) => x.id)) + 1);
+// Why the ladder takes no reviewer's rung now, or null when it does.
+const insertionRefused = (ladder: Ladder): string | null =>
+  ladder.rungs.some((x) => x.from === "reviewer" && x.status === "todo")
+    ? "an earlier one is still open"
+    : ladder.rungs.length >= LADDER_MAX
+      ? `the ladder already has ${LADDER_MAX} rungs`
+      : null;
+
+const insertRung = (
+  ladder: Ladder,
+  change: (id: number) => ReturnType<typeof parseRungChange>,
+  n: number,
+  logs: string[],
+): Ladder => {
+  const parsed = change(Math.max(0, ...ladder.rungs.map((x) => x.id)) + 1);
   if (parsed === null) return ladder;
-  const refused =
-    "error" in parsed
-      ? `wrong shape (${parsed.error})`
-      : ladder.rungs.some((x) => x.from === "reviewer" && x.status === "todo")
-        ? "an earlier one is still open"
-        : ladder.rungs.length >= LADDER_MAX
-          ? `the ladder already has ${LADDER_MAX} rungs`
-          : null;
+  const refused = "error" in parsed ? `wrong shape (${parsed.error})` : insertionRefused(ladder);
   if (refused !== null || "error" in parsed) {
     logs.push(`round ${n}: the reviewer's ladder change was not taken: ${refused}`);
     return ladder;
@@ -420,6 +428,19 @@ const insertRung = (ladder: Ladder, text: string, n: number, logs: string[]): La
     ...ladder,
     rungs: at < 0 ? [...ladder.rungs, parsed.rung] : ladder.rungs.toSpliced(at, 0, parsed.rung),
   };
+};
+
+/** Why the run would not take a reviewer's ladder change now, or null when it would. */
+export const rungChangeRefused = (
+  state: RunState,
+  change: Parameters<typeof rungOfChange>[0],
+): string | null => {
+  const t = state.task;
+  if (t._tag !== "round" || t.rung === null || state.ladder === null)
+    return "this round builds no rung, so it takes no ladder change";
+  const rung = rungOfChange(change, 0);
+  if ("error" in rung) return `the rung has the wrong shape (${rung.error})`;
+  return insertionRefused(state.ladder);
 };
 
 // ── Creator decisions (Guided). ───────────────────────────────────────────
@@ -698,9 +719,10 @@ const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
 const bit = (coin: number, k: number) => Math.floor(coin * 2 ** (k + 1)) % 2 === 1;
 
 const textOf = (res: RoleDone, file: string): string => {
-  const written = (res.files[file] ?? "").trim();
+  const written = (res.files?.[file] ?? "").trim();
   if (written.length > 20) return written;
-  return res.text.trim().length > 20 ? res.text.trim() : written;
+  const text = (res.text ?? "").trim();
+  return text.length > 20 ? text : written;
 };
 
 const newBlock = (tag: string, direction: string, whole: boolean, msLeft: number): Block => ({
@@ -1165,7 +1187,7 @@ const applyCompare = (
             : {
                 ...s,
                 phase: "done",
-                notes: textOf(res, sampleFile(s)),
+                notes: submitted(res, "report")?.report ?? textOf(res, sampleFile(s)),
                 evidence: res.evidence ?? s.evidence,
                 sheet: res.sheet,
               };
@@ -1181,8 +1203,9 @@ const applyCompare = (
     logs.push(`comparator ${j.id} could not finish`);
     return { ...c, judges: c.judges.with(ji, { ...j, phase: "done" }) };
   }
-  const text = textOf(res, VERDICT);
-  const verdict = parseCompare(text);
+  const sub = submitted(res, "verdict");
+  const text = sub !== null ? sub.reasons : textOf(res, VERDICT);
+  const verdict = sub?.verdict ?? parseCompare(text);
   const next: Judge =
     verdict === null && j.phase === "compare"
       ? { ...j, thread: res.threadId, phase: "correct", notes: text }
@@ -1191,7 +1214,10 @@ const applyCompare = (
           thread: res.threadId,
           phase: "done",
           verdict: verdict ?? "NONE",
-          reason: reasonsAfter(text, /^COMPARE:\s*(A|B|TIE)\s*$/i),
+          reason:
+            sub !== null
+              ? sub.reasons.replace(/\s+/g, " ").trim().slice(0, 500)
+              : reasonsAfter(text, /^COMPARE:\s*(A|B|TIE)\s*$/i),
           notes: text,
         };
   if (next.phase === "done") release.push(res.threadId);
@@ -1397,6 +1423,62 @@ const roundDirection = (state: RunState) => {
   const direction = state.steer.length === 0 ? base : Roles.steered(state.steer, base);
   return { direction, repeating };
 };
+
+/**
+ * What a planned role turn hands the run: nothing, or one submission kind; a
+ * tester scores the rung's look checks, by their number in the rung.
+ */
+export type Asked =
+  | { readonly kind: null }
+  | { readonly kind: Exclude<GameRunSubmissionKind, "checks"> }
+  | { readonly kind: "checks"; readonly look: ReadonlyArray<number> };
+
+export const asked = (state: RunState, step: RoleStep): Asked => {
+  const t = state.task;
+  const none = { kind: null } as const;
+  const inCompare = (c: Compare): Asked => {
+    if (step.role.startsWith("compare-")) return { kind: "verdict" };
+    const sample = c.samples.find((x) => step.role === `sample-${x.label}`);
+    return sample?.phase === "write" ? { kind: "report" } : none;
+  };
+  switch (t._tag) {
+    case "stage":
+      if (t.phase === "review") return { kind: "art" };
+      return t.name === "plan" && ["role", "redo", "revise"].includes(t.phase)
+        ? { kind: "ladder" }
+        : none;
+    case "ladder":
+      return { kind: "ladder" };
+    case "ship":
+      return t.phase === "write" ? { kind: "ship" } : none;
+    case "pick":
+      return t.phase === "select" ? { kind: "select" } : inCompare(t.cmp);
+    case "round": {
+      if (t.phase === "tester-write" || t.phase === "tester-duty") {
+        const rung = rungOf(state, t);
+        return {
+          kind: "checks",
+          look: (rung?.checks ?? []).flatMap((c, k) => (isStateCheck(c) ? [] : [k + 1])),
+        };
+      }
+      if (t.phase === "review-write") return { kind: "ledger" };
+      return t.phase === "compare" && t.cmp !== null ? inCompare(t.cmp) : none;
+    }
+    case "init":
+    case "proto":
+    case "leave":
+    case "decide":
+      return none;
+  }
+};
+
+/** A finished run comes back for a creator's note: one round on it, then it ends again. */
+export const reopen = (state: RunState, now: number): RunState => ({
+  ...state,
+  ending: null,
+  inFlight: null,
+  task: newRound(state, now),
+});
 
 export const plan = (state: RunState, input: Inputs): Planned => {
   if (state.inFlight !== null) return { kind: "step", state, step: state.inFlight };
@@ -1818,21 +1900,31 @@ export const applyResult = (
   switch (t._tag) {
     case "init":
       return out(afterStage({ ...s, trunk: g!.branch, best: g!.sha }, s.stage, now));
-    case "decide":
-      return out(
-        decide(
-          s,
-          t.decision,
-          res.kind === "decided" ? { answer: res.answer, notes: res.notes, by: res.by } : null,
-          input,
-          logs,
-        ),
+    case "decide": {
+      const next = decide(
+        s,
+        t.decision,
+        res.kind === "decided" ? { answer: res.answer, notes: res.notes, by: res.by } : null,
+        input,
+        logs,
       );
+      // The run holds an edited ladder; the file is what the creator and every role read.
+      const taken = next.decided.at(-1);
+      if (t.decision.kind === "ladder" && taken?.answer === "edit")
+        files.push({ path: LADDER, text: taken.notes });
+      return out(next);
+    }
     case "stage": {
       const artFits = (cap: number) => fit(s, now, cap, BUILD_RESERVE_MS + FLOOR_MS) >= FLOOR_MS;
       // The creator's rewrite keeps the old ladder when the new one has the wrong shape.
       if (t.name === "plan" && t.phase === "revise") {
-        const parsed = parseLadder(res.kind === "done" ? (res.files[LADDER] ?? "") : "");
+        const sub = submitted(res, "ladder");
+        const parsed =
+          sub !== null
+            ? ladderOf(sub.rungs)
+            : parseLadder(res.kind === "done" ? (res.files?.[LADDER] ?? "") : "");
+        if ("ladder" in parsed && sub !== null)
+          files.push({ path: LADDER, text: ladderJson(sub.rungs) });
         if ("ladder" in parsed) logs.push(`ladder rewritten: ${parsed.ladder.rungs.length} rungs`);
         else
           logs.push(`ladder rewrite not taken (${parsed.error.slice(0, 200)}); keeping the ladder`);
@@ -1844,7 +1936,7 @@ export const applyResult = (
       }
       if (t.phase === "revise") return out({ ...s, task: { ...t, phase: "commit" } });
       if (t.name === "plan" && (t.phase === "role" || t.phase === "redo")) {
-        const taken = takeLadder(res, t.phase === "redo", logs);
+        const taken = takeLadder(res, t.phase === "redo", logs, files);
         if (taken.kind === "fix")
           return out({
             ...s,
@@ -1859,8 +1951,10 @@ export const applyResult = (
         return out({ ...s, task: { ...t, phase: "commit", thread: res.threadId } });
       }
       if (t.phase === "review") {
-        const text = res.kind === "done" ? textOf(res, ART_REVIEW) : "";
-        const verdict = parseArt(text);
+        const art = submitted(res, "art");
+        const text =
+          art !== null ? art.defects : res.kind === "done" ? textOf(res, ART_REVIEW) : "";
+        const verdict = art !== null ? (art.redo ? "REDO" : "KEEP") : parseArt(text);
         if (verdict === null)
           logs.push(
             `art review declared no ART: KEEP or ART: REDO${res.kind === "failed" ? ` (${res.reason})` : ""}; keeping the art`,
@@ -1871,7 +1965,7 @@ export const applyResult = (
           return out({ ...s, task: { ...t, phase: "commit" } });
         }
         logs.push("art review: REDO; one redo turn with its defect list");
-        const defects = text.replace(ART_LINE, "").trim().slice(0, 3000);
+        const defects = (art !== null ? text : text.replace(ART_LINE, "")).trim().slice(0, 3000);
         return out({ ...s, task: { ...t, phase: "redo", review: defects } });
       }
       if (t.phase === "redo") return out({ ...s, task: { ...t, phase: "commit" } });
@@ -1952,13 +2046,18 @@ export const applyResult = (
       }
       if (t.phase === "select") {
         if (res.kind === "done") release.push(res.threadId);
-        const text = res.kind === "done" ? res.text : "";
-        const chosen = parseSelect(text);
+        const select = submitted(res, "select");
+        const text = select !== null ? select.reasons : res.kind === "done" ? (res.text ?? "") : "";
+        const chosen = select?.pick ?? parseSelect(text);
         if (chosen === null) {
           logs.push("pick tie unresolved: building from trunk with the tie recorded");
           return out(afterStage({ ...s, pickNotes: t.notes }, "pick", now));
         }
-        const notes = `${pickLegend(chosen)}\n${t.notes}\nSELECT: ${chosen} (continuation choice on tied comparison; no demonstrated preference)\n${reasonsAfter(text, /^SELECT:\s*(A|B)\s*$/i)}`;
+        const reasons =
+          select !== null
+            ? select.reasons.replace(/\s+/g, " ").trim().slice(0, 500)
+            : reasonsAfter(text, /^SELECT:\s*(A|B)\s*$/i);
+        const notes = `${pickLegend(chosen)}\n${t.notes}\nSELECT: ${chosen} (continuation choice on tied comparison; no demonstrated preference)\n${reasons}`;
         return out({
           ...s,
           pickNotes: notes,
@@ -1999,15 +2098,20 @@ export const applyResult = (
     case "ship": {
       if (t.phase === "play" && res.kind === "done")
         return out({ ...s, task: { ...t, phase: "write", thread: res.threadId } });
-      const text = res.kind === "done" ? textOf(res, ".studio/ship.md") : "";
+      const ship = submitted(res, "ship");
+      const text =
+        ship !== null ? ship.reasons : res.kind === "done" ? textOf(res, ".studio/ship.md") : "";
+      const yes = ship !== null ? ship.ship : parseShip(text) === "YES";
       // A creator note that arrived during the ship review still gets its round.
-      if (parseShip(text) === "YES" && s.steer.length === 0) return out({ ...s, ending: "ready" });
+      if (yes && s.steer.length === 0) return out({ ...s, ending: "ready" });
       const reasons =
-        text
-          .split(/SHIP:\s*(?:YES|NO)/i)
-          .pop()
-          ?.trim()
-          .slice(0, 500) ?? "";
+        ship !== null
+          ? ship.reasons.trim().slice(0, 500)
+          : (text
+              .split(/SHIP:\s*(?:YES|NO)/i)
+              .pop()
+              ?.trim()
+              .slice(0, 500) ?? "");
       // The run's goal was the ladder: it ends here with the review's reasons, and
       // polish runs only when the creator asks (a note sent during the review does).
       return out({
@@ -2018,7 +2122,7 @@ export const applyResult = (
       });
     }
     case "ladder": {
-      const taken = takeLadder(res, t.phase === "fix", logs);
+      const taken = takeLadder(res, t.phase === "fix", logs, files);
       if (taken.kind === "fix")
         return out({
           ...s,
@@ -2246,15 +2350,32 @@ const applyRound = (
     case "tester-write":
     case "tester-duty": {
       const bot = testedBot(res, r);
-      const notes = res.kind === "done" ? textOf(res, `.studio/tester-${r.n}.md`) : "";
+      const rung = rungOf(s, r);
+      const sub = submitted(res, "checks");
+      const notes =
+        sub !== null
+          ? sub.notes.trim()
+          : res.kind === "done"
+            ? textOf(res, `.studio/tester-${r.n}.md`)
+            : "";
       const testerNotes = notes.length > 20 ? notes : r.testerNotes;
+      if (sub !== null && notes.length > 20)
+        files.push({ path: `.studio/tester-${r.n}.md`, text: `${notes}\n` });
+      // A submission's checks are held over a follow-up turn that submits none.
+      const submittedChecks =
+        rung === null ? [] : sub !== null ? submittedChecksOf(sub, rung) : r.checks;
       if (r.phase === "tester-write" && res.kind === "done" && res.botsAfter <= r.botsBefore) {
         logs.push(`round ${r.n}: tester ran no bot; one follow-up turn asks for it`);
-        return at({ phase: "tester-duty", testerNotes, ...bot });
+        return at({
+          phase: "tester-duty",
+          testerNotes,
+          ...bot,
+          ...(sub === null ? {} : { checks: submittedChecks }),
+        });
       }
       const testerNote = testerNotes.split("\n").slice(0, 20).join("\n").slice(0, 600);
-      const note = testerNotes.length > 20 ? r.record.note : noteOf(r, "tester write failed");
-      const rung = rungOf(s, r);
+      const wrote = sub !== null || testerNotes.length > 20;
+      const note = wrote ? r.record.note : noteOf(r, "tester write failed");
       // A check passes only on what was played: a tester with no explore input
       // and no bot run on record cannot have seen it, whatever it declares.
       const played =
@@ -2263,7 +2384,13 @@ const applyRound = (
         r.bot !== null;
       // State checks were scored by the harness; the tester's lines count for look checks only.
       const isState = (k: number) => rung?.checks[k]?.kind === "state";
-      const declared = (rung === null ? [] : parseChecks(testerNotes, rung)).map((check, k) => {
+      const said =
+        rung === null
+          ? []
+          : submittedChecks.length > 0
+            ? submittedChecks
+            : parseChecks(testerNotes, rung);
+      const declared = said.map((check, k) => {
         const scored = r.stateChecks.find((x) => x.k === k);
         return isState(k)
           ? {
@@ -2431,10 +2558,11 @@ const applyRound = (
         : at({ phase: "review", facts });
     }
     case "review":
-      if (res.kind === "done" && res.budgetCut) return finishRound(s, r, null, "budget", now, logs);
+      if (res.kind === "done" && res.budgetCut)
+        return finishRound(s, r, null, "budget", now, logs, files);
       return res.kind === "done"
         ? at({ phase: "review-write", thread: res.threadId })
-        : finishRound(s, r, null, null, now, logs);
+        : finishRound(s, r, null, null, now, logs, files);
     case "review-write":
       return finishRound(
         s,
@@ -2443,6 +2571,7 @@ const applyRound = (
         res.kind === "done" && res.budgetCut ? "budget" : null,
         now,
         logs,
+        files,
       );
   }
 };
@@ -2551,9 +2680,18 @@ const finishRound = (
   ending: string | null,
   now: number,
   logs: string[],
+  files: Array<{ path: string; text: string }>,
 ): RunState => {
-  const reviewerNotes = res === null ? "" : textOf(res, `.studio/reviewer-${r.n}.md`);
-  const next = res === null ? "" : (res.files[".studio/next.md"] ?? "").trim().slice(0, 4000);
+  const ledger = res === null ? null : submitted(res, "ledger");
+  const reviewerNotes =
+    ledger !== null ? ledger.ledger : res === null ? "" : textOf(res, `.studio/reviewer-${r.n}.md`);
+  const next = (
+    ledger !== null ? ledger.ledger : res === null ? "" : (res.files?.[".studio/next.md"] ?? "")
+  )
+    .trim()
+    .slice(0, 4000);
+  if (ledger !== null && next.length > 0)
+    files.push({ path: ".studio/next.md", text: `${next}\n` });
   let note = r.record.note ?? "";
   if (reviewerNotes.length <= 20) note = `${note} reviewer write failed`.trim();
   if (next.length === 0) note = `${note} reviewer wrote no next.md`.trim();
@@ -2564,7 +2702,12 @@ const finishRound = (
     logs,
   );
   const ladder = settled.state.ladder;
-  const change = res === null ? "" : (res.files[RUNG_CHANGE] ?? "");
+  const change = (id: number) =>
+    ledger !== null
+      ? ledger.rungChange === undefined
+        ? null
+        : rungOfChange(ledger.rungChange, id)
+      : parseRungChange(res === null ? "" : (res.files?.[RUNG_CHANGE] ?? ""), id);
   const state: RunState = {
     ...settled.state,
     ladder: r.rung === null || ladder === null ? ladder : insertRung(ladder, change, r.n, logs),

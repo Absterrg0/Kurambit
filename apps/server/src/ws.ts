@@ -99,6 +99,8 @@ import {
   type TerminalMetadataStreamEvent,
   WS_METHODS,
   WsRpcGroup,
+  GAME_RUN_EVENT_TYPES,
+  isGameRunEventType,
 } from "@kurambit/contracts";
 import { resolveServerBackgroundActivitySettings } from "@kurambit/shared/backgroundActivitySettings";
 import {
@@ -772,6 +774,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
           afterSequence,
         })
         .pipe(
+          Stream.filter((stored) => !isGameRunEventType(stored.event.type)),
           Stream.map((stored) => ({
             kind: "event" as const,
             sequence: stored.sequence,
@@ -795,6 +798,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
           afterSequence,
           throughSequence,
           limit: THREAD_RESUME_MAX_REPLAY_EVENTS + 1,
+          excludeEventTypes: GAME_RUN_EVENT_TYPES,
           // A row a newer build wrote (e.g. after a downgrade) must not fail
           // every resubscribe. The live tail resumes from `highWater`, so a
           // dropped row never hides later events.
@@ -882,6 +886,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
           afterSequence: input.afterSequence,
           throughSequence: highWater,
           maxEvents: THREAD_RESUME_MAX_REPLAY_EVENTS,
+          excludeEventTypes: GAME_RUN_EVENT_TYPES,
         })
         .pipe(
           Effect.mapError(

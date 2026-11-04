@@ -71,6 +71,7 @@ export * from "./gameExplore.ts";
 export * from "./gamePlaySession.ts";
 export * from "./gameBot.ts";
 export * from "./gameRun.ts";
+export * from "./gameRunRecords.ts";
 export * from "./gameBlender.ts";
 export * from "./gameLibrary.ts";
 export * from "./gameUnity.ts";

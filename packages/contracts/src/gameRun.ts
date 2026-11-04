@@ -485,6 +485,11 @@ export const GameRunSubmission = Schema.Union([
   Schema.TaggedStruct("report", {
     report: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(8000)),
   }),
+  /** An art director's verdict on the art stage: keep it, or one redo against these defects. */
+  Schema.TaggedStruct("art", {
+    redo: Schema.Boolean,
+    defects: Schema.String.check(Schema.isMaxLength(4000)),
+  }),
 ]);
 export type GameRunSubmission = typeof GameRunSubmission.Type;
 export type GameRunSubmissionKind = GameRunSubmission["_tag"];
@@ -496,6 +501,7 @@ export const GameRunSubmissionKind = Schema.Literals([
   "ship",
   "ledger",
   "report",
+  "art",
 ]);
 
 export const GameRunSubmitInput = Schema.Struct({ submission: GameRunSubmission });
