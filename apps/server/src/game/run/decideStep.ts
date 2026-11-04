@@ -76,11 +76,13 @@ export const decideStep = (
 
   // The user can answer only once the agent has finished presenting: its turn
   // reading the decision and building the visual takes a minute or two, so the
-  // wait counts from that turn's end, not its start.
+  // wait counts from that turn's end, not its start. A run not yet visible (or a
+  // failed read) is not delivered: counting it so started the clock before the
+  // agent had even begun. DECISION_DELIVERY_MS bounds this wait.
   const delivered = deps.threads.getThreadRecords(ctx.creator, ["runs"]).pipe(
     Effect.map(({ runs }) => runs.find((run) => run.userMessageId === messageId)),
-    Effect.map((run) => run === undefined || (run.status !== "queued" && run.status !== "running")),
-    Effect.orElseSucceed(() => true),
+    Effect.map((run) => run !== undefined && run.status !== "queued" && run.status !== "running"),
+    Effect.orElseSucceed(() => false),
   );
 
   const wait = Effect.gen(function* () {
