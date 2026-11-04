@@ -147,9 +147,16 @@ const parseSelect = (text: string) => lastDeclared(text, /^SELECT:\s*(A|B)\s*$/g
 const ART_LINE = /^ART:\s*(KEEP|REDO)\s*$/gim;
 const parseArt = (text: string) => lastDeclared(text, ART_LINE);
 // The tester's line per check; the last one for a check wins, a missing one fails.
-const CHECK_LINE = /^CHECK\s+(\d+):\s*(PASS|FAIL)\s*$/i;
+// Notes are Markdown, so bold, bullets, headings and words after the verdict
+// are formatting, not a different answer.
+const CHECK_LINE = /^CHECK\s+(\d+)\s*[:\-–—]\s*(PASS|FAIL)\b/i;
+const checkText = (line: string) =>
+  line
+    .replace(/[*_`]/g, "")
+    .replace(/^[\s>#\-+•]*(?:\d+[.)]\s*)?/, "")
+    .trim();
 const parseChecks = (text: string, rung: Rung): Round["checks"] => {
-  const lines = text.split("\n").map((line) => line.trim());
+  const lines = text.split("\n").map(checkText);
   return rung.checks.map((check, i) => {
     const at = lines.findLastIndex((line) => CHECK_LINE.exec(line)?.[1] === `${i + 1}`);
     if (at < 0)
@@ -1673,6 +1680,17 @@ const applyRound = (
           candidate: g!.sha,
           record: { ...r.record, linesChanged: g!.lines },
         });
+      // The rung may already stand (the first build aims at rung 1): with nothing
+      // to change, the tester verifies it on the current build instead of the
+      // round stalling; there is nothing to judge, so its checks decide.
+      if (r.rung !== null && r.phase === "commit") {
+        logs.push(`round ${r.n}: no game-code change; verifying the rung on the current build`);
+        return at({
+          phase: "boot",
+          candidate: s.best,
+          record: { ...r.record, note: noteOf(r, "no change; rung verified on the current build") },
+        });
+      }
       // One short replace attempt with a concrete prompt before calling it stalled.
       const ms = fit(s, now, CAP.retry, 5 * MIN);
       if (r.phase === "commit" && ms >= FLOOR_MS)
@@ -1745,7 +1763,28 @@ const applyRound = (
       const testerNote = testerNotes.split("\n").slice(0, 20).join("\n").slice(0, 600);
       const note = testerNotes.length > 20 ? r.record.note : noteOf(r, "tester write failed");
       const rung = rungOf(s, r);
-      const checks = rung === null ? [] : parseChecks(testerNotes, rung);
+      // A check passes only on what was played: a tester with no explore input
+      // and no bot run on record cannot have seen it, whatever it declares.
+      const played =
+        (res.kind === "done" && (res.evidence?.executedInputSteps ?? 0) > 0) ||
+        (res.kind === "done" && res.botsAfter > r.botsBefore) ||
+        r.bot !== null;
+      const declared = rung === null ? [] : parseChecks(testerNotes, rung);
+      const checks = played
+        ? declared
+        : declared.map((check) => ({
+            ...check,
+            pass: false,
+            evidence:
+              `no play on record for the tester (no explore input, no bot run); ${check.evidence}`.slice(
+                0,
+                400,
+              ),
+          }));
+      if (rung !== null && !played && declared.some((check) => check.pass))
+        logs.push(
+          `round ${r.n}: the tester declared passes without any play on record; not counted`,
+        );
       if (rung !== null) logs.push(`round ${r.n}: the tester's checks: ${checkLine(checks)}`);
       return at({
         phase: "restore",
@@ -1770,6 +1809,19 @@ const applyRound = (
             outcome: "drop",
             reviewed: `the current best (this round's rung failed its checks; its candidate stays on branch ${r.branch} unmerged)`,
             record: { ...r.record, note: noteOf(r, `${why}; not judged`) },
+          },
+        };
+      }
+      // An unchanged build is the best itself: its passing checks land the rung.
+      if (rung !== null && r.candidate === s.best) {
+        logs.push(`round ${r.n}: the current build already passes the rung's checks; landed`);
+        return {
+          ...s,
+          task: {
+            ...r,
+            phase: "outcome",
+            outcome: "merge",
+            record: { ...r.record, note: noteOf(r, "rung already met by the current build") },
           },
         };
       }
@@ -1903,7 +1955,12 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
   if (kind === "candidate-wins") return { ...s, task: round({ outcome: "merge" }, {}) };
   // Here a ladder round's checks passed: they carry the signal, and judging only
   // blocks a build the old one clearly beats.
-  if (r.rung !== null && kind !== "best-wins") {
+  // A missing verdict is no evidence of "no regression" when the other one
+  // prefers the best, or when the evidence gate stopped judging (a blind player
+  // got no input into a build).
+  const favoursBest = verdicts[0]!.verdict === "B" || verdicts[1]!.verdict === "A";
+  const blindGate = kind === "unjudged" && (gate !== null || favoursBest);
+  if (r.rung !== null && kind !== "best-wins" && !blindGate) {
     const gate =
       kind === "unjudged"
         ? "judging gave no verdict"
