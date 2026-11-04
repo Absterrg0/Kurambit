@@ -60,6 +60,7 @@ describe("gameTemplateAppearance", () => {
     expect(gameTemplateAppearance("blank").label).toBe("Godot");
     expect(gameTemplateAppearance(null).label).toBe("Godot");
     expect(gameTemplateAppearance("blank-three").label).toBe("three.js");
+    expect(gameTemplateAppearance("blank-unity").label).toBe("Unity");
   });
 });
 

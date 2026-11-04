@@ -9,7 +9,7 @@ export interface GameTemplateAppearance {
 export const gameTemplateAppearance = (
   template: GameSummary["template"],
 ): GameTemplateAppearance => ({
-  label: template === "blank-three" ? "three.js" : "Godot",
+  label: template === "blank-three" ? "three.js" : template === "blank-unity" ? "Unity" : "Godot",
   initialClassName: "bg-foreground/8 text-foreground/80",
   coverClassName: "from-foreground/10 via-foreground/5 to-transparent",
 });
