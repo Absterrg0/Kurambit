@@ -1,5 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This helper reads the game's source tree on the native filesystem.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
@@ -77,6 +76,35 @@ const hashFileContent = async (
     await handle.close().catch(() => undefined);
   }
   return { size, sha256: hash.digest("hex") };
+};
+
+const MAX_DERIVED_ASSET_BYTES = 1 << 20;
+
+/**
+ * URP keeps a list of the settings a player needs in `m_RuntimeSettings`. A
+ * player build fills it from the rest of the file and an editor save empties
+ * it again, so it flips on every warm-up and build without any source edit.
+ * The build recomputes it either way: it is output kept inside an input file,
+ * and the identity leaves it out.
+ */
+const RUNTIME_SETTINGS =
+  /^( *)m_RuntimeSettings:\r?\n\1 {2}m_List:(?: \[\])?\r?\n(?:\1 {2}- rid: -?\d+\r?\n)*/m;
+
+const hashUnityAsset = async (
+  absolute: string,
+): Promise<{ readonly size: number; readonly sha256: string }> => {
+  const handle = await NodeFSP.open(absolute, READ_FLAGS);
+  let bytes: Buffer;
+  try {
+    bytes = await handle.readFile();
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+  const text = bytes.toString("latin1");
+  const kept = RUNTIME_SETTINGS.test(text)
+    ? Buffer.from(text.replace(RUNTIME_SETTINGS, "$1m_RuntimeSettings: derived\n"), "latin1")
+    : bytes;
+  return { size: kept.length, sha256: NodeCrypto.createHash("sha256").update(kept).digest("hex") };
 };
 
 /**
@@ -163,7 +191,10 @@ export const snapshotBuildSource = async (
           continue;
         let hashed: { readonly size: number; readonly sha256: string };
         try {
-          hashed = await hashFileContent(absolute, signal);
+          hashed =
+            unityProject && name.endsWith(".asset") && entry.size <= MAX_DERIVED_ASSET_BYTES
+              ? await hashUnityAsset(absolute)
+              : await hashFileContent(absolute, signal);
         } catch (cause) {
           if (signal?.aborted) signal.throwIfAborted();
           // A link swapped in between lstat and open fails on O_NOFOLLOW: that
@@ -197,58 +228,6 @@ export const changedFiles = (
     if (after.files.get(path) !== content) changed.add(path);
   for (const path of after.files.keys()) if (!before.files.has(path)) changed.add(path);
   return [...changed].sort();
-};
-
-const gitEnv = () =>
-  Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
-
-const gitOut = (root: string, args: ReadonlyArray<string>): Promise<Buffer | null> =>
-  new Promise((resolve) => {
-    NodeChildProcess.execFile(
-      "git",
-      [...args],
-      { cwd: root, env: gitEnv(), timeout: 30_000, maxBuffer: 64 << 20, encoding: "buffer" },
-      (error, stdout) => resolve(error === null ? stdout : null),
-    );
-  });
-
-/** The game repository's HEAD commit, or null when it has none or git fails. */
-export const headCommit = async (root: string): Promise<string | null> => {
-  const out = await gitOut(root, ["rev-parse", "--verify", "-q", "HEAD"]);
-  const head = out?.toString("utf8").trim() ?? "";
-  return /^[0-9a-f]{40,64}$/.test(head) ? head : null;
-};
-
-/**
- * The one change a Unity build may make and still have built its sources: the
- * first build after a fresh import has URP re-save its pipeline `.asset`
- * files, putting back the committed bytes the import had rewritten. True only
- * when HEAD did not move during the build, and every changed path (relative to
- * `engineDir`) is a Unity `.asset` file present before and after, whose bytes
- * differed from HEAD's before the build and equal HEAD's after it. An edit, a
- * new or deleted file, a commit, a revert of anything else, or any git failure
- * answers false.
- */
-export const restoredToCommit = async (
-  root: string,
-  engineDir: string,
-  before: Extract<SourceSnapshot, { kind: "known" }>,
-  after: Extract<SourceSnapshot, { kind: "known" }>,
-  headBefore: string | null,
-): Promise<boolean> => {
-  const changed = changedFiles(before, after);
-  if (changed.length === 0) return true;
-  if (headBefore === null || (await headCommit(root)) !== headBefore) return false;
-  for (const path of changed) {
-    const was = before.files.get(path);
-    const now = after.files.get(path);
-    if (was === undefined || now === undefined || !path.endsWith(".asset")) return false;
-    const blob = await gitOut(root, ["cat-file", "blob", `${headBefore}:${engineDir}/${path}`]);
-    if (blob === null) return false;
-    const committed = `${blob.length}:${NodeCrypto.createHash("sha256").update(blob).digest("hex")}`;
-    if (now !== committed || was === committed) return false;
-  }
-  return true;
 };
 
 export type SourceComparison =

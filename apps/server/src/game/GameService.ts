@@ -112,12 +112,7 @@ import {
   hashWebBuild,
   hashWebBuildDirectory,
 } from "./webBuild.ts";
-import {
-  comparedSource,
-  headCommit,
-  restoredToCommit,
-  snapshotBuildSource,
-} from "./sourceSnapshot.ts";
+import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
 import * as GameOperations from "./GameOperations.ts";
 import { userDirConfigIssues } from "./gameNativeUserDir.ts";
 import { mergeCheckIssues, limitIssues } from "./godotCheckOutput.ts";
@@ -833,7 +828,6 @@ const make = Effect.gen(function* () {
     );
     return yield* Effect.gen(function* () {
       const before = yield* snapshot(root, godotProject);
-      const headBefore = yield* Effect.promise(() => headCommit(root));
       // An interrupted build leaves its staging folder; only this build's own name prefix is cleared.
       yield* Effect.promise(async () => {
         const parent = NodePath.dirname(destination);
@@ -888,18 +882,7 @@ const make = Effect.gen(function* () {
           sourceId: null,
         };
       const after = yield* snapshot(root, godotProject);
-      let comparison = comparedSource(before, after, "export");
-      // URP's re-save of its pipeline assets is the one mid-build change that
-      // still built these sources (restoredToCommit says exactly when).
-      if (
-        comparison.kind === "changed" &&
-        before.kind === "known" &&
-        after.kind === "known" &&
-        (yield* Effect.promise(() =>
-          restoredToCommit(root, godotProject, before, after, headBefore),
-        ))
-      )
-        comparison = { kind: "current", sourceId: after.sourceId };
+      const comparison = comparedSource(before, after, "export");
       if (comparison.kind !== "current")
         return {
           result: { ...result, success: false, message: comparison.detail },
