@@ -510,6 +510,7 @@ const PICK_HOW: Record<GameRunPickHow, string> = {
   won: "won",
   selected: "selected after a tie",
   "only-booted": "adopted, the only one that booted",
+  creator: "picked by you",
 };
 
 const PICK_PHASE: Record<GameRunPickRef["phase"], string> = {
