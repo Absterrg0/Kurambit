@@ -52,6 +52,7 @@ import {
   type PlaySession,
 } from "./playSession.ts";
 import { openWebPlaySession } from "./webPlaySession.ts";
+import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
 import { requireChromium } from "./gameChromium.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 import { snapshotBuildSource } from "./sourceSnapshot.ts";
@@ -528,6 +529,7 @@ const make = Effect.gen(function* () {
     readonly viewport: GameViewport;
     readonly id: string;
     readonly traceDir: string;
+    readonly saves: string | null;
     readonly bootTimeoutMs: number;
     readonly what: string;
   }) =>
@@ -570,6 +572,7 @@ const make = Effect.gen(function* () {
           requestPath,
           scriptDir,
           traceDir: input.traceDir,
+          saves: input.saves,
           viewport: input.viewport,
           display: xvfb !== null,
         });
@@ -611,9 +614,22 @@ const make = Effect.gen(function* () {
         });
         // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
         const bootMs = Date.now() - bootWallStart;
+        // A kept session's game gets its quit and a few seconds to finish
+        // writing its saves before anything left is stopped.
+        const exited = Effect.gen(function* () {
+          const deadline = (yield* Clock.currentTimeMillis) + 5_000;
+          while (
+            processes.list(root).some((entry) => entry.pid === launched.pid) &&
+            (yield* Clock.currentTimeMillis) < deadline
+          )
+            yield* Effect.sleep(Duration.millis(100));
+        });
         return {
           play,
-          release: processes.stop(root).pipe(Effect.ignore),
+          release: (input.saves === null ? Effect.void : exited).pipe(
+            Effect.andThen(processes.stop(root)),
+            Effect.ignore,
+          ),
           scratch: spec.scratch,
           pictures: xvfb !== null,
           bootMs,
@@ -638,6 +654,8 @@ const make = Effect.gen(function* () {
       readonly opening: string;
       /** What the session plays: the sources themselves or a player built from them. */
       readonly plays: string;
+      /** The kept save location, or null when the session started with no saved data. */
+      readonly saves: string | null;
     },
   ) =>
     Effect.gen(function* () {
@@ -690,6 +708,10 @@ const make = Effect.gen(function* () {
       const noPicture = opened.pictures
         ? ""
         : "Runs headless without a picture (xvfb-run was not found on PATH): state, text, ui and errors stay available. ";
+      const savesNote =
+        input.saves === null
+          ? ""
+          : `Saved data is kept in ${NodePath.relative(root, input.saves)}/: what this session saves, the next kept session reads. `;
       return {
         sessionId: input.id,
         buildId: input.sourceId,
@@ -700,7 +722,7 @@ const make = Effect.gen(function* () {
         message:
           `${input.opening} exploration session ${input.id.slice(0, 8)} opened on ${input.plays} ${input.sourceId.slice(0, 12)} ` +
           `at ${input.viewport.width}x${input.viewport.height} (${held ? "paused between calls" : "real time: the game keeps running between calls"}). ` +
-          `${opened.inputNote}${exploreBudget} Act with input steps${play.capabilities.has("ui") ? " plus ui and inspect steps" : ""}, then game_explore_close. ` +
+          `${savesNote}${opened.inputNote}${exploreBudget} Act with input steps${play.capabilities.has("ui") ? " plus ui and inspect steps" : ""}, then game_explore_close. ` +
           `${noPicture}This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
@@ -717,8 +739,14 @@ const make = Effect.gen(function* () {
     input: typeof GameExploreStartInput.Type,
   ) =>
     Effect.gen(function* () {
-      yield* projects.read(root);
+      const manifest = yield* projects.read(root);
       const { backend, ctx } = yield* engines.context(root);
+      const saves = yield* keptSavesFor({
+        root,
+        engine: manifest.engine.name,
+        saves: input.saves,
+        operation: "Explore session",
+      });
       const imported = (yield* backend.importProject(ctx)).result;
       if (!imported.success)
         return yield* new GameOperationError({
@@ -762,6 +790,7 @@ const make = Effect.gen(function* () {
         viewport,
         id,
         traceDir,
+        saves,
         bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
         what: "The native runner",
       });
@@ -773,6 +802,7 @@ const make = Effect.gen(function* () {
         target: "native",
         opening: "Native",
         plays: "the current sources",
+        saves,
       });
     });
   /**
@@ -802,6 +832,12 @@ const make = Effect.gen(function* () {
         origin: prepared.origin,
         ms: prepared.ms,
       });
+      const saves = yield* keptSavesFor({
+        root,
+        engine: manifest.engine.name,
+        saves: input.saves,
+        operation: "Explore session",
+      });
       const id = NodeCrypto.randomUUID();
       const traceDir = NodePath.join(exploreScratchBase(), id);
       const opened = yield* openRunner({
@@ -812,6 +848,7 @@ const make = Effect.gen(function* () {
         viewport,
         id,
         traceDir,
+        saves,
         bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
         what: `The ${engine} player (log: ${NodePath.join(traceDir, "player.log")})`,
       });
@@ -823,6 +860,7 @@ const make = Effect.gen(function* () {
         target: "native",
         opening: engine,
         plays: "a Linux player of the current sources",
+        saves,
       });
     });
   /**
@@ -835,7 +873,7 @@ const make = Effect.gen(function* () {
     input: typeof GameExploreStartInput.Type,
   ) =>
     Effect.gen(function* () {
-      yield* projects.read(root);
+      const manifest = yield* projects.read(root);
       const { backend, ctx } = yield* engines.context(root);
       const viewport = backend.profile.viewport;
       if (backend.profile.play !== "browser" || viewport === null)
@@ -851,6 +889,12 @@ const make = Effect.gen(function* () {
         );
       const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
       const executable = yield* requireChromium("Explore session", root);
+      const saves = yield* keptSavesFor({
+        root,
+        engine: manifest.engine.name,
+        saves: input.saves,
+        operation: "Explore session",
+      });
       const id = NodeCrypto.randomUUID();
       const traceDir = NodePath.join(exploreScratchBase(), id);
       yield* Effect.tryPromise({
@@ -881,6 +925,7 @@ const make = Effect.gen(function* () {
             height: viewport.height,
             bootTimeoutMs,
             signal,
+            keptStorage: keptWebStorage(saves),
           }),
         catch: (cause) => exploreFailure(root, cause),
       }).pipe(
@@ -901,6 +946,7 @@ const make = Effect.gen(function* () {
           target: "web",
           opening: "Web",
           plays: "the current sources",
+          saves,
         },
       );
     });

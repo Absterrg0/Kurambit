@@ -199,6 +199,9 @@ func _handle(line: String) -> void:
 	var op := str(msg.get("op", ""))
 	if op == "quit":
 		_send({"op": "reply", "id": msg.get("id", 0), "ok": true})
+		# Quit as a player closing the window would, so a game that saves on
+		# close (best scores, settings) writes its saves before the runner quits.
+		root.propagate_notification(Node.NOTIFICATION_WM_CLOSE_REQUEST)
 		_running = false
 	elif op == "act" and not _realtime:
 		_send(await _run_act(msg))

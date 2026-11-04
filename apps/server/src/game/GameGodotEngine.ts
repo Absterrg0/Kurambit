@@ -15,7 +15,11 @@ import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { GODOT_CHECK_SCRIPT } from "./godotCheckScript.ts";
 import { GODOT_PLAY_RUNNER } from "./godotPlayRunner.ts";
-import { prepareNativeUserIsolation, userDirConfigIssues } from "./gameNativeUserDir.ts";
+import {
+  nativeUserIsolationAt,
+  prepareNativeUserIsolation,
+  userDirConfigIssues,
+} from "./gameNativeUserDir.ts";
 import { RawCheckResult, parseGodotIssues } from "./godotCheckOutput.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
@@ -72,9 +76,9 @@ export const makeGodotBackend = (
   /**
    * The play runner runs the real main scene from current sources (no
    * export) under a server-owned script in ignored builds/logs. The child
-   * sees the allowlisted engine base plus software GL and a per-run XDG trio,
-   * so the project's scripts cannot read server secrets and user:// stays in
-   * the isolation the runner checks. HOME stays the real one (Godot resolves
+   * sees the allowlisted engine base plus software GL and a per-run XDG trio
+   * (a kept session's stable one instead), so the project's scripts cannot
+   * read server secrets and user:// stays in the isolation the runner checks. HOME stays the real one (Godot resolves
    * editor config under it). Without a private display it runs headless.
    */
   const playProcess: NonNullable<GameEngineBackend["playProcess"]> = (input) =>
@@ -97,7 +101,9 @@ export const makeGodotBackend = (
         try: async () => {
           await NodeFSP.mkdir(input.scriptDir, { recursive: true });
           await NodeFSP.writeFile(scriptPath, GODOT_PLAY_RUNNER);
-          return prepareNativeUserIsolation(input.traceDir);
+          return input.saves === null
+            ? prepareNativeUserIsolation(input.traceDir)
+            : nativeUserIsolationAt(input.saves);
         },
         catch: (cause) =>
           new GameOperationError({

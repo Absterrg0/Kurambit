@@ -175,7 +175,7 @@ export const testerPlay = (n: number, jev: boolean, rung: Rung | null = null): s
   const checks =
     rung === null
       ? ""
-      : `This build is meant to be: ${rung.is} Verify each of its checks by playing, with a bot where a check says so, and note for each what you did, the values you read and the frame that shows it:\n${checkList(rung)}\n`;
+      : `This build is meant to be: ${rung.is} Verify each of its checks by playing, with a bot where a check says so, and note for each what you did, the values you read and the frame that shows it:\n${checkList(rung)}\nSessions start with no saved data; for a check that something survives a relaunch, change it in a session started with saves keep, close it, and read it back in a second saves keep session.\n`;
   return `${PLAYBOOK}${PLAYTEST_LINE}Play the game in this folder freely: start it with game_explore_start (default target), get past the menu, push as far as you can, try to win and to lose. ${checks}${bots} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${n}.md, main complaint first. You may only write that notes file and .studio/bot/ files; do not change game files. Do not use subagents.`;
 };
 

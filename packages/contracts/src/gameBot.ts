@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { GameSaves } from "./gameExplore.ts";
 
 /**
  * Real-time written-bot playtesting behind the GameBot service. A bot is a
@@ -49,6 +50,8 @@ export const GameBotRunInput = Schema.Struct({
    * calls run several so the player report compares across runs.
    */
   runs: Schema.optionalKey(Schema.Int),
+  /** Omitted means `fresh`; `keep` carries saved data across runs and sessions. */
+  saves: Schema.optionalKey(GameSaves),
 });
 export type GameBotRunInput = typeof GameBotRunInput.Type;
 

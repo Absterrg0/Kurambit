@@ -98,6 +98,7 @@ const RUN_STATE_IGNORES = [
   ".studio/reviewer-*.md",
   ".studio/worktrees/",
   ".studio/comparisons/",
+  ".studio/saves/",
   ".studio/play-*.md",
   ".studio/proto-*.md",
   ".studio/proto-*-frames.jpg",
