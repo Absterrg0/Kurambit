@@ -17,6 +17,7 @@ import { makeThreeBackend } from "./GameThreeEngine.ts";
 import * as GameUnity from "./GameUnity.ts";
 import { makeUnityBackend } from "./GameUnityEngine.ts";
 import type { GameEngineProfile, GameExportTarget } from "./engineProfile.ts";
+import type { WindowHost } from "./windowHost.ts";
 
 /**
  * The game engines this build runs. The manifest still names one, so a
@@ -77,11 +78,11 @@ export interface PlayProcessInput {
   /** A kept session's stable save location (see gameKeptSaves); null starts with no saved data. */
   readonly saves: string | null;
   readonly viewport: GameViewport;
-  /** Whether a private display exists; without one the runner must run headless or refuse. */
-  readonly display: boolean;
+  /** The window the runner gets (see windowHost); without one it must run headless or refuse. */
+  readonly window: WindowHost["kind"] | null;
 }
 
-/** One runner process: the caller puts it on a display, tracks it and ends it. */
+/** One runner process: the caller puts it in a window host's window, tracks it and ends it. */
 export interface PlayProcess {
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
@@ -195,7 +196,8 @@ export interface GameEngineBackend {
       ctx: GameEngineContext,
       target: "Linux" | "Windows",
     ) => Effect.Effect<GameActionResult, GameOperationError>;
-    /** The Linux player's file inside a player folder. */
+    /** The player sessions on this machine play: its build target and its file inside a player folder. */
+    readonly playTarget: "Linux" | "Windows";
     readonly executable: string;
   } | null;
 }

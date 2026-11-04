@@ -25,11 +25,12 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameUnity` does the same for Unity: one batchmode editor on a private display
   (one per server, since an editor costs 2-3 GB), reached through the official `unity` CLI and its
-  `unity mcp` server, with the same session.json pid records, reaping and idle shutdown
-  (`liveProcess.ts` holds the shared display, record and reap code). A record's pids are signalled
-  only while their argv names the executables the live toolchain would launch now, never paths
-  from the record, and of the editor's process tree only processes running from a detected editor's
-  directory, the CLI or Xvfb; a Unity Licensing Client is never signalled. Unity also keeps a copy of
+  `unity mcp` server, with the same session.json launch records, reaping and idle shutdown
+  (`liveProcess.ts` holds the shared display and record code). A record is acted on only while its
+  process still verifies as the launch (below) and its command line names the executables the live
+  toolchain would launch now, never paths from the record; of the editor's process tree only
+  processes running from a detected editor's directory, the CLI or Xvfb are signalled, and a Unity
+  Licensing Client never is. Unity also keeps a copy of
   its record under the server state dir, reaped at startup, so a crashed server's editor dies
   even if its game is never reopened. Every call or operation holds the editor; another game's
   open closes it only while it is idle, and fails `busy` naming the holder otherwise.
@@ -37,6 +38,17 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   detected, and never installs them: they are other vendors' software with their own upkeep and
   licences on every OS. It fetches only harness plumbing (uv, the Unity CLI) itself; `GamePreview` serves builds;
   `GameProcesses` tracks child processes; `GameOperations` keeps the last operation per game.
+- Every process the game layer starts goes through one process host
+  ([processHost.ts](../../apps/server/src/game/processHost.ts)), the only per-OS process code. A
+  child carries a fresh launch token in its environment (and on its command line where the program
+  ignores extra arguments: the Unity editor, Blender), and its launch record is pid, OS start time
+  and token. A record is signalled only while the live process has that start time and carries that
+  token, so a reused pid or a record an agent wrote never names another process. A tree is a
+  process group on Linux and macOS; on Windows every owned child joins one kill-on-close Job Object
+  held by a helper whose stdin is the server's pipe, so the tree dies with the server however it
+  exits, and a tree stop is `taskkill /T /F`. Free memory is `os.freemem()` (libuv's MemAvailable
+  on Linux). Every in-game runner quits when its control socket closes, so a crashed server leaves
+  no game running; only the live editors outlive it, and their records reap them.
 - `GameAssetLibrary` serves the curated CC0 library in `assetLibraryCatalog.ts`. Each pack is a
   download URL pinned by SHA-256 and size, fetched on first look into `asset-library/` beside Kurambit's
   tools folder, and unpacked with path, link and size limits. Bytes that differ from the pin are
@@ -88,7 +100,7 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   snippets; `gameWebServer` serves a game-relative directory over loopback for check/explore/bot
   without touching Preview state.
 - Unity play is a real Linux player of the current sources, built once per source identity
-  under `builds/logs/unity-play-*`, run under xvfb-run. The role runner makes a Unity sample's
+  under `builds/logs/unity-play-*`, run in a window host's window. The role runner makes a Unity sample's
   worktree itself and readies its player before the thread exists, so neither side of a
   comparison spends play time on a build: a copy-on-write copy of the main checkout's player of
   the same source identity (the content hash, never a commit: samples check out a neutral
@@ -127,10 +139,43 @@ reports are shared; an engine adds only how a session launches.
   the server instead of the page. Pages read no control tree: no ui or inspect steps, and a bot's
   id-clicks are skipped and counted.
 
-Process runners connect out to a loopback port with a per-session token. Pictures and video belong
-to the display host ([displayHost.ts](../../apps/server/src/game/displayHost.ts)), not the engine:
-exploration runs under `xvfb-run` and the runner writes each act's picture; a bot run gets its own
-Xvfb display recorded by ffmpeg x11grab, and the browser host stitches one still per second.
+Process runners connect out to a loopback port with a per-session token, and quit when that
+connection closes. Pictures and video belong to the engine, never the OS: each act's picture is
+written by the runner, and from protocol 2 a bot run asks `realtime` for frames, which the runner
+streams as JPEGs of its back buffer after draw (Godot: the viewport texture after
+`frame_post_draw`; Unity: `CaptureScreenshotIntoRenderTexture` downscaled on the GPU and read back
+with `AsyncGPUReadback`; the browser: the CDP screencast). Each frame carries the engine's own
+drawn-frame counter. [frameVideo.ts](../../apps/server/src/game/frameVideo.ts) pipes them into one
+ffmpeg on a wall-clock grid, repeating the last picture in a slot with no new one, so a game that
+draws slowly or stops looks exactly like that, and writes `run.frames.json` beside the video with
+each frame's counter, game time and arrival (the evidence route is `engine-frames`). The run's end
+frame is the runner's own `still`. A protocol 1 runner (an older game's Unity probe) still plays,
+without video.
+
+So the harness needs exactly two things from an OS: a **process host**
+([processHost.ts](../../apps/server/src/game/processHost.ts), above) and a **window host**
+([windowHost.ts](../../apps/server/src/game/windowHost.ts)): one `launch(command, viewport)` that
+gives a game or editor a window it draws into, which the user never sees and which never takes
+focus. Exploration, bots and the live Unity editor (which runs the Unity check and builds players)
+and Blender all launch through it; the Godot check needs no window and runs headless. On Linux every launch gets its own Xvfb display; the display outlives its command and ends right
+after it (an engine that loses its display mid-quit hangs in Xlib's exit path), so a game that quits
+because its server died takes its display along. Windows and macOS give an app no private display
+(a virtual monitor needs a driver there; macOS's API is private), so the window opens on the
+user's desktop far off every monitor, never minimized (a minimized Godot window stops drawing), and
+the launched program places it: Godot by `--position`, the Unity player by its probe
+(`SetWindowPos` without activation), Blender by `--window-geometry` with `--no-window-focus`. No
+capture code differs by OS. macOS stops Godot drawing in a window it counts as occluded, so there
+the runner registers an additional output to keep frames coming; what a Mac tester must confirm
+is in [macos-play-check.md](../operations/macos-play-check.md). Without a window host a native session runs headless where its engine
+can and refuses plainly otherwise; it never falls back to the user's display on Linux.
+
+On Windows, Unity plays a Windows player (macOS plays no Unity game yet). Godot's `user://` is
+isolated through the variables Godot reads on each OS (XDG on Linux, `%APPDATA%` on Windows, `HOME`
+on macOS; see [gameNativeUserDir.ts](../../apps/server/src/game/gameNativeUserDir.ts)). A Unity
+player on Windows keeps PlayerPrefs in the registry, which no environment can move, so its
+sessions share the game's real prefs there. Plumbing Kurambit fetches (uv, the Unity CLI) comes
+from one per-OS/CPU table of official builds with their published SHA-256
+([plumbingBuilds.ts](../../apps/server/src/game/plumbingBuilds.ts)).
 
 ## Tools
 
@@ -300,5 +345,5 @@ manifest, and every engine question the loop has is the lane's engine profile.
 Two constraints hold everywhere:
 
 - Nothing opens on the user's desktop. Every game process drops `DISPLAY`, `WAYLAND_DISPLAY` and
-  `XAUTHORITY`; pictures come from a private virtual display.
+  `XAUTHORITY`; its window comes from the window host, and its pictures from the engine.
 - No test suites for the game layer beyond data-safety checks; games are played, not asserted.

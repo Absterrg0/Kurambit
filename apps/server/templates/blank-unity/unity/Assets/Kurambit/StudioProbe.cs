@@ -13,7 +13,8 @@
 // the game paused (Time.timeScale 0) between acts. After `realtime` the game
 // runs at its own speed for good while held keys, taps and clicks stream in
 // and one tick observation goes out every 100 ms, which is what a bot plays
-// on. Input is queued through the Input System on a virtual keyboard and
+// on; when asked, the screen as drawn goes out as frames for the run video,
+// read back from the GPU without stalling the frame. Input is queued through the Input System on a virtual keyboard and
 // mouse, so the game receives real device events. Without that argument
 // nothing here runs. Kurambit owns this file and refreshes it at the start of
 // a production run.
@@ -25,12 +26,16 @@ using System.Globalization;
 using System.IO;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Unity.Collections;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
+using UnityEngine.Rendering;
 using UnityEngine.UI;
 using UnityEngine.UIElements;
 
@@ -72,6 +77,11 @@ namespace Kurambit
         private int ticks;
         private readonly HashSet<Key> streamHeld = new HashSet<Key>();
         private readonly Dictionary<Key, float> tapEnds = new Dictionary<Key, float>();
+        // Readbacks finish a few frames after their request; a few may wait at
+        // once so a game that draws slower than the asked rate still sends
+        // every frame it draws.
+        private const int MaxReadbacks = 3;
+        private int readbacks;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
@@ -287,6 +297,8 @@ namespace Kurambit
         {
             var request = RequestPath();
             if (request == null) yield break;
+            var offscreen = HasArgument("-kurambitOffscreen");
+            if (offscreen) PlaceOffscreen();
             Dictionary<string, object> config;
             try
             {
@@ -309,6 +321,8 @@ namespace Kurambit
             mouse.MakeCurrent();
             // Let the main scene run its first frames before the first observation.
             for (var i = 0; i < 5; i++) yield return null;
+            // The player may place its window again while it starts up.
+            if (offscreen) PlaceOffscreen();
             try
             {
                 client = new TcpClient();
@@ -326,14 +340,43 @@ namespace Kurambit
             yield return new WaitForEndOfFrame();
             var hello = Observation();
             hello["op"] = "hello";
-            hello["protocol"] = 1;
+            hello["protocol"] = 2;
             hello["token"] = token;
             hello["engine"] = "unity";
-            hello["capabilities"] = new List<object> { "realtime", "ui", "inspect", "setState" };
+            hello["capabilities"] = new List<object> { "realtime", "ui", "inspect", "setState", "frames" };
             hello["body"] = Body();
             Send(hello);
             Pause();
         }
+
+#if UNITY_STANDALONE_WIN
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+        [DllImport("kernel32.dll")] private static extern uint GetCurrentProcessId();
+#endif
+
+        /// <summary>
+        /// On a desktop the user works in (`-kurambitOffscreen`), the player's
+        /// own window goes far off every monitor without being activated; it
+        /// keeps drawing there, since it is not minimized.
+        /// </summary>
+        private static void PlaceOffscreen()
+        {
+#if UNITY_STANDALONE_WIN
+            var self = GetCurrentProcessId();
+            for (var window = FindWindowEx(IntPtr.Zero, IntPtr.Zero, "UnityWndClass", null);
+                 window != IntPtr.Zero;
+                 window = FindWindowEx(IntPtr.Zero, window, "UnityWndClass", null))
+            {
+                GetWindowThreadProcessId(window, out var owner);
+                // SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                if (owner == self) SetWindowPos(window, IntPtr.Zero, -10000, -10000, 0, 0, 0x0001 | 0x0004 | 0x0010);
+            }
+#endif
+        }
+
+        private static bool HasArgument(string name) => Array.IndexOf(Environment.GetCommandLineArgs(), name) >= 0;
 
         private static string RequestPath()
         {
@@ -396,6 +439,13 @@ namespace Kurambit
                     Time.timeScale = gameTimeScale;
                     realtimeStart = Time.time;
                     nextTickAt = Time.unscaledTime + TickSeconds;
+                    if (message.TryGetValue("frames", out var f) && f is Dictionary<string, object> frames)
+                        StartCoroutine(StreamFrames(
+                            frames.TryGetValue("fps", out var fps) ? Convert.ToSingle(fps, CultureInfo.InvariantCulture) : 12f,
+                            frames.TryGetValue("width", out var width) ? Convert.ToInt32(width, CultureInfo.InvariantCulture) : 960));
+                    break;
+                case "still":
+                    StartCoroutine(Still(id, message.TryGetValue("path", out var sp) ? sp as string : null));
                     break;
                 case "input" when realtime:
                     StreamInput(message);
@@ -980,6 +1030,94 @@ namespace Kurambit
                 }
             }
             return null;
+        }
+
+        private IEnumerator Still(object id, string path)
+        {
+            yield return new WaitForEndOfFrame();
+            var written = path != null && Capture(path);
+            Send(new Dictionary<string, object> { ["op"] = "reply", ["id"] = id, ["ok"] = true, ["screenshot"] = written });
+        }
+
+        /// <summary>
+        /// The screen after each frame's draw, downscaled on the GPU and read
+        /// back asynchronously, at about `fps` on wall time.
+        /// </summary>
+        private IEnumerator StreamFrames(float fps, int maxWidth)
+        {
+            var endOfFrame = new WaitForEndOfFrame();
+            var interval = 1f / Mathf.Max(1f, fps);
+            var next = 0f;
+            RenderTexture small = null;
+            try
+            {
+                while (stream != null)
+                {
+                    yield return endOfFrame;
+                    if (readbacks >= MaxReadbacks || Time.unscaledTime < next || Screen.width <= 0 || Screen.height <= 0) continue;
+                    next = Mathf.Max(next + interval, Time.unscaledTime);
+                    var width = Mathf.Max(16, Mathf.Min(maxWidth, Screen.width));
+                    var height = Mathf.Max(1, Mathf.RoundToInt(Screen.height * (float)width / Screen.width));
+                    if (small == null || small.width != width || small.height != height)
+                    {
+                        if (small != null) small.Release();
+                        small = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
+                    }
+                    var full = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, RenderTextureFormat.ARGB32);
+                    // Blit leaves its target active, and the game's next frame
+                    // would then draw into the downscaled size: put it back.
+                    var active = RenderTexture.active;
+                    ScreenCapture.CaptureScreenshotIntoRenderTexture(full);
+                    // Where texture rows start at the top, the readback would
+                    // come out upside down for the encoder, which reads rows
+                    // bottom first like a Texture2D.
+                    if (SystemInfo.graphicsUVStartsAtTop) Graphics.Blit(full, small, new Vector2(1f, -1f), new Vector2(0f, 1f));
+                    else Graphics.Blit(full, small);
+                    RenderTexture.active = active;
+                    RenderTexture.ReleaseTemporary(full);
+                    var counter = Time.frameCount;
+                    var t = Time.time - realtimeStart;
+                    if (SystemInfo.supportsAsyncGPUReadback)
+                    {
+                        readbacks++;
+                        AsyncGPUReadback.Request(small, 0, TextureFormat.RGBA32, request =>
+                        {
+                            readbacks--;
+                            if (request.hasError || stream == null) return;
+                            using (var jpeg = ImageConversion.EncodeNativeArrayToJPG(request.GetData<byte>(), GraphicsFormat.R8G8B8A8_UNorm, (uint)width, (uint)height, 0, 75))
+                                SendFrame(jpeg.ToArray(), counter, t, width, height);
+                        });
+                    }
+                    else
+                    {
+                        var previous = RenderTexture.active;
+                        RenderTexture.active = small;
+                        var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                        texture.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
+                        RenderTexture.active = previous;
+                        SendFrame(texture.EncodeToJPG(75), counter, t, width, height);
+                        Destroy(texture);
+                    }
+                }
+            }
+            finally
+            {
+                if (small != null) small.Release();
+            }
+        }
+
+        private void SendFrame(byte[] jpeg, int counter, float t, int width, int height)
+        {
+            // "op" goes first: the harness tells a frame from every other line by its start.
+            Send(new Dictionary<string, object>
+            {
+                ["op"] = "frame",
+                ["frame"] = counter,
+                ["t"] = t,
+                ["width"] = width,
+                ["height"] = height,
+                ["jpeg"] = Convert.ToBase64String(jpeg),
+            });
         }
 
         private static bool Capture(string path)

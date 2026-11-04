@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import {
   isPathInside,
   nativeUserEnv,
+  nativeUserLayout,
   prepareNativeUserIsolation,
   userDirConfigIssues,
 } from "./gameNativeUserDir.ts";
@@ -69,4 +70,18 @@ it("fails when the owned parent is not writable instead of leaking fallback dire
   } finally {
     await NodeFSP.rm(base, { recursive: true, force: true });
   }
+});
+
+it("points each OS's Godot data root into the isolation", () => {
+  expect(nativeUserLayout("/r", "linux").env).toEqual({
+    XDG_DATA_HOME: "/r/data",
+    XDG_CONFIG_HOME: "/r/config",
+    XDG_CACHE_HOME: "/r/cache",
+  });
+  const mac = nativeUserLayout("/r", "darwin");
+  expect(mac.env).toEqual({ HOME: "/r/home" });
+  expect(mac.dataDir).toBe("/r/home/Library/Application Support");
+  const windows = nativeUserLayout("C:\\r", "win32");
+  expect(windows.env).toEqual({ APPDATA: "C:\\r\\data", LOCALAPPDATA: "C:\\r\\cache" });
+  expect(windows.dataDir).toBe("C:\\r\\data");
 });

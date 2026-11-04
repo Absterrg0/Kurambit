@@ -25,6 +25,19 @@ import { parseGodotViewport } from "./godotViewport.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
 import { GODOT_PROFILE } from "./godotProfile.ts";
 import { planWindowsPreset } from "./windowsPreset.ts";
+import { OFFSCREEN_POSITION } from "./windowHost.ts";
+import { HOST_OS } from "./processHost.ts";
+
+/** The CFBundleIdentifier of the macOS app bundle an executable lives in; null outside one. */
+const macBundleId = async (executable: string): Promise<string | null> => {
+  const at = executable.lastIndexOf(".app/Contents/MacOS/");
+  if (at < 0) return null;
+  const plist = await NodeFSP.readFile(
+    `${executable.slice(0, at)}.app/Contents/Info.plist`,
+    "utf8",
+  ).catch(() => "");
+  return /<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1] ?? null;
+};
 
 const decodeCheckResult = Schema.decodeUnknownSync(RawCheckResult);
 
@@ -78,8 +91,8 @@ export const makeGodotBackend = (
    * export) under a server-owned script in ignored builds/logs. The child
    * sees the allowlisted engine base plus software GL and a per-run XDG trio
    * (a kept session's stable one instead), so the project's scripts cannot
-   * read server secrets and user:// stays in the isolation the runner checks. HOME stays the real one (Godot resolves
-   * editor config under it). Without a private display it runs headless.
+   * read server secrets and user:// stays in the isolation the runner checks
+   * (see gameNativeUserDir for each OS). Without a window host it runs headless.
    */
   const playProcess: NonNullable<GameEngineBackend["playProcess"]> = (input) =>
     Effect.gen(function* () {
@@ -120,26 +133,32 @@ export const makeGodotBackend = (
         ...isolation.env,
       };
       for (const name of GameProcesses.DISPLAY_VARIABLES) delete env[name];
+      // Godot launched outside LaunchServices on macOS re-activates itself
+      // through the Dock to get its window registered, which takes focus from
+      // the user; with its bundle id in the environment it skips that.
+      if (input.window === "offscreen" && HOST_OS === "darwin") {
+        const bundleId = yield* Effect.promise(() => macBundleId(binary.path));
+        if (bundleId !== null) env.__CFBundleIdentifier = bundleId;
+      }
       const size = `${input.viewport.width}x${input.viewport.height}`;
       const runner = ["--path", input.projectDir, "--script", scriptPath, "--", input.requestPath];
+      const window =
+        input.window === "private-display"
+          ? // Xvfb offers software GL only, which the Compatibility renderer runs on.
+            ["--display-driver", "x11", "--rendering-method", "gl_compatibility"]
+          : input.window === "offscreen"
+            ? // The user's desktop and GPU: the project's own renderer, in a
+              // window far off every monitor. Never minimized: a minimized
+              // Godot window stops drawing.
+              ["--windowed", "--position", `${OFFSCREEN_POSITION.x},${OFFSCREEN_POSITION.y}`]
+            : ["--headless"];
       return {
         executable: binary.path,
-        args: input.display
-          ? [
-              "--display-driver",
-              "x11",
-              "--rendering-method",
-              "gl_compatibility",
-              "--audio-driver",
-              "Dummy",
-              "--resolution",
-              size,
-              ...runner,
-            ]
-          : ["--headless", "--audio-driver", "Dummy", "--resolution", size, ...runner],
+        args: [...window, "--audio-driver", "Dummy", "--resolution", size, ...runner],
         env,
         cwd: input.projectDir,
-        request: { expectedUserDataPrefix: isolation.dataDir },
+        // Godot reports user:// with forward slashes on every OS.
+        request: { expectedUserDataPrefix: isolation.dataDir.replaceAll("\\", "/") },
         scratch: [input.scriptDir],
         inputNote: "",
       };

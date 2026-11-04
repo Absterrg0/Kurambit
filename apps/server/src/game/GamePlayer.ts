@@ -178,7 +178,7 @@ ${imported.message}`.slice(0, 3000),
                 await NodeFSP.rm(path, { recursive: true, force: true });
             });
             const built = yield* player.build(ctx, {
-              target: "Linux",
+              target: player.playTarget,
               destination: unityPlayerDirectory(root, sourceId),
               operation: "unity-play-build",
             });

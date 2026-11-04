@@ -4,6 +4,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
+import { HOST_OS } from "./processHost.ts";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
@@ -47,12 +48,45 @@ export const checkoutOf = async (root: string): Promise<Checkout> => {
     : { kind: "other", detail: `its git dir is ${gitDir}` };
 };
 
-/** What buildUnityPlayer checks before it moves a Linux player into place. */
+/**
+ * Copies a directory tree as cheaply as the filesystem allows: reflinks on
+ * Linux (btrfs, XFS), APFS clones on macOS, a plain copy where neither
+ * exists (Windows). The copy keeps modes and times.
+ */
+export const cloneTree = async (
+  source: string,
+  target: string,
+  timeoutMs: number,
+): Promise<void> => {
+  if (HOST_OS === "win32") {
+    await NodeFSP.cp(source, target, { recursive: true, preserveTimestamps: true });
+    return;
+  }
+  await execFile(
+    "cp",
+    HOST_OS === "darwin"
+      ? ["-c", "-R", "-p", "--", source, target]
+      : ["-a", "--reflink=auto", "--", source, target],
+    { timeout: timeoutMs },
+  );
+};
+
+/**
+ * The player a session plays on this machine: Unity builds it for the host
+ * OS. macOS has none yet (a player there is an app bundle named by the
+ * product), so a Unity session on macOS is refused before any build.
+ */
+export const UNITY_PLAY =
+  HOST_OS === "win32"
+    ? ({ target: "Windows", executable: "game.exe", runtime: "UnityPlayer.dll" } as const)
+    : ({ target: "Linux", executable: "game.x86_64", runtime: "UnityPlayer.so" } as const);
+
+/** What buildUnityPlayer checks before it moves this machine's player into place. */
 export const completePlayer = async (directory: string): Promise<boolean> => {
   for (const [name, kind] of [
-    ["game.x86_64", "file"],
+    [UNITY_PLAY.executable, "file"],
     ["game_Data", "directory"],
-    ["UnityPlayer.so", "file"],
+    [UNITY_PLAY.runtime, "file"],
   ] as const) {
     const stat = await NodeFSP.stat(NodePath.join(directory, name)).catch(() => null);
     if (
@@ -123,9 +157,7 @@ export const reuseMainPlayer = async (
   );
   try {
     await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
-    await execFile("cp", ["-a", "--reflink=auto", "--", source, staging], {
-      timeout: 5 * 60_000,
-    });
+    await cloneTree(source, staging, 5 * 60_000);
     const [copied, still] = await Promise.all([listing(staging), listing(source)]);
     if (copied !== still || !(await completePlayer(staging)))
       return "the main checkout's player changed while it was copied";

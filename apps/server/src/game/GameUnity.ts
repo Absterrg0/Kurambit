@@ -1,10 +1,8 @@
 // @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off preferSchemaOverJson:off -- This service owns the native editor process, private display and MCP-stdio boundary; wall-clock pids and CLI JSON envelopes are the domain here.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeUtil from "node:util";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -19,17 +17,24 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import {
-  alive,
-  displayInRange,
-  findXvfb,
+  commandFlag,
+  commandHas,
   memoryShortfall,
-  pickDisplay,
-  processTreeOf,
   readRecord,
-  reapVerified,
   underIdleMemoryFloor,
-  type RecordedPid,
 } from "./liveProcess.ts";
+import {
+  LAUNCH_ENV,
+  adoptLaunch,
+  launchToken,
+  listProcesses,
+  processCwd,
+  stopRecorded,
+  type LaunchRecord,
+  type OwnedProcess,
+  type ProcessFacts,
+} from "./processHost.ts";
+import { findWindowHost, findXvfb, type HostedWindow } from "./windowHost.ts";
 import {
   UNITY_LICENSE_FAILURE,
   isUnityLicensingClient,
@@ -37,7 +42,7 @@ import {
   unityEditorDir,
   unityEditorEnv,
 } from "./unityToolchain.ts";
-import { checkoutOf } from "./unityPlayerCache.ts";
+import { checkoutOf, cloneTree } from "./unityPlayerCache.ts";
 
 const IDLE_MS = 10 * 60_000;
 /**
@@ -48,8 +53,8 @@ const IDLE_MS = 10 * 60_000;
  */
 const NEEDED_MB = 4096;
 const SESSION_FILE = "session.json";
-/** Unity's private displays; Blender and the bot pick from other ranges. */
-const DISPLAYS = { first: 251, last: 399 } as const;
+/** The editor's window: big enough for its scene-view captures. */
+const EDITOR_WINDOW = { width: 1280, height: 720 } as const;
 /** A first open resolves packages and imports every asset; later opens reuse Library/. */
 const READY_TIMEOUT_S = 900;
 /**
@@ -92,10 +97,8 @@ export const UNITY_EDIT_TOOL =
 interface Session {
   readonly root: string;
   readonly projectDir: string;
-  readonly display: string;
-  readonly editorPid: number;
-  readonly xvfbPid: number;
-  readonly mcpPid: number;
+  readonly editor: OwnedProcess;
+  readonly window: HostedWindow;
   readonly client: Client;
   readonly logPath: string;
   lastActive: number;
@@ -111,14 +114,13 @@ interface Session {
 interface SessionRecord {
   readonly root: string;
   readonly homeDir: string;
-  readonly display: string;
+  /** Where the editor's window lives (`:251`), once it opened. */
+  readonly display?: string;
   readonly editor: string;
   readonly projectDir: string;
-  readonly xvfb: string;
   readonly cli: string;
-  readonly editorPid?: number;
-  readonly xvfbPid?: number;
-  readonly mcpPid?: number;
+  readonly editorLaunch?: LaunchRecord;
+  readonly mcpLaunch?: LaunchRecord;
 }
 
 export type McpContent = {
@@ -165,43 +167,34 @@ interface LiveExecutables {
 }
 
 /**
- * A recorded pid is ours only while its argv names the binary this server
- * would launch (from the live toolchain, never the record, which an agent
- * can write) and this session's project or display; a reused pid or a
- * forged record never matches.
+ * A recorded launch is ours only while it verifies (pid, start time and
+ * token; see processHost) and still runs the binary this server would
+ * launch (from the live toolchain, never the record, which an agent can
+ * write) for this session's project or display.
  */
 const recordedOwners = (
   record: Partial<SessionRecord>,
   homeDir: string,
   live: LiveExecutables,
-): ReadonlyArray<RecordedPid> => [
+): ReadonlyArray<{ readonly launch: unknown; readonly owns: (facts: ProcessFacts) => boolean }> => [
   {
-    pid: record.mcpPid,
-    owns: (argv) =>
-      argv[0] === live.cli &&
-      argv[1] === "mcp" &&
+    launch: record.mcpLaunch,
+    owns: (facts) =>
+      commandHas(facts, live.cli) &&
+      commandHas(facts, "mcp") &&
       typeof record.projectDir === "string" &&
-      argv[argv.indexOf("--project-path") + 1] === record.projectDir,
+      commandFlag(facts, "--project-path", record.projectDir),
   },
   {
-    pid: record.editorPid,
-    owns: (argv) =>
-      argv[0] !== undefined &&
-      live.editors.includes(argv[0]) &&
+    launch: record.editorLaunch,
+    owns: (facts) =>
+      live.editors.some((editor) => commandHas(facts, editor)) &&
       typeof record.projectDir === "string" &&
-      argv[argv.indexOf("-projectPath") + 1] === record.projectDir &&
+      commandFlag(facts, "-projectPath", record.projectDir) &&
       // The user's own editor (Unity Hub's) may be open on this same project:
       // only the batchmode editor writing this session's log is ours.
-      argv.includes("-batchmode") &&
-      argv[argv.indexOf("-logFile") + 1] === NodePath.join(homeDir, "editor.log"),
-  },
-  {
-    pid: record.xvfbPid,
-    owns: (argv) =>
-      live.xvfb !== null &&
-      argv[0] === live.xvfb &&
-      displayInRange(record.display, DISPLAYS.first, DISPLAYS.last) &&
-      argv[1] === record.display,
+      commandHas(facts, "-batchmode") &&
+      commandFlag(facts, "-logFile", NodePath.join(homeDir, "editor.log")),
   },
 ];
 
@@ -275,19 +268,26 @@ const reapRecord = async (
       return NodeFSP.realpath(dir).catch(() => dir);
     }),
   );
-  const keep = (exe: string) =>
-    !isUnityLicensingClient(exe) &&
-    (editorDirs.some((dir) => exe.startsWith(`${dir}${NodePath.sep}`)) ||
-      exe === live.cli ||
-      exe === live.xvfb);
-  const editorPid = record.editorPid;
-  await reapVerified(recordedOwners(record, homeDir, live), {
-    waitMs: 15_000,
-    pollMs: 200,
-    // Taken while the editor still lives: once it exits, its workers reparent.
-    tree: async (owned) =>
-      editorPid !== undefined && owned.includes(editorPid) ? processTreeOf(editorPid, keep) : [],
-  });
+  const keep = (facts: ProcessFacts) =>
+    facts.exe !== null &&
+    !isUnityLicensingClient(facts.exe) &&
+    (editorDirs.some((dir) => facts.exe!.startsWith(`${dir}${NodePath.sep}`)) ||
+      facts.exe === live.cli ||
+      facts.exe === live.xvfb);
+  const owners = recordedOwners(record, homeDir, live);
+  await stopRecorded(
+    owners.map((owner) => owner.launch),
+    {
+      waitMs: 15_000,
+      owns: (facts) =>
+        owners.some(
+          (owner) =>
+            (owner.launch as Partial<LaunchRecord> | undefined)?.pid === facts.pid &&
+            owner.owns(facts),
+        ),
+      keep,
+    },
+  );
   await dropDataStoreMemory(homeDir);
 };
 
@@ -377,8 +377,6 @@ export const parseCliEnvelope = (
   return null;
 };
 
-const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
-
 /**
  * Left out of the copy: files that name the editor that wrote them, and the
  * compiled-script state keyed by the main checkout's path. The worktree
@@ -409,16 +407,24 @@ const LIBRARY_NOT_COPIED = [
 const editorHasProjectOpen = async (projectDir: string): Promise<boolean> => {
   const real = (path: string) => NodeFSP.realpath(path).catch(() => NodePath.resolve(path));
   const want = await real(projectDir);
-  for (const pid of await NodeFSP.readdir("/proc").catch(() => [] as string[])) {
-    if (!/^\d+$/.test(pid)) continue;
-    const raw = await NodeFSP.readFile(`/proc/${pid}/cmdline`).catch(() => null);
-    if (raw === null || raw.length === 0) continue;
-    const args = raw.toString("utf8").split("\0");
+  for (const facts of await listProcesses()) {
+    const args = facts.argv ?? facts.command.split(" ");
     const at = args.findIndex((arg) => arg.toLowerCase() === "-projectpath");
     const value = at >= 0 ? args[at + 1] : undefined;
     if (value === undefined || value === "") continue;
-    const cwd = await NodeFSP.readlink(`/proc/${pid}/cwd`).catch(() => "/");
-    if ((await real(NodePath.resolve(cwd, value))) === want) return true;
+    if (NodePath.isAbsolute(value)) {
+      if ((await real(value)) === want) return true;
+      continue;
+    }
+    // Only Linux shows another process's working directory; elsewhere a
+    // relative project path that could be this one counts as open.
+    const cwd = await processCwd(facts.pid);
+    if (
+      cwd === null
+        ? NodePath.basename(value) === NodePath.basename(want)
+        : (await real(NodePath.resolve(cwd, value))) === want
+    )
+      return true;
   }
   return false;
 };
@@ -446,9 +452,7 @@ const seedLibrary = async (
     return "a Unity editor has the main checkout open, so its import cache may be mid-write";
   const staging = NodePath.join(scratch, `library-${NodeCrypto.randomUUID()}`);
   try {
-    await execFile("cp", ["-a", "--reflink=auto", "--", source, staging], {
-      timeout: 15 * 60_000,
-    });
+    await cloneTree(source, staging, 15 * 60_000);
     for (const name of LIBRARY_NOT_COPIED)
       await NodeFSP.rm(NodePath.join(staging, name), { recursive: true, force: true });
     await NodeFSP.rename(staging, target);
@@ -660,8 +664,7 @@ const make = Effect.gen(function* () {
         const existing = sessions.get(root);
         if (
           existing !== undefined &&
-          alive(existing.editorPid) &&
-          alive(existing.xvfbPid) &&
+          existing.editor.running() &&
           (existing.inFlight > 0 || now - existing.lastActive < IDLE_MS)
         ) {
           existing.lastActive = now;
@@ -712,13 +715,13 @@ const make = Effect.gen(function* () {
           }
         for (const otherRoot of Array.from(sessions.keys())) yield* drop(otherRoot);
         yield* drop(root);
-        const xvfbPath = yield* Effect.promise(findXvfb);
-        if (xvfbPath === null)
+        const host = yield* Effect.promise(findWindowHost);
+        if (host === null)
           return yield* opError(
             "unity-live",
             "Xvfb",
             "tool-missing",
-            "Xvfb is needed for the live Unity editor's private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
+            "The live Unity editor needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
           );
         // After the drops above, so an editor this server just closed counts as free.
         const short = yield* Effect.promise(() =>
@@ -759,30 +762,19 @@ const make = Effect.gen(function* () {
           if (notSeeded !== null && notSeeded !== "it already has one")
             yield* Effect.logWarning("Unity worktree imports cold", { root, reason: notSeeded });
         }
-        const displayNum = yield* Effect.promise(() => pickDisplay(DISPLAYS.first, DISPLAYS.last));
-        if (displayNum === null)
-          return yield* opError(
-            "unity-live",
-            root,
-            "busy",
-            `No free private Xvfb display (:${DISPLAYS.first}–:${DISPLAYS.last}).`,
-          );
-        const display = `:${displayNum}`;
         let record: SessionRecord = {
           root,
           homeDir,
-          display,
           editor: unity.editor,
           projectDir,
-          xvfb: xvfbPath,
           cli: unity.cli,
         };
         // Written as each pid appears, so a crash mid-start still leaves the
         // next open or game_stop something to reap.
-        const remember = (pids: Partial<SessionRecord>) =>
+        const remember = (launches: Partial<SessionRecord>) =>
           Effect.tryPromise({
             try: async () => {
-              record = { ...record, ...pids };
+              record = { ...record, ...launches };
               const text = JSON.stringify(record);
               await NodeFSP.writeFile(NodePath.join(homeDir, SESSION_FILE), text);
               await NodeFSP.writeFile(serverRecordOf(root), text);
@@ -794,50 +786,51 @@ const make = Effect.gen(function* () {
             yield* drop(root);
             return yield* opError("unity-live", root, reason, detail);
           });
-        const xvfb = NodeChildProcess.spawn(
-          xvfbPath,
-          [display, "-screen", "0", "1280x720x24", "-nolisten", "tcp"],
-          {
-            env: GameProcesses.engineChildEnv(),
-            detached: true,
-            stdio: "ignore",
-          },
-        );
-        xvfb.unref();
-        if (xvfb.pid === undefined) return yield* fail("Xvfb did not start.", "io");
-        const xvfbPid = xvfb.pid;
-        yield* remember({ xvfbPid });
         const logPath = NodePath.join(homeDir, "editor.log");
-        const editor = yield* Effect.sync(() => {
-          // The editor leads its own process group so a stop takes its
-          // asset-import workers and shader compilers with it.
-          const child = NodeChildProcess.spawn(
-            unity.editor,
-            [
-              "-batchmode",
-              "-projectPath",
-              projectDir,
-              "-logFile",
-              logPath,
-              "-force-glcore",
-              // Caps the job system's worker threads (the log confirms
-              // "Creating JobQueue using job-worker-count value 2").
-              "-job-worker-count",
-              "2",
-            ],
-            {
-              cwd: root,
-              env: unityEditorEnv({ DISPLAY: display, LIBGL_ALWAYS_SOFTWARE: "1" }),
-              detached: true,
-              stdio: "ignore",
-            },
-          );
-          child.unref();
-          return child;
+        // The token rides the command line as well as the environment, where
+        // an OS without readable environments can still verify it.
+        const editorToken = launchToken();
+        // The editor leads its own tree so a stop takes its asset-import
+        // workers and shader compilers with it.
+        const hosted = yield* Effect.tryPromise({
+          try: () =>
+            host.launch(
+              {
+                executable: unity.editor,
+                args: [
+                  "-batchmode",
+                  "-projectPath",
+                  projectDir,
+                  "-logFile",
+                  logPath,
+                  // Xvfb offers software OpenGL only; elsewhere the editor
+                  // keeps its default graphics API.
+                  ...(host.kind === "private-display" ? ["-force-glcore"] : []),
+                  // Caps the job system's worker threads (the log confirms
+                  // "Creating JobQueue using job-worker-count value 2").
+                  "-job-worker-count",
+                  "2",
+                  "-kurambitLaunch",
+                  editorToken,
+                ],
+                cwd: root,
+                env: unityEditorEnv({ LIBGL_ALWAYS_SOFTWARE: "1" }),
+                stdio: "ignore",
+                token: editorToken,
+              },
+              EDITOR_WINDOW,
+            ),
+          catch: (cause) =>
+            opError("unity-live", root, "io", "The Unity editor's window did not open.", cause),
         });
-        const editorPid = editor.pid;
-        if (editorPid === undefined) return yield* fail("The Unity editor did not start.", "io");
-        yield* remember({ editorPid });
+        const editorProcess = hosted.process;
+        const editor = editorProcess.child;
+        const editorLaunch = yield* Effect.promise(() => editorProcess.record);
+        yield* remember({
+          display: hosted.label,
+          ...(editorLaunch === null ? {} : { editorLaunch }),
+        });
+        if (editorLaunch === null) return yield* fail("The Unity editor did not start.", "io");
         // A batchmode editor that cannot open the project (compile errors, a
         // licence refusal) exits within seconds; the CLI would still wait out
         // its whole timeout for an editor that is gone.
@@ -863,7 +856,7 @@ const make = Effect.gen(function* () {
           ),
           exited,
         );
-        if (ready === null || !ready.ok || !alive(editorPid)) {
+        if (ready === null || !ready.ok || !editorProcess.running()) {
           const tail = yield* logTail(root);
           if (UNITY_LICENSE_FAILURE.test(tail))
             return yield* fail(
@@ -908,10 +901,11 @@ const make = Effect.gen(function* () {
           { operation: "unity-open-scene", timeoutMs: 120_000 },
         );
         const mcpLog = NodeFS.openSync(NodePath.join(homeDir, "mcp.log"), "w");
+        const mcpToken = launchToken();
         const transport = new StdioClientTransport({
           command: unity.cli,
           args: ["mcp", "--project-path", projectDir, "--tools", UNITY_MCP_TOOLS.join(",")],
-          env: stringEnv(unityCliEnv(install.cliHome)),
+          env: stringEnv({ ...unityCliEnv(install.cliHome), [LAUNCH_ENV]: mcpToken }),
           stderr: mcpLog,
         });
         const client = new Client({ name: "kurambit-game-unity", version: "1.0.0" }, {});
@@ -937,14 +931,13 @@ const make = Effect.gen(function* () {
             "io",
           );
         }
-        yield* remember({ mcpPid });
+        const mcpLaunch = yield* Effect.promise(() => adoptLaunch(mcpPid, mcpToken));
+        if (mcpLaunch !== null) yield* remember({ mcpLaunch });
         const session: Session = {
           root,
           projectDir,
-          display,
-          editorPid,
-          xvfbPid,
-          mcpPid,
+          editor: editorProcess,
+          window: hosted,
           client,
           logPath,
           lastActive: yield* Clock.currentTimeMillis,

@@ -25,9 +25,6 @@ import * as ServerSettings from "../serverSettings.ts";
 import { commandDetail } from "./commandDetail.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import {
-  UNITY_CLI_SHA256,
-  UNITY_CLI_URL,
-  UNITY_CLI_VERSION,
   UNITY_DOWNLOAD_URL,
   legacyUnityEditorRoot,
   parseSecondaryInstallPath,
@@ -46,11 +43,15 @@ import {
   type UnityEditorCandidate,
   type UnityLicense,
 } from "./unityToolchain.ts";
+import {
+  UNITY_CLI_BUILDS,
+  UNITY_CLI_VERSION,
+  UV_BUILDS,
+  UV_VERSION,
+  plumbingHost,
+  type PlumbingBuild,
+} from "./plumbingBuilds.ts";
 
-/** Pinned uv ( astral-sh/uv ), fetched on first use: no checksum file is
- * published, so the fetch verifies by running the extracted binary and
- * matching this version. */
-export const UV_VERSION = "0.9.8";
 const DOWNLOADS = {
   blender: "https://www.blender.org/download/",
   godot: "https://godotengine.org/download",
@@ -87,6 +88,9 @@ const LEGACY_INSTALLS = {
   godot: "godot-4.7.2/Godot_v4.7.2-stable_linux.x86_64",
   uv: `uv-${UV_VERSION}/uv`,
 } as const;
+const legacyInstall = (tool: BinaryTool, platform: Platform) =>
+  // Only uv is still fetched; its Windows build is uv.exe.
+  tool === "uv" && platform === "win32" ? `${LEGACY_INSTALLS.uv}.exe` : LEGACY_INSTALLS[tool];
 const ENV_OVERRIDES = {
   blender: "KURAMBIT_BLENDER",
   godot: "KURAMBIT_GODOT",
@@ -115,7 +119,7 @@ export const toolCandidates = (
     platform === "win32" ? `${name}.exe` : name,
   );
   return [
-    { path: NodePath.join(directory, LEGACY_INSTALLS[tool]), source: "kurambit" },
+    { path: NodePath.join(directory, legacyInstall(tool, platform)), source: "kurambit" },
     ...searchPath
       .split(NodePath.delimiter)
       .filter(Boolean)
@@ -192,7 +196,7 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const settings = yield* ServerSettings.ServerSettingsService;
   const platform = hostPlatform(yield* HostProcess.Platform);
-  const linuxX64 = platform === "linux" && (yield* HostProcess.Architecture) === "x64";
+  const plumbing = plumbingHost(platform, yield* HostProcess.Architecture);
   const directory = toolsDirectory();
   const logRoot = NodePath.join(directory, ".operations");
   const fetchLock = Semaphore.makeUnsafe(1);
@@ -335,7 +339,7 @@ const make = Effect.gen(function* () {
   // uv is plumbing: unless the user named one, a missing, old or broken uv
   // on PATH is replaced by the pinned fetch, which the probe then finds first.
   const fetchesUv = (found: Probe) =>
-    linuxX64 &&
+    plumbing !== null &&
     found.kind !== "ok" &&
     (found.kind === "missing" || (found.source !== "settings" && found.source !== "env"));
   const binaryStatus = (tool: BinaryTool) =>
@@ -410,46 +414,68 @@ const make = Effect.gen(function* () {
         } satisfies GameToolStatus),
       ),
     );
-  const fetchUv = Effect.gen(function* () {
-    const target = NodePath.join(directory, `uv-${UV_VERSION}`);
-    const stage = yield* makeStage("fetch-uv");
-    return yield* Effect.gen(function* () {
-      const archive = yield* Effect.tryPromise({
-        try: (signal) =>
-          downloadPlainFile(
-            `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz`,
-            `uv-${UV_VERSION}.tar.gz`,
-            stage,
-            signal,
-          ),
+  /**
+   * The one fetch path for plumbing: download the vendor's build for this
+   * OS and CPU, refuse it unless its SHA-256 is the one the vendor
+   * published, then unpack it. Returns where its executables are.
+   */
+  const fetchPlumbing = (operation: string, build: PlumbingBuild, stage: string) =>
+    Effect.gen(function* () {
+      const name = NodePath.basename(new URL(build.url).pathname);
+      const file = yield* Effect.tryPromise({
+        try: async (signal) => {
+          const downloaded = await downloadPlainFile(build.url, name, stage, signal);
+          const hash = NodeCrypto.createHash("sha256");
+          for await (const chunk of NodeFS.createReadStream(downloaded)) hash.update(chunk);
+          if (hash.digest("hex") !== build.sha256)
+            throw new GameOperationError({ operation, path: build.url, reason: "checksum" });
+          return downloaded;
+        },
         catch: (cause) =>
           isGameOperationError(cause)
             ? cause
-            : new GameOperationError({
-                operation: "fetch-uv",
-                path: `uv-${UV_VERSION}.tar.gz`,
-                reason: "download",
-                cause,
-              }),
+            : new GameOperationError({ operation, path: build.url, reason: "download", cause }),
       });
+      if (build.archive === null) return file;
+      const unpacked = NodePath.join(stage, "unpacked");
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(unpacked, { recursive: true }),
+        catch: (cause) =>
+          new GameOperationError({ operation, path: unpacked, reason: "io", cause }),
+      });
+      // tar reads both the tarballs and, on Windows and macOS (bsdtar), the zips.
       const extract = yield* processes.run({
         root: logRoot,
         executable: "tar",
-        args: ["-xzf", archive, "-C", stage],
-        operation: "fetch-uv-extract",
+        args: ["-xf", file, "-C", unpacked],
+        operation: `${operation}-extract`,
         timeoutMs: 120_000,
       });
       if (extract.exitCode !== 0)
         return yield* new GameOperationError({
-          operation: "fetch-uv",
+          operation,
           path: extract.logPath,
           reason: "command-failed",
           detail: commandDetail(extract),
         });
-      const extracted = NodePath.join(stage, "uv-x86_64-unknown-linux-gnu");
+      return NodePath.join(unpacked, build.dir);
+    });
+  const exe = (name: string) => (platform === "win32" ? `${name}.exe` : name);
+  const fetchUv = Effect.gen(function* () {
+    const target = NodePath.join(directory, `uv-${UV_VERSION}`);
+    if (plumbing === null)
+      return yield* new GameOperationError({
+        operation: "fetch-uv",
+        path: target,
+        reason: "unsupported-platform",
+        detail: "Kurambit has no uv build to fetch for this OS and CPU; install uv yourself.",
+      });
+    const stage = yield* makeStage("fetch-uv");
+    return yield* Effect.gen(function* () {
+      const extracted = yield* fetchPlumbing("fetch-uv", UV_BUILDS[plumbing], stage);
       const check = yield* processes.run({
         root: logRoot,
-        executable: NodePath.join(extracted, "uv"),
+        executable: NodePath.join(extracted, exe("uv")),
         args: ["--version"],
         operation: "fetch-uv-check",
         timeoutMs: 20_000,
@@ -457,7 +483,7 @@ const make = Effect.gen(function* () {
       if (check.exitCode !== 0 || !(check.stdout + check.stderr).includes(UV_VERSION))
         return yield* new GameOperationError({
           operation: "fetch-uv",
-          path: archive,
+          path: extracted,
           reason: "wrong-version",
           detail: `uv reported ${(check.stdout + check.stderr).slice(0, 200)}; expected ${UV_VERSION}.`,
         });
@@ -477,35 +503,37 @@ const make = Effect.gen(function* () {
       return (yield* executable("uv")).path;
     }),
   );
-  const cliFiles = unityCliPaths(directory);
+  const cliFiles = unityCliPaths(directory, platform);
   const cliPath = () => process.env.KURAMBIT_UNITY_CLI?.trim() || cliFiles.cli;
   const fetchUnityCli = Effect.gen(function* () {
+    if (plumbing === null)
+      return yield* new GameOperationError({
+        operation: "fetch-unity-cli",
+        path: cliFiles.cli,
+        reason: "unsupported-platform",
+        detail: "Unity publishes no CLI build for this OS and CPU.",
+      });
+    const build = UNITY_CLI_BUILDS[plumbing];
     const stage = yield* makeStage("fetch-unity-cli");
-    yield* Effect.tryPromise({
-      try: async (signal) => {
-        const file = await downloadPlainFile(UNITY_CLI_URL, "unity", stage, signal);
-        const hash = NodeCrypto.createHash("sha256");
-        for await (const chunk of NodeFS.createReadStream(file)) hash.update(chunk);
-        if (hash.digest("hex") !== UNITY_CLI_SHA256)
-          throw new GameOperationError({
-            operation: "fetch-unity-cli",
-            path: UNITY_CLI_URL,
-            reason: "checksum",
-          });
-        await NodeFSP.chmod(file, 0o755);
-        await NodeFSP.mkdir(cliFiles.cliDir, { recursive: true });
-        await NodeFSP.rename(file, cliFiles.cli);
-      },
-      catch: (cause) =>
-        isGameOperationError(cause)
-          ? cause
-          : new GameOperationError({
+    yield* fetchPlumbing("fetch-unity-cli", build, stage).pipe(
+      Effect.flatMap((file) =>
+        Effect.tryPromise({
+          try: async () => {
+            if (platform !== "win32") await NodeFSP.chmod(file, 0o755);
+            await NodeFSP.mkdir(cliFiles.cliDir, { recursive: true });
+            await NodeFSP.rename(file, cliFiles.cli);
+          },
+          catch: (cause) =>
+            new GameOperationError({
               operation: "fetch-unity-cli",
-              path: UNITY_CLI_URL,
-              reason: "download",
+              path: cliFiles.cli,
+              reason: "io",
               cause,
             }),
-    }).pipe(Effect.ensuring(dropStage(stage)));
+        }),
+      ),
+      Effect.ensuring(dropStage(stage)),
+    );
     const version = yield* processes.run({
       root: logRoot,
       executable: cliFiles.cli,
@@ -535,13 +563,6 @@ const make = Effect.gen(function* () {
           path: cli,
           reason: "tool-missing",
           detail: `KURAMBIT_UNITY_CLI names ${cli}, which is not an executable file.`,
-        });
-      if (!linuxX64)
-        return yield* new GameOperationError({
-          operation: "Unity",
-          path: cli,
-          reason: "unsupported-platform",
-          detail: "Kurambit fetches the Unity CLI for Linux x86_64 only.",
         });
       yield* fetchUnityCli;
       return cli;
@@ -596,12 +617,6 @@ const make = Effect.gen(function* () {
   /** The editor for a project, or why there is none; the licence and CLI are checked by the caller. */
   const unityEditor = (projectDir: string | undefined) =>
     Effect.gen(function* () {
-      if (platform !== "linux")
-        return yield* unityMissing(
-          "Unity",
-          "Kurambit drives the Unity editor on Linux only for now: it runs it on a private Xvfb display.",
-          "unsupported-platform",
-        );
       const { explicit, detected } = yield* unityCandidates;
       const override = explicit[0];
       if (override !== undefined && !(yield* Effect.promise(() => isExecutable(override.editor))))

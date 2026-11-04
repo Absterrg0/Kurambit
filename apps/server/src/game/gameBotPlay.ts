@@ -1,5 +1,5 @@
 // @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off preferSchemaOverJson:off -- One real-time bot run over a play session: the bot child by pid, wall-clock ticks and line JSON.
-import * as NodeChildProcess from "node:child_process";
+import type * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -22,7 +22,6 @@ import {
   END_FRAME,
   extractRunFrames,
   frozenScreenFinding,
-  killPid,
   perfFrom,
   posOf,
   sleep,
@@ -31,18 +30,14 @@ import {
   type Session,
 } from "./gameBotRuntime.ts";
 import { parseLine, type PlaySession } from "./playSession.ts";
+import { spawnOwned, type OwnedProcess } from "./processHost.ts";
+import { VIDEO_FPS, VIDEO_WIDTH, openFrameVideo, type FrameVideo } from "./frameVideo.ts";
 
 const END_SETTLE_MS = 1500;
 
-/** What an engine's launch hands the bot run: the session, and how its picture is kept. */
+/** What an engine's launch hands the bot run: the session, and how to end what it started. */
 export interface BotLaunch {
   readonly play: PlaySession;
-  /** Called on every tick; the browser takes its stills here. */
-  readonly onTick: (tick: number) => Promise<void>;
-  /** Finalizes the run's video once play ended. */
-  readonly finishVideo: () => Promise<void>;
-  /** Writes the screen as it is now; best effort. */
-  readonly snapshot: (path: string) => Promise<void>;
   /** Ends everything the launch started. Idempotent. */
   readonly stop: () => Promise<void>;
 }
@@ -127,12 +122,14 @@ export const playBot = async (
         : "This game's in-game runner does not play in real time, so bots cannot drive it.",
     );
   let botChild: NodeChildProcess.ChildProcess | undefined;
+  let botProcess: OwnedProcess | undefined;
+  let video: FrameVideo | null = null;
   const readers: LineReader[] = [];
   try {
     // The bot child: allowlisted environment only, so no key or display
     // route can reach it. Game data reaches it only through our messages.
     const childLog = NodeFS.openSync(NodePath.join(args.runDir, "child-stderr.log"), "w");
-    botChild = NodeChildProcess.spawn(
+    const owned = spawnOwned(
       process.execPath,
       [args.childPath, args.botFile, args.decider, args.mode, args.jevLive ? "jev-live" : "no-jev"],
       {
@@ -144,11 +141,13 @@ export const playBot = async (
           LANG: process.env.LANG ?? "C.UTF-8",
         },
         cwd: args.root,
-        detached: false,
         stdio: ["pipe", "pipe", childLog],
+        tree: false,
       },
     );
-    if (botChild.pid !== undefined) args.session.pids.push(botChild.pid);
+    botProcess = owned;
+    botChild = owned.child;
+    args.session.processes.push(owned);
     const childLines = createLineReader(botChild.stdout!);
     readers.push(childLines);
     let goal = "play the game";
@@ -262,7 +261,17 @@ export const playBot = async (
         /* closed */
       }
     };
-    await play.realtime();
+    // The video is the engine's own frames, on every engine; a runner from
+    // before protocol 2 plays without one.
+    if (can.has("frames")) {
+      video = openFrameVideo({
+        ffmpeg: args.ffmpeg,
+        videoPath: args.videoPath,
+        sidecarPath: NodePath.join(args.runDir, "run.frames.json"),
+        logPath: NodePath.join(args.runDir, "ffmpeg.log"),
+      });
+      await play.realtime({ fps: VIDEO_FPS, width: VIDEO_WIDTH, onFrame: video.push });
+    } else await play.realtime();
     const wallStart = Date.now();
     const budgetMs = args.seconds * 1000;
     while (!stopped()) {
@@ -394,7 +403,6 @@ export const playBot = async (
           pos,
           state: typeof gameState["state"] === "string" ? gameState["state"] : null,
         });
-      await launch.onTick(ticks);
       writeChild({
         op: "obs",
         tick: ticks,
@@ -572,7 +580,7 @@ export const playBot = async (
     await NodeFSP.mkdir(NodePath.join(args.runDir, "frames"), { recursive: true }).catch(
       () => undefined,
     );
-    await launch.snapshot(NodePath.join(args.runDir, "frames", END_FRAME)).catch(() => undefined);
+    await play.still(NodePath.join(args.runDir, "frames", END_FRAME)).catch(() => false);
     // Writes the runner never got (it predates them) are refusals too, said plainly.
     const refusedStates = [
       ...play.refusedStates(),
@@ -582,8 +590,7 @@ export const playBot = async (
       })),
     ];
     await play.close();
-    await sleep(500);
-    await launch.finishVideo();
+    const videoFacts = (await video?.finish()) ?? null;
     // Every child ends with the run: the bot child's stdin pipe closes so its
     // read loop exits on its own, and the launch ends the game and its
     // display, so one call that makes many runs cannot leak a process per run.
@@ -644,6 +651,7 @@ export const playBot = async (
       finalPos: lastPos,
       finalState: lastGameState,
       ...(perf === null ? {} : { perf }),
+      video: videoFacts,
     };
     await NodeFSP.writeFile(args.tracePath, JSON.stringify(trace, null, 2));
     await NodeFSP.writeFile(
@@ -674,7 +682,14 @@ export const playBot = async (
       (skippedIdClicks > 0
         ? ` ${skippedIdClicks} id-click(s) skipped: this game's runner has no control tree.`
         : "") +
-      ` Video: ${args.videoPath}`;
+      (videoFacts === null
+        ? can.has("frames")
+          ? " The game sent no frames, so this run has no video."
+          : " This game's in-game runner predates engine frames, so this run has no video; a fresh production run refreshes the harness's runner files."
+        : ` Video (engine frames): ${args.videoPath}, ${videoFacts.distinctFrames} distinct frames` +
+          (videoFacts.longestStallMs >= 2000
+            ? `; the game drew no new frame for ${(videoFacts.longestStallMs / 1000).toFixed(1)} s at its longest.`
+            : "."));
     return {
       runId: args.runId,
       goal,
@@ -702,14 +717,8 @@ export const playBot = async (
     };
   } finally {
     for (const reader of readers) reader.close();
-    if (botChild !== undefined) {
-      killPid(botChild.pid);
-      try {
-        botChild.kill("SIGTERM");
-      } catch {
-        /* gone */
-      }
-    }
+    botProcess?.signal("SIGTERM");
+    await video?.stop();
   }
 };
 
