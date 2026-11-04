@@ -247,9 +247,10 @@ const verified = async (record: unknown): Promise<ProcessFacts | null> => {
     : null;
 };
 
-/** Signals one pid; false when it is gone or not ours to signal. */
+/** Signals one pid, or a whole process group by its negated id; false when it is gone or not ours to signal. */
 const signalPid = (pid: number, signal: NodeJS.Signals): boolean => {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+  // 0, -1 and 1 would reach this server's own group, every process, or init.
+  if (!Number.isInteger(pid) || Math.abs(pid) <= 1) return false;
   try {
     process.kill(pid, signal);
     return true;

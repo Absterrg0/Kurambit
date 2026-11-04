@@ -58,3 +58,18 @@ it.skipIf(HOST_OS !== "linux")(
     }
   },
 );
+
+it.skipIf(HOST_OS !== "linux")("a tree stop ends what the child started", async () => {
+  const owned = spawnOwned("sh", ["-c", "sleep 30 & echo $!; wait"], {
+    env: process.env,
+    stdio: ["ignore", "pipe", "ignore"],
+    tree: true,
+  });
+  const grandchild = await new Promise<number>((resolve) =>
+    owned.child.stdout?.once("data", (chunk: Buffer) => resolve(Number(String(chunk).trim()))),
+  );
+  expect(await processFacts(grandchild)).not.toBeNull();
+  await owned.stop({ graceMs: 1_000 });
+  expect(owned.alive()).toBe(false);
+  expect(await processFacts(grandchild)).toBeNull();
+});
