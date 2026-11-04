@@ -36,7 +36,7 @@ export interface GameRunRecords {
   readonly inFlight: GameRunStep | null;
 }
 
-export interface GameRunInputs {
+interface GameRunInputs {
   readonly at: DateTime.Utc;
   /** Uniform in [0, 1): the policy's coin for labels, play order and presentation. */
   readonly coin: number;
@@ -49,12 +49,14 @@ type GameRunEventType =
   | "game-run.updated"
   | "game-run-step.updated"
   | "game-run-round.recorded";
+export type GameRunDomainEvent = Extract<
+  OrchestrationV2DomainEvent,
+  { readonly type: GameRunEventType }
+>;
 type WithoutId<E> = E extends unknown ? Omit<E, "id"> : never;
 /** An event the orchestrator gives an id when it commits it. */
-export type GameRunEvent = WithoutId<
-  Extract<OrchestrationV2DomainEvent, { readonly type: GameRunEventType }>
->;
-export type GameRunEffectRequest = Extract<
+export type GameRunEvent = WithoutId<GameRunDomainEvent>;
+type GameRunEffectRequest = Extract<
   OrchestrationEffectRequestV2,
   { readonly type: `game-run.${string}` }
 >;
@@ -65,7 +67,7 @@ export const GAME_RUN_EFFECT_TYPES = [
   "game-run.step.deadline",
 ] as const satisfies ReadonlyArray<GameRunEffectRequest["type"]>;
 
-export interface GameRunEffect {
+interface GameRunEffect {
   readonly request: GameRunEffectRequest;
   /** Epoch ms; absent runs at once. */
   readonly availableAt?: number;
@@ -78,7 +80,7 @@ export interface GameRunDecision {
   readonly cancelEffects: boolean;
 }
 
-export interface GameRunRefusal {
+interface GameRunRefusal {
   readonly reason: GameRunRefusalReason;
   readonly message: string;
 }

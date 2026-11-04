@@ -29,7 +29,7 @@ export const GameRunId = TrimmedNonEmptyString.pipe(Schema.brand("GameRunId"));
 export type GameRunId = typeof GameRunId.Type;
 export const GameRunStepId = TrimmedNonEmptyString.pipe(Schema.brand("GameRunStepId"));
 export type GameRunStepId = typeof GameRunStepId.Type;
-export const GameRunRoundId = TrimmedNonEmptyString.pipe(Schema.brand("GameRunRoundId"));
+const GameRunRoundId = TrimmedNonEmptyString.pipe(Schema.brand("GameRunRoundId"));
 export type GameRunRoundId = typeof GameRunRoundId.Type;
 
 /** A step's id: its number within the run. A pair's halves have numbers of their own. */
@@ -255,7 +255,7 @@ export const GameRunCheckOutcome = Schema.Struct({
 });
 export type GameRunCheckOutcome = typeof GameRunCheckOutcome.Type;
 
-export const GameRunDecidedBy = Schema.Literals(["creator", "default"]);
+const GameRunDecidedBy = Schema.Literals(["creator", "default"]);
 export type GameRunDecidedBy = typeof GameRunDecidedBy.Type;
 
 const FailedResult = Schema.Struct({ kind: Schema.Literal("failed"), reason: Schema.String });
@@ -290,14 +290,14 @@ export type GameRunStepResult = typeof GameRunStepResult.Type;
 
 // How a half of a pair finished, kept with the pair until its partner finishes
 // too, so neither half ever runs twice.
-export const GameRunHalfResult = Schema.Union([GameRunRoleDone, FailedResult, BotResult]);
+const GameRunHalfResult = Schema.Union([GameRunRoleDone, FailedResult, BotResult]);
 export type GameRunHalfResult = typeof GameRunHalfResult.Type;
 
 // A blind comparison's two independent steps, run at once: both builds'
 // samples, or the bot on both builds. Halves are in x-then-y order, which is
 // the order their results apply in; their ids follow the play order, so no
 // id or launch order tells a player which build it has.
-export const GameRunPairStep = Schema.Struct({
+const GameRunPairStep = Schema.Struct({
   kind: Schema.Literal("pair"),
   id: Schema.Number,
   halves: Schema.Array(Schema.Union([GameRunRoleStep, GameRunBotStep])),
@@ -352,7 +352,7 @@ export const GameRunDecided = Schema.Struct({
 });
 export type GameRunDecided = typeof GameRunDecided.Type;
 
-export const GameRunPlannedStep = Schema.Union([
+const GameRunPlannedStep = Schema.Union([
   GameRunRoleStep,
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GameRunGitOp }),
   Schema.Struct({ kind: Schema.Literal("boot"), id: Schema.Number }),
@@ -446,7 +446,7 @@ export const GameRunPlayed = Schema.Struct({
 });
 export type GameRunPlayed = typeof GameRunPlayed.Type;
 
-export const GameRunRoundPhase = Schema.Literals([
+const GameRunRoundPhase = Schema.Literals([
   "start",
   "block",
   "commit",
@@ -576,7 +576,7 @@ export type GameRunTask = typeof GameRunTask.Type;
 
 // ── The three records. ─────────────────────────────────────────────────────
 /** `waiting`: the step in flight is a creator decision. */
-export const GameRunStatus = Schema.Literals(["running", "waiting", "ended"]);
+const GameRunStatus = Schema.Literals(["running", "waiting", "ended"]);
 export type GameRunStatus = typeof GameRunStatus.Type;
 
 export const GameRunEnding = Schema.Literals([
@@ -654,7 +654,7 @@ export const GameRun = Schema.Struct({
 });
 export type GameRun = typeof GameRun.Type;
 
-export const GameRunStepStatus = Schema.Literals([
+const GameRunStepStatus = Schema.Literals([
   "planned",
   "running",
   "completed",

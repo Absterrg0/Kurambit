@@ -15,6 +15,10 @@ import {
 } from "@kurambit/shared/orchestrationV2ThreadError";
 import { threadPullRequestsOf } from "@kurambit/shared/threadPullRequests";
 import type {
+  GameRun,
+  GameRunRound,
+  GameRunStep,
+  GameRunStepId,
   OrchestrationV2AppThread,
   OrchestrationV2CheckpointScope,
   OrchestrationV2ExecutionNode,
@@ -39,6 +43,9 @@ import type {
   RunAttemptId,
 } from "@kurambit/contracts";
 import {
+  GameRun as GameRunSchema,
+  GameRunRound as GameRunRoundSchema,
+  GameRunStep as GameRunStepSchema,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
   OrchestrationV2CheckpointScopeJson as OrchestrationV2CheckpointScopeJsonSchema,
@@ -327,6 +334,27 @@ const isSettledLeafNode = (node: ProjectionNode, runs: ReadonlyArray<ProjectionR
   settledNodeStatuses.has(node.status) &&
   node.runId !== null &&
   !runs.some((run) => run.id === node.runId && activeRunStatuses.has(run.status));
+/**
+ * The production run's records of a thread. They are read on request and never
+ * ride a client's thread snapshot: a run's steps carry whole role prompts.
+ */
+export interface GameRunThreadRecords {
+  readonly gameRuns: ReadonlyArray<GameRun>;
+  readonly gameRunSteps: ReadonlyArray<GameRunStep>;
+  readonly gameRunRounds: ReadonlyArray<GameRunRound>;
+}
+const emptyGameRunRecords: GameRunThreadRecords = {
+  gameRuns: [],
+  gameRunSteps: [],
+  gameRunRounds: [],
+};
+export interface GameRunRecordFilter {
+  /**
+   * The steps a run holds in flight, or these steps; every step otherwise.
+   * A run's steps carry whole role prompts, so most reads want one.
+   */
+  readonly steps?: "in-flight" | ReadonlyArray<GameRunStepId>;
+}
 export type ProjectionRecordField = Exclude<
   keyof OrchestrationV2ThreadProjection,
   "thread" | "updatedAt" | "visibleTurnItems"
@@ -387,6 +415,10 @@ export interface ProjectionStoreV2Shape {
     fields: ReadonlyArray<K>,
     filter?: ProjectionRecordFilter,
   ) => Effect.Effect<ProjectionRecords<K>, ProjectionStoreV2Error>;
+  readonly getGameRunRecords: (
+    threadId: ThreadId,
+    filter?: GameRunRecordFilter,
+  ) => Effect.Effect<GameRunThreadRecords, ProjectionStoreV2Error>;
 
   readonly apply: (
     event: OrchestrationV2DomainEvent,
@@ -893,6 +925,29 @@ export function applyToProjection(
   }
 }
 
+function applyToGameRunRecords(
+  records: GameRunThreadRecords,
+  event: OrchestrationV2DomainEvent,
+): GameRunThreadRecords {
+  switch (event.type) {
+    case "game-run.created":
+    case "game-run.updated":
+      return { ...records, gameRuns: upsertById(records.gameRuns, event.payload) };
+    case "game-run-step.updated":
+      return { ...records, gameRunSteps: upsertById(records.gameRunSteps, event.payload) };
+    case "game-run-round.recorded":
+      return { ...records, gameRunRounds: upsertById(records.gameRunRounds, event.payload) };
+    default:
+      return records;
+  }
+}
+
+const isGameRunEvent = (event: OrchestrationV2DomainEvent) =>
+  event.type === "game-run.created" ||
+  event.type === "game-run.updated" ||
+  event.type === "game-run-step.updated" ||
+  event.type === "game-run-round.recorded";
+
 /**
  * Provider sessions are process-scoped: one session row can be bound to several app
  * threads. Updating that row changes what every bound thread reads, even though the
@@ -901,6 +956,7 @@ export function applyToProjection(
  */
 export interface ProjectionReplayState {
   readonly projections: Map<ThreadId, OrchestrationV2ThreadProjection>;
+  readonly gameRunRecords: Map<ThreadId, GameRunThreadRecords>;
   readonly providerSessionThreadIds: Map<ProviderSessionId, ReadonlySet<ThreadId>>;
   readonly providerThreadInstanceIds: Map<ProviderThreadId, ProviderInstanceId>;
 }
@@ -908,6 +964,7 @@ export interface ProjectionReplayState {
 function makeProjectionReplayState(): ProjectionReplayState {
   return {
     projections: new Map(),
+    gameRunRecords: new Map(),
     providerSessionThreadIds: new Map(),
     providerThreadInstanceIds: new Map(),
   };
@@ -925,6 +982,13 @@ function applyToProjectionReplayState(
   const current = state.projections.get(event.threadId);
   if (current === undefined) {
     return false;
+  }
+  if (isGameRunEvent(event)) {
+    state.gameRunRecords.set(
+      event.threadId,
+      applyToGameRunRecords(state.gameRunRecords.get(event.threadId) ?? emptyGameRunRecords, event),
+    );
+    return true;
   }
 
   let next = applyToProjection(current, event);
@@ -1077,6 +1141,16 @@ const encodeThreadUpdatedAt = Schema.encodeEffect(
   OrchestrationV2AppThreadJsonSchema.fields.updatedAt,
 );
 const encodeRunPayload = Schema.encodeEffect(Schema.fromJsonString(OrchestrationV2RunJsonSchema));
+const encodeGameRunPayload = Schema.encodeEffect(Schema.fromJsonString(GameRunSchema));
+const encodeGameRunStepPayload = Schema.encodeEffect(Schema.fromJsonString(GameRunStepSchema));
+const encodeGameRunRoundPayload = Schema.encodeEffect(Schema.fromJsonString(GameRunRoundSchema));
+const decodeGameRunPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(GameRunSchema));
+const decodeGameRunStepPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(GameRunStepSchema),
+);
+const decodeGameRunRoundPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(GameRunRoundSchema),
+);
 const encodeRestartCancelledBackgroundWork = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2RunJsonSchema.fields.restartCancelledBackgroundWork),
 );
@@ -2640,6 +2714,91 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `;
             break;
           }
+          case "game-run.created":
+          case "game-run.updated": {
+            const payloadJson = yield* encodeGameRunPayload(event.payload);
+            yield* sql`
+              INSERT INTO orchestration_v2_projection_game_runs (
+                game_run_id,
+                thread_id,
+                project_id,
+                status,
+                started_at,
+                updated_at,
+                payload_json
+              )
+              VALUES (
+                ${event.payload.id},
+                ${event.payload.threadId},
+                ${event.payload.projectId},
+                ${event.payload.status},
+                ${event.payload.startedAt},
+                ${event.payload.updatedAt},
+                ${payloadJson}
+              )
+              ON CONFLICT(game_run_id)
+              DO UPDATE SET
+                status = excluded.status,
+                updated_at = excluded.updated_at,
+                payload_json = excluded.payload_json
+            `;
+            break;
+          }
+          case "game-run-step.updated": {
+            const payloadJson = yield* encodeGameRunStepPayload(event.payload);
+            yield* sql`
+              INSERT INTO orchestration_v2_projection_game_run_steps (
+                game_run_step_id,
+                game_run_id,
+                thread_id,
+                seq,
+                kind,
+                status,
+                payload_json
+              )
+              VALUES (
+                ${event.payload.id},
+                ${event.payload.runId},
+                ${event.payload.threadId},
+                ${event.payload.seq},
+                ${event.payload.kind},
+                ${event.payload.status},
+                ${payloadJson}
+              )
+              ON CONFLICT(game_run_step_id)
+              DO UPDATE SET
+                status = excluded.status,
+                kind = excluded.kind,
+                payload_json = excluded.payload_json
+            `;
+            break;
+          }
+          case "game-run-round.recorded": {
+            const payloadJson = yield* encodeGameRunRoundPayload(event.payload);
+            yield* sql`
+              INSERT INTO orchestration_v2_projection_game_run_rounds (
+                game_run_round_id,
+                game_run_id,
+                thread_id,
+                round,
+                recorded_at,
+                payload_json
+              )
+              VALUES (
+                ${event.payload.id},
+                ${event.payload.runId},
+                ${event.payload.threadId},
+                ${event.payload.round.round},
+                ${event.payload.recordedAt},
+                ${payloadJson}
+              )
+              ON CONFLICT(game_run_round_id)
+              DO UPDATE SET
+                recorded_at = excluded.recorded_at,
+                payload_json = excluded.payload_json
+            `;
+            break;
+          }
           case "context-transfer.created":
           case "context-transfer.updated": {
             const payloadJson = yield* encodeContextTransferPayload(event.payload);
@@ -2710,7 +2869,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           event.type !== "thread.runtime-mode-updated" &&
           event.type !== "thread.interaction-mode-updated" &&
           event.type !== "thread.model-selection-updated" &&
-          event.type !== "thread.provider-switched"
+          event.type !== "thread.provider-switched" &&
+          !isGameRunEvent(event)
         ) {
           const updatedAt = yield* encodeThreadUpdatedAt(event.occurredAt);
           yield* sql`
@@ -3880,6 +4040,21 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             id: "context_transfer_id",
             decode: (payload) => decodeContextTransferPayload(payload),
           },
+          {
+            name: "game_runs",
+            id: "game_run_id",
+            decode: (payload) => decodeGameRunPayload(payload),
+          },
+          {
+            name: "game_run_steps",
+            id: "game_run_step_id",
+            decode: (payload) => decodeGameRunStepPayload(payload),
+          },
+          {
+            name: "game_run_rounds",
+            id: "game_run_round_id",
+            decode: (payload) => decodeGameRunRoundPayload(payload),
+          },
         ];
         const pageSize = 500;
         for (const table of tables) {
@@ -4872,6 +5047,47 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         ]),
         Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })),
       );
+
+    const getGameRunRecords: ProjectionStoreV2Shape["getGameRunRecords"] = (threadId, filter) =>
+      sql
+        .withTransaction(
+          Effect.all([
+            sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_game_runs
+              WHERE thread_id = ${threadId}
+              ORDER BY rowid ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeGameRunPayload, threadId))),
+            sql<PayloadRow>`
+              SELECT step.payload_json FROM orchestration_v2_projection_game_run_steps AS step
+              WHERE step.thread_id = ${threadId}
+                ${
+                  filter?.steps === undefined
+                    ? sql``
+                    : filter.steps === "in-flight"
+                      ? sql`AND step.seq = (
+                          SELECT json_extract(run.payload_json, '$.inFlight')
+                          FROM orchestration_v2_projection_game_runs AS run
+                          WHERE run.game_run_id = step.game_run_id
+                        )`
+                      : sql`AND step.game_run_step_id IN (SELECT value FROM json_each(${encodeIdList(filter.steps)}))`
+                }
+              ORDER BY step.rowid ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeGameRunStepPayload, threadId))),
+            sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_game_run_rounds
+              WHERE thread_id = ${threadId}
+              ORDER BY round ASC, rowid ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeGameRunRoundPayload, threadId))),
+          ]),
+        )
+        .pipe(
+          Effect.map(([gameRuns, gameRunSteps, gameRunRounds]) => ({
+            gameRuns,
+            gameRunSteps,
+            gameRunRounds,
+          })),
+          Effect.mapError(controlReadError(threadId)),
+        );
 
     const getThreadRecords: ProjectionStoreV2Shape["getThreadRecords"] = (
       threadId,
@@ -6096,6 +6312,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getNextTurnItemOrdinal,
       getTurnItem,
       getThreadRecords,
+      getGameRunRecords,
       getRuntimeRequest,
       getPlan,
       getProviderControlContext,
@@ -6125,6 +6342,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           const result = yield* Ref.modify(replayState, (existing) => {
             const next: ProjectionReplayState = {
               projections: new Map(existing.projections),
+              gameRunRecords: new Map(existing.gameRunRecords),
               providerSessionThreadIds: new Map(existing.providerSessionThreadIds),
               providerThreadInstanceIds: new Map(existing.providerThreadInstanceIds),
             };
@@ -6449,6 +6667,23 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ["thread", projection.thread],
             ...fields.map((field) => [field, selected[field]]),
           ]) as ProjectionRecords<(typeof fields)[number]>;
+        }),
+      getGameRunRecords: (threadId, filter) =>
+        Effect.gen(function* () {
+          const state = yield* Ref.get(replayState);
+          if (!state.projections.has(threadId))
+            return yield* new ProjectionStoreThreadNotFoundError({ threadId });
+          const records = state.gameRunRecords.get(threadId) ?? emptyGameRunRecords;
+          const steps = filter?.steps;
+          if (steps === undefined) return records;
+          return {
+            ...records,
+            gameRunSteps: records.gameRunSteps.filter((row) =>
+              steps === "in-flight"
+                ? records.gameRuns.some((run) => run.id === row.runId && run.inFlight === row.seq)
+                : steps.includes(row.id),
+            ),
+          };
         }),
       getRuntimeRequest: (threadId, requestId) =>
         Effect.gen(function* () {

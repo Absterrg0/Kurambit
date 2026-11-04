@@ -19,6 +19,8 @@ import {
   type ModelSelection,
   OrchestrationV2Command,
   type OrchestrationV2InternalCommand,
+  type OrchestrationV2GameRunCommand,
+  GameRunRefusalReason,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2AppThread,
   type OrchestrationV2ContextHandoff,
@@ -65,7 +67,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
@@ -133,6 +137,7 @@ import {
   ThreadForkServiceV2,
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
+import * as GameRunDecide from "./gameRun/decide.ts";
 import type * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -227,6 +232,21 @@ export class OrchestratorThreadAboveModeLimitError extends Schema.TaggedError<Or
   }
 }
 
+/** A game-run command the run's rules refuse; its detail is what the caller hands back in-turn. */
+export class OrchestratorGameRunRefusedError extends Schema.TaggedError<OrchestratorGameRunRefusedError>()(
+  "OrchestratorGameRunRefusedError",
+  {
+    commandId: CommandId,
+    commandType: Schema.String,
+    reason: GameRunRefusalReason,
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 export class OrchestratorCommandPreviouslyRejectedError extends Schema.TaggedError<OrchestratorCommandPreviouslyRejectedError>()(
   "OrchestratorCommandPreviouslyRejectedError",
   {
@@ -278,6 +298,7 @@ export const OrchestratorV2Error = Schema.Union([
   OrchestratorSubagentThreadReadOnlyError,
   OrchestratorGameRoundChildReadOnlyError,
   OrchestratorThreadAboveModeLimitError,
+  OrchestratorGameRunRefusedError,
 ]);
 export type OrchestratorV2Error = typeof OrchestratorV2Error.Type;
 
@@ -6518,6 +6539,72 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       effects,
     );
 
+  const dispatchGameRun = (
+    command: OrchestrationV2GameRunCommand,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) =>
+    Effect.gen(function* () {
+      const threadId = command.threadId;
+      const unreadable = (cause: unknown) => new OrchestratorProjectionError({ threadId, cause });
+      const thread = yield* projectionStore.getThread(threadId).pipe(Effect.mapError(unreadable));
+      if (thread.deletedAt !== null)
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${threadId} was deleted.`,
+        });
+      const records = yield* projectionStore
+        .getGameRunRecords(threadId, { steps: "in-flight" })
+        .pipe(Effect.mapError(unreadable));
+      const latest = records.gameRuns.at(-1);
+      const decided = GameRunDecide.decide(
+        command,
+        {
+          projectId: thread.projectId,
+          runs: records.gameRuns,
+          rounds: records.gameRunRounds,
+          inFlight:
+            records.gameRunSteps.find(
+              (step) => step.runId === latest?.id && step.seq === latest.inFlight,
+            ) ?? null,
+        },
+        {
+          at: yield* DateTime.now,
+          coin: yield* Random.next,
+          id: (yield* Random.nextIntBetween(0, 2 ** 48)).toString(36),
+        },
+      );
+      if (Result.isFailure(decided))
+        return yield* new OrchestratorGameRunRefusedError({
+          commandId: command.commandId,
+          commandType: command.type,
+          reason: decided.failure.reason,
+          detail: decided.failure.message,
+        });
+      const emitEvent = emit(events, command);
+      for (const event of decided.success.events)
+        yield* emitEvent<GameRunDecide.GameRunDomainEvent>(event);
+      yield* Ref.update(effects, (existing) => [
+        ...existing,
+        ...decided.success.effects.map(
+          ({ request, availableAt }): PendingOrchestrationEffectV2 => ({
+            id: `effect:${command.commandId}:${request.type}:${request.stepId}`,
+            commandId: command.commandId,
+            threadId,
+            request,
+            ...(availableAt === undefined ? {} : { availableAt: DateTime.makeUnsafe(availableAt) }),
+          }),
+        ),
+      ]);
+      return decided.success.cancelEffects
+        ? {
+            effectTypes: GameRunDecide.GAME_RUN_EFFECT_TYPES,
+            reason: "The game run was stopped.",
+          }
+        : undefined;
+    });
+
   const dispatchGameRoundTaskRequest = (
     command: Extract<OrchestrationV2InternalCommand, { readonly type: "game-round.task.request" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -10659,6 +10746,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "secret_request.record":
         yield* dispatchSecretRequestRecord(command, events);
+        break;
+      case "game-run.start":
+      case "game-run.resume":
+      case "game-run.stop":
+      case "game-run.steer":
+      case "game-run.profile.set":
+      case "game-run.decide":
+      case "game-run.submit":
+      case "game-run.step.start":
+      case "game-run.step.complete":
+      case "game-run.step.fail":
+      case "game-run.decision.expire":
+        cancelUnsettledEffects = yield* dispatchGameRun(command, events, effects);
         break;
       default:
         return yield* dispatchUnsupported(command);

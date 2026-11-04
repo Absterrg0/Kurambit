@@ -71,7 +71,7 @@ const checkProblem = (c: RungCheck, where: string): string | null => {
   return null;
 };
 /** What is wrong with a rung's checks beyond their shape, or null. */
-export const rungProblem = (r: { readonly checks: ReadonlyArray<RungCheck> }, where: string) =>
+const rungProblem = (r: { readonly checks: ReadonlyArray<RungCheck> }, where: string) =>
   r.checks.map((c, k) => checkProblem(c, `${where} check ${k + 1}`)).find((x) => x !== null) ??
   null;
 
