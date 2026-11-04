@@ -25,6 +25,7 @@ import type * as ThreadManagement from "../../orchestration-v2/ThreadManagementS
 import type * as GameService from "../GameService.ts";
 import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { botRunCount } from "./facts.ts";
+import { findFirstTurn, firstTurnId } from "./firstTurn.ts";
 import { blankCommit, neutralBuild } from "./git.ts";
 import type { RoleDone, StepResult } from "./policy.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn, waitOutLowMemory } from "./lowMemory.ts";
@@ -59,8 +60,8 @@ export type RoleContext = {
   readonly selection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
   readonly budgetEndsAt: number | null;
-  /** Persists the live turn into the in-flight step before any wait. */
-  readonly attach: (threadId: ThreadId, runId: RunId) => Effect.Effect<void>;
+  /** Adds a role thread to the run's history once its first turn exists. */
+  readonly started: (threadId: ThreadId) => Effect.Effect<void>;
   readonly log: (line: string) => Effect.Effect<void>;
 };
 
@@ -140,11 +141,15 @@ export const runRole: (
       ? Effect.succeed(true)
       : Effect.map(worktreeOf(threadId), (path) => path !== null);
 
-  const send = (threadId: ThreadId, text: string) =>
+  const send = (
+    threadId: ThreadId,
+    text: string,
+    commandId = CommandId.make(NodeCrypto.randomUUID()),
+  ) =>
     threads
       .sendToThread({
         projectId,
-        commandId: CommandId.make(NodeCrypto.randomUUID()),
+        commandId,
         threadId,
         messageId: MessageId.make(NodeCrypto.randomUUID()),
         text,
@@ -204,12 +209,14 @@ export const runRole: (
         Effect.orElseSucceed(() => null),
       );
 
-  // Starting the turn: a launch carries a command id derived from the step, so
-  // a resume after a crash mid-launch replays the same thread instead of a second.
+  // Starting the turn: every first turn carries a command id derived from the
+  // step, so a resume after a crash replays it instead of making a second, and
+  // T3's receipt for it says which thread the step already has.
   let threadId: ThreadId;
   let runId: RunId | undefined;
+  const prior = yield* findFirstTurn(threads.getCommandReceipt, ctx.runId, step, fresh);
   // A role thread the creator deleted is replaced, never waited on forever.
-  let target = step.attached?.threadId ?? step.thread;
+  let target = prior?.threadId ?? step.thread;
   const gone =
     target !== null &&
     (yield* threads.getThreadShell(target).pipe(
@@ -222,15 +229,21 @@ export const runRole: (
     yield* ctx.log(`${step.role}: thread ${target} is gone; relaunching the step`);
     target = null;
   }
-  const resumed = step.attached !== null && target !== null;
-  if (resumed && step.attached !== null) {
-    threadId = step.attached.threadId;
+  const resumed = prior !== null && target !== null;
+  if (resumed && target !== null) {
+    threadId = target;
+    yield* ctx.log(`${step.role}: reattaching to thread ${threadId}`);
+    yield* ctx.started(threadId);
   } else if (target !== null) {
     threadId = target;
     if (!(yield* workspaceOk(threadId)))
       return { kind: "failed", reason: "worktree gone" } satisfies StepResult;
-    runId = yield* send(threadId, step.prompt);
-    yield* ctx.attach(threadId, runId);
+    const sendId = firstTurnId(ctx.runId, step.id, ":send");
+    // No accepted send was found, so a receipt here is a refusal, and a
+    // refused command id stays refused: the retry is a new command.
+    const refused = (yield* threads.getCommandReceipt(sendId)) !== null;
+    runId = yield* send(threadId, step.prompt, refused ? undefined : sendId);
+    yield* ctx.started(threadId);
   } else {
     const blank = step.at === BLANK ? yield* blankWorktree(deps, ctx, step) : null;
     if (step.at === BLANK && blank === null)
@@ -263,9 +276,7 @@ export const runRole: (
     const own = blank ?? sample;
     const launched = yield* deps.launches
       .launch({
-        commandId: CommandId.make(
-          `studio:${ctx.runId}:${step.id}${fresh ? ":fresh" : gone ? ":relaunch" : ""}`,
-        ),
+        commandId: firstTurnId(ctx.runId, step.id, fresh ? ":fresh" : gone ? ":relaunch" : ""),
         projectId,
         title: step.title,
         modelSelection: ctx.selection,
@@ -303,7 +314,7 @@ export const runRole: (
       return { kind: "failed", reason: `${step.role}: launch made no run` } satisfies StepResult;
     }
     runId = first.id;
-    yield* ctx.attach(threadId, runId);
+    yield* ctx.started(threadId);
   }
   const live = threadId;
   // The cap runs from the launch: a Unity sample's player is prepared before
@@ -413,7 +424,13 @@ export const runRole: (
           // accepts), and every resend fails the same way. A role in the game
           // folder continues once in a fresh thread: its work is in the files.
           // A provider that is really down fails there too and ends the run.
-          if (target !== null && retries === 0 && step.at === null && !fresh)
+          if (
+            target !== null &&
+            retries === 0 &&
+            step.at === null &&
+            !fresh &&
+            prior?.kind !== ":fresh"
+          )
             return { kind: "fresh" } satisfies Waited;
           const reason =
             failure === null
@@ -441,7 +458,7 @@ export const runRole: (
     return yield* runRole(
       deps,
       ctx,
-      { ...step, attached: null, thread: null, prompt: `${CONTINUE}\n\n${step.prompt}` },
+      { ...step, thread: null, prompt: `${CONTINUE}\n\n${step.prompt}` },
       true,
     );
   }

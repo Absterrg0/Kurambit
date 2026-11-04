@@ -86,8 +86,9 @@ const RoleStep = Schema.Struct({
   sheet: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   // Total explore input this thread may use across its sessions; 0 sets none.
   inputCapMs: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
-  // Written by the driver once the turn exists, so a resume waits on it.
-  attached: Schema.NullOr(Schema.Struct({ threadId: ThreadId, runId: RunId })),
+  // Older run.json files: the driver's own copy of the turn it launched, read
+  // by a resume only when T3 holds no record of it. Never written now.
+  attached: Schema.optionalKey(Schema.NullOr(Schema.Struct({ threadId: ThreadId, runId: RunId }))),
 });
 
 const GitOp = Schema.Union([

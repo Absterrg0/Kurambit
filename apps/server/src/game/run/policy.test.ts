@@ -501,7 +501,8 @@ describe("parallel samples", () => {
   it("resumes a half-finished pair from run.json and runs only the unfinished half", () => {
     const { state, pair } = planPair(atCompare());
     const [x, y] = roles(pair);
-    // The driver attached both halves, then x finished and was saved; then the server stopped.
+    // x finished and was saved; then the server stopped. y carries the attach an
+    // older driver wrote, which still loads.
     const attachedY = {
       ...y!,
       attached: { threadId: ThreadId.make("ty"), runId: RunId.make("run-y") },

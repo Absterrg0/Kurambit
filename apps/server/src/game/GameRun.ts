@@ -28,7 +28,6 @@ import {
   type GameRunSteerResult,
   type ModelSelection,
   type ProjectId,
-  type RunId,
   ThreadId,
 } from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -255,7 +254,7 @@ const selectionFor = (current: ModelSelection, state: State.RunState): ModelSele
 const describe = (step: State.Step): string => {
   if (step.kind === "pair") return step.halves.map(describe).join(" | ");
   if (step.kind === "role")
-    return `step ${step.id}: ${step.role}${step.thread === null ? "" : " (follow-up)"}${step.at === null ? "" : ` at ${step.at.slice(0, 12)}`}${step.attached === null ? "" : " (reattach)"}`;
+    return `step ${step.id}: ${step.role}${step.thread === null ? "" : " (follow-up)"}${step.at === null ? "" : ` at ${step.at.slice(0, 12)}`}`;
   if (step.kind === "git") return `step ${step.id}: git ${step.op._tag}`;
   if (step.kind === "bot") return `step ${step.id}: bot ${step.file} at ${step.sha.slice(0, 12)}`;
   return `step ${step.id}: ${step.kind}`;
@@ -556,33 +555,21 @@ export const layer = Layer.effect(
       // A pair's two halves write the in-flight step at once; each write reads
       // the state only after it holds this lock, so neither loses the other's.
       const inFlightLock = Semaphore.makeUnsafe(1);
-      // The role records its thread and run before waiting, so a resumed
-      // driver reattaches instead of launching a second thread.
-      const attach = (stepId: number) => (threadId: ThreadId, runId: RunId) =>
+      // The run's own history of which role ran in which thread and when; a
+      // resume finds the step's thread from T3, never from here.
+      const started = (role: string) => (threadId: ThreadId) =>
         inFlightLock.withPermits(1)(
-          Effect.gen(function* () {
-            const step = state.inFlight;
-            const halves = step === null ? [] : step.kind === "pair" ? step.halves : [step];
-            const role = halves.find(
-              (h): h is State.RoleStep => h.kind === "role" && h.id === stepId,
-            );
-            if (step === null || role === undefined) return;
-            const attached = { ...role, attached: { threadId, runId } };
-            const fresh = !state.threads.some((t) => t.threadId === threadId);
-            yield* save({
-              ...state,
-              inFlight:
-                step.kind === "pair"
-                  ? { ...step, halves: step.halves.map((h) => (h.id === stepId ? attached : h)) }
-                  : attached,
-              threads: fresh
-                ? [
+          Effect.suspend(() =>
+            state.threads.some((t) => t.threadId === threadId)
+              ? Effect.void
+              : save({
+                  ...state,
+                  threads: [
                     ...state.threads,
-                    { role: role.role, threadId, startedAt: new Date().toISOString() },
-                  ]
-                : state.threads,
-            });
-          }),
+                    { role, threadId, startedAt: new Date().toISOString() },
+                  ],
+                }),
+          ),
         );
       // A finished half is saved at once, so a resume never plays it again.
       const recordHalf = (id: number, result: State.HalfResult) =>
@@ -654,7 +641,7 @@ export const layer = Layer.effect(
                   selection: d.selection,
                   runtimeMode: d.runtimeMode,
                   budgetEndsAt: state.budgetEndsAt,
-                  attach: attach(step.id),
+                  started: started(step.role),
                   log,
                 },
                 { ...step, prompt },
