@@ -73,18 +73,8 @@ export const nativeUserEnv = (
   XDG_CACHE_HOME: cacheDir,
 });
 
-/**
- * Creates a fresh per-run isolation trio under parentDir. Each call mints a
- * unique user-<uuid> root, so two runs sharing one evidence parent still get
- * separate userdata. The caller owns parentDir (an evidence or run directory)
- * and removes it with that evidence; this helper never touches HOME or
- * installed userdata.
- */
-export const prepareNativeUserIsolation = async (
-  parentDir: string,
-): Promise<NativeUserIsolation> => {
-  const unique = `user-${NodeCrypto.randomUUID()}`;
-  const dir = NodePath.join(parentDir, unique);
+/** The XDG trio under dir, created when missing; nothing is removed. */
+export const nativeUserIsolationAt = async (dir: string): Promise<NativeUserIsolation> => {
   const dataDir = NodePath.join(dir, "data");
   const configDir = NodePath.join(dir, "config");
   const cacheDir = NodePath.join(dir, "cache");
@@ -93,3 +83,13 @@ export const prepareNativeUserIsolation = async (
   await NodeFSP.mkdir(cacheDir, { recursive: true });
   return { dir, dataDir, configDir, cacheDir, env: nativeUserEnv(dataDir, configDir, cacheDir) };
 };
+
+/**
+ * Creates a fresh per-run isolation trio under parentDir. Each call mints a
+ * unique user-<uuid> root, so two runs sharing one evidence parent still get
+ * separate userdata. The caller owns parentDir (an evidence or run directory)
+ * and removes it with that evidence; this helper never touches HOME or
+ * installed userdata.
+ */
+export const prepareNativeUserIsolation = (parentDir: string): Promise<NativeUserIsolation> =>
+  nativeUserIsolationAt(NodePath.join(parentDir, `user-${NodeCrypto.randomUUID()}`));

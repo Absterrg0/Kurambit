@@ -1,6 +1,7 @@
 // @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off preferSchemaOverJson:off -- This module owns headless Chromium for browser play sessions: wall-clock boot polling and real-time input.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
+import * as NodePath from "node:path";
 import type { GameConsoleMessage, GameExploreStep } from "@kurambit/contracts";
 import {
   READ_STUDIO_READY,
@@ -40,6 +41,39 @@ const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 
+type KeptEntries = ReadonlyArray<{ readonly name: string; readonly value: string }>;
+
+/**
+ * A kept session's localStorage, stored without its origin: the served port
+ * changes per session, so the entries are restored onto whatever origin the
+ * next kept session serves. Unreadable or malformed means none.
+ */
+const readKeptStorage = async (path: string): Promise<KeptEntries> => {
+  const raw: unknown = await NodeFSP.readFile(path, "utf8")
+    .then((text) => JSON.parse(text) as unknown)
+    .catch(() => null);
+  const entries =
+    raw !== null && typeof raw === "object" && "localStorage" in raw ? raw.localStorage : null;
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry: unknown) =>
+    entry !== null &&
+    typeof entry === "object" &&
+    "name" in entry &&
+    "value" in entry &&
+    typeof entry.name === "string" &&
+    typeof entry.value === "string"
+      ? [{ name: entry.name, value: entry.value }]
+      : [],
+  );
+};
+
+/** Written whole then renamed, so a session killed mid-write keeps the last good saves. */
+const writeKeptStorage = async (path: string, entries: KeptEntries): Promise<void> => {
+  const partial = NodePath.join(NodePath.dirname(path), `.${NodePath.basename(path)}.partial`);
+  await NodeFSP.writeFile(partial, `${JSON.stringify({ localStorage: entries }, null, 2)}\n`);
+  await NodeFSP.rename(partial, path);
+};
+
 export interface WebPlaySession extends PlaySession {
   /** Writes the page's current picture: the browser is its own display host. */
   readonly still: (path: string) => Promise<void>;
@@ -60,6 +94,11 @@ export const openWebPlaySession = async (input: {
   readonly height: number;
   readonly bootTimeoutMs: number;
   readonly signal?: AbortSignal | undefined;
+  /**
+   * A kept session's localStorage file: restored before the page loads and
+   * written back when the session closes. Omitted, the page starts with none.
+   */
+  readonly keptStorage?: string | null | undefined;
 }): Promise<WebPlaySession> => {
   input.signal?.throwIfAborted();
   const { chromium } = loadPlaywright();
@@ -79,7 +118,20 @@ export const openWebPlaySession = async (input: {
     throw new Error("aborted");
   }
   try {
-    const page = await browser.newPage({ viewport: { width: input.width, height: input.height } });
+    const origin = new URL(input.url).origin;
+    const keptStorage = input.keptStorage ?? null;
+    const context = await browser.newContext({
+      viewport: { width: input.width, height: input.height },
+      ...(keptStorage === null
+        ? {}
+        : {
+            storageState: {
+              cookies: [],
+              origins: [{ origin, localStorage: [...(await readKeptStorage(keptStorage))] }],
+            },
+          }),
+    });
+    const page = await context.newPage();
     const pending: GameConsoleMessage[] = [];
     let dropped = 0;
     const record = (level: GameConsoleMessage["level"], text: string): void => {
@@ -321,7 +373,27 @@ export const openWebPlaySession = async (input: {
         await page.screenshot({ path }).catch(() => undefined);
       },
       close: async () => {
-        await browser.close().catch(() => undefined);
+        try {
+          if (keptStorage !== null) {
+            // Leaving the page fires pagehide as closing the tab would, so a game
+            // that saves then (the starter shell's progress does) has written it.
+            await page.goto("about:blank", { timeout: 5_000 }).catch(() => undefined);
+            // storageState has no timeout and reads through the page, so a game
+            // whose main thread is stuck would hold the close forever.
+            const state = await Promise.race([
+              context.storageState().catch(() => null),
+              sleep(3_000).then(() => null),
+            ]);
+            // A page that never answered keeps the last saves rather than erasing them.
+            if (state !== null)
+              await writeKeptStorage(
+                keptStorage,
+                state.origins.find((entry) => entry.origin === origin)?.localStorage ?? [],
+              ).catch(() => undefined);
+          }
+        } finally {
+          await browser.close().catch(() => undefined);
+        }
       },
     };
     return session;

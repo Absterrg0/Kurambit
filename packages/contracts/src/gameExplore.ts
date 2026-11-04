@@ -45,6 +45,16 @@ export const GAME_EXPLORE_BOUNDS = {
 const sessionId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
 
 /**
+ * What a play session starts with as the game's saved data. `fresh` (the
+ * default) starts with none and leaves none behind. `keep` uses one stable
+ * save location per game and engine under the game's ignored
+ * `.studio/saves/`, so what one kept session saves the next one reads; it is
+ * never the user's own saves.
+ */
+export const GameSaves = Schema.Literals(["fresh", "keep"]);
+export type GameSaves = typeof GameSaves.Type;
+
+/**
  * Exploration plays the current game sources with the game paused between
  * acts. Native games run Godot; three.js games load the static folder in
  * headless Chromium (real keyboard/mouse, screenshots, console errors, a
@@ -56,6 +66,8 @@ export const GameExploreStartInput = Schema.Struct({
   bootTimeoutMs: Schema.optionalKey(Schema.Finite),
   /** Which runner to open. Omitted means the game's own engine. */
   target: Schema.optionalKey(Schema.Literals(["native", "web"])),
+  /** Omitted means `fresh`. */
+  saves: Schema.optionalKey(GameSaves),
 });
 export type GameExploreStartInput = typeof GameExploreStartInput.Type;
 

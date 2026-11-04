@@ -104,6 +104,7 @@ export const launchPageBot = async (input: {
   readonly videoPath: string;
   readonly session: Session;
   readonly signal: AbortSignal | undefined;
+  readonly keptStorage: string | null;
 }): Promise<BotLaunch> => {
   if (input.session.stopped) throw new Error("Bot run stopped.");
   const framesDir = NodePath.join(input.runDir, "frames");
@@ -119,6 +120,7 @@ export const launchPageBot = async (input: {
     height: input.viewport.height,
     bootTimeoutMs: BOOT_TIMEOUT_MS,
     signal: input.signal,
+    keptStorage: input.keptStorage,
   }).catch(async (error: unknown) => {
     await serve.close().catch(() => undefined);
     throw stoppedError(input.session, error);

@@ -74,6 +74,8 @@ export interface PlayProcessInput {
   readonly scriptDir: string;
   /** Scratch outside the game for the process's own state and logs. */
   readonly traceDir: string;
+  /** A kept session's stable save location (see gameKeptSaves); null starts with no saved data. */
+  readonly saves: string | null;
   readonly viewport: GameViewport;
   /** Whether a private display exists; without one the runner must run headless or refuse. */
   readonly display: boolean;

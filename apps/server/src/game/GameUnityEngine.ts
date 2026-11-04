@@ -563,7 +563,7 @@ export const makeUnityBackend = (
             detail:
               "A Unity session needs xvfb-run for the player's private display; install the system Xvfb package.",
           });
-        const home = NodePath.join(input.traceDir, "home");
+        const home = NodePath.join(input.saves ?? input.traceDir, "home");
         yield* Effect.tryPromise({
           try: () => NodeFSP.mkdir(home, { recursive: true }),
           catch: (cause) =>
@@ -584,8 +584,8 @@ export const makeUnityBackend = (
             "-logFile",
             NodePath.join(input.traceDir, "player.log"),
           ],
-          // The player keeps its prefs and log under the session's scratch HOME,
-          // never the user's ~/.config/unity3d.
+          // The player keeps its prefs under the session's scratch HOME (a kept
+          // session's stable one), never the user's ~/.config/unity3d.
           env: {
             ...GameProcesses.engineChildEnv(),
             HOME: home,
@@ -594,7 +594,7 @@ export const makeUnityBackend = (
             LP_NUM_THREADS: "2",
           },
           request: {},
-          scratch: [home],
+          scratch: input.saves === null ? [home] : [],
           inputNote: "Keys and mouse go in through the Input System. ",
         };
       }),

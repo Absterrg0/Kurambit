@@ -27,6 +27,7 @@ import { findExecutable } from "./GameProcesses.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
 import { requireChromium } from "./gameChromium.ts";
 import { launchPageBot, launchProcessBot } from "./gameBotLaunch.ts";
+import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
 import { playBot, type BotLaunch } from "./gameBotPlay.ts";
 import {
   botEnding,
@@ -489,6 +490,12 @@ const make = Effect.gen(function* () {
       // A player of the current sources, built once per source identity; an
       // editor that just built it closes, so it never plays beside the run.
       const player = profile.play === "player" ? (yield* players.prepare(root)).player : null;
+      const saves = yield* keptSavesFor({
+        root,
+        engine: manifest.engine.name,
+        saves: input.saves,
+        operation: "Bot run",
+      });
       let jevKey: string | null = null;
       let jevBase = JEV_DEFAULT_BASE;
       let policyNote: string | null = null;
@@ -571,6 +578,7 @@ const make = Effect.gen(function* () {
                       videoPath,
                       session,
                       signal,
+                      keptStorage: keptWebStorage(saves),
                     }),
                   ),
                 catch: failed,
@@ -595,6 +603,7 @@ const make = Effect.gen(function* () {
                   requestPath,
                   scriptDir: runDir,
                   traceDir: runDir,
+                  saves,
                   viewport,
                   display: true,
                 }).pipe(
