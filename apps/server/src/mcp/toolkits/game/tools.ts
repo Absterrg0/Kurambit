@@ -434,7 +434,6 @@ const RunRoundTool = Tool.make("game_run_round", {
 const RunChecksTool = Tool.make("game_run_checks", {
   description:
     "Score the current rung's state checks on the build in this game folder now: the harness boots it, plays each check's scenario and reads the game's state, as the run does after a build. Returns pass or fail per check with the values it read and the scenario's last frame. Use it while building to know the rung holds before you stop. Look checks are a tester's; this scores state checks only. Takes a minute or two.",
-  parameters: Schema.Struct({}),
   success: GameRunChecksResult,
   failure,
   failureMode: "return",
