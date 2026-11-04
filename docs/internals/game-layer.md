@@ -198,8 +198,16 @@ land its rung (failed checks, a regression, a boot failure, no change) counts ag
 the second sets it aside with its reason, and set-aside rungs come back once after the rest. A
 run never pays twice for the same work: a retry right after a try that passed some checks grows
 that try's branch (the gate still judges it against the best), a builder turn that changes no game
-file ends its block, and a rung round's reviewer writes from the tester's and blind players'
-evidence instead of replaying the build. The reviewer's next.md is a ledger of bugs and DO NOT REGRESS that the builder clears beside the
+file ends its block, a rung round's reviewer writes from the tester's and blind players'
+evidence instead of replaying the build, and a gate whose best is the build an earlier gate's
+blind player saw reuses that play and plays only the candidate. "The same build" is checked by
+the kept round's fast-forward, not assumed: the round's restore commit carries the tester's files,
+so the merged sha differs from the played one, and git compares the two trees a blind player sees
+(without `.studio` and `NOTES.md`). The held play lives in `run.json` with its question and sample
+budget, and is never used under another question (finish rounds ask their own), budget or build.
+The comparators cannot tell the reused report from the fresh one; the comparison record names it.
+The bot still plays both builds: each round's tester rewrites `.studio/bot`, so an earlier bot
+result is not known to come from the same bot. The reviewer's next.md is a ledger of bugs and DO NOT REGRESS that the builder clears beside the
 rung, never a round's goal; the reviewer may add one rung through `.studio/rung-change.json`
 when something blocks the ladder, one open at a time. The old round shape (the review's top flaw,
 judged on that flaw, STATUS: ready to the ship review) runs only as finish rounds, once the

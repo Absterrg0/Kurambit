@@ -19,6 +19,7 @@ import type {
   PairStep,
   Pending,
   Picked,
+  Played,
   RoleStep,
   Round,
   RoundRecord,
@@ -105,6 +106,8 @@ export type GitOutcome = {
   readonly entered: boolean;
   readonly lines: number;
   readonly detail: string;
+  /** ff-merge: the merged tip is the same blind build as the op's `played` sha. */
+  readonly same: boolean;
 };
 export type StepResult =
   | RoleDone
@@ -762,12 +765,67 @@ const newCompare = (
   bots: [],
   botWithheld: "",
   judges: [],
+  reused: null,
 });
 const lastSample = (c: Compare, side: Side): Sample | null =>
   c.samples.findLast((s) => s.side === side) ?? null;
 const usable = (s: Sample | null) =>
   s !== null && s.phase === "done" && validatePlayEvidence(s.evidence, s.evidence) === null;
 const sampleFile = (s: Pick<Sample, "label">) => `.studio/play-${s.label}.md`;
+
+// A held play stands in for a fresh one only when a fresh player would be the same:
+// the same budget, model (a run without one uses its creator chat's) and
+// instructions. Otherwise a stale report's voice or strictness could tell judges
+// which side is old, or skew the verdict.
+const fnv = (text: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16);
+};
+const playerKey = (s: RunState, question: string) =>
+  `input ${Roles.SAMPLE_INPUT_MS} ms, floor ${PLAY_FLOOR_MS} ms, turn ${CAP.judge} ms; player ${s.provider ?? ""}/${s.model ?? ""}/${s.variant ?? ""} via ${s.model === null ? s.creator : ""}; prompt ${fnv(Roles.samplePlay(question, ""))}`;
+const reusable = (s: Sample) => usable(s) && s.notes.trim().length > 0;
+
+// The blind play a kept round's merge may carry to the new best: the
+// candidate's own when it was judged, else the one the best already holds
+// (a rung the current build already met). The merge checks the build.
+const heldPlay = (s: RunState, r: Round): Played | null => {
+  const mine = r.cmp === null ? null : lastSample(r.cmp, "x");
+  if (r.cmp !== null && mine !== null && reusable(mine))
+    return {
+      sha: r.cmp.x,
+      question: r.cmp.question,
+      budget: playerKey(s, r.cmp.question),
+      round: r.n,
+      branch: r.branch,
+      sample: mine,
+    };
+  return s.played !== null && s.played.sha === s.best ? s.played : null;
+};
+
+// A ladder gate on a best whose own blind play is held under the same
+// question and budget plays only the candidate. A finish round asks its own
+// question, so it never reuses.
+const gateCompare = (s: RunState, r: Round, c: Compare, logs: string[]): Compare => {
+  const held = s.played;
+  if (
+    r.rung === null ||
+    held === null ||
+    held.sha !== s.best ||
+    held.question !== c.question ||
+    held.budget !== playerKey(s, c.question) ||
+    !reusable(held.sample)
+  )
+    return c;
+  logs.push(
+    `round ${r.n}: the best is the build round ${held.round}'s blind player saw under this question; its play is reused and only the candidate is played`,
+  );
+  return {
+    ...c,
+    samples: [{ ...held.sample, side: "y" }],
+    reused: { side: "y", round: held.round, branch: held.branch },
+  };
+};
 // The game root keeps each comparator's write-up here once the comparison is over.
 const judgeFile = (j: Pick<Judge, "id">) => `.studio/comparisons/${j.id}.md`;
 const sheetFile = (s: Pick<Sample, "label">) => `.studio/comparisons/frames-${s.label}.jpg`;
@@ -1177,6 +1235,11 @@ const comparisonFile = (
         [names.x]: c.x,
         [names.y]: c.y,
         playOrder: c.xFirst ? `${names.x},${names.y}` : `${names.y},${names.x}`,
+        // Never shown to the comparators: their two reports look alike either way.
+        reusedPlay:
+          c.reused === null
+            ? null
+            : { build: names[c.reused.side], round: c.reused.round, branch: c.reused.branch },
         evidence: side((s) => s?.evidence ?? null),
         players: side((s) => s?.thread ?? null),
         reports: side((s) => s?.notes ?? ""),
@@ -1564,7 +1627,12 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     }
     case "outcome":
       return r.outcome === "merge"
-        ? run({ _tag: "ff-merge", trunk: state.trunk, branch: r.branch })
+        ? run({
+            _tag: "ff-merge",
+            trunk: state.trunk,
+            branch: r.branch,
+            played: heldPlay(state, r)?.sha ?? "",
+          })
         : toTrunk(r.branch);
     case "review":
       return act({
@@ -2200,7 +2268,7 @@ const applyRound = (
         r.bot,
         r.botDecider,
       );
-      return at({ phase: "compare", cmp });
+      return at({ phase: "compare", cmp: gateCompare(s, r, cmp, logs) });
     }
     case "compare": {
       const cmp = applyCompare(r.cmp!, done, res, logs, release);
@@ -2214,9 +2282,17 @@ const applyRound = (
     case "outcome": {
       if (r.outcome === "merge" && g!.ok) {
         logs.push(`round ${r.n}: kept, ${s.trunk} at ${g!.sha.slice(0, 8)}`);
+        const held = heldPlay(s, r);
+        const carried =
+          held !== null &&
+          g!.same &&
+          done.kind === "git" &&
+          done.op._tag === "ff-merge" &&
+          done.op.played === held.sha;
         return {
           ...s,
           best: g!.sha,
+          played: carried ? { ...held, sha: g!.sha } : null,
           stallStreak: 0,
           pending: null,
           task: {

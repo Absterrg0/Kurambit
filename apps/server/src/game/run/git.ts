@@ -257,6 +257,7 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
     entered: false,
     lines: 0,
     detail: "",
+    same: false,
     ...patch,
   });
 
@@ -345,7 +346,14 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
     return outcome({ ok: false, sha: yield* head, branch: trunk, detail: "merge failed" });
   });
 
-  const ffMerge = Effect.fn("RunGit.ffMerge")(function* (trunk: string, branch: string) {
+  // `same` says whether the merged tip is the build a blind player of `played`
+  // saw: the round's restore commit carries the tester's files beside the
+  // candidate, so the sha differs even when the neutral tree does not.
+  const ffMerge = Effect.fn("RunGit.ffMerge")(function* (
+    trunk: string,
+    branch: string,
+    played: string,
+  ) {
     const tip = yield* out(["rev-parse", `refs/heads/${branch}`]);
     if (tip.length === 0)
       return outcome({ ok: false, branch: yield* current, detail: `${branch} missing` });
@@ -353,7 +361,25 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
       return outcome({ ok: false, branch: yield* current, detail: `cannot reach ${trunk}` });
     const merged = yield* exec(root, ["merge", "--ff-only", "-q", branch]);
     const now = yield* head;
-    if (merged.code === 0 && now === tip) return outcome({ sha: now, branch: trunk });
+    if (merged.code === 0 && now === tip) {
+      const same =
+        played.length > 0 &&
+        (played === now ||
+          (yield* exec(
+            root,
+            [
+              "diff",
+              "--quiet",
+              played,
+              now,
+              "--",
+              ".",
+              ...NOT_IN_SAMPLE.map((path) => `:(exclude)${path}`),
+            ],
+            SLOW_MS,
+          )).code === 0);
+      return outcome({ sha: now, branch: trunk, same });
+    }
     yield* log(`merge ${branch} failed: ${merged.output.trim().slice(0, 200)}`);
     return outcome({ ok: false, sha: now, branch: trunk, detail: "not a fast-forward" });
   });
@@ -431,7 +457,7 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
       case "adopt":
         return adopt(op.trunk, op.sha, op.label);
       case "ff-merge":
-        return ffMerge(op.trunk, op.branch);
+        return ffMerge(op.trunk, op.branch, op.played);
       case "restore-commit":
         return restoreCommit(op.sha, op.message);
     }

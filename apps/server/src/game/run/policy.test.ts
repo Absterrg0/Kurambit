@@ -63,6 +63,7 @@ const gitOk = (patch: Partial<Policy.GitOutcome> = {}): Policy.StepResult => ({
     entered: false,
     lines: 10,
     detail: "",
+    same: false,
     ...patch,
   },
 });
@@ -901,6 +902,7 @@ describe("blind comparators", () => {
           bots: [],
           botWithheld: "",
           judges: [],
+          reused: null,
         },
       },
     });
@@ -960,6 +962,7 @@ describe("blind comparators", () => {
           bots: [],
           botWithheld: "",
           judges: [],
+          reused: null,
         },
         ...task,
       },
@@ -1297,6 +1300,132 @@ describe("ladder", () => {
     expect(two.logs).toContain("round 2 builds rung 1 of 5: the core can be played");
     expect(two.state.ladder?.rungs).toHaveLength(5);
     expect(two.logs.some((line) => line.includes("an earlier one is still open"))).toBe(true);
+  });
+
+  describe("the gate's held play of the best", () => {
+    // Each kept round merges to its own sha; `same` is what git would say about the played build.
+    const merging = (same: boolean) =>
+      ladderResponder("A", "B", [true, true], (step, state) =>
+        step.kind === "git" && step.op._tag === "ff-merge"
+          ? gitOk({
+              sha: `merged-${state.rounds.length + 1}`,
+              branch: "main",
+              same: same && step.op.played !== "",
+            })
+          : undefined,
+      );
+    const samples = (steps: ReadonlyArray<string>) => steps.filter((x) => x === "sample").length;
+    const comparison = (written: Record<string, string>, branch: string) =>
+      JSON.parse(
+        Object.entries(written).find(
+          ([path]) => path.startsWith(`.studio/comparisons/${branch}-`) && path.endsWith(".json"),
+        )![1],
+      );
+
+    it("plays only the candidate when the best is the build the last gate's player saw", () => {
+      const respond = merging(true);
+      const one = oneRound(atLadder(), respond);
+      expect(samples(one.steps)).toBe(4);
+      expect(one.state.played).toMatchObject({ sha: "merged-1", round: 1, branch: "round-1" });
+      const two = oneRound(one.state, respond);
+      expect(samples(two.steps)).toBe(2);
+      expect(two.state.rounds[1]?.kept).toBe(true);
+      const record = comparison(two.written, "round-1");
+      expect(record.reusedPlay).toEqual({ build: "best", round: 1, branch: "round-1" });
+      expect(record.reports.best).toBe(one.state.played?.sample.notes);
+      expect(record.players.best).toBe(one.state.played?.sample.thread);
+      expect(two.state.played).toMatchObject({ sha: "merged-2", round: 2 });
+    });
+
+    it("keeps the comparators blind to which report was reused", () => {
+      const prompts: string[] = [];
+      const respond = merging(true);
+      const one = oneRound(atLadder(), respond);
+      oneRound(one.state, (step, state) => {
+        if (step.kind === "role" && step.role.startsWith("compare")) prompts.push(step.prompt);
+        return respond(step, state);
+      });
+      expect(prompts).toHaveLength(2);
+      for (const prompt of prompts) {
+        expect(prompt).not.toMatch(/reuse|round 1|earlier/i);
+        expect(prompt).not.toContain(one.state.played!.sample.label);
+      }
+    });
+
+    it("plays both builds when the merged build differs from the one played", () => {
+      const one = oneRound(atLadder(), merging(false));
+      expect(one.state.played).toBeNull();
+      expect(samples(oneRound(one.state, merging(false)).steps)).toBe(4);
+    });
+
+    it("plays both builds when the held play is of another build, question or budget", () => {
+      const respond = merging(true);
+      const held = oneRound(atLadder(), respond).state;
+      const played = held.played!;
+      for (const patch of [
+        { sha: "other" },
+        { question: "which build plays better?" },
+        { budget: "input 1 ms" },
+        { sample: { ...played.sample, notes: "" } },
+        { sample: { ...played.sample, evidence: { ...goodEvidence, nominalMs: 999_000 } } },
+      ])
+        expect(samples(oneRound({ ...held, played: { ...played, ...patch } }, respond).steps)).toBe(
+          4,
+        );
+    });
+
+    it("plays both builds when the run's player changed since the held play", () => {
+      const respond = merging(true);
+      const held = oneRound(atLadder(), respond).state;
+      for (const patch of [{ model: "another-model" }, { creator: "thread:another-chat" }])
+        expect(samples(oneRound({ ...held, ...patch }, respond).steps)).toBe(4);
+    });
+
+    it("never reuses in a finish round, which asks its own question", () => {
+      const respond = merging(true);
+      const held = oneRound(atLadder(), respond).state;
+      const finish = oneRound(
+        { ...held, ladder: { rungs: [], note: "finish rounds only" } },
+        respond,
+      );
+      expect(finish.state.rounds[1]?.finish).toBe(true);
+      expect(samples(finish.steps)).toBe(4);
+    });
+
+    it("survives a resume, and an older run.json without a held play plays both", () => {
+      const respond = merging(true);
+      const held = oneRound(atLadder(), respond).state;
+      const resumed = State.loadState(JSON.stringify(State.encodeRunState(held)), "");
+      if (resumed.kind !== "v3") throw new Error("expected a v3 run");
+      expect(samples(oneRound(resumed.state, respond).steps)).toBe(2);
+      // Stopped mid-gate: the reused side stays reused after the reload.
+      const midGate = drive(
+        held,
+        respond,
+        (s) => s.task._tag === "round" && s.task.cmp !== null && s.task.cmp.samples.length === 2,
+      ).state;
+      const reloaded = State.loadState(JSON.stringify(State.encodeRunState(midGate)), "");
+      if (reloaded.kind !== "v3") throw new Error("expected a v3 run");
+      const t = reloaded.state.task;
+      expect(t._tag === "round" && t.cmp?.reused).toEqual({
+        side: "y",
+        round: 1,
+        branch: "round-1",
+      });
+      const rest = drive(
+        reloaded.state,
+        respond,
+        (s) => s.rounds.length === held.rounds.length + 1,
+      );
+      expect(rest.state.rounds[1]?.kept).toBe(true);
+      // Only the candidate's write-up is left; the best is never played.
+      expect(samples(rest.steps)).toBe(1);
+      const { played: _played, ...older } = State.encodeRunState(held);
+      const old = State.loadState(JSON.stringify(older), "");
+      if (old.kind !== "v3") throw new Error("expected a v3 run");
+      expect(old.state.played).toBeNull();
+      expect(samples(oneRound(old.state, respond).steps)).toBe(4);
+    });
   });
 
   it("writes a ladder first when an older run.json without one reaches its next round", () => {
