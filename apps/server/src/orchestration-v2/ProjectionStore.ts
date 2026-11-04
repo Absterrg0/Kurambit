@@ -884,6 +884,12 @@ export function applyToProjection(
         ...base,
         contextTransfers: upsertById(base.contextTransfers, event.payload),
       };
+    // A game run's records live beside the thread projection, and its steps are not chat activity.
+    case "game-run.created":
+    case "game-run.updated":
+    case "game-run-step.updated":
+    case "game-run-round.recorded":
+      return projection;
   }
 }
 

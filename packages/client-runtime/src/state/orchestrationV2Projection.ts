@@ -326,5 +326,11 @@ export function applyOrchestrationV2ProjectionEvent(
     case "context-transfer.created":
     case "context-transfer.updated":
       return { ...base, contextTransfers: upsertEntity(base.contextTransfers, event.payload) };
+    // A game run's records are not part of the thread snapshot; its steps are not chat activity.
+    case "game-run.created":
+    case "game-run.updated":
+    case "game-run-step.updated":
+    case "game-run-round.recorded":
+      return projection;
   }
 }

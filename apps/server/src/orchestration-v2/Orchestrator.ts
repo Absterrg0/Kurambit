@@ -464,6 +464,17 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.background-work.settle":
     case "thread.stop":
     case "provider.switch":
+    case "game-run.start":
+    case "game-run.resume":
+    case "game-run.stop":
+    case "game-run.steer":
+    case "game-run.profile.set":
+    case "game-run.decide":
+    case "game-run.submit":
+    case "game-run.step.start":
+    case "game-run.step.complete":
+    case "game-run.step.fail":
+    case "game-run.decision.expire":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":

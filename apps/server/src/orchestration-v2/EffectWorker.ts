@@ -526,6 +526,19 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          case "game-run.step.execute":
+          case "game-run.decision.wake":
+          case "game-run.decision.deadline":
+          case "game-run.step.deadline":
+            // The game run's executor is not wired in yet, so these fail visibly
+            // rather than settle as if their work had run.
+            return Effect.fail(
+              new OrchestrationEffectExecutionError({
+                effectId: effect.id,
+                effectType: effect.request.type,
+                cause: "The game run has no effect executor in this build.",
+              }),
+            );
         }
       },
     });

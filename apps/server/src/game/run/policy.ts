@@ -1,10 +1,10 @@
 // PURE. Every loop decision: stage order, the ladder, round structure, keep or revert,
 // stalls, the pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
-import type { GameBotDecider, ThreadId } from "@kurambit/contracts";
+import type { GameBotDecider, GameRunGitOutcome, ThreadId } from "@kurambit/contracts";
 import { laneProfile } from "../engineProfile.ts";
 import * as Roles from "./roles.ts";
+import type * as State from "./state.ts";
 import { BLANK, isStateCheck, parseLadder, parseRungChange } from "./state.ts";
-import type { CheckOutcome } from "./checkRunner.ts";
 import type {
   Block,
   BotFact,
@@ -80,56 +80,9 @@ const LADDER_MAX = 10;
 
 export type Inputs = { readonly now: number; readonly coin: number; readonly id: string };
 
-export type RoleDone = {
-  readonly kind: "done";
-  readonly threadId: ThreadId;
-  readonly text: string;
-  readonly files: Readonly<Record<string, string>>;
-  readonly evidence: Evidence | null;
-  readonly timedOut: boolean;
-  readonly budgetCut: boolean;
-  readonly elapsedMs: number;
-  readonly sourceBefore: string;
-  readonly sourceAfter: string;
-  readonly botsBefore: number;
-  readonly botsAfter: number;
-  /** The play bot this turn last ran and its decider, null when it ran none. */
-  readonly bot: { readonly file: string; readonly decider: GameBotDecider } | null;
-  /** The step's sheet when the runner drew one, else "". */
-  readonly sheet: string;
-};
-/** One shape for every git op; each op fills the fields it knows. */
-export type GitOutcome = {
-  readonly ok: boolean;
-  readonly sha: string;
-  readonly branch: string;
-  readonly changed: boolean;
-  readonly entered: boolean;
-  readonly lines: number;
-  readonly detail: string;
-  /** ff-merge: the merged tip is the same blind build as the op's `played` sha. */
-  readonly same: boolean;
-};
-export type StepResult =
-  | RoleDone
-  | {
-      readonly kind: "ended";
-      readonly ending: "usage-limit" | "provider-down" | "low-memory";
-      readonly reason: string;
-    }
-  | { readonly kind: "failed"; readonly reason: string }
-  | { readonly kind: "git"; readonly git: GitOutcome }
-  | { readonly kind: "boot"; readonly ok: boolean; readonly detail: string }
-  | { readonly kind: "facts"; readonly jev: boolean; readonly code: string }
-  | { readonly kind: "checks"; readonly results: ReadonlyArray<CheckOutcome> }
-  | { readonly kind: "bot"; readonly fact: Omit<BotFact, "side"> }
-  | { readonly kind: "note" }
-  | {
-      readonly kind: "decided";
-      readonly answer: string;
-      readonly notes: string;
-      readonly by: Decided["by"];
-    };
+export type RoleDone = State.RoleDone;
+export type GitOutcome = GameRunGitOutcome;
+export type StepResult = State.StepResult;
 
 export type Planned =
   | {
@@ -329,7 +282,7 @@ type Taken =
 
 // One fix turn for a ladder of the wrong shape; after it the run goes on without one.
 const takeLadder = (res: StepResult, last: boolean, logs: string[]): Taken => {
-  const parsed = parseLadder(res.kind === "done" ? (res.files[LADDER] ?? "") : "");
+  const parsed = parseLadder(res.kind === "done" ? (res.files?.[LADDER] ?? "") : "");
   if ("ladder" in parsed) {
     logs.push(
       `ladder: ${parsed.ladder.rungs.length} rungs`,
@@ -698,9 +651,10 @@ const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
 const bit = (coin: number, k: number) => Math.floor(coin * 2 ** (k + 1)) % 2 === 1;
 
 const textOf = (res: RoleDone, file: string): string => {
-  const written = (res.files[file] ?? "").trim();
+  const written = (res.files?.[file] ?? "").trim();
   if (written.length > 20) return written;
-  return res.text.trim().length > 20 ? res.text.trim() : written;
+  const text = (res.text ?? "").trim();
+  return text.length > 20 ? text : written;
 };
 
 const newBlock = (tag: string, direction: string, whole: boolean, msLeft: number): Block => ({
@@ -1832,7 +1786,7 @@ export const applyResult = (
       const artFits = (cap: number) => fit(s, now, cap, BUILD_RESERVE_MS + FLOOR_MS) >= FLOOR_MS;
       // The creator's rewrite keeps the old ladder when the new one has the wrong shape.
       if (t.name === "plan" && t.phase === "revise") {
-        const parsed = parseLadder(res.kind === "done" ? (res.files[LADDER] ?? "") : "");
+        const parsed = parseLadder(res.kind === "done" ? (res.files?.[LADDER] ?? "") : "");
         if ("ladder" in parsed) logs.push(`ladder rewritten: ${parsed.ladder.rungs.length} rungs`);
         else
           logs.push(`ladder rewrite not taken (${parsed.error.slice(0, 200)}); keeping the ladder`);
@@ -1952,7 +1906,7 @@ export const applyResult = (
       }
       if (t.phase === "select") {
         if (res.kind === "done") release.push(res.threadId);
-        const text = res.kind === "done" ? res.text : "";
+        const text = res.kind === "done" ? (res.text ?? "") : "";
         const chosen = parseSelect(text);
         if (chosen === null) {
           logs.push("pick tie unresolved: building from trunk with the tie recorded");
@@ -2553,7 +2507,7 @@ const finishRound = (
   logs: string[],
 ): RunState => {
   const reviewerNotes = res === null ? "" : textOf(res, `.studio/reviewer-${r.n}.md`);
-  const next = res === null ? "" : (res.files[".studio/next.md"] ?? "").trim().slice(0, 4000);
+  const next = res === null ? "" : (res.files?.[".studio/next.md"] ?? "").trim().slice(0, 4000);
   let note = r.record.note ?? "";
   if (reviewerNotes.length <= 20) note = `${note} reviewer write failed`.trim();
   if (next.length === 0) note = `${note} reviewer wrote no next.md`.trim();
@@ -2564,7 +2518,7 @@ const finishRound = (
     logs,
   );
   const ladder = settled.state.ladder;
-  const change = res === null ? "" : (res.files[RUNG_CHANGE] ?? "");
+  const change = res === null ? "" : (res.files?.[RUNG_CHANGE] ?? "");
   const state: RunState = {
     ...settled.state,
     ladder: r.rung === null || ladder === null ? ladder : insertRung(ladder, change, r.n, logs),
