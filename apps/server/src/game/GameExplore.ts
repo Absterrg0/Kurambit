@@ -863,7 +863,8 @@ const make = Effect.gen(function* () {
     prepared: GamePlayer.PreparedPlayer,
   ) =>
     Effect.gen(function* () {
-      const { backend } = yield* engines.context(root);
+      // The player is already built: the engine's executable is not needed again.
+      const backend = yield* engines.backendFor((yield* projects.read(root)).engine.name);
       const engine = backend.profile.displayName;
       const launch = backend.player?.session;
       const viewport = backend.profile.viewport;
