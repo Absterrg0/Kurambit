@@ -3,7 +3,6 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import {
-  UNITY_PINNED_VERSION,
   UNITY_VIEWPORT,
   type GameActionResult,
   type GameCheckIssue,
@@ -352,11 +351,12 @@ export const makeUnityBackend = (
     exportTargets: ["Linux", "Windows"],
     resolveProject: (root, manifest) =>
       Effect.gen(function* () {
-        const unity = yield* tools.unity;
+        const projectDir = insideGame(root, manifest.godotProject);
+        const unity = yield* tools.unity(projectDir);
         return {
-          binary: { path: unity.editor, version: UNITY_PINNED_VERSION, templates: null },
+          binary: { path: unity.editor, version: unity.version, templates: null },
           projectName: manifest.godotProject,
-          projectDir: insideGame(root, manifest.godotProject),
+          projectDir,
         };
       }),
     projectSettingsFile: "ProjectSettings/ProjectSettings.asset",

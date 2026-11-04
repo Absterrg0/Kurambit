@@ -966,12 +966,12 @@ const make = Effect.gen(function* () {
         detail: `${backend.displayName} games export ${backend.exportTargets.join(", ")} only; ${target} is refused for this engine.`,
       });
     if (backend.id === "unity") return yield* runUnityExport(root, target);
-    const toolStatus = yield* tools.status;
-    const engineStatus =
-      backend.id === "godot"
-        ? toolStatus.tools.find((tool) => tool.tool === "godot")
-        : { ready: true };
-    if (!engineStatus?.ready)
+    const baseTemplates = godot.templates;
+    if (
+      backend.id === "godot" &&
+      (baseTemplates === null ||
+        !(yield* Effect.promise(() => GameToolchain.hasBaseExportTemplates(baseTemplates))))
+    )
       return yield* new GameOperationError({
         operation: `${backend.displayName} export`,
         path: godot.templates ?? godot.path,
@@ -988,7 +988,7 @@ const make = Effect.gen(function* () {
         operation: `${backend.displayName} Windows export`,
         path: godot.templates ?? godot.path,
         reason: "templates-missing",
-        detail: `Windows x86_64 export templates for Godot ${godot.version} are missing from ${godot.templates ?? "the template directory"}. Ask the user to run Install tools in Settings > General > Game tools to add them; the Godot binary and the Web/Linux templates are reused as they are. Godot executable: ${godot.path}.`,
+        detail: `Windows x86_64 export templates for Godot ${godot.version} are missing from ${godot.templates ?? "the template directory"}. Ask the user to add them in the Godot editor (Editor > Manage Export Templates) or from the export templates .tpz on https://godotengine.org/download; Web and Linux exports keep working meanwhile. Godot executable: ${godot.path}.`,
       });
     // Import first: Godot's import writes engine-generated sidecars (*.import,
     // *.uid and .godot/) inside the project. The source identity is taken after
@@ -3478,7 +3478,11 @@ ${built.result.message}`.slice(0, 3000),
         // on, which is the normal state after an export.
         webBuildStale,
         sourcesDifferFromPlay,
-        toolchain: yield* tools.status,
+        toolchain: yield* tools.status(
+          manifest.engine.name === "unity"
+            ? { unityProject: GameProjectService.insideGame(root, manifest.godotProject) }
+            : undefined,
+        ),
         processes: processes.list(root),
         previewUrl,
         operation: operations.current(root),

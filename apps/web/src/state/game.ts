@@ -45,10 +45,6 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
   }),
-  verify: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:verify",
-    tag: WS_METHODS.gameVerify,
-  }),
   status: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:status",
     tag: WS_METHODS.gameStatus,
@@ -127,10 +123,6 @@ export const gameEnvironment = {
   packageWeb: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:packageWeb",
     tag: WS_METHODS.gameWebPackage,
-  }),
-  install: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:install",
-    tag: WS_METHODS.gameInstall,
   }),
   secretsStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:secretsStatus",

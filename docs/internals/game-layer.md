@@ -24,16 +24,18 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   `unity mcp` server, with the same session.json pid records, reaping and idle shutdown
   (`liveProcess.ts` holds the shared display, record and reap code). A record's pids are signalled
   only while their argv names the executables the live toolchain would launch now, never paths
-  from the record, and of the editor's process tree only processes running from the pinned editor
-  directory, CLI or Xvfb; a Unity Licensing Client is never signalled. Unity also keeps a copy of
+  from the record, and of the editor's process tree only processes running from a detected editor's
+  directory, the CLI or Xvfb; a Unity Licensing Client is never signalled. Unity also keeps a copy of
   its record under the server state dir, reaped at startup, so a crashed server's editor dies
   even if its game is never reopened. Every call or operation holds the editor; another game's
   open closes it only while it is idle, and fails `busy` naming the holder otherwise.
-  `GameToolchain` manages Blender/Godot/Unity installs; `GamePreview` serves builds;
+  `GameToolchain` detects the user's own Godot, Unity and Blender the way providers are
+  detected, and never installs them: they are other vendors' software with their own upkeep and
+  licences on every OS. It fetches only harness plumbing (uv, the Unity CLI) itself; `GamePreview` serves builds;
   `GameProcesses` tracks child processes; `GameOperations` keeps the last operation per game.
 - `GameAssetLibrary` serves the curated CC0 library in `assetLibraryCatalog.ts`. Each pack is a
-  download URL pinned by SHA-256 and size, fetched on first look into `asset-library/` beside the
-  pinned tools, and unpacked with path, link and size limits. Bytes that differ from the pin are
+  download URL pinned by SHA-256 and size, fetched on first look into `asset-library/` beside Kurambit's
+  tools folder, and unpacked with path, link and size limits. Bytes that differ from the pin are
   refused, never re-pinned at runtime: a source can change contents or licence silently, and a
   refusal is the only honest answer. A pin changes only in a reviewed commit that rechecks the
   licence. Kenney packs come from Kenney's own OpenGameArt uploads, because kenney.nl hands out

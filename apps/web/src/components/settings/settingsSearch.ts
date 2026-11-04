@@ -113,7 +113,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     scope: "environment",
     environmentOnly: true,
-    searchTerms: ["blender godot executable paths install verify toolchain"],
+    searchTerms: ["blender godot unity hub executable paths install download toolchain"],
   },
   {
     id: "storage-worktree-keep-when",

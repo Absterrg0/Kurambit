@@ -188,27 +188,33 @@ it("describes unknown source freshness and preserves selected Play", () => {
   expect(gameSourceFreshnessLabel(false)).toContain("last check");
 });
 
-it("counts only the tools the game's engine needs", () => {
-  const tool = (name: "blender" | "godot" | "uv" | "unity", ready: boolean) => ({
+it("counts only the engine the game needs", () => {
+  const tool = (
+    name: "blender" | "godot" | "uv" | "unity",
+    status: "ready" | "warning" | "error",
+  ) => ({
     tool: name,
+    installed: status !== "error",
     path: null,
     version: null,
-    ready,
-    verified: ready,
+    source: null,
+    status,
     message: "",
+    downloadUrl: null,
   });
   const withoutUnity = {
-    toolsDirectory: "/tools",
-    installing: false,
-    tools: [tool("blender", true), tool("godot", true), tool("uv", true), tool("unity", false)],
+    tools: [
+      tool("blender", "error"),
+      tool("godot", "warning"),
+      tool("uv", "ready"),
+      tool("unity", "error"),
+    ],
   };
   expect(toolchainReadyFor(withoutUnity, "godot")).toBe(true);
   expect(toolchainReadyFor(withoutUnity, "three")).toBe(true);
   expect(toolchainReadyFor(withoutUnity, "unity")).toBe(false);
-  const withoutGodot = {
-    ...withoutUnity,
-    tools: [tool("blender", true), tool("godot", false), tool("uv", true)],
-  };
+  const withoutGodot = { tools: [tool("godot", "error"), tool("unity", "ready")] };
   expect(toolchainReadyFor(withoutGodot, "three")).toBe(true);
   expect(toolchainReadyFor(withoutGodot, "godot")).toBe(false);
+  expect(toolchainReadyFor(withoutGodot, "unity")).toBe(true);
 });

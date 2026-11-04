@@ -34,6 +34,7 @@ import {
   UNITY_LICENSE_FAILURE,
   isUnityLicensingClient,
   unityCliEnv,
+  unityEditorDir,
   unityEditorEnv,
 } from "./unityToolchain.ts";
 import { checkoutOf } from "./unityPlayerCache.ts";
@@ -157,8 +158,8 @@ const opError = (
 
 /** What this server would launch now; a recorded pid must still run one of them. */
 interface LiveExecutables {
-  readonly editor: string;
-  readonly editorDir: string;
+  /** Every detected editor: a game opens with the one its project version picks. */
+  readonly editors: ReadonlyArray<string>;
   readonly cli: string;
   readonly xvfb: string | null;
 }
@@ -171,6 +172,7 @@ interface LiveExecutables {
  */
 const recordedOwners = (
   record: Partial<SessionRecord>,
+  homeDir: string,
   live: LiveExecutables,
 ): ReadonlyArray<RecordedPid> => [
   {
@@ -184,9 +186,14 @@ const recordedOwners = (
   {
     pid: record.editorPid,
     owns: (argv) =>
-      argv[0] === live.editor &&
+      argv[0] !== undefined &&
+      live.editors.includes(argv[0]) &&
       typeof record.projectDir === "string" &&
-      argv[argv.indexOf("-projectPath") + 1] === record.projectDir,
+      argv[argv.indexOf("-projectPath") + 1] === record.projectDir &&
+      // The user's own editor (Unity Hub's) may be open on this same project:
+      // only the batchmode editor writing this session's log is ours.
+      argv.includes("-batchmode") &&
+      argv[argv.indexOf("-logFile") + 1] === NodePath.join(homeDir, "editor.log"),
   },
   {
     pid: record.xvfbPid,
@@ -262,12 +269,19 @@ const reapRecord = async (
   homeDir: string,
   live: LiveExecutables,
 ): Promise<void> => {
-  const editorDir = await NodeFSP.realpath(live.editorDir).catch(() => live.editorDir);
+  const editorDirs = await Promise.all(
+    live.editors.map((editor) => {
+      const dir = unityEditorDir(editor);
+      return NodeFSP.realpath(dir).catch(() => dir);
+    }),
+  );
   const keep = (exe: string) =>
     !isUnityLicensingClient(exe) &&
-    (exe.startsWith(`${editorDir}${NodePath.sep}`) || exe === live.cli || exe === live.xvfb);
+    (editorDirs.some((dir) => exe.startsWith(`${dir}${NodePath.sep}`)) ||
+      exe === live.cli ||
+      exe === live.xvfb);
   const editorPid = record.editorPid;
-  await reapVerified(recordedOwners(record, live), {
+  await reapVerified(recordedOwners(record, homeDir, live), {
     waitMs: 15_000,
     pollMs: 200,
     // Taken while the editor still lives: once it exits, its workers reparent.
@@ -494,7 +508,8 @@ const make = Effect.gen(function* () {
   const sessions = new Map<string, Session>();
   // Opening an editor takes minutes; two callers for one game must share it.
   const openLock = Semaphore.makeUnsafe(1);
-  const install = tools.unityInstall;
+  // The CLI path and its HOME never depend on which editor a game picks.
+  const install = yield* tools.unityExecutables;
   const serverRecords = NodePath.join(stateDir, "unity-live");
 
   const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/unity-live");
@@ -503,12 +518,16 @@ const make = Effect.gen(function* () {
       serverRecords,
       `${NodeCrypto.createHash("sha256").update(root).digest("hex").slice(0, 24)}.json`,
     );
-  const liveExecutables = async (): Promise<LiveExecutables> => ({
-    editor: install.editor,
-    editorDir: install.editorDir,
-    cli: install.cli,
-    xvfb: await findXvfb(),
-  });
+  const liveExecutables = (): Effect.Effect<LiveExecutables> =>
+    tools.unityExecutables.pipe(
+      Effect.flatMap((unity) =>
+        Effect.promise(async () => ({
+          editors: unity.editors,
+          cli: unity.cli,
+          xvfb: await findXvfb(),
+        })),
+      ),
+    );
 
   const projectDirOf = (root: string) =>
     projects
@@ -540,13 +559,13 @@ const make = Effect.gen(function* () {
   const drop = (root: string): Effect.Effect<void> =>
     Effect.gen(function* () {
       const projectDir = yield* projectDirOf(root).pipe(Effect.orElseSucceed(() => null));
+      const live = yield* liveExecutables();
       yield* Effect.promise(async () => {
         const session = sessions.get(root);
         if (session !== undefined) {
           sessions.delete(root);
           void session.client.close().catch(() => undefined);
         }
-        const live = await liveExecutables();
         await reapFile(NodePath.join(homeDirOf(root), SESSION_FILE), homeDirOf(root), live, {
           root,
           projectDir: session?.projectDir ?? projectDir,
@@ -557,8 +576,9 @@ const make = Effect.gen(function* () {
 
   // An editor orphaned by a crashed server is found through the server's own
   // copy of its record, whether or not its game is ever opened again.
+  const startupLive = yield* liveExecutables();
   yield* Effect.promise(async () => {
-    const live = await liveExecutables();
+    const live = startupLive;
     for (const name of await NodeFSP.readdir(serverRecords).catch(() => [] as string[])) {
       if (!name.endsWith(".json")) continue;
       const file = NodePath.join(serverRecords, name);
@@ -657,8 +677,14 @@ const make = Effect.gen(function* () {
             "invalid-input",
             `This Unity game folder is a git checkout that is not a worktree of a game folder (${checkout.detail}), such as a submodule. The live Unity editor opens a game's own folder or a git worktree of it; open the game from its own folder.`,
           );
-        const unity = yield* tools.unity;
         const projectDir = yield* projectDirOf(root);
+        const unity = yield* tools.unity(projectDir);
+        if (unity.upgradesProject !== null)
+          yield* Effect.logWarning("Unity project opens in a newer editor", {
+            root,
+            project: unity.upgradesProject,
+            editor: unity.version,
+          });
         // One Unity editor per server: a second one would double a 2-3 GB
         // process and fight the first for the Licensing Client. An editor in
         // use is never closed under its caller.

@@ -1533,7 +1533,7 @@ function OpenCommandPaletteDialog(props: {
     kind: "action",
     value: "action:game-tools",
     title: "Game tools",
-    searchTerms: ["game tools", "blender godot install verify executable paths"],
+    searchTerms: ["game tools", "blender godot unity install download executable paths"],
     icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings/general", hash: "game-tools" });

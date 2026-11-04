@@ -341,10 +341,8 @@ export const WS_METHODS = {
   gameOpen: "game.open",
   gameAction: "game.action",
   gameWindowsPackage: "game.windowsPackage",
-  gameVerify: "game.verify",
   gameWebPackage: "game.webPackage",
   gameToolchainStatus: "game.toolchainStatus",
-  gameInstall: "game.install",
   gameSecretsStatus: "game.secretsStatus",
   gameSecretsSet: "game.secretsSet",
   gameRunStart: "game.runStart",
@@ -1449,17 +1447,6 @@ const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   success: GameToolchainStatus,
   error: gameError,
 });
-const WsGameInstallRpc = Rpc.make(WS_METHODS.gameInstall, {
-  /** `unity` installs the pinned Unity CLI and editor (a ~4.5 GB download) instead of Blender, Godot and uv. */
-  payload: Schema.Struct({ unity: Schema.optionalKey(Schema.Boolean) }),
-  success: GameToolchainStatus,
-  error: gameError,
-});
-const WsGameVerifyRpc = Rpc.make(WS_METHODS.gameVerify, {
-  payload: Schema.Struct({}),
-  success: GameToolchainStatus,
-  error: gameError,
-});
 const WsGameSecretsStatusRpc = Rpc.make(WS_METHODS.gameSecretsStatus, {
   payload: Schema.Struct({}),
   success: GameSecretsStatusResult,
@@ -1523,8 +1510,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameWindowsPackageRpc,
   WsGameWebPackageRpc,
   WsGameToolchainStatusRpc,
-  WsGameInstallRpc,
-  WsGameVerifyRpc,
   WsGameSecretsStatusRpc,
   WsGameSecretsSetRpc,
   WsGameRunStartRpc,

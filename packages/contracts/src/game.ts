@@ -75,8 +75,11 @@ export const THREE_PINNED_VERSION = "0.180.0";
 export const THREE_VIEWPORT = { width: 1280, height: 720 } as const;
 /** Game-relative directory holding a Unity game's project. */
 export const UNITY_PROJECT_DIRECTORY = "unity";
-/** The pinned Unity editor every Unity game opens, checks and builds with. */
-export const UNITY_PINNED_VERSION = "6000.6.7f1";
+/**
+ * The oldest Unity editor Kurambit accepts: the one `templates/blank-unity`
+ * was authored with. Any newer Unity 6 (6000.x) editor works too.
+ */
+export const UNITY_MIN_VERSION = "6000.6.7f1";
 /** Resolution Unity players boot, explore and screenshot at. */
 export const UNITY_VIEWPORT = { width: 1280, height: 720 } as const;
 export const GameTemplate = Schema.Struct({
@@ -202,11 +205,11 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       symlink:
         "A symbolic link is on the way to this path. Game tools write only real files and folders inside the game and never follow a link; replace the link with a real folder or file and retry.",
       "tool-missing":
-        "The executable is missing, is not a file, or cannot be executed. Fix its path in Settings > General > Game tools or KURAMBIT_BLENDER / KURAMBIT_GODOT. To use the managed version, clear the override and click Install tools in Settings > General > Game tools.",
+        "A program this needs is not installed, or its path is wrong. Ask the user to install it from the download page in the detail below (or fix its path in Settings > General > Game tools), then press Check again there.",
       "wrong-version":
-        "Use Godot 4.7.x and Blender 4.2 or later. Fix the executable path in Settings > General > Game tools. To use the managed version, clear the override and click Install tools in Settings > General > Game tools.",
+        "The installed version is not one Kurambit can use: Godot 4.7.x, Blender 4.2 or later, Unity 6 (6000.x). Ask the user to install a supported version from the download page in the detail below, or point Settings > General > Game tools at one.",
       "templates-missing":
-        "Install Godot export templates matching this executable's exact version at the path below. For managed tools, clear executable overrides in Settings > General > Game tools, then click Install tools in Settings > General > Game tools.",
+        "Godot's export templates for this exact Godot version are missing. Ask the user to open the Godot editor, choose Editor > Manage Export Templates and download them (or install the .tpz from https://godotengine.org/download), then press Check again in Settings > General > Game tools.",
       "unknown-template": "Pick a starter template from the New game dialog.",
       "starter-templates-missing":
         "Kurambit's starter template files are missing. Reinstall or update the app.",
@@ -215,10 +218,12 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       busy: "Another operation is running for this game. Wait for it or press Stop.",
       "low-memory":
         "This machine has too little free memory to start this without risking it being killed mid-work. Close other apps, or wait a few minutes for other work to finish, then retry once. Retrying sooner gets the same answer.",
-      checksum: "The downloaded artifact failed its published checksum. Retry the install.",
-      download: "The tool download failed. Check network access and retry the install.",
+      checksum: "A helper Kurambit fetches failed its published checksum. Retry.",
+      download:
+        "A helper Kurambit fetches could not be downloaded. Check network access and retry.",
       io: "Check that the path exists and is writable. Read the server log for the underlying error.",
-      "unsupported-platform": "Managed installation currently supports Linux x86_64 only.",
+      "unsupported-platform":
+        "This is not available on this operating system yet. Read the detail for what to install yourself.",
       "project-not-found":
         "Open this game as a project and start a thread before using game tools.",
       "thread-dispatch":
@@ -244,17 +249,27 @@ export const GameOperationFailure = Schema.Struct({
   detail: GameOperationError.fields.detail,
   message: Schema.String,
 });
+/** Where a game tool was found, in detection order. `kurambit` is a copy an earlier Kurambit installed. */
+export const GameToolSource = Schema.Literals(["settings", "env", "unity-hub", "kurambit", "path"]);
+export type GameToolSource = typeof GameToolSource.Type;
+/**
+ * One tool's health, shaped like a provider's: the user installs the tool,
+ * Kurambit finds it. `warning` is usable with a gap the message names;
+ * `error` is not usable.
+ */
 export const GameToolStatus = Schema.Struct({
   tool: Schema.Literals(["blender", "godot", "uv", "unity"]),
+  installed: Schema.Boolean,
   path: Schema.NullOr(Schema.String),
   version: Schema.NullOr(Schema.String),
-  ready: Schema.Boolean,
-  verified: Schema.Boolean,
+  source: Schema.NullOr(GameToolSource),
+  status: Schema.Literals(["ready", "warning", "error"]),
   message: Schema.String,
+  /** The vendor's download page, for a tool that is missing or wrong. */
+  downloadUrl: Schema.NullOr(Schema.String),
 });
+export type GameToolStatus = typeof GameToolStatus.Type;
 export const GameToolchainStatus = Schema.Struct({
-  toolsDirectory: Schema.String,
-  installing: Schema.Boolean,
   tools: Schema.Array(GameToolStatus),
 });
 export type GameToolchainStatus = typeof GameToolchainStatus.Type;

@@ -222,8 +222,8 @@ function StageStateCard({
               <WrenchIcon className="size-5" aria-hidden="true" />
             </StageIcon>
             <StageCopy
-              title="Game tools are not installed"
-              body="Kurambit builds and checks the game with Blender and Godot. Install them once, then come back and press Play."
+              title="This game's engine is not ready"
+              body="Kurambit builds and plays this game with the engine installed on this computer. Game tools shows what is missing and where to get it."
             />
             <Button size="sm" variant="outline" onClick={onOpenTools}>
               Open game tools settings

@@ -1,31 +1,211 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Pure path, environment and licence-file helpers for the Unity lane's native boundary.
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { UNITY_PINNED_VERSION } from "@kurambit/contracts";
+import { UNITY_MIN_VERSION } from "@kurambit/contracts";
 import { engineChildEnv } from "./GameProcesses.ts";
 
-/** Unity's official CLI. Pinned by version and by the linux-x64 hash its manifest published. */
+/**
+ * Unity's official CLI, which Kurambit fetches itself on first use: it is
+ * harness plumbing (the live editor's MCP bridge), not the editor. Pinned by
+ * version and by the linux-x64 hash its manifest published.
+ */
 export const UNITY_CLI_VERSION = "1.0.0-beta.15";
 export const UNITY_CLI_SHA256 = "cf3ddef260bba536332348bd5570fb80d90a8092784a893b30971f8ebf2a489e";
 export const UNITY_CLI_URL = `https://public-cdn.cloud.unity3d.com/hub/prod/cli/${UNITY_CLI_VERSION}/unity-linux-x64`;
-/** Windows players need this module; the Linux editor ships Linux Mono player support itself. */
-export const UNITY_EXTRA_MODULES = ["windows-mono"] as const;
+export const UNITY_DOWNLOAD_URL = "https://unity.com/download";
 
-export const unityPaths = (toolsDirectory: string) => {
+export const unityCliPaths = (toolsDirectory: string) => {
   const cliDir = NodePath.join(toolsDirectory, `unity-cli-${UNITY_CLI_VERSION}`);
-  const editorRoot = NodePath.join(toolsDirectory, "unity-editor");
-  const editorDir = NodePath.join(editorRoot, UNITY_PINNED_VERSION);
   return {
     cliDir,
     cli: NodePath.join(cliDir, "unity"),
-    /** The CLI's own HOME for every call (logs, download cache, hub-style config), off the user's Hub. */
+    /** The CLI's own HOME for every call (logs, hub-style config), off the user's Hub. */
     installHome: NodePath.join(cliDir, "home"),
-    editorRoot,
-    editorDir,
-    editor: NodePath.join(editorDir, "Editor/Unity"),
-    linuxPlayer: NodePath.join(editorDir, "Editor/Data/PlaybackEngines/LinuxStandaloneSupport"),
-    windowsPlayer: NodePath.join(editorDir, "Editor/Data/PlaybackEngines/WindowsStandaloneSupport"),
   };
+};
+
+/** Where an earlier Kurambit installed editors itself; still detected so those installs keep working. */
+export const legacyUnityEditorRoot = (toolsDirectory: string) =>
+  NodePath.join(toolsDirectory, "unity-editor");
+
+type Platform = "linux" | "darwin" | "win32";
+
+/** The editor executable inside a Hub-style `<root>/<version>` folder. */
+export const unityEditorExecutable = (versionDir: string, platform: Platform): string =>
+  platform === "darwin"
+    ? NodePath.join(versionDir, "Unity.app/Contents/MacOS/Unity")
+    : NodePath.join(versionDir, "Editor", platform === "win32" ? "Unity.exe" : "Unity");
+
+/** The version folder an editor executable lives in; its workers and Bee run from inside it. */
+export const unityEditorDir = (editor: string): string =>
+  /[\\/]Unity\.app[\\/]Contents[\\/]MacOS[\\/]Unity$/.test(editor)
+    ? NodePath.resolve(editor, "../../../..")
+    : NodePath.dirname(NodePath.dirname(editor));
+
+/** The Windows Mono player a Windows build needs; the Hub's "Windows Build Support (Mono)" module. */
+export const unityWindowsSupport = (editorDir: string, platform: Platform): string =>
+  platform === "darwin"
+    ? NodePath.join(editorDir, "PlaybackEngines/WindowsStandaloneSupport")
+    : NodePath.join(editorDir, "Editor/Data/PlaybackEngines/WindowsStandaloneSupport");
+
+/**
+ * Unity Hub's default editor folder and the file naming the user's other
+ * install folder (Hub > Preferences > Installs). Kurambit only reads these.
+ */
+export const unityHubLocations = (
+  platform: Platform,
+  home: string,
+  appData: string | undefined,
+): { readonly editors: string; readonly secondaryInstallPathFile: string } =>
+  platform === "darwin"
+    ? {
+        editors: "/Applications/Unity/Hub/Editor",
+        secondaryInstallPathFile: NodePath.join(
+          home,
+          "Library/Application Support/UnityHub/secondaryInstallPath.json",
+        ),
+      }
+    : platform === "win32"
+      ? {
+          editors: "C:\\Program Files\\Unity\\Hub\\Editor",
+          secondaryInstallPathFile: NodePath.join(
+            appData ?? NodePath.join(home, "AppData/Roaming"),
+            "UnityHub/secondaryInstallPath.json",
+          ),
+        }
+      : {
+          editors: NodePath.join(home, "Unity/Hub/Editor"),
+          secondaryInstallPathFile: NodePath.join(
+            home,
+            ".config/UnityHub/secondaryInstallPath.json",
+          ),
+        };
+
+/** Hub writes the folder as a JSON string, empty when the user never set one. */
+export const parseSecondaryInstallPath = (text: string | null): string | null => {
+  if (text === null) return null;
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  } catch {
+    return null;
+  }
+};
+
+export interface UnityVersion {
+  readonly text: string;
+  readonly parts: readonly [number, number, number, number, number];
+}
+
+const STREAMS = { a: 0, b: 1, f: 2, p: 3 } as const;
+
+/** `6000.6.7f1` and the like; alpha, beta, final and patch streams order in that sequence. */
+export const parseUnityVersion = (text: string): UnityVersion | null => {
+  const match = /^(\d{4})\.(\d+)\.(\d+)([abfp])(\d+)/.exec(text.trim());
+  if (match === null) return null;
+  return {
+    text: match[0],
+    parts: [
+      Number(match[1]),
+      Number(match[2]),
+      Number(match[3]),
+      STREAMS[match[4] as keyof typeof STREAMS],
+      Number(match[5]),
+    ],
+  };
+};
+
+export const compareUnityVersions = (a: UnityVersion, b: UnityVersion): number => {
+  for (let index = 0; index < a.parts.length; index++) {
+    const difference = a.parts[index]! - b.parts[index]!;
+    if (difference !== 0) return difference;
+  }
+  return 0;
+};
+
+const MIN_VERSION = parseUnityVersion(UNITY_MIN_VERSION)!;
+
+/** Unity 6 (6000.x) at or above the version the blank template was authored with. */
+export const supportedUnityVersion = (version: UnityVersion): boolean =>
+  version.parts[0] === MIN_VERSION.parts[0] && compareUnityVersions(version, MIN_VERSION) >= 0;
+
+/**
+ * An editor's version, read from the Hub-style folder it sits in: Kurambit
+ * never starts Unity just to ask.
+ */
+export const unityVersionFromPath = (editor: string): UnityVersion | null => {
+  const segments = unityEditorDir(editor).split(/[\\/]/).toReversed();
+  for (const segment of segments) {
+    const version = parseUnityVersion(segment);
+    if (version !== null && version.text === segment) return version;
+  }
+  return null;
+};
+
+/** `m_EditorVersion` of a Unity project's ProjectSettings/ProjectVersion.txt. */
+export const projectEditorVersion = (text: string | null): UnityVersion | null => {
+  const line = text === null ? undefined : /^m_EditorVersion:\s*(\S+)/m.exec(text)?.[1];
+  return line === undefined ? null : parseUnityVersion(line);
+};
+
+export interface UnityEditorCandidate<Source extends string = string> {
+  readonly editor: string;
+  readonly source: Source;
+  readonly version: UnityVersion | null;
+}
+
+export type UnityEditorChoice<C extends UnityEditorCandidate> =
+  | {
+      readonly kind: "picked";
+      readonly candidate: C;
+      readonly upgradesProject: UnityVersion | null;
+    }
+  | { readonly kind: "unsupported"; readonly candidate: C }
+  | { readonly kind: "unknown-version"; readonly candidate: C }
+  /** Every usable editor is older than the project: opening would downgrade it. */
+  | { readonly kind: "older-than-project"; readonly candidate: C; readonly project: UnityVersion }
+  | { readonly kind: "none" };
+
+/**
+ * The editor a game opens with. The game's own editor version when that one
+ * is installed, so a user's project is never upgraded behind their back;
+ * otherwise the newest supported editor, reporting the upgrade it implies.
+ * An explicit path (settings or env) is the only candidate when present.
+ */
+export const pickUnityEditor = <C extends UnityEditorCandidate>(
+  candidates: ReadonlyArray<C>,
+  project: UnityVersion | null,
+): UnityEditorChoice<C> => {
+  const explicit = candidates.find(
+    (candidate) => candidate.source === "settings" || candidate.source === "env",
+  );
+  const pool = explicit === undefined ? candidates : [explicit];
+  const supported = pool
+    .filter((candidate) => candidate.version !== null && supportedUnityVersion(candidate.version))
+    .toSorted((a, b) => compareUnityVersions(b.version!, a.version!));
+  const exact =
+    project === null
+      ? undefined
+      : supported.find((candidate) => compareUnityVersions(candidate.version!, project) === 0);
+  const chosen = exact ?? supported[0];
+  if (
+    chosen !== undefined &&
+    project !== null &&
+    compareUnityVersions(chosen.version!, project) < 0
+  )
+    return { kind: "older-than-project", candidate: chosen, project };
+  if (chosen !== undefined)
+    return {
+      kind: "picked",
+      candidate: chosen,
+      upgradesProject:
+        project !== null && compareUnityVersions(chosen.version!, project) > 0 ? project : null,
+    };
+  const first = pool[0];
+  if (first === undefined) return { kind: "none" };
+  return first.version === null && pool.every((candidate) => candidate.version === null)
+    ? { kind: "unknown-version", candidate: first }
+    : { kind: "unsupported", candidate: pool.find((candidate) => candidate.version !== null)! };
 };
 
 /** Where the Unity Licensing Client keeps the entitlement Unity Hub activated. */
