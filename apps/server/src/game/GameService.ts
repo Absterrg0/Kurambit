@@ -2111,8 +2111,8 @@ ${built.result.message}`.slice(0, 3000),
                 root,
                 "The game sources changed while the Unity play build ran; start the session again.",
               );
-            // The build settled files back to their committed content: the
-            // player is cached under the sources as they now stand.
+            // The sources moved between the read above and the build's own
+            // first read: the player is cached under what it was built from.
             if (built.sourceId !== sourceId) {
               const settled = built.sourceId;
               yield* Effect.tryPromise({
