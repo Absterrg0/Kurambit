@@ -39,19 +39,39 @@ export const LADDER_FILE = ".studio/ladder.json";
 export const RUNG_CHANGE_FILE = ".studio/rung-change.json";
 
 // The ladder's content is the model's; the order below is a usual one, not a rule.
-const LADDER_ASK = `Then write ${LADDER_FILE}: the ladder from this build to a game with the shape of a Steam demo, inside the scope the brief asks for, as JSON {"rungs":[{"is":"...","checks":[...]}]} with 4 to 7 rungs in build order. Each rung's "is" is one sentence: what the game IS once that rung is built, something a player notices in the first minute (a mechanic working end to end, a new area or level, a way to win and to lose, a flow from title to ending, feel and audio). Each rung has 2 to 4 checks; "what" is a sentence a player could verify. Make every check you can a state check, which the harness scores itself by playing a short scenario and reading the game's state: {"what":"...","kind":"state","from":"play" or "title","setup":"<where to start the scenario: game_state (with "values":{"<key>":<value>} written into the game's state), player (with "values":{"position":[x,y,z]}), or a target of the game's own the builder adds; omit to start where the game starts>","input":[{"hold":"<key>","ms":<n>},{"press":"<key>"},{"wait":<ms>}] (at most 20 s in all; omit when none),"expect":"<state key> <== != >= <= > <> <number, true, false or "text">"}. expect may join up to four terms with and, use delta(<key>) for how much a value changed during the scenario, and hud contains "text" for text on screen; the keys are the game's own GameState values, which the builder makes the game report. Only what needs eyes or taste is a look check, judged by a tester from play: {"what":"...","kind":"look","how":"<what to look at and when>"}. A usual order: the core loop playable end to end; a complete first area with a way to win and to lose; progression (more areas or rising challenge); title, flow and ending; feel, juice and audio. Each round of the run builds one rung and is kept only when its checks pass, so make every rung a real step a round can build, and no rung for what already works. Polish is not a rung: the run polishes after the ladder.`;
+// A run on the orchestration core takes every role's result through game_run_submit and
+// refuses one that does not fit in the role's own turn; the loop reads a file's last line.
+const REFUSED =
+  "A submission that does not fit is refused with the reason: fix it and submit again before you finish.";
 
-export const stage = (name: "vision" | "plan" | "art", lane: string): string => {
+const LADDER_SHAPE = `the ladder from this build to a game with the shape of a Steam demo, inside the scope the brief asks for,`;
+const ladderTarget = (typed: boolean) =>
+  typed
+    ? `Then submit the ladder with game_run_submit: ${LADDER_SHAPE} as {"_tag":"ladder","rungs":[{"is":"...","checks":[...]}]}`
+    : `Then write ${LADDER_FILE}: ${LADDER_SHAPE} as JSON {"rungs":[{"is":"...","checks":[...]}]}`;
+const ladderAsk = (typed: boolean) =>
+  `${ladderTarget(typed)} with 4 to 7 rungs in build order.${LADDER_RULES}${typed ? ` ${REFUSED}` : ""}`;
+const LADDER_RULES = ` Each rung's "is" is one sentence: what the game IS once that rung is built, something a player notices in the first minute (a mechanic working end to end, a new area or level, a way to win and to lose, a flow from title to ending, feel and audio). Each rung has 2 to 4 checks; "what" is a sentence a player could verify. Make every check you can a state check, which the harness scores itself by playing a short scenario and reading the game's state: {"what":"...","kind":"state","from":"play" or "title","setup":"<where to start the scenario: game_state (with "values":{"<key>":<value>} written into the game's state), player (with "values":{"position":[x,y,z]}), or a target of the game's own the builder adds; omit to start where the game starts>","input":[{"hold":"<key>","ms":<n>},{"press":"<key>"},{"wait":<ms>}] (at most 20 s in all; omit when none),"expect":"<state key> <== != >= <= > <> <number, true, false or "text">"}. expect may join up to four terms with and, use delta(<key>) for how much a value changed during the scenario, and hud contains "text" for text on screen; the keys are the game's own GameState values, which the builder makes the game report. Only what needs eyes or taste is a look check, judged by a tester from play: {"what":"...","kind":"look","how":"<what to look at and when>"}. A usual order: the core loop playable end to end; a complete first area with a way to win and to lose; progression (more areas or rising challenge); title, flow and ending; feel, juice and audio. Each round of the run builds one rung and is kept only when its checks pass, so make every rung a real step a round can build, and no rung for what already works. Polish is not a rung: the run polishes after the ladder.`;
+
+export const stage = (name: "vision" | "plan" | "art", lane: string, typed = false): string => {
   if (name === "vision")
     return `${TOOL_RULE}Read the brief in BRIEF.md and make it yours. Write VISION.md in this folder in your own words: the player's fantasy, the 30-second loop, what makes this one special. Look through the CC0 asset library (game_assets_search with no query and no kind lists every pack and its style); when one pack fits the brief, make it the game's style source and name it in VISION.md, so the whole game keeps that one look. Then render one key-art PNG the finished game must live up to with game_blender_code, in that pack's style when you chose one (see ./studio-skills/art-pipeline.md for a working render setup; your own image tools are fine if you have them), look at it, and name it in VISION.md. Do not write game code yet. Work only in this folder. Do not use subagents. Never commit.`;
   if (name === "plan")
-    return `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (default target). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. ${LADDER_ASK} Do not write game code. Do not use subagents. Do not commit.`;
+    return `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (default target). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. ${ladderAsk(typed)} Do not write game code. Do not use subagents. Do not commit.`;
   return `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Make the game's asset set as files in ${laneAssets(lane)} (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. Take what fits the key art from the CC0 library (game_assets_search, look at its contact sheet, then game_assets_add), starting with the pack VISION.md names if it names one, and render the rest to match: one consistent style for the whole game. Render sprites and animation frames from Blender models with game_blender_render_sprites (a pixel-art style pack goes in as its palette), never with your own camera or render code. Also replace ${laneUi(lane)}/icon.png (a placeholder) with the game's icon, 256x256, cut from the key art around its main subject so it reads at taskbar size: the window, the web tab and the Windows .exe use it. Also save the key art, 16:9, as ${laneUi(lane)}/title_bg.png: the title screen shows it behind the menu${laneProfile(lane).run.prompts.titleArt}. ${laneProfile(lane).run.prompts.art}In a 3D game every character or creature that moves is a rigged model with its animation clips (idle, walk or run, and its actions): take a rigged library character first (game_assets_search; the style pack's characters), and model one yourself only with an armature and clips when none fits; sprite frames are for 2D games. Record each file's intended use and source in ASSETS.md as a file-to-use map (one line per file: path, what it depicts, where the game loads it, source and licence). Do not write game code yet. Do not use subagents. Do not commit.`;
 };
 
 // The art stage's first render is judged by a fresh session, never by its maker.
-export const artReview = (lane: string): string =>
-  `${TOOL_RULE}You are the art director for this game's asset set. Read VISION.md and ./studio-skills/art-director.md. Open the key-art image VISION.md names and look at it, then read ASSETS.md and open every image file it lists under ${laneAssets(lane)} (for 3D models, look at a render made with the game_blender_* tools). If VISION.md names a style-source library pack, look at it with game_assets_search (pack: that id) and judge the set's style against it; a different rendering style (smooth renders against pixel art) is a cohesion defect. Judge the key art and the set against VISION.md: cohesion with the key art, readability at play size, glaring defects, and anything that looks placeholder or code-drawn (flat shapes, plain dots, missing light, glow or shading, a crowded composition, animation frames that barely differ, a flat background, a 3D character or creature that moves but has no skeleton or animation clips in the model facts, models whose heights do not fit each other). Write .studio/art-review.md: a short list of concrete defects in the art files, one line each naming the file, what is wrong and what would fix it (code is not art: the template kit's comments show placeholder paths such as <pack> on purpose). Then end the file with exactly one line, ART: KEEP or ART: REDO, alone on that line. REDO only when a listed defect makes the game look worse than its vision promises. You may only write .studio/art-review.md; change no other file. Do not use subagents.`;
+export const artReview = (lane: string, typed = false): string =>
+  `${TOOL_RULE}You are the art director for this game's asset set. Read VISION.md and ./studio-skills/art-director.md. Open the key-art image VISION.md names and look at it, then read ASSETS.md and open every image file it lists under ${laneAssets(lane)} (for 3D models, look at a render made with the game_blender_* tools). If VISION.md names a style-source library pack, look at it with game_assets_search (pack: that id) and judge the set's style against it; a different rendering style (smooth renders against pixel art) is a cohesion defect. Judge the key art and the set against VISION.md: cohesion with the key art, readability at play size, glaring defects, and anything that looks placeholder or code-drawn (flat shapes, plain dots, missing light, glow or shading, a crowded composition, animation frames that barely differ, a flat background, a 3D character or creature that moves but has no skeleton or animation clips in the model facts, models whose heights do not fit each other). ${
+    typed
+      ? `Then submit your review with game_run_submit as {"_tag":"art","redo":<true or false>,"defects":"<${ART_DEFECTS}>"} (${ART_NOT_CODE}). redo is true only when a listed defect makes the game look worse than its vision promises. ${REFUSED} Change no files. Do not use subagents.`
+      : `Write .studio/art-review.md: ${ART_DEFECTS} (${ART_NOT_CODE}). Then end the file with exactly one line, ART: KEEP or ART: REDO, alone on that line. REDO only when a listed defect makes the game look worse than its vision promises. You may only write .studio/art-review.md; change no other file. Do not use subagents.`
+  }`;
+const ART_DEFECTS =
+  "a short list of concrete defects in the art files, one line each naming the file, what is wrong and what would fix it";
+const ART_NOT_CODE =
+  "code is not art: the template kit's comments show placeholder paths such as <pack> on purpose";
 
 // GameRun appends this at launch: the facts come from disk and the policy stays pure.
 // Only ASSETS.md against the disk: the code is not wired to the new art yet, so which files
@@ -79,17 +99,19 @@ export const artRedo = (defects: string, lane: string): string =>
   `${TOOL_RULE}${SKILL_LINE}An independent art director reviewed the key art and the asset set and asked for one redo. Its defect list:\n${defects}\n\nFix every listed defect: re-render the named files (the key art VISION.md names, files under ${laneAssets(lane)}) held to the look VISION.md describes, keep each file's path, and update ASSETS.md where a file changed. Look at each new render before you finish. This is the only redo. Do not write game code. Do not use subagents. Do not commit.`;
 
 // A run that reached its rounds before the ladder existed writes one from where the game is.
-export const ladderWrite = (): string =>
-  `${TOOL_RULE}${SKILL_LINE}Play the current build first with game_explore_start (default target), and read PLAN.md and VISION.md. ${LADDER_ASK} Start from what the build does today. You may only write ${LADDER_FILE}. Do not change game files. Do not use subagents.`;
+export const ladderWrite = (typed = false): string =>
+  `${TOOL_RULE}${SKILL_LINE}Play the current build first with game_explore_start (default target), and read PLAN.md and VISION.md. ${ladderAsk(typed)} Start from what the build does today. ${typed ? "Change no files." : `You may only write ${LADDER_FILE}.`} Do not change game files. Do not use subagents.`;
 
 // A plan turn can end after playing and before writing anything; that is
 // unfinished work, not a malformed file, so it is asked to finish both files.
 const MISSING_LADDER = "the file is missing or empty";
 
-export const ladderFix = (error: string): string =>
-  error === MISSING_LADDER
-    ? `You ended your turn before writing the plan. Write PLAN.md now if it does not exist yet (the game's structure, what makes the core good, what done means), then ${LADDER_FILE}. ${LADDER_ASK} You may only write PLAN.md and ${LADDER_FILE}.`
-    : `${LADDER_FILE} does not have the ladder's shape: ${error}\nRewrite it as JSON {"rungs":[{"is":"...","checks":[{"what":"...","how":"..."}]}]}: 4 to 7 rungs, each with a non-empty "is" and 2 to 4 checks, each with a non-empty "what" and "how". Keep your rungs; fix the shape. You may only write ${LADDER_FILE}.`;
+export const ladderFix = (error: string, typed = false): string =>
+  typed
+    ? `You ended your turn without submitting the ladder. Write PLAN.md now if it does not exist yet (the game's structure, what makes the core good, what done means), then submit the ladder. ${ladderAsk(true)} You may only write PLAN.md.`
+    : error === MISSING_LADDER
+      ? `You ended your turn before writing the plan. Write PLAN.md now if it does not exist yet (the game's structure, what makes the core good, what done means), then ${LADDER_FILE}. ${ladderAsk(false)} You may only write PLAN.md and ${LADDER_FILE}.`
+      : `${LADDER_FILE} does not have the ladder's shape: ${error}\nRewrite it as JSON {"rungs":[{"is":"...","checks":[{"what":"...","how":"..."}]}]}: 4 to 7 rungs, each with a non-empty "is" and 2 to 4 checks, each with a non-empty "what" and "how". Keep your rungs; fix the shape. You may only write ${LADDER_FILE}.`;
 
 const scenario = (c: Rung["checks"][number]): string =>
   [
@@ -138,8 +160,8 @@ export const visionRevise = (notes: string, lane: string): string =>
   `${stage("vision", lane)}\n\nVISION.md and its key art exist already. The creator looked at them and asked for this:\n${notes}\nRevise VISION.md and render the key art again to answer it, keeping what the creator did not ask to change; name the new key art in VISION.md.`;
 
 /** The plan's ladder once more, on the creator's notes. */
-export const ladderRevise = (notes: string): string =>
-  `${TOOL_RULE}The creator read the ladder in ${LADDER_FILE} and asked for this:\n${notes}\nRewrite ${LADDER_FILE} to answer it, keeping the shape: ${LADDER_ASK} Update PLAN.md where the change makes it wrong. You may only write PLAN.md and ${LADDER_FILE}. Do not use subagents. Do not commit.`;
+export const ladderRevise = (notes: string, typed = false): string =>
+  `${TOOL_RULE}The creator read the ladder in ${LADDER_FILE} and asked for this:\n${notes}\n${typed ? "Submit a new ladder that answers it" : `Rewrite ${LADDER_FILE} to answer it`}, keeping the shape: ${ladderAsk(typed)} Update PLAN.md where the change makes it wrong. You may only write PLAN.md${typed ? "" : ` and ${LADDER_FILE}`}. Do not use subagents. Do not commit.`;
 
 export const firstDirection = (lane: string, first: Rung | null = null, creator = ""): string =>
   `${creator.length > 0 ? `${creator}\n` : ""}Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${laneAssets(lane)} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. ${laneProfile(lane).run.prompts.shell}${first === null ? "" : `Aim at the ladder's first rung (${LADDER_FILE}), which the first round checks: the game IS ${first.is} Its checks:\n${checkList(first)}\nMake each check observable the way it says. `}End with something a player notices in the first minute; game files under ${lane}/ only.`;
@@ -210,14 +232,27 @@ export const testerPlay = (
   return `${PLAYBOOK}${PLAYTEST_LINE}Play the game in this folder freely: start it with game_explore_start (default target), get past the menu, push as far as you can, try to win and to lose. ${checks}${bots} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${n}.md, main complaint first. You may only write that notes file and .studio/bot/ files; do not change game files. Do not use subagents.`;
 };
 
-export const testerWrite = (n: number, move: string, rung: Rung | null = null): string =>
-  `Stop playing, now write it. Read .studio/tester-${n}.md. Rewrite the notes file so it states what you did and felt in your own words: decisions, fail, boredom, wanting another go, and your main complaint first. ${
-    rung === null
-      ? `Prior flaw for this round: ${move} State whether it is fixed, partly fixed, or unchanged, with what you did and the furthest state you reached.`
-      : lookCount(rung) === 0
-        ? "The harness scored every check of this rung; write no CHECK lines.\n"
-        : `Then end the file with each look check, by its number, as a line alone, CHECK <number>: PASS or CHECK <number>: FAIL, followed by its evidence on the next lines: what you did, what you saw, the frame that shows it. PASS only what you saw happen in play; what the code says does not count, and a check you could not verify is FAIL. Write no line for state checks: the harness scored those. The checks:\n${checkList(rung)}\n`
-  }You may only write that notes file.`;
+export const testerWrite = (
+  n: number,
+  move: string,
+  rung: Rung | null = null,
+  typed = false,
+): string =>
+  typed
+    ? `Stop playing, now hand in your notes. Read .studio/tester-${n}.md, then submit with game_run_submit as {"_tag":"checks","checks":[...],"notes":"<what you did and felt in your own words: decisions, fail, boredom, wanting another go, and your main complaint first>"}; the run keeps your notes in .studio/tester-${n}.md. ${
+        rung === null
+          ? `checks is empty. Prior flaw for this round: ${move} Say in notes whether it is fixed, partly fixed, or unchanged, with what you did and the furthest state you reached.`
+          : lookCount(rung) === 0
+            ? "checks is empty: the harness scored every check of this rung."
+            : `checks holds each look check by its number, as {"check":<number>,"pass":<true or false>,"evidence":"<what you did, what you saw, the frame that shows it>"}. pass is true only for what you saw happen in play; what the code says does not count, and a check you could not verify is false. Give no entry for a state check: the harness scored those. The checks:\n${checkList(rung)}`
+      } ${REFUSED} Change no files.`
+    : `Stop playing, now write it. Read .studio/tester-${n}.md. Rewrite the notes file so it states what you did and felt in your own words: decisions, fail, boredom, wanting another go, and your main complaint first. ${
+        rung === null
+          ? `Prior flaw for this round: ${move} State whether it is fixed, partly fixed, or unchanged, with what you did and the furthest state you reached.`
+          : lookCount(rung) === 0
+            ? "The harness scored every check of this rung; write no CHECK lines.\n"
+            : `Then end the file with each look check, by its number, as a line alone, CHECK <number>: PASS or CHECK <number>: FAIL, followed by its evidence on the next lines: what you did, what you saw, the frame that shows it. PASS only what you saw happen in play; what the code says does not count, and a check you could not verify is FAIL. Write no line for state checks: the harness scored those. The checks:\n${checkList(rung)}\n`
+      }You may only write that notes file.`;
 
 // T28's testers ran zero bots each; one plain follow-up asks for the run.
 export const BOT_DUTY =
@@ -246,8 +281,10 @@ export const samplePlay = (question: string, notes: string): string =>
 export const sampleMore = (usedSeconds: number, notes: string): string =>
   `You used about ${usedSeconds} seconds of your ${SAMPLE_S}-second input budget, so your evidence covers only the opening. Keep playing this build with real input (game_explore_start/act/close), about ${PACE_S} seconds of input in every act call (holds of 1-2 seconds, longer for controls you already know, or presses with waits to watch what they do; at most ${CALL_S} seconds per call), or the acts run out first; each act result says the input left and the seconds per act that spend it. Your earlier sessions are closed, so open exactly one new session; it holds at most ${SESSION_S} seconds and ${B.maxTotalSteps} steps, and a second new one could push you past ${SAMPLE_S} seconds in total, which voids your sample. Push toward an ending, a win or a loss, or the furthest state you can reach, and try an approach you have not tried yet. Append what you did and reached to ${notes}. Same rules as before: judge from play only, change no game files, no subagents.`;
 
-export const sampleWrite = (notes: string): string =>
-  `Stop playing, now write it. Rewrite ${notes} with your actual actions, decisions, failures, boredom, desire to replay, and the furthest state reached. Address the shared question with observations, separating facts from uncertainty. Do not compare to an unseen build or declare a winner. You may only write ${notes}.`;
+export const sampleWrite = (notes: string, typed = false): string =>
+  typed
+    ? `Stop playing, now hand in your report. Read ${notes}, then submit with game_run_submit as {"_tag":"report","report":"<your actual actions, decisions, failures, boredom, desire to replay, and the furthest state reached>"}. Address the shared question with observations, separating facts from uncertainty. Do not compare to an unseen build or declare a winner. ${REFUSED} Change no files.`
+    : `Stop playing, now write it. Rewrite ${notes} with your actual actions, decisions, failures, boredom, desire to replay, and the furthest state reached. Address the shared question with observations, separating facts from uncertainty. Do not compare to an unseen build or declare a winner. You may only write ${notes}.`;
 
 // Reports are anonymous and in random order; the file carries a neutral id, so
 // nothing on disk tells the comparator which build is which while it works.
@@ -268,26 +305,52 @@ export const compare = (
   file: string,
   bots: boolean,
   frames: { readonly a: string; readonly b: string } | null = null,
+  typed = false,
 ) =>
-  `Compare these two independent play reports. Shared question: ${question} Consider uncertainty and unequal observed exposure. The players may have made different choices or mistakes; an outcome difference alone does not prove different game behavior. ${bots ? BOT_FACTS : ""}${frames === null ? "" : sheets(frames, aFirst)}TIE means no demonstrated preference. Reports are anonymous and their presentation order is randomized; do not prefer a label or position. Use only these reports${frames === null ? "" : " and the two frame sheets"}, not the game folder, sources or Git. Write ${file}. Put exactly one declaration, COMPARE: A or COMPARE: B or COMPARE: TIE, alone on its own line without any other text. Put play-based reasons in a separate paragraph after that line. Do not play or use subagents.\n\n${aFirst ? `Build A. ${a}\n\nBuild B. ${b}` : `Build B. ${b}\n\nBuild A. ${a}`}`;
+  `Compare these two independent play reports. Shared question: ${question} Consider uncertainty and unequal observed exposure. The players may have made different choices or mistakes; an outcome difference alone does not prove different game behavior. ${bots ? BOT_FACTS : ""}${frames === null ? "" : sheets(frames, aFirst)}TIE means no demonstrated preference. Reports are anonymous and their presentation order is randomized; do not prefer a label or position. Use only these reports${frames === null ? "" : " and the two frame sheets"}, not the game folder, sources or Git. ${typed ? `${VERDICT_SUBMIT} ${REFUSED}` : `Write ${file}. Put exactly one declaration, COMPARE: A or COMPARE: B or COMPARE: TIE, alone on its own line without any other text. Put play-based reasons in a separate paragraph after that line.`} Do not play or use subagents.\n\n${aFirst ? `Build A. ${a}\n\nBuild B. ${b}` : `Build B. ${b}\n\nBuild A. ${a}`}`;
 
-export const correct = (file: string): string =>
-  `Correct only the format of ${file}, using the reports already provided. Put your declaration COMPARE: A or COMPARE: B or COMPARE: TIE alone on its own line. Put reasons in a separate paragraph below it. Do not play again or collect new evidence.`;
+const VERDICT_SUBMIT = `Submit your verdict with game_run_submit as {"_tag":"verdict","verdict":"A", "B" or "TIE","reasons":"<play-based reasons>"}.`;
+
+export const correct = (file: string, typed = false): string =>
+  typed
+    ? `You ended your turn without submitting a verdict. ${VERDICT_SUBMIT} Use the reports already provided. Do not play again or collect new evidence.`
+    : `Correct only the format of ${file}, using the reports already provided. Put your declaration COMPARE: A or COMPARE: B or COMPARE: TIE alone on its own line. Put reasons in a separate paragraph below it. Do not play again or collect new evidence.`;
 
 // A selection on a tied pick, never a quality verdict.
-export const SELECT =
-  "The comparison is a tie with no demonstrated preference either way. For continuation only, not a quality verdict: which prototype should the first build extend, A or B, and in what direction? Put exactly one line SELECT: A or SELECT: B alone on its own line, then reasons in a separate paragraph below it. Do not replay or collect new evidence.";
+export const select = (typed = false): string =>
+  `The comparison is a tie with no demonstrated preference either way. For continuation only, not a quality verdict: which prototype should the first build extend, A or B, and in what direction? ${typed ? `Submit with game_run_submit as {"_tag":"select","pick":"A" or "B","reasons":"<why, and in what direction>"}. ${REFUSED}` : "Put exactly one line SELECT: A or SELECT: B alone on its own line, then reasons in a separate paragraph below it."} Do not replay or collect new evidence.`;
 
 export const reviewerPlay = (n: number, reviewed: string, facts: string): string =>
   `${PLAYBOOK}${SKILL_LINE}Play the game in this folder briefly (a few minutes at most): ${reviewed}. Read PLAN.md and .studio/tester-${n}.md. Code facts: ${facts} After every couple of plays, append what you did and felt to .studio/reviewer-${n}.md. You may only write that notes file. Do not change game files. Do not use subagents.`;
 
-export const reviewerWrite = (n: number, move: string, verdicts: string, facts: string) =>
-  `Stop playing, now write it. Read .studio/reviewer-${n}.md. Rewrite the notes file with what you did and felt, then write .studio/next.md with: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the smallest change that fixes the top flaw, including a deeper rule or system change if needed, without filler or length targets; a DO NOT REGRESS list; and the furthest state you reached and what blocked further progress. Prior round worked from: ${move} Verdicts ${verdicts}. State whether that prior flaw is fixed, partly fixed, or unchanged, with what action reached which state. Code facts: ${facts} Play weakness first. You may only write .studio/reviewer-${n}.md and .studio/next.md.`;
+export const reviewerWrite = (
+  n: number,
+  move: string,
+  verdicts: string,
+  facts: string,
+  typed = false,
+) =>
+  `Stop playing, now write it. Read .studio/reviewer-${n}.md. Rewrite the notes file with what you did and felt, then ${typed ? `submit the run's ledger with game_run_submit as {"_tag":"ledger","ledger":"<the ledger>"}, the run keeping it in .studio/next.md; the ledger holds` : "write .studio/next.md with"}: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the smallest change that fixes the top flaw, including a deeper rule or system change if needed, without filler or length targets; a DO NOT REGRESS list; and the furthest state you reached and what blocked further progress. Prior round worked from: ${move} Verdicts ${verdicts}. State whether that prior flaw is fixed, partly fixed, or unchanged, with what action reached which state. Code facts: ${facts} Play weakness first. ${typed ? `${REFUSED} You may only write .studio/reviewer-${n}.md.` : `You may only write .studio/reviewer-${n}.md and .studio/next.md.`}`;
 
 // Ladder rounds: next.md is a ledger the builder clears beside the next rung, never a goal.
-export const reviewerLedger = (n: number, built: string, ladder: string, facts: string): string =>
-  `${SKILL_LINE}This round's tester and blind players already played this build: do not play it again. Read PLAN.md, the tester's notes .studio/tester-${n}.md, this round's .studio/comparisons/round-${n}-*.json if there is one (the blind players' reports and frame sheets), .studio/bot-results.jsonl and the code. Write .studio/reviewer-${n}.md with what their play shows and what you see in the code, then write .studio/next.md as a ledger the builder clears alongside the next rung, never instead of it: the bugs and rough edges their play shows, most important first, each with where it shows; how to raise the feel and look; a DO NOT REGRESS list of what works now; the furthest state reached and what blocked further progress. Name no next move: the ladder sets each round's goal. This round: ${built} The ladder now:\n${ladder}\nOnly when something blocks the ladder (for example the core is unplayable, so no later rung can be built or checked) may you propose one ladder change: write ${RUNG_CHANGE_FILE} as JSON {"why":"...","is":"...","checks":[{"what":"...","how":"..."}]} with 2 to 4 checks; it becomes the next rung. Otherwise do not write that file. Code facts: ${facts} You may only write .studio/reviewer-${n}.md, .studio/next.md and ${RUNG_CHANGE_FILE}.`;
+const LEDGER_READ = (n: number) =>
+  `This round's tester and blind players already played this build: do not play it again. Read PLAN.md, the tester's notes .studio/tester-${n}.md, this round's .studio/comparisons/round-${n}-*.json if there is one (the blind players' reports and frame sheets), .studio/bot-results.jsonl and the code. Write .studio/reviewer-${n}.md with what their play shows and what you see in the code.`;
+const LEDGER_BODY = (built: string, ladder: string) =>
+  `The ledger is what the builder clears alongside the next rung, never instead of it: the bugs and rough edges their play shows, most important first, each with where it shows; how to raise the feel and look; a DO NOT REGRESS list of what works now; the furthest state reached and what blocked further progress. Name no next move: the ladder sets each round's goal. This round: ${built} The ladder now:\n${ladder}\n`;
+
+export const reviewerLedger = (
+  n: number,
+  built: string,
+  ladder: string,
+  facts: string,
+  typed = false,
+): string =>
+  typed
+    ? `${SKILL_LINE}${LEDGER_READ(n)} Then submit the ledger with game_run_submit as {"_tag":"ledger","ledger":"<the ledger>"}; the run keeps it in .studio/next.md. ${LEDGER_BODY(built, ladder)} Only when something blocks the ladder (for example the core is unplayable, so no later rung can be built or checked) add one ladder change to the submission as "rungChange":{"why":"...","is":"...","checks":[{"what":"...","how":"..."}]} with 2 to 4 checks; it becomes the next rung. ${REFUSED} Code facts: ${facts} You may only write .studio/reviewer-${n}.md.`
+    : `${SKILL_LINE}This round's tester and blind players already played this build: do not play it again. Read PLAN.md, the tester's notes .studio/tester-${n}.md, this round's .studio/comparisons/round-${n}-*.json if there is one (the blind players' reports and frame sheets), .studio/bot-results.jsonl and the code. Write .studio/reviewer-${n}.md with what their play shows and what you see in the code, then write .studio/next.md as a ledger the builder clears alongside the next rung, never instead of it: the bugs and rough edges their play shows, most important first, each with where it shows; how to raise the feel and look; a DO NOT REGRESS list of what works now; the furthest state reached and what blocked further progress. Name no next move: the ladder sets each round's goal. This round: ${built} The ladder now:\n${ladder}\nOnly when something blocks the ladder (for example the core is unplayable, so no later rung can be built or checked) may you propose one ladder change: write ${RUNG_CHANGE_FILE} as JSON {"why":"...","is":"...","checks":[{"what":"...","how":"..."}]} with 2 to 4 checks; it becomes the next rung. Otherwise do not write that file. Code facts: ${facts} You may only write .studio/reviewer-${n}.md, .studio/next.md and ${RUNG_CHANGE_FILE}.`;
 
 export const SHIP_PLAY = `${PLAYBOOK}${PLAYTEST_LINE}Play the game in this folder to the end if you can. After every couple of plays, append what you did and felt to .studio/ship.md. Do not change files. Do not use subagents.`;
-export const SHIP_WRITE =
-  "Stop playing, now write it. Read .studio/ship.md. Rewrite the notes file with what you did and felt, then name the furthest late state actually reached (ending? win or loss? which levels or systems?) and what remains unverified, then end with exactly one line SHIP: YES or SHIP: NO and the reasons. You may only write .studio/ship.md.";
+export const shipWrite = (typed = false): string =>
+  typed
+    ? `Stop playing, now hand in your verdict. Read .studio/ship.md, then submit with game_run_submit as {"_tag":"ship","ship":<true or false>,"reasons":"<what you did and felt, the furthest late state actually reached (ending? win or loss? which levels or systems?) and what remains unverified>"}. ${REFUSED} You may only write .studio/ship.md.`
+    : "Stop playing, now write it. Read .studio/ship.md. Rewrite the notes file with what you did and felt, then name the furthest late state actually reached (ending? win or loss? which levels or systems?) and what remains unverified, then end with exactly one line SHIP: YES or SHIP: NO and the reasons. You may only write .studio/ship.md.";

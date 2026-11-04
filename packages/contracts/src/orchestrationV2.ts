@@ -61,6 +61,7 @@ import { GameRunProfile, GameRunSubmission } from "./gameRun.ts";
 import {
   GameRun,
   GameRunId,
+  GameRunRoleBefore,
   GameRunRound,
   GameRunStep,
   GameRunStepId,
@@ -3086,6 +3087,7 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     ...GameRunCommandFields,
     stepId: GameRunStepId,
     roleThreadId: Schema.optional(ThreadId),
+    before: Schema.optional(GameRunRoleBefore),
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.step.complete"),

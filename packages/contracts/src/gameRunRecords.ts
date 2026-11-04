@@ -219,6 +219,10 @@ export const GameRunBotFact = Schema.Struct({ side: GameRunSide, ...BotFactField
 export type GameRunBotFact = typeof GameRunBotFact.Type;
 
 // ── What a step's execution hands back. ────────────────────────────────────
+/** A role turn's starting point: the build's source id and the bot runs on record. */
+export const GameRunRoleBefore = Schema.Struct({ source: Schema.String, bots: Schema.Number });
+export type GameRunRoleBefore = typeof GameRunRoleBefore.Type;
+
 /** A role turn's end: the typed submission the role made, if any, and what the harness saw. */
 export const GameRunRoleDone = Schema.Struct({
   kind: Schema.Literal("done"),
@@ -701,6 +705,8 @@ export const GameRunStep = Schema.Struct({
       seq: PositiveInt,
       threadId: Schema.NullOr(ThreadId),
       submission: Schema.NullOr(GameRunSubmission),
+      /** What the harness measured before the role's first turn, kept for the turn's result. */
+      before: Schema.optionalKey(GameRunRoleBefore),
     }),
   ),
   /** A pair keeps its halves' results in `step`; this is a single step's result, or an ending. */

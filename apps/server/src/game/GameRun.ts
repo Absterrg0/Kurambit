@@ -4,7 +4,6 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -17,13 +16,10 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
-  ProviderInstanceId,
-  gameRunRoleLabel,
   type GameCreateInput,
   type GameProjectResult,
   type GameRunDecideInput,
   type GameRunDecideResult,
-  type GameRunDecision,
   type GameRunProfile,
   type GameRunProfileResult,
   type GameRunPickDetail,
@@ -44,9 +40,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
-import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
-import { CHECK_BOT_DIR, runStateChecks } from "./run/checkRunner.ts";
-import * as Templates from "./templates.ts";
+import { runStateChecks } from "./run/checkRunner.ts";
 import { runBotFact } from "./run/botFacts.ts";
 import { artAssetFacts, reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
@@ -59,10 +53,27 @@ import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
 import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { artFacts, modelBlock, spriteBlock } from "./run/roles.ts";
-import { ENGINE_SKILLS, laneProfile } from "./engineProfile.ts";
+import { laneProfile } from "./engineProfile.ts";
 import { spriteFacts } from "./run/spriteFacts.ts";
 import { modelFacts } from "./run/modelFacts.ts";
 import * as State from "./run/state.ts";
+import {
+  causeText,
+  ensureScaffold,
+  logLine,
+  readText,
+  refreshHarnessFiles,
+  writeAtomic,
+} from "./runSetup.ts";
+import {
+  DECISION_LABEL,
+  currentStep,
+  decisionOf,
+  describe,
+  selectionFor,
+  steerWhen,
+  summarize,
+} from "./run/runView.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
   operation: Schema.String,
@@ -76,40 +87,6 @@ export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunErr
   }
 }
 
-// Run state, notes and reports are harness output, never game content:
-// ignoring them keeps the tree clean so build swaps never need a stash
-// (T28 wedged on a half-applied stash pop; T29 removed stash use).
-const RUN_STATE_IGNORES = [
-  ".studio/run.json",
-  ".studio/rounds.jsonl",
-  ".studio/stop",
-  ".studio/steer.jsonl",
-  ".studio/profile",
-  ".studio/run.log",
-  ".studio/bot-results.jsonl",
-  ".studio/player-report.md",
-  ".studio/pick.txt",
-  ".studio/next.md",
-  ".studio/ship.md",
-  ".studio/art-review.md",
-  ".studio/ladder.json",
-  `${CHECK_BOT_DIR}/`,
-  ".studio/rung-change.json",
-  ".studio/exports.json",
-  ".studio/final-video.json",
-  ".studio/tester-*.md",
-  ".studio/reviewer-*.md",
-  ".studio/worktrees/",
-  ".studio/comparisons/",
-  ".studio/saves/",
-  ".studio/play-*.md",
-  ".studio/proto-*.md",
-  ".studio/proto-*-frames.jpg",
-  ".studio/round-state.json",
-  "PICK-NOTES.md",
-  "JUDGE-NOTES.md",
-] as const;
-
 // A shipped or stalled run starts over (keeping its history); every other ending resumes.
 const CONTINUABLE = new Set([
   null,
@@ -120,46 +97,6 @@ const CONTINUABLE = new Set([
   "stopped",
   "failed",
 ]);
-
-// The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
-const SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
-// A role told to read every skill must not get another engine's rules.
-const keepLaneSkill = async (skills: string, lane: string) => {
-  const own = laneProfile(lane).run.skill;
-  const others = ENGINE_SKILLS.filter((name) => name !== own);
-  await Promise.all(
-    others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
-  );
-  const index = NodePath.join(skills, "AGENTS.md");
-  const text = await NodeFSP.readFile(index, "utf8").catch(() => null);
-  if (text === null) return;
-  const kept = text
-    .split("\n")
-    .filter((line) => !others.some((name) => line.startsWith(`- \`${name}\``)))
-    .join("\n");
-  await NodeFSP.writeFile(index, kept);
-};
-
-const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md.\n`;
-const STALE_SKILLS =
-  /\n*## Studio skills \(read the ones your role needs\)\n\nSkill pack in \.\/studio-skills, one line each:[^\n]*\n/;
-
-const readText = (path: string): Promise<string | null> =>
-  NodeFSP.readFile(path, "utf8").catch(() => null);
-
-// A unique same-directory temp file plus rename: a crash never leaves a torn
-// run.json behind, and concurrent writers never rename each other's inode.
-const writeAtomic = async (file: string, text: string): Promise<void> => {
-  await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp.${process.pid}.${NodeCrypto.randomUUID()}`;
-  try {
-    await NodeFSP.writeFile(tmp, text);
-    await NodeFSP.rename(tmp, file);
-  } catch (error) {
-    await NodeFSP.rm(tmp, { force: true }).catch(() => undefined);
-    throw error;
-  }
-};
 
 const paths = (root: string) => ({
   run: NodePath.join(root, ".studio", "run.json"),
@@ -172,13 +109,6 @@ const paths = (root: string) => ({
   log: NodePath.join(root, ".studio", "run.log"),
   next: NodePath.join(root, ".studio", "next.md"),
 });
-
-const logLine = (root: string, line: string): Effect.Effect<void> =>
-  Effect.promise(() =>
-    NodeFSP.mkdir(NodePath.join(root, ".studio"), { recursive: true }).then(() =>
-      NodeFSP.appendFile(paths(root).log, `${new Date().toISOString()} ${line}\n`),
-    ),
-  ).pipe(Effect.ignore);
 
 /** One JSON string per line; a torn or foreign line is skipped. */
 const parseSteer = (text: string): string[] =>
@@ -197,149 +127,6 @@ const fallbackOf = (decision: State.Decision): Answer => ({
   notes: "",
   by: "default",
 });
-
-// A game made before the decision protocol has the older creator section; it is replaced whole.
-const CREATOR_HEADING = "## The creator's session and the production run";
-const withCreatorSection = (agents: string): string => {
-  if (agents.includes("game_run_decide")) return agents;
-  const at = agents.indexOf(CREATOR_HEADING);
-  if (at < 0) return `${agents.trimEnd()}\n\n${CREATOR_SESSION_SECTION}`;
-  const after = agents.indexOf("\n## ", at + CREATOR_HEADING.length);
-  return `${agents.slice(0, at)}${CREATOR_SESSION_SECTION}${after < 0 ? "" : agents.slice(after)}`;
-};
-
-// The question a live run waits on, with its evidence as absolute paths. A question
-// still queued behind a busy chat states when its wait would end if it arrived now.
-const decisionOf = (root: string, state: State.RunState): GameRunDecision | null => {
-  const step = state.inFlight;
-  if (step?.kind !== "decide") return null;
-  const d = step.decision;
-  const deadline = step.deadline ?? (step.sent === null ? null : Date.now() + d.waitMs);
-  return {
-    id: d.id,
-    kind: d.kind,
-    ask: d.ask,
-    evidence: d.evidence.map((e) => ({ label: e.label, path: NodePath.join(root, e.path) })),
-    text: d.text,
-    answers: d.answers.map((a) => ({ answer: a.answer, means: a.means })),
-    default: d.fallback,
-    deadline: deadline === null ? null : new Date(deadline).toISOString(),
-  };
-};
-
-const currentStep = (state: State.RunState): string => {
-  const t = state.task;
-  const step = state.inFlight?.kind === "pair" ? state.inFlight.halves[0] : state.inFlight;
-  if (step?.kind === "role") {
-    const label = gameRunRoleLabel(step.role);
-    return t._tag === "round" && !label.includes("round") ? `Round ${t.n} · ${label}` : label;
-  }
-  switch (t._tag) {
-    case "init":
-      return "Setting up";
-    case "stage":
-      return t.name === "build" ? "First full build" : gameRunRoleLabel(t.name);
-    case "proto":
-      return `Prototype ${t.i + 1}`;
-    case "pick":
-      return "Blind pick of the prototypes";
-    case "round":
-      return `Round ${t.n} · ${t.phase.replace("-", " ")}`;
-    case "ladder":
-      return "Plan · writing the ladder";
-    case "ship":
-      return `Ship review after round ${t.n}`;
-    case "leave":
-      return "Wrapping up at the budget";
-    case "decide":
-      return `Waiting for the creator: ${DECISION_LABEL[t.decision.kind]}`;
-  }
-};
-
-const DECISION_LABEL: Record<State.Decision["kind"], string> = {
-  style: "the vision and look",
-  prototype: "which prototype to keep",
-  ladder: "the ladder",
-};
-
-// When a note takes effect: a round's direction is fixed once it starts.
-const steerWhen = (state: State.RunState | null): string => {
-  const t = state?.task;
-  if (t?._tag === "round" && t.phase === "start" && state?.inFlight === null)
-    return `Round ${t.n} starts with it.`;
-  if (t?._tag === "round")
-    return `Round ${t.n} is in progress and finishes as planned; round ${t.n + 1} starts with it.`;
-  if (t?._tag === "ship")
-    return "A ship review is in progress; the next round starts with it before the run can end.";
-  if (t?._tag === "ladder") return "The plan is writing the ladder; the next round starts with it.";
-  if (t?._tag === "leave") return "The run is ending at its budget; a resumed run starts with it.";
-  return "The run is still making its first build; its first round starts with it.";
-};
-
-const causeText = (cause: Cause.Cause<unknown>): string => {
-  const squashed: unknown = Cause.squash(cause);
-  return (squashed instanceof Error ? squashed.message : "unrecognized failure").slice(0, 300);
-};
-
-// The game's chosen provider, model and options: the creator's own unless the
-// run was started with overrides. A `#variant` suffix is the client's display
-// form, not a routable model: launching with it fails every turn at once, so it
-// becomes the `variant` option instead (T25: every #xhigh turn failed this way).
-const selectionFor = (current: ModelSelection, state: State.RunState): ModelSelection => {
-  let model = state.model ?? current.model;
-  let variant = state.variant;
-  const suffix = /#([A-Za-z][A-Za-z0-9_-]*)$/.exec(model);
-  if (suffix !== null) {
-    model = model.slice(0, suffix.index);
-    if (variant === null || variant.length === 0) variant = suffix[1] ?? null;
-  }
-  if ((variant === null || variant.length === 0) && state.model === null && state.provider === null)
-    return current;
-  // Options belong to a provider: another provider's (Codex effort on an
-  // OpenCode model) would make every turn fail, so they carry over only when
-  // the provider stays.
-  const base =
-    state.provider === null || state.provider === current.instanceId ? current.options : [];
-  const options =
-    variant === null || variant.length === 0
-      ? base
-      : [
-          ...(base ?? []).filter((entry) => entry.id !== "variant"),
-          { id: "variant", value: variant },
-        ];
-  return {
-    ...current,
-    instanceId:
-      state.provider === null ? current.instanceId : ProviderInstanceId.make(state.provider),
-    model,
-    ...(options === undefined ? {} : { options }),
-  };
-};
-
-const describe = (step: State.Step): string => {
-  if (step.kind === "pair") return step.halves.map(describe).join(" | ");
-  if (step.kind === "role")
-    return `step ${step.id}: ${step.role}${step.thread === null ? "" : " (follow-up)"}${step.at === null ? "" : ` at ${step.at.slice(0, 12)}`}`;
-  if (step.kind === "git") return `step ${step.id}: git ${step.op._tag}`;
-  if (step.kind === "bot") return `step ${step.id}: bot ${step.file} at ${step.sha.slice(0, 12)}`;
-  if (step.kind === "decide") return `step ${step.id}: ask the creator (${step.decision.id})`;
-  return `step ${step.id}: ${step.kind}`;
-};
-const summarize = (res: Policy.StepResult): string => {
-  if (res.kind === "done") return `done${res.timedOut ? " (capped)" : ""} on ${res.threadId}`;
-  if (res.kind === "git")
-    return `git ok=${res.git.ok} ${res.git.branch} ${res.git.sha.slice(0, 8)} ${res.git.detail}`.trim();
-  if (res.kind === "boot") return `boot ${res.ok ? "clean" : `failed: ${res.detail}`}`;
-  if (res.kind === "ended" || res.kind === "failed") return `${res.kind}: ${res.reason}`;
-  if (res.kind === "decided") return `decided ${res.answer} (${res.by})`;
-  if (res.kind === "checks")
-    return res.results
-      .map((c) => `check ${c.k + 1} ${c.pass ? "PASS" : "FAIL"}: ${c.evidence}`)
-      .join(" | ");
-  if (res.kind === "bot")
-    return `bot ${res.fact.ending} after ${res.fact.seconds.toFixed(0)}s ${JSON.stringify(res.fact.final)} ${res.fact.note}`.trim();
-  return res.kind;
-};
 
 type RunSlot = {
   fiber: Fiber.Fiber<void, never> | null;
@@ -496,102 +283,6 @@ export const layer = Layer.effect(
           () => false,
         ),
       );
-
-    const templatesDir = async () => {
-      const [bundled, monorepo] = Templates.templateDirectoryCandidates(
-        NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
-        NodePath.join,
-      );
-      return (await NodeFSP.access(bundled).then(
-        () => true,
-        () => false,
-      ))
-        ? bundled
-        : monorepo;
-    };
-
-    // The engine's in-game play runner speaks this server's protocol, so a new
-    // run brings it up to date in a commit of its own on trunk, right after
-    // init: riding in a role's commit, it would force that role through a boot
-    // and be lost with it when the role is rejected, or land on a leftover
-    // round branch instead of trunk.
-    const refreshHarnessFiles = (
-      git: ReturnType<typeof makeGit>,
-      root: string,
-      lane: string,
-      log: (line: string) => Effect.Effect<void>,
-    ) =>
-      Effect.gen(function* () {
-        const owned = laneProfile(lane).run.harnessFiles;
-        if (owned === null) return null;
-        const templates = yield* Effect.promise(templatesDir);
-        const paths = owned.files.map((file) => NodePath.join(lane, file));
-        const copied = yield* Effect.promise(async () => {
-          try {
-            for (const file of owned.files) {
-              const to = NodePath.join(root, lane, file);
-              await NodeFSP.mkdir(NodePath.dirname(to), { recursive: true });
-              await NodeFSP.copyFile(NodePath.join(templates, owned.template, lane, file), to);
-            }
-            return null;
-          } catch (error) {
-            return String(error).slice(0, 300);
-          }
-        });
-        if (copied !== null) {
-          yield* log(`harness files not refreshed: ${copied}`);
-          return null;
-        }
-        const before = yield* git.current;
-        const sha = yield* git.commitPaths(`harness: refresh ${owned.files.join(", ")}`, paths);
-        yield* log(`harness files refreshed on ${before} at ${sha.slice(0, 8)}`);
-        return sha;
-      }).pipe(Effect.uninterruptible);
-
-    // Skill pack, bot kit and the run-state ignores, so the committed tree each
-    // worktree role starts from has them. Only a new run refreshes the skills
-    // and the kit: a resume after a server update would otherwise change them
-    // mid-run, and the next build's commit would carry harness text as its
-    // own work while earlier builds were made under different guidance.
-    const ensureScaffold = (
-      root: string,
-      lane: string,
-      untrack: (p: ReadonlyArray<string>) => Effect.Effect<void>,
-      fresh: boolean,
-    ) =>
-      Effect.promise(async () => {
-        const templates = await templatesDir();
-        await NodeFSP.mkdir(NodePath.join(root, ".studio", "bot"), { recursive: true });
-        const copy = async (from: string, to: string) => {
-          const present = await NodeFSP.access(to).then(
-            () => true,
-            () => false,
-          );
-          if (!fresh && present) return false;
-          await NodeFSP.cp(from, to, { recursive: true }).catch(() => undefined);
-          return true;
-        };
-        const skills = NodePath.join(root, "studio-skills");
-        if (await copy(NodePath.join(templates, "studio"), skills))
-          await keepLaneSkill(skills, lane);
-        await copy(
-          NodePath.join(templates, "bot-kit"),
-          NodePath.join(root, ".studio", "bot", "kit"),
-        );
-        const before = (await readText(NodePath.join(root, "AGENTS.md"))) ?? "";
-        let agents = before.replace(STALE_SKILLS, "");
-        if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;
-        agents = withCreatorSection(agents);
-        if (agents !== before) await NodeFSP.writeFile(NodePath.join(root, "AGENTS.md"), agents);
-        const ignore = (await readText(NodePath.join(root, ".gitignore"))) ?? "";
-        const present = new Set(ignore.split("\n").map((line) => line.trim()));
-        const missing = RUN_STATE_IGNORES.filter((line) => !present.has(line));
-        if (missing.length > 0)
-          await NodeFSP.writeFile(
-            NodePath.join(root, ".gitignore"),
-            `${ignore}${ignore === "" || ignore.endsWith("\n") ? "" : "\n"}${missing.join("\n")}\n`,
-          );
-      }).pipe(Effect.ignore, Effect.andThen(untrack(RUN_STATE_IGNORES)));
 
     type Drive = {
       readonly root: string;

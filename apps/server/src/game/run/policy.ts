@@ -698,12 +698,12 @@ const role = (id: number, spec: RoleSpec): RoleStep => ({
   ...spec,
 });
 const git = (id: number, op: GitOp): Step => ({ kind: "git", id, op });
-const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
+const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>, typed: boolean): RoleSpec =>
   t.phase === "write"
     ? {
         role: "plan",
         title: "studio ladder",
-        prompt: Roles.ladderWrite(),
+        prompt: Roles.ladderWrite(typed),
         capMs: CAP.plan,
         read: [LADDER],
         clear: [LADDER],
@@ -712,7 +712,7 @@ const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
         role: "plan",
         title: "studio ladder",
         thread: t.thread,
-        prompt: Roles.ladderFix(t.error),
+        prompt: Roles.ladderFix(t.error, typed),
         capMs: CAP.ladderFix,
         read: [LADDER],
       };
@@ -965,6 +965,7 @@ const sampleStep = (
   c: Compare,
   move: SampleMove,
   label: string,
+  typed: boolean,
 ): { sample: Sample | null; step: RoleStep } => {
   const at = move.side === "x" ? c.x : c.y;
   if (move.current === null) {
@@ -1007,7 +1008,7 @@ const sampleStep = (
     title: "studio sample",
     thread: s.thread,
     at,
-    prompt: Roles.sampleWrite(sampleFile(s)),
+    prompt: Roles.sampleWrite(sampleFile(s), typed),
     capMs: CAP.write,
     // After a restart only this turn re-registers the thread's cap, and a
     // model that plays on here would void the sample.
@@ -1067,7 +1068,13 @@ const compareStep = (
     // Ids and labels follow the play order, which is a coin, never x and y.
     let fresh = 0;
     const made = (parallel ? move.moves : move.moves.slice(0, 1)).map((m, i) =>
-      sampleStep(id + i, c, m, m.current === null && fresh++ > 0 ? `${input.id}b` : input.id),
+      sampleStep(
+        id + i,
+        c,
+        m,
+        m.current === null && fresh++ > 0 ? `${input.id}b` : input.id,
+        state.typed,
+      ),
     );
     const cmp = {
       ...c,
@@ -1120,6 +1127,7 @@ const compareStep = (
           VERDICT,
           botsShown(c),
           sheets ? SHEET : null,
+          state.typed,
         ),
         capMs: CAP.write,
         read: [VERDICT],
@@ -1132,7 +1140,7 @@ const compareStep = (
       title: "studio blind comparison",
       thread: j.thread,
       at: BLANK,
-      prompt: Roles.correct(VERDICT),
+      prompt: Roles.correct(VERDICT, state.typed),
       capMs: CAP.write,
       read: [VERDICT],
     });
@@ -1503,7 +1511,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         return act({
           role: "art-director",
           title: "studio art director",
-          prompt: Roles.artReview(lane),
+          prompt: Roles.artReview(lane, state.typed),
           capMs: artCap(CAP.artReview),
           read: [ART_REVIEW],
           clear: [ART_REVIEW],
@@ -1512,7 +1520,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         return name === "plan"
           ? act({
               role: "plan",
-              prompt: Roles.ladderRevise(t.review),
+              prompt: Roles.ladderRevise(t.review, state.typed),
               capMs: CAP.plan,
               read: [LADDER],
             })
@@ -1521,7 +1529,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         return act({
           role: "plan",
           thread: t.thread,
-          prompt: Roles.ladderFix(t.review),
+          prompt: Roles.ladderFix(t.review, state.typed),
           capMs: CAP.ladderFix,
           read: [LADDER],
         });
@@ -1537,7 +1545,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           ? go(blockStep(id, t.block!, lane))
           : act({
               role: name,
-              prompt: Roles.stage(name, lane),
+              prompt: Roles.stage(name, lane, state.typed),
               capMs: CAP[name],
               ...(name === "plan" ? { read: [LADDER], clear: [LADDER] } : {}),
             });
@@ -1572,14 +1580,14 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           title: "studio blind comparison",
           thread: j?.thread ?? null,
           at: BLANK,
-          prompt: Roles.SELECT,
+          prompt: Roles.select(state.typed),
           capMs: CAP.write,
         });
       const made = compareStep(id, t.cmp, input, state);
       return go(made.step, { ...t, cmp: made.cmp }, made.logs);
     }
     case "ladder":
-      return act(ladderSpec(t));
+      return act(ladderSpec(t, state.typed));
     case "ship":
       return t.phase === "play"
         ? act({
@@ -1591,7 +1599,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         : act({
             role: `ship-${t.n}`,
             thread: t.thread,
-            prompt: Roles.SHIP_WRITE,
+            prompt: Roles.shipWrite(state.typed),
             capMs: CAP.write,
             read: [".studio/ship.md"],
           });
@@ -1620,7 +1628,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       if (remaining(state, input.now) < ROUND_RESERVE_MS) return end("budget");
       if (state.ladder === null) {
         const task: Task = { _tag: "ladder", phase: "write", thread: null, error: "" };
-        return go(role(id, ladderSpec(task)), task, [
+        return go(role(id, ladderSpec(task, state.typed)), task, [
           `round ${n}: the run has no ladder yet; the plan writes one first`,
         ]);
       }
@@ -1703,7 +1711,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         CAP.tester,
       );
     case "tester-write":
-      return tester(Roles.testerWrite(n, r.move, rungOf(state, r)), CAP.write, [
+      return tester(Roles.testerWrite(n, r.move, rungOf(state, r), state.typed), CAP.write, [
         `.studio/tester-${n}.md`,
       ]);
     case "tester-duty":
@@ -1745,7 +1753,13 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         const built = `it built rung ${k} (${rung.is}); the tester's checks: ${checkLine(r.checks) || "none verified"}; ${r.record.kept ? "kept" : `not kept (${r.record.note ?? ""})`}; judging ${verdicts}.`;
         return act({
           role: `reviewer-${n}`,
-          prompt: Roles.reviewerLedger(n, built, ladderText(state.ladder, rung.id), r.facts),
+          prompt: Roles.reviewerLedger(
+            n,
+            built,
+            ladderText(state.ladder, rung.id),
+            r.facts,
+            state.typed,
+          ),
           capMs: CAP.reviewer,
           clear: [".studio/next.md", RUNG_CHANGE],
           read: [...read, RUNG_CHANGE],
@@ -1754,7 +1768,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       return act({
         role: `reviewer-${n}`,
         thread: r.thread,
-        prompt: Roles.reviewerWrite(n, r.move, verdicts, r.facts),
+        prompt: Roles.reviewerWrite(n, r.move, verdicts, r.facts, state.typed),
         capMs: CAP.write,
         read,
       });
@@ -2381,7 +2395,7 @@ const applyRound = (
       const played =
         (res.kind === "done" && (res.evidence?.executedInputSteps ?? 0) > 0) ||
         (res.kind === "done" && res.botsAfter > r.botsBefore) ||
-        r.bot !== null;
+        r.bot !== "";
       // State checks were scored by the harness; the tester's lines count for look checks only.
       const isState = (k: number) => rung?.checks[k]?.kind === "state";
       const said =

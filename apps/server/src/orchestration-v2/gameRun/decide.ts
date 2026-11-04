@@ -102,12 +102,15 @@ const refuse = (reason: GameRunRefusalReason, message: string) =>
   Result.fail<GameRunRefusal>({ reason, message });
 
 // ── Records to the policy's state and back. ────────────────────────────────
-const toState = (
+/** The policy's state of a run, as its records hold it; status views and the run's executor read it too. */
+export const toState = (
   run: GameRun,
   rounds: ReadonlyArray<GameRunRound>,
   inFlight: GameRunStep | null,
 ): State.RunState => ({
   version: 3,
+  // Roles of a run on this core hand their results through game_run_submit.
+  typed: true,
   runId: run.id,
   profile: run.profile,
   decided: run.decided,
@@ -453,6 +456,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
   // Stages an earlier run on this game finished are not redone.
   const state: State.RunState = {
     ...fresh,
+    typed: true,
     rounds: fresh.rounds.toSorted((a, b) => a.round - b.round),
     stage: prior?.stage ?? fresh.stage,
     pickNotes: prior?.pickNotes ?? "",
@@ -830,9 +834,21 @@ const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
         entry.threadId !== command.roleThreadId
       )
         return refuse("wrong-thread", `Step ${command.stepId} already runs on another thread.`);
+      // The first measure of a role's starting point stands: a re-run of the
+      // launch after a restart measures a build the role has already changed.
       const launched: GameRunStep = {
         ...started,
-        roles: started.roles.map((r) => (r.seq === seq ? { ...r, threadId: thread } : r)),
+        roles: started.roles.map((r) =>
+          r.seq === seq
+            ? {
+                ...r,
+                threadId: thread,
+                ...(r.before === undefined && command.before !== undefined
+                  ? { before: command.before }
+                  : {}),
+              }
+            : r,
+        ),
       };
       const capAt = work.now + role.capMs;
       const cap = {
