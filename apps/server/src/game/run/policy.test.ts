@@ -1022,7 +1022,7 @@ describe("ladder", () => {
       v1: string,
       v2: string,
       pass: [boolean, boolean] = [true, true],
-      extra: Responder | null = null,
+      extra: ((step: Single, state: State.RunState) => Policy.StepResult | undefined) | null = null,
     ): Responder =>
     (step, state) => {
       const answered = extra?.(step, state);

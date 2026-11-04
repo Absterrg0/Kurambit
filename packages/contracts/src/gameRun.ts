@@ -44,6 +44,36 @@ export const GameRunRoundOutcome = Schema.Literals([
 ]);
 export type GameRunRoundOutcome = typeof GameRunRoundOutcome.Type;
 
+/** One check of a ladder rung, as the round's tester declared it. */
+export const GameRunCheckResult = Schema.Struct({
+  what: Schema.String,
+  pass: Schema.Boolean,
+  evidence: Schema.String,
+});
+export type GameRunCheckResult = typeof GameRunCheckResult.Type;
+
+/** What a ladder round did with its rung: landed, failed, or set aside on its second failure. */
+export const GameRunRungResult = Schema.Struct({
+  is: Schema.String,
+  checks: Schema.Array(GameRunCheckResult),
+  outcome: Schema.Literals(["landed", "failed", "set-aside"]),
+  why: Schema.String,
+});
+export type GameRunRungResult = typeof GameRunRungResult.Type;
+
+/** A rung of the run's ladder, in build order. */
+export const GameRunRungRef = Schema.Struct({
+  is: Schema.String,
+  checks: Schema.Array(Schema.String),
+  status: Schema.Literals(["todo", "done", "set-aside"]),
+  /** The rung the round in progress builds. */
+  current: Schema.Boolean,
+  /** Why it was set aside, or why a reviewer added it. */
+  why: Schema.String,
+  from: Schema.Literals(["plan", "reviewer"]),
+});
+export type GameRunRungRef = typeof GameRunRungRef.Type;
+
 export const GameRunRoundRef = Schema.Struct({
   round: Schema.Number,
   move: Schema.String,
@@ -63,6 +93,8 @@ export const GameRunRoundRef = Schema.Struct({
   note: Schema.NullOr(Schema.String),
   /** The creator's steering notes this round started from. */
   steer: Schema.Array(Schema.String),
+  /** The ladder rung this round built; null for a finish round or an older record. */
+  rung: Schema.NullOr(GameRunRungResult),
 });
 export type GameRunRoundRef = typeof GameRunRoundRef.Type;
 
@@ -108,6 +140,8 @@ export const GameRunStatusResult = Schema.Struct({
     Schema.Struct({ stage: Schema.Number, next: Schema.NullOr(Schema.String) }),
   ),
   pick: Schema.NullOr(GameRunPickRef),
+  /** The demo ladder rounds build rung by rung; empty before the plan writes it. */
+  ladder: Schema.Array(GameRunRungRef),
   rounds: Schema.Array(GameRunRoundRef),
   /** Creator notes waiting for the next round. */
   steer: Schema.Array(Schema.String),

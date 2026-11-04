@@ -47,7 +47,7 @@ import { makeGit, restoredPaths } from "./run/git.ts";
 import { bootStep, gitStep } from "./run/steps.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
-import { pickRef, runProgress } from "./run/progress.ts";
+import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
 import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { artFacts, modelBlock, spriteBlock } from "./run/roles.ts";
 import { ENGINE_SKILLS, laneProfile } from "./engineProfile.ts";
@@ -1003,6 +1003,7 @@ export const layer = Layer.effect(
           startedAt: null,
           progress: null,
           pick: null,
+          ladder: [],
           rounds: [],
           steer: [],
           threads: [],
@@ -1028,6 +1029,7 @@ export const layer = Layer.effect(
         startedAt: state.startedAt,
         progress: runProgress(state),
         pick: pickRef(state),
+        ladder: ladderRefs(state),
         rounds: state.rounds.map((r) => ({
           round: r.round,
           move: r.move,
@@ -1040,6 +1042,10 @@ export const layer = Layer.effect(
           durationMs: r.durationMs,
           note: r.note ?? null,
           steer: r.steer ?? [],
+          rung:
+            r.rung === undefined
+              ? null
+              : { is: r.rung.is, checks: r.rung.checks, outcome: r.rung.outcome, why: r.rung.why },
         })),
         steer: [...state.steer, ...queued],
         threads: state.threads,
