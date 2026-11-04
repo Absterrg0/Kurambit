@@ -142,8 +142,9 @@ namespace Kurambit
             foreach (var text in FindObjectsByType<Text>())
                 if (text.isActiveAndEnabled && !string.IsNullOrWhiteSpace(text.text))
                     found.Add(new KeyValuePair<string, string>(PathOf(text.transform), text.text.Trim()));
+            // TextMesh Pro without a font asset draws nothing (the project ships none), so it is not on screen.
             foreach (var text in FindObjectsByType<TMPro.TMP_Text>())
-                if (text.isActiveAndEnabled && !string.IsNullOrWhiteSpace(text.text))
+                if (text.isActiveAndEnabled && text.font != null && !string.IsNullOrWhiteSpace(text.text))
                     found.Add(new KeyValuePair<string, string>(PathOf(text.transform), text.text.Trim()));
             foreach (var document in FindObjectsByType<UIDocument>())
             {

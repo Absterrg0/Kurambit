@@ -67,7 +67,7 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     engine === "unity"
       ? `# Kurambit project
 
-Build BRIEF.md's game in Unity ${UNITY_PINNED_VERSION} (C#, Input System). unity/ is the project: unity/Assets/Scenes/Main.unity is the main scene, unity/Assets/Scripts for game code, unity/Assets/Kurambit/StudioProbe.cs stays as shipped.
+Build BRIEF.md's game in Unity ${UNITY_PINNED_VERSION} (C#, Input System). unity/ is the project inside a demo shell (TEMPLATE.md): gameplay goes in unity/Assets/Scenes/Game.unity, built by unity/Assets/Editor/BuildGame.cs, game code in unity/Assets/Scripts; unity/Assets/Kurambit stays as shipped.
 
 Use the game_* tools to check, play, export and package the game, and the game_unity_* tools to edit scenes in the live editor; never run Unity yourself. Keep builds/ and unity/Library, Temp, Logs, UserSettings generated.
 `

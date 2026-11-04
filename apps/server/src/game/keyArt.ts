@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Finds one image file inside a game folder.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { laneAssets } from "./run/roles.ts";
+import { laneUi } from "./run/roles.ts";
 
 const IMAGE = /\.(png|jpe?g|webp)$/i;
 // VISION.md names its key art in its own words: "Key art: `art/key-art.png`",
@@ -18,7 +18,7 @@ export const findKeyArt = async (root: string, lane: string): Promise<string | n
   if (base === null) return null;
   const vision = await NodeFSP.readFile(NodePath.join(base, "VISION.md"), "utf8").catch(() => "");
   const named = NAMED.exec(vision.slice(0, 20_000))?.[1]?.trim() ?? "";
-  const candidates = [`${laneAssets(lane)}/ui/title_bg.png`];
+  const candidates = [`${laneUi(lane)}/title_bg.png`];
   if (IMAGE.test(named) && !NodePath.isAbsolute(named)) candidates.push(named);
   for (const candidate of candidates) {
     const real = await NodeFSP.realpath(NodePath.join(base, candidate)).catch(() => null);

@@ -150,6 +150,15 @@ checks are boots, exports and keep-or-revert verdicts. A fresh art director judg
 renders against the vision and may ask for one bounded redo (`ART: REDO`) before the art is
 committed; a missing verdict keeps the art.
 
+The Unity lane needs three things the loop does nowhere else. A live editor holds the open scene in
+memory and saves it after every edit without reading the disk first, so every run git step that can
+move the root's checkout closes the root's live editors before it runs; otherwise the next
+prototype's first edit writes the previous branch's scene over its own (seen live). Its boot is the
+editor check plus a Linux player build, because testers and samples play only the player and a
+build can pass the editor (an editor-only API in a runtime script) and still fail as a player.
+And the project's first editor open, a full import of minutes, runs before the first root role's
+clock, so the first prototype is not capped on it while the second opens warm.
+
 ## Why this shape
 
 A model left alone grades its own work, stops when it feels done, and says it tested things. The
@@ -168,9 +177,27 @@ and it ships the `Juice` feel kit, because weak builder models skip or break bot
 them from scratch; the manifest's gameplay scene (`scenes/game.tscn`) is the seam the shell
 instances, so the check boots both. The shell pauses with `SceneTree.paused`, which is why the
 native explore runner resumes the game's own pause after each act instead of forcing it off.
-Both shells carry the controls as named actions (the Godot InputMap, `web/shell/controls.js`)
+The shells carry the controls as named actions (the Godot InputMap, `web/shell/controls.js`,
+`Controls.cs` over the Unity Input System)
 that players rebind on the Controls screen; every default keeps a keyboard key, because explore
 acts and bots press keys by name and cannot reach an action bound only to a gamepad.
+The Unity starter carries the same shell in `unity/Assets/Kurambit/Shell/`, built in code at
+startup rather than saved in a scene, so no starter UI depends on scene YAML a model might
+overwrite. Gameplay is `Game.unity`, which the shell loads additively as the active scene on Play
+and Retry; played on its own (the check, editor play) it boots straight into a run, which is why
+the template's `gameplayScene` is `Assets/Scenes/Game.unity`. Pause and the end screen use
+`Time.timeScale`, the same lever the StudioProbe holds the game with between acts, so the shell's
+end beat and Juice's hit pause count only time that runs. A Unity player can load only assets a
+scene or a `Resources/` asset references, so an `AssetPostprocessor` points
+`Kurambit/Resources/ShellAssets.asset` at the fixed files the art step writes (title art, font,
+click sound, credits) and sets `Assets/UI/icon.png` as the player icon when they import. The
+template's URP assets are committed as a player build re-saves them; an older serialization
+would make every new game's first build change its sources and fail the identity check. The
+first cold import still empties the URP global settings' runtime list until that first build
+restores it, so the sources differ only between those two moments; player preparation caches
+under the settled sources. Domain reload stays on (`EditorSettings` enter-play-mode options
+off): the kits keep static state, and a second play session in one editor would otherwise
+reach objects the previous session destroyed.
 The three.js starter carries the same shell in `web/shell/`: it owns the render loop and calls
 the gameplay module `web/main.js` through `start`/`update`/`stop`. Its page opens on the title,
 so the template's `gameplayScene` is `index.html?play` (boots straight into a run) and the

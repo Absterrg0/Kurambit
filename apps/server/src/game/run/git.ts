@@ -142,6 +142,10 @@ const BESIDE_ENGINE = ["art", "ASSETS.md"];
  */
 export const restoredPaths = (lane: string) => [lane, ...BESIDE_ENGINE];
 
+/** Whether `op` can change the files of the game root's checkout; commits never do. */
+export const movesCheckout = (op: GitOp): boolean =>
+  op._tag !== "commit" && op._tag !== "branch-commit";
+
 export const makeGit = (root: string, lane: string, log: (line: string) => Effect.Effect<void>) => {
   const fail = (op: string, reason: string, result?: Exec) =>
     (result === undefined
