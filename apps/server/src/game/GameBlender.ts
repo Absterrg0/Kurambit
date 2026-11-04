@@ -29,12 +29,14 @@ import {
   type GameBlenderRenderSpritesResult,
   type GameBlenderSceneInput,
   type GameBlenderSceneResult,
+  type GameManifest,
 } from "@kurambit/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { renderSprites } from "./blenderSprites.ts";
+import { engineProfile } from "./engineProfile.ts";
 import {
   alive,
   displayInRange,
@@ -792,17 +794,9 @@ const make = Effect.gen(function* () {
     args: Record<string, unknown>,
   ): Effect.Effect<string, GameOperationError> => call(root, name, args).pipe(Effect.map(textOf));
 
-  /**
-   * Where GLBs land in the engine project, from the manifest. Unity imports
-   * only what sits under Assets/, where the template's glTFast reads GLB.
-   */
-  const assetDirOf = (manifest: {
-    readonly godotProject: string;
-    readonly engine: { readonly name: string };
-  }) =>
-    manifest.engine.name === "unity"
-      ? `${manifest.godotProject}/Assets/Blender`
-      : `${manifest.godotProject}/assets/blender`;
+  /** Where GLBs land in the engine project, from the manifest and its engine's layout. */
+  const assetDirOf = (manifest: GameManifest) =>
+    `${manifest.godotProject}/${engineProfile(manifest.engine.name).layout.blender}`;
   const exportDirOf = (root: string) => projects.read(root).pipe(Effect.map(assetDirOf));
 
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>

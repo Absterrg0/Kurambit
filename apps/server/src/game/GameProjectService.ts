@@ -18,8 +18,6 @@ import {
   ThreadId,
   GameManifest,
   GameOperationError,
-  THREE_VIEWPORT,
-  UNITY_VIEWPORT,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameListResult,
@@ -34,6 +32,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
+import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
@@ -490,12 +489,11 @@ const make = Effect.gen(function* () {
       const manifest = yield* read(root);
       // The walk stays bounded to the engine tree; every source is read once
       // to attribute asset usage, and a changed tree is never served stale.
-      // three.js games have no project.godot: they play at the lane's fixed viewport.
+      // An engine with a fixed resolution (three.js, Unity) plays at it; Godot's is in project.godot.
       const expensive = yield* Effect.tryPromise({
         try: async () => {
-          if (manifest.engine.name === "three") return { viewport: { ...THREE_VIEWPORT } };
-          // Unity players boot at the lane's fixed resolution; see UNITY_VIEWPORT.
-          if (manifest.engine.name === "unity") return { viewport: { ...UNITY_VIEWPORT } };
+          const fixed = engineProfile(manifest.engine.name).viewport;
+          if (fixed !== null) return { viewport: { ...fixed } };
           const engineRoot = insideGame(root, manifest.godotProject);
           const projectGodot = await NodeFSP.readFile(
             NodePath.join(engineRoot, "project.godot"),

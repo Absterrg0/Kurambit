@@ -12,7 +12,7 @@ import {
   type GameEngineId,
   type GameManifest,
 } from "@kurambit/contracts";
-import { laneAssets, laneLibrary } from "./run/roles.ts";
+import { laneAssets, laneLibrary } from "./engineProfile.ts";
 import { decodePng, measure, type Rgba } from "./run/spriteFacts.ts";
 import {
   colourHex,

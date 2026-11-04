@@ -3,7 +3,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { assetListSummary, assetUseSummary, readAssetUse } from "./assetUse.ts";
-import { laneBots } from "./roles.ts";
+import { laneBots, laneProfile } from "../engineProfile.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { modelFacts } from "./modelFacts.ts";
 
@@ -72,9 +72,8 @@ export const artAssetFacts = async (root: string, lane: string): Promise<string>
 
 /** Code facts plus the player report, as one sentence block for the reviewer. */
 export const reviewerFacts = async (root: string, lane: string): Promise<string> => {
-  const ext = lane === "godot" ? [".gd"] : lane === "unity" ? [".cs"] : [".js", ".mjs"];
-  // A Unity project's own files live under Assets/; everything beside it is generated.
-  const base = lane === "unity" ? NodePath.join(root, lane, "Assets") : NodePath.join(root, lane);
+  const { extensions: ext, under } = laneProfile(lane).run.sources;
+  const base = NodePath.join(root, lane, under);
   const sources: Array<{ f: string; n: number }> = [];
   let images = 0;
   let audio = 0;

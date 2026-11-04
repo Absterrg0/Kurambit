@@ -1,6 +1,7 @@
 // PURE. Every loop decision: stage order, round structure, keep or revert, stalls, the
 // pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
 import type { GameBotDecider, ThreadId } from "@kurambit/contracts";
+import { laneBots, laneProfile } from "../engineProfile.ts";
 import * as Roles from "./roles.ts";
 import { BLANK } from "./state.ts";
 import type {
@@ -485,7 +486,7 @@ const compareStep = (
   state: RunState,
 ): { cmp: Compare; step: Step; logs: string[] } => {
   const move = compareMove(c);
-  const parallel = Roles.laneParallel(state.lane);
+  const parallel = laneProfile(state.lane).run.parallelSamples;
   if (move.kind === "bots") {
     // Decided here, after the plays and their replays: the runs still owed
     // must fit and leave both verdicts their time.
@@ -1428,7 +1429,7 @@ const applyRound = (
         r.phase === "tester-write" &&
         res.kind === "done" &&
         res.botsAfter <= r.botsBefore &&
-        Roles.laneBots(lane)
+        laneBots(lane)
       ) {
         logs.push(`round ${r.n}: tester ran no bot; one follow-up turn asks for it`);
         return at({ phase: "tester-duty", testerNotes, ...bot });
@@ -1451,7 +1452,7 @@ const applyRound = (
         return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
       }
       const question = Roles.roundQuestion(Roles.roundDirection(r.direction, r.repeating, lane));
-      const lanePlaysBots = Roles.laneBots(lane);
+      const lanePlaysBots = laneBots(lane);
       if (!lanePlaysBots)
         logs.push(`round ${r.n}: bot runs do not play ${lane} games; bot facts are skipped`);
       const cmp = newCompare(

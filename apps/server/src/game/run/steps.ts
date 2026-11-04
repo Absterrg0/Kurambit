@@ -6,6 +6,7 @@ import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
 import { movesCheckout, type makeGit } from "./git.ts";
 import type { StepResult } from "./policy.ts";
 import type { GitOp } from "./state.ts";
+import { laneProfile } from "../engineProfile.ts";
 
 type Game = GameService.GameService["Service"];
 
@@ -82,12 +83,12 @@ export const bootStep = (
           }`,
     })),
   );
-  // Unity's check plays the scene in the editor, but testers and
-  // samples play a built Linux player: a build that only the editor
-  // runs (an editor-only API, a scene missing from the build) fails
-  // here, where its builder sees why. The player is cached by source,
+  // An engine whose games play as a built player (Unity) checks the scene in
+  // its editor, but testers and samples play the player: a build that only
+  // the editor runs (an editor-only API, a scene missing from the build)
+  // fails here, where its builder sees why. The player is cached by source,
   // so the tester's first session reuses it.
-  const player = game.unityPreparePlayer(ctx.root).pipe(
+  const player = game.preparePlayer(ctx.root).pipe(
     Effect.map((p): Verdict => ({
       ok: true,
       detail: `boot clean; Linux player ${p.origin} in ${Math.round(p.ms / 1000)} s`,
@@ -113,7 +114,7 @@ export const bootStep = (
   );
   return judged("boot check", check).pipe(
     Effect.flatMap((r) =>
-      r.kind === "boot" && r.ok && ctx.lane === "unity"
+      r.kind === "boot" && r.ok && laneProfile(ctx.lane).play === "player"
         ? judged("boot player build", player)
         : Effect.succeed(r),
     ),

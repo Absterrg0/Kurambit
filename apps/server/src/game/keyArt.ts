@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Finds one image file inside a game folder.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { laneUi } from "./run/roles.ts";
+import { laneUi } from "./engineProfile.ts";
 
 const IMAGE = /\.(png|jpe?g|webp)$/i;
 // VISION.md names its key art in its own words: "Key art: `art/key-art.png`",

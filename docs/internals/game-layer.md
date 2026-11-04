@@ -9,8 +9,11 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 
 ## Services
 
-- `GameService` owns the native boundary: import, check, export (Web, Linux, Windows), web
-  preview, exploration sessions, bot runs. Operations are exclusive per game and reported as events.
+- `GameService` is the facade the RPC handlers and MCP tools call: status, import, check, bot
+  runs and the Unity editor tools. `GameExport` makes, publishes and packages releases (Web, Linux,
+  Windows), `GameExplore` runs exploration sessions, `GamePlayer` keeps built players per source
+  identity and warms a live editor. Operations are exclusive per game (`GameOperations.exclusive`)
+  and reported as events.
 - `GameProjectService` owns game records: create (blank scaffold), open, list, resolve, inventory.
 - `GameRun` owns the production loop. Every role is a fresh ordinary Kurambit thread on the game's
   project with a `role` lineage under the creator's chat. `role` only groups: sidebars, game opens
@@ -43,13 +46,18 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   machine (the installed app and any dev server) shares that cache, so fetches lock per pack only
   within one process, scratch names carry the fetching server's pid (a start-up sweep spares live
   ones), and placing a pack accepts a complete copy another server placed first.
-- `GameEngine`/`GameGodotEngine`/`GameThreeEngine` is the engine adapter seam: import, check,
-  export release. Godot owns the native process boundary (headless editor import, check script,
+- An engine is two modules, and core code asks them instead of naming the engine. Its profile
+  (`godotProfile.ts`, `threeProfile.ts`, `unityProfile.ts`, read through `engineProfile.ts`) is pure
+  data the services and the run's pure policy share: directories, export targets, how its games play
+  (a browser page, the engine's native runner, or a built player), bot duty, Web build files,
+  check messages, its skill and its prompt lines. Its backend (`GameGodotEngine`, `GameThreeEngine`,
+  `GameUnityEngine`, registered in `GameEngine`) holds the behaviour that differs: import, check,
+  export readiness and preset, export release, and two optional capabilities, `editor` (a live
+  editor that refuses a second user) and `player` (a player folder built from the sources). Godot owns the native process boundary (headless editor import, check script,
   export presets; Web, Linux and Windows releases). three.js owns a headless-Chromium boundary
   instead: the static folder is the game, so import is a no-op success, check loads the page
   and reports console/page errors, export copies the folder. Windows and Linux exports are
-  refused plainly for three.js (`backend.exportTargets`); the interface carries `displayName`
-  so core messages name the engine without naming it in core code. Unity refuses a second editor
+  refused plainly for three.js (`profile.exportTargets`). Unity refuses a second editor
   on an open project, so every Unity operation goes through the game's live editor in
   `GameUnity`: import refreshes and recompiles there, check recompiles and then plays the main
   scene for 120 frames and reads the console, export builds a player folder that replaces
@@ -92,8 +100,8 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   the Godot native runner's TCP protocol, so acts, pictures, probe reads and close share that
   path; input is queued on virtual Input System devices, which is why the lane asks games to read
   input through the Input System.
-- `GameService` routes by manifest engine with an explicit target override: `game_explore_start`
-  defaults to the game's lane, Godot web and native-on-three are refused plainly. The same
+- `GameExplore` routes by the engine's play kind with an explicit target override:
+  `game_explore_start` defaults to the game's lane, Godot web and native-on-three are refused plainly. The same
   content-addressed export machinery (hash, compare, move into place, select) serves both lanes;
   the expected-files check is engine-aware.
 
@@ -139,7 +147,7 @@ and run.log and the comparison record say why. A failing bot never drops the rou
 and its two bot runs, run at once (Unity's one at a time, behind its one editor); that holds only
 because explore sessions, bot runs and game operations are keyed by checkout root, not by game.
 Two starts at once would both pass a free-memory check made before either allocates, so explore
-and bot starts hold one gate in `GameService` from that check through their import and boot. A
+and bot starts hold one gate (`GameMemoryGate`) from that check through their import and boot. A
 sample's time waiting there for memory is given back to its clock; a play turn refused
 `low-memory` is played again after a pause, and memory that stays short ends the run resumably
 rather than voiding the sample. Comparators
@@ -206,8 +214,8 @@ the gameplay module `web/main.js` through `start`/`update`/`stop`. Its page open
 so the template's `gameplayScene` is `index.html?play` (boots straight into a run) and the
 three.js check loads that entry after the plain page, like the Godot check runs `game.tscn`. The manifest's
 `godotProject` names the engine project directory for every lane (`web` for three.js, `unity`), so snapshots,
-exports and the loop resolve it unchanged. `GameRun` reads the manifest once per loop (`laneOf`) for
-the engine directory and prompt paths; everything else in the loop is engine-neutral.
+exports and the loop resolve it unchanged. `GameRun` takes the lane (the engine directory) from the
+manifest, and every engine question the loop has is the lane's engine profile.
 
 Two constraints hold everywhere:
 

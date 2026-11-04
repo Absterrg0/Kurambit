@@ -537,47 +537,54 @@ const tooLargeUse = (engine: AssetUse["engine"], tooLarge: string): AssetUse => 
   drawn: [],
 });
 
-/** Pure: the same files always give the same facts. */
-export const scanAssetUse = (
-  files: ReadonlyArray<EngineFile>,
-  lane: string,
-  assetsMd: string | null,
-): AssetUse => {
-  const byPath = new Map(files.map((f) => [f.path, f]));
-  const engine = byPath.has("project.godot")
-    ? "godot"
-    : byPath.has(UNITY_VERSION_FILE)
-      ? "unity"
-      : "web";
-  const code = engine === "godot" ? CODE_GODOT : engine === "unity" ? CODE_UNITY : CODE_WEB;
-  const isSource = (path: string) =>
-    (engine === "godot" ? SOURCE_GODOT : engine === "unity" ? SOURCE_UNITY : SOURCE_WEB).test(
-      path,
-    ) &&
-    !path.endsWith(".import") &&
-    !path.endsWith(".uid") &&
-    // Editor-only scripts never ship in the player.
-    !(engine === "unity" && /(^|\/)Editor\//.test(path));
-  const allAssets = files
-    .map((f) => f.path)
-    .filter((p) => ASSET.test(p) && !isLibrary(p))
-    .sort();
-  const assetSet = new Set(allAssets);
-  const assets = allAssets.filter((p) => !PACK_DIR.test(p));
-  const packFiles = allAssets.filter((p) => PACK_DIR.test(p));
+type ScanEngine = AssetUse["engine"];
 
-  // Godot names files by uid as well as by path, and imported copies point back at their source.
+/** How each engine's project names, loads and draws its files. */
+interface EngineScan {
+  /** A file only this engine's project has, relative to the engine dir. */
+  readonly marker: string | null;
+  /** Files whose text can reference others. */
+  readonly source: RegExp;
+  /** Code: what can be "never loaded" and what drawing is counted in; data files are neither. */
+  readonly code: RegExp;
+  /** Sources that never ship, so they load nothing. */
+  readonly excluded: (path: string) => boolean;
+  /**
+   * Ids the engine names files by (Godot uids, Unity GUIDs), imported copies'
+   * sources, and the page's import map.
+   */
+  readonly ids: (files: ReadonlyArray<EngineFile>) => {
+    readonly uids: ReadonlyMap<string, string>;
+    readonly imported: ReadonlyMap<string, string>;
+    readonly importMap: ReadonlyMap<string, string>;
+  };
+  readonly refs: (
+    file: { readonly path: string; readonly text: string },
+    context: {
+      readonly uids: ReadonlyMap<string, string>;
+      readonly imported: ReadonlyMap<string, string>;
+      readonly importMap: ReadonlyMap<string, string>;
+      readonly isSource: (path: string) => boolean;
+    },
+  ) => ReadonlyArray<Reference>;
+  /** Global type names a file declares; a loaded file that names one loads it. */
+  readonly names: (path: string, text: string) => ReadonlyArray<string | undefined>;
+  /** Where loading starts. */
+  readonly roots: (
+    byPath: ReadonlyMap<string, EngineFile>,
+    sources: ReadonlyArray<string>,
+  ) => ReadonlyArray<string>;
+  readonly drawn: (path: string, text: string) => Array<readonly [string, number]>;
+  /** The entry point, as the summary names it. */
+  readonly entry: string;
+}
+
+// Godot names files by uid as well as by path, and imported copies point back at their source.
+const godotIds = (files: ReadonlyArray<EngineFile>) => {
   const uids = new Map<string, string>();
   const imported = new Map<string, string>();
   for (const f of files) {
     if (f.text === null) continue;
-    if (engine === "unity") {
-      const guid = f.path.endsWith(".meta")
-        ? /^guid: ([0-9a-f]{32})/m.exec(f.text)?.[1]
-        : undefined;
-      if (guid !== undefined) uids.set(guid, f.path.slice(0, -".meta".length));
-      continue;
-    }
     if (f.path.endsWith(".uid")) uids.set(f.text.trim(), f.path.slice(0, -".uid".length));
     else if (f.path.endsWith(".import")) {
       const source = f.path.slice(0, -".import".length);
@@ -590,50 +597,128 @@ export const scanAssetUse = (
       if (uid !== undefined) uids.set(uid, f.path);
     }
   }
+  return { uids, imported, importMap: new Map<string, string>() };
+};
 
-  const importMap = engine === "web" ? importMapOf(files) : new Map<string, string>();
+const unityIds = (files: ReadonlyArray<EngineFile>) => {
+  const uids = new Map<string, string>();
+  for (const f of files) {
+    if (f.text === null) continue;
+    const guid = f.path.endsWith(".meta") ? /^guid: ([0-9a-f]{32})/m.exec(f.text)?.[1] : undefined;
+    if (guid !== undefined) uids.set(guid, f.path.slice(0, -".meta".length));
+  }
+  return { uids, imported: new Map<string, string>(), importMap: new Map<string, string>() };
+};
+
+const SCANS: Readonly<Record<ScanEngine, EngineScan>> = {
+  godot: {
+    marker: "project.godot",
+    source: SOURCE_GODOT,
+    code: CODE_GODOT,
+    excluded: () => false,
+    ids: godotIds,
+    // A glTF names its buffers and images by relative path, as a page does.
+    refs: (f, c) =>
+      f.path.endsWith(".gltf")
+        ? webRefs(f.text, f.path, c.importMap)
+        : godotRefs(f.text, c.uids, c.imported, c.isSource),
+    names: (_, text) => [/^class_name\s+(\w+)/m.exec(text)?.[1]],
+    // project.godot names the main scene and autoloads.
+    roots: () => ["project.godot"],
+    drawn: drawnGodot,
+    entry: "project.godot",
+  },
+  unity: {
+    marker: UNITY_VERSION_FILE,
+    source: SOURCE_UNITY,
+    code: CODE_UNITY,
+    // Editor-only scripts never ship in the player.
+    excluded: (path) => /(^|\/)Editor\//.test(path),
+    ids: unityIds,
+    refs: (f, c) => unityRefs(f.text, f.path, c.uids),
+    // A C# file may declare several types; every one of them names the file.
+    names: (path, text) =>
+      path.endsWith(".cs")
+        ? [...csCode(text).matchAll(/\b(?:class|struct)\s+(\w+)/g)].map((m) => m[1])
+        : [],
+    // The build's enabled scenes, its graphics and quality settings (the render pipeline
+    // assets) and scripts it runs on load.
+    roots: (byPath, sources) => [
+      ...UNITY_SETTINGS_ROOTS,
+      ...sources.filter((p) => /\bRuntimeInitializeOnLoadMethod\b/.test(byPath.get(p)?.text ?? "")),
+    ],
+    drawn: drawnUnity,
+    entry: `the enabled ${UNITY_BUILD_SCENES} scenes and the graphics and quality settings`,
+  },
+  web: {
+    marker: null,
+    source: SOURCE_WEB,
+    code: CODE_WEB,
+    excluded: () => false,
+    ids: (files) => ({
+      uids: new Map<string, string>(),
+      imported: new Map<string, string>(),
+      importMap: importMapOf(files),
+    }),
+    refs: (f, c) => webRefs(f.text, f.path, c.importMap),
+    names: () => [],
+    roots: (byPath, sources) =>
+      byPath.has("index.html") ? ["index.html"] : sources.filter((p) => /\.html?$/.test(p)),
+    drawn: drawnWeb,
+    entry: "index.html",
+  },
+};
+
+/** The folder's engine, from the files only its project has. */
+const engineOf = (has: (path: string) => boolean): ScanEngine =>
+  (Object.keys(SCANS) as ScanEngine[]).find((engine) => {
+    const marker = SCANS[engine].marker;
+    return marker !== null && has(marker);
+  }) ?? "web";
+
+/** Pure: the same files always give the same facts. */
+export const scanAssetUse = (
+  files: ReadonlyArray<EngineFile>,
+  lane: string,
+  assetsMd: string | null,
+): AssetUse => {
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  const engine = engineOf((path) => byPath.has(path));
+  const scan = SCANS[engine];
+  const isSource = (path: string) =>
+    scan.source.test(path) &&
+    !path.endsWith(".import") &&
+    !path.endsWith(".uid") &&
+    !scan.excluded(path);
+  const allAssets = files
+    .map((f) => f.path)
+    .filter((p) => ASSET.test(p) && !isLibrary(p))
+    .sort();
+  const assetSet = new Set(allAssets);
+  const assets = allAssets.filter((p) => !PACK_DIR.test(p));
+  const packFiles = allAssets.filter((p) => PACK_DIR.test(p));
+
+  const { uids, imported, importMap } = scan.ids(files);
+
   const refsOf = new Map<string, ReadonlyArray<Reference>>();
   for (const f of files)
     if (f.text !== null && isSource(f.path) && !isLibrary(f.path))
       refsOf.set(
         f.path,
-        engine === "godot" && !f.path.endsWith(".gltf")
-          ? godotRefs(f.text, uids, imported, isSource)
-          : engine === "unity"
-            ? unityRefs(f.text, f.path, uids)
-            : webRefs(f.text, f.path, importMap),
+        scan.refs({ path: f.path, text: f.text }, { uids, imported, importMap, isSource }),
       );
 
   const classNames = new Map<string, string>();
   for (const [path] of refsOf) {
     const text = byPath.get(path)?.text ?? "";
-    // A C# file may declare several types; every one of them names the file.
-    const names =
-      engine === "godot"
-        ? [/^class_name\s+(\w+)/m.exec(text)?.[1]]
-        : engine === "unity" && path.endsWith(".cs")
-          ? [...csCode(text).matchAll(/\b(?:class|struct)\s+(\w+)/g)].map((m) => m[1])
-          : [];
+    const names = scan.names(path, text);
     for (const name of names)
       if (name !== undefined && !classNames.has(name)) classNames.set(name, path);
   }
 
-  // Loaded code is what the engine reaches from its entry point: project.godot names the
-  // main scene and autoloads; Unity starts from the build's enabled scenes, its graphics
-  // and quality settings (the render pipeline assets) and from scripts it runs on load. A global class_name (or C# class) counts once a loaded file names it.
-  const roots =
-    engine === "godot"
-      ? ["project.godot"]
-      : engine === "unity"
-        ? [
-            ...UNITY_SETTINGS_ROOTS,
-            ...[...refsOf.keys()].filter((p) =>
-              /\bRuntimeInitializeOnLoadMethod\b/.test(byPath.get(p)?.text ?? ""),
-            ),
-          ]
-        : byPath.has("index.html")
-          ? ["index.html"]
-          : [...refsOf.keys()].filter((p) => /\.html?$/.test(p));
+  // Loaded code is what the engine reaches from its entry point. A global class_name (or C#
+  // class) counts once a loaded file names it.
+  const roots = scan.roots(byPath, [...refsOf.keys()]);
   const index = pathIndex(files.map((f) => f.path));
   const loaded = new Set<string>();
   const queue: string[] = [];
@@ -679,11 +764,7 @@ export const scanAssetUse = (
   const drawn = new Map<string, number>();
   for (const path of [...loaded].sort()) {
     const text = byPath.get(path)?.text ?? "";
-    for (const [name, n] of engine === "godot"
-      ? drawnGodot(path, text)
-      : engine === "unity"
-        ? drawnUnity(path, text)
-        : drawnWeb(path, text))
+    for (const [name, n] of scan.drawn(path, text))
       if (n > 0) drawn.set(name, (drawn.get(name) ?? 0) + n);
   }
 
@@ -697,7 +778,7 @@ export const scanAssetUse = (
     listed: listed === null ? null : listed.inList.size + listed.missing.size,
     listedMissing: listed === null ? [] : [...listed.missing].sort(),
     unlisted: listed === null ? [] : assets.filter((a) => !listed.inList.has(a)),
-    unloaded: [...refsOf.keys()].filter((p) => code.test(p) && !loaded.has(p)).sort(),
+    unloaded: [...refsOf.keys()].filter((p) => scan.code.test(p) && !loaded.has(p)).sort(),
     drawn: [...drawn.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
   };
 };
@@ -774,11 +855,7 @@ export const readAssetUse = async (root: string, lane: string): Promise<AssetUse
   const { files, tooLarge } = await readEngine(NodePath.join(root, lane));
   if (tooLarge !== null)
     return tooLargeUse(
-      files.some((f) => f.path === "project.godot")
-        ? "godot"
-        : files.some((f) => f.path === UNITY_VERSION_FILE)
-          ? "unity"
-          : "web",
+      engineOf((path) => files.some((f) => f.path === path)),
       tooLarge,
     );
   return scanAssetUse(
@@ -805,12 +882,7 @@ const tooLargeLine = (use: AssetUse, lane: string) =>
 /** A few bounded sentences; paths are relative to the engine dir. */
 export const assetUseSummary = (use: AssetUse, lane: string): string => {
   if (use.tooLarge !== null) return tooLargeLine(use, lane);
-  const entry =
-    use.engine === "godot"
-      ? "project.godot"
-      : use.engine === "unity"
-        ? `the enabled ${UNITY_BUILD_SCENES} scenes and the graphics and quality settings`
-        : "index.html";
+  const entry = SCANS[use.engine].entry;
   const drawn =
     use.drawn.length === 0 ? "none" : use.drawn.map(([name, n]) => `${name} ${n}`).join(", ");
   return [

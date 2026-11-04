@@ -5,7 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError } from "@kurambit/contracts";
-import { botEnding, botFinalState } from "../GameBot.ts";
+import { botEnding, botFinalState } from "../gameBotRuntime.ts";
 import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
 import type { RoleDeps } from "./roleRunner.ts";

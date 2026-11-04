@@ -39,7 +39,7 @@ import {
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { toolsDirectory } from "./GameToolchain.ts";
-import { laneLibrary } from "./run/roles.ts";
+import { laneLibrary } from "./engineProfile.ts";
 import { templateDirectoryCandidates } from "./templates.ts";
 
 /** Beside the pinned tools, shared by every game on this machine. */

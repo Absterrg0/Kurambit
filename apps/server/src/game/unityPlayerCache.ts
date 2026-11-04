@@ -10,6 +10,9 @@ const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 export const unityPlayerDirectory = (root: string, sourceId: string) =>
   NodePath.join(root, "builds/logs", `unity-play-${sourceId.slice(0, 16)}`);
 
+/** Whether a builds/logs entry is a cached player folder. */
+export const isPlayerDirectory = (name: string) => name.startsWith("unity-play-");
+
 export type Checkout =
   | { readonly kind: "own" }
   | { readonly kind: "linked"; readonly main: string }
