@@ -82,6 +82,7 @@ const RUN_STATE_IGNORES = [
   ".studio/rounds.jsonl",
   ".studio/stop",
   ".studio/steer.jsonl",
+  ".studio/profile",
   ".studio/run.log",
   ".studio/bot-results.jsonl",
   ".studio/player-report.md",
@@ -161,6 +162,9 @@ const paths = (root: string) => ({
   rounds: NodePath.join(root, ".studio", "rounds.jsonl"),
   stop: NodePath.join(root, ".studio", "stop"),
   steer: NodePath.join(root, ".studio", "steer.jsonl"),
+  // A profile switch waiting for the run's next step boundary; a file, like a
+  // steer, so a restart before that boundary does not lose it.
+  profile: NodePath.join(root, ".studio", "profile"),
   log: NodePath.join(root, ".studio", "run.log"),
   next: NodePath.join(root, ".studio", "next.md"),
 });
@@ -622,13 +626,14 @@ export const layer = Layer.effect(
           yield* Effect.promise(() => NodeFSP.rm(paths(root).steer, { force: true }));
         }),
       );
-      const takeProfile = Effect.suspend(() => {
-        const profile = d.slot.profile;
+      const takeProfile = Effect.gen(function* () {
+        const requested = (yield* Effect.promise(() => readText(paths(root).profile)))?.trim();
         d.slot.profile = null;
-        if (profile === null || profile === state.profile) return Effect.void;
-        return save({ ...state, profile }).pipe(
-          Effect.andThen(log(`creator switched the run to ${profile}`)),
-        );
+        if (requested !== "guided" && requested !== "autopilot") return;
+        yield* Effect.promise(() => NodeFSP.rm(paths(root).profile, { force: true }));
+        if (requested === state.profile) return;
+        yield* save({ ...state, profile: requested });
+        yield* log(`creator switched the run to ${requested}`);
       });
       const inputs = (): Policy.Inputs => ({
         now: Date.now(),
@@ -1192,7 +1197,7 @@ export const layer = Layer.effect(
       if (waiting === null)
         return yield* no(
           "no-decision",
-          "The run is not waiting for a decision now; it may have taken its default already. game_run_status shows where it stands.",
+          "The run is not waiting for a decision now; it may have taken its default already. game_run_status shows where it stands. If the user was answering a question the run already decided, pass their words on with game_run_steer so they shape the next steps.",
         );
       if (waiting.decision.id !== input.decisionId)
         return yield* no(
@@ -1224,6 +1229,7 @@ export const layer = Layer.effect(
           "No live run for this game. Start or resume the run with the profile you want.",
         );
       slot.profile = profile;
+      yield* Effect.promise(() => writeAtomic(paths(root).profile, `${profile}\n`));
       // Nobody needs to answer an Autopilot run: the waiting question takes its default now.
       const waiting = slot.waiting;
       if (profile === "autopilot" && waiting !== null)

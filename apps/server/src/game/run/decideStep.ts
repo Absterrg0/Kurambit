@@ -74,10 +74,12 @@ export const decideStep = (
   const { commandId, messageId } = keys(ctx.runId, step.decision);
   const fallback: Answer = { answer: step.decision.fallback, notes: "", by: "default" };
 
-  // The question reached the creator's agent once its turn left the queue.
+  // The user can answer only once the agent has finished presenting: its turn
+  // reading the decision and building the visual takes a minute or two, so the
+  // wait counts from that turn's end, not its start.
   const delivered = deps.threads.getThreadRecords(ctx.creator, ["runs"]).pipe(
     Effect.map(({ runs }) => runs.find((run) => run.userMessageId === messageId)),
-    Effect.map((run) => run === undefined || run.status !== "queued"),
+    Effect.map((run) => run === undefined || (run.status !== "queued" && run.status !== "running")),
     Effect.orElseSucceed(() => true),
   );
 
@@ -98,7 +100,9 @@ export const decideStep = (
       if (at.kind === "deliver") {
         if (yield* delivered) {
           yield* update({ ...current, deadline: Date.now() + current.decision.waitMs });
-          yield* ctx.log(`decision ${current.decision.id}: the creator's agent has the question`);
+          yield* ctx.log(
+            `decision ${current.decision.id}: the creator's agent presented the question`,
+          );
         } else yield* Effect.sleep(DELIVERY_CHECK);
         continue;
       }
