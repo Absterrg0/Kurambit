@@ -409,7 +409,8 @@ const make = Effect.gen(function* () {
       Effect.map((resolved): string | null => resolved.path),
       Effect.orElseSucceed(() => null),
     );
-    const uvx = yield* resolveUv.pipe(
+    const uvx = yield* tools.executable("uv").pipe(
+      Effect.flatMap((resolved) => uvPaths(resolved.path)),
       Effect.map((uv): string | null => uv.uvx),
       Effect.orElseSucceed(() => null),
     );
@@ -448,49 +449,23 @@ const make = Effect.gen(function* () {
       yield* Effect.promise(() => reapRecorded(homeDirOf(root), live));
     });
 
-  const failMissingUv = (): GameOperationError =>
-    opError(
-      "blender-live",
-      PINNED_PKG,
-      "tool-missing",
-      "The live Blender view needs managed uv (Settings > General > Game tools > Install), or `uvx` on PATH. Follow-up: teach GameToolchain to install uv like Blender and Godot.",
-    );
-
-  // uv resolved once per session: the toolchain's managed install first
-  // (downloaded and pinned like Blender and Godot), PATH as a fallback.
+  // uv comes from the toolchain: detected, or fetched once on first use.
   interface UvPaths {
     readonly uvx: string;
     readonly binDir: string | null;
   }
-  const resolveUv: Effect.Effect<UvPaths, GameOperationError> = Effect.gen(function* () {
-    const managed = yield* tools.executable("uv").pipe(
-      Effect.map((resolved) => resolved.path),
-      Effect.orElseSucceed(() => null as string | null),
-    );
-    if (managed !== null) {
-      const dir = NodePath.dirname(managed);
+  const uvPaths = (uv: string): Effect.Effect<UvPaths> =>
+    Effect.promise(async () => {
+      const dir = NodePath.dirname(uv);
       const sibling = NodePath.join(dir, "uvx");
-      const hasSibling = yield* Effect.promise(() =>
-        NodeFSP.access(sibling, NodeFSP.constants.X_OK)
-          .then(() => true)
-          .catch(() => false),
-      );
-      return { uvx: hasSibling ? sibling : managed, binDir: dir };
-    }
-    for (const name of ["uvx", "uv"]) {
-      for (const dir of (process.env.PATH ?? "").split(NodePath.delimiter)) {
-        if (dir === "") continue;
-        const candidate = NodePath.join(dir, name);
-        const found = yield* Effect.promise(() =>
-          NodeFSP.access(candidate, NodeFSP.constants.X_OK)
-            .then(() => true)
-            .catch(() => false),
-        );
-        if (found) return { uvx: candidate, binDir: null };
-      }
-    }
-    return yield* failMissingUv();
-  });
+      const hasSibling = await NodeFSP.access(sibling, NodeFSP.constants.X_OK)
+        .then(() => true)
+        .catch(() => false);
+      return { uvx: hasSibling ? sibling : uv, binDir: dir };
+    });
+  const resolveUv: Effect.Effect<UvPaths, GameOperationError> = tools.uv.pipe(
+    Effect.flatMap(uvPaths),
+  );
 
   const withBinDir = (env: NodeJS.ProcessEnv, binDir: string | null): NodeJS.ProcessEnv => {
     if (binDir === null) return env;

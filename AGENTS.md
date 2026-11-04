@@ -76,7 +76,7 @@ The most common defect in this repo is a change that works on the path you teste
 - `vp i` installs. Worktrees get this from the kurambit.json setup script; if module resolution looks broken, it probably did not run.
 - `vp run dev` starts server and web; `vp run dev:desktop` starts the desktop app. In a linked git worktree, state defaults to that worktree's gitignored `.kurambit`. In a plain clone it defaults to `~/.kurambit`, so pass `--home-dir <checkout>/.kurambit` (for example `node scripts/dev-runner.ts dev --home-dir $PWD/.kurambit`). An explicit `--home-dir` always wins. `KURAMBIT_HOME` overrides the default outside a worktree.
 - `/tmp` may be RAM-backed. Keep builds, exports, and scratch files on disk, for example `TMPDIR=~/.gs-tmp`. Keep it short: Unix socket paths have a 108-character limit.
-- Godot and Blender are pinned and installed under `~/.local/share/kurambit/tools`; tests that need them skip when they are absent.
+- Godot, Unity and Blender are the user's own installs, detected like providers (Settings path, env override, Unity Hub, an earlier Kurambit copy under `~/.local/share/kurambit/tools`, PATH); tests that need them skip when they are absent.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
 - To reuse web dev auth across worktrees, configure one fixed `KURAMBIT_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `kurambit.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
 - Stop what you started, by the PID you tracked. See rule 1.

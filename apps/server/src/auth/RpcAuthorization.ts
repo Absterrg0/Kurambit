@@ -128,8 +128,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.gameOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameAction]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeGameEvents]: AuthOrchestrationReadScope,
-  [WS_METHODS.gameInstall]: AuthSettingsWriteScope,
-  [WS_METHODS.gameVerify]: AuthSettingsWriteScope,
   [WS_METHODS.gameSecretsStatus]: AuthSettingsWriteScope,
   [WS_METHODS.gameSecretsSet]: AuthSettingsWriteScope,
   [WS_METHODS.shellOpenInEditor]: AuthOrchestrationOperateScope,

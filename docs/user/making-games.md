@@ -3,31 +3,42 @@
 Kurambit turns a written brief into a playable game. Your coding agent does the work with
 Blender and Godot or Unity for native games, or three.js for browser games; you direct it, play the result, and ask for changes.
 
-## Set up the tools once
+## Game tools
 
-Open **Settings → General → Game tools** and choose **Install tools**. Kurambit downloads
-Blender 4.5.14 LTS and Godot 4.7.2 with the matching export templates, checks their published
-checksums, and keeps them in `~/.local/share/kurambit/tools`. **Verify** runs a real Blender
-export and a real Godot import, so a green status means the tools work, not just that files exist.
+three.js browser games need nothing installed. Native games use engines you install yourself,
+the same way you install your coding agents: Kurambit finds them, checks their versions, and
+**Settings → General → Game tools** shows each one's status, where it was found, and a **Get**
+link to the vendor's download page when it is missing or the wrong version. After installing
+something, press **Check again**.
 
-To use your own installs, enter their paths in **Game tools**. Godot must be 4.7.x so its export
-templates match; Blender 4.2 or newer works.
+- **Godot** builds and plays Godot games. Use Godot 4.7.x from
+  [godotengine.org/download](https://godotengine.org/download), plus its export templates: in the
+  Godot editor choose **Editor → Manage Export Templates** and download them. Without templates a
+  Godot game cannot be built for play; without the Windows ones, only Windows exports are refused.
+- **Unity** builds Unity games. Install [Unity Hub](https://unity.com/download) and add a Unity 6
+  editor, 6000.6.7f1 or later, with **Windows Build Support (Mono)**. When several are installed,
+  a new game uses the newest; a game already made keeps the version its project names when that
+  editor is installed, and Game tools warns you when only a newer one is, because opening the
+  project there upgrades it. Unity also needs a licence: in Unity Hub, sign in and add a free
+  Unity Personal licence under **Preferences → Licenses**. Kurambit only reads that the licence is
+  active; it never asks for or stores your Unity account. Unity games run on Linux only for now.
+- **Blender** makes game art for every engine. Use Blender 4.2 or later from
+  [blender.org/download](https://www.blender.org/download/).
 
-The live Blender view additionally needs `uvx` (or `uv`) on PATH: it runs the pinned 3D-server
-package behind the `game_blender_*` tools. Install uv from https://docs.astral.sh/uv/ if those
-tools report it missing. Playing native games and the live Blender view also need the system
-Xvfb package (`xorg-x11-server-Xvfb` on Fedora, `xvfb` on Debian and Ubuntu): everything runs on a
-private virtual display, so nothing opens on your desktop.
+Kurambit looks for each tool in this order: the path you enter in **Game tools**, the
+`KURAMBIT_GODOT`, `KURAMBIT_UNITY_EDITOR` or `KURAMBIT_BLENDER` environment variable, known install
+locations (Unity Hub's editors folder and its secondary install folder, and copies an earlier
+Kurambit installed), then your PATH (`godot`, `godot4`, `blender`). A path you enter is the only
+place it looks, so a wrong one shows as an error instead of being skipped.
 
-Unity games need Unity installed separately: choose **Install Unity** in **Game tools**. Kurambit
-downloads Unity's official CLI (checked against its published hash) and uses it to install Unity
-6000.6.7f1 with Windows build support into the same tools folder, about 4.5 GB. Unity also needs a
-licence on this machine: open Unity Hub, sign in, and add a free Unity Personal licence under
-**Preferences → Licenses**. Kurambit reads that the licence is active and tells you when it is
-missing or needs a refresh; it never asks for or stores your Unity account. A Unity editor uses 2-3
-GB of memory, so Kurambit keeps at most one open at a time and closes it after ten idle minutes;
-while one Unity game is checking, playing or exporting, another Unity game's request reports the
-editor busy instead of closing it.
+The live Blender view's helper runs through uv; Kurambit uses yours if it is on PATH and otherwise
+fetches it once by itself. Playing native games and the live Blender and Unity editors also need
+the system Xvfb package (`xorg-x11-server-Xvfb` on Fedora, `xvfb` on Debian and Ubuntu): everything
+runs on a private virtual display, so nothing opens on your desktop.
+
+A Unity editor uses 2-3 GB of memory, so Kurambit keeps at most one open at a time and closes it
+after ten idle minutes; while one Unity game is checking, playing or exporting, another Unity
+game's request reports the editor busy instead of closing it.
 
 Kurambit refuses to open a live editor when the machine is short of memory: about 4 GB free for
 Unity, whose builds bring their own tools, and 1.5 GB for the live Blender view, plus about 2 GB
@@ -123,7 +134,8 @@ its right.
   exporting again. If the game sources changed since that export, export Windows again before
   packaging. **Export Linux** writes a standalone build to `builds/linux/`. Kurambit checks the
   Windows executable it produced but does not run it, so try it on Windows before sharing it. If
-  the Windows export templates are missing, **Install tools** in Settings adds them. The **Builds**
+  Godot's Windows export templates are missing, add them in the Godot editor under **Editor →
+  Manage Export Templates**. The **Builds**
   tab lists every target with its time, folder and logs, and a freshness check against the current
   sources.
 - **Download package** on the Web card zips the exact build Play serves, without exporting or
@@ -178,7 +190,7 @@ Each game is a self-contained git repository you can move, back up, or open on a
   Windows `.exe`. The gameplay lives in `godot/scenes/game.tscn` (`web/main.js` for
   three.js), and the credits screen shows `godot/credits.txt` (`web/credits.txt`).
 - Unity games hold `unity/` instead: a normal Unity project you can open in Unity Hub with
-  Unity 6000.6.7f1. The gameplay lives in `unity/Assets/Scenes/Game.unity`, the icon is
+  the Unity version its `ProjectSettings/ProjectVersion.txt` names. The gameplay lives in `unity/Assets/Scenes/Game.unity`, the icon is
   `unity/Assets/UI/icon.png` and the credits are `unity/Assets/credits.txt`. Its `Library/`,
   `Temp/` and `Logs/` folders are Unity's caches and are not committed. A Unity export is a folder: copy all of `builds/linux/` or `builds/windows/`, not just
   the executable.

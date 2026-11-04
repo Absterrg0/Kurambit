@@ -9,7 +9,9 @@ it makes export to Windows, Linux and the web.
 - Node.js 24 and [Vite+](https://viteplus.dev) (`vp`) to build from source.
 - At least one installed, signed-in provider (see [Providers](#providers)). You can launch
   Kurambit first and configure providers afterwards.
-- Blender and Godot, which Kurambit installs for you from **Settings → General → Game tools**.
+- For native games, Godot 4.7, Unity 6 (through Unity Hub) and Blender 4.2 or later, installed
+  yourself. **Settings → General → Game tools** shows what Kurambit found and links to each
+  download. three.js browser games need nothing installed.
 
 ## Run from source
 

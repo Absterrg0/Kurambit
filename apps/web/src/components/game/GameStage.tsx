@@ -214,7 +214,7 @@ export function GameStage({
           : phase.kind === "failed"
             ? "Build failed"
             : phase.kind === "tools-missing"
-              ? "Game tools missing"
+              ? "Engine not ready"
               : null;
   const runningSomething =
     busy !== null ||

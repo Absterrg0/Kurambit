@@ -5,7 +5,12 @@ import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import * as Schema from "effect/Schema";
 import { useNavigate } from "@tanstack/react-router";
-import { ModelSelection, type EnvironmentId, type GameEngineId } from "@kurambit/contracts";
+import {
+  ModelSelection,
+  type EnvironmentId,
+  type GameEngineId,
+  type GameToolStatus,
+} from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { FolderIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -33,6 +38,9 @@ import {
   getCustomModelOptionsByInstance,
 } from "../../modelSelection";
 import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuery } from "../../state/query";
+import { engineToolFor, toolchainReadyFor } from "./gameStageLogic";
+import { GameToolLink } from "./GameToolLink";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { gameSlug } from "./gameLibrary.logic";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -127,7 +135,18 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
   const [brief, setBrief] = useState(draft?.brief ?? "");
   const [artDirection, setArtDirection] = useState("");
-  const [engine, setEngine] = useState<GameEngineId>(draft?.engine ?? "godot");
+  const toolchain = useEnvironmentQuery(
+    gameEnvironment.toolchain({ environmentId, input: {} }),
+  ).data;
+  // Until the toolchain answers, every engine reads as pickable so the form does not flicker.
+  const engineReady = (id: GameEngineId) => toolchain === null || toolchainReadyFor(toolchain, id);
+  const [chosenEngine, setEngine] = useState<GameEngineId | null>(draft?.engine ?? null);
+  const engine: GameEngineId =
+    chosenEngine !== null && engineReady(chosenEngine)
+      ? chosenEngine
+      : engineReady("godot")
+        ? "godot"
+        : "three";
   const [editingFolder, setEditingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
@@ -255,59 +274,17 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                 </label>
                 <fieldset className="flex flex-col gap-2 text-sm">
                   <legend className="font-medium">Engine</legend>
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5">
-                    <input
-                      type="radio"
-                      name="game-engine"
-                      value="godot"
-                      checked={engine === "godot"}
-                      onChange={() => setEngine("godot")}
+                  {ENGINE_OPTIONS.map((option) => (
+                    <EngineOption
+                      key={option.id}
+                      {...option}
+                      tool={toolchain === null ? null : engineToolFor(toolchain, option.id)}
+                      ready={engineReady(option.id)}
+                      checked={engine === option.id}
+                      onPick={() => setEngine(option.id)}
                       disabled={busy}
-                      className="mt-1"
                     />
-                    <span>
-                      <span className="font-medium">Godot native</span>
-                      <span className="block text-xs text-muted-foreground">
-                        A real Godot 4.7 project with Blender-made art. The full lane: native play,
-                        Windows and Linux exports.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5">
-                    <input
-                      type="radio"
-                      name="game-engine"
-                      value="three"
-                      checked={engine === "three"}
-                      onChange={() => setEngine("three")}
-                      disabled={busy}
-                      className="mt-1"
-                    />
-                    <span>
-                      <span className="font-medium">three.js browser</span>
-                      <span className="block text-xs text-muted-foreground">
-                        A quick static browser game, no install step. Web export only.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5">
-                    <input
-                      type="radio"
-                      name="game-engine"
-                      value="unity"
-                      checked={engine === "unity"}
-                      onChange={() => setEngine("unity")}
-                      disabled={busy}
-                      className="mt-1"
-                    />
-                    <span>
-                      <span className="font-medium">Unity native</span>
-                      <span className="block text-xs text-muted-foreground">
-                        A Unity 6 project in C#. Linux and Windows builds. Needs Unity installed
-                        from Game tools and a Unity Personal licence from Unity Hub.
-                      </span>
-                    </span>
-                  </label>
+                  ))}
                 </fieldset>
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="flex items-baseline gap-1.5">
@@ -442,5 +419,78 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
         </form>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+const ENGINE_OPTIONS = [
+  {
+    id: "godot",
+    title: "Godot native",
+    description:
+      "A real Godot 4.7 project with Blender-made art. The full lane: native play, Windows and Linux exports.",
+  },
+  {
+    id: "three",
+    title: "three.js browser",
+    description: "A quick static browser game, nothing to install. Web export only.",
+  },
+  {
+    id: "unity",
+    title: "Unity native",
+    description:
+      "A Unity 6 project in C#. Linux and Windows builds. Needs a Unity 6 editor from Unity Hub and a Unity Personal licence.",
+  },
+] as const satisfies ReadonlyArray<{ id: GameEngineId; title: string; description: string }>;
+
+/** An engine that is not ready cannot be picked; it shows what is wrong and where to get it. */
+function EngineOption({
+  id,
+  title,
+  description,
+  tool,
+  ready,
+  checked,
+  onPick,
+  disabled,
+}: {
+  id: GameEngineId;
+  title: string;
+  description: string;
+  tool: GameToolStatus | null;
+  ready: boolean;
+  checked: boolean;
+  onPick: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5">
+      <label
+        className={
+          ready ? "flex cursor-pointer items-start gap-2" : "flex items-start gap-2 opacity-64"
+        }
+      >
+        <input
+          type="radio"
+          name="game-engine"
+          value={id}
+          checked={checked}
+          onChange={onPick}
+          disabled={disabled || !ready}
+          className="mt-1"
+        />
+        <span>
+          <span className="font-medium">{title}</span>
+          <span className="block text-xs text-muted-foreground">{description}</span>
+          {tool !== null && tool.status !== "ready" ? (
+            <span className="mt-1 block text-xs text-muted-foreground">{tool.message}</span>
+          ) : null}
+        </span>
+      </label>
+      {tool !== null && tool.status !== "ready" ? (
+        <div className="pl-5">
+          <GameToolLink tool={tool} />
+        </div>
+      ) : null}
+    </div>
   );
 }

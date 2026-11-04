@@ -2,7 +2,7 @@ import {
   GAME_TEMPLATES,
   THREE_PINNED_VERSION,
   THREE_PROJECT_DIRECTORY,
-  UNITY_PINNED_VERSION,
+  UNITY_MIN_VERSION,
   UNITY_PROJECT_DIRECTORY,
   gameTemplateForEngine,
   type GameCreateInput,
@@ -32,7 +32,7 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
       engine === "three"
         ? { name: "three", version: THREE_PINNED_VERSION }
         : engine === "unity"
-          ? { name: "unity", version: UNITY_PINNED_VERSION }
+          ? { name: "unity", version: UNITY_MIN_VERSION }
           : { name: "godot", version: "4.7.2" },
     // The engine project directory for every lane, despite the legacy name.
     godotProject:
@@ -67,7 +67,7 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     engine === "unity"
       ? `# Kurambit project
 
-Build BRIEF.md's game in Unity ${UNITY_PINNED_VERSION} (C#, Input System). unity/ is the project inside a demo shell (TEMPLATE.md): gameplay goes in unity/Assets/Scenes/Game.unity, built by unity/Assets/Editor/BuildGame.cs, game code in unity/Assets/Scripts; unity/Assets/Kurambit stays as shipped.
+Build BRIEF.md's game in Unity 6 (C#, Input System). unity/ is the project inside a demo shell (TEMPLATE.md): gameplay goes in unity/Assets/Scenes/Game.unity, built by unity/Assets/Editor/BuildGame.cs, game code in unity/Assets/Scripts; unity/Assets/Kurambit stays as shipped.
 
 Use the game_* tools to check, play, export and package the game, and the game_unity_* tools to edit scenes in the live editor; never run Unity yourself. Keep builds/ and unity/Library, Temp, Logs, UserSettings generated.
 `
