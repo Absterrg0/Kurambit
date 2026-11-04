@@ -7,6 +7,7 @@ import { ArrowRightIcon, ArrowUpRightIcon, FolderOpenIcon } from "lucide-react";
 import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useThreadShells } from "../../state/entities";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
 import { isNestedUnderLiveParent, type EnvironmentId, type GameSummary } from "@kurambit/contracts";
 import { KurambitMark } from "../brand/KurambitBrand";
@@ -16,6 +17,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { useGameDialogStore, type GameDraft } from "./gameDialogStore";
+import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import {
   formatGameEditedAt,
   gameInitial,
@@ -36,6 +38,7 @@ const BRIEF_IDEAS = [
 
 export function GamesHome() {
   const { games, isLoading, error } = useGameLibrary();
+  const environmentId = usePrimaryEnvironmentId();
   const threads = useThreadShells();
   const navigate = useNavigate();
   const handleNewThread = useNewThreadHandler();
@@ -83,7 +86,13 @@ export function GamesHome() {
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-16 px-8 pt-24 pb-16 lg:pt-32">
-            <BriefComposer onStart={startGame} onOpenFolder={openGameFolder} />
+            {environmentId ? (
+              <BriefComposer
+                environmentId={environmentId}
+                onStart={startGame}
+                onOpenFolder={openGameFolder}
+              />
+            ) : null}
 
             {error ? (
               <div className="mx-auto flex w-full max-w-2xl flex-col items-start gap-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
@@ -119,14 +128,18 @@ export function GamesHome() {
 }
 
 function BriefComposer({
+  environmentId,
   onStart,
   onOpenFolder,
 }: {
+  environmentId: EnvironmentId;
   onStart: (draft: GameDraft) => void;
   onOpenFolder: () => void;
 }) {
   const [brief, setBrief] = useState("");
-  const [engine, setEngine] = useState<GameDraft["engine"]>("godot");
+  const { ready: engineReady } = useEngineReadiness(environmentId);
+  const [chosenEngine, setEngine] = useState<GameDraft["engine"] | null>(null);
+  const engine = chooseEngine(chosenEngine, engineReady);
   const ready = brief.trim().length > 0;
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
@@ -178,9 +191,13 @@ function BriefComposer({
               if (next === "godot" || next === "three" || next === "unity") setEngine(next);
             }}
           >
-            <Toggle value="godot">Godot · native</Toggle>
+            <Toggle value="godot" disabled={!engineReady("godot")}>
+              Godot · native
+            </Toggle>
             <Toggle value="three">three.js · browser</Toggle>
-            <Toggle value="unity">Unity · native</Toggle>
+            <Toggle value="unity" disabled={!engineReady("unity")}>
+              Unity · native
+            </Toggle>
           </ToggleGroup>
           <Button type="button" variant="ghost" size="sm" onClick={onOpenFolder}>
             <FolderOpenIcon aria-hidden />

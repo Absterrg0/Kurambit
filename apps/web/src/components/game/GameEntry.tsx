@@ -38,8 +38,8 @@ import {
   getCustomModelOptionsByInstance,
 } from "../../modelSelection";
 import { gameEnvironment } from "../../state/game";
-import { useEnvironmentQuery } from "../../state/query";
-import { engineToolFor, toolchainReadyFor } from "./gameStageLogic";
+import { engineToolFor } from "./gameStageLogic";
+import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import { GameToolLink } from "./GameToolLink";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { gameSlug } from "./gameLibrary.logic";
@@ -135,18 +135,9 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
   const [brief, setBrief] = useState(draft?.brief ?? "");
   const [artDirection, setArtDirection] = useState("");
-  const toolchain = useEnvironmentQuery(
-    gameEnvironment.toolchain({ environmentId, input: {} }),
-  ).data;
-  // Until the toolchain answers, every engine reads as pickable so the form does not flicker.
-  const engineReady = (id: GameEngineId) => toolchain === null || toolchainReadyFor(toolchain, id);
+  const { toolchain, ready: engineReady } = useEngineReadiness(environmentId);
   const [chosenEngine, setEngine] = useState<GameEngineId | null>(draft?.engine ?? null);
-  const engine: GameEngineId =
-    chosenEngine !== null && engineReady(chosenEngine)
-      ? chosenEngine
-      : engineReady("godot")
-        ? "godot"
-        : "three";
+  const engine = chooseEngine(chosenEngine, engineReady);
   const [editingFolder, setEditingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
