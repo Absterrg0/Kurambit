@@ -82,8 +82,14 @@ export const artRedo = (defects: string, lane: string): string =>
 export const ladderWrite = (): string =>
   `${TOOL_RULE}${SKILL_LINE}Play the current build first with game_explore_start (default target), and read PLAN.md and VISION.md. ${LADDER_ASK} Start from what the build does today. You may only write ${LADDER_FILE}. Do not change game files. Do not use subagents.`;
 
+// A plan turn can end after playing and before writing anything; that is
+// unfinished work, not a malformed file, so it is asked to finish both files.
+const MISSING_LADDER = "the file is missing or empty";
+
 export const ladderFix = (error: string): string =>
-  `${LADDER_FILE} does not have the ladder's shape: ${error}\nRewrite it as JSON {"rungs":[{"is":"...","checks":[{"what":"...","how":"..."}]}]}: 4 to 7 rungs, each with a non-empty "is" and 2 to 4 checks, each with a non-empty "what" and "how". Keep your rungs; fix the shape. You may only write ${LADDER_FILE}.`;
+  error === MISSING_LADDER
+    ? `You ended your turn before writing the plan. Write PLAN.md now if it does not exist yet (the game's structure, what makes the core good, what done means), then ${LADDER_FILE}. ${LADDER_ASK} You may only write PLAN.md and ${LADDER_FILE}.`
+    : `${LADDER_FILE} does not have the ladder's shape: ${error}\nRewrite it as JSON {"rungs":[{"is":"...","checks":[{"what":"...","how":"..."}]}]}: 4 to 7 rungs, each with a non-empty "is" and 2 to 4 checks, each with a non-empty "what" and "how". Keep your rungs; fix the shape. You may only write ${LADDER_FILE}.`;
 
 const checkList = (rung: Pick<Rung, "checks">): string =>
   rung.checks.map((c, i) => `${i + 1}. ${c.what} (observed by: ${c.how})`).join("\n");
