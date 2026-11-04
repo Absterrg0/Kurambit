@@ -440,7 +440,10 @@ const RunChecksTool = Tool.make("game_run_checks", {
   failure,
   failureMode: "return",
   dependencies: runDependencies,
-}).annotate(Tool.Readonly, false);
+})
+  .annotate(Tool.Readonly, false)
+  // The run's builder scores its rung with it; it names no build, so blind roles may see it too.
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 
 const RunSteerTool = Tool.make("game_run_steer", {
   description:
