@@ -612,14 +612,12 @@ const make = Effect.gen(function* () {
         }),
       );
 
-  const logTail = (root: string) =>
-    Effect.promise(async () => {
-      const text = await NodeFSP.readFile(
-        NodePath.join(homeDirOf(root), "editor.log"),
-        "utf8",
-      ).catch(() => "");
-      return text.slice(-3000);
-    });
+  const editorLog = (root: string) =>
+    Effect.promise(() =>
+      NodeFSP.readFile(NodePath.join(homeDirOf(root), "editor.log"), "utf8").catch(() => ""),
+    );
+
+  const logTail = (root: string) => editorLog(root).pipe(Effect.map((text) => text.slice(-3000)));
 
   const gameName = (root: string) =>
     projects.read(root).pipe(
@@ -850,9 +848,17 @@ const make = Effect.gen(function* () {
                 .join(" ")}`,
               "license-missing",
             );
-          const compile = /error CS\d{4}/.test(tail)
-            ? " The project has C# compile errors, so the editor could not open it; fix them (see the log) and retry."
-            : "";
+          // The errors are what the agent acts on; the log repeats each one
+          // several times and its tail often ends past them.
+          const errors = [
+            ...new Set(
+              (yield* editorLog(root)).match(/^[^\n]*error CS\d{4}:[^\n]*$/gm) ?? [],
+            ),
+          ].slice(0, 6);
+          const compile =
+            errors.length > 0 || /error CS\d{4}/.test(tail)
+              ? ` C# compile errors stop it opening the project; fix them and retry:\n${errors.join("\n")}\n`
+              : "";
           return yield* fail(
             ready === null
               ? `The Unity editor exited before it was ready (exit ${editor.exitCode ?? editor.signalCode}).${compile} Editor log: ${logPath}\n${tail.slice(-1500)}`
