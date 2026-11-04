@@ -82,6 +82,8 @@ const RUN_STATE_IGNORES = [
   ".studio/next.md",
   ".studio/ship.md",
   ".studio/art-review.md",
+  ".studio/ladder.json",
+  ".studio/rung-change.json",
   ".studio/exports.json",
   ".studio/final-video.json",
   ".studio/tester-*.md",

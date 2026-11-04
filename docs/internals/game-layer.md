@@ -19,7 +19,8 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   project with a `role` lineage under the creator's chat. `role` only groups: sidebars, game opens
   and session lists skip it, and it has none of the subagent run takeover, controls or completion
   delivery, which would tie a role to the creator's live turn. State is `.studio/run.json` +
-  `.studio/rounds.jsonl` plus git, so a crash resumes from the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE/ART lines.
+  `.studio/rounds.jsonl` plus git, so a crash resumes from the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE/ART/CHECK lines and the
+  shape of the two JSON files the loop asks for (the ladder and a reviewer's rung change).
 - `GameBot` plays a model-written bot file in real time, on every engine, and records video plus
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameUnity` does the same for Unity: one batchmode editor on a private display
@@ -164,7 +165,30 @@ the policy leads the next round's direction with them.
 
 Vision, two core-loop prototypes, a blind pick, plan, art, one full build, then rounds until a ship
 review says yes, the run stalls, the creator stops it, or an optional budget ends: builder block, boot check, tester play with a bot run,
-blind compare in both orders, keep or revert, reviewer notes for the next round. Before the
+blind compare in both orders, keep or revert, reviewer notes for the next round.
+
+Rounds climb a ladder. The plan writes `.studio/ladder.json`, 4 to 7 rungs from the picked
+prototype to a game with the shape of a Steam demo, each a sentence of what the game is after it
+plus 2 to 4 checks with how to observe them; code checks only the shape (one fix turn, else the
+run has an empty ladder and only finish rounds). The ladder then lives in `run.json`, the one
+truth for which rung landed; the file is the plan's output and is not read again. A round builds
+the first open rung, and the tester declares `CHECK k: PASS|FAIL` per check. The old loop
+measured why this matters: when every round's goal was the last review's top flaw and judges asked
+which build handled that flaw better, a run spent five hours on one flaw while the game never
+grew, and two near-identical builds gave noisy ties. So acceptance is the rung's checks, and blind
+judging is only a regression gate: a round whose checks pass is kept unless the old build wins
+both orders (ties, splits and missing verdicts keep it). A round whose checks fail is not judged
+at all, since no verdict could keep it, and its work stays on its branch. Any round that does not
+land its rung (failed checks, a regression, a boot failure, no change) counts against the rung;
+the second sets it aside with its reason, and set-aside rungs come back once after the rest. The
+reviewer's next.md is a ledger of bugs and DO NOT REGRESS that the builder clears beside the
+rung, never a round's goal; the reviewer may add one rung through `.studio/rung-change.json`
+when something blocks the ladder, one open at a time. The old round shape (the review's top flaw,
+judged on that flaw, STATUS: ready to the ship review) runs only as finish rounds, once the
+ladder is done or the budget's last fifth begins. A run.json from before the ladder writes one at
+its next round start.
+
+Before the
 comparators run, the tester's last play bot plays both builds in fresh worktrees for the same real
 time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
 that bot against the candidate, and a bot that fails on only one build would name it, so the
