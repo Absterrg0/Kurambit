@@ -172,6 +172,7 @@ interface LiveExecutables {
  */
 const recordedOwners = (
   record: Partial<SessionRecord>,
+  homeDir: string,
   live: LiveExecutables,
 ): ReadonlyArray<RecordedPid> => [
   {
@@ -188,7 +189,11 @@ const recordedOwners = (
       argv[0] !== undefined &&
       live.editors.includes(argv[0]) &&
       typeof record.projectDir === "string" &&
-      argv[argv.indexOf("-projectPath") + 1] === record.projectDir,
+      argv[argv.indexOf("-projectPath") + 1] === record.projectDir &&
+      // The user's own editor (Unity Hub's) may be open on this same project:
+      // only the batchmode editor writing this session's log is ours.
+      argv.includes("-batchmode") &&
+      argv[argv.indexOf("-logFile") + 1] === NodePath.join(homeDir, "editor.log"),
   },
   {
     pid: record.xvfbPid,
@@ -276,7 +281,7 @@ const reapRecord = async (
       exe === live.cli ||
       exe === live.xvfb);
   const editorPid = record.editorPid;
-  await reapVerified(recordedOwners(record, live), {
+  await reapVerified(recordedOwners(record, homeDir, live), {
     waitMs: 15_000,
     pollMs: 200,
     // Taken while the editor still lives: once it exits, its workers reparent.
