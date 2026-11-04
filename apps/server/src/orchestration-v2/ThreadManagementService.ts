@@ -398,12 +398,15 @@ export interface ThreadManagementServiceShape {
    */
   readonly hasReceipt: (commandId: CommandId) => Effect.Effect<boolean>;
   /**
-   * The committed outcome of a dispatch, for a caller whose own audit record
-   * must agree with it. `null` when the command never committed.
+   * The committed outcome of a dispatch and the thread it committed on, for a
+   * caller that derives its command ids and asks T3 what they did instead of
+   * keeping a copy. `null` when the command never committed.
    */
-  readonly getCommandReceiptStatus: (
-    commandId: CommandId,
-  ) => Effect.Effect<"accepted" | "rejected" | null>;
+  readonly getCommandReceipt: (commandId: CommandId) => Effect.Effect<{
+    readonly status: "accepted" | "rejected";
+    readonly threadId: ThreadId;
+    readonly commandType: string;
+  } | null>;
   readonly waitForThread: (
     input: ThreadManagementWaitInput,
   ) => Effect.Effect<ThreadManagementWaitResult, ThreadManagementError>;
@@ -564,17 +567,17 @@ const make = Effect.gen(function* () {
       Effect.map(Option.isSome),
     );
 
-  const getCommandReceiptStatus: ThreadManagementServiceShape["getCommandReceiptStatus"] = (
-    commandId,
-  ) =>
+  const getCommandReceipt: ThreadManagementServiceShape["getCommandReceipt"] = (commandId) =>
     receipts.getByCommandId(commandId).pipe(
       Effect.orElseSucceed(() => Option.none()),
       Effect.map((receipt) =>
         Option.isNone(receipt)
           ? null
-          : receipt.value.status === "rejected"
-            ? "rejected"
-            : "accepted",
+          : {
+              status: receipt.value.status,
+              threadId: receipt.value.threadId,
+              commandType: receipt.value.commandType,
+            },
       ),
     );
 
@@ -1244,7 +1247,7 @@ const make = Effect.gen(function* () {
     assertProviderInstanceEnabled,
     isProviderInstanceEnabledForProject,
     hasReceipt,
-    getCommandReceiptStatus,
+    getCommandReceipt,
     waitForThread,
     settleAfterRun,
     settleThread,

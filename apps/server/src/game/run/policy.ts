@@ -215,7 +215,6 @@ const role = (id: number, spec: RoleSpec): RoleStep => ({
   copy: [],
   sheet: "",
   inputCapMs: 0,
-  attached: null,
   ...spec,
 });
 const git = (id: number, op: GitOp): Step => ({ kind: "git", id, op });
