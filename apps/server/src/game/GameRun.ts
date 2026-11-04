@@ -191,6 +191,8 @@ const currentStep = (state: State.RunState): string => {
       return "Blind pick of the prototypes";
     case "round":
       return `Round ${t.n} · ${t.phase.replace("-", " ")}`;
+    case "ladder":
+      return "Plan · writing the ladder";
     case "ship":
       return `Ship review after round ${t.n}`;
     case "leave":
@@ -207,6 +209,7 @@ const steerWhen = (state: State.RunState | null): string => {
     return `Round ${t.n} is in progress and finishes as planned; round ${t.n + 1} starts with it.`;
   if (t?._tag === "ship")
     return "A ship review is in progress; the next round starts with it before the run can end.";
+  if (t?._tag === "ladder") return "The plan is writing the ladder; the next round starts with it.";
   if (t?._tag === "leave") return "The run is ending at its budget; a resumed run starts with it.";
   return "The run is still making its first build; its first round starts with it.";
 };

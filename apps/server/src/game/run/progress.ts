@@ -49,6 +49,8 @@ export const runProgress = (state: RunState): { stage: number; next: string | nu
         stage: STAGE.Rounds,
         next: ROUND_NEXT[t.phase] ?? (t.phase.startsWith("review") ? `Round ${t.n + 1}` : "Tester"),
       };
+    case "ladder":
+      return { stage: STAGE.Rounds, next: `Round ${state.rounds.length + 1}` };
     case "ship":
       return { stage: STAGE.Rounds, next: `Ready, or round ${t.n + 1}` };
     case "leave":

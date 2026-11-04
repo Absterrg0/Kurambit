@@ -1,5 +1,6 @@
 // The run's persisted record: `.studio/run.json` holds one RunState, decoded on every load.
 import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { GameBotDecider, GameBotPerf, RunId, ThreadId } from "@kurambit/contracts";
 
@@ -9,6 +10,96 @@ const Verdict = Schema.Struct({
   reason: Schema.String,
 });
 export type Verdict = typeof Verdict.Type;
+
+// ── The demo ladder. The plan role writes `.studio/ladder.json`; code checks
+// only its shape, the rungs are the model's judgment.
+const Line = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(600));
+const RungCheck = Schema.Struct({ what: Line, how: Line });
+const rungFields = {
+  is: Line,
+  checks: Schema.Array(RungCheck).check(Schema.isMinLength(2), Schema.isMaxLength(4)),
+};
+export const LadderFile = Schema.Struct({
+  rungs: Schema.Array(Schema.Struct(rungFields)).check(
+    Schema.isMinLength(4),
+    Schema.isMaxLength(7),
+  ),
+});
+/** A reviewer's one ladder change: a rung that unblocks the ladder, and why. */
+export const RungChange = Schema.Struct({ why: Line, ...rungFields });
+
+const Rung = Schema.Struct({
+  // Stable across a reviewer's insertion, which shifts positions; round records name it.
+  id: Schema.Number,
+  ...rungFields,
+  status: Schema.Literals(["todo", "done", "set-aside"]),
+  // Rounds that built this rung without landing it since it last opened.
+  fails: Schema.Number,
+  // A set-aside rung comes back once, after the rest of the ladder.
+  back: Schema.Boolean,
+  // Why it was set aside, or why a reviewer added it.
+  why: Schema.String,
+  from: Schema.Literals(["plan", "reviewer"]),
+});
+export type Rung = typeof Rung.Type;
+const Ladder = Schema.Struct({
+  rungs: Schema.Array(Rung),
+  // Why the ladder is empty when the plan never wrote a valid one; "" otherwise.
+  note: Schema.String,
+});
+export type Ladder = typeof Ladder.Type;
+
+const decodeLadderFile = Schema.decodeUnknownResult(Schema.fromJsonString(LadderFile), {
+  errors: "all",
+});
+const decodeRungChange = Schema.decodeUnknownResult(Schema.fromJsonString(RungChange));
+
+/** The plan's ladder file as a fresh ladder, or what is wrong with its shape. */
+export const parseLadder = (
+  text: string,
+): { readonly ladder: Ladder } | { readonly error: string } => {
+  if (text.trim().length === 0) return { error: "the file is missing or empty" };
+  const decoded = decodeLadderFile(text);
+  if (Result.isFailure(decoded)) return { error: decoded.failure.message.slice(0, 1500) };
+  return {
+    ladder: {
+      rungs: decoded.success.rungs.map((r, i) => ({
+        id: i + 1,
+        ...r,
+        status: "todo",
+        fails: 0,
+        back: false,
+        why: "",
+        from: "plan",
+      })),
+      note: "",
+    },
+  };
+};
+
+/** A reviewer's proposed rung, what is wrong with its shape, or null when it wrote none. */
+export const parseRungChange = (
+  text: string,
+  id: number,
+): { readonly rung: Rung } | { readonly error: string } | null => {
+  if (text.trim().length === 0) return null;
+  const decoded = decodeRungChange(text);
+  if (Result.isFailure(decoded)) return { error: decoded.failure.message.slice(0, 300) };
+  const { why, ...rung } = decoded.success;
+  return { rung: { id, ...rung, status: "todo", fails: 0, back: false, why, from: "reviewer" } };
+};
+
+// What one round did with its rung, check by check, in the round record.
+const RungResult = Schema.Struct({
+  rung: Schema.Number,
+  is: Schema.String,
+  checks: Schema.Array(
+    Schema.Struct({ what: Schema.String, pass: Schema.Boolean, evidence: Schema.String }),
+  ),
+  outcome: Schema.Literals(["landed", "failed", "set-aside"]),
+  why: Schema.String,
+});
+export type RungResult = typeof RungResult.Type;
 
 const RoundRecord = Schema.Struct({
   round: Schema.Number,
@@ -23,6 +114,9 @@ const RoundRecord = Schema.Struct({
   testerNote: Schema.optionalKey(Schema.String),
   note: Schema.optionalKey(Schema.String),
   steer: Schema.optionalKey(Schema.Array(Schema.String)),
+  rung: Schema.optionalKey(RungResult),
+  // A finish round: the old fix-the-flaw shape, after the ladder.
+  finish: Schema.optionalKey(Schema.Boolean),
 });
 export type RoundRecord = typeof RoundRecord.Type;
 
@@ -307,6 +401,13 @@ const Round = Schema.TaggedStruct("round", {
   bot: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   botDecider: BotDecider,
   testerNotes: Schema.String,
+  // The ladder rung this round builds (an index into the ladder), null for a finish
+  // round. Older run.json files have none.
+  rung: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  // The tester's pass or fail per check, once it wrote them.
+  checks: Schema.Array(
+    Schema.Struct({ what: Schema.String, pass: Schema.Boolean, evidence: Schema.String }),
+  ).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   cmp: Schema.NullOr(Compare),
   outcome: Schema.Literals(["", "merge", "drop", "hold"]),
   reviewed: Schema.String,
@@ -351,6 +452,12 @@ const Task = Schema.Union([
     comparison: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   }),
   Round,
+  // A run that reached rounds without a ladder (older run.json files) writes one first.
+  Schema.TaggedStruct("ladder", {
+    phase: Schema.Literals(["write", "fix"]),
+    thread: Schema.NullOr(ThreadId),
+    error: Schema.String,
+  }),
   Schema.TaggedStruct("ship", {
     n: Schema.Number,
     phase: Schema.Literals(["play", "write"]),
@@ -397,6 +504,8 @@ const RunState = Schema.Struct({
   picked: Schema.NullOr(Picked).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   next: Schema.String,
   lastDirection: Schema.String,
+  // null until the plan wrote one; older run.json files have none and write one at the next round.
+  ladder: Schema.NullOr(Ladder).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   // The creator's notes for the next round, folded in from .studio/steer.jsonl
   // by the driver. Older run.json files have none.
   steer: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
@@ -477,6 +586,7 @@ export const freshState = (
   picked: null,
   next: "",
   lastDirection: "",
+  ladder: null,
   steer: [],
   creator: "",
   task: { _tag: "init" },

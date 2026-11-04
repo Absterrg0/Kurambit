@@ -8,7 +8,10 @@ Adapted from Genex's director material (MIT), cut hard.
    presentation, the asset list, what makes the core good (how it plays,
    feels and looks), and what done means for the scope asked. Numbers,
    not adjectives.
-4. Depth over breadth: plan the depth the core needs. No content lists or
-   length targets; more content is the creator's call.
+4. Write the ladder in `.studio/ladder.json`: 4 to 7 rungs from this build to
+   a game with the shape of a Steam demo. Each rung is what the game is after
+   it, something a player notices in the first minute, with 2 to 4 checks a
+   player could verify and how to observe each. Build each rung deep, end to
+   end; polish comes after the ladder, not as a rung.
 5. Scope rule: deepen what was asked. No unasked systems.
 6. A plan that fits the budget beats a complete one. Cut until it fits.
