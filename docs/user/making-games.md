@@ -61,7 +61,7 @@ You also need a signed-in agent. Codex and Claude are enabled by default; enable
 
 Choose **New game** on the home screen or in the sidebar. Name the game, write a brief and optional
 art direction, and choose where to save it (`~/Games/<slug>` by default). Pick the agent and model,
-then choose **Create game**. Kurambit creates the project folder, starts a production run on your
+choose how the run decides (Guided or Autopilot, see below), then choose **Create game**. Kurambit creates the project folder, starts a production run on your
 brief (see below), and opens the game on its **Run** tab. The game's session stays yours: talk to
 your agent there about the game at any time.
 
@@ -95,6 +95,19 @@ verdicts and reasoning, the blind players' reports, the bot's results and video,
 and the reviewer's direction. Your agent can read the same with `game_run_round`, so you can ask it
 what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
 the work. **Stop run** ends it; rejected work stays on its branch.
+
+A run is **Guided** (the default) or on **Autopilot**. A Guided run asks you at the moments that
+shape the game: once the vision and its key art exist, once both prototypes are built, and once
+the plan has written its ladder. Your agent posts the question in the game's chat with the key
+art, each prototype's frames and its two-line pitch, or the ladder, and asks what you want. Answer
+in your own words: keep it or ask for changes ("pinker, rounder"), pick a prototype or combine
+them ("the second one, with the first one's camera"), ask for one more pair of prototypes, edit
+the ladder, or let the run decide. Each kind of redo happens once. If nobody answers within about
+three minutes of the question reaching the chat, the run goes on with its own choice: it keeps the
+vision and the ladder and lets the blind pick choose the prototype. The Run tab says what the run
+is waiting for and when it goes on. Autopilot never asks. Choose the profile in the new-game
+dialog or next to **Start run**, switch it on the Run tab while a run is live, or ask your agent
+to switch; switching to Autopilot while a question waits lets the run decide it at once.
 
 The plan writes a ladder: four to seven steps from the first playable build to a game shaped like
 a Steam demo (the core loop end to end, a complete first area with a win and a loss, progression,
