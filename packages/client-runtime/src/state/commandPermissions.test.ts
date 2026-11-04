@@ -67,6 +67,7 @@ describe("command permissions", () => {
           WS_METHODS.gameRunStart,
           WS_METHODS.gameRunStop,
           WS_METHODS.gameRunSteer,
+          WS_METHODS.gameRunProfile,
           WS_METHODS.gameRunRestore,
           WS_METHODS.gameSecretsSet,
         ] as const) {

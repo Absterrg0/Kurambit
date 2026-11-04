@@ -399,6 +399,7 @@ export function notificationChildThreadId(
     case "monitor":
     case "background_task":
     case "system":
+    case "game_run":
       return undefined;
     default:
       source satisfies never;
