@@ -192,8 +192,21 @@ func _process(delta: float) -> void:
 	elif not _hint_now.is_empty():
 		_hint_now["seconds"] -= delta
 		var until: Callable = _hint_now["until"]
-		if _hint_now["seconds"] > 0.0 and until.is_valid() and until.call() == true:
-			_hint_now["seconds"] = 0.0
+		# A condition bound to a node the game freed (Retry reloads the scene)
+		# errors on every check; the hint then just times out. Reading the id
+		# never touches the freed object.
+		var owner_id := until.get_object_id()
+		if owner_id != 0 and not is_instance_id_valid(owner_id):
+			until = Callable()
+			_hint_now["until"] = until
+		if _hint_now["seconds"] > 0.0 and until.is_valid():
+			var met: Variant = until.call()
+			# A condition that errors (it reached a freed node) returns no bool:
+			# dropped after its first error instead of failing every frame.
+			if typeof(met) != TYPE_BOOL:
+				_hint_now["until"] = Callable()
+			elif met:
+				_hint_now["seconds"] = 0.0
 		_hint.modulate.a = clampf(1.0 + _hint_now["seconds"] / FADE_S, 0.0, 1.0)
 		if _hint_now["seconds"] <= -FADE_S:
 			_hint.visible = false
