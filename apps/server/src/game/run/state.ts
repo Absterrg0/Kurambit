@@ -6,7 +6,11 @@ import {
   GameBotDecider,
   GameBotPerf,
   GameRunDecisionKind,
+  GameRunLadder,
   GameRunProfile,
+  type GameRunRungCheck,
+  GameRunRungChange,
+  GameRunRungFields,
   RunId,
   ThreadId,
 } from "@kurambit/contracts";
@@ -21,45 +25,11 @@ export type Verdict = typeof Verdict.Type;
 
 // ── The demo ladder. The plan role writes `.studio/ladder.json`; code checks
 // only its shape, the rungs are the model's judgment.
-const Line = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(600));
-const CheckInput = Schema.Union([
-  Schema.Struct({ hold: Schema.String.check(Schema.isNonEmpty()), ms: Schema.Number }),
-  Schema.Struct({ press: Schema.String.check(Schema.isNonEmpty()) }),
-  Schema.Struct({ wait: Schema.Number }),
-]);
-// A "state" check is a scenario and an expectation code scores (checks.ts); a
-// "look" check (the default, and every check of an older ladder) is judged by a
-// tester from play, as `how` says.
-const RungCheck = Schema.Struct({
-  what: Line,
-  how: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(600))),
-  kind: Schema.optionalKey(Schema.Literals(["state", "look"])),
-  from: Schema.optionalKey(Schema.Literals(["play", "title"])),
-  setup: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(80))),
-  // What the setup target is given: values for "game_state", a position for "player".
-  values: Schema.optionalKey(
-    Schema.Record(
-      Schema.String,
-      Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Array(Schema.Number)]),
-    ),
-  ),
-  input: Schema.optionalKey(Schema.Array(CheckInput).check(Schema.isMaxLength(30))),
-  expect: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
-});
-export type RungCheck = typeof RungCheck.Type;
+export type RungCheck = GameRunRungCheck;
 export const isStateCheck = (c: RungCheck): boolean => c.kind === "state";
-const rungFields = {
-  is: Line,
-  checks: Schema.Array(RungCheck).check(Schema.isMinLength(2), Schema.isMaxLength(4)),
-};
-export const LadderFile = Schema.Struct({
-  rungs: Schema.Array(Schema.Struct(rungFields)).check(
-    Schema.isMinLength(4),
-    Schema.isMaxLength(7),
-  ),
-});
-/** A reviewer's one ladder change: a rung that unblocks the ladder, and why. */
-export const RungChange = Schema.Struct({ why: Line, ...rungFields });
+const rungFields = GameRunRungFields;
+export const LadderFile = GameRunLadder;
+export const RungChange = GameRunRungChange;
 
 const Rung = Schema.Struct({
   // Stable across a reviewer's insertion, which shifts positions; round records name it.
