@@ -77,6 +77,14 @@ import { turnScopedSelectionTransition } from "@kurambit/provider-core/server/se
 import { OPENCODE_PROVIDER, openCodePermissionRequestKind } from "../adapter.ts";
 import { openCodeToolTurnItem } from "../toolItems.ts";
 
+/**
+ * OpenCode names a plan's spending cap in the error type ("provider.go-limit"
+ * when OpenCode Go's monthly usage is used up). That is a usage limit, not a
+ * broken turn: retrying cannot help until the limit lifts.
+ */
+const failureClassOf = (type: string): "usage_limit" | "provider_error" =>
+  /(?:^|[.\-_])(?:limit|quota)$/i.test(type) ? "usage_limit" : "provider_error";
+
 const OpenCode2ProviderCapabilities = {
   sessions: {
     supportsMultipleProviderThreadsPerSession: true,
@@ -2071,7 +2079,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             failure: makeProviderFailure({
               message: event.data.error.message,
               code: event.data.error.type,
-              class: "provider_error",
+              class: failureClassOf(event.data.error.type),
             }),
           });
         default:
