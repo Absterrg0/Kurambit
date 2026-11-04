@@ -312,7 +312,10 @@ export const openWebPlaySession = async (input: {
             await page.mouse.click(Math.round(click.x), Math.round(click.y)).catch(() => undefined);
       },
       setState: async (target, values) => {
-        await page.evaluate(STUDIO_SET_STATE, { target, values }).catch(() => false);
+        // Playwright evaluates a string as an expression and never calls it, so the
+        // call and its JSON argument are part of the expression.
+        const call = `(${STUDIO_SET_STATE})(${JSON.stringify({ target, values })})`;
+        await page.evaluate(call).catch(() => false);
       },
       still: async (path) => {
         await page.screenshot({ path }).catch(() => undefined);

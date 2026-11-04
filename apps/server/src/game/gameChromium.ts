@@ -59,9 +59,9 @@ export const READ_STUDIO_STATE = `(() => {
 })()`;
 
 /**
- * Reaches named late content through the game's own setState. The input is
- * one object because Playwright's evaluate takes a single argument. Returns
- * the game's boolean: a refusal is not an error.
+ * Reaches named late content through the game's own setState. Function text,
+ * not a call: the caller applies it to one JSON input. Returns the game's
+ * boolean: a refusal is not an error.
  */
 export const STUDIO_SET_STATE = `(input) => {
   const target = input?.target;
