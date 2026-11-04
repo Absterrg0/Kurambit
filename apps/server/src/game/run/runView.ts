@@ -84,7 +84,10 @@ export const steerWhen = (state: State.RunState | null): string => {
 // run was started with overrides. A `#variant` suffix is the client's display
 // form, not a routable model: launching with it fails every turn at once, so it
 // becomes the `variant` option instead (T25: every #xhigh turn failed this way).
-export const selectionFor = (current: ModelSelection, state: State.RunState): ModelSelection => {
+export const selectionFor = (
+  current: ModelSelection,
+  state: Pick<State.RunState, "provider" | "model" | "variant">,
+): ModelSelection => {
   let model = state.model ?? current.model;
   let variant = state.variant;
   const suffix = /#([A-Za-z][A-Za-z0-9_-]*)$/.exec(model);

@@ -34,6 +34,8 @@ import * as EventStore from "../EventStore.ts";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
+import * as GameRunDecisions from "../gameRun/GameRunDecisions.ts";
+import * as GameRunJobs from "../gameRun/GameRunJobs.ts";
 import * as ProjectStore from "../ProjectStore.ts";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
@@ -486,9 +488,15 @@ export function layerWithRegistry<Error>(
           ),
         )
       : Layer.empty;
+  const layerGameRunJobsProvided = GameRunJobs.layer;
+  const layerGameRunDecisionsProvided = GameRunDecisions.layer.pipe(
+    Layer.provide(Layer.mergeAll(layerOrchestratorProvided, layerStores)),
+  );
   const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
     Layer.provide(
       Layer.mergeAll(
+        layerGameRunJobsProvided,
+        layerGameRunDecisionsProvided,
         layerRunFinalizationServiceProvided,
         layerCheckpointRollbackServiceProvided,
         layerProviderSessionManagerProvided,
@@ -506,6 +514,8 @@ export function layerWithRegistry<Error>(
   );
   const layerReplayRuntime = Layer.mergeAll(
     layerOrchestratorProvided,
+    layerGameRunJobsProvided,
+    layerGameRunDecisionsProvided,
     layerProviderSessionManagerProvided,
     layerEffectWorkerProvided,
     layerEventSinkProvided,

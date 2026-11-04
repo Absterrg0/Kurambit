@@ -1,4 +1,4 @@
-import * as GameRun from "../../../game/GameRun.ts";
+import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
@@ -40,7 +40,7 @@ const unreadableThread = ThreadId.make("thread-unreadable");
 
 const layerStubServices = Layer.mergeAll(
   Layer.mock(GameService.GameService)({}),
-  Layer.mock(GameRun.GameRun)({}),
+  Layer.mock(GameRunControl.GameRunControl)({}),
   Layer.mock(McpHttpServer.McpClientAuthenticator)({
     authenticate: () => Effect.succeed(undefined),
   }),

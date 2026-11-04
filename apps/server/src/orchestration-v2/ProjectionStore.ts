@@ -420,6 +420,11 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
     filter?: GameRunRecordFilter,
   ) => Effect.Effect<GameRunThreadRecords, ProjectionStoreV2Error>;
+  /** Creator threads whose latest game run has not ended, for startup recovery. */
+  readonly listLiveGameRunThreads: () => Effect.Effect<
+    ReadonlyArray<ThreadId>,
+    ProjectionStoreV2Error
+  >;
 
   readonly apply: (
     event: OrchestrationV2DomainEvent,
@@ -5086,6 +5091,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           Effect.mapError(controlReadError(threadId)),
         );
 
+    const listLiveGameRunThreads: ProjectionStoreV2Shape["listLiveGameRunThreads"] = () =>
+      sql<{ readonly thread_id: string }>`
+        SELECT DISTINCT thread_id FROM orchestration_v2_projection_game_runs
+        WHERE status != 'ended'
+      `.pipe(
+        Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const getThreadRecords: ProjectionStoreV2Shape["getThreadRecords"] = (
       threadId,
       fields,
@@ -6310,6 +6324,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getTurnItem,
       getThreadRecords,
       getGameRunRecords,
+      listLiveGameRunThreads,
       getRuntimeRequest,
       getPlan,
       getProviderControlContext,
@@ -6682,6 +6697,14 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ),
           };
         }),
+      listLiveGameRunThreads: () =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.gameRunRecords].flatMap(([threadId, records]) =>
+              records.gameRuns.some((run) => run.status !== "ended") ? [threadId] : [],
+            ),
+          ),
+        ),
       getRuntimeRequest: (threadId, requestId) =>
         Effect.gen(function* () {
           const projection = (yield* Ref.get(replayState)).projections.get(threadId);

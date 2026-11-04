@@ -23,6 +23,8 @@ import * as TestClock from "effect/testing/TestClock";
 import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EffectWorker from "./EffectWorker.ts";
+import * as GameRunDecisions from "./gameRun/GameRunDecisions.ts";
+import * as GameRunJobs from "./gameRun/GameRunJobs.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
@@ -148,6 +150,8 @@ function layerExecutorFor(input: {
         execute: () => Effect.void,
       }),
     ),
+    Layer.mock(GameRunJobs.GameRunJobs)({}),
+    Layer.mock(GameRunDecisions.GameRunDecisions)({}),
   );
   return EffectWorker.layerExecutor.pipe(
     Layer.provide(

@@ -2,7 +2,7 @@ import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
-import * as GameRun from "./game/GameRun.ts";
+import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
@@ -1179,7 +1179,7 @@ const layerWsRpc = (
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const game = yield* GameService.GameService;
-      const gameRun = yield* GameRun.GameRun;
+      const gameRun = yield* GameRunControl.GameRunControl;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameToolchain = yield* GameToolchain.GameToolchain;
       const currentSessionId = currentSession.sessionId;
@@ -3053,7 +3053,7 @@ export const layer = Layer.unwrap(
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const game = yield* GameService.GameService;
-    const gameRun = yield* GameRun.GameRun;
+    const gameRun = yield* GameRunControl.GameRunControl;
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
     const sql = yield* SqlClient.SqlClient;
@@ -3112,7 +3112,7 @@ export const layer = Layer.unwrap(
               serverBrowser,
             ).pipe(
               Layer.provide(Layer.succeed(GameService.GameService, game)),
-              Layer.provide(Layer.succeed(GameRun.GameRun, gameRun)),
+              Layer.provide(Layer.succeed(GameRunControl.GameRunControl, gameRun)),
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provideMerge(RpcSerialization.layerJson),

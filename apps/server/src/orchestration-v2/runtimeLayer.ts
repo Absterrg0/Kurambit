@@ -50,6 +50,9 @@ import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadLifecycleService from "./ThreadLifecycleService.ts";
 import * as ThreadForkService from "./ThreadForkService.ts";
+import * as GameRunDecisions from "./gameRun/GameRunDecisions.ts";
+import * as GameRunJobs from "./gameRun/GameRunJobs.ts";
+import * as GameRunRecovery from "./gameRun/GameRunRecovery.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
@@ -303,9 +306,22 @@ const layerThreadTitleRegenerationProvided = ThreadTitleRegenerationService.laye
     Layer.mergeAll(layerThreadManagementProvided, ProjectStore.layer, TextGeneration.layer),
   ),
 );
+// One supervisor for the process: the effect worker hands it steps, the game
+// layer attaches the work, recovery restarts what a restart cut off.
+const layerGameRunJobsProvided = GameRunJobs.layer;
+const layerGameRunDecisionsProvided = GameRunDecisions.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerOrchestratorProvided, ProjectionStore.layer)),
+);
+const layerGameRunRecoveryProvided = GameRunRecovery.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(layerGameRunJobsProvided, layerGameRunDecisionsProvided, ProjectionStore.layer),
+  ),
+);
 const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
   Layer.provide(
     Layer.mergeAll(
+      layerGameRunJobsProvided,
+      layerGameRunDecisionsProvided,
       layerRunFinalizationServiceProvided,
       layerCheckpointRollbackServiceProvided,
       layerProviderSessionManagerProvided,
@@ -345,6 +361,9 @@ const layerMcpAppRequestsProvided = McpAppRequests.layer.pipe(
 
 export const layer = Layer.mergeAll(
   layerCommandOutputHubProvided,
+  layerGameRunJobsProvided,
+  layerGameRunDecisionsProvided,
+  layerGameRunRecoveryProvided,
   layerOrchestratorProvided,
   layerMcpAppRequestsProvided,
   layerThreadManagementProvided,

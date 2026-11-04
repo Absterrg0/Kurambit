@@ -85,7 +85,7 @@ const decodeBotRow = Schema.decodeUnknownOption(Schema.fromJsonString(BotRow));
 // The bot the blind comparison replays: the latest play-mode run among the rows
 // this turn added, with the decider it used. An exploration bot wanders on
 // purpose and says nothing about how far scripted play gets, so it gives none.
-const lastBotRun = async (root: string, after: number): Promise<RoleDone["bot"]> => {
+export const lastBotRun = async (root: string, after: number): Promise<RoleDone["bot"]> => {
   const text = await NodeFSP.readFile(
     NodePath.join(root, ".studio", "bot-results.jsonl"),
     "utf8",
@@ -566,7 +566,7 @@ const stepWorktree = (
 // A blind comparator's checkout, made before its thread so the model's first
 // look finds its files in place: the BLANK commit, outside the game root,
 // holding only the step's copies. Any failure leaves no checkout behind.
-const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
+export const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
   Effect.gen(function* () {
     const made = yield* stepWorktree(deps, ctx, step, blankCommit(ctx.root));
     if (made === null) return null;
@@ -600,7 +600,12 @@ const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
 // Either way both sides of a comparison start on a ready player. A failed
 // preparation still plays (its first explore start builds, as it always
 // could), and only this log, which comparators never read, says which.
-const playerSampleWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, ref: string) =>
+export const playerSampleWorktree = (
+  deps: RoleDeps,
+  ctx: RoleContext,
+  step: RoleStep,
+  ref: string,
+) =>
   Effect.gen(function* () {
     const engine = laneProfile(ctx.lane).displayName;
     const made = yield* stepWorktree(deps, ctx, step, Effect.succeed(ref)).pipe(
@@ -638,7 +643,7 @@ const playerSampleWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, 
     return made;
   });
 
-const removeBlank = (
+export const removeBlank = (
   deps: RoleDeps,
   ctx: RoleContext,
   blank: { readonly path: string; readonly branch: string },
@@ -654,7 +659,7 @@ const removeBlank = (
 // first, so nothing writes into a folder being deleted.
 // Any failure keeps the worktree for the creator to see; nothing is rm'd by hand.
 export const releaseWorktree = (
-  deps: RoleDeps,
+  deps: Pick<RoleDeps, "threads" | "game" | "vcs">,
   ctx: Pick<RoleContext, "root" | "log">,
   threadId: ThreadId,
 ) =>
