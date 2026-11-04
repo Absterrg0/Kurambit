@@ -124,3 +124,7 @@ takes ~0.3s from sight to action, too slow for a fast hit.
 - Observations at 10 Hz: game state values, player position, HUD text, body
   (on-ground, velocity), visible landmarks, wall/drop clearance (3D), shape
   overlap, engine errors. 2D games have no room rays: steer by position.
+- Not every engine reports everything. Browser (three.js) games give game
+  state, player position, HUD text and page errors only, and skip id-clicks
+  (click at screen points). Unity games give no shape overlap and take no
+  `setState` writes. A missing field reads as unknown, so guard for it.

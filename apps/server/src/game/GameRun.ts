@@ -447,6 +447,21 @@ export const layer = Layer.effect(
           NodePath.join(templates, "bot-kit"),
           NodePath.join(root, ".studio", "bot", "kit"),
         );
+        // The engine's in-game play runner speaks the server's protocol, so a
+        // fresh run brings it up to date; its commit carries the change.
+        const owned = laneProfile(lane);
+        if (fresh && owned.run.harnessFiles !== null)
+          for (const file of owned.run.harnessFiles.files) {
+            const from = NodePath.join(
+              templates,
+              owned.run.harnessFiles.template,
+              owned.projectDirectory,
+              file,
+            );
+            const to = NodePath.join(root, lane, file);
+            await NodeFSP.mkdir(NodePath.dirname(to), { recursive: true });
+            await NodeFSP.copyFile(from, to).catch(() => undefined);
+          }
         const before = (await readText(NodePath.join(root, "AGENTS.md"))) ?? "";
         let agents = before.replace(STALE_SKILLS, "");
         if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;

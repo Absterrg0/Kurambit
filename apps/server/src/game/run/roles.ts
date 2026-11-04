@@ -1,7 +1,7 @@
 // Every prompt the loop sends, built from facts. About 150 words of rules; names no game,
 // genre or mechanic. Builders write; the harness plays.
 import { GAME_EXPLORE_BOUNDS } from "@kurambit/contracts";
-import { laneAssets, laneBots, laneProfile, laneUi } from "../engineProfile.ts";
+import { laneAssets, laneProfile, laneUi } from "../engineProfile.ts";
 
 // Role threads have no local engine binaries and must never look for any:
 // the game_* MCP tools are the only way to check, play, export, bot-test or model.
@@ -112,13 +112,11 @@ export const builderMore = (minutes: number, direction: string): string =>
 
 // The service records every bot run itself in .studio/bot-results.jsonl, so
 // the tester never appends there. With a Jev key the tester also explores.
-export const testerPlay = (n: number, jev: boolean, lane: string): string => {
-  const bots = !laneBots(lane)
-    ? "Bot runs do not play this game's engine; your play with the game_explore_* tools is the evidence."
-    : jev
-      ? "Write TWO bots under .studio/bot/: a win bot (goal: win or reach the ending; decider jev when the game suits fast decisions, else policy; run it with game_bot_run, seconds 60) and an exploration bot (goal: try everything; options covering the mechanics broadly, preferring what has not been tried, edge cases and limits; no goal of winning; see the run types in .studio/bot/kit/KIT-GUIDE.md; run it with game_bot_run mode explore, decider jev, seconds 40, runs 3). The service records every run and writes .studio/player-report.md; do not append to .studio/bot-results.jsonl yourself. A note without bot runs does not count."
-      : "You must also write or update a bot file under .studio/bot/ for this game and run it at least once with game_bot_run (decider policy unless the game needs jev). The service records every run in .studio/bot-results.jsonl; do not append there yourself. A note without a bot run does not count.";
-  return `${PLAYBOOK}${PLAYTEST_LINE}Play the game in this folder freely: start it with game_explore_start (default target), get past the menu, push as far as you can, try to win and to lose. ${bots} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${n}.md, main complaint first. You may only write that notes file${laneBots(lane) ? " and .studio/bot/ files" : ""}; do not change game files. Do not use subagents.`;
+export const testerPlay = (n: number, jev: boolean): string => {
+  const bots = jev
+    ? "Write TWO bots under .studio/bot/: a win bot (goal: win or reach the ending; decider jev when the game suits fast decisions, else policy; run it with game_bot_run, seconds 60) and an exploration bot (goal: try everything; options covering the mechanics broadly, preferring what has not been tried, edge cases and limits; no goal of winning; see the run types in .studio/bot/kit/KIT-GUIDE.md; run it with game_bot_run mode explore, decider jev, seconds 40, runs 3). The service records every run and writes .studio/player-report.md; do not append to .studio/bot-results.jsonl yourself. A note without bot runs does not count."
+    : "You must also write or update a bot file under .studio/bot/ for this game and run it at least once with game_bot_run (decider policy unless the game needs jev). The service records every run in .studio/bot-results.jsonl; do not append there yourself. A note without a bot run does not count.";
+  return `${PLAYBOOK}${PLAYTEST_LINE}Play the game in this folder freely: start it with game_explore_start (default target), get past the menu, push as far as you can, try to win and to lose. ${bots} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${n}.md, main complaint first. You may only write that notes file and .studio/bot/ files; do not change game files. Do not use subagents.`;
 };
 
 export const testerWrite = (n: number, move: string): string =>

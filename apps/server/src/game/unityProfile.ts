@@ -10,8 +10,6 @@ export const UNITY_PROFILE: GameEngineProfile = {
   layout: { assets: "Assets", ui: "UI", library: "Library", blender: "Assets/Blender" },
   viewport: UNITY_VIEWPORT,
   play: "player",
-  botRefusal:
-    "Bot runs do not play Unity games yet. Play a Unity game with game_explore_start/act/close, which runs a real Linux build with real input.",
   web: null,
   check: {
     timedOut: "The Unity check timed out before finishing its physics frames.",
@@ -19,6 +17,7 @@ export const UNITY_PROFILE: GameEngineProfile = {
   },
   run: {
     skill: "unity",
+    harnessFiles: { template: "blank-unity", files: ["Assets/Kurambit/StudioProbe.cs"] },
     // One editor per server builds every sample's player, so a second sample would wait on it.
     parallelSamples: false,
     // The project's first editor open imports everything (minutes; later opens take seconds).
