@@ -124,19 +124,20 @@ export const makeGodotBackend = (
       const runner = ["--path", input.projectDir, "--script", scriptPath, "--", input.requestPath];
       return {
         executable: binary.path,
-        args: input.display
-          ? [
-              "--display-driver",
-              "x11",
-              "--rendering-method",
-              "gl_compatibility",
-              "--audio-driver",
-              "Dummy",
-              "--resolution",
-              size,
-              ...runner,
-            ]
-          : ["--headless", "--audio-driver", "Dummy", "--resolution", size, ...runner],
+        args:
+          input.window !== null
+            ? [
+                "--display-driver",
+                "x11",
+                "--rendering-method",
+                "gl_compatibility",
+                "--audio-driver",
+                "Dummy",
+                "--resolution",
+                size,
+                ...runner,
+              ]
+            : ["--headless", "--audio-driver", "Dummy", "--resolution", size, ...runner],
         env,
         cwd: input.projectDir,
         request: { expectedUserDataPrefix: isolation.dataDir },

@@ -21,10 +21,7 @@ import * as GameToolchain from "./GameToolchain.ts";
 import {
   commandFlag,
   commandHas,
-  displayInRange,
-  findXvfb,
   memoryShortfall,
-  pickDisplay,
   readRecord,
   underIdleMemoryFloor,
 } from "./liveProcess.ts";
@@ -34,12 +31,12 @@ import {
   launchToken,
   listProcesses,
   processCwd,
-  spawnOwned,
   stopRecorded,
   type LaunchRecord,
   type OwnedProcess,
   type ProcessFacts,
 } from "./processHost.ts";
+import { findWindowHost, findXvfb, type HostedWindow } from "./windowHost.ts";
 import {
   UNITY_LICENSE_FAILURE,
   isUnityLicensingClient,
@@ -58,8 +55,8 @@ const IDLE_MS = 10 * 60_000;
  */
 const NEEDED_MB = 4096;
 const SESSION_FILE = "session.json";
-/** Unity's private displays; Blender and the bot pick from other ranges. */
-const DISPLAYS = { first: 251, last: 399 } as const;
+/** The editor's window: big enough for its scene-view captures. */
+const EDITOR_WINDOW = { width: 1280, height: 720 } as const;
 /** A first open resolves packages and imports every asset; later opens reuse Library/. */
 const READY_TIMEOUT_S = 900;
 /**
@@ -102,9 +99,8 @@ export const UNITY_EDIT_TOOL =
 interface Session {
   readonly root: string;
   readonly projectDir: string;
-  readonly display: string;
   readonly editor: OwnedProcess;
-  readonly xvfb: OwnedProcess;
+  readonly window: HostedWindow;
   readonly client: Client;
   readonly logPath: string;
   lastActive: number;
@@ -120,13 +116,12 @@ interface Session {
 interface SessionRecord {
   readonly root: string;
   readonly homeDir: string;
-  readonly display: string;
+  /** Where the editor's window lives (`:251`), once it opened. */
+  readonly display?: string;
   readonly editor: string;
   readonly projectDir: string;
-  readonly xvfb: string;
   readonly cli: string;
   readonly editorLaunch?: LaunchRecord;
-  readonly xvfbLaunch?: LaunchRecord;
   readonly mcpLaunch?: LaunchRecord;
 }
 
@@ -202,14 +197,6 @@ const recordedOwners = (
       // only the batchmode editor writing this session's log is ours.
       commandHas(facts, "-batchmode") &&
       commandFlag(facts, "-logFile", NodePath.join(homeDir, "editor.log")),
-  },
-  {
-    launch: record.xvfbLaunch,
-    owns: (facts) =>
-      live.xvfb !== null &&
-      commandHas(facts, live.xvfb) &&
-      displayInRange(record.display, DISPLAYS.first, DISPLAYS.last) &&
-      commandHas(facts, record.display!),
   },
 ];
 
@@ -684,7 +671,6 @@ const make = Effect.gen(function* () {
         if (
           existing !== undefined &&
           existing.editor.running() &&
-          existing.xvfb.running() &&
           (existing.inFlight > 0 || now - existing.lastActive < IDLE_MS)
         ) {
           existing.lastActive = now;
@@ -735,13 +721,13 @@ const make = Effect.gen(function* () {
           }
         for (const otherRoot of Array.from(sessions.keys())) yield* drop(otherRoot);
         yield* drop(root);
-        const xvfbPath = yield* Effect.promise(findXvfb);
-        if (xvfbPath === null)
+        const host = yield* Effect.promise(findWindowHost);
+        if (host === null)
           return yield* opError(
             "unity-live",
             "Xvfb",
             "tool-missing",
-            "Xvfb is needed for the live Unity editor's private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
+            "The live Unity editor needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
           );
         // After the drops above, so an editor this server just closed counts as free.
         const short = yield* Effect.promise(() =>
@@ -782,22 +768,11 @@ const make = Effect.gen(function* () {
           if (notSeeded !== null && notSeeded !== "it already has one")
             yield* Effect.logWarning("Unity worktree imports cold", { root, reason: notSeeded });
         }
-        const displayNum = yield* Effect.promise(() => pickDisplay(DISPLAYS.first, DISPLAYS.last));
-        if (displayNum === null)
-          return yield* opError(
-            "unity-live",
-            root,
-            "busy",
-            `No free private Xvfb display (:${DISPLAYS.first}–:${DISPLAYS.last}).`,
-          );
-        const display = `:${displayNum}`;
         let record: SessionRecord = {
           root,
           homeDir,
-          display,
           editor: unity.editor,
           projectDir,
-          xvfb: xvfbPath,
           cli: unity.cli,
         };
         // Written as each pid appears, so a crash mid-start still leaves the
@@ -817,55 +792,49 @@ const make = Effect.gen(function* () {
             yield* drop(root);
             return yield* opError("unity-live", root, reason, detail);
           });
-        const xvfb = spawnOwned(
-          xvfbPath,
-          [display, "-screen", "0", "1280x720x24", "-nolisten", "tcp"],
-          {
-            env: GameProcesses.engineChildEnv(),
-            stdio: "ignore",
-            tree: false,
-          },
-        );
-        xvfb.child.unref();
-        const xvfbLaunch = yield* Effect.promise(() => xvfb.record);
-        if (xvfbLaunch === null) return yield* fail("Xvfb did not start.", "io");
-        yield* remember({ xvfbLaunch });
         const logPath = NodePath.join(homeDir, "editor.log");
         // The token rides the command line as well as the environment, where
         // an OS without readable environments can still verify it.
         const editorToken = launchToken();
         // The editor leads its own tree so a stop takes its asset-import
         // workers and shader compilers with it.
-        const editorProcess = spawnOwned(
-          unity.editor,
-          [
-            "-batchmode",
-            "-projectPath",
-            projectDir,
-            "-logFile",
-            logPath,
-            "-force-glcore",
-            // Caps the job system's worker threads (the log confirms
-            // "Creating JobQueue using job-worker-count value 2").
-            "-job-worker-count",
-            "2",
-            "-kurambitLaunch",
-            editorToken,
-          ],
-          {
-            cwd: root,
-            env: unityEditorEnv({ DISPLAY: display, LIBGL_ALWAYS_SOFTWARE: "1" }),
-            stdio: "ignore",
-            tree: true,
-            window: true,
-            token: editorToken,
-          },
-        );
-        editorProcess.child.unref();
+        const hosted = yield* Effect.tryPromise({
+          try: () =>
+            host.launch(
+              {
+                executable: unity.editor,
+                args: [
+                  "-batchmode",
+                  "-projectPath",
+                  projectDir,
+                  "-logFile",
+                  logPath,
+                  "-force-glcore",
+                  // Caps the job system's worker threads (the log confirms
+                  // "Creating JobQueue using job-worker-count value 2").
+                  "-job-worker-count",
+                  "2",
+                  "-kurambitLaunch",
+                  editorToken,
+                ],
+                cwd: root,
+                env: unityEditorEnv({ LIBGL_ALWAYS_SOFTWARE: "1" }),
+                stdio: "ignore",
+                token: editorToken,
+              },
+              EDITOR_WINDOW,
+            ),
+          catch: (cause) =>
+            opError("unity-live", root, "io", "The Unity editor's window did not open.", cause),
+        });
+        const editorProcess = hosted.process;
         const editor = editorProcess.child;
         const editorLaunch = yield* Effect.promise(() => editorProcess.record);
+        yield* remember({
+          display: hosted.label,
+          ...(editorLaunch === null ? {} : { editorLaunch }),
+        });
         if (editorLaunch === null) return yield* fail("The Unity editor did not start.", "io");
-        yield* remember({ editorLaunch });
         // A batchmode editor that cannot open the project (compile errors, a
         // licence refusal) exits within seconds; the CLI would still wait out
         // its whole timeout for an editor that is gone.
@@ -971,9 +940,8 @@ const make = Effect.gen(function* () {
         const session: Session = {
           root,
           projectDir,
-          display,
           editor: editorProcess,
-          xvfb,
+          window: hosted,
           client,
           logPath,
           lastActive: yield* Clock.currentTimeMillis,

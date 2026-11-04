@@ -39,10 +39,7 @@ import { engineProfile } from "./engineProfile.ts";
 import {
   commandFlag,
   commandHas,
-  displayInRange,
-  findXvfb,
   memoryShortfall,
-  pickDisplay,
   readRecord,
   underIdleMemoryFloor,
 } from "./liveProcess.ts";
@@ -50,12 +47,12 @@ import {
   LAUNCH_ENV,
   adoptLaunch,
   launchToken,
-  spawnOwned,
   stopRecorded,
   type LaunchRecord,
   type OwnedProcess,
   type ProcessFacts,
 } from "./processHost.ts";
+import { findWindowHost, type HostedWindow } from "./windowHost.ts";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
@@ -100,11 +97,10 @@ export const GAME_BLENDER_POLYPIZZA_SECRET = "game-blender-polypizza-key";
 
 interface Session {
   readonly root: string;
-  readonly display: string;
   readonly port: number;
   readonly homeDir: string;
   readonly blender: OwnedProcess;
-  readonly xvfb: OwnedProcess;
+  readonly window: HostedWindow;
   readonly client: Client;
   readonly transport: StdioClientTransport;
   /** What this session was launched from; its own pids are verified against these. */
@@ -161,11 +157,7 @@ const waitPort = async (port: number, timeoutMs: number): Promise<boolean> => {
  * the spawn sites. The one-shot addon installer below is different: it
  * fetches the pinned package over the network, so it keeps proxy/cert
  * variables (see toolNetworkEnv). */
-const sessionEnv = (
-  homeDir: string,
-  display: string | null,
-  extra?: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv => {
+const sessionEnv = (homeDir: string, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const fakeHome = NodePath.join(homeDir, "home");
   const env: NodeJS.ProcessEnv = {
     ...GameProcesses.engineChildEnv(),
@@ -179,7 +171,6 @@ const sessionEnv = (
   env.LIBGL_ALWAYS_SOFTWARE = "1";
   env.LP_NUM_THREADS = "2";
   env.DISABLE_TELEMETRY = "true";
-  if (display !== null) env.DISPLAY = display;
   return env;
 };
 
@@ -217,8 +208,8 @@ const toolNetworkEnv = (): NodeJS.ProcessEnv => {
   return out;
 };
 
-/** Blender's private displays; Unity and the bot pick from other ranges. */
-const DISPLAYS = { first: 119, last: 249 } as const;
+/** Blender's window, the size its viewport looks render at. */
+const BLENDER_WINDOW = { width: 1280, height: 800 } as const;
 
 /** PNG IHDR dimensions without a decoder: width/height at bytes 16/20. */
 const pngSizeOf = (data: string, fallback: number): { width: number; height: number } => {
@@ -255,13 +246,12 @@ const textOf = (result: McpContent): string =>
  */
 interface SessionRecord {
   readonly port: number;
-  readonly display: string;
+  /** Where Blender's window lives (`:119`), once it opened. */
+  readonly display?: string;
   readonly blender: string;
   readonly bootPy: string;
-  readonly xvfb: string;
   readonly uvx: string;
   readonly blenderLaunch?: LaunchRecord;
-  readonly xvfbLaunch?: LaunchRecord;
   readonly mcpLaunch?: LaunchRecord;
 }
 
@@ -269,7 +259,6 @@ interface SessionRecord {
 interface LiveExecutables {
   readonly blender: string | null;
   readonly uvx: string | null;
-  readonly xvfb: string | null;
 }
 
 /**
@@ -298,14 +287,6 @@ const recordedOwners = (
     launch: record.blenderLaunch,
     owns: (facts) =>
       live.blender !== null && commandHas(facts, live.blender) && commandHas(facts, bootPy),
-  },
-  {
-    launch: record.xvfbLaunch,
-    owns: (facts) =>
-      live.xvfb !== null &&
-      commandHas(facts, live.xvfb) &&
-      displayInRange(record.display, DISPLAYS.first, DISPLAYS.last) &&
-      commandHas(facts, record.display!),
   },
 ];
 
@@ -425,7 +406,7 @@ const make = Effect.gen(function* () {
       Effect.map((uv): string | null => uv.uvx),
       Effect.orElseSucceed(() => null),
     );
-    return { blender, uvx, xvfb: yield* Effect.promise(findXvfb) };
+    return { blender, uvx };
   });
 
   /** Ends the in-memory session synchronously, so a sweep's idle check and the close are one step. */
@@ -435,8 +416,7 @@ const make = Effect.gen(function* () {
       sessions.delete(root);
       // Closing the client ends the MCP child it spawned.
       void session.client.close().catch(() => undefined);
-      session.blender.signal("SIGTERM");
-      session.xvfb.signal("SIGTERM");
+      void session.window.stop();
     }
     return session;
   };
@@ -490,7 +470,6 @@ const make = Effect.gen(function* () {
       if (
         existing !== undefined &&
         existing.blender.running() &&
-        existing.xvfb.running() &&
         now - existing.lastActive < IDLE_MS
       ) {
         existing.lastActive = now;
@@ -499,13 +478,13 @@ const make = Effect.gen(function* () {
       yield* drop(root);
       const uv = yield* resolveUv;
       const blender = yield* tools.executable("blender");
-      const xvfbPath = yield* Effect.promise(findXvfb);
-      if (xvfbPath === null)
+      const host = yield* Effect.promise(findWindowHost);
+      if (host === null)
         return yield* opError(
           "blender-live",
           "Xvfb",
           "tool-missing",
-          "Xvfb is needed for the live Blender's private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
+          "The live Blender needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
         );
       const short = yield* Effect.promise(() =>
         memoryShortfall("live Blender", NEEDED_MB, "KURAMBIT_BLENDER_MEMORY_MB"),
@@ -543,7 +522,7 @@ const make = Effect.gen(function* () {
         timeoutMs: 120_000,
         env: withBinDir(
           {
-            ...sessionEnv(homeDir, null),
+            ...sessionEnv(homeDir),
             BLENDERMCP_ADDONS_DIR: addonsDir,
             // Fixed installer argv, fetched over the network: proxy/cert
             // variables ride this child only.
@@ -572,7 +551,7 @@ const make = Effect.gen(function* () {
         ],
         operation: "blender-live-enable",
         timeoutMs: 120_000,
-        env: sessionEnv(homeDir, null),
+        env: sessionEnv(homeDir),
         envMode: "replace",
       });
       if (enable.exitCode !== 0)
@@ -583,22 +562,11 @@ const make = Effect.gen(function* () {
           "Could not enable the Blender addon in the isolated config.",
           enable,
         );
-      const displayNum = yield* Effect.promise(() => pickDisplay(DISPLAYS.first, DISPLAYS.last));
-      if (displayNum === null)
-        return yield* opError(
-          "blender-live",
-          root,
-          "busy",
-          "No free private Xvfb display (:119–:249).",
-        );
-      const display = `:${displayNum}`;
       const bootPy = NodePath.join(homeDir, "boot_server.py");
       let record: SessionRecord = {
         port,
-        display,
         blender: blender.path,
         bootPy,
-        xvfb: xvfbPath,
         uvx: uv.uvx,
       };
       // Written as each pid appears, so a crash mid-start still leaves the
@@ -611,16 +579,6 @@ const make = Effect.gen(function* () {
           },
           catch: (cause) => opError("blender-live", SESSION_FILE, "io", undefined, cause),
         });
-      const xvfb = spawnOwned(xvfbPath, [display, "-screen", "0", "1280x800x24"], {
-        env: sessionEnv(homeDir, null),
-        stdio: "ignore",
-        tree: false,
-      });
-      xvfb.child.unref();
-      const xvfbLaunch = yield* Effect.promise(() => xvfb.record);
-      if (xvfbLaunch === null)
-        return yield* opError("blender-live", display, "io", "Xvfb did not start.");
-      yield* remember({ xvfbLaunch });
       yield* Effect.tryPromise({
         try: () =>
           NodeFSP.writeFile(
@@ -638,38 +596,43 @@ const make = Effect.gen(function* () {
           .then(() => [blendPath])
           .catch(() => [] as string[]),
       );
-      const blenderProcess = yield* Effect.sync(() => {
-        const logFd = NodeFS.openSync(logPath, "w");
-        // Blender hands what follows `--` to Python and ignores it, so the
-        // token rides the command line where an OS hides environments.
-        const token = launchToken();
-        // cwd is the game root so relative paths in model code land in the game.
-        const owned = spawnOwned(blender.path, [...reopen, "--python", bootPy, "--", token], {
-          cwd: root,
-          env: withBinDir({ ...sessionEnv(homeDir, display), ...addonKeys }, uv.binDir),
-          stdio: ["ignore", logFd, logFd],
-          tree: true,
-          window: true,
-          token,
-        });
-        owned.child.unref();
-        try {
-          NodeFS.closeSync(logFd);
-        } catch {
-          /* the child keeps its copy */
-        }
-        return owned;
+      const hosted = yield* Effect.tryPromise({
+        try: async () => {
+          const logFd = NodeFS.openSync(logPath, "w");
+          // Blender hands what follows `--` to Python and ignores it, so the
+          // token rides the command line where an OS hides environments.
+          const token = launchToken();
+          try {
+            // cwd is the game root so relative paths in model code land in the game.
+            return await host.launch(
+              {
+                executable: blender.path,
+                args: [...reopen, "--python", bootPy, "--", token],
+                cwd: root,
+                env: withBinDir({ ...sessionEnv(homeDir), ...addonKeys }, uv.binDir),
+                stdio: ["ignore", logFd, logFd],
+                token,
+              },
+              BLENDER_WINDOW,
+            );
+          } finally {
+            NodeFS.closeSync(logFd);
+          }
+        },
+        catch: (cause) =>
+          opError("blender-live", root, "io", "Blender's window did not open.", cause),
       });
-      const stopStarted = Effect.sync(() => {
-        blenderProcess.signal("SIGTERM");
-        xvfb.signal("SIGTERM");
-      });
+      const blenderProcess = hosted.process;
+      const stopStarted = Effect.promise(() => hosted.stop());
       const blenderLaunch = yield* Effect.promise(() => blenderProcess.record);
+      yield* remember({
+        display: hosted.label,
+        ...(blenderLaunch === null ? {} : { blenderLaunch }),
+      });
       if (blenderLaunch === null) {
         yield* stopStarted;
         return yield* opError("blender-live", root, "io", "Blender did not start.");
       }
-      yield* remember({ blenderLaunch });
       if (!(yield* Effect.promise(() => waitPort(port, 90_000)))) {
         yield* stopStarted;
         return yield* opError(
@@ -737,14 +700,13 @@ const make = Effect.gen(function* () {
       const startedAt = yield* Clock.currentTimeMillis;
       const session: Session = {
         root,
-        display,
         port,
         homeDir,
         blender: blenderProcess,
-        xvfb,
+        window: hosted,
         client,
         transport,
-        live: { blender: blender.path, uvx: uv.uvx, xvfb: xvfbPath },
+        live: { blender: blender.path, uvx: uv.uvx },
         lastActive: startedAt,
       };
       sessions.set(root, session);

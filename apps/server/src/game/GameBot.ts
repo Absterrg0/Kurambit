@@ -26,6 +26,7 @@ import { insideGame } from "./GameProjectService.ts";
 import { findExecutable } from "./GameProcesses.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
 import { requireChromium } from "./gameChromium.ts";
+import { findWindowHost } from "./windowHost.ts";
 import { launchPageBot, launchProcessBot } from "./gameBotLaunch.ts";
 import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
 import { playBot, type BotLaunch } from "./gameBotPlay.ts";
@@ -468,17 +469,13 @@ const make = Effect.gen(function* () {
           "tool-missing",
           "ffmpeg is needed for the run video.",
         );
-      const xvfb = isWeb
-        ? null
-        : yield* Effect.promise(() =>
-            findExecutable("Xvfb", { pathEnv, override: process.env.KURAMBIT_XVFB }),
-          );
-      if (xvfb === null && !isWeb)
+      const host = isWeb ? null : yield* Effect.promise(() => findWindowHost());
+      if (host === null && !isWeb)
         return yield* opError(
           "Bot run",
           "Xvfb",
           "tool-missing",
-          "Xvfb is needed for the run's private display.",
+          "A bot run needs a window for the game, and this machine has no private display; install the system Xvfb package.",
         );
       // A player of the current sources, built once per source identity; an
       // editor that just built it closes, so it never plays beside the run.
@@ -600,7 +597,7 @@ const make = Effect.gen(function* () {
                   traceDir: runDir,
                   saves,
                   viewport,
-                  display: true,
+                  window: host!.kind,
                 }).pipe(
                   Effect.flatMap((spec) =>
                     Effect.tryPromise({
@@ -611,7 +608,7 @@ const make = Effect.gen(function* () {
                             spec,
                             listener,
                             requestPath,
-                            xvfb: xvfb!,
+                            host: host!,
                             viewport,
                             runDir,
                             session,

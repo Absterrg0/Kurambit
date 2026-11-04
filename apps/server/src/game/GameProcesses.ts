@@ -8,8 +8,9 @@ import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { GameOperationError, type GameProcessResult } from "@kurambit/contracts";
+import { GameOperationError, type GameProcessResult, type GameViewport } from "@kurambit/contracts";
 import { spawnOwned } from "./processHost.ts";
+import type { WindowCommand, WindowHost } from "./windowHost.ts";
 
 interface Running {
   child: NodeChildProcess.ChildProcess;
@@ -104,12 +105,12 @@ interface ProcessInput {
    */
   envMode?: "inherit" | "replace" | undefined;
   /**
-   * Own the child's whole tree (see processHost): stop, timeout and disposal
-   * end wrapper-spawned descendants too (a window host's display server and
-   * its engine child). Defaults to direct-child signalling; never matches
-   * processes by name.
+   * Start the child in a window the user never sees (see windowHost); the
+   * child then owns its tree, and stop, timeout and disposal also end what
+   * the window needed. Without it the child is signalled directly; nothing
+   * is ever matched by name.
    */
-  ownedProcessGroup?: boolean | undefined;
+  window?: { readonly host: WindowHost; readonly viewport: GameViewport } | undefined;
 }
 export class GameProcesses extends Context.Service<
   GameProcesses,
@@ -142,7 +143,9 @@ const make = Effect.gen(function* () {
       log.once("open", () => resolve());
       log.once("error", reject);
     });
-    const owned = spawnOwned(input.executable, input.args, {
+    const command = {
+      executable: input.executable,
+      args: input.args,
       cwd: input.cwd ?? input.root,
       // "replace" starts from nothing so omitted keys are actually absent in
       // the spawned child; "inherit" keeps the headless server base for
@@ -152,18 +155,23 @@ const make = Effect.gen(function* () {
           ? { ...input.env }
           : { ...headlessEnvironment(process.env), ...input.env },
       stdio: ["ignore", "pipe", "pipe"],
-      // A wrapper (a window host) leaves its display server and engine child
-      // in the tree; owning the tree is the only way to stop all of them.
-      tree: input.ownedProcessGroup === true,
-      window: input.ownedProcessGroup === true,
-    });
+    } satisfies WindowCommand;
+    const hosted =
+      input.window === undefined
+        ? null
+        : await input.window.host.launch(command, input.window.viewport).catch((error: unknown) => {
+            log.end();
+            throw error;
+          });
+    const owned =
+      hosted?.process ?? spawnOwned(command.executable, command.args, { ...command, tree: false });
     const { child } = owned;
     let stdout = "",
       stderr = "",
       timedOut = false;
     let stopping: Promise<void> | null = null;
     const stop = () => {
-      stopping ??= owned.stop().finally(() => {
+      stopping ??= (hosted?.stop() ?? owned.stop()).finally(() => {
         stopping = null;
       });
     };
@@ -191,10 +199,10 @@ const make = Effect.gen(function* () {
       log.on("error", () => stop());
       child.once("close", (code, exitSignal) => {
         clearTimeout(timer);
-        // The leader closed, but an owned tree may still hold its display
-        // server or engine child, and the close removes this entry from the
-        // tracked map, so a later stop() could not reach it.
-        if (owned.alive()) stop();
+        // The child closed, but its tree or window may still hold processes,
+        // and the close removes this entry from the tracked map, so a later
+        // stop() could not reach them.
+        if (hosted !== null || owned.alive()) stop();
         signal?.removeEventListener("abort", abort);
         if (child.pid !== undefined) running.delete(child.pid);
         log.end(() => {
@@ -223,10 +231,14 @@ const make = Effect.gen(function* () {
         done,
         stop,
       });
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
+    // A hosted child may have spawned already; its record settles either way.
+    if (hosted !== null) {
+      if ((await owned.record) === null) throw new Error(`${input.executable} did not start.`);
+    } else
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
     return { pid: child.pid!, logPath, done };
   };
   const stop = (root?: string) =>

@@ -555,13 +555,13 @@ export const makeUnityBackend = (
             reason: "invalid-input",
             detail: "A Unity session plays a prepared player, and none was given.",
           });
-        if (!input.display)
+        if (input.window === null)
           return yield* new GameOperationError({
             operation: "Play session",
             path: input.projectDir,
             reason: "tool-missing",
             detail:
-              "A Unity session needs xvfb-run for the player's private display; install the system Xvfb package.",
+              "A Unity session needs a window for its player, and this machine has no private display; install the system Xvfb package.",
           });
         const home = NodePath.join(input.saves ?? input.traceDir, "home");
         yield* Effect.tryPromise({

@@ -1,9 +1,7 @@
-// @effect-diagnostics globalTimers:off nodeBuiltinImport:off preferSchemaOverJson:off -- Shared memory, display and launch-record helpers for the live editors' native boundary (GameBlender, GameUnity).
-// A live editor runs on a private display, records each launch on disk as it
-// starts, and is reaped only through launches that still verify as ours.
+// @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- Shared memory and launch-record helpers for the live editors' native boundary (GameBlender, GameUnity).
+// A live editor runs in a window host's window, records each launch on disk as
+// it starts, and is reaped only through launches that still verify as ours.
 import * as NodeFSP from "node:fs/promises";
-import * as NodeNet from "node:net";
-import { findExecutable } from "./GameProcesses.ts";
 import { memoryAvailable, type ProcessFacts } from "./processHost.ts";
 
 const MB = 1024 * 1024;
@@ -51,42 +49,6 @@ const IDLE_MEMORY_FLOOR = 1024 * MB;
 export const underIdleMemoryFloor = async (): Promise<number | null> => {
   const available = memoryAvailable();
   return available < IDLE_MEMORY_FLOOR ? Math.round(available / MB) : null;
-};
-
-/** The Xvfb every live editor launches, and the only Xvfb its records may name. */
-export const findXvfb = (): Promise<string | null> =>
-  findExecutable("Xvfb", { pathEnv: process.env.PATH, override: process.env.KURAMBIT_XVFB });
-
-/** The first display in [first, last] with neither an X lock file nor a listener. */
-export const pickDisplay = async (first: number, last: number): Promise<number | null> => {
-  for (let n = first; n <= last; n++) {
-    try {
-      await NodeFSP.access(`/tmp/.X${n}-lock`);
-      continue;
-    } catch {
-      /* candidate */
-    }
-    const taken = await new Promise<boolean>((resolve) => {
-      const s = NodeNet.connect(6000 + n, "127.0.0.1");
-      s.once("connect", () => {
-        s.destroy();
-        resolve(true);
-      });
-      s.once("error", () => {
-        s.destroy();
-        resolve(false);
-      });
-    });
-    if (!taken) return n;
-  }
-  return null;
-};
-
-/** `:N` inside the range this service picks its displays from. */
-export const displayInRange = (display: unknown, first: number, last: number): boolean => {
-  if (typeof display !== "string") return false;
-  const n = /^:(\d+)$/.exec(display)?.[1];
-  return n !== undefined && Number(n) >= first && Number(n) <= last;
 };
 
 export const readRecord = async <T>(file: string): Promise<Partial<T> | null> => {

@@ -100,7 +100,7 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   snippets; `gameWebServer` serves a game-relative directory over loopback for check/explore/bot
   without touching Preview state.
 - Unity play is a real Linux player of the current sources, built once per source identity
-  under `builds/logs/unity-play-*`, run under xvfb-run. The role runner makes a Unity sample's
+  under `builds/logs/unity-play-*`, run in a window host's window. The role runner makes a Unity sample's
   worktree itself and readies its player before the thread exists, so neither side of a
   comparison spends play time on a build: a copy-on-write copy of the main checkout's player of
   the same source identity (the content hash, never a commit: samples check out a neutral
@@ -150,8 +150,18 @@ ffmpeg on a wall-clock grid, repeating the last picture in a slot with no new on
 draws slowly or stops looks exactly like that, and writes `run.frames.json` beside the video with
 each frame's counter, game time and arrival (the evidence route is `engine-frames`). The run's end
 frame is the runner's own `still`. A protocol 1 runner (an older game's Unity probe) still plays,
-without video. The display host ([displayHost.ts](../../apps/server/src/game/displayHost.ts)) only
-gives the game a window it draws into.
+without video.
+
+So the harness needs exactly two things from an OS: a **process host**
+([processHost.ts](../../apps/server/src/game/processHost.ts), above) and a **window host**
+([windowHost.ts](../../apps/server/src/game/windowHost.ts)): one `launch(command, viewport)` that
+gives a game or editor a window it draws into, which the user never sees and which never takes
+focus. Exploration, bots and the live Unity editor (which runs the Unity check and builds players)
+and Blender all launch through it; the Godot check needs no window and runs headless. On Linux every launch gets its own Xvfb display; the display outlives its command and ends right
+after it (an engine that loses its display mid-quit hangs in Xlib's exit path), so a game that quits
+because its server died takes its display along. Without a window host a native session runs
+headless where its engine can and refuses plainly otherwise; it never falls back to the user's
+display.
 
 ## Tools
 
@@ -321,5 +331,5 @@ manifest, and every engine question the loop has is the lane's engine profile.
 Two constraints hold everywhere:
 
 - Nothing opens on the user's desktop. Every game process drops `DISPLAY`, `WAYLAND_DISPLAY` and
-  `XAUTHORITY`; pictures come from a private virtual display.
+  `XAUTHORITY`; its window comes from the window host, and its pictures from the engine.
 - No test suites for the game layer beyond data-safety checks; games are played, not asserted.

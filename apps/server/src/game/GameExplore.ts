@@ -44,7 +44,7 @@ import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { insideGame } from "./GameProjectService.ts";
-import { findXvfbRun, xvfbRunArgs } from "./displayHost.ts";
+import { findWindowHost } from "./windowHost.ts";
 import {
   listenForRunner,
   type PlayActObservation,
@@ -75,7 +75,7 @@ const EXPLORE_WEB_ROOM: MemoryRoom = {
   env: "KURAMBIT_EXPLORE_WEB_MEMORY_MB",
 };
 /**
- * A built Linux player under software GL and its xvfb-run display: a small
+ * A built Linux player under software GL and its private display: a small
  * 3D Unity game's player held 290 MB PSS; headroom covers bigger games. Its
  * build, when the session needs one, is the live editor's own memory guard.
  */
@@ -517,8 +517,8 @@ const make = Effect.gen(function* () {
           cause,
         });
   /**
-   * Starts the engine's runner process on a private display (headless when
-   * the engine runs without one and xvfb-run is missing) and waits for its
+   * Starts the engine's runner process in a window host's window (headless
+   * when the engine runs without one and the machine has no host) and waits for its
    * hello. Everything it started is ended on any failure, by PID only.
    */
   const openRunner = (input: {
@@ -541,7 +541,7 @@ const make = Effect.gen(function* () {
           root,
           `${backend.profile.displayName} games play in the browser.`,
         );
-      const xvfb = yield* Effect.promise(() => findXvfbRun());
+      const host = yield* Effect.promise(() => findWindowHost());
       const scriptDir = NodePath.join(root, "builds/logs", `game-explore-${input.id}`);
       const requestPath = NodePath.join(input.traceDir, "request.json");
       yield* Effect.tryPromise({
@@ -574,7 +574,7 @@ const make = Effect.gen(function* () {
           traceDir: input.traceDir,
           saves: input.saves,
           viewport: input.viewport,
-          display: xvfb !== null,
+          window: host?.kind ?? null,
         });
         yield* Effect.tryPromise({
           try: () => listener.writeRequest(requestPath, spec.request),
@@ -590,17 +590,14 @@ const make = Effect.gen(function* () {
         const bootWallStart = Date.now();
         const launched = yield* processes.start({
           root,
-          executable: xvfb ?? spec.executable,
-          args:
-            xvfb === null
-              ? [...spec.args]
-              : xvfbRunArgs(input.viewport, [spec.executable, ...spec.args]),
+          executable: spec.executable,
+          args: spec.args,
           ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
           operation: "explore-play",
           timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
           env: spec.env,
           envMode: "replace",
-          ownedProcessGroup: true,
+          window: host === null ? undefined : { host, viewport: input.viewport },
         });
         const play = yield* Effect.tryPromise({
           try: (signal) =>
@@ -631,7 +628,7 @@ const make = Effect.gen(function* () {
             Effect.ignore,
           ),
           scratch: spec.scratch,
-          pictures: xvfb !== null,
+          pictures: host !== null,
           bootMs,
           inputNote: spec.inputNote,
         } satisfies OpenedPlay;
@@ -707,7 +704,7 @@ const make = Effect.gen(function* () {
       const held = input.target === "native";
       const noPicture = opened.pictures
         ? ""
-        : "Runs headless without a picture (xvfb-run was not found on PATH): state, text, ui and errors stay available. ";
+        : "Runs headless without a picture (this machine has no private display: install Xvfb): state, text, ui and errors stay available. ";
       const savesNote =
         input.saves === null
           ? ""
@@ -1079,7 +1076,7 @@ const make = Effect.gen(function* () {
       let screenshotReason: string | undefined = undefined;
       if (screenshotPath === null)
         screenshotReason =
-          "xvfb-run was not found on PATH, so the native session runs headless without a picture. State, text, ui and errors stay available.";
+          "This machine has no private display (install Xvfb), so the native session runs headless without a picture. State, text, ui and errors stay available.";
       else if (
         reply.screenshot &&
         (yield* Effect.promise(() =>
