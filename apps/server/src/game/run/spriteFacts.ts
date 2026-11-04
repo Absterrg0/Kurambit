@@ -5,7 +5,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import * as NodeZlib from "node:zlib";
-import { laneAssets, laneLibrary } from "./roles.ts";
+import { laneAssets, laneLibrary } from "../engineProfile.ts";
 
 const MAX_IMAGES = 160;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;

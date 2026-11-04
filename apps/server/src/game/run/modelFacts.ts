@@ -2,7 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
-import { laneAssets, laneLibrary } from "./roles.ts";
+import { laneAssets, laneLibrary } from "../engineProfile.ts";
 
 // Measured facts on the game's glTF models, read from their JSON alone (no
 // buffers): size, triangles, skeleton, clips and referenced files. The art

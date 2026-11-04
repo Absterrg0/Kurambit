@@ -30,6 +30,7 @@ import type { RoleDone, StepResult } from "./policy.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn, waitOutLowMemory } from "./lowMemory.ts";
 import { CONTINUE, MEMORY_RETRY } from "./roles.ts";
 import { BLANK, type RoleStep } from "./state.ts";
+import { laneProfile } from "../engineProfile.ts";
 
 class RoleRunError extends Schema.TaggedError<RoleRunError>()("RoleRunError", {
   op: Schema.String,
@@ -256,8 +257,8 @@ export const runRole: (
         `${step.role}: no neutral commit for ${step.at.slice(0, 12)}; playing the build's own`,
       );
     const sample =
-      blank === null && step.at !== null && ctx.lane === "unity"
-        ? yield* unitySampleWorktree(deps, ctx, step, baseRef ?? step.at)
+      blank === null && step.at !== null && laneProfile(ctx.lane).play === "player"
+        ? yield* playerSampleWorktree(deps, ctx, step, baseRef ?? step.at)
         : null;
     const own = blank ?? sample;
     const launched = yield* deps.launches
@@ -582,12 +583,13 @@ const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
 // Either way both sides of a comparison start on a ready player. A failed
 // preparation still plays (its first explore start builds, as it always
 // could), and only this log, which comparators never read, says which.
-const unitySampleWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, ref: string) =>
+const playerSampleWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, ref: string) =>
   Effect.gen(function* () {
+    const engine = laneProfile(ctx.lane).displayName;
     const made = yield* stepWorktree(deps, ctx, step, Effect.succeed(ref)).pipe(
       Effect.catchCause(() =>
         ctx
-          .log(`${step.role}: its Unity worktree could not be made; the launch makes one`)
+          .log(`${step.role}: its ${engine} worktree could not be made; the launch makes one`)
           .pipe(Effect.as(null)),
       ),
     );
@@ -596,23 +598,23 @@ const unitySampleWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, r
     const seconds = () => `${Math.round((Date.now() - from) / 1000)} s`;
     // Memory short is waited out here, before either side's clock.
     yield* waitOutLowMemory(
-      deps.game.unityPreparePlayer(made.path),
-      `${step.role}: Unity player preparation`,
+      deps.game.preparePlayer(made.path),
+      `${step.role}: ${engine} player preparation`,
       ctx.log,
     ).pipe(
       Effect.matchEffect({
         onSuccess: (prepared) =>
           ctx.log(
-            `${step.role}: Unity player ${prepared.origin} for ${prepared.sourceId.slice(0, 12)} in ${seconds()} before launch`,
+            `${step.role}: ${engine} player ${prepared.origin} for ${prepared.sourceId.slice(0, 12)} in ${seconds()} before launch`,
           ),
         onFailure: (error) =>
           ctx.log(
-            `${step.role}: Unity player not prepared after ${seconds()} (${(error.detail ?? error.reason).slice(0, 300)}); its first explore start builds one`,
+            `${step.role}: ${engine} player not prepared after ${seconds()} (${(error.detail ?? error.reason).slice(0, 300)}); its first explore start builds one`,
           ),
       }),
       Effect.catchCause(() =>
         ctx.log(
-          `${step.role}: Unity player preparation broke after ${seconds()}; its first explore start builds one`,
+          `${step.role}: ${engine} player preparation broke after ${seconds()}; its first explore start builds one`,
         ),
       ),
     );

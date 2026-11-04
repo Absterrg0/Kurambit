@@ -267,7 +267,7 @@ export class GameService extends Context.Service<
      * guard. Idempotent. A blind sample's worktree gets this before its
      * thread exists, so no sample spends its play time on a build.
      */
-    readonly unityPreparePlayer: (root: string) => Effect.Effect<
+    readonly preparePlayer: (root: string) => Effect.Effect<
       {
         readonly origin: "cached" | "reused" | "built";
         readonly ms: number;
@@ -280,7 +280,7 @@ export class GameService extends Context.Service<
      * import is paid outside any role's clock. A no-op when the project
      * already has an import cache.
      */
-    readonly unityWarmEditor: (root: string) => Effect.Effect<boolean, GameOperationError>;
+    readonly warmEditor: (root: string) => Effect.Effect<boolean, GameOperationError>;
     /** Live Blender scene: run bpy code, auto-saving the .blend source. */
     readonly blenderCode: (
       threadId: ThreadId,
@@ -3861,7 +3861,7 @@ ${built.result.message}`.slice(0, 3000),
       withRoot(threadId, "Library add", (root) => library.add(root, input)),
     closeLiveEditors: (root) =>
       Effect.all([liveBlender.stop(root), liveUnity.stop(root)], { discard: true }),
-    unityPreparePlayer: Effect.fn("GameService.unityPreparePlayer")(function* (root) {
+    preparePlayer: Effect.fn("GameService.preparePlayer")(function* (root) {
       if ((yield* projects.read(root)).engine.name !== "unity")
         return yield* exploreInvalid(root, "Only a Unity game plays a prepared player.");
       const prepared = yield* unityPrepareLock.withPermits(1)(
@@ -3875,7 +3875,7 @@ ${built.result.message}`.slice(0, 3000),
       );
       return { origin: prepared.origin, ms: prepared.ms, sourceId: prepared.sourceId };
     }),
-    unityWarmEditor: Effect.fn("GameService.unityWarmEditor")(function* (root) {
+    warmEditor: Effect.fn("GameService.warmEditor")(function* (root) {
       if ((yield* projects.read(root)).engine.name !== "unity") return false;
       const { cwd } = yield* engine(root);
       // Unity creates Library/ as soon as it starts importing, so a warm-up cut

@@ -51,6 +51,7 @@ import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { pickRef, runProgress } from "./run/progress.ts";
 import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { artFacts, modelBlock, spriteBlock } from "./run/roles.ts";
+import { ENGINE_SKILLS, laneProfile } from "./engineProfile.ts";
 import { spriteFacts } from "./run/spriteFacts.ts";
 import { modelFacts } from "./run/modelFacts.ts";
 import * as State from "./run/state.ts";
@@ -107,17 +108,10 @@ const CONTINUABLE = new Set([
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
-/** Each lane's engine skill; a role told to read every skill must not get another engine's rules. */
-const ENGINE_SKILLS: Record<string, string> = {
-  godot: "godot-game",
-  web: "three",
-  unity: "unity",
-};
-
+// A role told to read every skill must not get another engine's rules.
 const keepLaneSkill = async (skills: string, lane: string) => {
-  const own = ENGINE_SKILLS[lane];
-  if (own === undefined) return;
-  const others = Object.values(ENGINE_SKILLS).filter((name) => name !== own);
+  const own = laneProfile(lane).run.skill;
+  const others = ENGINE_SKILLS.filter((name) => name !== own);
   await Promise.all(
     others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
   );
@@ -582,27 +576,28 @@ export const layer = Layer.effect(
                   : redo
                     ? `${step.prompt}${spriteBlock(sprites, true)}${modelBlock(models, true)}`
                     : step.prompt;
-              // A Unity game's first editor open imports the whole project
-              // (minutes; later opens take seconds). Paid here, before any
+              // An engine whose first editor open imports the whole project
+              // (minutes; later opens take seconds) pays it here, before any
               // role's clock, so the first prototype is not capped on it
               // while the second starts warm.
               const warmFrom = Date.now();
-              if (state.lane === "unity" && step.at === null)
+              const engine = laneProfile(state.lane);
+              if (engine.run.warmEditor && step.at === null)
                 yield* waitOutLowMemory(
-                  d.deps.game.unityWarmEditor(root),
-                  "Unity warm-up",
+                  d.deps.game.warmEditor(root),
+                  `${engine.displayName} warm-up`,
                   log,
                 ).pipe(
                   Effect.matchEffect({
                     onSuccess: (warmed) =>
                       warmed
                         ? log(
-                            `Unity warm-up: first import took ${Math.round((Date.now() - warmFrom) / 1000)} s, before ${step.role}'s clock`,
+                            `${engine.displayName} warm-up: first import took ${Math.round((Date.now() - warmFrom) / 1000)} s, before ${step.role}'s clock`,
                           )
                         : Effect.void,
                     onFailure: (error) =>
                       log(
-                        `Unity warm-up skipped (${(error.detail ?? error.reason).slice(0, 200)}); the role opens the editor itself`,
+                        `${engine.displayName} warm-up skipped (${(error.detail ?? error.reason).slice(0, 200)}); the role opens the editor itself`,
                       ),
                   }),
                 );

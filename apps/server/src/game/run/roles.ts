@@ -1,6 +1,7 @@
 // Every prompt the loop sends, built from facts. About 150 words of rules; names no game,
 // genre or mechanic. Builders write; the harness plays.
 import { GAME_EXPLORE_BOUNDS } from "@kurambit/contracts";
+import { laneAssets, laneBots, laneProfile, laneUi } from "../engineProfile.ts";
 
 // Role threads have no local engine binaries and must never look for any:
 // the game_* MCP tools are the only way to check, play, export, bot-test or model.
@@ -21,27 +22,6 @@ const SAMPLE_SESSIONS = Math.ceil(SAMPLE_INPUT_MS / B.maxTotalNominalMs);
 const BATCH = `Batch your input: a session allows ${B.maxCalls} game_explore_act calls, ${B.maxTotalSteps} steps and ${SESSION_S} seconds of input, so one short step per call runs out of calls long before input. Learn a control's response with one short hold, then send 2-3 held steps per call (keys for combinations), at most ${CALL_S} seconds of input per call in total and at most ${B.maxStepsPerCall} steps. Study the frame after each batch. `;
 const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (default target) and study every frame. The code says what should happen, playing shows what does, and playing wins. ${BATCH}`;
 
-/** Where a lane's art lives, as a game-relative path: Unity imports only what sits under Assets/. */
-export const laneAssets = (lane: string): string =>
-  lane === "unity" ? "unity/Assets" : `${lane}/assets`;
-
-/** Where a lane's icon and title art live; Unity's template folders are capitalised. */
-export const laneUi = (lane: string): string =>
-  `${laneAssets(lane)}/${lane === "unity" ? "UI" : "ui"}`;
-
-/** Where library packs land under the lane's asset dir. */
-export const laneLibrary = (lane: string): string =>
-  `${laneAssets(lane)}/${lane === "unity" ? "Library" : "library"}`;
-
-/** Bot runs play Godot and three.js games; Unity games are played through explore only. */
-export const laneBots = (lane: string): boolean => lane !== "unity";
-
-/**
- * A comparison's two builds play at once in their own worktrees. Not Unity:
- * one editor per server builds every sample's player, so a second waits on it.
- */
-export const laneParallel = (lane: string): boolean => lane !== "unity";
-
 export const CONTINUE = "Continue where you left off. Reply briefly, then keep working.";
 export const MEMORY_RETRY =
   "Your exploration could not start earlier because this machine was short of memory; it has had time to free and your clock starts over now. Start the exploration again and do the whole task below.";
@@ -54,10 +34,6 @@ const buildRule = (lane: string) =>
 const wholeBuildRule = (lane: string) =>
   `${TOOL_RULE}Build what this direction asks as one playable whole, not a sketch. Keep the game bootable as you go; use game_check for boot checks and focused play to verify what you built. The harness independently plays and judges your build afterwards. Work under ${lane}/; changes only to notes, bots or skills do not count. Finish when the direction is built and report what changed and what remains unverified.`;
 
-// The Unity lane imports models from Assets/; its prompt otherwise matches the Godot one.
-const UNITY_ART =
-  "A 3D game needs real 3D models as GLB, from the library or made with the game_blender_* tools and exported under unity/Assets/Blender with their armature and clips (glTFast imports both, clips included), textures and sprites as PNG under unity/Assets/Art, then game_import and game_check; code-built primitives are placeholders, same as 2D. Unity imports only what sits under unity/Assets/ (capital A). ";
-
 export const stage = (name: "vision" | "plan" | "art", lane: string): string => {
   if (name === "vision")
     return `${TOOL_RULE}Read the brief in BRIEF.md and make it yours. Write VISION.md in this folder in your own words: the player's fantasy, the 30-second loop, what makes this one special. Look through the CC0 asset library (game_assets_search with no query and no kind lists every pack and its style); when one pack fits the brief, make it the game's style source and name it in VISION.md, so the whole game keeps that one look. Then render one key-art PNG the finished game must live up to with game_blender_code, in that pack's style when you chose one (see ./studio-skills/art-pipeline.md for a working render setup; your own image tools are fine if you have them), look at it, and name it in VISION.md. Do not write game code yet. Work only in this folder. Do not use subagents. Never commit.`;
@@ -65,7 +41,7 @@ export const stage = (name: "vision" | "plan" | "art", lane: string): string => 
   // and adding levels is the creator's job, not the loop's.
   if (name === "plan")
     return `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (default target). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. Plan the depth the core needs; avoid filler and length targets. More content is the creator's choice. Do not write game code. Do not use subagents. Do not commit.`;
-  return `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Make the game's asset set as files in ${laneAssets(lane)} (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. Take what fits the key art from the CC0 library (game_assets_search, look at its contact sheet, then game_assets_add), starting with the pack VISION.md names if it names one, and render the rest to match: one consistent style for the whole game. Render sprites and animation frames from Blender models with game_blender_render_sprites (a pixel-art style pack goes in as its palette), never with your own camera or render code. Also replace ${laneUi(lane)}/icon.png (a placeholder) with the game's icon, 256x256, cut from the key art around its main subject so it reads at taskbar size: the window, the web tab and the Windows .exe use it. Also save the key art, 16:9, as ${laneUi(lane)}/title_bg.png: the title screen shows it behind the menu${lane === "web" ? `; also add, inside :root in ${lane}/style.css, --title-art: linear-gradient(rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.55)), url("assets/ui/title_bg.png"); (this one CSS line is allowed)` : ""}. ${lane === "unity" ? UNITY_ART : lane === "godot" ? "A 3D game needs real 3D models as GLB, library or Blender models (game_blender_* tools; rigged characters where they move), then imported and checked in the engine; code-built primitives are placeholders, same as 2D. " : "Models are GLB, library or Blender models (game_blender_* tools, exported under web/assets), sprites and textures as rendered PNGs; code-built primitives are placeholders. The export is a static copy, so everything the game loads must be a file under web/. "}In a 3D game every character or creature that moves is a rigged model with its animation clips (idle, walk or run, and its actions): take a rigged library character first (game_assets_search; the style pack's characters), and model one yourself only with an armature and clips when none fits; sprite frames are for 2D games. Record each file's intended use and source in ASSETS.md as a file-to-use map (one line per file: path, what it depicts, where the game loads it, source and licence). Do not write game code yet. Do not use subagents. Do not commit.`;
+  return `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Make the game's asset set as files in ${laneAssets(lane)} (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. Take what fits the key art from the CC0 library (game_assets_search, look at its contact sheet, then game_assets_add), starting with the pack VISION.md names if it names one, and render the rest to match: one consistent style for the whole game. Render sprites and animation frames from Blender models with game_blender_render_sprites (a pixel-art style pack goes in as its palette), never with your own camera or render code. Also replace ${laneUi(lane)}/icon.png (a placeholder) with the game's icon, 256x256, cut from the key art around its main subject so it reads at taskbar size: the window, the web tab and the Windows .exe use it. Also save the key art, 16:9, as ${laneUi(lane)}/title_bg.png: the title screen shows it behind the menu${laneProfile(lane).run.prompts.titleArt}. ${laneProfile(lane).run.prompts.art}In a 3D game every character or creature that moves is a rigged model with its animation clips (idle, walk or run, and its actions): take a rigged library character first (game_assets_search; the style pack's characters), and model one yourself only with an armature and clips when none fits; sprite frames are for 2D games. Record each file's intended use and source in ASSETS.md as a file-to-use map (one line per file: path, what it depicts, where the game loads it, source and licence). Do not write game code yet. Do not use subagents. Do not commit.`;
 };
 
 // The art stage's first render is judged by a fresh session, never by its maker.
@@ -97,19 +73,11 @@ export const modelBlock = (models: string, redo = false): string =>
 export const artRedo = (defects: string, lane: string): string =>
   `${TOOL_RULE}${SKILL_LINE}An independent art director reviewed the key art and the asset set and asked for one redo. Its defect list:\n${defects}\n\nFix every listed defect: re-render the named files (the key art VISION.md names, files under ${laneAssets(lane)}) held to the look VISION.md describes, keep each file's path, and update ASSETS.md where a file changed. Look at each new render before you finish. This is the only redo. Do not write game code. Do not use subagents. Do not commit.`;
 
-// Games made from the Godot starter carry a demo shell; older ones do not, so the line defers to TEMPLATE.md.
-const shellLine = (lane: string): string =>
-  lane === "godot"
-    ? "When TEMPLATE.md describes the demo shell, use it: gameplay goes in godot/scenes/game.tscn, a run ends with GameState.win or GameState.lose, every player action gets an answer through Juice, values that must survive a retry go in KEEP_ACROSS_RUNS, and you build no menus of your own. "
-    : lane === "web"
-      ? "When TEMPLATE.md describes the demo shell, use it: gameplay goes in web/main.js (start, update, stop on the ctx the shell passes), a run ends with GameState.win or GameState.lose, every player action gets an answer through Juice, values that must survive a retry go in KEEP_ACROSS_RUNS, and you build no menus or render loop of your own. "
-      : "";
-
 export const proto = (lane: string): string =>
-  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. ${shellLine(lane)}Keep the boot clean. Do not use subagents. Do not commit.`;
+  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. ${laneProfile(lane).run.prompts.shell}Keep the boot clean. Do not use subagents. Do not commit.`;
 
 export const firstDirection = (lane: string): string =>
-  `Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${laneAssets(lane)} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. ${shellLine(lane)}End with something a player notices in the first minute; game files under ${lane}/ only.`;
+  `Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${laneAssets(lane)} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. ${laneProfile(lane).run.prompts.shell}End with something a player notices in the first minute; game files under ${lane}/ only.`;
 
 const concreteAsk = (lane: string) =>
   `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under ${lane}/; notes, bots and skill files do not count.`;
