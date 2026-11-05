@@ -171,8 +171,18 @@ const make = Effect.gen(function* () {
       if (step === undefined || (step.status !== "planned" && step.status !== "running")) return;
       if (step.kind === "decide") return yield* decisions.presented(threadId);
       // An effect still owed drives the step; otherwise a durable wake does,
-      // in the outbox's order, never a job started from here.
-      if (yield* owes(threadId, ["game-run.step.execute", "game-run.step.wake"])) return;
+      // in the outbox's order, never a job started from here. A turn waiting to
+      // be sent again is its resend's: a wake would land the turn before it a
+      // second time. A pending cap is not: a turn the restart cut off needs the
+      // wake to be continued.
+      if (
+        yield* owes(threadId, [
+          "game-run.step.execute",
+          "game-run.step.wake",
+          "game-run.step.resend",
+        ])
+      )
+        return;
       yield* engine.dispatch({
         type: "game-run.step.schedule",
         commandId: CommandId.make(

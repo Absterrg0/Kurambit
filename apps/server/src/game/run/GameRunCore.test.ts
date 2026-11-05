@@ -1895,6 +1895,28 @@ it.effect("a finish whose opening read breaks once still finishes", () =>
   ),
 );
 
+it.effect("a restart while a turn waits to be sent again leaves it to its resend", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const landings = () =>
+        (NodeFS.existsSync(NodePath.join(lastRoot, ".studio", "run.log"))
+          ? NodeFS.readFileSync(NodePath.join(lastRoot, ".studio", "run.log"), "utf8")
+          : ""
+        ).split("instant-failed turn").length - 1;
+      // The step's job lands the failed turn: its resend waits on a timer.
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* until(() => landings() === 1);
+      // A restart: the step's effect is spent, but its resend still owes it.
+      yield* recover;
+      yield* until(() => landings() > 1);
+      assert.equal(landings(), 1);
+    }),
+  ),
+);
+
 it.effect("a role turn someone else interrupted is not read as capped", () =>
   withGame((world) =>
     Effect.gen(function* () {

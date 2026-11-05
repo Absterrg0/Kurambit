@@ -243,7 +243,7 @@ reach none of its controls.
   job a restart cut short sees the same round and makes the same choice.
 - **Recovery** (`GameRunRecovery`, at startup): a live run's unfinished step gets its job again,
   and an ending whose finish is not recorded finishes again. Recovery never jumps the outbox's
-  order: a step whose `game-run.step.execute` or `.wake` is still owed, and an ending whose
+  order: a step whose `game-run.step.execute`, `.wake` or `.resend` is still owed, and an ending whose
   `game-run.finish` is, are left to those effects, which run behind the outputs before them; any
   other step is woken with a `game-run.step.schedule` of kind `recover`. Only a finish or restore
   whose effect was already taken (so everything before it ran) gets its job straight back. Every step is safe to repeat because
