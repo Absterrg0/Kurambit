@@ -3,6 +3,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
 import { laneAssets, laneLibrary } from "../engineProfile.ts";
+import { readGltfJson } from "../gltfJson.ts";
 
 // Measured facts on the game's glTF models, read from their JSON alone (no
 // buffers): size, triangles, skeleton, clips and referenced files. The art
@@ -80,28 +81,10 @@ const local = (node: Node): Mat => {
 const IDENTITY: Mat = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 const readJson = async (path: string): Promise<Doc | null> => {
-  const handle = await NodeFSP.open(path, "r").catch(() => null);
-  if (handle === null) return null;
-  try {
-    if (/\.gltf$/i.test(path)) {
-      const { size } = await handle.stat();
-      if (size > MAX_JSON_BYTES) return null;
-      return JSON.parse((await handle.readFile()).toString("utf8")) as Doc;
-    }
-    const head = Buffer.alloc(20);
-    await handle.read(head, 0, 20, 0);
-    if (head.toString("latin1", 0, 4) !== "glTF" || head.toString("latin1", 16, 20) !== "JSON")
-      return null;
-    const length = head.readUInt32LE(12);
-    if (length > MAX_JSON_BYTES) return null;
-    const json = Buffer.alloc(length);
-    await handle.read(json, 0, length, 20);
-    return JSON.parse(json.toString("utf8")) as Doc;
-  } catch {
-    return null;
-  } finally {
-    await handle.close();
-  }
+  const read = await readGltfJson(path, MAX_JSON_BYTES);
+  return read.kind === "json" && typeof read.json === "object" && read.json !== null
+    ? (read.json as Doc)
+    : null;
 };
 
 const round = (n: number) => (n >= 10 ? Math.round(n) : Math.round(n * 100) / 100);

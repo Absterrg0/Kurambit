@@ -34,7 +34,6 @@
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",
     "@ff-labs/fff-node": "0.11.0",
-    "@gltf-transform/core": "4.5.1",
     "@kurambit/provider-acp": "workspace:*",
     "@kurambit/provider-acp-registry": "workspace:*",
     "@kurambit/provider-core": "workspace:*",
