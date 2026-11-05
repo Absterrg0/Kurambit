@@ -492,7 +492,7 @@ export function layerWithRegistry<Error>(
       : Layer.empty;
   const layerGameRunJobsProvided = GameRunJobs.layer;
   const layerGameRunDecisionsProvided = GameRunDecisions.layer.pipe(
-    Layer.provide(Layer.mergeAll(layerOrchestratorProvided, layerStores)),
+    Layer.provide(Layer.mergeAll(layerOrchestratorProvided, layerStores, layerGameRunJobsProvided)),
   );
   const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
     Layer.provide(

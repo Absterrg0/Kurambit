@@ -8,7 +8,7 @@ import { GameOperationError } from "@kurambit/contracts";
 import { botEnding, botFinalState } from "../gameBotRuntime.ts";
 import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
-import type { RoleDeps } from "./roleRunner.ts";
+import type { RoleDeps } from "./roleWorkspace.ts";
 import type { Step } from "./state.ts";
 
 type BotStep = Extract<Step, { kind: "bot" }>;

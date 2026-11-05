@@ -10,14 +10,7 @@ import type {
 import { laneProfile } from "../engineProfile.ts";
 import * as Roles from "./roles.ts";
 import type * as State from "./state.ts";
-import {
-  BLANK,
-  isStateCheck,
-  ladderOf,
-  parseLadder,
-  parseRungChange,
-  rungOfChange,
-} from "./state.ts";
+import { BLANK, isStateCheck, ladderOf, parseLadder, rungOfChange } from "./state.ts";
 import type {
   Block,
   BotFact,
@@ -83,9 +76,7 @@ const FLOOR_MS = 2 * MIN;
 // What the first full build needs after art; the art review and its redo
 // run only when they leave the build its start.
 const BUILD_RESERVE_MS = 24 * MIN;
-const ART_REVIEW = ".studio/art-review.md";
 const LADDER = Roles.LADDER_FILE;
-const RUNG_CHANGE = Roles.RUNG_CHANGE_FILE;
 // A rung that fails in this many rounds is set aside for the next.
 const RUNG_TRIES = 2;
 // A reviewer's insertions stop growing the ladder past this.
@@ -132,45 +123,6 @@ const submitted = <K extends GameRunSubmissionKind>(
 const ladderJson = (rungs: Submitted<"ladder">["rungs"]) =>
   `${JSON.stringify({ rungs }, null, 2)}\n`;
 
-// ── Declared lines: the old loop's prose. Code never interprets any other. ──
-const lastDeclared = (text: string, re: RegExp): string | null => {
-  const found = [...text.matchAll(re)].at(-1);
-  return found === undefined ? null : (found[1] ?? "").toUpperCase();
-};
-const parseShip = (text: string) => lastDeclared(text, /^SHIP:\s*(YES|NO)\s*$/gim);
-const parseCompare = (text: string) => lastDeclared(text, /^COMPARE:\s*(A|B|TIE)\s*$/gim);
-const parseSelect = (text: string) => lastDeclared(text, /^SELECT:\s*(A|B)\s*$/gim);
-const ART_LINE = /^ART:\s*(KEEP|REDO)\s*$/gim;
-const parseArt = (text: string) => lastDeclared(text, ART_LINE);
-// The tester's line per check; the last one for a check wins, a missing one fails.
-// Notes are Markdown, so bold, bullets, headings and words after the verdict
-// are formatting, not a different answer.
-const CHECK_LINE = /^CHECK\s+(\d+)\s*[:\-–—]\s*(PASS|FAIL)\b/i;
-const checkText = (line: string) =>
-  line
-    .replace(/[*_`]/g, "")
-    .replace(/^[\s>#\-+•]*(?:\d+[.)]\s*)?/, "")
-    .trim();
-const parseChecks = (text: string, rung: Rung): Round["checks"] => {
-  const lines = text.split("\n").map(checkText);
-  return rung.checks.map((check, i) => {
-    const at = lines.findLastIndex((line) => CHECK_LINE.exec(line)?.[1] === `${i + 1}`);
-    if (at < 0)
-      return { what: check.what, pass: false, evidence: "the tester declared no CHECK line" };
-    const end = lines.findIndex((line, j) => j > at && CHECK_LINE.test(line));
-    const evidence = lines
-      .slice(at + 1, end < 0 ? undefined : end)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 400);
-    return {
-      what: check.what,
-      pass: CHECK_LINE.exec(lines[at]!)?.[2]?.toUpperCase() === "PASS",
-      evidence,
-    };
-  });
-};
 // A tester's look-check results by their number in the rung; the run's own scoring covers state checks.
 const submittedChecksOf = (sub: Submitted<"checks">, rung: Rung): Round["checks"] =>
   rung.checks.map((check, i) => {
@@ -179,16 +131,6 @@ const submittedChecksOf = (sub: Submitted<"checks">, rung: Rung): Round["checks"
       ? { what: check.what, pass: false, evidence: "the tester submitted no result for this check" }
       : { what: check.what, pass: said.pass, evidence: said.evidence.slice(0, 400) };
   });
-const reasonsAfter = (text: string, re: RegExp): string => {
-  const lines = text.split("\n");
-  const at = lines.findLastIndex((line) => re.test(line));
-  return lines
-    .slice(at + 1)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 500);
-};
 
 // ── Pure round decisions. ─────────────────────────────────────────────────
 export type PairKind = "best-wins" | "candidate-wins" | "inconclusive" | "unjudged";
@@ -315,6 +257,8 @@ const lastTry = (state: RunState, rung: Rung): string => {
     : `round ${last.round}, branch ${last.branch}: ${last.rung.why}`;
 };
 
+// A plan turn that ended without a ladder left its work unfinished.
+const MISSING_LADDER = "no ladder was submitted";
 type Taken =
   | { readonly kind: "ladder"; readonly ladder: Ladder }
   | { readonly kind: "fix"; readonly thread: ThreadId; readonly error: string };
@@ -327,10 +271,8 @@ const takeLadder = (
   files: Array<{ path: string; text: string }>,
 ): Taken => {
   const sub = submitted(res, "ladder");
-  const parsed =
-    sub !== null
-      ? ladderOf(sub.rungs)
-      : parseLadder(res.kind === "done" ? (res.files?.[LADDER] ?? "") : "");
+  // A missing ladder is unfinished work; game-run.submit refused any of the wrong shape.
+  const parsed = sub !== null ? ladderOf(sub.rungs) : { error: MISSING_LADDER };
   if ("ladder" in parsed && sub !== null) files.push({ path: LADDER, text: ladderJson(sub.rungs) });
   if ("ladder" in parsed) {
     logs.push(
@@ -340,12 +282,10 @@ const takeLadder = (
     return { kind: "ladder", ladder: parsed.ladder };
   }
   if (!last && res.kind === "done") {
-    logs.push(
-      `ladder: ${LADDER} has the wrong shape; one fix turn (${parsed.error.slice(0, 200)})`,
-    );
+    logs.push(`ladder: none submitted; one fix turn (${parsed.error.slice(0, 200)})`);
     return { kind: "fix", thread: res.threadId, error: parsed.error };
   }
-  logs.push(`ladder: no valid ${LADDER} (${parsed.error.slice(0, 200)}); finish rounds only`);
+  logs.push(`ladder: no valid ladder (${parsed.error.slice(0, 200)}); finish rounds only`);
   return {
     kind: "ladder",
     ladder: { rungs: [], note: `the plan wrote no valid ladder: ${parsed.error}`.slice(0, 300) },
@@ -411,7 +351,7 @@ const insertionRefused = (ladder: Ladder): string | null =>
 
 const insertRung = (
   ladder: Ladder,
-  change: (id: number) => ReturnType<typeof parseRungChange>,
+  change: (id: number) => ReturnType<typeof rungOfChange> | null,
   n: number,
   logs: string[],
 ): Ladder => {
@@ -698,32 +638,22 @@ const role = (id: number, spec: RoleSpec): RoleStep => ({
   ...spec,
 });
 const git = (id: number, op: GitOp): Step => ({ kind: "git", id, op });
-const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>, typed: boolean): RoleSpec =>
+const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
   t.phase === "write"
     ? {
         role: "plan",
         title: "studio ladder",
-        prompt: Roles.ladderWrite(typed),
+        prompt: Roles.ladderWrite(),
         capMs: CAP.plan,
-        read: [LADDER],
-        clear: [LADDER],
       }
     : {
         role: "plan",
         title: "studio ladder",
         thread: t.thread,
-        prompt: Roles.ladderFix(t.error, typed),
+        prompt: Roles.ladderFix(),
         capMs: CAP.ladderFix,
-        read: [LADDER],
       };
 const bit = (coin: number, k: number) => Math.floor(coin * 2 ** (k + 1)) % 2 === 1;
-
-const textOf = (res: RoleDone, file: string): string => {
-  const written = (res.files?.[file] ?? "").trim();
-  if (written.length > 20) return written;
-  const text = (res.text ?? "").trim();
-  return text.length > 20 ? text : written;
-};
 
 const newBlock = (tag: string, direction: string, whole: boolean, msLeft: number): Block => ({
   tag,
@@ -852,7 +782,6 @@ const judgeFile = (j: Pick<Judge, "id">) => `.studio/comparisons/${j.id}.md`;
 const sheetFile = (s: Pick<Sample, "label">) => `.studio/comparisons/frames-${s.label}.jpg`;
 // A comparator sees only these names in its own BLANK worktree; none carries a
 // label, judge id or sha, and A and B follow its order, not the builds.
-const VERDICT = ".compare/verdict.md";
 const SHEET = { a: ".compare/sheet-a.jpg", b: ".compare/sheet-b.jpg" } as const;
 
 type SampleMove = { readonly side: Side; readonly current: Sample | null };
@@ -965,7 +894,6 @@ const sampleStep = (
   c: Compare,
   move: SampleMove,
   label: string,
-  typed: boolean,
 ): { sample: Sample | null; step: RoleStep } => {
   const at = move.side === "x" ? c.x : c.y;
   if (move.current === null) {
@@ -1008,12 +936,11 @@ const sampleStep = (
     title: "studio sample",
     thread: s.thread,
     at,
-    prompt: Roles.sampleWrite(sampleFile(s), typed),
+    prompt: Roles.sampleWrite(sampleFile(s)),
     capMs: CAP.write,
     // After a restart only this turn re-registers the thread's cap, and a
     // model that plays on here would void the sample.
     inputCapMs: Roles.SAMPLE_INPUT_MS,
-    read: [sampleFile(s)],
     release: true,
     sheet: sheetFile(s),
   });
@@ -1068,13 +995,7 @@ const compareStep = (
     // Ids and labels follow the play order, which is a coin, never x and y.
     let fresh = 0;
     const made = (parallel ? move.moves : move.moves.slice(0, 1)).map((m, i) =>
-      sampleStep(
-        id + i,
-        c,
-        m,
-        m.current === null && fresh++ > 0 ? `${input.id}b` : input.id,
-        state.typed,
-      ),
+      sampleStep(id + i, c, m, m.current === null && fresh++ > 0 ? `${input.id}b` : input.id),
     );
     const cmp = {
       ...c,
@@ -1124,13 +1045,10 @@ const compareStep = (
           report(move.aIs),
           report(other),
           j.aFirst,
-          VERDICT,
           botsShown(c),
           sheets ? SHEET : null,
-          state.typed,
         ),
         capMs: CAP.write,
-        read: [VERDICT],
       });
       return { cmp: { ...c, judges: [...c.judges, j] }, step, logs: [] };
     }
@@ -1140,9 +1058,8 @@ const compareStep = (
       title: "studio blind comparison",
       thread: j.thread,
       at: BLANK,
-      prompt: Roles.correct(VERDICT, state.typed),
+      prompt: Roles.correct(),
       capMs: CAP.write,
-      read: [VERDICT],
     });
     return { cmp: c, step, logs: [] };
   }
@@ -1195,7 +1112,7 @@ const applyCompare = (
             : {
                 ...s,
                 phase: "done",
-                notes: submitted(res, "report")?.report ?? textOf(res, sampleFile(s)),
+                notes: submitted(res, "report")?.report ?? "",
                 evidence: res.evidence ?? s.evidence,
                 sheet: res.sheet,
               };
@@ -1212,8 +1129,8 @@ const applyCompare = (
     return { ...c, judges: c.judges.with(ji, { ...j, phase: "done" }) };
   }
   const sub = submitted(res, "verdict");
-  const text = sub !== null ? sub.reasons : textOf(res, VERDICT);
-  const verdict = sub?.verdict ?? parseCompare(text);
+  const text = sub?.reasons ?? "";
+  const verdict = sub?.verdict ?? null;
   const next: Judge =
     verdict === null && j.phase === "compare"
       ? { ...j, thread: res.threadId, phase: "correct", notes: text }
@@ -1222,11 +1139,9 @@ const applyCompare = (
           thread: res.threadId,
           phase: "done",
           verdict: verdict ?? "NONE",
-          reason:
-            sub !== null
-              ? sub.reasons.replace(/\s+/g, " ").trim().slice(0, 500)
-              : reasonsAfter(text, /^COMPARE:\s*(A|B|TIE)\s*$/i),
-          notes: text,
+          reason: text.replace(/\s+/g, " ").trim().slice(0, 500),
+          // The comparator's write-up as the round detail shows it.
+          notes: verdict === null ? text : `Verdict: ${verdict}\n${text}`,
         };
   if (next.phase === "done") release.push(res.threadId);
   if (next.phase === "done" && next.verdict === "NONE" && j.attempt === 0)
@@ -1236,7 +1151,7 @@ const applyCompare = (
 
 // The comparison's record, written once the verdicts are in, with each
 // comparator's write-up. The build mapping is in the game root all along
-// (run.json and run.log name every sample's sha); comparators stay blind by
+// (the run's step records name every sample's sha); comparators stay blind by
 // working outside it, in BLANK worktrees that hold only their neutral files.
 const comparisonFiles = (
   tag: string,
@@ -1511,27 +1426,23 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         return act({
           role: "art-director",
           title: "studio art director",
-          prompt: Roles.artReview(lane, state.typed),
+          prompt: Roles.artReview(lane),
           capMs: artCap(CAP.artReview),
-          read: [ART_REVIEW],
-          clear: [ART_REVIEW],
         });
       if (t.phase === "revise")
         return name === "plan"
           ? act({
               role: "plan",
-              prompt: Roles.ladderRevise(t.review, state.typed),
+              prompt: Roles.ladderRevise(t.review),
               capMs: CAP.plan,
-              read: [LADDER],
             })
           : act({ role: name, prompt: Roles.visionRevise(t.review, lane), capMs: CAP.vision });
       if (t.phase === "redo" && name === "plan")
         return act({
           role: "plan",
           thread: t.thread,
-          prompt: Roles.ladderFix(t.review, state.typed),
+          prompt: Roles.ladderFix(),
           capMs: CAP.ladderFix,
-          read: [LADDER],
         });
       if (t.phase === "redo")
         return act({
@@ -1545,9 +1456,8 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           ? go(blockStep(id, t.block!, lane))
           : act({
               role: name,
-              prompt: Roles.stage(name, lane, state.typed),
+              prompt: Roles.stage(name, lane),
               capMs: CAP[name],
-              ...(name === "plan" ? { read: [LADDER], clear: [LADDER] } : {}),
             });
       if (t.phase === "commit") return run({ _tag: "commit", message: t.name, base: state.best });
       return t.phase === "boot" ? go({ kind: "boot", id }) : reject(t.name, t.why);
@@ -1580,14 +1490,14 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           title: "studio blind comparison",
           thread: j?.thread ?? null,
           at: BLANK,
-          prompt: Roles.select(state.typed),
+          prompt: Roles.select(),
           capMs: CAP.write,
         });
       const made = compareStep(id, t.cmp, input, state);
       return go(made.step, { ...t, cmp: made.cmp }, made.logs);
     }
     case "ladder":
-      return act(ladderSpec(t, state.typed));
+      return act(ladderSpec(t));
     case "ship":
       return t.phase === "play"
         ? act({
@@ -1599,9 +1509,8 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         : act({
             role: `ship-${t.n}`,
             thread: t.thread,
-            prompt: Roles.shipWrite(state.typed),
+            prompt: Roles.shipWrite(),
             capMs: CAP.write,
-            read: [".studio/ship.md"],
           });
     case "leave":
       return t.phase === "restore"
@@ -1620,15 +1529,15 @@ export const plan = (state: RunState, input: Inputs): Planned => {
   }
   const r = t;
   const n = r.n;
-  const tester = (prompt: string, capMs: number, read: string[] = []) =>
-    act({ role: `tester-${n}`, thread: r.thread, prompt, capMs, read, bots: true });
+  const tester = (prompt: string, capMs: number) =>
+    act({ role: `tester-${n}`, thread: r.thread, prompt, capMs, bots: true });
   switch (r.phase) {
     case "start": {
       if (state.stallStreak >= 3) return end("stalled");
       if (remaining(state, input.now) < ROUND_RESERVE_MS) return end("budget");
       if (state.ladder === null) {
         const task: Task = { _tag: "ladder", phase: "write", thread: null, error: "" };
-        return go(role(id, ladderSpec(task, state.typed)), task, [
+        return go(role(id, ladderSpec(task)), task, [
           `round ${n}: the run has no ladder yet; the plan writes one first`,
         ]);
       }
@@ -1711,11 +1620,9 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         CAP.tester,
       );
     case "tester-write":
-      return tester(Roles.testerWrite(n, r.move, rungOf(state, r), state.typed), CAP.write, [
-        `.studio/tester-${n}.md`,
-      ]);
+      return tester(Roles.testerWrite(n, r.move, rungOf(state, r)), CAP.write);
     case "tester-duty":
-      return tester(Roles.BOT_DUTY, CAP.duty, [`.studio/tester-${n}.md`]);
+      return tester(Roles.BOT_DUTY, CAP.duty);
     case "restore":
       return run({ _tag: "restore-commit", sha: r.candidate, message: r.branch });
     case "compare": {
@@ -1736,7 +1643,6 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         role: `reviewer-${n}`,
         prompt: Roles.reviewerPlay(n, r.reviewed, r.facts),
         capMs: CAP.reviewer,
-        clear: [".studio/next.md", RUNG_CHANGE],
       });
     case "review-write": {
       const [o1, o2] = r.record.verdicts;
@@ -1746,31 +1652,21 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           ? "inconclusive, flaw still open"
           : "rejected/unjudged";
       const verdicts = `${o1?.verdict ?? "NONE"}/${o2?.verdict ?? "NONE"} (${word})`;
-      const read = [`.studio/reviewer-${n}.md`, ".studio/next.md"];
       const rung = rungOf(state, r);
       if (rung !== null && state.ladder !== null) {
         const k = positionOf(state.ladder, rung);
         const built = `it built rung ${k} (${rung.is}); the tester's checks: ${checkLine(r.checks) || "none verified"}; ${r.record.kept ? "kept" : `not kept (${r.record.note ?? ""})`}; judging ${verdicts}.`;
         return act({
           role: `reviewer-${n}`,
-          prompt: Roles.reviewerLedger(
-            n,
-            built,
-            ladderText(state.ladder, rung.id),
-            r.facts,
-            state.typed,
-          ),
+          prompt: Roles.reviewerLedger(n, built, ladderText(state.ladder, rung.id), r.facts),
           capMs: CAP.reviewer,
-          clear: [".studio/next.md", RUNG_CHANGE],
-          read: [...read, RUNG_CHANGE],
         });
       }
       return act({
         role: `reviewer-${n}`,
         thread: r.thread,
-        prompt: Roles.reviewerWrite(n, r.move, verdicts, r.facts, state.typed),
+        prompt: Roles.reviewerWrite(n, r.move, verdicts, r.facts),
         capMs: CAP.write,
-        read,
       });
     }
   }
@@ -1933,10 +1829,7 @@ export const applyResult = (
       // The creator's rewrite keeps the old ladder when the new one has the wrong shape.
       if (t.name === "plan" && t.phase === "revise") {
         const sub = submitted(res, "ladder");
-        const parsed =
-          sub !== null
-            ? ladderOf(sub.rungs)
-            : parseLadder(res.kind === "done" ? (res.files?.[LADDER] ?? "") : "");
+        const parsed = sub !== null ? ladderOf(sub.rungs) : { error: MISSING_LADDER };
         if ("ladder" in parsed && sub !== null)
           files.push({ path: LADDER, text: ladderJson(sub.rungs) });
         if ("ladder" in parsed) logs.push(`ladder rewritten: ${parsed.ladder.rungs.length} rungs`);
@@ -1966,12 +1859,11 @@ export const applyResult = (
       }
       if (t.phase === "review") {
         const art = submitted(res, "art");
-        const text =
-          art !== null ? art.defects : res.kind === "done" ? textOf(res, ART_REVIEW) : "";
-        const verdict = art !== null ? (art.redo ? "REDO" : "KEEP") : parseArt(text);
+        const text = art?.defects ?? "";
+        const verdict = art === null ? null : art.redo ? "REDO" : "KEEP";
         if (verdict === null)
           logs.push(
-            `art review declared no ART: KEEP or ART: REDO${res.kind === "failed" ? ` (${res.reason})` : ""}; keeping the art`,
+            `art review submitted no verdict${res.kind === "failed" ? ` (${res.reason})` : ""}; keeping the art`,
           );
         if (verdict !== "REDO") return out({ ...s, task: { ...t, phase: "commit" } });
         if (!artFits(CAP.artRedo)) {
@@ -1979,7 +1871,7 @@ export const applyResult = (
           return out({ ...s, task: { ...t, phase: "commit" } });
         }
         logs.push("art review: REDO; one redo turn with its defect list");
-        const defects = (art !== null ? text : text.replace(ART_LINE, "")).trim().slice(0, 3000);
+        const defects = text.trim().slice(0, 3000);
         return out({ ...s, task: { ...t, phase: "redo", review: defects } });
       }
       if (t.phase === "redo") return out({ ...s, task: { ...t, phase: "commit" } });
@@ -2061,16 +1953,12 @@ export const applyResult = (
       if (t.phase === "select") {
         if (res.kind === "done") release.push(res.threadId);
         const select = submitted(res, "select");
-        const text = select !== null ? select.reasons : res.kind === "done" ? (res.text ?? "") : "";
-        const chosen = select?.pick ?? parseSelect(text);
+        const chosen = select?.pick ?? null;
         if (chosen === null) {
           logs.push("pick tie unresolved: building from trunk with the tie recorded");
           return out(afterStage({ ...s, pickNotes: t.notes }, "pick", now));
         }
-        const reasons =
-          select !== null
-            ? select.reasons.replace(/\s+/g, " ").trim().slice(0, 500)
-            : reasonsAfter(text, /^SELECT:\s*(A|B)\s*$/i);
+        const reasons = (select?.reasons ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
         const notes = `${pickLegend(chosen)}\n${t.notes}\nSELECT: ${chosen} (continuation choice on tied comparison; no demonstrated preference)\n${reasons}`;
         return out({
           ...s,
@@ -2113,19 +2001,10 @@ export const applyResult = (
       if (t.phase === "play" && res.kind === "done")
         return out({ ...s, task: { ...t, phase: "write", thread: res.threadId } });
       const ship = submitted(res, "ship");
-      const text =
-        ship !== null ? ship.reasons : res.kind === "done" ? textOf(res, ".studio/ship.md") : "";
-      const yes = ship !== null ? ship.ship : parseShip(text) === "YES";
+      const yes = ship?.ship === true;
       // A creator note that arrived during the ship review still gets its round.
       if (yes && s.steer.length === 0) return out({ ...s, ending: "ready" });
-      const reasons =
-        ship !== null
-          ? ship.reasons.trim().slice(0, 500)
-          : (text
-              .split(/SHIP:\s*(?:YES|NO)/i)
-              .pop()
-              ?.trim()
-              .slice(0, 500) ?? "");
+      const reasons = (ship?.reasons ?? "").trim().slice(0, 500);
       // The run's goal was the ladder: it ends here with the review's reasons, and
       // polish runs only when the creator asks (a note sent during the review does).
       return out({
@@ -2366,12 +2245,7 @@ const applyRound = (
       const bot = testedBot(res, r);
       const rung = rungOf(s, r);
       const sub = submitted(res, "checks");
-      const notes =
-        sub !== null
-          ? sub.notes.trim()
-          : res.kind === "done"
-            ? textOf(res, `.studio/tester-${r.n}.md`)
-            : "";
+      const notes = sub?.notes.trim() ?? "";
       const testerNotes = notes.length > 20 ? notes : r.testerNotes;
       if (sub !== null && notes.length > 20)
         files.push({ path: `.studio/tester-${r.n}.md`, text: `${notes}\n` });
@@ -2398,12 +2272,7 @@ const applyRound = (
         r.bot !== "";
       // State checks were scored by the harness; the tester's lines count for look checks only.
       const isState = (k: number) => rung?.checks[k]?.kind === "state";
-      const said =
-        rung === null
-          ? []
-          : submittedChecks.length > 0
-            ? submittedChecks
-            : parseChecks(testerNotes, rung);
+      const said = rung === null ? [] : submittedChecks;
       const declared = said.map((check, k) => {
         const scored = r.stateChecks.find((x) => x.k === k);
         return isState(k)
@@ -2697,18 +2566,11 @@ const finishRound = (
   files: Array<{ path: string; text: string }>,
 ): RunState => {
   const ledger = res === null ? null : submitted(res, "ledger");
-  const reviewerNotes =
-    ledger !== null ? ledger.ledger : res === null ? "" : textOf(res, `.studio/reviewer-${r.n}.md`);
-  const next = (
-    ledger !== null ? ledger.ledger : res === null ? "" : (res.files?.[".studio/next.md"] ?? "")
-  )
-    .trim()
-    .slice(0, 4000);
-  if (ledger !== null && next.length > 0)
-    files.push({ path: ".studio/next.md", text: `${next}\n` });
+  // The ledger leads the next round; next.md holds it for people and later roles.
+  const next = (ledger?.ledger ?? "").trim().slice(0, 4000);
+  if (next.length > 0) files.push({ path: ".studio/next.md", text: `${next}\n` });
   let note = r.record.note ?? "";
-  if (reviewerNotes.length <= 20) note = `${note} reviewer write failed`.trim();
-  if (next.length === 0) note = `${note} reviewer wrote no next.md`.trim();
+  if (next.length === 0) note = `${note} reviewer submitted no ledger`.trim();
   const settled = settleRung(
     s,
     r,
@@ -2717,11 +2579,7 @@ const finishRound = (
   );
   const ladder = settled.state.ladder;
   const change = (id: number) =>
-    ledger !== null
-      ? ledger.rungChange === undefined
-        ? null
-        : rungOfChange(ledger.rungChange, id)
-      : parseRungChange(res === null ? "" : (res.files?.[RUNG_CHANGE] ?? ""), id);
+    ledger?.rungChange === undefined ? null : rungOfChange(ledger.rungChange, id);
   const state: RunState = {
     ...settled.state,
     ladder: r.rung === null || ladder === null ? ladder : insertRung(ladder, change, r.n, logs),

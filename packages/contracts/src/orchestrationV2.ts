@@ -3040,6 +3040,11 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     profile: Schema.optional(GameRunProfile),
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
+    /**
+     * Where a run on a game an earlier run already built starts: past its
+     * prototypes, at the rounds (which write a ladder first when none exists).
+     */
+    stage: Schema.optional(Schema.Literal("build")),
   }),
   /** Continues a run that ended resumably (budget, a provider or memory outage, a failure, a stop). */
   Schema.Struct({
@@ -3115,6 +3120,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     type: Schema.Literal("game-run.decision.expire"),
     ...GameRunCommandFields,
     decisionId: TrimmedNonEmptyString,
+    /** The decision has nothing on disk to show: its default is taken at once, unasked. */
+    nothingToShow: Schema.optional(Schema.Boolean),
   }),
   /** An ending's finish (stops, outputs, exports) completed; recovery owes it no more. */
   Schema.Struct({

@@ -307,14 +307,14 @@ export type GameRunStepResult = typeof GameRunStepResult.Type;
 
 // How a half of a pair finished, kept with the pair until its partner finishes
 // too, so neither half ever runs twice.
-const GameRunHalfResult = Schema.Union([GameRunRoleDone, FailedResult, BotResult]);
+export const GameRunHalfResult = Schema.Union([GameRunRoleDone, FailedResult, BotResult]);
 export type GameRunHalfResult = typeof GameRunHalfResult.Type;
 
 // A blind comparison's two independent steps, run at once: both builds'
 // samples, or the bot on both builds. Halves are in x-then-y order, which is
 // the order their results apply in; their ids follow the play order, so no
 // id or launch order tells a player which build it has.
-const GameRunPairStep = Schema.Struct({
+export const GameRunPairStep = Schema.Struct({
   kind: Schema.Literal("pair"),
   id: Schema.Number,
   halves: Schema.Array(Schema.Union([GameRunRoleStep, GameRunBotStep])),
@@ -369,7 +369,7 @@ export const GameRunDecided = Schema.Struct({
 });
 export type GameRunDecided = typeof GameRunDecided.Type;
 
-const GameRunPlannedStep = Schema.Union([
+export const GameRunPlannedStep = Schema.Union([
   GameRunRoleStep,
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GameRunGitOp }),
   Schema.Struct({ kind: Schema.Literal("boot"), id: Schema.Number }),

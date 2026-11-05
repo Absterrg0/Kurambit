@@ -1,6 +1,5 @@
 // @effect-diagnostics globalDate:off globalDateInEffect:off nodeBuiltinImport:off -- The production run's files in the game folder: skill pack, bot kit, ignores, the run log.
-// What a run puts in the game folder before and around its steps, shared by the
-// loop (GameRun) and the orchestration core's step runner.
+// What a run puts in the game folder before and around its steps.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -13,9 +12,11 @@ import type { makeGit } from "./run/git.ts";
 import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
 
-// Run state, notes and reports are harness output, never game content:
-// ignoring them keeps the tree clean so build swaps never need a stash
-// (T28 wedged on a half-applied stash pop; T29 removed stash use).
+// Run notes and reports are harness output, never game content: ignoring them
+// keeps the tree clean so build swaps never need a stash (T28 wedged on a
+// half-applied stash pop). The list keeps the files earlier runs wrote
+// (run.json, rounds.jsonl, stop, steer, profile), so an older game's leftovers
+// never ride in a commit.
 export const RUN_STATE_IGNORES = [
   ".studio/run.json",
   ".studio/rounds.jsonl",
@@ -74,7 +75,7 @@ export const readText = (path: string): Promise<string | null> =>
   NodeFSP.readFile(path, "utf8").catch(() => null);
 
 // A unique same-directory temp file plus rename: a crash never leaves a torn
-// run.json behind, and concurrent writers never rename each other's inode.
+// file behind, and concurrent writers never rename each other's inode.
 export const writeAtomic = async (file: string, text: string): Promise<void> => {
   await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
   const tmp = `${file}.tmp.${process.pid}.${NodeCrypto.randomUUID()}`;

@@ -42,7 +42,7 @@ export const clientRuntimeModeCeiling = (client: McpClientCaller | undefined): R
  */
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
-  /** Threads the GameRun production loop launched. They get play-level tools only. */
+  /** Threads the production run launched. They get play-level tools only. */
   readonly gameRunRole?: "run" | null;
   readonly capabilities: ReadonlySet<McpCapability>;
   readonly issuedAt: number;
@@ -127,7 +127,7 @@ export const requireThreadScope = (scope: McpInvocationScope, operation: string)
     ? Effect.fail(threadCallerRequired(operation))
     : Effect.succeed(scope as McpThreadInvocationScope);
 
-/** True inside a tool call from a thread the GameRun production loop launched. */
+/** True inside a tool call from a thread the production run launched. */
 export const isGameRunThread = () => {
   const fiber = Fiber.getCurrent();
   if (fiber === undefined) return false;

@@ -71,7 +71,7 @@ const dependencies = [
 ];
 const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
 /**
- * Run threads from the GameRun production loop get play-level tools only
+ * Run threads from the production run get play-level tools only
  * (status, check, import, export, explore, game_bot_*, game_blender_*, game_unity_*, game_assets_*).
  * Every other game tool hides from them, as non-game tools do by default.
  */
@@ -450,7 +450,7 @@ const RunChecksTool = Tool.make("game_run_checks", {
 
 const RunSteerTool = Tool.make("game_run_steer", {
   description:
-    "Pass the creator's request to this game's production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. A run that has ended (its ladder done, or stopped) resumes for one round on the note, then stops: this is how the creator asks for polish after the run's goal is met. Fails plainly when the game never had a run: then work on the game directly. Say the creator's request in their words, one request per call.",
+    "Pass the creator's request to this game's production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. A run that reached its goal (its ladder done or shipped) comes back for one round on the note, then stops again: this is how the creator asks for polish after the run's goal is met. A stopped or interrupted run keeps the note for when it is resumed with game_run_start. Fails plainly when the game never had a run: then work on the game directly. Say the creator's request in their words, one request per call.",
   parameters: Schema.Struct({
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
   }),

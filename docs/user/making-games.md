@@ -94,7 +94,12 @@ player's report and frames. Each round after it says what it tried and whether i
 verdicts and reasoning, the blind players' reports, the bot's results and video, the tester's note
 and the reviewer's direction. Your agent can read the same with `game_run_round`, so you can ask it
 what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
-the work. **Stop run** ends it; rejected work stays on its branch.
+the work. **Stop run** ends it; rejected work stays on its branch. Starting the run again without
+a new brief continues it where it stopped, and if Kurambit restarts during a run, the run picks up
+where it was on its own. A game whose run was made by an earlier version of Kurambit needs a new
+run from your brief, which continues from the game as it is: no new vision or prototypes, a plan
+writes a ladder for the game, then rounds build it. The earlier run's rounds, ladder and decisions
+are not carried over; its history stays in git.
 
 A run is **Guided** (the default) or on **Autopilot**. A Guided run asks you at the moments that
 shape the game: once the vision and its key art exist, once both prototypes are built, and once
@@ -130,8 +135,9 @@ the middle of a round, and while the game has uncommitted changes; it never disc
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
 the run. The round in progress finishes as planned; the next round starts with your note, ahead of
-its ladder step or the reviewer's direction, and the rounds list shows what you asked. When no run is live, your agent
-works on the game directly.
+its ladder step or the reviewer's direction, and the rounds list shows what you asked. A stopped
+run keeps your note for when it continues. When no run is live, your agent works on the game
+directly.
 
 ## Play and revise
 

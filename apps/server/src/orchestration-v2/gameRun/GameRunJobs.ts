@@ -6,6 +6,7 @@
 import {
   GameRunId as GameRunIdSchema,
   type GameRunId,
+  type GameRunQuestion,
   type GameRunStepId,
   type ThreadId,
 } from "@kurambit/contracts";
@@ -40,6 +41,12 @@ export interface GameRunJobRunner {
   readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
   /** A run's ending: stops its turns and jobs, does its last outputs and exports, records it. */
   readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
+  /** Whether the game folder holds anything of a decision's evidence to show the creator. */
+  readonly showable: (
+    threadId: ThreadId,
+    lane: string,
+    decision: GameRunQuestion,
+  ) => Effect.Effect<boolean>;
 }
 
 // Heavy work inside a step takes the game layer's own locks and memory guards;
@@ -64,6 +71,8 @@ export class GameRunJobs extends Context.Service<
     /** Interrupts every job of the run and waits for them to end. */
     readonly stopRun: (runId: GameRunId) => Effect.Effect<void>;
     readonly isLive: (key: string) => Effect.Effect<boolean>;
+    /** The runner's answer, once it is attached. */
+    readonly showable: GameRunJobRunner["showable"];
     readonly attach: (runner: GameRunJobRunner) => Effect.Effect<void>;
   }
 >()("kurambit/orchestration-v2/gameRun/GameRunJobs") {}
@@ -142,6 +151,10 @@ export const make = Effect.gen(function* () {
     fork,
     stopRun,
     isLive: (key) => Effect.sync(() => live.has(key)),
+    showable: (threadId, lane, decision) =>
+      Deferred.await(runner).pipe(
+        Effect.flatMap((each) => each.showable(threadId, lane, decision)),
+      ),
     attach: (each) => Deferred.succeed(runner, each).pipe(Effect.asVoid),
   });
 });

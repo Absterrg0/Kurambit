@@ -1,7 +1,7 @@
 // @effect-diagnostics globalDate:off nodeBuiltinImport:off -- A question still queued behind a busy chat states its deadline from now; evidence paths are joined to the game root.
 // How a run reads to people and tools: its current step, the decision it waits
 // on, when a note takes effect, the model its roles run on. Pure over the
-// policy's state, so the loop and the orchestration core show runs alike.
+// policy's state.
 import * as NodePath from "node:path";
 import {
   ProviderInstanceId,

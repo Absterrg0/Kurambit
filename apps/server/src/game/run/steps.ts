@@ -1,4 +1,4 @@
-// The run's git and boot steps, outside the loop so a driver can run them on a real game.
+// The run's git and boot steps, as the step runner runs them on the game folder.
 import * as Effect from "effect/Effect";
 import type { GameOperationError, ThreadId } from "@kurambit/contracts";
 import type * as GameService from "../GameService.ts";

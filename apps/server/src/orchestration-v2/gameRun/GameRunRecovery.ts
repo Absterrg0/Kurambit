@@ -4,12 +4,15 @@
 // its finished turn) before doing anything. A decision needs no job: its
 // deadline is a durable effect, and only a presentation that ended while the
 // server was down is caught up. An ended or stopped run is never continued;
-// only its finish, if a restart cut it short, runs again.
-import type { ThreadId } from "@kurambit/contracts";
+// only its finish, if a restart cut it short, runs again. A role turn no step
+// record names (a thread an older Kurambit's run launched, which T3 continued
+// after the restart) is stopped, so nothing edits a game outside its run.
+import { CommandId, type ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecisions from "./GameRunDecisions.ts";
 import * as GameRunJobs from "./GameRunJobs.ts";
@@ -23,6 +26,56 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const jobs = yield* GameRunJobs.GameRunJobs;
   const decisions = yield* GameRunDecisions.GameRunDecisions;
+  const engine = yield* Orchestrator.OrchestratorV2;
+
+  const stopUnnamedRoleTurns = Effect.gen(function* () {
+    const turns = yield* projections.listLiveGameRunRoleTurns();
+    const named = new Map<ThreadId, ReadonlySet<ThreadId>>();
+    const namedUnder = (parent: ThreadId) =>
+      Effect.gen(function* () {
+        const known = named.get(parent);
+        if (known !== undefined) return known;
+        const records = yield* projections
+          .getGameRunRecords(parent)
+          .pipe(
+            Effect.orElseSucceed(() => ({ gameRuns: [], gameRunSteps: [], gameRunRounds: [] })),
+          );
+        const threads = new Set(
+          records.gameRunSteps.flatMap((step) =>
+            step.roles.flatMap((role) => (role.threadId === null ? [] : [role.threadId])),
+          ),
+        );
+        named.set(parent, threads);
+        return threads;
+      });
+    for (const turn of turns) {
+      if (
+        turn.parentThreadId !== null &&
+        (yield* namedUnder(turn.parentThreadId)).has(turn.threadId)
+      )
+        continue;
+      yield* engine
+        .dispatch({
+          type: "run.interrupt",
+          commandId: CommandId.make(`server:game-run-unnamed-role:${turn.runId}`),
+          threadId: turn.threadId,
+          runId: turn.runId,
+          reason: "No production run holds this role turn.",
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("an unnamed game run role turn could not be stopped", {
+              threadId: turn.threadId,
+              cause,
+            }),
+          ),
+        );
+    }
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("game run recovery could not list role turns", { cause }),
+    ),
+  );
 
   const recoverThread = (threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -49,7 +102,8 @@ const make = Effect.gen(function* () {
     );
 
   const recover = () =>
-    projections.listGameRunThreadsToRecover().pipe(
+    stopUnnamedRoleTurns.pipe(
+      Effect.andThen(projections.listGameRunThreadsToRecover()),
       Effect.flatMap((threads) => Effect.forEach(threads, recoverThread, { discard: true })),
       Effect.catchCause((cause) => Effect.logWarning("game run recovery failed", { cause })),
     );

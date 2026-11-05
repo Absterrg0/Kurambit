@@ -39,8 +39,6 @@ const done = (step: State.Step, patch: Partial<Policy.RoleDone> = {}): Policy.Ro
   threadId: ThreadId.make(
     step.kind === "role" && step.thread !== null ? step.thread : `t-${step.id}`,
   ),
-  text: "",
-  files: {},
   evidence: goodEvidence,
   timedOut: false,
   budgetCut: false,
@@ -198,22 +196,50 @@ const roundResponder =
     if (step.role.startsWith("compare")) {
       const t = state.task;
       const aIs = t._tag === "round" ? t.cmp?.judges.at(-1)?.aIs : "x";
-      return done(step, {
-        files: { [step.read[0]!]: `COMPARE: ${aIs === "x" ? v1 : v2}\nplay-based reasons` },
-      });
+      return done(step, verdictOf(aIs === "x" ? v1 : v2));
     }
     if (step.role.startsWith("builder")) return done(step, { elapsedMs: step.capMs });
     if (step.role.startsWith("reviewer"))
-      return done(step, {
-        files: {
-          ".studio/next.md": "fix the jump\nSTATUS: continue",
-          [step.read[0] ?? "x"]: "reviewer notes long enough",
-        },
-      });
-    return done(step, {
-      files: Object.fromEntries(step.read.map((f) => [f, "notes that are long enough to count"])),
-    });
+      return done(step, { submission: { _tag: "ledger", ledger: "fix the jump" } });
+    return done(step, plainSubmission(state, step));
   };
+
+/**
+ * A plan's ladder as it reaches the run: game-run.submit refuses one of the
+ * wrong shape in the role's turn, so a ladder that does not parse is a turn
+ * that submitted none.
+ */
+const ladderSubmitted = (text: string): Partial<Policy.RoleDone> => {
+  const parsed = State.parseLadder(text);
+  return "ladder" in parsed
+    ? {
+        submission: {
+          _tag: "ladder",
+          rungs: parsed.ladder.rungs.map(({ is, checks }) => ({ is, checks })),
+        },
+      }
+    : {};
+};
+
+/** A comparator's verdict; anything but A, B or TIE is a turn that submitted none. */
+const verdictOf = (verdict: string, reasons = "play-based reasons"): Partial<Policy.RoleDone> =>
+  verdict === "A" || verdict === "B" || verdict === "TIE"
+    ? { submission: { _tag: "verdict", verdict, reasons } }
+    : {};
+
+/**
+ * What a role hands in by default: notes where its step asks for notes, and no
+ * verdict, ladder or selection, which a test gives explicitly when it needs one.
+ */
+const plainSubmission = (state: State.RunState, step: State.RoleStep): Partial<Policy.RoleDone> => {
+  const asked = Policy.asked(state, step);
+  const notes = "notes that are long enough to count";
+  return asked.kind === "report"
+    ? { submission: { _tag: "report", report: notes } }
+    : asked.kind === "checks"
+      ? { submission: { _tag: "checks", checks: [], notes } }
+      : {};
+};
 
 // An empty ladder: these rounds are finish rounds, the fix-the-flaw shape.
 const atRound = (patch: Partial<State.RunState> = {}) =>
@@ -371,7 +397,7 @@ describe("rounds", () => {
         ? done(step, {
             botsBefore: 3,
             botsAfter: 3,
-            files: { [step.read[0] ?? "x"]: "tester notes long enough to count" },
+            ...plainSubmission(state, step),
           })
         : roundResponder("A", "B")(step, state);
     const { steps } = drive(
@@ -527,7 +553,7 @@ describe("parallel samples", () => {
     expect(state.rounds[0]?.kept).toBe(true);
   });
 
-  it("resumes a half-finished pair from run.json and runs only the unfinished half", () => {
+  it("resumes a half-finished pair and runs only the unfinished half", () => {
     const { state, pair } = planPair(atCompare());
     const [x, y] = roles(pair);
     // x finished and was saved; then the server stopped. y carries the attach an
@@ -544,9 +570,7 @@ describe("parallel samples", () => {
         results: [{ id: x!.id, result: done(x!) as State.HalfResult }],
       },
     };
-    const loaded = State.loadState(JSON.stringify(State.encodeRunState(saved)), "");
-    if (loaded.kind !== "v3") throw new Error("expected v3");
-    const again = Policy.plan(loaded.state, { now: T0 + MIN, coin: 0.9, id: "other" });
+    const again = Policy.plan(saved, { now: T0 + MIN, coin: 0.9, id: "other" });
     if (again.kind !== "step" || again.step.kind !== "pair") throw new Error("expected the pair");
     const resumed = again.step;
     expect(resumed).toEqual(saved.inFlight);
@@ -644,8 +668,8 @@ describe("bot facts", () => {
     (step, state) => {
       if (step.kind === "role" && step.role.startsWith("tester"))
         return done(step, {
-          bot: step.read.length === 0 ? { file: bot, decider } : null,
-          files: Object.fromEntries(step.read.map((f) => [f, "tester notes long enough to count"])),
+          bot: Policy.asked(state, step).kind === null ? { file: bot, decider } : null,
+          ...plainSubmission(state, step),
         });
       return roundResponder("A", "B", { bot: (sha) => outcomes[sha]! })(step, state);
     };
@@ -806,9 +830,7 @@ describe("blind comparators", () => {
         if (drawn.includes(step.at)) sheets[step.at] = step.sheet;
         return done(step, {
           sheet: drawn.includes(step.at) ? step.sheet : "",
-          files: Object.fromEntries(
-            step.read.map((f) => [f, "notes that are long enough to count"]),
-          ),
+          ...plainSubmission(state, step),
         });
       }
       return respond(step, state);
@@ -832,8 +854,7 @@ describe("blind comparators", () => {
     expect(compares).toHaveLength(2);
     for (const step of compares) {
       expect(step.at).toBe(State.BLANK);
-      expect(step.read).toEqual([".compare/verdict.md"]);
-      expect(step.prompt).toContain("Write .compare/verdict.md.");
+      expect(step.prompt).toContain("Submit your verdict with game_run_submit");
       expect(step.prompt).toContain("Use only these reports and the two frame sheets,");
       expect(step.prompt).toContain("frames from that player's own play, evenly sampled");
     }
@@ -857,7 +878,7 @@ describe("blind comparators", () => {
     // Once both verdicts are in, the game root keeps each write-up where the round detail reads it.
     for (const step of compares)
       expect(written[`.studio/comparisons/${step.role.replace("compare-", "")}.md`]).toMatch(
-        /^COMPARE: [AB]\nplay-based reasons/,
+        /^Verdict: [AB]\nplay-based reasons/,
       );
     expect(state.rounds[0]?.verdicts.map((v) => v.verdict)).toEqual(["A", "B"]);
   });
@@ -876,7 +897,7 @@ describe("blind comparators", () => {
     }
   });
 
-  it("releases each comparator's worktree once its verdict is in, after a format fix", () => {
+  it("releases each comparator's worktree once its verdict is in, after one turn to submit it", () => {
     // The first order's first answer has no declaration line; the follow-up fixes it.
     let fixed = false;
     const respond: Responder = (step, state) => {
@@ -887,7 +908,8 @@ describe("blind comparators", () => {
         !fixed
       ) {
         fixed = true;
-        return done(step, { files: { [step.read[0]!]: "A is better, clearly so in play" } });
+        // A write-up with no verdict submitted: the comparator gets one turn to submit it.
+        return done(step);
       }
       return roundResponder("A", "B")(step, state);
     };
@@ -895,8 +917,7 @@ describe("blind comparators", () => {
     expect(compares.map((c) => c.thread === null)).toEqual([true, false, true]);
     const correct = compares[1]!;
     expect(correct.at).toBe(State.BLANK);
-    expect(correct.read).toEqual([".compare/verdict.md"]);
-    expect(correct.prompt).toContain(".compare/verdict.md");
+    expect(correct.prompt).toContain("without submitting a verdict");
     // The first comparator's thread outlives its unformatted answer, then goes with the other's.
     expect(released).toEqual([correct.thread, "t-" + compares[2]!.id]);
     expect(state.rounds[0]?.verdicts.map((v) => v.verdict)).toEqual(["A", "B"]);
@@ -933,10 +954,12 @@ describe("blind comparators", () => {
     const respond: Responder = (step, state) => {
       if (step.kind === "role" && step.prompt.startsWith("The comparison is a tie")) {
         selects.push(step);
-        return done(step, { text: "SELECT: B\nreasons to continue from B" });
+        return done(step, {
+          submission: { _tag: "select", pick: "B", reasons: "reasons to continue from B" },
+        });
       }
       if (step.kind === "role" && step.role.startsWith("compare"))
-        return done(step, { files: { [step.read[0]!]: "COMPARE: TIE\nno difference shown" } });
+        return done(step, verdictOf("TIE", "no difference shown"));
       return roundResponder("A", "B")(step, state);
     };
     const tied = drive(pick, respond, (s) => s.task._tag === "pick" && s.task.phase === "select");
@@ -995,8 +1018,10 @@ describe("blind comparators", () => {
     (step, state) =>
       step.kind === "role" && step.role.startsWith("compare")
         ? step.prompt.startsWith("The comparison is a tie")
-          ? done(step, { text: "SELECT: B\nreasons to continue from B" })
-          : done(step, { files: { [step.read[0]!]: `COMPARE: ${verdict}\nreasons` } })
+          ? done(step, {
+              submission: { _tag: "select", pick: "B", reasons: "reasons to continue from B" },
+            })
+          : done(step, verdictOf(verdict, "reasons"))
         : roundResponder("A", "B")(step, state);
   const past = (s: State.RunState) => s.task._tag !== "pick";
 
@@ -1056,13 +1081,25 @@ describe("ladder", () => {
     (step, state) => {
       const answered = extra?.(step, state);
       if (answered !== undefined) return answered;
-      if (step.kind === "role" && step.role.startsWith("tester") && step.read.length > 0)
+      if (
+        step.kind === "role" &&
+        step.role.startsWith("tester") &&
+        Policy.asked(state, step).kind === "checks"
+      ) {
+        const asked = Policy.asked(state, step);
+        const look = asked.kind === "checks" ? asked.look : [];
         return done(step, {
-          files: {
-            [step.read[0]!]:
-              `played it through\nCHECK 1: ${pass[0] ? "PASS" : "FAIL"}\nstarted read true\nCHECK 2: ${pass[1] ? "PASS" : "FAIL"}\nsaw the end text`,
+          submission: {
+            _tag: "checks",
+            checks: look.map((check) => ({
+              check,
+              pass: pass[check - 1] ?? false,
+              evidence: check === 1 ? "started read true" : "saw the end text",
+            })),
+            notes: "played it through, start to end",
           },
         });
+      }
       return roundResponder(v1, v2)(step, state);
     };
   const oneRound = (start: State.RunState, respond: Responder) =>
@@ -1092,7 +1129,7 @@ describe("ladder", () => {
         prompts.push(step.prompt);
         return done(step, {
           threadId: ThreadId.make("plan-thread"),
-          files: { ".studio/ladder.json": texts.shift() ?? "" },
+          ...ladderSubmitted(texts.shift() ?? ""),
         });
       };
       const { state } = drive(
@@ -1104,7 +1141,7 @@ describe("ladder", () => {
     };
     const good = planWith([ladderJson(5)]);
     expect(good.prompts).toHaveLength(1);
-    expect(good.prompts[0]).toContain(".studio/ladder.json");
+    expect(good.prompts[0]).toContain("game_run_submit");
     expect(good.state.ladder?.rungs.map((r) => r.status)).toEqual([
       "todo",
       "todo",
@@ -1191,7 +1228,7 @@ describe("ladder", () => {
     expect(prompts.some((p) => p.includes("Its work is your starting point"))).toBe(true);
     expect(prompts.some((p) => p.includes("This build continues a try that failed"))).toBe(true);
     // The reviewer reads the round's play evidence in one turn instead of replaying the build.
-    const reviews = prompts.filter((p) => p.includes(".studio/next.md as a ledger"));
+    const reviews = prompts.filter((p) => p.includes("submit the ledger with game_run_submit"));
     expect(reviews).toHaveLength(2);
     expect(reviews.every((p) => p.includes("do not play it again"))).toBe(true);
     // A try that passed nothing starts again from the best.
@@ -1217,7 +1254,11 @@ describe("ladder", () => {
       (step, state) =>
         step.kind === "role" && step.role.startsWith("ship")
           ? done(step, {
-              files: { ".studio/ship.md": `played it\nSHIP: ${verdict}\nthe ending is abrupt` },
+              submission: {
+                _tag: "ship",
+                ship: verdict === "YES",
+                reasons: "played it; the ending is abrupt",
+              },
             })
           : ladderResponder("A", "B")(step, state);
     const no = drive(landed.state, ship("NO"), (s) => s.ending !== null);
@@ -1375,22 +1416,20 @@ describe("ladder", () => {
   });
 
   it("puts a reviewer's ladder change in as the next rung, one open at a time", () => {
-    const change = JSON.stringify({
+    const rungChange = {
       why: "the core cannot be played",
       is: "the core can be played",
       checks: [
         { what: "a", how: "b" },
         { what: "c", how: "d" },
       ],
-    });
+    };
     const reviewer: Responder = (step, state) =>
-      step.kind === "role" && step.role.startsWith("reviewer") && step.read.length > 0
+      step.kind === "role" &&
+      step.role.startsWith("reviewer") &&
+      Policy.asked(state, step).kind === "ledger"
         ? done(step, {
-            files: {
-              ".studio/next.md": "- the jump sticks",
-              ".studio/rung-change.json": change,
-              [step.read[0]!]: "reviewer notes long enough",
-            },
+            submission: { _tag: "ledger", ledger: "- the jump sticks", rungChange },
           })
         : ladderResponder("A", "B", [true, false])(step, state);
     const one = oneRound(atLadder(), reviewer);
@@ -1498,55 +1537,37 @@ describe("ladder", () => {
       expect(samples(finish.steps)).toBe(4);
     });
 
-    it("survives a resume, and an older run.json without a held play plays both", () => {
+    it("keeps the reused side reused across a stop mid-gate", () => {
       const respond = merging(true);
       const held = oneRound(atLadder(), respond).state;
-      const resumed = State.loadState(JSON.stringify(State.encodeRunState(held)), "");
-      if (resumed.kind !== "v3") throw new Error("expected a v3 run");
-      expect(samples(oneRound(resumed.state, respond).steps)).toBe(2);
-      // Stopped mid-gate: the reused side stays reused after the reload.
+      expect(samples(oneRound(held, respond).steps)).toBe(2);
       const midGate = drive(
         held,
         respond,
         (s) => s.task._tag === "round" && s.task.cmp !== null && s.task.cmp.samples.length === 2,
       ).state;
-      const reloaded = State.loadState(JSON.stringify(State.encodeRunState(midGate)), "");
-      if (reloaded.kind !== "v3") throw new Error("expected a v3 run");
-      const t = reloaded.state.task;
+      const t = midGate.task;
       expect(t._tag === "round" && t.cmp?.reused).toEqual({
         side: "y",
         round: 1,
         branch: "round-1",
       });
-      const rest = drive(
-        reloaded.state,
-        respond,
-        (s) => s.rounds.length === held.rounds.length + 1,
-      );
+      const rest = drive(midGate, respond, (s) => s.rounds.length === held.rounds.length + 1);
       expect(rest.state.rounds[1]?.kept).toBe(true);
       // Only the candidate's write-up is left; the best is never played.
       expect(samples(rest.steps)).toBe(1);
-      const { played: _played, ...older } = State.encodeRunState(held);
-      const old = State.loadState(JSON.stringify(older), "");
-      if (old.kind !== "v3") throw new Error("expected a v3 run");
-      expect(old.state.played).toBeNull();
-      expect(samples(oneRound(old.state, respond).steps)).toBe(4);
     });
   });
 
-  it("writes a ladder first when an older run.json without one reaches its next round", () => {
-    const { ladder: _ladder, ...older } = State.encodeRunState(atLadder());
-    const loaded = State.loadState(JSON.stringify(older), "");
-    if (loaded.kind !== "v3") throw new Error("expected a v3 run");
-    expect(loaded.state.ladder).toBeNull();
-    const planned = Policy.plan(loaded.state, { now: T0, coin: 0, id: "l" });
+  it("writes a ladder first when a run reaches its next round without one", () => {
+    const planned = Policy.plan({ ...atLadder(), ladder: null }, { now: T0, coin: 0, id: "l" });
     if (planned.kind !== "step" || planned.step.kind !== "role") throw new Error("expected a role");
     expect(planned.step.role).toBe("plan");
-    expect(planned.step.read).toEqual([".studio/ladder.json"]);
+    expect(Policy.asked(planned.state, planned.step).kind).toBe("ladder");
     const applied = Policy.applyResult(
       planned.state,
       planned.step,
-      done(planned.step, { files: { ".studio/ladder.json": ladderJson(4) } }),
+      done(planned.step, ladderSubmitted(ladderJson(4))),
       { now: T0, coin: 0, id: "m" },
     );
     expect(applied.state.ladder?.rungs).toHaveLength(4);
@@ -1573,8 +1594,8 @@ describe("art review", () => {
       review: "",
     },
   });
-  // Plays the art stage with the given review text; records each role step it saw.
-  const playArt = (review: string) => {
+  // Plays the art stage with the given review (none: the director submitted nothing).
+  const playArt = (review: { readonly redo: boolean; readonly defects: string } | null) => {
     const seen: State.RoleStep[] = [];
     const respond: Responder = (step) => {
       if (step.kind === "git") return gitOk({ sha: "art", branch: "main" });
@@ -1582,7 +1603,7 @@ describe("art review", () => {
       if (step.kind !== "role") throw new Error(`unexpected ${step.kind}`);
       seen.push(step);
       if (step.role === "art-director")
-        return done(step, { files: { ".studio/art-review.md": review } });
+        return done(step, review === null ? {} : { submission: { _tag: "art", ...review } });
       return done(step, { threadId: ThreadId.make("art-thread") });
     };
     const { state, steps } = drive(
@@ -1594,27 +1615,27 @@ describe("art review", () => {
   };
 
   it("commits the art as it is on KEEP", () => {
-    const { state, roles, steps } = playArt("- key.png: fine\nART: KEEP");
+    const { state, roles, steps } = playArt({ redo: false, defects: "- key.png: fine" });
     expect(roles.map((r) => r.role)).toEqual(["art", "art-director"]);
     expect(steps.slice(-2)).toEqual(["commit", "boot"]);
     expect(state.best).toBe("art");
   });
 
   it("gives one redo turn on the art thread with the defect list, then continues", () => {
-    const review =
-      "- assets/firefly.png: plain white dot, no glow; render a soft additive glow\nART: REDO";
-    const { state, roles, steps } = playArt(review);
+    const { state, roles, steps } = playArt({
+      redo: true,
+      defects: "- assets/firefly.png: plain white dot, no glow; render a soft additive glow",
+    });
     expect(roles.map((r) => r.role)).toEqual(["art", "art-director", "art"]);
     const redo = roles[2]!;
     expect(redo.thread).toBe("art-thread");
     expect(redo.prompt).toContain("plain white dot, no glow");
-    expect(redo.prompt).not.toContain("ART: REDO");
     expect(steps.slice(-2)).toEqual(["commit", "boot"]);
     expect(state.task._tag === "stage" && state.task.name).toBe("build");
   });
 
-  it("keeps the art and logs when the verdict is malformed", () => {
-    const { roles } = playArt("looks mostly fine\nART: maybe REDO later");
+  it("keeps the art and logs when the director submits no verdict", () => {
+    const { roles } = playArt(null);
     expect(roles.map((r) => r.role)).toEqual(["art", "art-director"]);
     const reviewing = {
       ...atArt,
@@ -1622,12 +1643,11 @@ describe("art review", () => {
     } as State.RunState;
     const planned = Policy.plan(reviewing, { now: T0, coin: 0, id: "r" });
     if (planned.kind !== "step") throw new Error("expected the review step");
-    const applied = Policy.applyResult(
-      planned.state,
-      planned.step,
-      done(planned.step, { files: { ".studio/art-review.md": "no verdict here at all" } }),
-      { now: T0, coin: 0, id: "r2" },
-    );
+    const applied = Policy.applyResult(planned.state, planned.step, done(planned.step), {
+      now: T0,
+      coin: 0,
+      id: "r2",
+    });
     expect(applied.state.task._tag === "stage" && applied.state.task.phase).toBe("commit");
     expect(applied.logs.join("\n")).toContain("keeping the art");
   });
@@ -1650,13 +1670,6 @@ describe("steering", () => {
     const { state } = drive(arrived, roundResponder("A", "B"), (s) => s.rounds.length === 1);
     expect(state.rounds[0]?.steer).toEqual(["make the frogs faster"]);
     expect(state.steer).toEqual(["and add a boss"]);
-  });
-
-  it("reads an older run.json without notes as having none", () => {
-    const encoded = State.encodeRunState(atRound());
-    const { steer: _steer, ...older } = encoded;
-    const loaded = State.loadState(JSON.stringify(older), "");
-    expect(loaded.kind === "v3" && loaded.state.steer).toEqual([]);
   });
 });
 
@@ -1696,26 +1709,22 @@ describe("budget", () => {
 });
 
 describe("resume", () => {
-  // A persisted in-flight step is executed again, never re-planned: a role
-  // reattaches to its thread and a git op re-runs (every op is repeatable).
-  it("re-runs the persisted step of every kind after a round trip through run.json", () => {
+  // A step in flight is executed again, never re-planned: a role reattaches to
+  // its thread and a git op re-runs (every op is repeatable).
+  it("plans the step in flight of every kind again as itself", () => {
     const seen = new Set<string>();
     const respond: Responder = (step, s) =>
       step.kind === "role" && step.role.startsWith("tester")
         ? done(step, {
             bot: { file: ".studio/bot/win.mjs", decider: "policy" },
-            files: Object.fromEntries(step.read.map((f) => [f, "tester notes long enough"])),
+            ...plainSubmission(s, step),
           })
         : roundResponder("A", "B")(step, s);
     let state = atRound();
     for (let guard = 0; guard < 60 && state.rounds.length === 0; guard += 1) {
       const planned = Policy.plan(state, { now: T0, coin: 0.7, id: `p${guard}` });
       if (planned.kind === "end") break;
-      const json = JSON.stringify(State.encodeRunState(planned.state));
-      const loaded = State.loadState(json, "");
-      expect(loaded.kind).toBe("v3");
-      if (loaded.kind !== "v3") return;
-      const again = Policy.plan(loaded.state, { now: T0 + MIN, coin: 0.1, id: "other" });
+      const again = Policy.plan(planned.state, { now: T0 + MIN, coin: 0.1, id: "other" });
       expect(again.kind === "step" && again.step).toEqual(planned.step);
       seen.add(planned.step.kind === "git" ? `git:${planned.step.op._tag}` : planned.step.kind);
       state = applyStep(planned.state, planned.step, respond, {
@@ -1750,34 +1759,6 @@ describe("resume", () => {
     expect(applied.state.ending).toBe("usage-limit");
     expect(applied.state.inFlight).toEqual(attached);
   });
-
-  it("migrates a run.json from the old loop and resumes at init", () => {
-    const old = JSON.stringify({
-      runId: "run_old",
-      brief: "b",
-      stage: "round-4",
-      ending: "budget",
-      stallStreak: 1,
-      rounds: [],
-      threads: [],
-      pending: null,
-    });
-    const journal = `${JSON.stringify({ round: 1, move: "m", branch: "round-1", verdicts: [], kept: true, durationMs: 1, linesChanged: 2, sweepFindings: 0 })}\n{torn`;
-    const loaded = State.loadState(old, journal);
-    expect(loaded.kind).toBe("legacy");
-    if (loaded.kind !== "legacy") return;
-    expect(loaded.state.rounds).toHaveLength(1);
-    expect(loaded.state.task._tag).toBe("init");
-    const next = Policy.applyResult(
-      loaded.state,
-      { kind: "git", id: 1, op: { _tag: "init" } },
-      gitOk({ sha: "abc", branch: "main" }),
-      { now: T0, coin: 0, id: "i" },
-    ).state;
-    expect(next.task._tag).toBe("round");
-    expect(next.trunk).toBe("main");
-    expect(State.loadState("{not json", "").kind).toBe("unreadable");
-  });
 });
 
 describe("guided decisions", () => {
@@ -1806,7 +1787,7 @@ describe("guided decisions", () => {
       if (step.kind === "git" && step.op._tag === "branch-commit")
         return gitOk({ branch: step.op.name, sha: step.op.name });
       if (step.kind === "role" && step.role === "plan")
-        return done(step, { files: { ".studio/ladder.json": ladderJson(4) } });
+        return done(step, ladderSubmitted(ladderJson(4)));
       return roundResponder("A", "B")(step, state);
     };
   const start = (profile: State.RunState["profile"]) => base({ profile });
@@ -1971,7 +1952,7 @@ describe("guided decisions", () => {
       (step, state) => {
         if (step.kind === "role" && step.role === "plan") {
           plans.push(step.prompt);
-          return done(step, { files: { ".studio/ladder.json": ladderJson(6, "boss") } });
+          return done(step, ladderSubmitted(ladderJson(6, "boss")));
         }
         return respond(step, state);
       },
@@ -2007,32 +1988,17 @@ describe("guided decisions", () => {
       kind: "default",
     });
     const waiting = { ...sent, deadline: T0 + Policy.DECISION_WAIT_MS };
-    // A restart persists the step; the resumed run reads it back from run.json.
-    const saved = JSON.stringify(State.encodeRunState({ ...planned.state, inFlight: waiting }));
-    const loaded = State.loadState(saved, "");
-    if (loaded.kind !== "v3" || loaded.state.inFlight?.kind !== "decide")
-      throw new Error("expected the step back");
-    expect(Policy.plan(loaded.state, { now: T0, coin: 0, id: "y" })).toMatchObject({
+    // A resumed run plans the waiting step again, and waits only what is left of it.
+    const resumed = { ...planned.state, inFlight: waiting };
+    expect(Policy.plan(resumed, { now: T0, coin: 0, id: "y" })).toMatchObject({
       step: { kind: "decide" },
     });
-    expect(Policy.decisionWait(loaded.state.inFlight, T0 + MIN)).toEqual({
+    expect(Policy.decisionWait(waiting, T0 + MIN)).toEqual({
       kind: "wait",
       ms: Policy.DECISION_WAIT_MS - MIN,
     });
-    expect(Policy.decisionWait(loaded.state.inFlight, T0 + Policy.DECISION_WAIT_MS)).toEqual({
+    expect(Policy.decisionWait(waiting, T0 + Policy.DECISION_WAIT_MS)).toEqual({
       kind: "default",
     });
-  });
-
-  it("loads an older run.json as Autopilot with no decisions", () => {
-    const {
-      profile: _profile,
-      decided: _decided,
-      buildNotes: _notes,
-      ...old
-    } = State.encodeRunState(base({ profile: "guided" }));
-    const loaded = State.loadState(JSON.stringify(old), "");
-    expect(loaded.kind === "v3" && loaded.state.profile).toBe("autopilot");
-    expect(loaded.kind === "v3" && loaded.state.decided).toEqual([]);
   });
 });

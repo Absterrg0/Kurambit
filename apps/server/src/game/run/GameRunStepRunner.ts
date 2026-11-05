@@ -54,6 +54,7 @@ import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { runBotFact } from "./botFacts.ts";
 import { runStateChecks } from "./checkRunner.ts";
 import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
+import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { makeGit, neutralBuild } from "./git.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
@@ -67,7 +68,7 @@ import {
   removeBlank,
   type RoleContext,
   type RoleDeps,
-} from "./roleRunner.ts";
+} from "./roleWorkspace.ts";
 import { CONTINUE, artFacts, modelBlock, spriteBlock } from "./roles.ts";
 import { currentStep, describe, summarize } from "./runView.ts";
 import { spriteFacts } from "./spriteFacts.ts";
@@ -234,13 +235,7 @@ const make = Effect.gen(function* () {
   const roleContext = (run: GameRun, root: string, log: RoleContext["log"]): RoleContext => ({
     root,
     lane: run.lane,
-    projectId: run.projectId,
-    creator: run.threadId,
     runId: run.id,
-    selection: run.modelSelection,
-    runtimeMode: run.runtimeMode,
-    budgetEndsAt: run.budgetEndsAt,
-    started: () => Effect.void,
     log,
   });
 
@@ -635,8 +630,8 @@ const make = Effect.gen(function* () {
     });
 
   // ── A run's end, from the game-run.finish effect its ending committed: its
-  // jobs and live role turns stop, and the game folder gets what the old loop
-  // did after its last step. Every part is safe to repeat, so a finish a
+  // jobs and live role turns stop, and the game folder gets its last outputs
+  // and exports. Every part is safe to repeat, so a finish a
   // restart cut short runs again whole; game-run.finished records it done.
   const finish = (job: GameRunJobs.GameRunFinishJob) =>
     Effect.gen(function* () {
@@ -715,14 +710,30 @@ const make = Effect.gen(function* () {
       });
     });
 
+  // The run log is for people: each step's decisions, written once it settles.
+  // Nothing reads it back; the step records are the run's history.
+  const logged = new Set<string>();
+  const logStep = (step: GameRunStep) =>
+    Effect.gen(function* () {
+      const key = `${step.id}:${step.attempt}:${step.status}`;
+      if (step.status === "planned" || step.status === "running" || logged.has(key)) return;
+      logged.add(key);
+      const root = yield* projects.resolve(step.threadId);
+      yield* logLine(root, `${describe(step.step)} (${step.status})`);
+      for (const line of step.logs) yield* logLine(root, `  ${line}`);
+    });
+
   const handle: GameRunStepRunner["Service"]["handle"] = (event) =>
-    event.type === "game-run.created" || event.type === "game-run.updated"
-      ? showLive(event.payload).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("game run live line failed", { threadId: event.threadId, cause }),
-          ),
-        )
-      : Effect.void;
+    (event.type === "game-run.created" || event.type === "game-run.updated"
+      ? showLive(event.payload)
+      : event.type === "game-run-step.updated"
+        ? logStep(event.payload)
+        : Effect.void
+    ).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("game run live line failed", { threadId: event.threadId, cause }),
+      ),
+    );
 
   const executeJob = (job: GameRunJobs.GameRunStepJob) =>
     execute(job).pipe(
@@ -736,6 +747,13 @@ const make = Effect.gen(function* () {
   const start: GameRunStepRunner["Service"]["start"] = () =>
     Effect.gen(function* () {
       yield* jobs.attach({
+        // A folder that cannot be read is no reason to skip the question.
+        showable: (threadId, lane, decision) =>
+          projects.resolve(threadId).pipe(
+            Effect.flatMap((root) => Effect.promise(() => presentable(root, lane, decision))),
+            Effect.map((evidence) => evidence.length > 0),
+            Effect.orElseSucceed(() => true),
+          ),
         execute: executeJob,
         deadline: (job) =>
           deadline(job).pipe(
