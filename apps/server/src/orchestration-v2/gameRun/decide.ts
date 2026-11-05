@@ -449,7 +449,8 @@ type Command<T extends OrchestrationV2GameRunCommand["type"]> = Extract<
  * Why an ended run cannot be moved on yet: its ending's finish (stops, outputs,
  * exports) or a creator's restore is still working the game folder.
  */
-const settling = (run: GameRun) =>
+/** Refuses a move while the run's ending or a restore still owns the game folder. */
+export const settling = (run: GameRun) =>
   run.endedAt !== null && run.finished !== run.endedAt
     ? refuse("finishing", `Run ${run.id} is still finishing its ending; try again in a moment.`)
     : run.restore !== null && run.restore.outcome === null

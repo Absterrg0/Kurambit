@@ -1310,6 +1310,28 @@ it.effect("every chat of a game reaches its one run, and a role thread only its 
   ),
 );
 
+it.effect("a start while the ending still finishes is refused before it touches the folder", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* atVision(world);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "game-run.stop",
+        commandId: nextId(),
+        threadId: creator,
+        runId,
+      });
+      // The stop's finish has not run, so the folder is still the ending's.
+      const agents = NodePath.join(lastRoot, "AGENTS.md");
+      NodeFS.rmSync(agents, { force: true });
+      const control = yield* GameRunControl.GameRunControl;
+      const refused = yield* control.runStart({ threadId: creator, brief: "" }).pipe(Effect.flip);
+      assert.equal(refused.reason, "finishing");
+      assert.isFalse(NodeFS.existsSync(agents));
+    }),
+  ),
+);
+
 it.effect("a steer sent again under the same id is one note", () =>
   withGame((world) =>
     Effect.gen(function* () {

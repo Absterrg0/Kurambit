@@ -35,9 +35,10 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 
-import { RESUMABLE, toState } from "../orchestration-v2/gameRun/decide.ts";
+import { RESUMABLE, settling, toState } from "../orchestration-v2/gameRun/decide.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -250,6 +251,16 @@ const make = Effect.gen(function* () {
         resumed: true,
         message: `The run is already going (${run.stage}); watch it on the Run tab.`,
       } satisfies GameRunStartResult;
+    // An ending still exporting or a restore still moving the folder owns it:
+    // refuse before the scaffold below writes there, not after, at the decider.
+    const busy = run === null ? null : settling(run);
+    if (busy !== null && Result.isFailure(busy))
+      return yield* runError(
+        "run-start",
+        input.threadId,
+        busy.failure.reason,
+        busy.failure.message,
+      );
     const manifest = yield* projects.read(root).pipe(Effect.option);
     const lane = Option.isSome(manifest) ? manifest.value.godotProject : "godot";
     const projection = yield* threads
