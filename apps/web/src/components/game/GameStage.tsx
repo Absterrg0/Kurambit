@@ -26,7 +26,11 @@ import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
-import { clampGameChatWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import {
+  clampGameChatWidth,
+  type GameStageTab,
+  useGameWorkspaceStore,
+} from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import {
@@ -52,8 +56,6 @@ import {
   type GamePreviewServe,
   toolchainReadyFor,
 } from "./gameStageLogic";
-
-type GameStageTab = "play" | "run" | "builds";
 
 const BUSY_LABELS: Record<GameAction, string> = {
   preview: "Building the web preview",
@@ -104,6 +106,12 @@ export function GameStage({
   const setChatWidth = useGameWorkspaceStore((state) => state.setChatWidth);
   const setChatCollapsed = useGameWorkspaceStore((state) => state.setChatCollapsed);
   const [tab, setTab] = useState<GameStageTab | null>(null);
+  const tabRequest = useGameWorkspaceStore((state) => state.stageTabRequest);
+  const [seenTabRequest, setSeenTabRequest] = useState(tabRequest);
+  if (tabRequest !== seenTabRequest) {
+    setSeenTabRequest(tabRequest);
+    if (tabRequest !== null) setTab(tabRequest.tab);
+  }
   // A game being made by its production run opens on the run, not on an
   // empty stage; the creator's own choice of tab always wins.
   const runStatus = useEnvironmentQuery(

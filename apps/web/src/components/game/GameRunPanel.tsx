@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -36,7 +36,7 @@ import { useEnvironmentProviders } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { cn } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -71,6 +71,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const runProfile = useAtomCommand(gameEnvironment.runProfile, { reportFailure: false });
   const [startProfile, setStartProfile] = useState<GameRunProfile | null>(null);
   const [note, setNote] = useState("");
+  const steerKey = useRef<{ readonly text: string; readonly id: string } | null>(null);
   const [steerMessage, setSteerMessage] = useState<string | null>(null);
   // What the last start did, in one line (a resume, a fresh run, an earlier run not carried over).
   const [startMessage, setStartMessage] = useState<string | null>(null);
@@ -138,18 +139,23 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     else statusQuery.refresh();
   };
   const steer = async () => {
-    if (busy || note.trim().length === 0) return;
+    const text = note.trim();
+    if (busy || text.length === 0) return;
+    // Sending the same note again after a failure is a retry of the same
+    // command, so a note that did land is not added twice.
+    if (steerKey.current?.text !== text) steerKey.current = { text, id: randomUUID() };
     setBusy(true);
     setError(null);
     const result = await runSteer({
       environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, text: note.trim() },
+      input: { threadId: threadRef.threadId, text, commandId: steerKey.current.id },
     });
     setBusy(false);
     if (result._tag === "Failure") {
       setError(String(squashAtomCommandFailure(result)));
       return;
     }
+    steerKey.current = null;
     setNote("");
     setSteerMessage(result.value.message);
     statusQuery.refresh();

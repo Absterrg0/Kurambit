@@ -14,8 +14,14 @@ export type GameRunProfile = typeof GameRunProfile.Type;
 export const GameRunDecisionKind = Schema.Literals(["style", "prototype", "ladder"]);
 export type GameRunDecisionKind = typeof GameRunDecisionKind.Type;
 
+/** The caller's id for one request: a retry with the same id is the same command, applied once. */
+export const GameRunCommandKey = Schema.optionalKey(
+  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+);
+
 export const GameRunStartInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   /** Required for a new run; empty resumes a stopped run with its own brief. */
   brief: Schema.String.check(Schema.isMaxLength(8000)),
   artDirection: Schema.optionalKey(Schema.String),
@@ -319,7 +325,7 @@ export const GameRunRestoreResult = Schema.Struct({
 });
 export type GameRunRestoreResult = typeof GameRunRestoreResult.Type;
 
-export const GameRunStopInput = Schema.Struct({ threadId: ThreadId });
+export const GameRunStopInput = Schema.Struct({ threadId: ThreadId, commandId: GameRunCommandKey });
 export type GameRunStopInput = typeof GameRunStopInput.Type;
 
 export const GameRunStopResult = Schema.Struct({
@@ -330,6 +336,7 @@ export type GameRunStopResult = typeof GameRunStopResult.Type;
 
 export const GameRunSteerInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
 });
 export type GameRunSteerInput = typeof GameRunSteerInput.Type;
@@ -362,6 +369,7 @@ export type GameRunChecksResult = typeof GameRunChecksResult.Type;
 
 export const GameRunDecideInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   decisionId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   answer: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   notes: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20_000))),
@@ -373,6 +381,7 @@ export type GameRunDecideResult = typeof GameRunDecideResult.Type;
 
 export const GameRunProfileInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   profile: GameRunProfile,
 });
 export type GameRunProfileInput = typeof GameRunProfileInput.Type;

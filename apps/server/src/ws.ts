@@ -1784,25 +1784,25 @@ const layerWsRpc = (
                 GameRunControl.GameRunError.toOperationError("game-run-status", cause),
               ),
             ),
-        [WS_METHODS.gameRunStop]: ({ threadId }) =>
+        [WS_METHODS.gameRunStop]: ({ threadId, commandId }) =>
           gameRun
-            .runStop(threadId)
+            .runStop(threadId, commandId)
             .pipe(
               Effect.mapError((cause) =>
                 GameRunControl.GameRunError.toOperationError("game-run-stop", cause),
               ),
             ),
-        [WS_METHODS.gameRunSteer]: ({ threadId, text }) =>
+        [WS_METHODS.gameRunSteer]: ({ threadId, text, commandId }) =>
           gameRun
-            .runSteer(threadId, text)
+            .runSteer(threadId, text, commandId)
             .pipe(
               Effect.mapError((cause) =>
                 GameRunControl.GameRunError.toOperationError("game-run-steer", cause),
               ),
             ),
-        [WS_METHODS.gameRunProfile]: ({ threadId, profile }) =>
+        [WS_METHODS.gameRunProfile]: ({ threadId, profile, commandId }) =>
           gameRun
-            .runProfile(threadId, profile)
+            .runProfile(threadId, profile, commandId)
             .pipe(
               Effect.mapError((cause) =>
                 GameRunControl.GameRunError.toOperationError("game-run-profile", cause),

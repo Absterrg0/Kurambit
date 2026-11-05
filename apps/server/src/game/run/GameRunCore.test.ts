@@ -1263,6 +1263,22 @@ it.effect("every chat of a game reaches its one run, and a role thread none of i
   ),
 );
 
+it.effect("a steer sent again under the same id is one note", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* atVision(world);
+      const control = yield* GameRunControl.GameRunControl;
+      const notes = Effect.map(inFlight, ({ run }) => run.steer ?? []);
+      const before = (yield* notes).length;
+      yield* control.runSteer(creator, "Make the arena bigger.", "steer-1");
+      yield* control.runSteer(creator, "Make the arena bigger.", "steer-1");
+      assert.lengthOf(yield* notes, before + 1);
+      yield* control.runSteer(creator, "Make the arena bigger.", "steer-2");
+      assert.lengthOf(yield* notes, before + 2);
+    }),
+  ),
+);
+
 it.effect("a role's cap not yet due fires later from its timer, with no fiber holding it", () =>
   withGame((world) =>
     Effect.gen(function* () {

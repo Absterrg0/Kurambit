@@ -227,7 +227,7 @@ const handlers = {
       const scope = yield* caller;
       const runs = yield* GameRunControl.GameRunControl;
       return yield* runs
-        .runSteer(scope.thread.threadId, input.text)
+        .runSteer(scope.thread.threadId, input.text, input.commandId)
         .pipe(Effect.mapError(runFailure));
     }),
   ),
@@ -249,11 +249,13 @@ const handlers = {
         .pipe(Effect.mapError(runFailure));
     }),
   ),
-  game_run_stop: McpToolAccess.actsAsCaller(() =>
+  game_run_stop: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;
       const runs = yield* GameRunControl.GameRunControl;
-      return yield* runs.runStop(scope.thread.threadId).pipe(Effect.mapError(runFailure));
+      return yield* runs
+        .runStop(scope.thread.threadId, input.commandId)
+        .pipe(Effect.mapError(runFailure));
     }),
   ),
   game_run_submit: McpToolAccess.actsAsCaller((input) =>
@@ -265,12 +267,21 @@ const handlers = {
         .pipe(Effect.mapError(runFailure));
     }),
   ),
+  game_run_restore: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const runs = yield* GameRunControl.GameRunControl;
+      return yield* runs
+        .restoreRound(scope.thread.threadId, input.round)
+        .pipe(Effect.mapError(runFailure));
+    }),
+  ),
   game_run_profile: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;
       const runs = yield* GameRunControl.GameRunControl;
       return yield* runs
-        .runProfile(scope.thread.threadId, input.profile)
+        .runProfile(scope.thread.threadId, input.profile, input.commandId)
         .pipe(Effect.mapError(runFailure));
     }),
   ),

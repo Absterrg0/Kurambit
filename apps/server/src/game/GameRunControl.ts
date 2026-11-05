@@ -90,12 +90,20 @@ type Service = {
     input: GameCreateInput,
   ) => Effect.Effect<typeof GameProjectResult.Type, GameOperationError>;
   readonly runStatus: (threadId: ThreadId) => Fails<GameRunStatusResult>;
-  readonly runStop: (threadId: ThreadId) => Fails<GameRunStopResult>;
+  readonly runStop: (threadId: ThreadId, commandId?: string) => Fails<GameRunStopResult>;
   /** The creator's answer to the decision the live run waits on; refused when it does not fit. */
   readonly runDecide: (input: GameRunDecideInput) => Fails<GameRunDecideResult>;
-  readonly runProfile: (threadId: ThreadId, profile: GameRunProfile) => Fails<GameRunProfileResult>;
+  readonly runProfile: (
+    threadId: ThreadId,
+    profile: GameRunProfile,
+    commandId?: string,
+  ) => Fails<GameRunProfileResult>;
   /** A creator note for the run's next round; on a finished run it buys one round. */
-  readonly runSteer: (threadId: ThreadId, text: string) => Fails<GameRunSteerResult>;
+  readonly runSteer: (
+    threadId: ThreadId,
+    text: string,
+    commandId?: string,
+  ) => Fails<GameRunSteerResult>;
   /** Scores the open rung's state checks on the build in the game root now. */
   readonly runChecks: (threadId: ThreadId) => Fails<GameRunChecksResult>;
   /** One round's evidence; `videoFile` and `sheetFiles` are files the transport may sign. */
@@ -220,7 +228,14 @@ const make = Effect.gen(function* () {
           : runError(operation, command.threadId, "command-failed", cause.message),
       ),
     );
-  const commandId = () => CommandId.make(`server:game-run:${NodeCrypto.randomUUID()}`);
+  // A caller's own id makes its retry the same command; the orchestrator's
+  // receipt answers it without applying it again.
+  const commandId = (kind?: string, given?: string) =>
+    CommandId.make(
+      given === undefined || kind === undefined
+        ? `server:game-run:${NodeCrypto.randomUUID()}`
+        : `client:${kind}:${given}`,
+    );
 
   const runStart: Service["runStart"] = Effect.fn("GameRunControl.runStart")(function* (
     input: GameRunStartInput,
@@ -259,7 +274,7 @@ const make = Effect.gen(function* () {
       yield* ensureScaffold(root, lane, git.untrack, false);
       yield* dispatch("run-start", {
         type: "game-run.resume",
-        commandId: commandId(),
+        commandId: commandId("game-run.start", input.commandId),
         threadId: run.threadId,
         runId: run.id,
         ...(budgetMinutes === undefined ? {} : { budgetMinutes }),
@@ -302,7 +317,7 @@ const make = Effect.gen(function* () {
     yield* ensureScaffold(root, lane, git.untrack, true);
     yield* dispatch("run-start", {
       type: "game-run.start",
-      commandId: commandId(),
+      commandId: commandId("game-run.start", input.commandId),
       threadId: runThread,
       runId,
       lane,
@@ -440,6 +455,7 @@ const make = Effect.gen(function* () {
 
   const runStop: Service["runStop"] = Effect.fn("GameRunControl.runStop")(function* (
     threadId: ThreadId,
+    given?: string,
   ) {
     yield* resolveGame(threadId);
     const { run } = yield* latestOf(threadId);
@@ -447,7 +463,7 @@ const make = Effect.gen(function* () {
       return { stopped: false, message: "No live run for this game." } satisfies GameRunStopResult;
     yield* dispatch("run-stop", {
       type: "game-run.stop",
-      commandId: commandId(),
+      commandId: commandId("game-run.stop", given),
       threadId: run.threadId,
       runId: run.id,
       reason: "stopped by the creator",
@@ -476,7 +492,7 @@ const make = Effect.gen(function* () {
     );
     yield* dispatch("run-decide", {
       type: "game-run.decide",
-      commandId: commandId(),
+      commandId: commandId("game-run.decide", input.commandId),
       threadId: run.threadId,
       runId: run.id,
       decisionId: input.decisionId,
@@ -502,6 +518,7 @@ const make = Effect.gen(function* () {
   const runProfile: Service["runProfile"] = Effect.fn("GameRunControl.runProfile")(function* (
     threadId: ThreadId,
     profile: GameRunProfile,
+    given?: string,
   ) {
     const run = yield* liveRun(
       "run-profile",
@@ -510,7 +527,7 @@ const make = Effect.gen(function* () {
     );
     yield* dispatch("run-profile", {
       type: "game-run.profile.set",
-      commandId: commandId(),
+      commandId: commandId("game-run.profile.set", given),
       threadId: run.threadId,
       runId: run.id,
       profile,
@@ -527,6 +544,7 @@ const make = Effect.gen(function* () {
   const runSteer: Service["runSteer"] = Effect.fn("GameRunControl.runSteer")(function* (
     threadId: ThreadId,
     text: string,
+    given?: string,
   ) {
     const { root } = yield* resolveGame(threadId);
     const note = text.trim().slice(0, 4000);
@@ -542,7 +560,7 @@ const make = Effect.gen(function* () {
       );
     yield* dispatch("run-steer", {
       type: "game-run.steer",
-      commandId: commandId(),
+      commandId: commandId("game-run.steer", given),
       threadId: run.threadId,
       runId: run.id,
       note,
