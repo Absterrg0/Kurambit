@@ -1412,7 +1412,14 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
    * every time. A rewrite that keeps its size, mtime and (where git checks
    * them) ctime and inode is missed, exactly as `git status` misses it for a
    * tracked file; git's racy check still re-reads files written in the
-   * second the index was.
+   * second the index was. Two known limits follow from it:
+   *   - a clean filter whose output changes with no config or attribute
+   *     change (a tool upgraded under the same name): a fresh seed re-hashes
+   *     new and modified files every time and records the new output, the
+   *     kept index records it only once the file's stat data changes;
+   *   - on Windows, Git for Windows reports no inode and a creation time as
+   *     ctime, so for these files only size and mtime stand between an
+   *     in-place rewrite that keeps both and a missed change.
    */
   const lineUpCaptureIndex = (place: CapturePlace, run: CaptureRun) =>
     Effect.gen(function* () {
