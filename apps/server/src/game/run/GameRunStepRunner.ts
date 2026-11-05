@@ -60,6 +60,7 @@ import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
+import { BuildName } from "./buildNames.ts";
 import { buildStep, captureBuild } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
@@ -762,7 +763,7 @@ const make = Effect.gen(function* () {
         // cut after the best was restored must not keep the best as the work.
         const ops = { game, checkpoints };
         const ctx = { root, runId: run.id, lane: run.lane };
-        const name = `ending-${job.endedAt.replace(/[^0-9A-Za-z]/g, "")}/unfinished`;
+        const name = BuildName.ending(job.endedAt);
         const parked = yield* Effect.gen(function* () {
           const ref = checkpointRefForGameRun(run.id, name);
           const kept = yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: ref });

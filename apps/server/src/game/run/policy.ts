@@ -8,6 +8,7 @@ import type {
   ThreadId,
 } from "@kurambit/contracts";
 import { laneProfile } from "../engineProfile.ts";
+import { BuildName } from "./buildNames.ts";
 import * as Roles from "./roles.ts";
 import type * as State from "./state.ts";
 import { BLANK, isStateCheck, ladderOf, parseLadder, rungOfChange } from "./state.ts";
@@ -638,8 +639,6 @@ const role = (id: number, spec: RoleSpec): RoleStep => ({
   ...spec,
 });
 const build = (id: number, op: BuildOp): Step => ({ kind: "build", id, op });
-/** A round's candidate is kept under its label's name. */
-const candidateOf = (label: string) => `${label}/candidate`;
 /** A prototype's label names its build; anything else already is one (a checkpoint oid). */
 const buildOf = (state: RunState, name: string): string =>
   state.protos.find((p) => p.branch === name)?.sha ?? name;
@@ -1456,7 +1455,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     Math.max(FLOOR_MS, fit(state, input.now, cap, BUILD_RESERVE_MS + FLOOR_MS));
   switch (t._tag) {
     case "init":
-      return run({ _tag: "capture", name: "base", base: "" });
+      return run({ _tag: "capture", name: BuildName.base, base: "" });
     case "stage": {
       const name = t.name;
       if (t.phase === "review")
@@ -1497,7 +1496,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
               capMs: CAP[name],
             });
       if (t.phase === "commit")
-        return run({ _tag: "capture", name: `stage-${t.name}`, base: state.best });
+        return run({ _tag: "capture", name: BuildName.stage(t.name), base: state.best });
       return t.phase === "boot" ? go({ kind: "boot", id }) : toBest();
     }
     case "proto": {
@@ -1514,14 +1513,15 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       }
       if (t.phase === "role")
         return act({ role: name, prompt: Roles.proto(lane), capMs: CAP.proto });
-      if (t.phase === "commit") return run({ _tag: "capture", name, base: state.best });
+      if (t.phase === "commit")
+        return run({ _tag: "capture", name: BuildName.proto(t.i), base: state.best });
       if (t.phase === "boot") return go({ kind: "boot", id });
       // Each prototype starts from the same base: kept or not, it stays under its name.
       return toBest();
     }
     case "pick": {
       if (t.phase === "adopt")
-        return run({ _tag: "restore", sha: buildOf(state, t.chosen), keep: ["best"] });
+        return run({ _tag: "restore", sha: buildOf(state, t.chosen), keep: [BuildName.best] });
       const j = finalJudge(t.cmp, "x");
       if (t.phase === "select")
         return act({
@@ -1554,7 +1554,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "leave":
       // The round's work, whatever state it is in, is kept before the folder returns to the best.
       return t.phase === "capture"
-        ? run({ _tag: "capture", name: `${t.branch}/unfinished`, base: state.best })
+        ? run({ _tag: "capture", name: BuildName.unfinished(t.branch), base: state.best })
         : toBest();
     case "decide": {
       if (state.profile === "guided")
@@ -1647,7 +1647,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       return go(blockStep(id, r.block!, lane));
     case "commit":
     case "retry-commit":
-      return run({ _tag: "capture", name: candidateOf(r.branch), base: state.best });
+      return run({ _tag: "capture", name: BuildName.candidate(r.branch), base: state.best });
     case "stall":
       return toBest();
     case "boot":
@@ -1680,7 +1680,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       // A kept round is the best and keeps its own name for a creator's restore;
       // the folder already holds it.
       return r.outcome === "merge"
-        ? run({ _tag: "keep", names: ["best", r.branch], sha: r.candidate })
+        ? run({ _tag: "keep", names: [BuildName.best, BuildName.kept(r.branch)], sha: r.candidate })
         : toBest();
     case "review":
       return act({
@@ -1937,7 +1937,7 @@ export const applyResult = (
         if (res.ok) return out(afterStage({ ...s, best: t.sha }, t.name, now));
         return out({ ...s, task: { ...t, phase: "reject", why: res.detail } });
       }
-      logs.push(`${t.name}: boot failed; its work stays as build stage-${t.name}`);
+      logs.push(`${t.name}: boot failed; its work stays as build ${BuildName.stage(t.name)}`);
       return out(afterStage(s, t.name, now));
     }
     case "proto": {

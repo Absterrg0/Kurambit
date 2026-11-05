@@ -17,6 +17,7 @@ import { RESUMABLE } from "../../orchestration-v2/gameRun/decide.ts";
 import type * as GameService from "../GameService.ts";
 import { causeText, logLine } from "../runSetup.ts";
 import { buildStep, captureBuild, isRestored, measureChange, restoredPaths } from "./builds.ts";
+import { BuildName } from "./buildNames.ts";
 import type { RoundRecord, RunState } from "./state.ts";
 
 export const restoreKeptRound = (input: {
@@ -63,7 +64,7 @@ export const restoreKeptRound = (input: {
     const what = restoredPaths(lane).join(", ");
     // The folder as it is, kept once per request: a restore a restart cut
     // short must not keep its own half-restored folder as the creator's work.
-    const beforeName = `restore-${input.requestId}/before`;
+    const beforeName = BuildName.restoreBefore(input.requestId);
     const beforeRef = checkpointRefForGameRun(run.id, beforeName);
     if (!(yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: beforeRef })))
       yield* captureBuild(checkpoints, root, run.id, beforeName);
@@ -77,7 +78,7 @@ export const restoreKeptRound = (input: {
     const restored = yield* buildStep(
       { game, checkpoints },
       { root, runId: run.id, lane },
-      { _tag: "restore", sha: build, keep: ["best"] },
+      { _tag: "restore", sha: build, keep: [BuildName.best] },
     );
     if (!restored.build.ok)
       return no("commit-missing", `Round ${round}'s build is gone (${restored.build.detail}).`);
@@ -85,7 +86,7 @@ export const restoreKeptRound = (input: {
       checkpoints,
       root,
       run.id,
-      `restore-${input.requestId}/after`,
+      BuildName.restoreAfter(input.requestId),
     );
     if ((yield* measureChange(checkpoints, root, restorePaths, build, after)).changed)
       return no(

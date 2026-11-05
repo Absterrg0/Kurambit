@@ -50,6 +50,7 @@ import { forkParked } from "../../serverActivation.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
+import { BuildName } from "./buildNames.ts";
 import { captureBuild, isGameCode, measureChange } from "./builds.ts";
 import { botRunCount } from "./facts.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
@@ -469,7 +470,7 @@ const make = Effect.gen(function* () {
             checkpoints,
             root,
             at.run.id,
-            `turn/${turn.stepId}/${turn.attempt}`,
+            BuildName.turn(turn.stepId, turn.attempt),
           ).pipe(
             Effect.catch((error) =>
               log(`${role.role}: its turn could not be kept as a build (${error.message})`).pipe(
