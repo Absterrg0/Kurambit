@@ -134,6 +134,7 @@ interface Step {
   readonly act?: (cwd: string) => void;
   /** Whether the capture seeds a fresh index (true) or reuses the kept one (false). */
   readonly seeds: boolean;
+  readonly preWrites?: boolean;
   readonly restoreTo?: { readonly step: string; readonly paths: ReadonlyArray<string> };
 }
 interface Case {
@@ -162,6 +163,7 @@ const cases: ReadonlyArray<Case> = [
       {
         name: "large change",
         seeds: false,
+        preWrites: true,
         act: (cwd) => {
           for (let i = 0; i < 7; i += 1)
             randomFile(NodePath.join(cwd, `assets/big/b${i}.bin`), 10 << 20);
@@ -601,6 +603,12 @@ it.layer(layer)("persistent capture index oracle", (it) => {
             assert.strictEqual(userState(cwd), before, `${label}: the oracle changed git state`);
             const seeded = ran.some((args) => args.includes("read-tree"));
             assert.strictEqual(seeded, step.seeds, `${label}: seeded=${seeded}`);
+            const preWrote = ran.some((args) => args.includes("hash-object"));
+            assert.strictEqual(
+              preWrote,
+              step.preWrites ?? false,
+              `${label}: pre-wrote=${preWrote}`,
+            );
             if (testCase.name === "split index")
               for (const file of captureIndexes(cwd))
                 // Never a split index pointing at a shared index file git could expire.

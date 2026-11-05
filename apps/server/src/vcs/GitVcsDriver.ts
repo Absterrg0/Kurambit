@@ -428,6 +428,10 @@ const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
 
 // A capture's listings name every changed or new file; they stay in memory.
 const CAPTURE_LISTING_MAX_BYTES = 128 * 1024 * 1024;
+// Pre-writing pays off only when much changed: below this total a capture only
+// stages. Files below the floor are left to add, where they cost next to nothing.
+const PRE_WRITE_MIN_FILE_BYTES = 64 * 1024;
+const PRE_WRITE_MIN_TOTAL_BYTES = 64 * 1024 * 1024;
 // Longer than any capture runs, so a temp file this old belongs to no running capture.
 const STRAY_CAPTURE_INDEX_MS = 2 * 60 * 60_000;
 const CAPTURE_INDEX_FILE = /^capture-index-[0-9a-f]{16}-[0-9a-f]{16}$/;
@@ -496,6 +500,20 @@ function caseConflicts(paths: Iterable<string>): Set<string> {
     }
   }
   return conflicted;
+}
+
+/** The files over `count` groups of near-equal bytes: largest first, each to the lightest group. */
+function balanceBySize<A extends { readonly size: number }>(
+  files: ReadonlyArray<A>,
+  count: number,
+) {
+  const groups = Array.from({ length: count }, () => ({ bytes: 0, files: [] as A[] }));
+  for (const file of [...files].sort((left, right) => right.size - left.size)) {
+    const lightest = groups.reduce((min, group) => (group.bytes < min.bytes ? group : min));
+    lightest.files.push(file);
+    lightest.bytes += file.size;
+  }
+  return groups.map((group) => group.files).filter((group) => group.length > 0);
 }
 
 const nowFreshness = Effect.fn("GitVcsDriver.nowFreshness")(function* () {
@@ -582,6 +600,7 @@ const gitCommand = (
     readonly maxOutputBytes?: number;
     readonly outputMode?: VcsProcess.VcsProcessInput["outputMode"];
     readonly appendTruncationMarker?: boolean;
+    readonly lowPriority?: boolean;
   },
 ) =>
   process.run({
@@ -601,6 +620,7 @@ const gitCommand = (
     ...(options?.appendTruncationMarker !== undefined
       ? { appendTruncationMarker: options.appendTruncationMarker }
       : {}),
+    ...(options?.lowPriority !== undefined ? { lowPriority: options.lowPriority } : {}),
   });
 
 export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* () {
@@ -641,6 +661,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       ...(input.appendTruncationMarker !== undefined
         ? { appendTruncationMarker: input.appendTruncationMarker }
         : {}),
+      ...(input.lowPriority !== undefined ? { lowPriority: input.lowPriority } : {}),
     });
 
   const detectRepository: VcsDriver.VcsDriver["Service"]["detectRepository"] = Effect.fn(
@@ -1470,6 +1491,79 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       } satisfies CaptureIndexLineUp;
     });
 
+  /**
+   * A cache warm, only when much changed: the large changed files are written
+   * as objects by parallel `hash-object` processes at lowered priority, then
+   * `add -A` finds each object stored and makes every decision itself (modes,
+   * symlinks, filters, line endings). A wrong guess leaves an orphan object.
+   */
+  const preWriteChanged = (top: string, run: CaptureRun, lined: CaptureIndexLineUp | null) =>
+    Effect.gen(function* () {
+      const tracked =
+        lined === null
+          ? splitNul(
+              yield* captureListing(run, [
+                ...checkpointIndexConfig,
+                "diff-files",
+                "-z",
+                "--name-only",
+                "--",
+                ".",
+              ]),
+            )
+          : [...lined.dirty, ...lined.realigned];
+      const untracked = splitNul(
+        yield* captureListing(run, [
+          ...checkpointIndexConfig,
+          "ls-files",
+          "-z",
+          "-o",
+          "--exclude-standard",
+          "--full-name",
+          "--",
+          ".",
+        ]),
+      ).filter((file) => !file.endsWith("/"));
+      const changed = yield* Effect.forEach(
+        [...new Set([...tracked, ...untracked])],
+        (file) =>
+          Effect.promise(() =>
+            NodeFSP.lstat(path.join(top, file)).then(
+              (info) => ({ path: file, size: info.isFile() ? info.size : -1 }),
+              () => ({ path: file, size: -1 }),
+            ),
+          ),
+        { concurrency: 64 },
+      );
+      const files = changed.filter((file) => file.size >= 0);
+      // --stdin-paths reads lines and unquotes a leading quote: such names are left to add.
+      const large = files.filter(
+        (file) => file.size >= PRE_WRITE_MIN_FILE_BYTES && !/[\n\r]|^"/.test(file.path),
+      );
+      if (large.reduce((sum, file) => sum + file.size, 0) < PRE_WRITE_MIN_TOTAL_BYTES) return;
+      // Two process slots stay free for the app's other git work.
+      const count = Math.max(
+        1,
+        Math.min(NodeOS.availableParallelism() - 1, VcsProcess.VCS_PROCESS_CONCURRENCY - 2),
+      );
+      const groups = balanceBySize(large, count);
+      yield* Effect.forEach(
+        groups,
+        (group) =>
+          run(
+            ["-c", "core.longpaths=true", ...durableWrite, "hash-object", "-w", "--stdin-paths"],
+            {
+              cwd: top,
+              stdin: `${group.map((file) => file.path).join("\n")}\n`,
+              maxOutputBytes: 1,
+              outputMode: "truncate",
+              lowPriority: true,
+            },
+          ),
+        { concurrency: "unbounded", discard: true },
+      );
+    });
+
   /** The capture's index becomes the kept one, under a ref to the commit made from it. */
   const keepCaptureIndex = (
     place: CapturePlace,
@@ -1525,6 +1619,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               Effect.orElseSucceed(() => null),
             )
           : null;
+      const { top } = place ?? (yield* resolveTopLevel(input.cwd));
       // Capture commands never write an index that points at a shared index
       // file git's own expiry could remove, nor read an untracked cache.
       const captureConfig: ReadonlyArray<readonly [string, string]> = [
@@ -1618,6 +1713,17 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
                 );
               }
             }
+
+            yield* preWriteChanged(top, run, lined).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.failCause(cause)
+                  : Effect.logWarning("checkpoint pre-write failed; staging hashes every file", {
+                      cwd: input.cwd,
+                      cause: Cause.pretty(cause),
+                    }),
+              ),
+            );
 
             const stageFiles = (exclusions: ReadonlyArray<string>) =>
               run([

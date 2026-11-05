@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off -- the OS priority constants.
+import * as NodeOS from "node:os";
+
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -36,6 +39,8 @@ export interface VcsProcessInput {
   readonly maxOutputBytes?: number;
   readonly outputMode?: ProcessRunner.ProcessRunInput["outputMode"];
   readonly appendTruncationMarker?: boolean;
+  /** Runs below normal priority, so bulk work leaves the user's editor and game smooth. */
+  readonly lowPriority?: boolean;
 }
 
 export interface VcsProcessOutput {
@@ -58,7 +63,7 @@ export class VcsProcess extends Context.Service<
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
-const VCS_PROCESS_CONCURRENCY = 8;
+export const VCS_PROCESS_CONCURRENCY = 8;
 const GITHUB_PROCESS_CONCURRENCY = 4;
 
 export const CHECKPOINT_CAPTURE_OPERATION = "GitVcsDriver.checkpoints.captureCheckpoint";
@@ -192,6 +197,7 @@ export const make = Effect.gen(function* () {
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: input.outputMode ?? "truncate",
         truncatedMarker: input.appendTruncationMarker ? OUTPUT_TRUNCATED_MARKER : "",
+        ...(input.lowPriority ? { priority: NodeOS.constants.priority.PRIORITY_BELOW_NORMAL } : {}),
         timeoutBehavior: "error",
       })
       .pipe(
