@@ -37,6 +37,13 @@ export const restoreKeptRound = (input: {
     reason,
     message,
   });
+  // A failure is a refusal the run records; an interrupt is left to recovery, which runs the job again.
+  const refusedOn =
+    (reason: GameRunRestoreRefusal, what: string) =>
+    (cause: Cause.Cause<unknown>): Effect.Effect<GameRunRestoreOutcome | null> =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.interrupt
+        : Effect.succeed(no(reason, `${what} (${causeText(cause)}); see .studio/run.log.`));
   return Effect.gen(function* () {
     if (!record.kept)
       return no(
@@ -84,24 +91,50 @@ export const restoreKeptRound = (input: {
         message: `Round ${round}'s build (${what}) is already the game's current build.${dropped.length > 0 ? `${dropped} What the folder held is kept as ${before}` : ""}`,
       } satisfies GameRunRestoreOutcome;
     }
-    const restored = yield* buildStep(
-      { game, checkpoints },
-      { root, runId: run.id, lane },
-      { _tag: "restore", sha: build, keep: [BuildName.best] },
-    );
-    if (!restored.build.ok)
-      return no("commit-missing", `Round ${round}'s build is gone (${restored.build.detail}).`);
-    const after = yield* captureBuild(
-      checkpoints,
-      root,
-      run.id,
-      BuildName.restoreAfter(input.requestId),
-    );
-    if ((yield* measureChange(checkpoints, root, restorePaths, build, after)).changed)
-      return no(
-        "restore-incomplete",
-        `Restoring round ${round} did not reproduce its build; see .studio/run.log.`,
+    const deps = { game, checkpoints };
+    const ctx = { root, runId: run.id, lane };
+    const afterName = BuildName.restoreAfter(input.requestId);
+    // From here the folder moves; any refusal puts the folder before back first.
+    const moving = Effect.gen(function* () {
+      const restored = yield* buildStep(deps, ctx, {
+        _tag: "restore",
+        sha: build,
+        keep: [BuildName.best],
+      });
+      if (!restored.build.ok)
+        return no("commit-missing", `Round ${round}'s build is gone (${restored.build.detail}).`);
+      const after = yield* captureBuild(checkpoints, root, run.id, afterName);
+      if ((yield* measureChange(checkpoints, root, restorePaths, build, after)).changed)
+        return no("restore-incomplete", `Restoring round ${round} did not reproduce its build.`);
+      return null;
+    }).pipe(Effect.catchCause(refusedOn("git-failed", "The restore could not finish")));
+    const refused = yield* moving;
+    if (refused !== null) {
+      // The run's best stays what it was, so its build name goes back with the folder.
+      const putBack = Effect.gen(function* () {
+        const back = yield* buildStep(deps, ctx, { _tag: "restore", sha: beforeRef, keep: [] });
+        if (state.best.length > 0)
+          yield* buildStep(deps, ctx, { _tag: "keep", names: [BuildName.best], sha: state.best });
+        if (!back.build.ok) return back.build.detail;
+        const now = yield* captureBuild(checkpoints, root, run.id, afterName);
+        return (yield* measureChange(checkpoints, root, restorePaths, beforeRef, now)).changed
+          ? "the folder still differs from it"
+          : null;
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.succeed(causeText(cause)),
+        ),
       );
+      const failed = yield* putBack;
+      const said =
+        failed === null
+          ? `The folder is back as it was before the restore.`
+          : `Putting the folder back failed too (${failed}), so its ${what} may be partly restored. What it held before is kept as ${before}`;
+      yield* log(`creator's restore of round ${round} refused: ${refused.message} ${said}`);
+      return { ...refused, message: `${refused.message} ${said}` } satisfies GameRunRestoreOutcome;
+    }
     yield* log(
       `creator restored round ${round} (${build.slice(0, 8)}): ${what}${abandoned}; the folder before is ${before}`,
     );
@@ -111,15 +144,7 @@ export const restoreKeptRound = (input: {
       message: `Round ${round}'s ${what} are back in the game folder; notes, PLAN.md, VISION.md, bots and run records were left as they are.${dropped} What the folder held before is kept as ${before}`,
     } satisfies GameRunRestoreOutcome;
   }).pipe(
-    Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.interrupt
-        : Effect.succeed(
-            no(
-              "git-failed",
-              `The restore could not finish (${causeText(cause)}); see .studio/run.log.`,
-            ),
-          ),
-    ),
+    Effect.catchCause(refusedOn("git-failed", "The restore could not finish")),
+    Effect.map((outcome) => outcome ?? no("git-failed", "The restore left no outcome.")),
   );
 };
