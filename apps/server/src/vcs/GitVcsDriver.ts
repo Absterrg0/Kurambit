@@ -1518,23 +1518,26 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       // A folder that became a repository since its files were added (a
       // `.git` file or folder, as in a worktree or a submodule) is a gitlink or
       // left out after a seed, never its files: one lstat per folder.
-      const repositories = new Map<string, boolean>();
-      const isRepository = (folder: string) =>
-        repositories.has(folder)
-          ? Effect.succeed(repositories.get(folder)!)
-          : Effect.promise(() =>
+      const folderChains = (file: string) => {
+        const parts = file.split("/");
+        return parts.slice(1).map((_, depth) => parts.slice(0, depth + 1).join("/"));
+      };
+      const folders = new Set(added.flatMap((record) => folderChains(record.path)));
+      const repositoryFolders = new Set(
+        yield* Effect.forEach(
+          [...folders],
+          (folder) =>
+            Effect.promise(() =>
               NodeFSP.lstat(path.join(place.top, folder, ".git")).then(
-                () => true,
-                () => false,
+                () => folder,
+                () => null,
               ),
-            ).pipe(Effect.tap((found) => Effect.sync(() => repositories.set(folder, found))));
+            ),
+          { concurrency: 32 },
+        ),
+      );
       const insideRepository = (file: string) =>
-        Effect.gen(function* () {
-          const parts = file.split("/");
-          for (let depth = 1; depth < parts.length; depth += 1)
-            if (yield* isRepository(parts.slice(0, depth).join("/"))) return true;
-          return false;
-        });
+        folderChains(file).some((folder) => repositoryFolders.has(folder));
       const lines: string[] = realign.map(
         (record) => `${record.srcMode} ${record.srcOid}\t${record.path}`,
       );
@@ -1543,8 +1546,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           record.dstMode === "160000" ||
           dirty.has(record.path) ||
           ignored.has(record.path) ||
-          (yield* insideRepository(record.path)) ||
-          (yield* foreignCase(record.path));
+          insideRepository(record.path) ||
+          (place.ignoreCase && (yield* foreignCase(record.path)));
         if (drop) lines.push(`0 ${"0".repeat(record.srcOid.length)}\t${record.path}`);
       }
       if (lines.length > 0)
