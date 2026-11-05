@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off -- os.setPriority is the one cross-platform way to lower a child's priority.
+import * as NodeOS from "node:os";
+
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -29,6 +32,8 @@ export interface ProcessRunInput {
   readonly maxOutputBytes?: number | undefined;
   readonly outputMode?: "error" | "truncate" | undefined;
   readonly truncatedMarker?: string | undefined;
+  /** An OS priority for the child (`os.constants.priority`); left as inherited when unset. */
+  readonly priority?: number | undefined;
   /**
    * On timeout, return a synthetic timedOut result.
    * Partial stdout/stderr are not preserved.
@@ -309,6 +314,15 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
           }),
       ),
     );
+
+  const priority = input.priority;
+  // Priority is a courtesy to the rest of the machine: a child that already
+  // exited, or a platform that refuses, still runs its work. It is set just
+  // after spawn, so the child's first moments run at normal priority, and on
+  // Windows (where the class is not inherited from a later change) a process
+  // the child starts in that moment keeps normal priority.
+  if (priority !== undefined)
+    yield* Effect.try(() => NodeOS.setPriority(child.pid, priority)).pipe(Effect.ignore);
 
   const stdin = input.stdin;
   const onStdoutChunk = input.onStdoutChunk;

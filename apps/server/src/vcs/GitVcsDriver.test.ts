@@ -324,7 +324,11 @@ it.effect.each([
               phase === "add" &&
               nestedRecovery &&
               !input.args.some((arg) => arg.startsWith(":(exclude,literal)"));
-            if (!input.args.includes(phase) || initialStage || ++racedAttempts !== 1) {
+            // The capture also moves its index's own ref; only the checkpoint's races here.
+            const raced =
+              input.args.includes(phase) &&
+              (phase !== "update-ref" || input.args.includes(checkpointRef));
+            if (!raced || initialStage || ++racedAttempts !== 1) {
               return liveRunner.run(input);
             }
             const lockPath = phase === "add" ? `${input.env!.GIT_INDEX_FILE!}.lock` : refLockPath;
@@ -1162,7 +1166,7 @@ it.effect("GitVcsDriver flushes checkpoint objects and refs to disk before publi
     assert.strictEqual(writes.length, 4);
     for (const args of writes) {
       const command = args.findIndex((arg) => writeCommands.includes(arg));
-      for (const setting of ["core.fsync=objects,reference", "core.fsyncMethod=fsync"]) {
+      for (const setting of ["core.fsync=objects,reference,index", "core.fsyncMethod=fsync"]) {
         const index = args.indexOf(setting);
         assert.strictEqual(args[index - 1], "-c", args.join(" "));
         assert.isBelow(index, command);
@@ -1172,7 +1176,7 @@ it.effect("GitVcsDriver flushes checkpoint objects and refs to disk before publi
       "-C",
       "/repo",
       "-c",
-      "core.fsync=objects,reference",
+      "core.fsync=objects,reference,index",
       "-c",
       "core.fsyncMethod=fsync",
       "update-ref",
