@@ -67,8 +67,6 @@ const baseGame = (root: string) => {
 const todayTree = (cwd: string) => {
   const index = NodePath.join(NodeOS.tmpdir(), `oracle-index-${NodeCrypto.randomUUID()}`);
   try {
-    const userIndex = gitPath(cwd, "index");
-    if (NodeFS.existsSync(userIndex)) NodeFS.copyFileSync(userIndex, index);
     const env = { ...gitEnv(), GIT_INDEX_FILE: index };
     let sparse = false;
     try {
@@ -82,7 +80,50 @@ const todayTree = (cwd: string) => {
       "-c",
       "sparse.expectFilesOutsideOfPatterns=false",
     ];
-    git(cwd, [...config, "read-tree", "--reset", "HEAD"], env);
+    // Today's seed, step for step: a copy of the user's index read over HEAD,
+    // its time put back below the user index's (git's racy check), and dropped
+    // for a plain read when its flags could hide a change.
+    const seeded = (() => {
+      try {
+        const userIndex = gitPath(cwd, "index");
+        const indexTime = Math.floor((Math.floor(NodeFS.statSync(userIndex).mtimeMs) - 1) / 1000);
+        if (indexTime <= 0) return false;
+        NodeFS.copyFileSync(userIndex, index);
+        git(cwd, [...config, "read-tree", "--reset", "HEAD"], env);
+        NodeFS.utimesSync(index, indexTime, indexTime);
+        const records = git(
+          cwd,
+          [...config, "ls-files", "--full-name", "--sparse", "-v", "-z"],
+          env,
+        )
+          .split("\0")
+          .filter((record) => record.length > 0);
+        if (records.some((record) => /^[a-z]/.test(record) || (!sparse && record.startsWith("S"))))
+          return false;
+        const skipped = records
+          .filter((record) => record.startsWith("S") && !record.endsWith("/"))
+          .map((record) => record.slice(2));
+        if (skipped.length === 0) return true;
+        const selected = NodeChildProcess.execFileSync(
+          "git",
+          [...config, "sparse-checkout", "check-rules", "-z"],
+          { cwd, env, input: `${skipped.join("\0")}\0` },
+        );
+        return selected.length === 0;
+      } catch {
+        return false;
+      }
+    })();
+    if (!seeded) {
+      NodeFS.rmSync(index, { force: true });
+      git(
+        cwd,
+        sparse
+          ? [...config, "-c", "index.sparse=true", "read-tree", "--reset", "HEAD"]
+          : ["read-tree", "HEAD"],
+        env,
+      );
+    }
     try {
       git(cwd, [...config, "add", ...(sparse ? ["--sparse"] : []), "-A", "--", "."], env);
     } catch {
@@ -452,6 +493,39 @@ const cases: ReadonlyArray<Case> = [
         seeds: false,
         fails: true,
         act: (cwd) => write(NodePath.join(cwd, "art/File.txt"), "two, different\n"),
+      },
+    ],
+  },
+  {
+    name: "the user's index",
+    setup: (root) => (baseGame(root), root),
+    steps: [
+      { name: "cold", seeds: true },
+      {
+        // Today's method drops a seed with such flags and hashes every file.
+        name: "an assume-unchanged file changes",
+        seeds: false,
+        act: (cwd) => {
+          git(cwd, ["update-index", "--assume-unchanged", "scripts/s0.gd"]);
+          write(NodePath.join(cwd, "scripts/s0.gd"), "extends Node # assumed, changed\n");
+        },
+      },
+      {
+        // Same size, same second as the user's index: only git's racy check sees it.
+        name: "a same-second same-size edit beside the user's index",
+        seeds: false,
+        act: (cwd) => {
+          git(cwd, ["update-index", "--no-assume-unchanged", "scripts/s0.gd"]);
+          const file = NodePath.join(cwd, "scripts/s5.gd");
+          const second = 1_700_000_000;
+          // HEAD's own content, so the seed keeps this entry's stat data.
+          write(file, "extends Node # 5\n");
+          NodeFS.utimesSync(file, second, second);
+          git(cwd, ["add", "scripts/s5.gd"]);
+          write(file, "extends Node # X\n");
+          NodeFS.utimesSync(file, second, second);
+          NodeFS.utimesSync(gitPath(cwd, "index"), second, second);
+        },
       },
     ],
   },
