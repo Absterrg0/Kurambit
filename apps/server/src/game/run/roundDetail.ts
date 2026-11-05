@@ -51,7 +51,9 @@ export const roundOutcome = (r: RoundRecord): GameRunRoundOutcome =>
       ? "inconclusive"
       : r.unjudged === true
         ? "unjudged"
-        : "rejected";
+        : r.abandoned === true
+          ? "abandoned"
+          : "rejected";
 
 const Primitive = Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]);
 const BotFactFile = Schema.Struct({

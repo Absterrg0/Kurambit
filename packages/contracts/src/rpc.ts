@@ -32,6 +32,11 @@ import {
   GameThreadInput,
   GameToolchainStatus,
   GameWebPackageResult,
+  GameMediaSaveInput,
+  GameSavedDeleteInput,
+  GameSavedListInput,
+  GameSavedListResult,
+  GameSavedMedia,
   GameWindowsPackageResult,
 } from "./game.ts";
 import {
@@ -355,6 +360,9 @@ export const WS_METHODS = {
   gameRunRound: "game.runRound",
   gameRunPick: "game.runPick",
   gameRunRestore: "game.runRestore",
+  gameMediaSave: "game.mediaSave",
+  gameSavedList: "game.savedList",
+  gameSavedDelete: "game.savedDelete",
   subscribeGameEvents: "subscribeGameEvents",
 
   shellOpenInEditor: "shell.openInEditor",
@@ -1501,6 +1509,21 @@ const WsGameRunRestoreRpc = Rpc.make(WS_METHODS.gameRunRestore, {
   success: GameRunRestoreResult,
   error: gameError,
 });
+const WsGameMediaSaveRpc = Rpc.make(WS_METHODS.gameMediaSave, {
+  payload: GameMediaSaveInput,
+  success: GameSavedMedia,
+  error: gameError,
+});
+const WsGameSavedListRpc = Rpc.make(WS_METHODS.gameSavedList, {
+  payload: GameSavedListInput,
+  success: GameSavedListResult,
+  error: gameError,
+});
+const WsGameSavedDeleteRpc = Rpc.make(WS_METHODS.gameSavedDelete, {
+  payload: GameSavedDeleteInput,
+  success: Schema.Struct({}),
+  error: gameError,
+});
 const WsSubscribeGameEventsRpc = Rpc.make(WS_METHODS.subscribeGameEvents, {
   /** With a thread, only that thread's game's pushes. */
   payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
@@ -1529,6 +1552,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameRunRoundRpc,
   WsGameRunPickRpc,
   WsGameRunRestoreRpc,
+  WsGameMediaSaveRpc,
+  WsGameSavedListRpc,
+  WsGameSavedDeleteRpc,
   WsSubscribeGameEventsRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

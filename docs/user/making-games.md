@@ -136,8 +136,9 @@ kept as a build first, so a restore never discards work: the restore's answer an
 name that build with the command that brings it back. Work a run left unfinished when its budget
 ran out or it ended mid-round is kept and named in `.studio/run.log` the same way. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
 bots and the run's records stay as they are. A resumed run judges its next round against the
-restored build. Restore refuses while a run is live and while a stopped run is in the middle of a
-round.
+restored build. Restore refuses while a run is live. Restoring while a stopped run is in the middle
+of a round abandons that round: its work is in the build kept before the restore, the round shows as
+**Abandoned**, and a resume starts the next round from the restored build.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
@@ -198,6 +199,16 @@ keep their references.
 Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
 keeps running; use **Stop** in the stage to close it.
 
+## Keep a video or image
+
+Bot videos, explore screenshots and the blind players' frame sheets live with the game's logs, which
+**Settings → Storage** deletes after a while (14 days by default). To keep one, choose **Save** under
+it, in a round of the Run tab or in the prototype pick, or ask your agent to save it. The copy goes
+into the game's `saved/` folder under a dated name such as `2026-11-05 round 2 bot run.mp4`; open it
+or show it in its folder from there. The **Saved** list in the Builds tab shows everything saved and
+deletes a copy you no longer want. `saved/` is not committed to the game repository, and saving never
+replaces a file already there.
+
 ## Asset library
 
 Agents can use a built-in library of free game art and sound: 2D sprites and tilesets, UI kits and
@@ -239,3 +250,4 @@ Each game is a self-contained git repository you can move, back up, or open on a
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
 - `.studio/` holds the production run's rounds, notes, bots and videos.
+- `saved/` holds the videos and images you chose to keep; it is not committed.

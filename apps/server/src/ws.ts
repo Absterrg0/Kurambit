@@ -1903,6 +1903,11 @@ const layerWsRpc = (
               expiresAt: DateTime.formatIso(DateTime.makeUnsafe(download.expiresAt)),
             };
           }),
+        [WS_METHODS.gameMediaSave]: ({ threadId, source, label }) =>
+          game.saveMedia(threadId, source, label),
+        [WS_METHODS.gameSavedList]: ({ threadId }) => game.listSaved(threadId),
+        [WS_METHODS.gameSavedDelete]: ({ threadId, name }) =>
+          game.deleteSaved(threadId, name).pipe(Effect.as({})),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           input.threadId === undefined ? game.events : game.threadEvents(input.threadId),
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status(),

@@ -58,12 +58,16 @@ export const GameRunThreadRef = Schema.Struct({
 });
 export type GameRunThreadRef = typeof GameRunThreadRef.Type;
 
-/** How a round ended: merged, tied or split (best stands), lost both orders, or never judged. */
+/**
+ * How a round ended: merged, tied or split (best stands), lost both orders,
+ * never judged, or dropped mid-way by the creator's restore of another round.
+ */
 export const GameRunRoundOutcome = Schema.Literals([
   "kept",
   "inconclusive",
   "rejected",
   "unjudged",
+  "abandoned",
 ]);
 export type GameRunRoundOutcome = typeof GameRunRoundOutcome.Type;
 
@@ -553,6 +557,7 @@ export const GameRunRestoreRefusal = Schema.Literals([
   "not-kept",
   "mid-step",
   "off-trunk",
+  /** Older records only: a restore now abandons the round in progress. */
   "mid-round",
   "uncommitted-work",
   "commit-missing",

@@ -126,7 +126,8 @@ Results also list folders in the worktree folder that no thread uses, with their
 Browser captures, rotated logs and game logs have separate retention periods. Expired capture links stop
 working. Current logs, message attachments, and browser profiles are kept. Game logs (each game's
 tool logs and bot, explore and check runs) are deleted after 14 days by default, and a game's
-oldest go first once they pass 2 GB; old rounds then show no bot video. Turn the rule off to keep them.
+oldest go first once they pass 2 GB; old rounds then show no bot video. Turn the rule off to keep them,
+or save the ones you want into the game's `saved/` folder, which the cleanup never touches.
 
 ## Project icons
 

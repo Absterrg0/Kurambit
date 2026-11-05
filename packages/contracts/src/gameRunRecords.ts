@@ -103,6 +103,8 @@ export const GameRunRoundRecord = Schema.Struct({
   kept: Schema.Boolean,
   unjudged: Schema.optionalKey(Schema.Boolean),
   inconclusive: Schema.optionalKey(Schema.Boolean),
+  // A creator's restore of another round dropped this one mid-way.
+  abandoned: Schema.optionalKey(Schema.Boolean),
   durationMs: Schema.Number,
   linesChanged: Schema.Number,
   testerNote: Schema.optionalKey(Schema.String),

@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId, WS_METHODS } from "@kurambit/contracts";
+import { EnvironmentId, GAME_SAVED_MEDIA_EVENT, ThreadId, WS_METHODS } from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -23,6 +23,7 @@ const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRunt
  */
 const threadGameSignal = Atom.family((key: string) => {
   const [environmentId = "", threadId = ""] = key.split("\0");
+  let last = "";
   return Atom.make((get) => {
     const result = get(
       gameEvents({
@@ -30,9 +31,10 @@ const threadGameSignal = Atom.family((key: string) => {
         input: { threadId: ThreadId.make(threadId) },
       }),
     );
-    return AsyncResult.isSuccess(result)
-      ? `${result.value.at}\0${result.value.revision ?? ""}`
-      : "";
+    // A saved/ change is the Saved list's alone; status and the run do not reread for it.
+    if (AsyncResult.isSuccess(result) && result.value.name !== GAME_SAVED_MEDIA_EVENT)
+      last = `${result.value.at}\0${result.value.revision ?? ""}`;
+    return last;
   }).pipe(Atom.withLabel(`game:thread-signal:${key}`));
 });
 
@@ -50,7 +52,8 @@ const gameListSignal = Atom.family((environmentId: string) => {
   let changes = 0;
   return Atom.make((get) => {
     const result = get(gameEvents({ environmentId: EnvironmentId.make(environmentId), input: {} }));
-    if (!AsyncResult.isSuccess(result)) return changes;
+    if (!AsyncResult.isSuccess(result) || result.value.name === GAME_SAVED_MEDIA_EVENT)
+      return changes;
     const event = result.value;
     // A run event's message is its current step, which the card shows.
     const state =
@@ -72,6 +75,32 @@ const runRestoredSignal = Atom.family((environmentId: string) =>
 
 export const noteRunRestored = (environmentId: EnvironmentId): void =>
   appAtomRegistry.update(runRestoredSignal(environmentId), (n) => n + 1);
+
+/**
+ * Changes when the server pushes a change to one thread's game's saved/
+ * folder: a save or delete from this client, another one, or an agent's tool.
+ */
+const savedMediaSignal = Atom.family((key: string) => {
+  const [environmentId = "", threadId = ""] = key.split("\0");
+  let changes = 0;
+  let last = "";
+  return Atom.make((get) => {
+    const result = get(
+      gameEvents({
+        environmentId: EnvironmentId.make(environmentId),
+        input: { threadId: ThreadId.make(threadId) },
+      }),
+    );
+    if (!AsyncResult.isSuccess(result) || result.value.name !== GAME_SAVED_MEDIA_EVENT)
+      return changes;
+    const seen = `${result.value.at}\0${result.value.revision ?? ""}`;
+    if (seen !== last) {
+      last = seen;
+      changes += 1;
+    }
+    return changes;
+  }).pipe(Atom.withLabel(`game:saved-media:${key}`));
+});
 
 export const gameEnvironment = {
   toolchain: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
@@ -129,6 +158,22 @@ export const gameEnvironment = {
   runRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runRestore",
     tag: WS_METHODS.gameRunRestore,
+  }),
+  saveMedia: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:saveMedia",
+    tag: WS_METHODS.gameMediaSave,
+  }),
+  savedList: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:savedList",
+    tag: WS_METHODS.gameSavedList,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: (target) =>
+      savedMediaSignal(`${target.environmentId}\0${target.input.threadId}`),
+  }),
+  deleteSaved: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:deleteSaved",
+    tag: WS_METHODS.gameSavedDelete,
   }),
   runStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runStop",

@@ -15,6 +15,7 @@ import {
   type GameAction,
   type GameActionResult,
   type GameOperationEvent,
+  type GameSavedMedia,
   type GameWebPackage,
   type GameWindowsPackage,
   type ThreadId,
@@ -78,6 +79,14 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameUnity from "./GameUnity.ts";
+import {
+  SAVED_DIR,
+  SAVED_EVENT,
+  SavedMediaError,
+  deleteSaved,
+  listSaved,
+  saveMedia,
+} from "./gameSavedMedia.ts";
 import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
 import { comparedSource, type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
 import { WEB_BUILD_DIRECTORY } from "./webBuild.ts";
@@ -382,6 +391,20 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameUnityScreenshotInput,
     ) => Effect.Effect<GameUnityScreenshotResult, GameOperationError>;
+    /** Copies a generated video or image into the game's saved/, past the log cleanup. */
+    readonly saveMedia: (
+      threadId: ThreadId,
+      source: string,
+      label?: string,
+    ) => Effect.Effect<GameSavedMedia, GameOperationError>;
+    readonly listSaved: (
+      threadId: ThreadId,
+    ) => Effect.Effect<ReadonlyArray<GameSavedMedia>, GameOperationError>;
+    /** Removes one file directly inside saved/. */
+    readonly deleteSaved: (
+      threadId: ThreadId,
+      name: string,
+    ) => Effect.Effect<void, GameOperationError>;
     /** Live Unity editor: recent console entries. */
     readonly unityConsole: (
       threadId: ThreadId,
@@ -566,7 +589,57 @@ const make = Effect.gen(function* () {
     const root = yield* projects.resolve(threadId);
     return yield* operations.exclusive(root, name, work(root), owner);
   });
+  // No operation lock: a saved copy touches neither the engine nor the folder Kurambit works in.
+  const savedMedia = <A>(
+    operation: string,
+    threadId: ThreadId,
+    work: (root: string) => Promise<A>,
+  ) =>
+    Effect.flatMap(projects.resolve(threadId), (root) =>
+      Effect.tryPromise({
+        try: () => work(root),
+        catch: (cause) =>
+          new GameOperationError({
+            operation,
+            path: NodePath.join(root, SAVED_DIR),
+            reason: cause instanceof SavedMediaError ? cause.reason : "io",
+            detail: (cause instanceof Error ? cause.message : String(cause)).slice(0, 4000),
+            cause,
+          }),
+      }),
+    );
   return GameService.of({
+    saveMedia: (threadId, source, label) =>
+      Effect.flatMap(Clock.currentTimeMillis, (now) => {
+        // The day on the server's own clock and zone: the creator's machine.
+        const day = DateTime.formatIsoDate(
+          DateTime.makeZonedUnsafe(now, { timeZone: DateTime.zoneMakeLocal() }),
+        );
+        // Pushed to every client of the game, so a save an agent made shows in the Saved list.
+        return savedMedia("Save media", threadId, (root) =>
+          saveMedia(root, source, label, day, now),
+        ).pipe(
+          Effect.tap((saved) =>
+            Effect.flatMap(projects.resolve(threadId), (root) =>
+              operations.changed(root, SAVED_EVENT, `Saved ${saved.name}`),
+            ).pipe(Effect.ignore),
+          ),
+        );
+      }),
+    listSaved: (threadId) =>
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        savedMedia("List saved media", threadId, (root) => listSaved(root, now)),
+      ),
+    deleteSaved: (threadId, name) =>
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        savedMedia("Delete saved media", threadId, (root) => deleteSaved(root, name, now)),
+      ).pipe(
+        Effect.tap(() =>
+          Effect.flatMap(projects.resolve(threadId), (root) =>
+            operations.changed(root, SAVED_EVENT, `Deleted ${name}`),
+          ).pipe(Effect.ignore),
+        ),
+      ),
     events: operations.events,
     threadEvents: (threadId) =>
       Stream.unwrap(

@@ -17,7 +17,11 @@ export const BuildName = {
   /** A round's builds sit in the round's own folder (`round-3/…`), which is never a build. */
   candidate: (label: string) => `${part(label)}/candidate`,
   kept: (label: string) => `${part(label)}/kept`,
-  unfinished: (label: string) => `${part(label)}/unfinished`,
+  /**
+   * A left round's work, by the step that kept it: a left round is never
+   * recorded, so the next round reuses its label and must not take its name.
+   */
+  unfinished: (label: string, step: number) => `${part(label)}/unfinished-${step}`,
   /** One role turn's work, for its change against the build before it. */
   turn: (stepId: string, attempt: number) => `turns/${part(stepId)}-${attempt}`,
   /** The work an ending found in the folder, kept once per ending. */

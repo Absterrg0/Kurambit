@@ -22,6 +22,7 @@ import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import { BuildName } from "../../game/run/buildNames.ts";
 import * as Policy from "../../game/run/policy.ts";
 import * as State from "../../game/run/state.ts";
 import type { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
@@ -903,18 +904,57 @@ const restoreRequest = (work: Work, command: Command<"game-run.restore.request">
     );
   });
 
-/** The restore job's outcome; a restored build becomes the run's judged best. */
+/** A restore on a stopped run abandons the round it holds; a resume would continue it otherwise. */
+export const abandonsRound = (run: GameRun, state: State.RunState): boolean =>
+  run.ending !== null && RESUMABLE.has(run.ending) && Policy.holdsRound(state);
+
+/**
+ * The restore job's outcome; a restored build becomes the run's judged best,
+ * and the round a stopped run held is dropped, its step with it.
+ */
 const restore = (work: Work, command: Command<"game-run.restore">) =>
   Result.flatMap(current(work, command.runId), (run) => {
     if (run.restore?.requestId !== command.requestId || run.restore.outcome !== null)
       return refuse("stale-step", `Restore ${command.requestId} is not the one pending.`);
     const landed: GameRun = { ...run, restore: { ...run.restore, outcome: command.outcome } };
-    const state = toState(run, work.records.rounds, inFlightOf(work, run));
-    const next =
-      command.outcome.kind === "restored"
-        ? { ...state, best: command.outcome.sha, pending: null }
-        : state;
-    return Result.succeed(settle(work, landed, state, next, [], []));
+    const held = inFlightOf(work, run);
+    const state = toState(run, work.records.rounds, held);
+    if (command.outcome.kind !== "restored")
+      return Result.succeed(settle(work, landed, state, state, [], []));
+    const best = { ...state, best: command.outcome.sha, pending: null };
+    if (!abandonsRound(run, state))
+      return Result.succeed(settle(work, landed, state, best, [], []));
+    const dropped = Policy.abandonRound(
+      best,
+      `the creator restored round ${run.restore.round} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
+      work.now,
+    );
+    // The next step's job releases the dropped round's copies, as it does a
+    // landed step's: the comparison's threads, and the held step's own roles (a
+    // blind player still playing is in the step, not yet in the comparison).
+    const release =
+      held === null
+        ? []
+        : [
+            ...new Set([
+              ...held.outputs.release,
+              ...dropped.release,
+              ...held.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId])),
+            ]),
+          ];
+    const steps: GameRunStep[] =
+      held === null
+        ? []
+        : [
+            {
+              ...held,
+              status: "cancelled",
+              outputs: { ...held.outputs, release },
+              logs: [...held.logs, ...dropped.logs],
+              completedAt: held.completedAt ?? work.at,
+            },
+          ];
+    return Result.succeed(settle(work, landed, state, dropped.state, steps, []));
   });
 
 /** A step's own timer: a role's cap at a later due time, a turn sent again, or its work after a memory wait. */

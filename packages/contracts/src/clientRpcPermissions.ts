@@ -19,6 +19,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.gameRunRestore]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameWindowsPackage]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameWebPackage]: AuthOrchestrationOperateScope,
+  [WS_METHODS.gameMediaSave]: AuthOrchestrationOperateScope,
+  [WS_METHODS.gameSavedDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameSecretsSet]: AuthSettingsWriteScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,

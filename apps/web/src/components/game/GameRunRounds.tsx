@@ -3,7 +3,6 @@ import { useAtomValue } from "@effect/atom-react";
 import { ChevronRightIcon, HistoryIcon } from "lucide-react";
 import {
   gameRunRoleLabel,
-  type EnvironmentId,
   type GameRunComparison,
   type GameRunPickDetail,
   type GameRunPickHow,
@@ -25,6 +24,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { SaveMediaButton } from "./GameSavedMedia";
 import { exposureLine, formatRunDuration, pickSideLabel } from "./gameRunView.logic";
 
 const OUTCOME: Record<
@@ -35,6 +35,7 @@ const OUTCOME: Record<
   inconclusive: { label: "Inconclusive", variant: "warning" },
   rejected: { label: "Rejected", variant: "error" },
   unjudged: { label: "Unjudged", variant: "outline" },
+  abandoned: { label: "Abandoned", variant: "outline" },
 };
 
 // The move is the reviewer's markdown; its first prose line says what the round tried.
@@ -81,14 +82,17 @@ const asIs = (text: string): string => text;
 
 /** A blind comparison's evidence: the comparators, the players' reports with their frames, the bots. */
 function ComparisonFields({
-  environmentId,
+  threadRef,
+  saveLabel,
   comparison,
   name = asIs,
   judgeLabel = asIs,
   onSheetLoad,
   onSheetError,
 }: {
-  environmentId: EnvironmentId;
+  threadRef: ScopedThreadRef;
+  /** What a saved sheet's name starts with ("round 3"). */
+  saveLabel: string;
   comparison: GameRunComparison;
   /** How a build is named to the reader ("A" → "A · Prototype 2"). */
   name?: (build: string) => string;
@@ -96,7 +100,7 @@ function ComparisonFields({
   onSheetLoad: () => void;
   onSheetError: () => void;
 }) {
-  const connection = usePreparedConnection(environmentId);
+  const connection = usePreparedConnection(threadRef.environmentId);
   return (
     <>
       {comparison.gate ? (
@@ -156,6 +160,13 @@ function ComparisonFields({
                         onError={onSheetError}
                       />
                     </a>
+                  ) : null}
+                  {sheetUrl !== null && sheet !== undefined ? (
+                    <SaveMediaButton
+                      threadRef={threadRef}
+                      source={sheet.file}
+                      label={`${saveLabel} ${name(report.build)} frame sheet`}
+                    />
                   ) : null}
                 </li>
               );
@@ -230,7 +241,7 @@ function RoundDetail({
   const restore = async () => {
     if (restoring) return;
     const confirmed = await requestConfirmDialog(
-      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build with a new commit, so later work stays in git history. Notes, PLAN.md, VISION.md, bots and run records stay as they are. Uncommitted changes block the restore; nothing is discarded.`,
+      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build; what the folder holds now is kept as a build first. Notes, PLAN.md, VISION.md, bots and run records stay as they are. A round the stopped run is in the middle of is abandoned, and a resume starts the next round from this build.`,
     );
     if (confirmed !== true) return;
     setRestoring(true);
@@ -302,7 +313,8 @@ function RoundDetail({
 
       {comparison !== null ? (
         <ComparisonFields
-          environmentId={threadRef.environmentId}
+          threadRef={threadRef}
+          saveLabel={`round ${round}`}
           comparison={comparison}
           onSheetLoad={() => setVideoRetried(false)}
           onSheetError={() => {
@@ -353,6 +365,13 @@ function RoundDetail({
                 setVideoRetried(true);
                 query.refresh();
               }}
+            />
+          ) : null}
+          {videoUrl !== null && detail.video !== null ? (
+            <SaveMediaButton
+              threadRef={threadRef}
+              source={detail.video.file}
+              label={`round ${round} bot run`}
             />
           ) : null}
         </Field>
@@ -485,7 +504,8 @@ function PickDetail({ threadRef }: { threadRef: ScopedThreadRef }) {
       {detail.note ? <p className="text-2xs text-muted-foreground">{detail.note}</p> : null}
       {detail.comparison !== null ? (
         <ComparisonFields
-          environmentId={threadRef.environmentId}
+          threadRef={threadRef}
+          saveLabel="prototype pick"
           comparison={detail.comparison}
           name={name}
           judgeLabel={() => "Comparator"}

@@ -15,7 +15,8 @@ import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import type * as GameService from "../GameService.ts";
 import { BuildName } from "./buildNames.ts";
 import { buildStep, captureBuild, pruneBuilds } from "./builds.ts";
-import { freshState } from "./state.ts";
+import * as Policy from "./policy.ts";
+import { type RunState, freshState } from "./state.ts";
 
 const layer = CheckpointStore.layer.pipe(
   Layer.provide(
@@ -53,7 +54,7 @@ it.effect("keeps a round beside its candidate, under names git can store, again 
     const capture = (name: string) => captureBuild(checkpoints, root, runId, name);
     // Every kind of name the run makes, as real ids and times give them.
     const candidate = yield* capture(BuildName.candidate("round-1"));
-    yield* capture(BuildName.unfinished("round-1"));
+    yield* capture(BuildName.unfinished("round-1", 7));
     yield* capture(BuildName.turn("run_mzx1:step:12", 2));
     yield* capture(BuildName.ending("2026-11-05T12:00:00.000Z"));
     yield* capture(BuildName.restoreBefore("8c1f-uuid"));
@@ -108,8 +109,14 @@ it.effect("clears a finished run's spent builds and keeps every one it or a pers
       BuildName.restoreBefore("r1"),
       BuildName.candidate("round-2"),
       BuildName.candidate("round-3"),
-      BuildName.unfinished("round-3"),
+      // Every build the run log names as kept: each left round's work, each
+      // ending's, a never-recorded round's candidate, a failed-checks round's.
+      BuildName.unfinished("round-3", 9),
+      BuildName.unfinished("round-2", 4),
       BuildName.ending("2026-11-05T12:00:00.000Z"),
+      BuildName.ending("2026-11-04T12:00:00.000Z"),
+      BuildName.candidate("round-4"),
+      BuildName.candidate("round-6"),
       BuildName.turn("step:7", 1),
     ];
     // A turn whose build is the best is still the best.
@@ -121,8 +128,8 @@ it.effect("clears a finished run's spent builds and keeps every one it or a pers
       BuildName.turn("step:5", 1),
       BuildName.turn("step:5", 2),
       BuildName.candidate("round-1"),
-      BuildName.unfinished("round-2"),
-      BuildName.ending("2026-11-04T12:00:00.000Z"),
+      // Beaten in both orders: the log never promised it.
+      BuildName.candidate("round-5"),
     ];
     for (const name of spent) build(name, 150);
     const state = {
@@ -160,6 +167,28 @@ it.effect("clears a finished run's spent builds and keeps every one it or a pers
               durationMs: 0,
               linesChanged: 0,
             },
+            {
+              round: 5,
+              move: "",
+              branch: "round-5",
+              verdicts: [
+                { order: "A=candidate,B=best", verdict: "B", reason: "" },
+                { order: "A=best,B=candidate", verdict: "A", reason: "" },
+              ],
+              kept: false,
+              durationMs: 0,
+              linesChanged: 0,
+            },
+            {
+              round: 6,
+              move: "",
+              branch: "round-6",
+              verdicts: [],
+              kept: false,
+              note: "rung checks failed (1 FAIL); not judged",
+              durationMs: 0,
+              linesChanged: 0,
+            },
           ],
           pending: { branch: "round-3", sha: pending, round: 3, verdicts: [], streak: 0 },
         },
@@ -175,4 +204,91 @@ it.effect("clears a finished run's spent builds and keeps every one it or a pers
     expect(yield* pruneBuilds(checkpoints, root, state)).toBe(0);
     NodeFS.rmSync(root, { recursive: true, force: true });
   }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "a budget leave's work is still there, under the name the log gave, after the finish prunes",
+  () =>
+    Effect.gen(function* () {
+      const { root, git } = repo();
+      const checkpoints = yield* CheckpointStore.CheckpointStore;
+      const runId = "run_leave";
+      const deps = { game, checkpoints };
+      const ctx = { root, runId, lane: "godot" };
+      const best = yield* captureBuild(checkpoints, root, runId, BuildName.best);
+      // Round 3's candidate, built and tested; the budget is spent before judging.
+      NodeFS.writeFileSync(NodePath.join(root, "godot", "main.gd"), "extends Node2D\n");
+      const candidate = yield* captureBuild(
+        checkpoints,
+        root,
+        runId,
+        BuildName.candidate("round-3"),
+      );
+      const input = { now: 0, coin: 0.5, id: "x" };
+      const fresh = freshState(
+        {
+          runId,
+          profile: "autopilot",
+          brief: "",
+          artDirection: "",
+          budgetMinutes: 60,
+          provider: null,
+          model: null,
+          variant: null,
+          startedAt: "",
+        },
+        {
+          rounds: [
+            {
+              round: 1,
+              move: "",
+              branch: "round-1",
+              verdicts: [],
+              kept: true,
+              durationMs: 0,
+              linesChanged: 0,
+            },
+            {
+              round: 2,
+              move: "",
+              branch: "round-2",
+              verdicts: [],
+              kept: true,
+              durationMs: 0,
+              linesChanged: 0,
+            },
+          ],
+          pending: null,
+        },
+      );
+      const round = Policy.reopen(fresh, 0).task;
+      if (round._tag !== "round") throw new Error("expected a round");
+      let state: RunState = {
+        ...fresh,
+        lane: "godot",
+        best,
+        seq: 11,
+        budgetEndsAt: input.now,
+        task: { ...round, phase: "restore", branch: "round-3", candidate },
+      };
+      const logs: string[] = [];
+      while (state.ending === null) {
+        const planned = Policy.plan(state, input);
+        if (planned.kind !== "step" || planned.step.kind !== "build")
+          throw new Error("expected a build");
+        const result = yield* buildStep(deps, ctx, planned.step.op);
+        const applied = Policy.applyResult(planned.state, planned.step, result, input);
+        logs.push(...applied.logs);
+        state = applied.state;
+      }
+      expect(state.ending).toBe("budget");
+      // The next round reuses the left round's label; its candidate is not that work's name.
+      expect(state.task).toMatchObject({ _tag: "round", n: 3 });
+      const named = /kept as build (\S+)/.exec(logs.join("\n"))?.[1];
+      expect(named).toBe(BuildName.unfinished("round-3", 13));
+      yield* pruneBuilds(checkpoints, root, state);
+      const kept = git("rev-parse", checkpointRefForGameRun(runId, named!));
+      expect(git("show", `${kept}:godot/main.gd`)).toBe("extends Node2D");
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }).pipe(Effect.provide(layer)),
 );

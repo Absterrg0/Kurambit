@@ -587,6 +587,37 @@ export const GameWebPackageResult = Schema.Struct({
   expiresAt: Schema.String,
 });
 export type GameWebPackageResult = typeof GameWebPackageResult.Type;
+/** The GameOperationEvent name a change to a game's saved/ folder is pushed under. */
+export const GAME_SAVED_MEDIA_EVENT = "saved";
+/** A creator's copy of generated media in the game's saved/ folder, kept past the log cleanup. */
+export const GameSavedMedia = Schema.Struct({
+  name: Schema.String,
+  /** Absolute path on the server. */
+  path: Schema.String,
+  bytes: Schema.Number,
+  savedAt: Schema.String,
+  /** The game-relative file it was saved from and the label it was saved with, when known. */
+  source: Schema.NullOr(Schema.String),
+  label: Schema.NullOr(Schema.String),
+});
+export type GameSavedMedia = typeof GameSavedMedia.Type;
+export const GameMediaSaveFields = {
+  /** Game-relative (or absolute) path of a video or image Kurambit generated. */
+  source: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)),
+  /** Words for the saved name after its date ("round 2 bot run"). */
+  label: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(120))),
+};
+export const GameMediaSaveInput = Schema.Struct({ threadId: ThreadId, ...GameMediaSaveFields });
+export type GameMediaSaveInput = typeof GameMediaSaveInput.Type;
+export const GameSavedListInput = Schema.Struct({ threadId: ThreadId });
+export const GameSavedListResult = Schema.Array(GameSavedMedia);
+export type GameSavedListResult = typeof GameSavedListResult.Type;
+export const GameSavedDeleteFields = {
+  /** A file directly in saved/, as the list names it. */
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
+};
+export const GameSavedDeleteInput = Schema.Struct({ threadId: ThreadId, ...GameSavedDeleteFields });
+export type GameSavedDeleteInput = typeof GameSavedDeleteInput.Type;
 export const GameConsoleMessage = Schema.Struct({
   level: Schema.Literals(["log", "info", "warning", "error"]),
   text: Schema.String,

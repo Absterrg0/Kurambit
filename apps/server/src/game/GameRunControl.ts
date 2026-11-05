@@ -124,7 +124,7 @@ type Service = {
   /**
    * Puts a kept round's build back in the game folder as the stopped run's
    * judged best, keeping what the folder held first. Refused while a run is
-   * live or mid-round.
+   * live; a stopped run's round in progress is abandoned.
    */
   readonly restoreRound: (threadId: ThreadId, round: number) => Fails<GameRunRestoreResult>;
   /** A run role's typed result; the refusal's reason comes back in-turn. */

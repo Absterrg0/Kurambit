@@ -227,7 +227,9 @@ reach none of its controls.
   the git work, and `game-run.restore` lands its outcome. The git work and a run's next move would
   race on the game folder, so the decider refuses resume, steer and another restore while an ending
   is unfinished (`finishing`) or a restore is pending (`restoring`), and refuses start and resume
-  during a restore.
+  during a restore. A stopped run's round in progress is dropped only when a `restored` outcome
+  lands (`Policy.abandonRound`), never at the request: a refused restore leaves it resumable, and a
+  job a restart cut short sees the same round and makes the same choice.
 - **Recovery** (`GameRunRecovery`, at startup): a live run's unfinished step gets its job again,
   and an ending whose finish is not recorded finishes again. Every step is safe to repeat because
   its job first finds what an earlier try left: a role's thread, a turn of this attempt that ended

@@ -1442,6 +1442,86 @@ export const resume = (state: RunState): RunState => ({
   ladder: state.ladder !== null && state.ladder.rungs.length === 0 ? null : state.ladder,
 });
 
+/**
+ * Whether a creator's restore abandons the round a stopped run holds: one
+ * past its start (or with its start's step saved), or the budget's leave of
+ * one. A resume would otherwise continue it on the folder the restore replaced.
+ */
+export const holdsRound = (state: RunState): boolean =>
+  state.task._tag === "leave" ||
+  (state.task._tag === "round" && (state.task.phase !== "start" || state.inFlight !== null));
+
+/**
+ * A creator's restore drops the round in flight: the next round starts from
+ * the restored best, never from this round's work (the restore kept the folder
+ * as a build first). A round already judged, waiting only on its review, is
+ * recorded with its outcome; one never judged is recorded as abandoned, which
+ * is no stall and leaves its rung as it was, with the creator's notes it read
+ * back for the next round. `release` names the role threads whose copies go.
+ */
+export const abandonRound = (
+  state: RunState,
+  why: string,
+  now: number,
+): Pick<Applied, "state" | "logs" | "release"> => {
+  const t = state.task;
+  const logs: string[] = [];
+  const fresh = (s: RunState) => ({ ...s, inFlight: null, task: newRound(s, now) });
+  if (t._tag === "leave") {
+    logs.push(`${t.branch}: left unfinished, ${why}`);
+    return { state: fresh(state), logs, release: [] };
+  }
+  if (t._tag !== "round" || !holdsRound(state)) return { state, logs, release: [] };
+  if (t.phase === "start") return { state: fresh(state), logs, release: [] };
+  const release = [
+    ...(t.cmp?.samples ?? []).map((x) => x.thread),
+    ...(t.cmp?.judges ?? []).map((j) => j.thread),
+  ].filter((thread): thread is ThreadId => thread !== null);
+  const record = { ...t.record, durationMs: now - t.startedAt, note: noteOf(t, why) };
+  if (t.record.kept) {
+    const settled = settleRung(
+      state,
+      t,
+      { ...record, ...(t.candidate.length > 0 ? { build: t.candidate } : {}) },
+      logs,
+    );
+    logs.push(`round ${t.n}: kept; its review is skipped, ${why}`);
+    const next = {
+      ...settled.state,
+      rounds: [...state.rounds, settled.record],
+      stage: `round-${t.n}`,
+      stallStreak: 0,
+    };
+    return { state: fresh(next), logs, release };
+  }
+  // Judged and not kept (rejected, inconclusive, unjudged, failed checks, a
+  // merge that failed): it keeps its outcome and its rung counts the try, but
+  // it is no stall, and it names no build a retry would continue over the
+  // restored best. A keep still waiting to be merged was never kept: abandoned.
+  const judged =
+    t.outcome === "drop" ||
+    t.outcome === "hold" ||
+    (t.outcome === "merge" && t.phase !== "outcome");
+  if (judged) {
+    const settled = settleRung(state, t, record, logs);
+    logs.push(`round ${t.n}: not kept; its review is skipped, ${why}`);
+    const next = {
+      ...settled.state,
+      rounds: [...state.rounds, settled.record],
+      stage: `round-${t.n}`,
+    };
+    return { state: fresh(next), logs, release };
+  }
+  logs.push(`round ${t.n}: abandoned, ${why}`);
+  const next = {
+    ...state,
+    rounds: [...state.rounds, { ...record, abandoned: true }],
+    stage: `round-${t.n}`,
+    steer: [...(t.record.steer ?? []), ...state.steer],
+  };
+  return { state: fresh(next), logs, release };
+};
+
 export const plan = (state: RunState, input: Inputs): Planned => {
   if (state.inFlight !== null) return { kind: "step", state, step: state.inFlight };
   const id = state.seq + 1;
@@ -1556,7 +1636,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "leave":
       // The round's work, whatever state it is in, is kept before the folder returns to the best.
       return t.phase === "capture"
-        ? run({ _tag: "capture", name: BuildName.unfinished(t.branch), base: state.best })
+        ? run({ _tag: "capture", name: BuildName.unfinished(t.branch, id), base: state.best })
         : toBest();
     case "decide": {
       if (state.profile === "guided")
@@ -2087,7 +2167,7 @@ export const applyResult = (
     case "leave":
       if (t.phase !== "trunk") {
         logs.push(
-          `${t.branch}: its unfinished work is kept as ${keptBuild(s.runId, BuildName.unfinished(t.branch), s.lane, g?.sha ?? "")}`,
+          `${t.branch}: its unfinished work is kept as ${keptBuild(s.runId, done.kind === "build" && done.op._tag === "capture" ? done.op.name : BuildName.unfinished(t.branch, done.id), s.lane, g?.sha ?? "")}`,
         );
         return out({ ...s, task: { ...t, phase: "trunk" } });
       }
@@ -2402,10 +2482,11 @@ const applyRound = (
       }
       // With a budget, judging starts only when both plays and both verdicts fit.
       if (remaining(s, now) < COMPARE_MIN_MS) {
+        // Kept as a left round's work: its candidate's name is the next round's.
         logs.push(
-          `round ${r.n}: budget leaves no time to judge; the candidate is kept as ${keptBuild(s.runId, BuildName.candidate(r.branch), s.lane, r.candidate)}`,
+          `round ${r.n}: budget leaves no time to judge; the round's work is kept as it is`,
         );
-        return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
+        return leaveRound(s, r);
       }
       const question =
         rung !== null
