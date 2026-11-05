@@ -1,5 +1,6 @@
 import { applyThreadPullRequestLinkUpdate } from "@kurambit/shared/threadPullRequests";
 import { projectTurnItemForWire } from "./WireProjection.ts";
+import { threadTurnsOwnedByRun } from "./CommandPolicy.ts";
 import * as Stream from "effect/Stream";
 import { makeThreadFind, findProjectedThreadItems } from "./ThreadFind.ts";
 import type {
@@ -3809,6 +3810,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         const candidates: Array<ProjectionLimitRecoveryCandidate> = [];
         for (const row of rows) {
           const thread = yield* decodeThreadPayload(row.payload_json);
+          if (threadTurnsOwnedByRun(thread)) continue;
           const item = yield* decodeTurnItemPayload(row.failure_payload_json);
           const summary = threadErrorSummary(
             item.type === "error" ? item.failure : null,
@@ -6590,7 +6592,8 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 ({ thread }) =>
                   thread.deletedAt === null &&
                   thread.archivedAt === null &&
-                  thread.settledOverride !== "settled",
+                  thread.settledOverride !== "settled" &&
+                  !threadTurnsOwnedByRun(thread),
               )
               .map(threadShellFromProjection)
               .filter(

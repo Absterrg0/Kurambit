@@ -2231,6 +2231,112 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
       }),
   );
 
+  it.effect("never recovers a production run's role thread from a usage limit", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const events = yield* EventSink.EventSinkV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("recovery:role");
+      const projectId = ProjectId.make("recovery:project:role");
+      const now = yield* DateTime.now;
+      yield* seedProject({
+        projectId,
+        title: "Recovery project",
+        workspaceRoot: process.cwd(),
+        defaultModelSelection: modelSelection,
+        createdAt: DateTime.formatIso(now),
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("recovery:create:role"),
+        threadId,
+        projectId,
+        title: "Builder",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        launchedBy: "game_run",
+        createdBy: "user",
+        creationSource: "server",
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("recovery:message:role"),
+        threadId,
+        messageId: MessageId.make("recovery:message:role"),
+        text: "Build the step.",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "server",
+      });
+      const run = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
+      const resetAt = DateTime.formatIso(DateTime.add(now, { minutes: 1 }));
+      yield* events.write({
+        events: [
+          {
+            id: EventId.make("recovery:run:role"),
+            type: "run.updated",
+            threadId,
+            occurredAt: now,
+            payload: { ...run, status: "failed", completedAt: now },
+          },
+          {
+            id: EventId.make("recovery:error:role"),
+            type: "turn-item.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              id: TurnItemId.make("recovery:error:role"),
+              type: "error",
+              threadId,
+              runId: run.id,
+              nodeId: run.rootNodeId,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 2,
+              status: "failed",
+              title: "Usage limit reached",
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              failure: {
+                class: "usage_limit",
+                message: "Plan limit reached.",
+                code: "usageLimitExceeded",
+                retryable: null,
+                resetAt,
+              },
+            },
+          },
+        ],
+      });
+      // The run ends resumably on this limit and continues the role itself.
+      const candidates = yield* projections.getLimitRecoveryCandidates({
+        now,
+        autoResume: true,
+        snooze: true,
+      });
+      assert.notInclude(
+        candidates.map((candidate) => candidate.id),
+        threadId,
+      );
+      const arm = yield* orchestrator
+        .dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make("recovery:arm:role"),
+          threadId,
+          limitRecovery: { runId: run.id, resetAt, autoResume: true },
+        })
+        .pipe(Effect.exit);
+      assert.equal(arm._tag, "Failure");
+    }),
+  );
+
   it.effect.each([
     "resume",
     "queued-resume",

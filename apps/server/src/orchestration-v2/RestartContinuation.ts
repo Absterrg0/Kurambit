@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import type { ProjectionRuntimeRecoveryState } from "./ProjectionStore.ts";
 
 import * as ServerSettings from "../serverSettings.ts";
-import { isNativeMaintenanceCommand } from "./CommandPolicy.ts";
+import { isNativeMaintenanceCommand, threadTurnsOwnedByRun } from "./CommandPolicy.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import {
   awaitingProviderThreadId,
@@ -42,11 +42,8 @@ function restartContinuationBlocked(
   settled: boolean,
 ): boolean {
   const { thread } = projection;
-  // A production run's role turn is its run's to continue, with the step's own
-  // prompt and cap: a generic "continue" here would run uncapped, and the run
-  // would read the cut turn as the role's finished work.
-  if (thread.launchedBy === "game_run") return true;
   if (
+    threadTurnsOwnedByRun(thread) ||
     thread.archivedAt !== null ||
     thread.deletedAt !== null ||
     thread.settledOverride === "settled" ||

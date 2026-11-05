@@ -2,6 +2,7 @@ import {
   type ChatAttachment,
   CommandId,
   ModelSelection,
+  type OrchestrationV2AppThread,
   type OrchestrationV2Command,
   OrchestrationV2ProviderCapabilities,
   type OrchestrationV2Run,
@@ -116,6 +117,18 @@ type MessageDispatchMode = Extract<
   OrchestrationV2Command,
   { readonly type: "message.dispatch" }
 >["dispatchMode"];
+
+/**
+ * A production run's role thread takes turns only from its run, which sends
+ * each with the step's prompt and cap. A server-made "continue" would run
+ * uncapped, possibly after the run ended, and the run would read that work as
+ * the role's. Every automatic continuation honours this.
+ */
+export function threadTurnsOwnedByRun(thread: {
+  readonly launchedBy?: OrchestrationV2AppThread["launchedBy"];
+}): boolean {
+  return thread.launchedBy === "game_run";
+}
 
 export function isNativeMaintenanceCommand(message: {
   readonly text: string;

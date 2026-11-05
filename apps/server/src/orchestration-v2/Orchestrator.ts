@@ -82,6 +82,7 @@ import {
   CommandPolicyV2,
   isNativeMaintenanceCommand,
   resolveMessageDispatchIntent,
+  threadTurnsOwnedByRun,
 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
@@ -2620,6 +2621,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: "The reset time has passed. Retry the thread manually.",
         });
       }
+      if (threadTurnsOwnedByRun(thread)) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause:
+            "This thread is one of a production run's roles. The run continues it when you resume the run from the game's chat.",
+        });
+      }
       if (
         !Number.isFinite(resetMs) ||
         thread.archivedAt !== null ||
@@ -4197,6 +4206,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const recovery = projection.thread.limitRecovery;
         const now = yield* DateTime.now;
         if (
+          threadTurnsOwnedByRun(projection.thread) ||
           run?.id !== command.usageLimitContinuationOfRunId ||
           failure?.class !== "usage_limit" ||
           threadShellFromProjection(projection).lastErrorClass !== "usage_limit" ||
@@ -4239,6 +4249,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const source = projection.runs.find((run) => run.id === command.restartContinuationOfRunId);
         if (
           !source ||
+          threadTurnsOwnedByRun(projection.thread) ||
           !isRestartContinuationSource(source, projection.providerTurns) ||
           projection.thread.archivedAt !== null ||
           projection.thread.deletedAt !== null ||
