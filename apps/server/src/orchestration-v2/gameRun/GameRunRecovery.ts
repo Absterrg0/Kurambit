@@ -86,6 +86,9 @@ const make = Effect.gen(function* () {
       if (run.status === "ended") {
         if (run.endedAt !== null && run.finished !== run.endedAt)
           yield* jobs.finish({ threadId, runId: run.id, endedAt: run.endedAt });
+        // A restore whose job a restart cut off runs again: it checks the folder first.
+        if (run.restore !== null && run.restore.outcome === null)
+          yield* jobs.restore({ threadId, runId: run.id, requestId: run.restore.requestId });
         return;
       }
       if (run.inFlight === null) return;

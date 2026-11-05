@@ -50,7 +50,7 @@ export const bootStep = (
           // A player build whose sources moved under it says nothing about them.
           const transient =
             error.reason === "busy" ||
-            error.detail === "Operation cancelled." ||
+            error.reason === "cancelled" ||
             (what === "boot player build" && error.reason === "invalid-input");
           if (transient && tries < 3)
             return ctx
@@ -94,7 +94,7 @@ export const bootStep = (
       detail: `boot clean; Linux player ${p.origin} in ${Math.round(p.ms / 1000)} s`,
     })),
     Effect.catchIf(
-      (error) => error.reason === "command-failed" && error.detail !== "Operation cancelled.",
+      (error) => error.reason === "command-failed",
       (error) => {
         // The first line names the session the build was for; the errors follow it,
         // then the log path and the editor's own output, which only the run log keeps.

@@ -497,6 +497,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-run.step.fail":
     case "game-run.decision.expire":
     case "game-run.finished":
+    case "game-run.restore.request":
     case "game-run.restore":
       return command.threadId;
     case "delegated_task.request":
@@ -6564,6 +6565,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         command,
         {
           projectId: thread.projectId,
+          projectRun: yield* projectionStore
+            .getProjectGameRun(thread.projectId)
+            .pipe(Effect.mapError(unreadable)),
           runs: records.gameRuns,
           rounds: records.gameRunRounds,
           inFlight:
@@ -10761,6 +10765,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "game-run.step.fail":
       case "game-run.decision.expire":
       case "game-run.finished":
+      case "game-run.restore.request":
       case "game-run.restore":
         cancelUnsettledEffects = yield* dispatchGameRun(command, events, effects);
         break;

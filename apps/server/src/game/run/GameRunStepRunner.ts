@@ -12,6 +12,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type GameRun,
+  type GameRunRestoreOutcome,
   type GameRunRoleBefore,
   type GameRunStep,
   type GameRunStepId,
@@ -56,6 +57,7 @@ import { runStateChecks } from "./checkRunner.ts";
 import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
+import { restoreKeptRound } from "./restoreRound.ts";
 import { makeGit, neutralBuild } from "./git.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
@@ -694,6 +696,40 @@ const make = Effect.gen(function* () {
       );
     });
 
+  // A creator's restore, from the effect its request committed. Every check is
+  // made against the folder now, so a restore a restart cut short runs again safely.
+  const restore = (job: GameRunJobs.GameRunRestoreJob) =>
+    Effect.gen(function* () {
+      const records = yield* projections.getGameRunRecords(job.threadId);
+      const run = records.gameRuns.at(-1);
+      const pending = run?.restore;
+      if (run === undefined || run.id !== job.runId || pending?.requestId !== job.requestId) return;
+      if (pending.outcome !== null) return;
+      const held =
+        records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
+      const state = toState(run, records.gameRunRounds, held);
+      const record = state.rounds.find((r) => r.round === pending.round);
+      const root = yield* projects.resolve(run.threadId);
+      const outcome: GameRunRestoreOutcome =
+        record === undefined
+          ? {
+              kind: "refused",
+              reason: "round-not-found",
+              message: `Round ${pending.round} is not recorded.`,
+            }
+          : yield* restoreKeptRound({ game, root, run, state, record });
+      yield* refused(
+        engine.dispatch({
+          type: "game-run.restore",
+          commandId: CommandId.make(`server:game-run-restore:${job.requestId}`),
+          threadId: run.threadId,
+          runId: run.id,
+          requestId: job.requestId,
+          outcome,
+        }),
+      );
+    });
+
   // The Game panel's live run line: the step label, refreshed as the run moves.
   const showLive = (run: GameRun) =>
     Effect.gen(function* () {
@@ -761,6 +797,14 @@ const make = Effect.gen(function* () {
               Cause.hasInterruptsOnly(cause)
                 ? Effect.interrupt
                 : Effect.logWarning("game run cap watch failed", { stepId: job.stepId, cause }),
+            ),
+          ),
+        restore: (job) =>
+          restore(job).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : Effect.logWarning("game run restore failed", { runId: job.runId, cause }),
             ),
           ),
         finish: (job) =>

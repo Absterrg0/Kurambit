@@ -1769,81 +1769,49 @@ const layerWsRpc = (
         [WS_METHODS.gameStatus]: ({ threadId, checkSources }) =>
           game.status(threadId, { checkSources }),
         [WS_METHODS.gameRunStart]: (input) =>
-          gameRun.runStart(input).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "game-run-start",
-                  path: String(input.threadId),
-                  reason: "command-failed",
-                  detail: cause.message,
-                  cause,
-                }),
+          gameRun
+            .runStart(input)
+            .pipe(
+              Effect.mapError((cause) =>
+                GameRunControl.GameRunError.toOperationError("game-run-start", cause),
+              ),
             ),
-          ),
         [WS_METHODS.gameRunStatus]: ({ threadId }) =>
-          gameRun.runStatus(threadId).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "game-run-status",
-                  path: String(threadId),
-                  reason: "command-failed",
-                  detail: cause.message,
-                  cause,
-                }),
+          gameRun
+            .runStatus(threadId)
+            .pipe(
+              Effect.mapError((cause) =>
+                GameRunControl.GameRunError.toOperationError("game-run-status", cause),
+              ),
             ),
-          ),
         [WS_METHODS.gameRunStop]: ({ threadId }) =>
-          gameRun.runStop(threadId).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "game-run-stop",
-                  path: String(threadId),
-                  reason: "command-failed",
-                  detail: cause.message,
-                  cause,
-                }),
+          gameRun
+            .runStop(threadId)
+            .pipe(
+              Effect.mapError((cause) =>
+                GameRunControl.GameRunError.toOperationError("game-run-stop", cause),
+              ),
             ),
-          ),
         [WS_METHODS.gameRunSteer]: ({ threadId, text }) =>
-          gameRun.runSteer(threadId, text).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "game-run-steer",
-                  path: String(threadId),
-                  reason: "command-failed",
-                  detail: cause.message,
-                  cause,
-                }),
+          gameRun
+            .runSteer(threadId, text)
+            .pipe(
+              Effect.mapError((cause) =>
+                GameRunControl.GameRunError.toOperationError("game-run-steer", cause),
+              ),
             ),
-          ),
         [WS_METHODS.gameRunProfile]: ({ threadId, profile }) =>
-          gameRun.runProfile(threadId, profile).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "game-run-profile",
-                  path: String(threadId),
-                  reason: "command-failed",
-                  detail: cause.message,
-                  cause,
-                }),
+          gameRun
+            .runProfile(threadId, profile)
+            .pipe(
+              Effect.mapError((cause) =>
+                GameRunControl.GameRunError.toOperationError("game-run-profile", cause),
+              ),
             ),
-          ),
         [WS_METHODS.gameRunRound]: ({ threadId, round }) =>
           gameRun.roundDetail(threadId, round).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "game-run-round",
-                  path: String(threadId),
-                  reason: "command-failed",
-                  detail: cause.message,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              GameRunControl.GameRunError.toOperationError("game-run-round", cause),
             ),
             // roundDetail builds the video path from the run id inside builds/logs.
             Effect.flatMap(({ detail, videoFile, sheetFiles }) =>
@@ -1864,15 +1832,8 @@ const layerWsRpc = (
         // The pick's frame sheets are signed exactly like a round's.
         [WS_METHODS.gameRunPick]: ({ threadId }) =>
           gameRun.pickDetail(threadId).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "game-run-pick",
-                  path: String(threadId),
-                  reason: "command-failed",
-                  detail: cause.message,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              GameRunControl.GameRunError.toOperationError("game-run-pick", cause),
             ),
             Effect.flatMap(({ detail, sheetFiles }) =>
               Effect.map(
@@ -1882,18 +1843,13 @@ const layerWsRpc = (
             ),
           ),
         [WS_METHODS.gameRunRestore]: ({ threadId, round }) =>
-          gameRun.restoreRound(threadId, round).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "game-run-restore",
-                  path: String(threadId),
-                  reason: "command-failed",
-                  detail: cause.message,
-                  cause,
-                }),
+          gameRun
+            .restoreRound(threadId, round)
+            .pipe(
+              Effect.mapError((cause) =>
+                GameRunControl.GameRunError.toOperationError("game-run-restore", cause),
+              ),
             ),
-          ),
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameRun.createGame(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),

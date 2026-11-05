@@ -425,6 +425,13 @@ export interface ProjectionStoreV2Shape {
     ReadonlyArray<ThreadId>,
     ProjectionStoreV2Error
   >;
+  /**
+   * A game's latest production run, on whichever of its project's threads it
+   * lives: the game folder is the project's, so its run is too.
+   */
+  readonly getProjectGameRun: (
+    projectId: ProjectId,
+  ) => Effect.Effect<GameRun | null, ProjectionStoreV2Error>;
   /** Live runs on threads a game run launched, with the thread each was launched under. */
   readonly listLiveGameRunRoleTurns: () => Effect.Effect<
     ReadonlyArray<{
@@ -5100,6 +5107,27 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           Effect.mapError(controlReadError(threadId)),
         );
 
+    const getProjectGameRun: ProjectionStoreV2Shape["getProjectGameRun"] = (projectId) =>
+      sql<PayloadRow>`
+        SELECT payload_json FROM orchestration_v2_projection_game_runs
+        WHERE project_id = ${projectId}
+        ORDER BY started_at DESC, rowid DESC
+        LIMIT 1
+      `.pipe(
+        Effect.flatMap((rows) =>
+          rows[0] === undefined
+            ? Effect.succeed(null)
+            : decodeGameRunPayload(rows[0].payload_json).pipe(
+                Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+              ),
+        ),
+        Effect.mapError((cause) =>
+          cause._tag === "ProjectionStoreSetupError"
+            ? cause
+            : new ProjectionStoreSetupError({ cause }),
+        ),
+      );
+
     const listLiveGameRunRoleTurns: ProjectionStoreV2Shape["listLiveGameRunRoleTurns"] = () =>
       sql<{
         readonly thread_id: string;
@@ -5131,6 +5159,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         SELECT DISTINCT thread_id FROM orchestration_v2_projection_game_runs
         WHERE status != 'ended'
           OR json_extract(payload_json, '$.finished') IS NOT json_extract(payload_json, '$.endedAt')
+          OR (
+            json_extract(payload_json, '$.restore') IS NOT NULL
+            AND json_extract(payload_json, '$.restore.outcome') IS NULL
+          )
       `.pipe(
         Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
         Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
@@ -6362,6 +6394,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getGameRunRecords,
       listGameRunThreadsToRecover,
       listLiveGameRunRoleTurns,
+      getProjectGameRun,
       getRuntimeRequest,
       getPlan,
       getProviderControlContext,
@@ -6734,6 +6767,17 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ),
           };
         }),
+      getProjectGameRun: (projectId) =>
+        Ref.get(replayState).pipe(
+          Effect.map(
+            (state) =>
+              [...state.gameRunRecords.values()]
+                .flatMap((records) => records.gameRuns)
+                .filter((run) => run.projectId === projectId)
+                .toSorted((a, b) => a.startedAt.localeCompare(b.startedAt))
+                .at(-1) ?? null,
+          ),
+        ),
       listLiveGameRunRoleTurns: () =>
         Ref.get(replayState).pipe(
           Effect.map((state) =>
@@ -6758,7 +6802,12 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
         Ref.get(replayState).pipe(
           Effect.map((state) =>
             [...state.gameRunRecords].flatMap(([threadId, records]) =>
-              records.gameRuns.some((run) => run.status !== "ended" || run.finished !== run.endedAt)
+              records.gameRuns.some(
+                (run) =>
+                  run.status !== "ended" ||
+                  run.finished !== run.endedAt ||
+                  (run.restore !== null && run.restore.outcome === null),
+              )
                 ? [threadId]
                 : [],
             ),

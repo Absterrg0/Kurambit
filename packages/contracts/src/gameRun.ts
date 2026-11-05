@@ -161,6 +161,8 @@ export type GameRunDecision = typeof GameRunDecision.Type;
 
 export const GameRunStatusResult = Schema.Struct({
   active: Schema.Boolean,
+  /** The run ended where game-run.resume continues it: a start without a new brief resumes it. */
+  resumable: Schema.Boolean,
   runId: Schema.NullOr(Schema.String),
   /** Null when no run is recorded. */
   profile: Schema.NullOr(GameRunProfile),
@@ -510,3 +512,62 @@ export const GameRunSubmitInput = Schema.Struct({ submission: GameRunSubmission 
 export type GameRunSubmitInput = typeof GameRunSubmitInput.Type;
 export const GameRunSubmitResult = Schema.Struct({ message: Schema.String });
 export type GameRunSubmitResult = typeof GameRunSubmitResult.Type;
+
+/** Why a game-run command was refused; a tool hands the message back in-turn. */
+export const GameRunRefusalReason = Schema.Literals([
+  "no-run",
+  "run-live",
+  "run-ended",
+  "not-resumable",
+  "stale-run",
+  "stale-step",
+  "wrong-thread",
+  "wrong-kind",
+  "invalid-submission",
+  "stale-attempt",
+  "no-decision",
+  "stale-decision",
+  "invalid-answer",
+  "not-due",
+  /** The run's ending is still being finished (stops, outputs, exports). */
+  "finishing",
+  /** A creator's restore of a kept round is moving the game folder. */
+  "restoring",
+]);
+export type GameRunRefusalReason = typeof GameRunRefusalReason.Type;
+
+/** Why a restore left the game folder as it was. */
+export const GameRunRestoreRefusal = Schema.Literals([
+  "round-not-found",
+  "not-kept",
+  "mid-step",
+  "off-trunk",
+  "mid-round",
+  "uncommitted-work",
+  "commit-missing",
+  "restore-incomplete",
+  "local-changes",
+  "git-failed",
+]);
+export type GameRunRestoreRefusal = typeof GameRunRestoreRefusal.Type;
+
+/**
+ * Why a run tool or RPC failed, typed for agents and the UI: the run's own
+ * refusal, a restore's, or what the transport found before the run was asked.
+ */
+export const GameRunErrorReason = Schema.Union([
+  GameRunRefusalReason,
+  GameRunRestoreRefusal,
+  Schema.Literals([
+    "project-not-found",
+    "role-thread",
+    "brief-required",
+    "no-live-run",
+    "empty-note",
+    "records-unreadable",
+    "thread-read",
+    "not-a-role",
+    "command-failed",
+  ]),
+]);
+export type GameRunErrorReason = typeof GameRunErrorReason.Type;

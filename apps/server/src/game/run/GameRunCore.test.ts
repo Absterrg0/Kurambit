@@ -166,6 +166,19 @@ const roleDone = (threadId: ThreadId): GameRunStepResult => ({
   sheet: "",
 });
 
+/** The ending's finish job reported (as a drained finish effect would): the run may move on. */
+const finishEnding = Effect.gen(function* () {
+  const orchestrator = yield* Orchestrator.OrchestratorV2;
+  const { run } = yield* inFlight;
+  yield* orchestrator.dispatch({
+    type: "game-run.finished",
+    commandId: nextId(),
+    threadId: creator,
+    runId: run.id,
+    endedAt: run.endedAt!,
+  });
+});
+
 const gitOk: GameRunStepResult = {
   kind: "git",
   git: {
@@ -220,6 +233,7 @@ const countingRunner = Effect.gen(function* () {
       ),
     deadline: () => Effect.void,
     finish: () => Effect.void,
+    restore: () => Effect.void,
     showable: () => Effect.succeed(true),
   };
   yield* (yield* GameRunJobs.GameRunJobs).attach(runner);
@@ -288,6 +302,7 @@ it.effect("a stopped run stays stopped across recovery, until a resume", () =>
     assert.deepEqual(handed, []);
     assert.equal((yield* inFlight).run.ending, "stopped");
 
+    yield* finishEnding;
     yield* orchestrator.dispatch({
       type: "game-run.resume",
       commandId: nextId(),
@@ -349,39 +364,139 @@ it.effect(
     }).pipe(Effect.provide(layerWithRecovery)),
 );
 
-it.effect("a restore makes the build the ended run's judged best, and a live run refuses it", () =>
-  Effect.gen(function* () {
-    yield* createCreator;
-    yield* startRun("autopilot");
-    yield* completeStep((yield* inFlight).step!, gitOk);
-    const orchestrator = yield* Orchestrator.OrchestratorV2;
-    const restore = orchestrator
-      .dispatch({
-        type: "game-run.restore",
+const refusalOf = <A, R>(dispatched: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
+  dispatched.pipe(
+    Effect.flip,
+    Effect.map((error) =>
+      error._tag === "OrchestratorGameRunRefusedError" ? error.reason : error._tag,
+    ),
+  );
+const stopRun = Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+  orchestrator.dispatch({ type: "game-run.stop", commandId: nextId(), threadId: creator, runId }),
+);
+const resume = Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+  orchestrator.dispatch({ type: "game-run.resume", commandId: nextId(), threadId: creator, runId }),
+);
+
+it.effect(
+  "an ending still finishing holds a resume, a steer and a restore until it is finished",
+  () =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* stopRun;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const { run } = yield* inFlight;
+      assert.equal(run.status, "ended");
+      // Its finish effect has not run: the folder may still be moving to trunk.
+      assert.equal(yield* refusalOf(resume), "finishing");
+      assert.equal(
+        yield* refusalOf(
+          orchestrator.dispatch({
+            type: "game-run.steer",
+            commandId: nextId(),
+            threadId: creator,
+            runId,
+            note: "More enemies.",
+          }),
+        ),
+        "finishing",
+      );
+      assert.equal(
+        yield* refusalOf(
+          orchestrator.dispatch({
+            type: "game-run.restore.request",
+            commandId: nextId(),
+            threadId: creator,
+            runId,
+            requestId: "r1",
+            round: 1,
+          }),
+        ),
+        "finishing",
+      );
+      yield* orchestrator.dispatch({
+        type: "game-run.finished",
         commandId: nextId(),
         threadId: creator,
         runId,
-        best: "restored-sha",
-      })
-      .pipe(Effect.flip);
-    assert.equal((yield* restore)._tag, "OrchestratorGameRunRefusedError");
+        endedAt: run.endedAt!,
+      });
+      yield* resume;
+      assert.equal((yield* inFlight).run.status, "running");
+    }).pipe(Effect.provide(layerWithRecovery)),
+);
+
+it.effect("a restore is recorded first, holds a resume while pending, and lands as the best", () =>
+  Effect.gen(function* () {
+    yield* createCreator;
+    yield* startRun("autopilot");
+    yield* stopRun;
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
     yield* orchestrator.dispatch({
-      type: "game-run.stop",
+      type: "game-run.finished",
       commandId: nextId(),
       threadId: creator,
       runId,
+      endedAt: (yield* inFlight).run.endedAt!,
     });
+    yield* orchestrator.dispatch({
+      type: "game-run.restore.request",
+      commandId: nextId(),
+      threadId: creator,
+      runId,
+      requestId: "r1",
+      round: 1,
+    });
+    assert.deepEqual((yield* inFlight).run.restore?.outcome, null);
+    assert.equal(yield* refusalOf(resume), "restoring");
     yield* orchestrator.dispatch({
       type: "game-run.restore",
       commandId: nextId(),
       threadId: creator,
       runId,
-      best: "restored-sha",
+      requestId: "r1",
+      outcome: { kind: "restored", sha: "restored-sha", message: "back" },
     });
     const { run } = yield* inFlight;
     assert.equal(run.best, "restored-sha");
     assert.isNull(run.pending);
-    assert.equal(run.status, "ended");
+    yield* resume;
+    assert.equal((yield* inFlight).run.status, "running");
+  }).pipe(Effect.provide(layerWithRecovery)),
+);
+
+it.effect("a game has one run: another chat of its project cannot start a second", () =>
+  Effect.gen(function* () {
+    yield* createCreator;
+    yield* startRun("autopilot");
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const other = ThreadId.make("thread:second-chat");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: nextId(),
+      threadId: other,
+      projectId,
+      title: "Arena, again",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: "/games/arena",
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const second = orchestrator.dispatch({
+      type: "game-run.start",
+      commandId: nextId(),
+      threadId: other,
+      runId: GameRunId.make("run_second"),
+      lane: "godot",
+      brief: "Another game in the same folder.",
+      modelSelection,
+      runtimeMode: "full-access",
+    });
+    assert.equal(yield* refusalOf(second), "run-live");
   }).pipe(Effect.provide(layerWithRecovery)),
 );
 
@@ -428,6 +543,7 @@ it.effect("a decision asked again after a resume wakes the creator's chat again"
       threadId: creator,
       runId,
     });
+    yield* finishEnding;
     yield* orchestrator.dispatch({
       type: "game-run.resume",
       commandId: nextId(),
@@ -452,6 +568,8 @@ interface World {
   readonly existing: Set<ThreadId>;
   readonly deleted: Set<ThreadId>;
   readonly receipts: Set<string>;
+  /** Other chats of the game: T3 holds them as it holds the creator's. */
+  readonly chats: Set<ThreadId>;
   readonly interrupts: Array<{ readonly threadId: ThreadId; readonly commandId: string }>;
   readonly launches: ThreadId[];
   readonly sends: Array<{ readonly threadId: ThreadId; readonly messageId: string }>;
@@ -471,6 +589,7 @@ const newWorld = Effect.gen(function* () {
     existing: new Set(),
     deleted: new Set(),
     receipts: new Set(),
+    chats: new Set(),
     interrupts: [],
     launches: [],
     sends: [],
@@ -521,28 +640,33 @@ const roleThreadsOf = (world: World) =>
       const roleThread = (threadId: ThreadId) => ({
         id: threadId,
         projectId,
-        launchedBy: "game_run" as const,
+        // The game's chats are its own; every other thread here is a role's.
+        ...(threadId === creator || world.chats.has(threadId)
+          ? {}
+          : { launchedBy: "game_run" as const }),
         lineage: { parentThreadId: creator, relationshipToParent: "role", rootThreadId: creator },
       });
       return Layer.mock(ThreadManagement.ThreadManagementService)({
         dispatch: orchestrator.dispatch,
         getThreadShell: (threadId) =>
-          threadId === creator
-            ? (world.onCreatorShell ?? Effect.void).pipe(
-                Effect.andThen(orchestrator.getThreadShell(threadId)),
-              )
-            : Effect.succeed(
-                world.existing.has(threadId)
-                  ? ({
-                      ...roleThread(threadId),
-                      deletedAt: world.deleted.has(threadId)
-                        ? DateTime.makeUnsafe(Date.now())
-                        : null,
-                      worktreePath: null,
-                      activeRunId: null,
-                    } as unknown as OrchestrationV2ThreadShell)
-                  : null,
-              ),
+          world.chats.has(threadId)
+            ? orchestrator.getThreadShell(threadId)
+            : threadId === creator
+              ? (world.onCreatorShell ?? Effect.void).pipe(
+                  Effect.andThen(orchestrator.getThreadShell(threadId)),
+                )
+              : Effect.succeed(
+                  world.existing.has(threadId)
+                    ? ({
+                        ...roleThread(threadId),
+                        deletedAt: world.deleted.has(threadId)
+                          ? DateTime.makeUnsafe(Date.now())
+                          : null,
+                        worktreePath: null,
+                        activeRunId: null,
+                      } as unknown as OrchestrationV2ThreadShell)
+                    : null,
+                ),
         getThreadRecords: ((threadId: ThreadId) =>
           Effect.succeed({
             thread: roleThread(threadId),
@@ -843,6 +967,7 @@ const resumedVision = (world: World) =>
     const { vision, thread } = yield* atVision(world);
     world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed" })]);
     yield* completeStep(vision, { kind: "ended", ending: "usage-limit", reason: "limit" });
+    yield* finishEnding;
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     yield* orchestrator.dispatch({
       type: "game-run.resume",
@@ -1088,4 +1213,44 @@ it.effect("startup stops a role turn no step record names, and leaves a named on
     assert.notInclude(["preparing", "starting", "running", "waiting"], stopped?.status);
     assert.include(["preparing", "starting", "running", "waiting"], kept?.status);
   }).pipe(Effect.provide(layerWithRecovery)),
+);
+
+it.effect("every chat of a game reaches its one run, and a role thread none of its controls", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { thread } = yield* atVision(world);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const other = ThreadId.make("thread:second-chat");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: nextId(),
+        threadId: other,
+        projectId,
+        title: "Arena, again",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: "/games/arena",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      world.chats.add(other);
+      const control = yield* GameRunControl.GameRunControl;
+      const status = yield* control.runStatus(other);
+      assert.equal(status.runId, runId);
+      assert.isTrue(status.active);
+      const again = yield* control.runStart({ threadId: other, brief: "A second game here." });
+      assert.equal(again.runId, runId);
+      assert.isTrue(again.resumed);
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      assert.lengthOf((yield* projections.getGameRunRecords(other)).gameRuns, 0);
+      // A stop from the second chat stops the game's run.
+      yield* control.runStop(other);
+      assert.equal((yield* inFlight).run.ending, "stopped");
+      // The run's own role thread reaches none of its controls.
+      const refused = yield* control.runStatus(thread).pipe(Effect.flip);
+      assert.equal(refused.reason, "role-thread");
+    }),
+  ),
 );

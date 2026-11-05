@@ -61,6 +61,7 @@ const read = (records: Records): Decide.GameRunRecords => {
   const run = records.runs.at(-1);
   return {
     projectId: ProjectId.make("project:game"),
+    projectRun: null,
     runs: records.runs,
     rounds: records.rounds,
     inFlight:
@@ -92,6 +93,9 @@ const refusal = (records: Records, input: Input, ms = T0) => {
 };
 
 const runOf = (records: Records) => records.runs.at(-1)!;
+/** The ending's finish ran (the job's report): the run may be moved on again. */
+const finished = (records: Records) =>
+  accept(records, { type: "game-run.finished", runId, endedAt: runOf(records).endedAt! }).records;
 const stepOf = (records: Records) => {
   const run = runOf(records);
   return records.steps.find((s) => s.runId === run.id && s.seq === run.inFlight)!;
@@ -507,7 +511,7 @@ describe("game-run commands", () => {
       second!.id,
     ]);
     // On resume only the half that never finished plays again.
-    const resumed = accept(ended, { type: "game-run.resume", runId }).records;
+    const resumed = accept(finished(ended), { type: "game-run.resume", runId }).records;
     expect(stepOf(resumed)).toMatchObject({ attempt: pair.attempt + 1, endedHalves: [] });
   });
 
@@ -519,7 +523,10 @@ describe("game-run commands", () => {
     });
     expect(runOf(limited)).toMatchObject({ status: "ended", ending: "usage-limit", inFlight: 1 });
     expect(stepOf(limited)).toMatchObject({ status: "cancelled", attempt: 1 });
-    const { records: resumed, decision } = accept(limited, { type: "game-run.resume", runId });
+    const { records: resumed, decision } = accept(finished(limited), {
+      type: "game-run.resume",
+      runId,
+    });
     expect(stepOf(resumed)).toMatchObject({ status: "planned", attempt: 2, result: null });
     expect(decision.effects.map((e) => e.request)).toEqual([
       { type: "game-run.step.execute", runId, stepId: gameRunStepId(runId, 1), attempt: 2 },
@@ -668,8 +675,13 @@ describe("game-run commands", () => {
         result: gitOk(),
       }).reason,
     ).toBe("run-ended");
-    // A note waits for the resume.
-    const noted = accept(stopped, { type: "game-run.steer", runId, note: "More enemies." }).records;
+    // Nothing moves an ending until its finish ran; then a note waits for the resume.
+    expect(refusal(stopped, { type: "game-run.resume", runId }).reason).toBe("finishing");
+    const noted = accept(finished(stopped), {
+      type: "game-run.steer",
+      runId,
+      note: "More enemies.",
+    }).records;
     expect(runOf(noted)).toMatchObject({
       status: "ended",
       ending: "stopped",

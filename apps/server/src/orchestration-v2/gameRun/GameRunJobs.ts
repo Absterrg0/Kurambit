@@ -33,6 +33,12 @@ export interface GameRunFinishJob {
   readonly endedAt: string;
 }
 
+export interface GameRunRestoreJob {
+  readonly threadId: ThreadId;
+  readonly runId: GameRunId;
+  readonly requestId: string;
+}
+
 /** What a step's job does; the game layer supplies it once its services exist. */
 export interface GameRunJobRunner {
   /** A step's work, reported with game-run.step.complete or game-run.step.fail. */
@@ -41,6 +47,8 @@ export interface GameRunJobRunner {
   readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
   /** A run's ending: stops its turns and jobs, does its last outputs and exports, records it. */
   readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
+  /** A creator's restore of a kept round: moves the folder, lands with game-run.restore. */
+  readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
   /** Whether the game folder holds anything of a decision's evidence to show the creator. */
   readonly showable: (
     threadId: ThreadId,
@@ -62,6 +70,8 @@ export class GameRunJobs extends Context.Service<
     readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
     /** Finishes an ending unless its finish is live; returns at once. Finishing twice is safe. */
     readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
+    /** Runs a restore unless one for that request is live; returns at once. */
+    readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
     /** Any other work of a run's (a role turn sent again after a pause), once per key. */
     readonly fork: (
       key: string,
@@ -135,6 +145,26 @@ export const make = Effect.gen(function* () {
       Deferred.await(runner).pipe(Effect.flatMap((each) => each.finish(job))),
     );
 
+  // Its own owner too: a finish's stop must not cut a restore that already holds the folder.
+  const restore = (job: GameRunRestoreJob) =>
+    fork(
+      `restore:${job.runId}:${job.requestId}`,
+      GameRunIdSchema.make(`${job.runId}:restore`),
+      Deferred.await(runner).pipe(Effect.flatMap((each) => each.restore(job))),
+    );
+
+  // The game layer attaches the work when it builds; a server where it never
+  // does would hold every run's effects forever without a word.
+  yield* Deferred.await(runner).pipe(
+    Effect.timeoutOption("2 minutes"),
+    Effect.flatMap((attached) =>
+      attached._tag === "None"
+        ? Effect.logWarning("no game run job runner attached; game run steps are waiting")
+        : Effect.void,
+    ),
+    Effect.forkIn(scope),
+  );
+
   const stopRun = (runId: GameRunId) =>
     Effect.suspend(() =>
       Fiber.interruptAll(
@@ -148,6 +178,7 @@ export const make = Effect.gen(function* () {
     execute,
     deadline,
     finish,
+    restore,
     fork,
     stopRun,
     isLive: (key) => Effect.sync(() => live.has(key)),

@@ -95,8 +95,8 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const game = useGameLibrary().games.find((entry) => entry.projectId === shell?.projectId) ?? null;
   const startedAt = status?.startedAt == null ? Number.NaN : Date.parse(status.startedAt);
 
-  // A run record that is not live can be resumed without a new brief.
-  const resumable = status !== null && status.runId !== null && status.ending !== "ready";
+  // The server says whether the run continues without a new brief.
+  const resumable = status?.resumable === true;
   // A resume keeps the run's own profile unless the creator picks another; a new run is Guided.
   const profile = startProfile ?? (resumable ? status.profile : null) ?? "guided";
   const start = async () => {

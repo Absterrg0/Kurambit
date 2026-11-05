@@ -153,6 +153,12 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     runId: GameRunId,
     endedAt: IsoDateTime,
   }),
+  // A creator's restore of a kept round: its job moves the folder and lands with game-run.restore.
+  Schema.Struct({
+    type: Schema.Literal("game-run.restore.execute"),
+    runId: GameRunId,
+    requestId: Schema.String,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -172,6 +178,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.decision.deadline",
   "game-run.step.deadline",
   "game-run.finish",
+  "game-run.restore.execute",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

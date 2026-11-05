@@ -140,7 +140,7 @@ export const layer = Layer.effect(
                   new GameOperationError({
                     operation: name,
                     path: root,
-                    reason: "command-failed",
+                    reason: "cancelled",
                     detail: "Operation cancelled.",
                   }),
                 ),

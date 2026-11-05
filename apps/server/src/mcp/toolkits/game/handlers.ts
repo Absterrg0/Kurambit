@@ -1,4 +1,3 @@
-import { GameOperationError } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
@@ -15,13 +14,7 @@ const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
 const runFailure = (cause: GameRunControl.GameRunError) =>
-  new GameOperationError({
-    operation: `game-${cause.operation}`,
-    path: cause.path,
-    reason: "command-failed",
-    detail: cause.message,
-    cause,
-  });
+  GameRunControl.GameRunError.toOperationError(`game-${cause.operation}`, cause);
 const handlers = {
   game_status: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
@@ -269,7 +262,7 @@ const handlers = {
       const runs = yield* GameRunControl.GameRunControl;
       return yield* runs
         .runSubmit(scope.thread.threadId, input.submission)
-        .pipe(Effect.mapError(GameRunControl.submitFailure));
+        .pipe(Effect.mapError(runFailure));
     }),
   ),
   game_run_profile: McpToolAccess.actsAsCaller((input) =>
