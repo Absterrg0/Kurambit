@@ -117,6 +117,8 @@ const AssetClaimsSchema = Schema.Union([
     filePath: Schema.String,
     device: Schema.String,
     inode: Schema.String,
+    /** Served as an attachment, so any file type may be signed; set only by server code. */
+    download: Schema.optionalKey(Schema.Literal(true)),
     expiresAt: Schema.Number,
   }),
   Schema.Struct({
@@ -351,6 +353,7 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     readonly requestedPath: string;
     readonly resource: AssetResource;
     readonly expiresAt: number;
+    readonly download?: boolean;
   }) {
     const path = yield* Path.Path;
     const canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
@@ -361,7 +364,7 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     if (!canonicalFile) {
       return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
     }
-    if (hostPreviewMimeTypeFromExtension(path.extname(canonicalFile)) === null) {
+    if (!input.download && hostPreviewMimeTypeFromExtension(path.extname(canonicalFile)) === null) {
       return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
     }
     const wantsDimensions = HEADER_IMAGE_EXTENSIONS.has(path.extname(canonicalFile).toLowerCase());
@@ -393,6 +396,7 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
         kind: "media-file-exact" as const,
         filePath: canonicalFile,
         ...opened.identity,
+        ...(input.download ? { download: true as const } : {}),
         expiresAt: input.expiresAt,
       },
       fileName: path.basename(canonicalFile),
@@ -488,6 +492,12 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   readonly workspaceRoot?: string;
   readonly projectFaviconPath?: string;
   readonly projectCheckoutPending?: boolean;
+  /**
+   * A `media-file` served as an attachment instead of a preview. Never taken from a
+   * client's resource: it lifts the preview-type limit, so only server code that has
+   * already chosen the file may set it.
+   */
+  readonly download?: boolean;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -519,6 +529,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         requestedPath,
         resource: input.resource,
         expiresAt,
+        ...(input.download ? { download: true } : {}),
       });
       claims = finalized.claims;
       fileName = finalized.fileName;
@@ -932,14 +943,25 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     );
     if (canonicalFile !== claims.filePath) return null;
     const mimeType = hostPreviewMimeTypeFromExtension(path.extname(canonicalFile));
-    if (!mimeType) return null;
+    if (!mimeType && !claims.download) return null;
     const file = yield* openMediaFile(canonicalFile, claims).pipe(
       Effect.tapError((cause) =>
         Effect.logError("Failed to open canonical media file.", { filePath: canonicalFile, cause }),
       ),
       Effect.orElseSucceed(() => null),
     );
-    return file
+    if (!file) return null;
+    if (claims.download) {
+      return {
+        kind: "file",
+        path: canonicalFile,
+        download: true,
+        fileName: path.basename(canonicalFile),
+        ...(mimeType ? { mimeType } : {}),
+        file,
+      } satisfies ResolvedAsset;
+    }
+    return mimeType
       ? ({ kind: "file", path: canonicalFile, mimeType, file } satisfies ResolvedAsset)
       : null;
   }

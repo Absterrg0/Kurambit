@@ -31,12 +31,7 @@ import { OtlpTracer, OtlpSerialization } from "effect/observability";
 import * as ServerConfig from "./config.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
-import {
-  openMediaFile,
-  statMediaFile,
-  streamMediaFile,
-  type OpenMediaFile,
-} from "./assets/MediaFile.ts";
+import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
 import {
   ATTACHMENT_UPLOAD_ROUTE_PREFIX,
   storeAttachmentUpload,
@@ -44,8 +39,6 @@ import {
 } from "./assets/AttachmentUpload.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import * as GamePackageDownload from "./game/GamePackageDownload.ts";
-import * as GameService from "./game/GameService.ts";
 import {
   annotateEnvironmentRequest,
   failEnvironmentScopeRequired,
@@ -400,9 +393,7 @@ const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([OTLP_TRACES_PROXY_P
 const layerUntracedRequests = Layer.succeed(HttpMiddleware.TracerDisabledWhen)((request) => {
   const queryIndex = request.url.indexOf("?");
   const path = queryIndex === -1 ? request.url : request.url.slice(0, queryIndex);
-  // A capability URL carries its bearer token in the path, and traces record
-  // the full path, so these requests stay out of them like any other secret.
-  return UNTRACED_REQUEST_PATHS.has(path) || GamePackageDownload.isGamePackageRoutePath(path);
+  return UNTRACED_REQUEST_PATHS.has(path);
 });
 
 export const withUntracedRequests = Layer.provide(layerUntracedRequests);
@@ -459,95 +450,6 @@ export const layerAssetRoute = HttpRouter.add(
     );
   }),
 );
-
-/**
- * Serves the archive a package RPC already completed. The URL carries a signed
- * package capability naming the archive hash and, for Web, the selected build,
- * never a filesystem path; an expired, edited, unknown or other-target token is
- * a 404, and so is a package whose bytes changed after the URL was minted.
- * Bytes stream from an identity-checked handle, so a large release never enters
- * a JSON frame or a renderer blob.
- */
-const layerPackageDownloadRoute = (kind: GamePackageDownload.GamePackageKind) =>
-  HttpRouter.use((router) =>
-    Effect.gen(function* () {
-      const game = yield* GameService.GameService;
-      const prefix = GamePackageDownload.gamePackageRoutePrefix(kind);
-      const text =
-        kind === "windows"
-          ? {
-              missing:
-                "No complete Windows package is ready. Open Builds and choose Download package.",
-              changed:
-                "The Windows package changed before it could be downloaded. Open Builds and download it again.",
-              tooLarge: "The Windows package is too large to stream.",
-              warning: "The Windows package download failed.",
-            }
-          : {
-              missing:
-                "No complete Web package is ready for the selected build. Open Builds, then choose Download package on the selected Web build.",
-              changed:
-                "The selected Web build or its package changed before it could be downloaded. Open Builds and download the selected build again.",
-              tooLarge: "The Web package is too large to stream.",
-              warning: "The Web package download failed.",
-            };
-      yield* router.add(
-        "GET",
-        `${prefix}/*`,
-        Effect.gen(function* () {
-          const request = yield* HttpServerRequest.HttpServerRequest;
-          const url = HttpServerRequest.toURL(request);
-          if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
-          const token = url.value.pathname.slice(`${prefix}/`.length);
-          if (token.length === 0 || token.includes("/"))
-            return HttpServerResponse.text("Not Found", { status: 404 });
-          const claims = yield* GamePackageDownload.verifyGamePackageDownload(token).pipe(
-            Effect.catchCause(() => Effect.succeed(null)),
-          );
-          if (claims === null || claims.kind !== kind)
-            return HttpServerResponse.text("Not Found", { status: 404 });
-          const file = yield* Effect.gen(function* () {
-            if (kind === "web") {
-              if (claims.buildId === undefined) return null;
-              return yield* game.webPackageFile(
-                claims.threadId,
-                claims.buildId,
-                claims.packageSha256,
-              );
-            }
-            return yield* game.windowsPackageFile(claims.threadId, claims.packageSha256);
-          }).pipe(Effect.catchCause(() => Effect.succeed(null)));
-          if (file === null) return HttpServerResponse.text(text.missing, { status: 404 });
-          const opened = yield* openMediaFile(file.path, file.identity).pipe(
-            Effect.orElseSucceed(() => null),
-          );
-          if (opened === null) return HttpServerResponse.text(text.changed, { status: 404 });
-          if (opened.info.size !== BigInt(file.bytes))
-            return HttpServerResponse.text(text.changed, { status: 404 });
-          const body = streamMediaFile(opened, 0n, BigInt(file.bytes));
-          if (body === null) return HttpServerResponse.text(text.tooLarge, { status: 413 });
-          return HttpServerResponse.stream(body, {
-            headers: {
-              "Cache-Control": "private, no-store",
-              "Content-Disposition": downloadContentDisposition(file.fileName),
-              "Content-Length": String(file.bytes),
-              "Content-Type": "application/zip",
-              "X-Content-Type-Options": "nosniff",
-            },
-          });
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning(text.warning, { cause }).pipe(
-              Effect.as(HttpServerResponse.text(text.changed, { status: 404 })),
-            ),
-          ),
-        ),
-      );
-    }),
-  );
-
-export const layerGamePackageRoute = layerPackageDownloadRoute("windows");
-export const layerGameWebPackageRoute = layerPackageDownloadRoute("web");
 
 export const layerAttachmentUploadRoute = HttpRouter.add(
   "POST",

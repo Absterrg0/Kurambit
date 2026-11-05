@@ -272,35 +272,6 @@ export class GameService extends Context.Service<
      * static-host ZIP. It never exports and never chooses another build.
      */
     readonly packageWeb: (threadId: ThreadId) => Effect.Effect<GameWebPackage, GameOperationError>;
-    /** The complete archive a signed download URL serves; never creates one. */
-    readonly webPackageFile: (
-      threadId: ThreadId,
-      buildId: string,
-      packageSha256: string,
-    ) => Effect.Effect<
-      {
-        readonly path: string;
-        readonly fileName: string;
-        readonly bytes: number;
-        readonly sha256: string;
-        readonly identity: { readonly device: string; readonly inode: string };
-      },
-      GameOperationError
-    >;
-    /** The complete archive a signed download URL serves; never creates one. */
-    readonly windowsPackageFile: (
-      threadId: ThreadId,
-      packageSha256: string,
-    ) => Effect.Effect<
-      {
-        readonly path: string;
-        readonly fileName: string;
-        readonly bytes: number;
-        readonly sha256: string;
-        readonly identity: { readonly device: string; readonly inode: string };
-      },
-      GameOperationError
-    >;
     /**
      * Opens a bounded persistent exploration session on the current game
      * sources. Short act/observe cycles keep one paused runner; closing
@@ -771,14 +742,6 @@ const make = Effect.gen(function* () {
     packageWindows: (threadId) =>
       withRoot(threadId, "Package Windows build", exporter.packageWindows),
     packageWeb: (threadId) => withRoot(threadId, "Package Web build", exporter.packageWeb),
-    webPackageFile: (threadId, buildId, packageSha256) =>
-      Effect.flatMap(projects.resolve(threadId), (root) =>
-        exporter.webPackageFile(root, buildId, packageSha256),
-      ),
-    windowsPackageFile: (threadId, packageSha256) =>
-      Effect.flatMap(projects.resolve(threadId), (root) =>
-        exporter.windowsPackageFile(root, packageSha256),
-      ),
     exploreStart: explore.start,
     exploreAct: explore.act,
     exploreClose: explore.close,

@@ -623,6 +623,41 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("signs any file type only as a download, bound to the file it signed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-media-download-" });
+      const filePath = path.join(root, "game-web.zip");
+      yield* fs.writeFileString(filePath, "zip bytes");
+      const resource = {
+        _tag: "media-file" as const,
+        threadId: ThreadId.make("thread-1"),
+        path: filePath,
+      };
+      const preview = yield* Effect.flip(issueAssetUrl({ resource }));
+      expect(preview._tag).toBe("AssetPreviewTypeValidationError");
+
+      const issued = yield* issueAssetUrl({ resource, download: true });
+      const suffix = issued.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      const token = suffix.slice(0, separator);
+      const asset = yield* resolveAsset(token, suffix.slice(separator + 1));
+      if (asset?.kind !== "file") throw new Error("Expected the download");
+      const response = HttpServerResponse.toWeb(yield* assetFileResponse(asset));
+      expect(response.headers.get("content-disposition")).toBe(
+        'attachment; filename="game-web.zip"',
+      );
+      expect(response.headers.get("content-type")).toBe("application/octet-stream");
+      expect(yield* Effect.promise(() => response.text())).toBe("zip bytes");
+
+      const replacement = path.join(root, "replacement.zip");
+      yield* fs.writeFileString(replacement, "new zip");
+      yield* fs.rename(replacement, filePath);
+      expect(yield* resolveAsset(token, suffix.slice(separator + 1))).toBeNull();
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("issues workspace URLs that resolve the entry file and sibling assets", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
