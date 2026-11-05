@@ -418,7 +418,10 @@ const make = Effect.gen(function* () {
   });
   yield* prune;
   yield* scheduler.register("game-bot-evidence", yield* Scheduler.every(3_600_000, prune));
-  /** The caller holds `evidenceLock`. A damaged record counts as none, and says so. */
+  /**
+   * The caller holds `evidenceLock`. A damaged record counts as none, and says
+   * so; the next recorded run moves it aside.
+   */
   const loadRecord = (threadId: ThreadId, root: string) =>
     Effect.tryPromise({
       try: () => BotEvidence.read(evidenceDir, threadId),
@@ -435,7 +438,33 @@ const make = Effect.gen(function* () {
   const recordRun = (threadId: ThreadId, root: string, run: BotEvidence.BotRun) =>
     evidenceLock.withPermits(1)(
       Effect.gen(function* () {
-        const next = BotEvidence.add(yield* loadRecord(threadId, root), root, run);
+        const found = yield* Effect.tryPromise({
+          try: () => BotEvidence.read(evidenceDir, threadId),
+          catch: (cause) => opError("Bot run", evidenceDir, "io", undefined, cause),
+        });
+        if (found === "damaged") {
+          const now = yield* Clock.currentTimeMillis;
+          const aside = yield* Effect.tryPromise({
+            try: () => BotEvidence.setAside(evidenceDir, threadId, now),
+            catch: (cause) =>
+              opError(
+                "Bot run",
+                evidenceDir,
+                "io",
+                "A damaged bot record could not be moved aside.",
+                cause,
+              ),
+          });
+          yield* Effect.logWarning("A thread's bot evidence was unreadable; it is kept aside.", {
+            threadId,
+            aside,
+          });
+        }
+        const next = BotEvidence.add(
+          found === null || found === "damaged" ? BotEvidence.empty(threadId, root) : found,
+          root,
+          run,
+        );
         yield* Effect.tryPromise({
           try: () => BotEvidence.write(evidenceDir, next),
           catch: (cause) =>

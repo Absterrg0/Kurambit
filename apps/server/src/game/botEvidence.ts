@@ -5,8 +5,9 @@
 // folder a role agent works in, the way explore evidence is kept; the game's
 // .studio/bot-results.jsonl is a copy for people and decides nothing.
 import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
-import { recordPath, writeRecordFile } from "./exploreEvidence.ts";
+import { keyOf, recordPath, writeRecordFile } from "./exploreEvidence.ts";
 
 const BotRun = Schema.Struct({
   runId: Schema.String,
@@ -88,6 +89,17 @@ export const read = async (
   if (text === null) return null;
   const decoded = decode(text);
   return decoded._tag === "Some" && decoded.value.threadId === threadId ? decoded.value : "damaged";
+};
+
+/**
+ * Moves a damaged record aside before a fresh one replaces it, so the count it
+ * held is never silently lost and can be inspected. It keeps a `.json` name,
+ * so the same age bound prunes it.
+ */
+export const setAside = async (dir: string, threadId: string, nowMs: number) => {
+  const aside = NodePath.join(dir, `${keyOf(threadId)}.damaged-${nowMs}.json`);
+  await NodeFSP.rename(recordPath(dir, threadId), aside);
+  return aside;
 };
 
 export const write = (dir: string, record: ThreadBots) =>

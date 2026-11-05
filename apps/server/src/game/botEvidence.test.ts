@@ -40,6 +40,10 @@ describe("bot evidence", () => {
       // Another thread's record under this thread's name is no run of its own.
       NodeFS.copyFileSync(recordPath(dir, "t"), recordPath(dir, "u"));
       expect(await BotEvidence.read(dir, "u")).toBe("damaged");
+      // Moved aside, not overwritten: its count stays readable for a person.
+      const aside = await BotEvidence.setAside(dir, "u", 1);
+      expect(await BotEvidence.read(dir, "u")).toBeNull();
+      expect(JSON.parse(NodeFS.readFileSync(aside, "utf8")).count).toBe(record.count);
     } finally {
       NodeFS.rmSync(dir, { recursive: true, force: true });
     }
