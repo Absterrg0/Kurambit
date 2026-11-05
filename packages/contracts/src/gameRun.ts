@@ -35,6 +35,8 @@ export const GameRunStartResult = Schema.Struct({
   root: Schema.String,
   stage: Schema.String,
   resumed: Schema.Boolean,
+  /** What the start did, for the creator: a resume, a fresh run, an earlier run not carried over. */
+  message: Schema.String,
 });
 export type GameRunStartResult = typeof GameRunStartResult.Type;
 

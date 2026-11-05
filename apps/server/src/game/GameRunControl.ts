@@ -1,10 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off -- A run's id carries its start time; status reads the run's evidence files in the game folder.
 // What the game_run_* tools and the Game panel's run RPCs reach: thin over the
-// production run's commands and its records (getGameRunRecords). Until the
-// loop's removal, KURAMBIT_GAME_RUN_CORE=domain selects the orchestration core
-// and anything else keeps every transport on the loop (GameRun), so no
-// transport is ever half on one and half on the other.
+// production run's commands and its records (getGameRunRecords).
 import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import {
   CommandId,
@@ -31,7 +29,7 @@ import {
   type ThreadId,
   GameOperationError,
 } from "@kurambit/contracts";
-import * as Config from "effect/Config";
+import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -42,10 +40,9 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import * as GameRun from "./GameRun.ts";
 import * as GameService from "./GameService.ts";
 import { runStateChecks } from "./run/checkRunner.ts";
-import { presentable } from "./run/decideStep.ts";
+import { presentable } from "./run/decisionEvidence.ts";
 import { makeGit, restoredPaths } from "./run/git.ts";
 import { roleAt, roleTurns } from "./run/GameRunRoleReactor.ts";
 import * as Policy from "./run/policy.ts";
@@ -54,33 +51,64 @@ import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDe
 import { DECISION_LABEL, currentStep, decisionOf, selectionFor, steerWhen } from "./run/runView.ts";
 import { ensureScaffold, logLine } from "./runSetup.ts";
 
+export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
+  operation: Schema.String,
+  path: Schema.String,
+  reason: Schema.String,
+  detail: Schema.optionalKey(Schema.String),
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {
+  override get message(): string {
+    return this.detail ?? `Game run ${this.operation} failed (${this.reason}).`;
+  }
+}
+
+type Fails<A> = Effect.Effect<A, GameRunError>;
+type FrameSheets = ReadonlyArray<{ readonly build: string; readonly path: string }>;
+
 type Service = {
-  readonly runStart: GameRun.GameRun["Service"]["runStart"];
-  readonly createGame: GameRun.GameRun["Service"]["createGame"];
-  readonly runStatus: GameRun.GameRun["Service"]["runStatus"];
-  readonly runStop: GameRun.GameRun["Service"]["runStop"];
-  readonly runDecide: GameRun.GameRun["Service"]["runDecide"];
-  readonly runProfile: GameRun.GameRun["Service"]["runProfile"];
-  readonly runSteer: GameRun.GameRun["Service"]["runSteer"];
-  readonly runChecks: GameRun.GameRun["Service"]["runChecks"];
-  readonly roundDetail: GameRun.GameRun["Service"]["roundDetail"];
-  readonly pickDetail: GameRun.GameRun["Service"]["pickDetail"];
-  readonly restoreRound: GameRun.GameRun["Service"]["restoreRound"];
+  readonly runStart: (input: GameRunStartInput) => Fails<GameRunStartResult>;
+  /** A new game is a production run: create the project, then run the brief. */
+  readonly createGame: (
+    input: GameCreateInput,
+  ) => Effect.Effect<typeof GameProjectResult.Type, GameOperationError>;
+  readonly runStatus: (threadId: ThreadId) => Fails<GameRunStatusResult>;
+  readonly runStop: (threadId: ThreadId) => Fails<GameRunStopResult>;
+  /** The creator's answer to the decision the live run waits on; refused when it does not fit. */
+  readonly runDecide: (input: GameRunDecideInput) => Fails<GameRunDecideResult>;
+  readonly runProfile: (threadId: ThreadId, profile: GameRunProfile) => Fails<GameRunProfileResult>;
+  /** A creator note for the run's next round; on a finished run it buys one round. */
+  readonly runSteer: (threadId: ThreadId, text: string) => Fails<GameRunSteerResult>;
+  /** Scores the open rung's state checks on the build in the game root now. */
+  readonly runChecks: (threadId: ThreadId) => Fails<GameRunChecksResult>;
+  /** One round's evidence; `videoFile` and `sheetFiles` are files the transport may sign. */
+  readonly roundDetail: (
+    threadId: ThreadId,
+    round: number,
+  ) => Fails<{
+    detail: GameRunRoundDetail;
+    videoFile: string | null;
+    sheetFiles: FrameSheets;
+  }>;
+  readonly pickDetail: (
+    threadId: ThreadId,
+  ) => Fails<{ detail: GameRunPickDetail; sheetFiles: FrameSheets }>;
+  /**
+   * Makes a kept round's build the game's sources again with a new commit on
+   * trunk, and the ended run's judged best. Refused while a run is live,
+   * mid-round, off trunk or with uncommitted work.
+   */
+  readonly restoreRound: (threadId: ThreadId, round: number) => Fails<GameRunRestoreResult>;
   /** A run role's typed result; the refusal's reason comes back in-turn. */
   readonly runSubmit: (
     roleThreadId: ThreadId,
     submission: GameRunSubmission,
-  ) => Effect.Effect<GameRunSubmitResult, GameRun.GameRunError>;
+  ) => Fails<GameRunSubmitResult>;
 };
 
 export class GameRunControl extends Context.Service<GameRunControl, Service>()(
   "kurambit/game/GameRunControl",
 ) {}
-
-/** Which run drives a game until the loop is removed. */
-export const gameRunCoreConfig = Config.Literals(["loop", "domain"], "KURAMBIT_GAME_RUN_CORE").pipe(
-  Config.withDefault("loop" as const),
-);
 
 const RESUMABLE: ReadonlySet<string> = new Set([
   "budget",
@@ -92,25 +120,9 @@ const RESUMABLE: ReadonlySet<string> = new Set([
 ]);
 
 const runError = (operation: string, path: string, reason: string, detail: string) =>
-  new GameRun.GameRunError({ operation, path, reason, detail });
+  new GameRunError({ operation, path, reason, detail });
 
-const loopControl = Effect.gen(function* () {
-  const loop = yield* GameRun.GameRun;
-  return GameRunControl.of({
-    ...loop,
-    runSubmit: (roleThreadId) =>
-      Effect.fail(
-        runError(
-          "run-submit",
-          roleThreadId,
-          "no-submission",
-          "This game's production run takes no submissions: finish your turn as its prompt says.",
-        ),
-      ),
-  });
-});
-
-const domainControl = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
@@ -155,7 +167,10 @@ const domainControl = Effect.gen(function* () {
         records,
         run,
         inFlight,
-        state: run === null ? null : toState(run, records.gameRunRounds, inFlight),
+        state:
+          run === null
+            ? null
+            : toState(run, records.gameRunRounds, inFlight, threadRefs(records, run.id)),
       };
     });
 
@@ -183,7 +198,13 @@ const domainControl = Effect.gen(function* () {
       );
     const { run } = yield* latestOf(input.threadId);
     if (run !== null && run.status !== "ended")
-      return { runId: run.id, root, stage: run.stage, resumed: true } satisfies GameRunStartResult;
+      return {
+        runId: run.id,
+        root,
+        stage: run.stage,
+        resumed: true,
+        message: `The run is already going (${run.stage}); watch it on the Run tab.`,
+      } satisfies GameRunStartResult;
     const manifest = yield* projects.read(root).pipe(Effect.option);
     const lane = Option.isSome(manifest) ? manifest.value.godotProject : "godot";
     const projection = yield* threads
@@ -216,11 +237,34 @@ const domainControl = Effect.gen(function* () {
         ...(overridden ? { modelSelection: selectionFor(current, chosen) } : {}),
       });
       yield* logLine(root, `resuming run ${run.id} from stage ${run.stage}`);
-      return { runId: run.id, root, stage: run.stage, resumed: true } satisfies GameRunStartResult;
+      return {
+        runId: run.id,
+        root,
+        stage: run.stage,
+        resumed: true,
+        message: `The run resumed where it left off (${run.stage}).`,
+      } satisfies GameRunStartResult;
     }
+    // A game an earlier Kurambit ran keeps its files and git history, but its
+    // run record is not this run's: the run starts fresh from a brief.
+    const earlier =
+      run === null &&
+      (yield* Effect.promise(() =>
+        NodeFSP.access(NodePath.join(root, ".studio", "run.json")).then(
+          () => true,
+          () => false,
+        ),
+      ));
     const brief = input.brief.trim();
     if (brief.length === 0)
-      return yield* runError("run-start", root, "brief-required", "A new run needs a brief.");
+      return yield* runError(
+        "run-start",
+        root,
+        "brief-required",
+        earlier
+          ? "This game's earlier run is from an older Kurambit and cannot be resumed: its state was not carried over. Start a new run with a brief; the game's files and git history stay as they are."
+          : "A new run needs a brief.",
+      );
     const runId = GameRunId.make(
       `run_${Date.now().toString(36)}${NodeCrypto.randomBytes(3).toString("hex")}`,
     );
@@ -250,6 +294,9 @@ const domainControl = Effect.gen(function* () {
       root,
       stage: started?.stage ?? "starting",
       resumed: false,
+      message: earlier
+        ? "A new run started from the brief. This game's earlier run is from an older Kurambit: its state (stage, rounds, ladder, decisions) was not carried over, so the run starts from the beginning; the game's files and git history stay as they are."
+        : "The run started; watch it on the Run tab.",
     } satisfies GameRunStartResult;
   });
 
@@ -577,7 +624,7 @@ const domainControl = Effect.gen(function* () {
     return evidence;
   });
 
-  // The loop's restore, against the run's records; the restored build becomes
+  // A kept round's restore; the restored build becomes
   // the run's judged best, so a resumed run compares its next round with it.
   const restoreRound: Service["restoreRound"] = (threadId, round) =>
     Effect.flatMap(resolveGame(threadId), ({ root }) =>
@@ -757,31 +804,10 @@ const domainControl = Effect.gen(function* () {
   });
 });
 
-// Either core needs what the other does, so the flag never changes what the game layer provides.
-type ControlDeps =
-  | GameRun.GameRun
-  | Orchestrator.OrchestratorV2
-  | ProjectionStore.ProjectionStoreV2
-  | ThreadManagement.ThreadManagementService
-  | GameProjectService.GameProjectService
-  | GameService.GameService;
-export const layerDomain: Layer.Layer<GameRunControl, never, ControlDeps> = Layer.effect(
-  GameRunControl,
-  domainControl,
-);
-const layerLoop: Layer.Layer<GameRunControl, never, ControlDeps> = Layer.effect(
-  GameRunControl,
-  loopControl,
-);
-export const layer = Layer.unwrap(
-  Effect.gen(function* () {
-    const core = yield* gameRunCoreConfig.pipe(Effect.orElseSucceed(() => "loop" as const));
-    return core === "domain" ? layerDomain : layerLoop;
-  }),
-);
+export const layer = Layer.effect(GameRunControl, make);
 
 /** The submission tool's failure, in the toolkit's error shape. */
-export const submitFailure = (cause: GameRun.GameRunError) =>
+export const submitFailure = (cause: GameRunError) =>
   new GameOperationError({
     operation: "game-run-submit",
     path: cause.path,

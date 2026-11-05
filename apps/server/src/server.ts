@@ -2,7 +2,6 @@ import * as GameService from "./game/GameService.ts";
 import * as GameOperations from "./game/GameOperations.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
-import * as GameRun from "./game/GameRun.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameRunRoleReactor from "./game/run/GameRunRoleReactor.ts";
 import * as GameRunStepRunner from "./game/run/GameRunStepRunner.ts";
@@ -516,7 +515,6 @@ const layerGameRunWork = GameRunStepRunner.layer.pipe(
 const layerGameServices = GameRunControl.layer.pipe(
   Layer.provideMerge(layerGameRunWork),
   Layer.provide(ProjectionStoreV2.layer),
-  Layer.provideMerge(GameRun.layer),
   Layer.provideMerge(GameService.layer),
   Layer.provideMerge(GameProjectService.layer),
   Layer.provideMerge(GameOperations.layer),
@@ -535,25 +533,15 @@ const layerMakeRoutes = Layer.mergeAll(
     }),
   ).pipe(Layer.provide(GameTurnCancellationReactor.layer)),
   // A production run is a long-lived job: a restart (an update, a crash, a
-  // dev reload) picks it up instead of leaving it silently dead mid-round. The
-  // loop resumes its own runs; the orchestration core re-runs what a restart
-  // cut off. Only the selected core drives runs.
+  // dev reload) re-runs what it cut off instead of leaving it dead mid-round.
   Layer.effectDiscard(
     Effect.gen(function* () {
-      const core = yield* GameRunControl.gameRunCoreConfig.pipe(
-        Effect.orElseSucceed(() => "loop" as const),
-      );
       const runner = yield* GameRunStepRunner.GameRunStepRunner;
       const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      const recovery = yield* GameRunRecovery.GameRunRecovery;
       yield* runner.start();
       yield* roles.start();
-      if (core === "domain") {
-        const recovery = yield* GameRunRecovery.GameRunRecovery;
-        yield* forkParked(recovery.recover());
-      } else {
-        const gameRun = yield* GameRun.GameRun;
-        yield* forkParked(gameRun.resumeInterrupted());
-      }
+      yield* forkParked(recovery.recover());
     }),
   ),
   Layer.mergeAll(

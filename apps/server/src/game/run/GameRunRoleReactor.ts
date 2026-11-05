@@ -51,7 +51,7 @@ import { logLine } from "../runSetup.ts";
 import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { botRunCount } from "./facts.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
-import { lastBotRun, releaseWorktree } from "./roleRunner.ts";
+import { lastBotRun, releaseWorktree } from "./roleWorkspace.ts";
 import { MEMORY_RETRY } from "./roles.ts";
 import type { RoleStep, Step } from "./state.ts";
 

@@ -1,6 +1,5 @@
 import { GameOperationError } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
-import type * as GameRun from "../../../game/GameRun.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -15,7 +14,7 @@ import {
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
-const runFailure = (cause: GameRun.GameRunError) =>
+const runFailure = (cause: GameRunControl.GameRunError) =>
   new GameOperationError({
     operation: `game-${cause.operation}`,
     path: cause.path,

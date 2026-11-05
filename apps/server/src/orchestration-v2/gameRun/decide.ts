@@ -107,10 +107,10 @@ export const toState = (
   run: GameRun,
   rounds: ReadonlyArray<GameRunRound>,
   inFlight: GameRunStep | null,
+  /** The run's role threads, from its step records; only status views read them. */
+  threads: State.RunState["threads"] = [],
 ): State.RunState => ({
   version: 3,
-  // Roles of a run on this core hand their results through game_run_submit.
-  typed: true,
   runId: run.id,
   profile: run.profile,
   decided: run.decided,
@@ -126,7 +126,7 @@ export const toState = (
   lastFailure: run.lastFailure,
   shipNoReasons: run.shipNoReasons,
   rounds: rounds.map((r) => r.round).toSorted((a, b) => a.round - b.round),
-  threads: [],
+  threads,
   pending: run.pending,
   seq: run.seq,
   budgetEndsAt: run.budgetEndsAt,
@@ -462,7 +462,6 @@ const start = (work: Work, command: Command<"game-run.start">) => {
   // Stages an earlier run on this game finished are not redone.
   const state: State.RunState = {
     ...fresh,
-    typed: true,
     rounds: fresh.rounds.toSorted((a, b) => a.round - b.round),
     stage: prior?.stage ?? fresh.stage,
     pickNotes: prior?.pickNotes ?? "",

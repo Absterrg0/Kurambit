@@ -54,7 +54,6 @@ import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as GameOperations from "../GameOperations.ts";
 import * as GameProjectService from "../GameProjectService.ts";
-import * as GameRun from "../GameRun.ts";
 import * as GameRunControl from "../GameRunControl.ts";
 import * as GameService from "../GameService.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
@@ -577,7 +576,7 @@ const gameRoot = () => {
 };
 
 const layerGame = (root: string, world: World) =>
-  Layer.mergeAll(GameRunStepRunner.layer, GameRunControl.layerDomain).pipe(
+  Layer.mergeAll(GameRunStepRunner.layer, GameRunControl.layer).pipe(
     Layer.provideMerge(GameRunRoleReactor.layer),
     Layer.provide(
       Layer.mergeAll(
@@ -621,7 +620,6 @@ const layerGame = (root: string, world: World) =>
             }),
         }),
         Layer.mock(ServerSecretStore.ServerSecretStore)({}),
-        Layer.mock(GameRun.GameRun)({}),
       ),
     ),
     Layer.provideMerge(layerWithRecovery),

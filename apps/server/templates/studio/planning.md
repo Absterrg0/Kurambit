@@ -8,7 +8,7 @@ Adapted from Genex's director material (MIT), cut hard.
    presentation, the asset list, what makes the core good (how it plays,
    feels and looks), and what done means for the scope asked. Numbers,
    not adjectives.
-4. Write the ladder in `.studio/ladder.json`: 4 to 7 rungs from this build to
+4. Submit the ladder with `game_run_submit` as your prompt says: 4 to 7 rungs from this build to
    a game with the shape of a Steam demo. Each rung is what the game is after
    it, something a player notices in the first minute, with 2 to 4 checks a
    player could verify and how to observe each. Build each rung deep, end to
