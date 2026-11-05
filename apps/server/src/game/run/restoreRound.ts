@@ -16,8 +16,8 @@ import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import { RESUMABLE } from "../../orchestration-v2/gameRun/decide.ts";
 import type * as GameService from "../GameService.ts";
 import { causeText, logLine } from "../runSetup.ts";
-import { buildStep, captureBuild, isRestored, measureChange, restoredPaths } from "./builds.ts";
-import { BuildName } from "./buildNames.ts";
+import { buildStep, captureBuild, isRestored, measureChange } from "./builds.ts";
+import { BuildName, keptBuild, restoredPaths } from "./buildNames.ts";
 import type { RoundRecord, RunState } from "./state.ts";
 
 export const restoreKeptRound = (input: {
@@ -66,8 +66,11 @@ export const restoreKeptRound = (input: {
     // short must not keep its own half-restored folder as the creator's work.
     const beforeName = BuildName.restoreBefore(input.requestId);
     const beforeRef = checkpointRefForGameRun(run.id, beforeName);
-    if (!(yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: beforeRef })))
-      yield* captureBuild(checkpoints, root, run.id, beforeName);
+    // A repeat after a restart finds the build by name; only a first attempt has its commit.
+    const beforeSha = (yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: beforeRef }))
+      ? ""
+      : yield* captureBuild(checkpoints, root, run.id, beforeName);
+    const before = keptBuild(run.id, beforeName, lane, beforeSha);
     const restorePaths = isRestored(lane);
     if (!(yield* measureChange(checkpoints, root, restorePaths, beforeRef, build)).changed)
       return {
@@ -93,11 +96,13 @@ export const restoreKeptRound = (input: {
         "restore-incomplete",
         `Restoring round ${round} did not reproduce its build; see .studio/run.log.`,
       );
-    yield* log(`creator restored round ${round} (${build.slice(0, 8)}): ${what}`);
+    yield* log(
+      `creator restored round ${round} (${build.slice(0, 8)}): ${what}; the folder before is ${before}`,
+    );
     return {
       kind: "restored",
       sha: build,
-      message: `Round ${round}'s ${what} are back in the game folder; notes, PLAN.md, VISION.md, bots and run records were left as they are. What the folder held before is kept as the run's build ${beforeName}, and restoring another kept round goes there in turn.`,
+      message: `Round ${round}'s ${what} are back in the game folder; notes, PLAN.md, VISION.md, bots and run records were left as they are. What the folder held before is kept as ${before}`,
     } satisfies GameRunRestoreOutcome;
   }).pipe(
     Effect.catchCause((cause) =>

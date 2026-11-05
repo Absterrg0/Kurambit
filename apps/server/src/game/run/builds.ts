@@ -8,6 +8,7 @@ import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import type * as GameService from "../GameService.ts";
+import { restoredPaths } from "./buildNames.ts";
 import type { BuildOutcome } from "./policy.ts";
 import type { BuildOp } from "./state.ts";
 
@@ -15,14 +16,6 @@ type Checkpoints = CheckpointStore.CheckpointStore["Service"];
 
 /** What a blind player must not see: files that differ by round, not by game. */
 export const NOT_IN_SAMPLE = [".studio", "NOTES.md"];
-
-/**
- * What a restore brings back: the engine project and the art sources with
- * their map, so built assets and the .blend files they came from stay
- * together. Notes, plans, bots and `.studio` stay as they are, and ignored
- * engine caches (`.godot`, `Library`) are never touched.
- */
-export const restoredPaths = (lane: string) => [lane, "art", "ASSETS.md"];
 
 /** Game code: the engine project, without what an engine import rewrites on its own. */
 export const isGameCode = (lane: string) => (path: string) =>

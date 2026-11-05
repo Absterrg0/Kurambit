@@ -8,7 +8,7 @@ import type {
   ThreadId,
 } from "@kurambit/contracts";
 import { laneProfile } from "../engineProfile.ts";
-import { BuildName } from "./buildNames.ts";
+import { BuildName, keptBuild } from "./buildNames.ts";
 import * as Roles from "./roles.ts";
 import type * as State from "./state.ts";
 import { BLANK, isStateCheck, ladderOf, parseLadder, rungOfChange } from "./state.ts";
@@ -2075,7 +2075,12 @@ export const applyResult = (
       return out({ ...s, ladder: taken.ladder, task: newRound(s, now) });
     }
     case "leave":
-      if (t.phase !== "trunk") return out({ ...s, task: { ...t, phase: "trunk" } });
+      if (t.phase !== "trunk") {
+        logs.push(
+          `${t.branch}: its unfinished work is kept as ${keptBuild(s.runId, BuildName.unfinished(t.branch), s.lane, g?.sha ?? "")}`,
+        );
+        return out({ ...s, task: { ...t, phase: "trunk" } });
+      }
       return out({ ...s, ending: "budget", task: newRound(s, now) });
     case "round":
       return out(applyRound(s, t, done, res, input, logs, files, release));
@@ -2388,7 +2393,7 @@ const applyRound = (
       // With a budget, judging starts only when both plays and both verdicts fit.
       if (remaining(s, now) < COMPARE_MIN_MS) {
         logs.push(
-          `round ${r.n}: budget leaves no time to judge; candidate kept as build ${r.branch}`,
+          `round ${r.n}: budget leaves no time to judge; the candidate is kept as ${keptBuild(s.runId, BuildName.candidate(r.branch), s.lane, r.candidate)}`,
         );
         return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
       }

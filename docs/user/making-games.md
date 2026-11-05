@@ -132,7 +132,9 @@ which were set aside and why; each round shows how many of its checks passed.
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this
 round**, or ask your agent to restore it. The engine project, the art sources under `art/` and `ASSETS.md` return to that build in the
 game folder, and restoring a later kept round goes forward again. What the folder held before is
-kept as a build first, so a restore never discards work. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
+kept as a build first, so a restore never discards work: the restore's answer and `.studio/run.log`
+name that build with the command that brings it back. Work a run left unfinished when its budget
+ran out or it ended mid-round is kept and named in `.studio/run.log` the same way. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
 bots and the run's records stay as they are. A resumed run judges its next round against the
 restored build. Restore refuses while a run is live and while a stopped run is in the middle of a
 round.

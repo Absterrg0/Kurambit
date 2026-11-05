@@ -60,7 +60,7 @@ import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
-import { BuildName } from "./buildNames.ts";
+import { BuildName, keptBuild } from "./buildNames.ts";
 import { buildStep, captureBuild } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
@@ -767,7 +767,12 @@ const make = Effect.gen(function* () {
         const parked = yield* Effect.gen(function* () {
           const ref = checkpointRefForGameRun(run.id, name);
           const kept = yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: ref });
-          if (!kept) yield* captureBuild(checkpoints, root, run.id, name);
+          if (!kept) {
+            const sha = yield* captureBuild(checkpoints, root, run.id, name);
+            yield* log(
+              `the folder's work at the ending is kept as ${keptBuild(run.id, name, run.lane, sha)}`,
+            );
+          }
           const best = yield* buildStep(ops, ctx, { _tag: "restore", sha: run.best, keep: [] });
           return best.build.ok ? ref : null;
         }).pipe(
@@ -787,7 +792,9 @@ const make = Effect.gen(function* () {
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause)
                 ? Effect.failCause(cause)
-                : log(`the run's unfinished work could not be put back: ${causeText(cause)}`),
+                : log(
+                    `the run's unfinished work could not be put back (${causeText(cause)}); it is ${keptBuild(run.id, name, run.lane, "")}`,
+                  ),
             ),
           );
       }
