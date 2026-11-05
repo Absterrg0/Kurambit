@@ -390,6 +390,9 @@ export class GameService extends Context.Service<
   }
 >()("kurambit/game/GameService") {}
 
+/** Checkouts whose status hashes are kept; see statusSnapshot. */
+const STATUS_HASH_CHECKOUTS = 16;
+
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const processes = yield* GameProcesses.GameProcesses;
@@ -410,13 +413,20 @@ const make = Effect.gen(function* () {
     Effect.promise((signal) => snapshotBuildSource(root, project, { signal }));
   // Status is read on every push for the thread, so its freshness answer reuses
   // hashes of files whose stat identity is unchanged. An explicit check rereads
-  // every byte and refreshes the cache.
+  // every byte and refreshes the cache. The most recently read checkouts keep
+  // theirs (a run's sample copies are checkouts too); one dropped costs a
+  // single full read. A cache holds up to 10k files, about 3 MB.
   const statusHashes = new Map<string, SourceHashCache>();
   const statusSnapshot = (root: string, project: string, reread: boolean) =>
     Effect.promise((signal) => {
       const key = `${root}\0${project}`;
       const cache = statusHashes.get(key) ?? new Map();
+      statusHashes.delete(key);
       statusHashes.set(key, cache);
+      if (statusHashes.size > STATUS_HASH_CHECKOUTS) {
+        const oldest = statusHashes.keys().next().value;
+        if (oldest !== undefined) statusHashes.delete(oldest);
+      }
       if (reread) cache.clear();
       return snapshotBuildSource(root, project, { signal, cache });
     });
