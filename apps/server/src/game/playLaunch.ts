@@ -88,80 +88,93 @@ export const openRunnerPlay = (
       try: () => NodeFSP.mkdir(input.traceDir, { recursive: true }),
       catch: failure(operation, root, "io"),
     });
-    const listener = yield* Effect.tryPromise({
-      try: () => listenForRunner(),
-      catch: failure(operation, root, "io"),
-    });
-    let game: GameProcesses.StartedProcess | null = null;
-    const end = async () => {
-      await game?.stop();
-      await listener.drop();
-    };
-    return yield* Effect.gen(function* () {
-      const spec = yield* launch({
-        projectDir: input.projectDir,
-        player: input.player,
-        requestPath,
-        scriptDir: input.scriptDir,
-        traceDir: input.traceDir,
-        saves: input.saves,
-        viewport: input.viewport,
-        window: input.host?.kind ?? null,
-      });
-      yield* Effect.tryPromise({
-        try: () => listener.writeRequest(requestPath, spec.request),
-        catch: failure(operation, root, "io"),
-      });
-      const bootStart = Date.now();
-      const started = yield* processes.start({
-        root,
-        executable: spec.executable,
-        args: spec.args,
-        ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
-        operation: input.process,
-        timeoutMs: input.timeoutMs,
-        env: spec.env,
-        envMode: "replace",
-        window: input.host === null ? undefined : { host: input.host, viewport: input.viewport },
-      });
-      game = started;
-      let exited = false;
-      void started.exited.then(
-        () => (exited = true),
-        () => (exited = true),
-      );
-      const play = yield* Effect.tryPromise({
-        try: (signal) =>
-          listener.accept({
-            timeoutMs: input.bootTimeoutMs,
-            what: input.what,
-            signal,
-            alive: () => !exited,
-          }),
-        catch: failure(operation, root, "command-failed"),
-      });
-      const bootMs = Date.now() - bootStart;
-      return {
-        play,
-        stop: once(async () => {
-          await play.close();
-          // A kept session's game got its quit and has a few seconds to finish
-          // writing its saves before it is stopped.
-          if (input.saves !== null) {
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            await Promise.race([
-              started.exited.catch(() => undefined),
-              new Promise((resolve) => (timer = setTimeout(resolve, 5_000))),
-            ]);
-            clearTimeout(timer);
-          }
-          await end();
-        }),
-        bootMs,
-        scratch: spec.scratch,
-        inputNote: spec.inputNote,
-      } satisfies PlayLaunch;
-    }).pipe(Effect.onError(() => Effect.promise(end)));
+    // Interruptible only where it waits (the launch spec, the request, the
+    // hello): what it starts is known to `end` before an interrupt can land.
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const listener = yield* Effect.tryPromise({
+          try: () => listenForRunner(),
+          catch: failure(operation, root, "io"),
+        });
+        let game: GameProcesses.StartedProcess | null = null;
+        const end = async () => {
+          await game?.stop();
+          await listener.drop();
+        };
+        return yield* Effect.gen(function* () {
+          const spec = yield* restore(
+            launch({
+              projectDir: input.projectDir,
+              player: input.player,
+              requestPath,
+              scriptDir: input.scriptDir,
+              traceDir: input.traceDir,
+              saves: input.saves,
+              viewport: input.viewport,
+              window: input.host?.kind ?? null,
+            }),
+          );
+          yield* restore(
+            Effect.tryPromise({
+              try: () => listener.writeRequest(requestPath, spec.request),
+              catch: failure(operation, root, "io"),
+            }),
+          );
+          const bootStart = Date.now();
+          const started = yield* processes.start({
+            root,
+            executable: spec.executable,
+            args: spec.args,
+            ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
+            operation: input.process,
+            timeoutMs: input.timeoutMs,
+            env: spec.env,
+            envMode: "replace",
+            window:
+              input.host === null ? undefined : { host: input.host, viewport: input.viewport },
+          });
+          game = started;
+          let exited = false;
+          void started.exited.then(
+            () => (exited = true),
+            () => (exited = true),
+          );
+          const play = yield* restore(
+            Effect.tryPromise({
+              try: (signal) =>
+                listener.accept({
+                  timeoutMs: input.bootTimeoutMs,
+                  what: input.what,
+                  signal,
+                  alive: () => !exited,
+                }),
+              catch: failure(operation, root, "command-failed"),
+            }),
+          );
+          const bootMs = Date.now() - bootStart;
+          return {
+            play,
+            stop: once(async () => {
+              await play.close();
+              // A kept session's game got its quit and has a few seconds to finish
+              // writing its saves before it is stopped.
+              if (input.saves !== null) {
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                await Promise.race([
+                  started.exited.catch(() => undefined),
+                  new Promise((resolve) => (timer = setTimeout(resolve, 5_000))),
+                ]);
+                clearTimeout(timer);
+              }
+              await end();
+            }),
+            bootMs,
+            scratch: spec.scratch,
+            inputNote: spec.inputNote,
+          } satisfies PlayLaunch;
+        }).pipe(Effect.onError(() => Effect.promise(end)));
+      }),
+    );
   });
 
 /** A browser game's page in headless Chromium on its folder, served over loopback. */
@@ -176,38 +189,45 @@ export const openPagePlay = (input: {
 }): Effect.Effect<PlayLaunch, GameOperationError> =>
   Effect.gen(function* () {
     const { operation, root } = input;
-    const served = yield* Effect.tryPromise({
-      try: () => serveGameDirectory(root, NodePath.relative(root, input.projectDir) || "."),
-      catch: failure(operation, root, "io", "The static project could not be served."),
-    });
-    const unserve = () => served.close().catch(() => undefined);
-    const bootStart = Date.now();
-    const play = yield* Effect.tryPromise({
-      try: (signal) =>
-        openWebPlaySession({
-          browser: input.browser,
-          url: served.url,
-          width: input.viewport.width,
-          height: input.viewport.height,
-          bootTimeoutMs: input.bootTimeoutMs,
-          signal,
-          keptStorage: input.keptStorage,
-        }),
-      catch: (cause) =>
-        failure(
-          operation,
-          root,
-          cause instanceof WebBrowserLaunchFailed ? "tool-missing" : "command-failed",
-        )(cause),
-    }).pipe(Effect.onError(() => Effect.promise(unserve)));
-    return {
-      play,
-      stop: once(async () => {
-        await play.close();
-        await unserve();
+    // Interruptible only while the page boots, which ends its browser on abort.
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const served = yield* Effect.tryPromise({
+          try: () => serveGameDirectory(root, NodePath.relative(root, input.projectDir) || "."),
+          catch: failure(operation, root, "io", "The static project could not be served."),
+        });
+        const unserve = () => served.close().catch(() => undefined);
+        const bootStart = Date.now();
+        const play = yield* restore(
+          Effect.tryPromise({
+            try: (signal) =>
+              openWebPlaySession({
+                browser: input.browser,
+                url: served.url,
+                width: input.viewport.width,
+                height: input.viewport.height,
+                bootTimeoutMs: input.bootTimeoutMs,
+                signal,
+                keptStorage: input.keptStorage,
+              }),
+            catch: (cause) =>
+              failure(
+                operation,
+                root,
+                cause instanceof WebBrowserLaunchFailed ? "tool-missing" : "command-failed",
+              )(cause),
+          }),
+        ).pipe(Effect.onError(() => Effect.promise(unserve)));
+        return {
+          play,
+          stop: once(async () => {
+            await play.close();
+            await unserve();
+          }),
+          bootMs: Date.now() - bootStart,
+          scratch: [],
+          inputNote: "",
+        } satisfies PlayLaunch;
       }),
-      bootMs: Date.now() - bootStart,
-      scratch: [],
-      inputNote: "",
-    } satisfies PlayLaunch;
+    );
   });

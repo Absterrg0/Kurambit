@@ -176,6 +176,9 @@ export const openWebPlaySession = async (input: {
     await browser.close().catch(() => undefined);
     throw new Error("aborted");
   }
+  // page.goto takes no signal: an abort mid-boot ends the browser, which ends the wait.
+  const abortBoot = () => void browser.close().catch(() => undefined);
+  input.signal?.addEventListener("abort", abortBoot, { once: true });
   try {
     const origin = new URL(input.url).origin;
     const keptStorage = input.keptStorage ?? null;
@@ -305,6 +308,8 @@ export const openWebPlaySession = async (input: {
     } catch (cause) {
       await browser.close().catch(() => undefined);
       throw cause;
+    } finally {
+      input.signal?.removeEventListener("abort", abortBoot);
     }
     const bootProbe = sanitizeProbe(await readState());
     const bootConsole = drain();
@@ -532,6 +537,7 @@ export const openWebPlaySession = async (input: {
     };
     return session;
   } catch (cause) {
+    input.signal?.removeEventListener("abort", abortBoot);
     await browser.close().catch(() => undefined);
     throw cause;
   }

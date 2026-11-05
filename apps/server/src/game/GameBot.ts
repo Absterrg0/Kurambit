@@ -585,8 +585,10 @@ const make = Effect.gen(function* () {
           // only once that settled (bounded), so nothing writes into the run's
           // folder once the call returns and its caller removes it.
           let playing: Promise<unknown> = Promise.resolve();
+          // A stop during boot interrupts the launch, which ends what it started.
           const one = yield* Effect.acquireUseRelease(
             open.pipe(
+              Effect.interruptible,
               Effect.mapError((error) =>
                 session.stopped
                   ? opError("Bot run", root, "command-failed", "Bot run stopped.")
