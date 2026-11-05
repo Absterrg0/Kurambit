@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
+import * as Schema from "effect/Schema";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -12,6 +13,7 @@ import {
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import {
   GAME_RUN_STAGES,
+  GameOperationError,
   gameRunRoleLabel,
   type GameRunDecision,
   type GameRunProfile,
@@ -50,6 +52,8 @@ import { GameRunPickRow, GameRunRoundRow } from "./GameRunRounds";
 import { GAME_RUN_PROFILE_HINT, GameRunProfileToggle } from "./GameRunProfileToggle";
 import { formatRunDuration, groupRoleThreads } from "./gameRunView.logic";
 import { useGameLibrary } from "./useGameLibrary";
+
+const isGameOperationError = Schema.is(GameOperationError);
 
 /** The smallest working surface for a production run: start, status, steer, stop. */
 export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
@@ -152,7 +156,11 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     });
     setBusy(false);
     if (result._tag === "Failure") {
-      setError(String(squashAtomCommandFailure(result)));
+      const failure = squashAtomCommandFailure(result);
+      // The run refused the note ("finishing… try again"): that answer is its
+      // receipt, so a retry must be a new command to be taken at all.
+      if (isGameOperationError(failure) && failure.runReason !== undefined) steerKey.current = null;
+      setError(String(failure));
       return;
     }
     steerKey.current = null;
