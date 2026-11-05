@@ -95,6 +95,7 @@ and checked, played and exported with the same `game_*` tools as a Godot game.
     executable, `game_Data/` and `UnityPlayer.so` together); Windows builds
     `builds/windows/`. Web is refused. Bot runs play the same Linux player as
     `game_explore_*`, at normal speed; they take no `setState` writes.
-17. Work in `./unity` plus VISION.md, PLAN.md and NOTES.md. Never commit,
-    never reset git, never use subagents. Never touch `Library/`, `Temp/`,
+17. In a production run's role, work in `./unity` plus VISION.md, PLAN.md and
+    NOTES.md, and never commit, reset git or use subagents: the run keeps
+    the builds. Never touch `Library/`, `Temp/`,
     `Logs/` or `UserSettings/`; they are the editor's caches.
