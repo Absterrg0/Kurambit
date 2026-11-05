@@ -9,7 +9,6 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
@@ -46,16 +45,10 @@ import * as GameProjectService from "./GameProjectService.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
-import {
-  listenForRunner,
-  type PlayActObservation,
-  type PlayObservation,
-  type PlaySession,
-} from "./playSession.ts";
-import { openWebPlaySession } from "./webPlaySession.ts";
+import { type PlayActObservation, type PlayObservation, type PlaySession } from "./playSession.ts";
 import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
 import { requireChromium } from "./gameChromium.ts";
-import { serveGameDirectory } from "./gameWebServer.ts";
+import { openPagePlay, openRunnerPlay } from "./playLaunch.ts";
 import { snapshotBuildSource } from "./sourceSnapshot.ts";
 
 /**
@@ -85,8 +78,6 @@ const EXPLORE_PLAYER_ROOM: MemoryRoom = {
   neededMb: 1024,
   env: "KURAMBIT_EXPLORE_UNITY_MEMORY_MB",
 };
-
-const isGameOperationError = Schema.is(GameOperationError);
 
 /** Nominal commanded game time; a process runner's tap spans its physics-frame hold. */
 const exploreStepNominalMs = (step: GameExploreStep, target: "native" | "web"): number => {
@@ -537,16 +528,6 @@ const make = Effect.gen(function* () {
     readonly bootMs: number;
     readonly inputNote: string;
   }
-  const exploreFailure = (root: string, cause: unknown) =>
-    isGameOperationError(cause)
-      ? cause
-      : new GameOperationError({
-          operation: "Explore session",
-          path: root,
-          reason: "command-failed",
-          detail: cause instanceof Error ? cause.message : String(cause),
-          cause,
-        });
   /**
    * Starts the engine's runner process in a window host's window (headless
    * when the engine runs without one and the machine has no host) and waits for its
@@ -565,108 +546,39 @@ const make = Effect.gen(function* () {
     readonly what: string;
   }) =>
     Effect.gen(function* () {
-      const { root, backend } = input;
-      const launch = backend.playProcess;
-      if (launch === null)
-        return yield* exploreInvalid(
-          root,
-          `${backend.profile.displayName} games play in the browser.`,
-        );
+      const { root } = input;
       const host = yield* Effect.promise(() => findWindowHost(processHost));
       const scriptDir = NodePath.join(root, "builds/logs", `game-explore-${input.id}`);
-      const requestPath = NodePath.join(input.traceDir, "request.json");
-      yield* Effect.tryPromise({
-        try: () => NodeFSP.mkdir(input.traceDir, { recursive: true }),
-        catch: (cause) =>
-          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
-      });
-      const listener = yield* Effect.tryPromise({
-        try: () => listenForRunner(),
-        catch: (cause) =>
-          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
-      });
       const dropScratch = Effect.promise(() =>
         Promise.all([
           NodeFSP.rm(input.traceDir, { recursive: true, force: true }),
           NodeFSP.rm(scriptDir, { recursive: true, force: true }),
         ]),
       ).pipe(Effect.ignore);
-      const dropAll = Effect.gen(function* () {
-        yield* processes.stop(root).pipe(Effect.ignore);
-        yield* Effect.promise(() => listener.drop());
-        yield* dropScratch;
-      });
-      return yield* Effect.gen(function* () {
-        const spec = yield* launch({
-          projectDir: input.projectDir,
-          player: input.player,
-          requestPath,
-          scriptDir,
-          traceDir: input.traceDir,
-          saves: input.saves,
-          viewport: input.viewport,
-          window: host?.kind ?? null,
-        });
-        yield* Effect.tryPromise({
-          try: () => listener.writeRequest(requestPath, spec.request),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "Explore session",
-              path: root,
-              reason: "io",
-              cause,
-            }),
-        });
-        // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs; the run's game time uses the controlled clock.
-        const bootWallStart = Date.now();
-        const launched = yield* processes.start({
-          root,
-          executable: spec.executable,
-          args: spec.args,
-          ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
-          operation: "explore-play",
-          timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
-          env: spec.env,
-          envMode: "replace",
-          window: host === null ? undefined : { host, viewport: input.viewport },
-        });
-        const play = yield* Effect.tryPromise({
-          try: (signal) =>
-            listener.accept({
-              timeoutMs: input.bootTimeoutMs,
-              what: input.what,
-              signal,
-              alive: () => processes.list(root).some((entry) => entry.pid === launched.pid),
-            }),
-          catch: (cause) => exploreFailure(root, cause),
-        });
-        // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
-        const bootMs = Date.now() - bootWallStart;
-        // A kept session's game gets its quit and a few seconds to finish
-        // writing its saves before anything left is stopped.
-        const exited = Effect.gen(function* () {
-          const deadline = (yield* Clock.currentTimeMillis) + 5_000;
-          while (
-            processes.list(root).some((entry) => entry.pid === launched.pid) &&
-            (yield* Clock.currentTimeMillis) < deadline
-          )
-            yield* Effect.sleep(Duration.millis(100));
-        });
-        return {
-          play,
-          release: (input.saves === null ? Effect.void : exited).pipe(
-            Effect.andThen(processes.stop(root)),
-            Effect.ignore,
-          ),
-          scratch: spec.scratch,
-          pictures: host !== null,
-          bootMs,
-          inputNote: spec.inputNote,
-        } satisfies OpenedPlay;
-      }).pipe(
-        Effect.tapError(() => dropAll),
-        Effect.onInterrupt(() => dropAll),
-      );
+      const launched = yield* openRunnerPlay(processes, {
+        operation: "Explore session",
+        process: "explore-play",
+        root,
+        backend: input.backend,
+        projectDir: input.projectDir,
+        player: input.player,
+        viewport: input.viewport,
+        host,
+        scriptDir,
+        traceDir: input.traceDir,
+        saves: input.saves,
+        timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
+        bootTimeoutMs: input.bootTimeoutMs,
+        what: input.what,
+      }).pipe(Effect.onError(() => dropScratch));
+      return {
+        play: launched.play,
+        release: Effect.promise(launched.stop),
+        scratch: launched.scratch,
+        pictures: host !== null,
+        bootMs: launched.bootMs,
+        inputNote: launched.inputNote,
+      } satisfies OpenedPlay;
     });
   /** Registers an opened session and says what it is. */
   const exploreRegister = (
@@ -930,42 +842,26 @@ const make = Effect.gen(function* () {
         catch: (cause) =>
           new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
       });
-      const server = yield* Effect.tryPromise({
-        try: () => serveGameDirectory(root, ctx.projectName),
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "Explore session",
-            path: root,
-            reason: "io",
-            detail: "The static project could not be served.",
-            cause,
-          }),
+      const launched = yield* openPagePlay({
+        operation: "Explore session",
+        root,
+        projectDir: ctx.projectDir,
+        executable,
+        viewport,
+        bootTimeoutMs,
+        keptStorage: keptWebStorage(saves),
       });
-      const dropServer = Effect.promise(() => server.close()).pipe(Effect.ignore);
-      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
-      const bootWallStart = Date.now();
-      const play = yield* Effect.tryPromise({
-        try: (signal) =>
-          openWebPlaySession({
-            executable,
-            url: server.url,
-            width: viewport.width,
-            height: viewport.height,
-            bootTimeoutMs,
-            signal,
-            keptStorage: keptWebStorage(saves),
-          }),
-        catch: (cause) => exploreFailure(root, cause),
-      }).pipe(
-        Effect.tapError(() => dropServer),
-        Effect.onInterrupt(() => dropServer),
-      );
-      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
-      const bootMs = Date.now() - bootWallStart;
       return yield* exploreRegister(
         threadId,
         root,
-        { play, release: dropServer, scratch: [], pictures: true, bootMs, inputNote: "" },
+        {
+          play: launched.play,
+          release: Effect.promise(launched.stop),
+          scratch: [],
+          pictures: true,
+          bootMs: launched.bootMs,
+          inputNote: "",
+        },
         {
           id,
           traceDir,

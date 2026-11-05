@@ -184,6 +184,30 @@ export const sampleCopy = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, bui
 export const removeBlank = (_deps: RoleDeps, _ctx: RoleContext, blank: { readonly path: string }) =>
   Effect.promise(() => NodeFSP.rm(blank.path, { recursive: true, force: true }).catch(() => {}));
 
+/**
+ * What is left of an ended run's copies goes, with any editor open on one
+ * closed first. An ending a resume continues from keeps its roles' copies
+ * (`step-*`), since the resumed step plays on in them.
+ */
+export const dropRunCopies = (
+  deps: Pick<RoleDeps, "game">,
+  copies: string,
+  keepRoleCopies: boolean,
+) =>
+  Effect.gen(function* () {
+    const names = yield* Effect.promise(() => NodeFSP.readdir(copies).catch(() => []));
+    const gone = names.filter(
+      (name) => !(keepRoleCopies && name.startsWith("step-") && !name.endsWith(".making")),
+    );
+    for (const name of gone) yield* deps.game.closeLiveEditors(NodePath.join(copies, name));
+    yield* Effect.promise(async () => {
+      if (gone.length === names.length) await NodeFSP.rm(copies, { recursive: true, force: true });
+      else
+        for (const name of gone)
+          await NodeFSP.rm(NodePath.join(copies, name), { recursive: true, force: true });
+    });
+  });
+
 // A role's copy goes once its role has no turn left: the folder, then the
 // thread's binding to it. An editor still open on it (a Unity sample's player
 // build) closes first, so nothing writes into a folder being deleted. Only a

@@ -18,7 +18,14 @@ interface Running {
   operation: string;
   logPath: string;
   done: Promise<GameProcessResult>;
-  stop: () => void;
+  stop: () => Promise<void>;
+}
+/** A started process: its exit, and a stop that resolves once it has exited. */
+export interface StartedProcess {
+  readonly pid: number;
+  readonly logPath: string;
+  readonly exited: Promise<GameProcessResult>;
+  readonly stop: () => Promise<void>;
 }
 /**
  * Every way a child process can reach a display server. A headless child keeps
@@ -124,9 +131,7 @@ export class GameProcesses extends Context.Service<
   GameProcesses,
   {
     readonly run: (input: ProcessInput) => Effect.Effect<GameProcessResult, GameOperationError>;
-    readonly start: (
-      input: ProcessInput,
-    ) => Effect.Effect<{ pid: number; logPath: string }, GameOperationError>;
+    readonly start: (input: ProcessInput) => Effect.Effect<StartedProcess, GameOperationError>;
     readonly stop: (root: string) => Effect.Effect<void>;
     readonly list: (root: string) => readonly { pid: number; operation: string; logPath: string }[];
   }
@@ -180,17 +185,16 @@ const make = Effect.gen(function* () {
       stderr = "",
       timedOut = false;
     let stopping: Promise<void> | null = null;
-    const stop = () => {
-      stopping ??= (hosted?.stop() ?? owned.stop()).finally(() => {
+    const stop = () =>
+      (stopping ??= (hosted?.stop() ?? owned.stop()).finally(() => {
         stopping = null;
-      });
-    };
-    const abort = () => stop();
+      }));
+    const abort = () => void stop();
     signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) stop();
+    if (signal?.aborted) void stop();
     const timer = setTimeout(() => {
       timedOut = true;
-      stop();
+      void stop();
     }, input.timeoutMs ?? 120_000);
     const append = (chunk: Buffer, channel: "stdout" | "stderr") => {
       const value = chunk.toString();
@@ -206,13 +210,13 @@ const make = Effect.gen(function* () {
       child.once("error", (error) => {
         spawnError = error;
       });
-      log.on("error", () => stop());
+      log.on("error", () => void stop());
       child.once("close", (code, exitSignal) => {
         clearTimeout(timer);
         // The child closed, but its tree or window may still hold processes,
         // and the close removes this entry from the tracked map, so a later
         // stop() could not reach them.
-        if (hosted !== null || owned.alive()) stop();
+        if (hosted !== null || owned.alive()) void stop();
         signal?.removeEventListener("abort", abort);
         if (child.pid !== undefined) running.delete(child.pid);
         log.end(() => {
@@ -249,14 +253,23 @@ const make = Effect.gen(function* () {
         child.once("spawn", resolve);
         child.once("error", reject);
       });
-    return { pid: child.pid!, logPath, done };
+    return {
+      pid: child.pid!,
+      logPath,
+      exited: done,
+      // Resolves once the child closed and what its window needed is gone.
+      stop: async () => {
+        await stop();
+        await done.catch(() => {});
+      },
+    } satisfies StartedProcess;
   };
   const stop = (root?: string) =>
     Effect.promise(async () => {
       const owned = [...running.values()].filter(
         (entry) => root === undefined || entry.root === root,
       );
-      for (const entry of owned) entry.stop();
+      for (const entry of owned) void entry.stop();
       await Promise.allSettled(owned.map((entry) => entry.done));
     });
   yield* Effect.addFinalizer(() => stop());
@@ -274,16 +287,12 @@ const make = Effect.gen(function* () {
                 cause,
               }),
           }),
-          (handle) =>
-            Effect.promise(async () => {
-              running.get(handle.pid)?.stop();
-              await handle.done.catch(() => {});
-            }),
-        ).pipe(Effect.flatMap((handle) => Effect.promise(() => handle.done))),
+          (handle) => Effect.promise(() => handle.stop()),
+        ).pipe(Effect.flatMap((handle) => Effect.promise(() => handle.exited))),
       ),
     start: (input) =>
       Effect.tryPromise({
-        try: (signal) => startProcess(input, signal).then(({ pid, logPath }) => ({ pid, logPath })),
+        try: (signal) => startProcess(input, signal),
         catch: (cause) =>
           new GameOperationError({
             operation: input.operation,

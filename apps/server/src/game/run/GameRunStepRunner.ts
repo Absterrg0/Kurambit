@@ -36,7 +36,7 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
-import { gitEra, toState } from "../../orchestration-v2/gameRun/decide.ts";
+import { gitEra, RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   gameRunOperationOwner,
@@ -74,6 +74,7 @@ import {
 import { modelFacts } from "./modelFacts.ts";
 import {
   blankFolder,
+  dropRunCopies,
   releaseCopy,
   removeBlank,
   runCopies,
@@ -933,6 +934,13 @@ const make = Effect.gen(function* () {
               : log(`the run's spent builds could not be cleared: ${causeText(cause)}`),
           ),
         );
+      yield* dropRunCopies(deps, copiesOf(run.id), RESUMABLE.has(run.ending ?? "")).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : log(`the run's copies could not be removed: ${causeText(cause)}`),
+        ),
+      );
     });
 
   // A creator's restore, from the effect its request committed. Every check is
