@@ -1252,10 +1252,18 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         ...(yield* listAttributes(["-c", "-o"])),
         ...(yield* listAttributes(["-o", "-i"])),
       ];
+      // Git 2.42 names the files it reads; older git gets the global one
+      // resolved by hand and no system one.
+      const gitVar = (name: string) =>
+        execute({ operation, cwd, args: ["var", name], allowNonZeroExit: true }).pipe(
+          Effect.map((result) => (result.exitCode === 0 ? result.stdout.trim() : "")),
+        );
+      const systemAttributes = yield* gitVar("GIT_ATTR_SYSTEM");
       const home = process.env.HOME || NodeOS.homedir();
       const configured = settings.get("core.attributesfile");
       const globalAttributes =
-        typeof configured === "string" && configured.length > 0
+        (yield* gitVar("GIT_ATTR_GLOBAL")) ||
+        (typeof configured === "string" && configured.length > 0
           ? configured.startsWith("~/")
             ? path.join(home, configured.slice(2))
             : path.resolve(cwd, configured)
@@ -1263,10 +1271,12 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               process.env.XDG_CONFIG_HOME || path.join(home, ".config"),
               "git",
               "attributes",
-            );
+            ));
       const folders = prefix.split("/").filter((part) => part.length > 0);
       const attributeFiles = [
         infoAttributes,
+        // Empty when git reads none (GIT_ATTR_NOSYSTEM, or git before 2.42).
+        systemAttributes,
         globalAttributes,
         ...folders.map((_, depth) => path.join(top, ...folders.slice(0, depth), ".gitattributes")),
         ...listed.map((file) => path.join(top, file)),
@@ -1292,6 +1302,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         file: path.join(dir, `capture-index-${id}-${key}`),
         // Keeps every object the index names reachable, so git's gc never prunes one.
         ref: `${CAPTURE_INDEX_REFS}${id}`,
+        /** HEAD as read for the key: the capture lines up with, seeds from and parents this. */
+        head,
         ignoreCase: gitConfigTrue(settings.get("core.ignorecase")),
         precomposeUnicode: gitConfigTrue(settings.get("core.precomposeunicode")),
       };
@@ -1385,6 +1397,13 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
    * ignored, not a nested repository nor inside one and, on a case-insensitive disk, spelled
    * as on disk and nowhere else in the index. `add -A` meets every dropped path
    * as new, as after a seed.
+   *
+   * This widens one trust: a file HEAD lacks is taken as unchanged on the
+   * stat data an earlier capture recorded, where a fresh seed hashed it
+   * every time. A rewrite that keeps its size, mtime and (where git checks
+   * them) ctime and inode is missed, exactly as `git status` misses it for a
+   * tracked file; git's racy check still re-reads files written in the
+   * second the index was.
    */
   const lineUpCaptureIndex = (place: CapturePlace, run: CaptureRun) =>
     Effect.gen(function* () {
@@ -1396,7 +1415,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         "--raw",
         "--no-renames",
         "--ignore-submodules=none",
-        "HEAD",
+        place.head,
         "--",
         ".",
       ]);
@@ -1596,10 +1615,12 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       );
       if (large.reduce((sum, file) => sum + file.size, 0) < PRE_WRITE_MIN_TOTAL_BYTES) return;
       // Two process slots stay free for the app's other git work.
-      const count = Math.max(
-        1,
-        Math.min(NodeOS.availableParallelism() - 1, VcsProcess.VCS_PROCESS_CONCURRENCY - 2),
+      const count = Math.min(
+        NodeOS.availableParallelism() - 1,
+        VcsProcess.VCS_PROCESS_CONCURRENCY - 2,
       );
+      // One process would only hash the files a second time, in series.
+      if (count < 2) return;
       const groups = balanceBySize(large, count);
       report.processes = groups.length;
       yield* Effect.forEach(
@@ -1729,12 +1750,17 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               Effect.orElseSucceed(() => null),
             )
           : null;
+      // HEAD moving mid-capture must not mix two HEADs into one capture: with a
+      // place, every step uses the commit its key was computed from.
+      const headRef = place?.head ?? "HEAD";
       const { top } = place ?? (yield* resolveTopLevel(input.cwd));
       // Capture commands never write an index that points at a shared index
       // file git's own expiry could remove, nor read an untracked cache.
       const captureConfig: ReadonlyArray<readonly [string, string]> = [
         ["core.splitIndex", "false"],
         ["core.untrackedCache", "false"],
+        // A checksum on every index write, so a torn kept index reads as corrupt.
+        ["index.skipHash", "false"],
         ...(sparseCheckout ? [] : ([["index.sparse", "false"]] as const)),
       ];
       const report = { files: 0, bytes: 0, processes: 0, reused: false };
@@ -1796,7 +1822,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
                 operation,
                 cwd: input.cwd,
                 env: commitEnv,
-                tree: "HEAD",
+                tree: headRef,
                 sparseCheckout,
               });
               if (!reusedIndex) {
@@ -1822,7 +1848,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
                 yield* run(
                   sparseCheckout
                     ? [...indexConfig, "-c", "index.sparse=true", "read-tree", "--reset", "HEAD"]
-                    : ["read-tree", "HEAD"],
+                    : ["read-tree", headRef],
                 );
               }
             }
@@ -1920,7 +1946,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               ...captureWrite,
               "commit-tree",
               treeOid,
-              ...(headExists ? ["-p", "HEAD"] : []),
+              ...(headExists ? ["-p", headRef] : []),
               "-m",
               message,
             ]);
@@ -1945,7 +1971,14 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           }).pipe(Effect.ensuring(cleanupTempIndex));
         }).pipe(
           Effect.catchCause((cause) => {
-            if (!reusing || Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+            // A timeout is reported, not retried: a reseed would double a 10-minute wait.
+            const error = Cause.findErrorOption(cause);
+            if (
+              !reusing ||
+              Cause.hasInterruptsOnly(cause) ||
+              (Option.isSome(error) && error.value._tag === "VcsProcessTimeoutError")
+            )
+              return Effect.failCause(cause);
             // The kept index could not be used (corrupt, a foreign format, a
             // pruned object): it goes, and the capture starts from a fresh seed.
             return Effect.logWarning("checkpoint capture index reseeded", {

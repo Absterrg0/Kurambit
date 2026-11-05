@@ -317,7 +317,10 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
 
   const priority = input.priority;
   // Priority is a courtesy to the rest of the machine: a child that already
-  // exited, or a platform that refuses, still runs its work.
+  // exited, or a platform that refuses, still runs its work. It is set just
+  // after spawn, so the child's first moments run at normal priority, and on
+  // Windows (where the class is not inherited from a later change) a process
+  // the child starts in that moment keeps normal priority.
   if (priority !== undefined)
     yield* Effect.try(() => NodeOS.setPriority(child.pid, priority)).pipe(Effect.ignore);
 
