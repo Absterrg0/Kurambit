@@ -211,6 +211,11 @@ reach none of its controls.
   every thread's provider work shares. A step's effect (`game-run.step.execute`) hands its work to
   `GameRunJobs` (in-process, bounded, scoped fibers) and settles at once; the job reports with
   `game-run.step.complete` or `game-run.step.fail`. A role step's job only launches the role.
+  The step's timers are short (a role's cap is a read and an interrupt or a reschedule; a turn sent
+  again is a read and a dispatch), so they run inside their effects, as the decisions do: the
+  effect stays unsettled until its act is committed, and the outbox runs it again after a failure
+  or a server death. A timer that only forked a job would be done before its work, and a death in
+  between would leave the step running with no job and no timer.
 - **Attempts.** A step planned again (a resume) is a new attempt. Every report carries its attempt
   and a command id derived from step, attempt and action (`gameRunStepCommandId`), so a late report
   of an earlier try is refused and a retried one is a no-op. Each attempt has its own role thread
@@ -231,7 +236,7 @@ reach none of its controls.
 - **Recovery** (`GameRunRecovery`, at startup): a live run's unfinished step gets its job again,
   and an ending whose finish is not recorded finishes again. Every step is safe to repeat because
   its job first finds what an earlier try left: a role's thread, a turn of this attempt that ended
-  (landed now), one still running (its cap watched again). A stopped run is never continued except
+  (landed now), one still running (its cap set again as a timer). A stopped run is never continued except
   by `game-run.resume`.
 - **The role reactor's rule.** A role turn's message id names its step and attempt; a restart's
   continuation of a turn (`restartContinuationOfRunId`) is the same turn. `GameRunRoleReactor`

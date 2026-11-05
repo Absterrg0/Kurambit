@@ -595,6 +595,10 @@ interface World {
   onCreatorShell: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
   onSend: ((threadId: ThreadId, messageId: string) => void) | null;
+  /** This many sends break before reaching the thread, as a server dying mid-send would. */
+  sendBreaks: number;
+  /** This many interrupts break before reaching the thread. */
+  interruptBreaks: number;
   /** Resolved once a role's cap watch reads its turn's memory waits. */
   readonly capWatched: Deferred.Deferred<void>;
   /** Resolved with each role thread launched. */
@@ -621,6 +625,8 @@ const newWorld = Effect.gen(function* () {
     folderGone: false,
     onCreatorShell: null,
     onSend: null,
+    sendBreaks: 0,
+    interruptBreaks: 0,
     capWatched: yield* Deferred.make<void>(),
     launched: yield* Queue.unbounded<ThreadId>(),
     interrupted: yield* Queue.unbounded<string>(),
@@ -710,19 +716,26 @@ const roleThreadsOf = (world: World) =>
               : null,
           ),
         interruptThread: (input) =>
-          Effect.sync(() => {
-            world.interrupts.push({ threadId: input.threadId, commandId: input.commandId });
-            world.receipts.add(input.commandId);
-          }).pipe(
+          (world.interruptBreaks-- > 0 ? Effect.die("interrupt broke") : Effect.void).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                world.interrupts.push({ threadId: input.threadId, commandId: input.commandId });
+                world.receipts.add(input.commandId);
+              }),
+            ),
             Effect.andThen(Queue.offer(world.interrupted, input.commandId)),
             Effect.as({ type: "no_active_run" as const }),
           ),
         sendToThread: (input) =>
-          Effect.sync(() => {
-            world.sends.push({ threadId: input.threadId, messageId: input.messageId });
-            world.onSend?.(input.threadId, input.messageId);
-            return {} as never;
-          }),
+          (world.sendBreaks-- > 0 ? Effect.die("send broke") : Effect.void).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                world.sends.push({ threadId: input.threadId, messageId: input.messageId });
+                world.onSend?.(input.threadId, input.messageId);
+                return {} as never;
+              }),
+            ),
+          ),
       });
     }),
   );
@@ -877,6 +890,13 @@ const awaitRun = (ok: (run: GameRunRecord) => boolean) =>
 
 const startRunner = Effect.flatMap(GameRunStepRunner.GameRunStepRunner, (runner) => runner.start());
 const recover = Effect.flatMap(GameRunRecovery.GameRunRecovery, (recovery) => recovery.recover());
+/** Recovery, with the cap the step's job sets as a timer for the turn it finds or sends, fired. */
+const recoverAndCap = Effect.gen(function* () {
+  const scheduled = yield* awaitRun(() => true);
+  yield* recover;
+  yield* Fiber.join(scheduled);
+  yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+});
 
 it.effect("a role step whose turn ended while the server was down lands from its thread", () =>
   withGame((world) =>
@@ -908,7 +928,7 @@ it.effect("a turn a server restart cut off lands only when its continuation ends
       });
       world.runs.set(thread, [cut, going]);
       yield* startRunner;
-      yield* recover;
+      yield* recoverAndCap;
       // The step's job reattached and watches the continuation's cap.
       yield* Deferred.await(world.capWatched);
       const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
@@ -943,7 +963,7 @@ it.effect(
         // The reactor hands a cut-off turn to its step instead of landing it.
         assert.equal(yield* roles.settle(thread, cut), "continue");
         yield* startRunner;
-        yield* recover;
+        yield* recoverAndCap;
         // The step's job continued the turn with its own prompt and watches its cap.
         yield* Deferred.await(world.capWatched);
         assert.deepEqual(
@@ -987,7 +1007,7 @@ it.effect("a continued turn's cap runs from where the cut turn's work began", ()
       // The cap is checked on the run's clock.
       yield* TestClock.setTime(Date.now());
       yield* startRunner;
-      yield* recover;
+      yield* recoverAndCap;
       assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
     }),
   ),
@@ -999,7 +1019,7 @@ it.effect("a stop interrupts the live role turn and stops its jobs, from its out
       const { vision, thread } = yield* atVision(world);
       world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
       yield* startRunner;
-      yield* recover;
+      yield* recoverAndCap;
       // The cap is checked and set again as a durable timer at its due time.
       yield* Deferred.await(world.capWatched);
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -1262,6 +1282,51 @@ it.effect("a turn sent again after an instant failure is capped like the first",
       yield* worker.drain();
       assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
       assert.lengthOf(world.sends, 1);
+    }),
+  ),
+);
+
+it.effect("a turn sent again is sent by its timer even when the first try breaks", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.settle(thread, world.runs.get(thread)![0]!);
+      // The send breaks once the timer is due, as a server dying before the turn is queued would.
+      world.sendBreaks = 1;
+      yield* TestClock.setTime(Date.now() + 20_000);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      assert.lengthOf(world.sends, 0);
+      // The timer's effect was never done, so it runs again and the turn goes.
+      yield* TestClock.adjust("1 second");
+      yield* worker.drain();
+      assert.deepEqual(
+        world.sends.map((send) => send.messageId),
+        [roleTurnMessageId(vision.id, 1, "retry", 2)],
+      );
+    }),
+  ),
+);
+
+it.effect("a role's cap whose interrupt breaks is sent again by its timer", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      yield* startRunner;
+      // Past the cap its timers fire (the step.start's, and the job's for the
+      // turn it reattached to), and the interrupt breaks more often than both try once.
+      world.interruptBreaks = 3;
+      yield* TestClock.setTime(Date.now() + 11 * 60_000);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      for (let round = 0; round < 5; round += 1) {
+        yield* worker.drain();
+        yield* TestClock.adjust("1 second");
+      }
+      assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
     }),
   ),
 );

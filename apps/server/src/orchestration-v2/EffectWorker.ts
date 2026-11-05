@@ -532,8 +532,8 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
-          // A step's work and a role's cap are long, so they become jobs and
-          // the effect settles at once; the jobs report back with commands.
+          // A step's work is long, so it becomes a job and the effect settles
+          // at once; the job reports back with commands.
           case "game-run.step.execute":
           case "game-run.step.wake":
             return gameRunJobs.execute({
@@ -542,22 +542,32 @@ export const layerExecutor: Layer.Layer<
               stepId: effect.request.stepId,
               attempt: effect.request.attempt,
             });
+          // A role's cap and a turn sent again are short: done inside the
+          // effect, which a failure or a server death leaves to run again.
           case "game-run.step.deadline":
-            return gameRunJobs.deadline({
+          case "game-run.step.resend": {
+            const request = effect.request;
+            const job = {
               threadId: effect.threadId,
-              runId: effect.request.runId,
-              stepId: effect.request.stepId,
-              attempt: effect.request.attempt,
-            });
-          case "game-run.step.resend":
-            return gameRunJobs.resend({
-              threadId: effect.threadId,
-              runId: effect.request.runId,
-              stepId: effect.request.stepId,
-              attempt: effect.request.attempt,
-              turn: effect.request.turn,
-              n: effect.request.n,
-            });
+              runId: request.runId,
+              stepId: request.stepId,
+              attempt: request.attempt,
+            };
+            return (
+              request.type === "game-run.step.deadline"
+                ? gameRunJobs.deadline(job)
+                : gameRunJobs.resend({ ...job, turn: request.turn, n: request.n })
+            ).pipe(
+              Effect.mapError(
+                (error) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: request.type,
+                    cause: error.cause,
+                  }),
+              ),
+            );
+          }
           case "game-run.restore.execute":
             return gameRunJobs.restore({
               threadId: effect.threadId,

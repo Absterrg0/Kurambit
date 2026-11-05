@@ -137,6 +137,38 @@ const make = Effect.gen(function* () {
       Effect.catch((error) => Effect.logWarning("game run report failed", { error })),
     );
 
+  // A refusal is the timer's answer (the run moved on or stopped); any other
+  // failure is left to the timer's effect, which runs again.
+  const refusedOnly = <A, R>(dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
+    dispatch.pipe(
+      Effect.asVoid,
+      Effect.catchTags({
+        OrchestratorGameRunRefusedError: () => Effect.void,
+        OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+      }),
+    );
+
+  /**
+   * A role turn's cap as a durable timer due now, keyed by what the step just
+   * sent or found at work: its effect sets it again at the turn's due time, so
+   * every turn of the step is capped whatever became of an earlier timer.
+   */
+  const capTurn = (half: GameRunJobs.GameRunStepJob, key: string) =>
+    Effect.flatMap(DateTime.now, (now) =>
+      engine.dispatch({
+        type: "game-run.step.schedule",
+        commandId: CommandId.make(
+          `server:game-run-cap:${half.stepId}:attempt:${half.attempt}:watch:${key}`,
+        ),
+        threadId: half.threadId,
+        runId: half.runId,
+        stepId: half.stepId,
+        attempt: half.attempt,
+        at: DateTime.toEpochMillis(now),
+        timer: { kind: "cap" },
+      }),
+    );
+
   const complete = (
     job: GameRunJobs.GameRunStepJob,
     stepId: GameRunStepId,
@@ -504,7 +536,7 @@ const make = Effect.gen(function* () {
           yield* limitInput(threadId);
           if (!GameRunRoleReactor.isSettledRun(latest.run)) {
             yield* log(`${role.role}: reattaching to thread ${threadId}`);
-            return yield* jobs.deadline(half);
+            return yield* refused(capTurn(half, latest.run.id));
           }
           if (GameRunRoleReactor.isCutOff(latest.run)) {
             const attemptTurns = turns.filter((t) => t.turn.attempt === job.attempt);
@@ -516,16 +548,17 @@ const make = Effect.gen(function* () {
             if (cut >= CUT_OFF_LIMIT)
               return yield* fail(half, stepId, `${role.role}: role turn cut off repeatedly`);
             yield* log(`${role.role}: turn on ${threadId} was cut off; continuing it`);
+            const n = Math.max(...attemptTurns.map((t) => t.turn.n)) + 1;
             yield* roles.sendTurn({
               projectId: run.projectId,
               threadId,
               stepId,
               attempt: job.attempt,
               kind: "continue",
-              n: Math.max(...attemptTurns.map((t) => t.turn.n)) + 1,
+              n,
               text: `${CONTINUE}\n\n${yield* promptOf(run, role, root)}`,
             });
-            return yield* jobs.deadline(half);
+            return yield* refused(capTurn(half, `continue:${n}`));
           }
           if ((yield* roles.settle(threadId, latest.run)) !== "fresh") return;
           // Its own provider session refuses the reused thread: the work is in the
@@ -750,8 +783,9 @@ const make = Effect.gen(function* () {
 
   /**
    * A role turn's cap, from its turn's start, plus the time its explore
-   * starts waited for memory, never past the run's budget. The effect that
-   * starts this fires at the plain cap, so this only ever waits longer.
+   * starts waited for memory, never past the run's budget. It runs inside its
+   * effect, which stays unsettled until the interrupt is sent or the timer is
+   * set again, so a server death in between runs it again.
    */
   const deadline = (job: GameRunJobs.GameRunStepJob) =>
     Effect.gen(function* () {
@@ -781,7 +815,7 @@ const make = Effect.gen(function* () {
       // is set again as a durable timer at its due time, never held by a fiber.
       // The outbox's clock decides when timers are due, so this one does too.
       if (DateTime.toEpochMillis(yield* DateTime.now) < due)
-        return yield* refused(
+        return yield* refusedOnly(
           engine.dispatch({
             type: "game-run.step.schedule",
             commandId: CommandId.make(
@@ -803,28 +837,48 @@ const make = Effect.gen(function* () {
           runId: live.run.id,
           reason: "Studio role cap reached.",
         })
-        .pipe(Effect.ignore);
+        .pipe(Effect.asVoid);
     });
 
-  /** A role turn sent again once its pause is over, if its step is still where it was. */
-  const resend = (job: GameRunJobs.GameRunResendJob) =>
+  /**
+   * A role turn sent again once its pause is over, if its step is still where
+   * it was, inside its effect: a server death before the turn is queued runs
+   * it again under the same ids. The send and the look after it are one act a
+   * stop cannot cut: the ending's finish then either finds the turn to
+   * interrupt, or the turn, sent after the ending, is interrupted here.
+   */
+  const resend = (job: GameRunJobs.GameRunResend) =>
     Effect.gen(function* () {
       const at = yield* roles.locate(job.threadId, job.stepId, job.attempt);
       if (at === null || at.role === null) return;
       const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
       if (threadId === null) return;
       const prompt = at.role.prompt;
-      yield* roles.sendTurn({
-        projectId: at.run.projectId,
-        threadId,
-        stepId: job.stepId,
-        attempt: job.attempt,
-        kind: job.turn,
-        n: job.n,
-        text: job.turn === "memory" ? `${MEMORY_RETRY}\n\n${prompt}` : prompt,
-      });
-      // A turn sent again is capped like the first.
-      yield* jobs.deadline(job);
+      const projectId = at.run.projectId;
+      yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          yield* roles.sendTurn({
+            projectId,
+            threadId,
+            stepId: job.stepId,
+            attempt: job.attempt,
+            kind: job.turn,
+            n: job.n,
+            text: job.turn === "memory" ? `${MEMORY_RETRY}\n\n${prompt}` : prompt,
+          });
+          if ((yield* roles.locate(job.threadId, job.stepId, job.attempt)) === null)
+            return yield* threads.interruptThread({
+              projectId,
+              commandId: CommandId.make(
+                `server:game-run-resend-late:${job.stepId}:attempt:${job.attempt}:${job.turn}:${job.n}`,
+              ),
+              threadId,
+              reason: "The production run moved on before this turn was sent.",
+            });
+          // A turn sent again is capped like the first.
+          yield* refusedOnly(capTurn(job, `${job.turn}:${job.n}`));
+        }),
+      );
     });
 
   // ── A run's end, from the game-run.finish effect its ending committed: its
@@ -1127,19 +1181,11 @@ const make = Effect.gen(function* () {
         execute: executeJob,
         deadline: (job) =>
           deadline(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run cap watch failed", { stepId: job.stepId, cause }),
-            ),
+            Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
           ),
         resend: (job) =>
           resend(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run resend failed", { stepId: job.stepId, cause }),
-            ),
+            Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
           ),
         restore: (job) =>
           restore(job).pipe(
