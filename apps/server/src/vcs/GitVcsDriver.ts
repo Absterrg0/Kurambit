@@ -810,6 +810,21 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       );
     });
 
+  // A path with its symlinks resolved, for one that may not exist yet: the
+  // nearest existing folder above it is resolved and the rest kept.
+  const resolvedPath = (target: string): Effect.Effect<string> =>
+    fileSystem
+      .realPath(target)
+      .pipe(
+        Effect.catch(() =>
+          path.dirname(target) === target
+            ? Effect.succeed(target)
+            : resolvedPath(path.dirname(target)).pipe(
+                Effect.map((parent) => path.join(parent, path.basename(target))),
+              ),
+        ),
+      );
+
   // The repository's top and where `cwd` sits in it ("" at the top, else "game/"):
   // scoped work names paths relative to `cwd` and never reaches past it.
   const resolveTopLevel = (cwd: string) =>
@@ -1471,6 +1486,16 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         const { top, prefix } = yield* resolveTopLevel(input.cwd);
         const fail = (detail: string) =>
           new VcsProcessExitError({ operation, command: "mkdir", cwd: top, exitCode: 1, detail });
+        // The copy's folder is removed whole below, so it must share no path
+        // with the repository, its git dir or a folder holding either.
+        const destination = yield* resolvedPath(path.resolve(input.destination));
+        for (const guarded of [top, yield* resolveGitCommonDir(input.cwd)]) {
+          const real = yield* resolvedPath(guarded);
+          const within = (inner: string, outer: string) =>
+            inner === outer || inner.startsWith(`${outer}${path.sep}`);
+          if (within(destination, real) || within(real, destination))
+            return yield* fail(`Refusing to replace ${input.destination}: it overlaps ${guarded}.`);
+        }
         // A fresh folder every time, so a repeat writes the same copy and nothing older survives.
         yield* fileSystem
           .remove(input.destination, { recursive: true, force: true })

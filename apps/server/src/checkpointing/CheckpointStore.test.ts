@@ -726,6 +726,18 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           expect(yield* fileSystem.exists(NodePath.join(copy, "NOTES.md"))).toBe(false);
           expect(yield* fileSystem.exists(NodePath.join(copy, ".git"))).toBe(false);
           expect(yield* fileSystem.readFile(at(".git/index"))).toEqual(index);
+          // A copy that would replace the repository or a folder in it is refused.
+          for (const destination of [tmp, at("game")]) {
+            const refused = yield* checkpointStore
+              .materializeCheckpoint({
+                cwd: tmp,
+                checkpointRef: CheckpointRef.make(oid),
+                destination,
+              })
+              .pipe(Effect.flip);
+            expect(refused.message).toContain("Refusing to replace");
+          }
+          expect(yield* fileSystem.readFileString(at("game/scenes/level.txt"))).toBe("level 1\n");
         }),
     );
 
