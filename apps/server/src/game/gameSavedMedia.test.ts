@@ -29,8 +29,11 @@ it("copies a generated video under a dated name and never overwrites a saved one
     expect(await NodeFSP.readFile(NodePath.join(root, source), "utf8")).toBe("video-2");
     // Ignored inside saved/ itself, so a game with an older .gitignore keeps videos out of checkpoints.
     expect(await NodeFSP.readFile(NodePath.join(root, "saved/.gitignore"), "utf8")).toBe("*\n");
+    await NodeFSP.rm(NodePath.join(root, "saved/.gitignore"));
+    await saveMedia(root, source, "again", "2026-11-05");
+    expect(await NodeFSP.readFile(NodePath.join(root, "saved/.gitignore"), "utf8")).toBe("*\n");
     expect((await listSaved(root)).map((m) => m.name).toSorted()).toEqual(
-      [first.name, second.name].toSorted(),
+      [first.name, second.name, "2026-11-05 again.mp4"].toSorted(),
     );
   }));
 

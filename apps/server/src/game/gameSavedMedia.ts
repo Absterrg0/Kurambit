@@ -41,14 +41,17 @@ const savedDir = async (root: string, create: boolean): Promise<string | null> =
   if (!(await exists(dir))) {
     if (!create) return null;
     await NodeFSP.mkdir(dir, { recursive: true });
-    // Ignored however old the game's own .gitignore is, so a checkpoint's `add -A` never takes a video.
-    await NodeFSP.writeFile(NodePath.join(dir, ".gitignore"), "*\n");
   }
   if ((await NodeFSP.realpath(dir)) !== dir)
     throw new SavedMediaError(
       "symlink",
       `${dir} is a link; saved media is not written through it.`,
     );
+  // Ignored however old the game's own .gitignore is, so a checkpoint's
+  // `add -A` never takes a video; written again whenever someone removed it.
+  const ignore = NodePath.join(dir, ".gitignore");
+  if (!(await exists(ignore)))
+    await NodeFSP.writeFile(ignore, "*\n", { flag: "wx" }).catch(() => {});
   return dir;
 };
 
