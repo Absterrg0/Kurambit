@@ -13,7 +13,7 @@ import {
 
 import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
-import { RESUMABLE } from "../../orchestration-v2/gameRun/decide.ts";
+import { RESUMABLE, abandonsRound } from "../../orchestration-v2/gameRun/decide.ts";
 import type * as GameService from "../GameService.ts";
 import { causeText, logLine } from "../runSetup.ts";
 import { buildStep, captureBuild, isRestored, measureChange } from "./builds.ts";
@@ -43,16 +43,12 @@ export const restoreKeptRound = (input: {
         "not-kept",
         `Round ${round} was not kept; only a kept round's build can be restored.`,
       );
-    const resumable = run.ending !== null && RESUMABLE.has(run.ending);
-    if (state.inFlight?.kind === "build" && resumable)
+    // The round a stopped run holds is abandoned once the restore lands (decide.ts).
+    const abandons = abandonsRound(run, state);
+    if (state.inFlight?.kind === "build" && RESUMABLE.has(run.ending ?? "") && !abandons)
       return no(
         "mid-step",
         "The stopped run saved an unfinished build step and would replay it on resume. Resume the run and let that step finish, then restore.",
-      );
-    if (resumable && state.task._tag === "round" && state.task.phase !== "start")
-      return no(
-        "mid-round",
-        `The stopped run is in the middle of round ${state.task.n}. Resume it and let the round finish, then restore.`,
       );
     const build = record.build;
     if (build === undefined || build.length === 0)
@@ -71,13 +67,23 @@ export const restoreKeptRound = (input: {
       ? ""
       : yield* captureBuild(checkpoints, root, run.id, beforeName);
     const before = keptBuild(run.id, beforeName, lane, beforeSha);
+    const task = state.task;
+    const dropped = !abandons
+      ? ""
+      : ` ${task._tag === "round" ? `Round ${task.n}` : "The round"}, in progress when the run stopped, is abandoned: a resume starts the next round from round ${round}'s build, and the abandoned round's work is in the build named next.`;
+    const abandoned = abandons ? "; the round in progress is abandoned" : "";
     const restorePaths = isRestored(lane);
-    if (!(yield* measureChange(checkpoints, root, restorePaths, beforeRef, build)).changed)
+    if (!(yield* measureChange(checkpoints, root, restorePaths, beforeRef, build)).changed) {
+      if (abandons)
+        yield* log(
+          `creator restored round ${round}, already the current build${abandoned}; the folder before is ${before}`,
+        );
       return {
         kind: "restored",
         sha: build,
-        message: `Round ${round}'s build (${what}) is already the game's current build.`,
+        message: `Round ${round}'s build (${what}) is already the game's current build.${dropped.length > 0 ? `${dropped} What the folder held is kept as ${before}` : ""}`,
       } satisfies GameRunRestoreOutcome;
+    }
     const restored = yield* buildStep(
       { game, checkpoints },
       { root, runId: run.id, lane },
@@ -97,12 +103,12 @@ export const restoreKeptRound = (input: {
         `Restoring round ${round} did not reproduce its build; see .studio/run.log.`,
       );
     yield* log(
-      `creator restored round ${round} (${build.slice(0, 8)}): ${what}; the folder before is ${before}`,
+      `creator restored round ${round} (${build.slice(0, 8)}): ${what}${abandoned}; the folder before is ${before}`,
     );
     return {
       kind: "restored",
       sha: build,
-      message: `Round ${round}'s ${what} are back in the game folder; notes, PLAN.md, VISION.md, bots and run records were left as they are. What the folder held before is kept as ${before}`,
+      message: `Round ${round}'s ${what} are back in the game folder; notes, PLAN.md, VISION.md, bots and run records were left as they are.${dropped} What the folder held before is kept as ${before}`,
     } satisfies GameRunRestoreOutcome;
   }).pipe(
     Effect.catchCause((cause) =>

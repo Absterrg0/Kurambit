@@ -727,6 +727,47 @@ describe("game-run commands", () => {
     expect(resumed.decision.effects.map((e) => e.request.type)).toEqual(["game-run.step.execute"]);
   });
 
+  it("a creator's restore on a run stopped mid-round abandons the round", () => {
+    const stopped = finished(
+      accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
+    );
+    const held = stepOf(stopped);
+    const requested = accept(stopped, {
+      type: "game-run.restore.request",
+      runId,
+      requestId: "r1",
+      round: 1,
+    }).records;
+    // The round stays the run's until the restore lands: nothing else moves it meanwhile.
+    expect(refusal(requested, { type: "game-run.resume", runId }).reason).toBe("restoring");
+    const restored = accept(requested, {
+      type: "game-run.restore",
+      runId,
+      requestId: "r1",
+      outcome: { kind: "restored", sha: "beef", message: "" },
+    }).records;
+    expect(runOf(restored)).toMatchObject({
+      best: "beef",
+      pending: null,
+      inFlight: null,
+      stallStreak: 0,
+      task: { _tag: "round", n: 2, phase: "start" },
+    });
+    expect(restored.rounds.map((r) => r.round)).toMatchObject([
+      { round: 1, kept: false, abandoned: true },
+    ]);
+    expect(restored.rounds[0]!.round.build).toBeUndefined();
+    expect(runOf(restored).ladder?.rungs[0]).toMatchObject({ status: "todo", fails: 0 });
+    const dropped = restored.steps.find((s) => s.id === held.id)!;
+    expect(dropped.status).toBe("cancelled");
+    expect(dropped.logs.join("\n")).toContain("abandoned");
+
+    // A resume starts the next round from the restored build, not the abandoned one.
+    const resumed = accept(restored, { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed).seq).toBeGreaterThan(held.seq);
+    expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: "beef" } });
+  });
+
   it("a note on a finished run buys one round", () => {
     const base = complete(started(), gitOk());
     const finished = {

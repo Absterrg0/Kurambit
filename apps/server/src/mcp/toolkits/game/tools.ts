@@ -426,7 +426,7 @@ const RunStatusTool = Tool.make("game_run_status", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const RunRoundTool = Tool.make("game_run_round", {
   description:
-    "One finished round of this game's production run, read from the run's records: the move, the outcome (kept, inconclusive, rejected or unjudged), each blind comparator's verdict and reasoning, the blind players' reports, bot facts and bot runs, the tester's note and the reviewer's direction for the next round. Long texts are cut and end in an ellipsis. Read-only; use game_run_status for the round numbers.",
+    "One finished round of this game's production run, read from the run's records: the move, the outcome (kept, inconclusive, rejected, unjudged, or abandoned by a restore), each blind comparator's verdict and reasoning, the blind players' reports, bot facts and bot runs, the tester's note and the reviewer's direction for the next round. Long texts are cut and end in an ellipsis. Read-only; use game_run_status for the round numbers.",
   parameters: Schema.Struct({
     round: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   }),
@@ -516,7 +516,7 @@ const RunStopTool = Tool.make("game_run_stop", {
 
 const RunRestoreTool = Tool.make("game_run_restore", {
   description:
-    "Put this game back to a kept round's build when the creator asks: that build's engine project, art and ASSETS.md return to the game folder, and a resumed run judges its next round against them. What the folder held before is kept first, and the result names it with the command that brings it back. Only a kept round, with no run live and no round in progress; a restore that does not fit is refused with the reason. game_run_status lists the rounds and which were kept.",
+    "Put this game back to a kept round's build when the creator asks: that build's engine project, art and ASSETS.md return to the game folder, and a resumed run judges its next round against them. What the folder held before is kept first, and the result names it with the command that brings it back. Only a kept round, with no run live (stop it first). A stopped run's round in progress is abandoned: its work is in the build kept before, and a resume starts the next round from the restored build. A restore that does not fit is refused with the reason. game_run_status lists the rounds and which were kept.",
   parameters: Schema.Struct({
     round: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   }),

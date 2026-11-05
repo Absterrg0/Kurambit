@@ -136,8 +136,9 @@ kept as a build first, so a restore never discards work: the restore's answer an
 name that build with the command that brings it back. Work a run left unfinished when its budget
 ran out or it ended mid-round is kept and named in `.studio/run.log` the same way. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
 bots and the run's records stay as they are. A resumed run judges its next round against the
-restored build. Restore refuses while a run is live and while a stopped run is in the middle of a
-round.
+restored build. Restore refuses while a run is live. Restoring while a stopped run is in the middle
+of a round abandons that round: its work is in the build kept before the restore, the round shows as
+**Abandoned**, and a resume starts the next round from the restored build.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to

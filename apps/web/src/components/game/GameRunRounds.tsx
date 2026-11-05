@@ -35,6 +35,7 @@ const OUTCOME: Record<
   inconclusive: { label: "Inconclusive", variant: "warning" },
   rejected: { label: "Rejected", variant: "error" },
   unjudged: { label: "Unjudged", variant: "outline" },
+  abandoned: { label: "Abandoned", variant: "outline" },
 };
 
 // The move is the reviewer's markdown; its first prose line says what the round tried.
@@ -230,7 +231,7 @@ function RoundDetail({
   const restore = async () => {
     if (restoring) return;
     const confirmed = await requestConfirmDialog(
-      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build with a new commit, so later work stays in git history. Notes, PLAN.md, VISION.md, bots and run records stay as they are. Uncommitted changes block the restore; nothing is discarded.`,
+      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build; what the folder holds now is kept as a build first. Notes, PLAN.md, VISION.md, bots and run records stay as they are. A round the stopped run is in the middle of is abandoned, and a resume starts the next round from this build.`,
     );
     if (confirmed !== true) return;
     setRestoring(true);

@@ -1442,6 +1442,68 @@ export const resume = (state: RunState): RunState => ({
   ladder: state.ladder !== null && state.ladder.rungs.length === 0 ? null : state.ladder,
 });
 
+/**
+ * Whether a creator's restore abandons the round a stopped run holds: one
+ * past its start (or with its start's step saved), or the budget's leave of
+ * one. A resume would otherwise continue it on the folder the restore replaced.
+ */
+export const holdsRound = (state: RunState): boolean =>
+  state.task._tag === "leave" ||
+  (state.task._tag === "round" && (state.task.phase !== "start" || state.inFlight !== null));
+
+/**
+ * A creator's restore drops the round in flight: the next round starts from
+ * the restored best, never from this round's work (the restore kept the folder
+ * as a build first). A round already kept, waiting only on its review, is
+ * recorded as kept; any other is recorded as abandoned, which is no stall and
+ * leaves its rung as it was, with the creator's notes it read back for the
+ * next round. `release` names the role threads whose copies go.
+ */
+export const abandonRound = (
+  state: RunState,
+  why: string,
+  now: number,
+): Pick<Applied, "state" | "logs" | "release"> => {
+  const t = state.task;
+  const logs: string[] = [];
+  const fresh = (s: RunState) => ({ ...s, inFlight: null, task: newRound(s, now) });
+  if (t._tag === "leave") {
+    logs.push(`${t.branch}: left unfinished, ${why}`);
+    return { state: fresh(state), logs, release: [] };
+  }
+  if (t._tag !== "round" || !holdsRound(state)) return { state, logs, release: [] };
+  if (t.phase === "start") return { state: fresh(state), logs, release: [] };
+  const release = [
+    ...(t.cmp?.samples ?? []).map((x) => x.thread),
+    ...(t.cmp?.judges ?? []).map((j) => j.thread),
+  ].filter((thread): thread is ThreadId => thread !== null);
+  const record = { ...t.record, durationMs: now - t.startedAt, note: noteOf(t, why) };
+  if (t.record.kept) {
+    const settled = settleRung(
+      state,
+      t,
+      { ...record, ...(t.candidate.length > 0 ? { build: t.candidate } : {}) },
+      logs,
+    );
+    logs.push(`round ${t.n}: kept; its review is skipped, ${why}`);
+    const next = {
+      ...settled.state,
+      rounds: [...state.rounds, settled.record],
+      stage: `round-${t.n}`,
+      stallStreak: 0,
+    };
+    return { state: fresh(next), logs, release };
+  }
+  logs.push(`round ${t.n}: abandoned, ${why}`);
+  const next = {
+    ...state,
+    rounds: [...state.rounds, { ...record, abandoned: true }],
+    stage: `round-${t.n}`,
+    steer: [...(t.record.steer ?? []), ...state.steer],
+  };
+  return { state: fresh(next), logs, release };
+};
+
 export const plan = (state: RunState, input: Inputs): Planned => {
   if (state.inFlight !== null) return { kind: "step", state, step: state.inFlight };
   const id = state.seq + 1;
