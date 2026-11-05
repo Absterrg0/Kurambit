@@ -648,5 +648,39 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           expect(yield* fileSystem.readFile(at(".git/index"))).toEqual(index);
         }),
     );
+
+    it.effect("brings back files the user's index marks unchanged or skipped", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const fileSystem = yield* FileSystem.FileSystem;
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const at = (file: string) => NodePath.join(tmp, file);
+        yield* initRepoWithCommit(tmp);
+        yield* fileSystem.makeDirectory(at("game"), { recursive: true });
+        yield* writeTextFile(at("game/a.txt"), "a v1\n");
+        yield* writeTextFile(at("game/b.txt"), "b v1\n");
+        yield* git(tmp, ["add", "."]);
+        yield* git(tmp, ["commit", "-m", "game"]);
+        const oid = yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef: checkpointRefForGameRun("run_1", "best"),
+        });
+        // Flags that make git trust the index over the file.
+        yield* git(tmp, ["update-index", "--assume-unchanged", "game/a.txt"]);
+        yield* git(tmp, ["update-index", "--skip-worktree", "game/b.txt"]);
+        yield* writeTextFile(at("game/a.txt"), "a v2\n");
+        yield* writeTextFile(at("game/b.txt"), "b v2\n");
+
+        expect(
+          yield* checkpointStore.restoreCheckpoint({
+            cwd: tmp,
+            checkpointRef: CheckpointRef.make(oid),
+            filePaths: ["game"],
+          }),
+        ).toBe(true);
+        expect(yield* fileSystem.readFileString(at("game/a.txt"))).toBe("a v1\n");
+        expect(yield* fileSystem.readFileString(at("game/b.txt"))).toBe("b v1\n");
+      }),
+    );
   });
 });
