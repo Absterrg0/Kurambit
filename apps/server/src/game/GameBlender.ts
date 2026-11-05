@@ -50,6 +50,7 @@ import {
   sweepIdle,
   textOf,
 } from "./liveProcess.ts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import {
   adoptLaunch,
@@ -327,6 +328,7 @@ export class GameBlender extends Context.Service<
 
 const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
+  const memory = yield* HostResources.HostResources;
   const processHost = yield* ProcessHost;
   const processes = yield* GameProcesses.GameProcesses;
   const gate = yield* GameMemoryGate.GameMemoryGate;
@@ -801,6 +803,7 @@ const make = Effect.gen(function* () {
       LIVE_SWEEP_MS,
       sweepIdle({
         what: "live Blender",
+        memory,
         idle: () =>
           Array.from(sessions)
             .filter(([root]) => idle(root))
@@ -831,12 +834,11 @@ const make = Effect.gen(function* () {
         root,
         Effect.gen(function* () {
           if (input.shading === "rendered") {
-            const short = yield* Effect.promise(() =>
-              memoryShortfall(
-                "rendered Blender look",
-                RENDER_NEEDED_MB,
-                "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
-              ),
+            const short = yield* memoryShortfall(
+              memory,
+              "rendered Blender look",
+              RENDER_NEEDED_MB,
+              "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
             );
             if (short !== null)
               return yield* opError(
@@ -1006,8 +1008,11 @@ const make = Effect.gen(function* () {
       holding(
         root,
         Effect.gen(function* () {
-          const short = yield* Effect.promise(() =>
-            memoryShortfall("sprite render", RENDER_NEEDED_MB, "KURAMBIT_BLENDER_RENDER_MEMORY_MB"),
+          const short = yield* memoryShortfall(
+            memory,
+            "sprite render",
+            RENDER_NEEDED_MB,
+            "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
           );
           if (short !== null)
             return yield* opError("blender-render-sprites", root, "low-memory", short);

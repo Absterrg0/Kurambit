@@ -17,7 +17,6 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
-import * as NodeOS from "node:os";
 import * as NodeUtil from "node:util";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -600,39 +599,6 @@ export const stopRecorded = async (
     if (!left) break;
     await sleep(100);
   }
-};
-
-/**
- * Pages macOS can hand to new work from `vm_stat` output: free, inactive and
- * speculative. Purgeable pages already sit in the active and inactive queues,
- * so counting them again would make every memory guard too lenient.
- * Null when the output is not vm_stat's.
- */
-export const parseVmStat = (text: string): number | null => {
-  const pageSize = /page size of (\d+) bytes/.exec(text)?.[1];
-  if (pageSize === undefined) return null;
-  let pages = 0;
-  for (const name of ["free", "inactive", "speculative"]) {
-    const count = new RegExp(`^Pages ${name}:\\s+(\\d+)\\.`, "m").exec(text)?.[1];
-    if (count !== undefined) pages += Number(count);
-  }
-  return pages * Number(pageSize);
-};
-
-/**
- * Memory new work can take, in bytes. `os.freemem()` is that on Linux
- * (libuv reads MemAvailable) and Windows (ullAvailPhys counts the standby
- * list), but on macOS libuv counts only free pages, and macOS keeps memory
- * full of inactive and purgeable pages it hands out on demand; there the
- * figure comes from vm_stat.
- */
-export const memoryAvailable = async (): Promise<number> => {
-  if (HOST_OS !== "darwin") return NodeOS.freemem();
-  const text = await execFile("vm_stat", [], { env: { ...process.env, LC_ALL: "C" } }).then(
-    (result) => result.stdout,
-    () => "",
-  );
-  return parseVmStat(text) ?? NodeOS.freemem();
 };
 
 /**

@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import { GameOperationError } from "@kurambit/contracts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import { memoryShortfall } from "./liveProcess.ts";
 import { admitWithMemory } from "./memoryAdmission.ts";
 
@@ -40,24 +41,28 @@ export class GameMemoryGate extends Context.Service<
   }
 >()("kurambit/game/GameMemoryGate") {}
 
-export const layer = Layer.sync(GameMemoryGate, () => {
-  const gate = Semaphore.makeUnsafe(1);
-  return GameMemoryGate.of({
-    admit: (operation, path, room, start, onWaited = () => {}) =>
-      admitWithMemory({
-        gate,
-        shortfall: Effect.promise(() => memoryShortfall(room.what, room.neededMb, room.env)),
-        maxWaitMs: MEMORY_WAIT_MS,
-        poll: MEMORY_POLL,
-        refuse: (short, waitedMs) =>
-          new GameOperationError({
-            operation,
-            path,
-            reason: "low-memory",
-            detail: `${short} Waited ${Math.round(waitedMs / 1000)} s for memory to free.`,
-          }),
-        onWaited,
-        start,
-      }),
-  });
-});
+export const layer = Layer.effect(
+  GameMemoryGate,
+  Effect.gen(function* () {
+    const memory = yield* HostResources.HostResources;
+    const gate = Semaphore.makeUnsafe(1);
+    return GameMemoryGate.of({
+      admit: (operation, path, room, start, onWaited = () => {}) =>
+        admitWithMemory({
+          gate,
+          shortfall: memoryShortfall(memory, room.what, room.neededMb, room.env),
+          maxWaitMs: MEMORY_WAIT_MS,
+          poll: MEMORY_POLL,
+          refuse: (short, waitedMs) =>
+            new GameOperationError({
+              operation,
+              path,
+              reason: "low-memory",
+              detail: `${short} Waited ${Math.round(waitedMs / 1000)} s for memory to free.`,
+            }),
+          onWaited,
+          start,
+        }),
+    });
+  }),
+);

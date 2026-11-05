@@ -29,6 +29,7 @@ import {
   sweepIdle,
   textOf,
 } from "./liveProcess.ts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import {
   adoptLaunch,
@@ -504,6 +505,7 @@ export class GameUnity extends Context.Service<
 
 const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
+  const memory = yield* HostResources.HostResources;
   const processHost = yield* ProcessHost;
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
@@ -1060,6 +1062,7 @@ const make = Effect.gen(function* () {
       LIVE_SWEEP_MS,
       sweepIdle({
         what: "live Unity editor",
+        memory,
         idle: () =>
           Array.from(sessions)
             .filter(([, session]) => session.inFlight === 0)

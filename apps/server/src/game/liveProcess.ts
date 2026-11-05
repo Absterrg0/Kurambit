@@ -4,7 +4,8 @@
 import * as NodeFSP from "node:fs/promises";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
-import { memoryAvailable, type ProcessFacts } from "./processHost.ts";
+import type * as HostResources from "../resourceTelemetry/HostResources.ts";
+import type { ProcessFacts } from "./processHost.ts";
 
 const MB = 1024 * 1024;
 const gb = (bytes: number) => (bytes / 1024 / MB).toFixed(1);
@@ -33,12 +34,15 @@ export const shortfallDetail = (
  * the honest answer. `env` (whole MB, 0 turns the check off) overrides
  * `neededMb` for machines that know better.
  */
-export const memoryShortfall = async (
+export const memoryShortfall = (
+  memory: HostResources.HostResources["Service"],
   what: string,
   neededMb: number,
   env: string,
-): Promise<string | null> =>
-  shortfallDetail(what, neededMb, process.env[env], await memoryAvailable());
+): Effect.Effect<string | null> =>
+  Effect.map(memory.availableMemory, (available) =>
+    shortfallDetail(what, neededMb, process.env[env], available),
+  );
 
 /**
  * Below this much available memory an idle live editor is closed. The kernel
@@ -49,10 +53,8 @@ export const memoryShortfall = async (
 const IDLE_MEMORY_FLOOR = 1024 * MB;
 
 /** Available memory in MB while it is under the idle floor, else null. */
-export const underIdleMemoryFloor = async (): Promise<number | null> => {
-  const available = await memoryAvailable();
-  return available < IDLE_MEMORY_FLOOR ? Math.round(available / MB) : null;
-};
+const underIdleMemoryFloor = (available: number): number | null =>
+  available < IDLE_MEMORY_FLOOR ? Math.round(available / MB) : null;
 
 export const readRecord = async <T>(file: string): Promise<Partial<T> | null> => {
   try {
@@ -90,6 +92,7 @@ export const LIVE_SWEEP_MS = 15_000;
  */
 export const sweepIdle = (input: {
   readonly what: string;
+  readonly memory: HostResources.HostResources["Service"];
   readonly idle: () => ReadonlyArray<{
     readonly root: string;
     readonly lastActive: number;
@@ -99,7 +102,8 @@ export const sweepIdle = (input: {
   Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
     const idle = input.idle();
-    const shortMb = idle.length === 0 ? null : yield* Effect.promise(underIdleMemoryFloor);
+    const shortMb =
+      idle.length === 0 ? null : underIdleMemoryFloor(yield* input.memory.availableMemory);
     for (const session of idle) {
       const expired = now - session.lastActive > LIVE_IDLE_MS;
       if (!expired && shortMb === null) continue;
