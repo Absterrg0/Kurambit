@@ -53,7 +53,7 @@ import * as GameProjectService from "../GameProjectService.ts";
 import * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
 import { BuildName } from "./buildNames.ts";
-import { captureBuild, isGameCode, measureChange } from "./builds.ts";
+import { captureBuild, freeBy, isGameCode, measureChange } from "./builds.ts";
 import { botRunCount } from "./facts.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
 import { lastBotRun, releaseCopy, runCopies } from "./roleWorkspace.ts";
@@ -466,7 +466,11 @@ const make = Effect.gen(function* () {
               checkpoints,
               // The landing waits out another owner's operation: a capture
               // that fails reads as a change, which would be a guess.
-              lock: { operations, owner: gameRunOperationOwner(at.run.id), wait: true },
+              lock: {
+                operations,
+                owner: gameRunOperationOwner(at.run.id),
+                waitUntil: yield* freeBy,
+              },
             },
             root,
             at.run.id,

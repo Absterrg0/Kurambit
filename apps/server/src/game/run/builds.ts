@@ -1,10 +1,9 @@
 // The run's builds are T3 checkpoints under the run's own refs
 // (checkpointRefForGameRun): the run never commits, checks out, merges or
 // writes the user's index, HEAD or branches. A build is its commit oid.
-import { CheckpointRef, GameOperationError } from "@kurambit/contracts";
+import { CheckpointRef } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
-import * as Schedule from "effect/Schedule";
-import * as Schema from "effect/Schema";
+import * as Clock from "effect/Clock";
 
 import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
@@ -16,7 +15,6 @@ import { type BuildOutcome, classifyComparePair } from "./policy.ts";
 import type { BuildOp, RunState } from "./state.ts";
 
 type Checkpoints = CheckpointStore.CheckpointStore["Service"];
-const isGameOperationError = Schema.is(GameOperationError);
 
 /** What a blind player must not see: files that differ by round, not by game. */
 export const NOT_IN_SAMPLE = [".studio", "NOTES.md"];
@@ -132,9 +130,10 @@ export const pruneBuilds = (checkpoints: Checkpoints, root: string, state: RunSt
 /**
  * How the run takes the game folder for one of its own moves (a capture, a
  * restore, a kept name): as one operation of the game, owned by the run, so
- * no export, check or Play of another owner reads a half-moved folder. `wait`
- * queues behind another owner's operation for a while; without it a busy game
- * fails `busy`, which a step hands back to its durable timer.
+ * no export, check or Play of another owner reads a half-moved folder. With
+ * `waitUntil` (epoch ms) a move queues behind another owner's operation until
+ * then; without it a busy game fails `busy`, which a step hands back to its
+ * durable timer.
  *
  * Lock order: the game's operation lock, then the checkpoint workspace lock
  * inside it. T3's per-turn captures take only the workspace lock, and nothing
@@ -144,29 +143,29 @@ export const pruneBuilds = (checkpoints: Checkpoints, root: string, state: RunSt
 export interface FolderLock {
   readonly operations: GameOperations.GameOperations["Service"];
   readonly owner: string;
-  readonly wait: boolean;
+  readonly waitUntil: number | null;
 }
 
 // The end of a run, a restore and a turn's capture wait out a creator's Play
-// or an operation begun before the run; past this they fail as they found it.
-const FREE_POLL = "10 seconds";
-const FREE_TRIES = 60;
-const isBusy = (error: unknown) => isGameOperationError(error) && error.reason === "busy";
-
-/** `work` once the game is free for it, when the caller waits; otherwise one try. */
-export const onceFree = <A, E, R>(wait: boolean, work: Effect.Effect<A, E, R>) =>
-  wait
-    ? work.pipe(
-        Effect.retry({ while: isBusy, schedule: Schedule.spaced(FREE_POLL), times: FREE_TRIES }),
-      )
-    : work;
+// or an operation begun before the run, all of their moves within this one
+// bound; past it they fail as they found the game.
+const FREE_WAIT_MS = 10 * 60_000;
+/** The one deadline every wait of a finish, restore or landing shares. */
+export const freeBy = Effect.map(Clock.currentTimeMillis, (now) => now + FREE_WAIT_MS);
 
 const asRunOperation = <A, E extends { readonly message: string }>(
   lock: FolderLock,
   root: string,
   name: string,
   work: Effect.Effect<A, E>,
-) => onceFree(lock.wait, lock.operations.exclusive(root, name, work, lock.owner));
+) =>
+  lock.operations.exclusive(
+    root,
+    name,
+    work,
+    lock.owner,
+    lock.waitUntil === null ? undefined : { waitUntil: lock.waitUntil },
+  );
 
 const capture = (checkpoints: Checkpoints, root: string, runId: string, name: string) =>
   checkpoints.withWorkspaceLock(

@@ -62,7 +62,7 @@ import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
-import { buildStep, captureBuild, type FolderLock, pruneBuilds } from "./builds.ts";
+import { buildStep, captureBuild, type FolderLock, freeBy, pruneBuilds } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import {
   BUSY_PAUSE,
@@ -226,11 +226,11 @@ const make = Effect.gen(function* () {
     });
   const memoryWaitsLeft = (record: GameRunStep) => (record.memoryWaits ?? 0) < MEMORY_WAITS;
   const busyWaitsLeft = (record: GameRunStep) => (record.busyWaits ?? 0) < BUSY_WAITS;
-  // Steps hand a busy game back to their timer; the end of a run and a restore wait it out.
-  const folderLock = (run: GameRun, wait: boolean): FolderLock => ({
+  // Steps hand a busy game back to their timer; the end of a run and a restore wait it out, until `waitUntil`.
+  const folderLock = (run: GameRun, waitUntil: number | null): FolderLock => ({
     operations,
     owner: gameRunOperationOwner(run.id),
-    wait,
+    waitUntil,
   });
 
   // A step's work that broke reports it, so the run ends resumably with why;
@@ -635,7 +635,7 @@ const make = Effect.gen(function* () {
               Effect.andThen(
                 handBackOnBusy(
                   buildStep(
-                    { game, checkpoints, lock: folderLock(run, false) },
+                    { game, checkpoints, lock: folderLock(run, null) },
                     { root, runId: run.id, lane: run.lane },
                     step.op,
                   ),
@@ -916,7 +916,9 @@ const make = Effect.gen(function* () {
         // cut after the best was restored must not keep the best as the work.
         // A run from before checkpoints holds no builds to park or restore:
         // its folder is exported as it is and left untouched.
-        const ops = { game, checkpoints, lock: folderLock(run, true) };
+        // One bound for every wait of the ending, however many moves and exports it makes.
+        const waitUntil = yield* freeBy;
+        const ops = { game, checkpoints, lock: folderLock(run, waitUntil) };
         const ctx = { root, runId: run.id, lane: run.lane };
         const name = BuildName.ending(job.endedAt);
         const parked = yield* Effect.gen(function* () {
@@ -944,9 +946,14 @@ const make = Effect.gen(function* () {
                 ).pipe(Effect.as(null)),
           ),
         );
-        yield* finishExports(root, run.threadId, game, log, gameRunOperationOwner(run.id)).pipe(
-          Effect.ignore,
-        );
+        yield* finishExports(
+          root,
+          run.threadId,
+          game,
+          log,
+          gameRunOperationOwner(run.id),
+          waitUntil,
+        ).pipe(Effect.ignore);
         if (parked !== null)
           yield* buildStep(ops, ctx, { _tag: "restore", sha: parked, keep: [] }).pipe(
             Effect.catchCause((cause) =>
@@ -1013,17 +1020,19 @@ const make = Effect.gen(function* () {
               reason: "round-not-found",
               message: `Round ${pending.round} is not recorded.`,
             })
-          : Effect.flatMap(projects.resolve(run.threadId, { deleted: "allowed" }), (root) =>
-              restoreKeptRound({
-                game,
-                checkpoints,
-                lock: folderLock(run, true),
-                root,
-                run,
-                state,
-                record,
-                requestId: job.requestId,
-              }),
+          : Effect.flatMap(
+              Effect.all([projects.resolve(run.threadId, { deleted: "allowed" }), freeBy]),
+              ([root, waitUntil]) =>
+                restoreKeptRound({
+                  game,
+                  checkpoints,
+                  lock: folderLock(run, waitUntil),
+                  root,
+                  run,
+                  state,
+                  record,
+                  requestId: job.requestId,
+                }),
             )
       ).pipe(
         Effect.catchCause((cause) =>

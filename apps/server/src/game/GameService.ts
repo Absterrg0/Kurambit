@@ -235,10 +235,12 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameAssetsAddResult, GameOperationError>;
     readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /** `owner` names whose work the export is, for owner-scoped cancels; the thread by default. */
+    /** `waitUntil` (epoch ms) queues behind another operation until then instead of failing busy. */
     readonly export: (
       threadId: ThreadId,
       target: "Web" | "Linux" | "Windows",
       owner?: string,
+      waitUntil?: number,
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
      * Which export targets the game's engine backend declares, with its display
@@ -248,6 +250,7 @@ export class GameService extends Context.Service<
     readonly exportTargets: (
       threadId: ThreadId,
       owner?: string,
+      waitUntil?: number,
     ) => Effect.Effect<
       {
         targets: ReadonlyArray<"Web" | "Linux" | "Windows">;
@@ -540,10 +543,17 @@ const make = Effect.gen(function* () {
     name: string,
     work: (root: string) => Effect.Effect<A, GameOperationError>,
     owner: string = String(threadId),
+    waitUntil?: number,
   ) {
     const root = yield* projects.resolve(threadId);
     yield* projects.admitWrite(threadId, root, name, owner);
-    return yield* operations.exclusive(root, name, work(root), owner);
+    return yield* operations.exclusive(
+      root,
+      name,
+      work(root),
+      owner,
+      waitUntil === undefined ? undefined : { waitUntil },
+    );
   });
   // A busy game while a run holds it is the run's own work: the refusal says
   // so, rather than suggesting Stop game, which stops only the caller's work.
@@ -569,9 +579,16 @@ const make = Effect.gen(function* () {
     name: string,
     work: (root: string) => Effect.Effect<A, GameOperationError>,
     owner: string = String(threadId),
+    waitUntil?: number,
   ) {
     const root = yield* projects.resolve(threadId);
-    return yield* operations.exclusive(root, name, work(root), owner);
+    return yield* operations.exclusive(
+      root,
+      name,
+      work(root),
+      owner,
+      waitUntil === undefined ? undefined : { waitUntil },
+    );
   });
   // No operation lock: a saved copy touches neither the engine nor the folder Kurambit works in.
   const savedMedia = <A>(
@@ -738,9 +755,15 @@ const make = Effect.gen(function* () {
       };
     }),
     import: (threadId) => withRoot(threadId, "Import", engines.importProject),
-    export: (threadId, target, owner) =>
-      withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target), owner),
-    exportTargets: (threadId, owner) =>
+    export: (threadId, target, owner, waitUntil) =>
+      withRoot(
+        threadId,
+        `Export ${target}`,
+        (root) => exporter.export(root, target),
+        owner,
+        waitUntil,
+      ),
+    exportTargets: (threadId, owner, waitUntil) =>
       readRoot(
         threadId,
         "Export targets",
@@ -750,6 +773,7 @@ const make = Effect.gen(function* () {
             return { targets: profile.exportTargets, displayName: profile.displayName };
           }),
         owner,
+        waitUntil,
       ),
     packageWindows: (threadId) =>
       withRoot(threadId, "Package Windows build", exporter.packageWindows),

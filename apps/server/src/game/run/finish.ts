@@ -8,7 +8,6 @@ import * as Effect from "effect/Effect";
 import type { ThreadId } from "@kurambit/contracts";
 import type * as GameService from "../GameService.ts";
 import { walkFiles } from "../walkFiles.ts";
-import { onceFree } from "./builds.ts";
 
 type Row = {
   ok: boolean;
@@ -66,15 +65,19 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   game: GameService.GameService["Service"],
   log: (line: string) => Effect.Effect<void>,
   owner: string,
+  /** The finish's one deadline for waiting out another owner's operation. */
+  waitUntil: number,
 ) {
   // Ask only targets the backend declares; anything else is recorded skipped.
-  const targets = yield* onceFree(true, game.exportTargets(creatorThreadId, owner)).pipe(
-    Effect.orElseSucceed(() => ({ targets: ["Web", "Linux"] as const, displayName: "Game" })),
-  );
+  const targets = yield* game
+    .exportTargets(creatorThreadId, owner, waitUntil)
+    .pipe(
+      Effect.orElseSucceed(() => ({ targets: ["Web", "Linux"] as const, displayName: "Game" })),
+    );
   const runTarget = (target: "Web" | "Linux"): Effect.Effect<Row> =>
     targets.targets.includes(target)
       ? // Another owner's operation is waited out, and a failure says why in the log and exports.json.
-        onceFree(true, game.export(creatorThreadId, target, owner)).pipe(
+        game.export(creatorThreadId, target, owner, waitUntil).pipe(
           Effect.map((r): Row => ({
             ok: r.success,
             skipped: null,

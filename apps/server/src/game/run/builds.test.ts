@@ -52,7 +52,7 @@ const lock = {
     exclusive: <A, E>(_root: string, _name: string, work: Effect.Effect<A, E>) => work,
   } as unknown as GameOperations.GameOperations["Service"],
   owner: "game-run:test",
-  wait: false,
+  waitUntil: null,
 };
 
 it.effect("keeps a round beside its candidate, under names git can store, again and again", () =>
