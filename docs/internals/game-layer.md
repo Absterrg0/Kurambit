@@ -282,8 +282,8 @@ batches renders because the pinned server gives each Blender command 180 s. The 
 (downscale, hard alpha, one palette for the whole strip, outline) runs in the server in
 `spriteRender.ts`, so the same renders always give the same bytes.
 
-The creator's session and a live run share the game folder, and the run's git resets would undo the
-session's edits. The game's AGENTS.md tells the creator's agent to pass requests to the run with
+The creator's session and a live run share the game folder, and the run's build restores would
+overwrite the session's edits. The game's AGENTS.md tells the creator's agent to pass requests to the run with
 `game_run_steer` while one is live; the composer is never rerouted. A note is a `game-run.steer`
 command; the policy leads the next round's direction with it.
 
