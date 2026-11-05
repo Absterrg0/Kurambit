@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The ZIP writer streams archive entries from the native filesystem.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeZlib from "node:zlib";
 import * as DateTime from "effect/DateTime";
 
 const ZIP_CHUNK_BYTES = 1024 * 1024;
@@ -39,23 +40,6 @@ export const throwIfAborted = (signal: AbortSignal | undefined) => {
   if (signal?.aborted === true) throw new DOMException("The package was cancelled.", "AbortError");
 };
 
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let index = 0; index < 256; index++) {
-    let value = index;
-    for (let bit = 0; bit < 8; bit++)
-      value = (value & 1) === 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    table[index] = value >>> 0;
-  }
-  return table;
-})();
-
-const crc32 = (bytes: Uint8Array, crc = 0xffffffff) => {
-  let value = crc;
-  for (const byte of bytes) value = CRC_TABLE[(value ^ byte) & 0xff]! ^ (value >>> 8);
-  return value >>> 0;
-};
-
 const dosDateTime = (mtimeMs: number) => {
   const safe = DateTime.toDate(
     DateTime.makeUnsafe(Number.isFinite(mtimeMs) ? mtimeMs : "1980-01-01T00:00:00.000Z"),
@@ -75,7 +59,8 @@ interface EntryDigest {
 
 const digestEntry = async (entry: StoredZipEntry, signal: AbortSignal | undefined) => {
   const hash = NodeCrypto.createHash("sha256");
-  let crc = 0xffffffff;
+  // zlib keeps the pre- and post-inversion itself: each call continues the last.
+  let crc = 0;
   let offset = 0;
   while (offset < entry.size) {
     throwIfAborted(signal);
@@ -87,7 +72,7 @@ const digestEntry = async (entry: StoredZipEntry, signal: AbortSignal | undefine
         "changed",
         "The file changed while it was being read, so no package was written.",
       );
-    crc = crc32(chunk, crc);
+    crc = NodeZlib.crc32(chunk, crc);
     hash.update(chunk);
     offset += chunk.byteLength;
   }
@@ -98,7 +83,7 @@ const digestEntry = async (entry: StoredZipEntry, signal: AbortSignal | undefine
       "changed",
       "The file changed while it was being packaged, so no package was written.",
     );
-  return { crc: (crc ^ 0xffffffff) >>> 0, sha256, bytes: offset };
+  return { crc, sha256, bytes: offset };
 };
 
 const writeAll = async (handle: NodeFSP.FileHandle, bytes: Uint8Array) => {
