@@ -98,7 +98,7 @@ export const layer = Layer.effect(
           at: DateTime.formatIso(yield* DateTime.now),
         });
       }).pipe(Effect.withSpan("GameOperations.record"));
-    // A turn that ends cancels only its own work: the production loop runs
+    // A turn that ends cancels only its own work: the production run runs
     // boot checks on the same game while role turns are being interrupted at
     // their caps.
     const active = new Map<

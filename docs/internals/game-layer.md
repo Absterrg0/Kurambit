@@ -3,7 +3,7 @@
 > For maintainers. The code lives in `apps/server/src/game/`, `apps/server/src/mcp/toolkits/game/`,
 > `packages/contracts/src/game.ts`, `apps/web/src/components/game/`.
 
-One brief produces a game through a harness-run loop, and the harness — not the model — owns every
+One brief produces a game through a harness-run production run, and the harness — not the model — owns every
 check that matters: it plays every build with a separate session, compares builds blind so a worse
 one never lands, and keeps working until a ship review says yes, it stalls, or the creator stops it.
 
@@ -15,12 +15,13 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   identity and warms a live editor. Operations are exclusive per game (`GameOperations.exclusive`)
   and reported as events.
 - `GameProjectService` owns game records: create (blank scaffold), open, list, resolve, inventory.
-- `GameRun` owns the production loop. Every role is a fresh ordinary Kurambit thread on the game's
-  project with a `role` lineage under the creator's chat. `role` only groups: sidebars, game opens
-  and session lists skip it, and it has none of the subagent run takeover, controls or completion
-  delivery, which would tie a role to the creator's live turn. State is `.studio/run.json` +
-  `.studio/rounds.jsonl` plus git, so a crash resumes from the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE/ART/CHECK lines and the
-  shape of the two JSON files the loop asks for (the ladder and a reviewer's rung change).
+- The production run is an orchestration domain (below): `GameRunControl` is what the run tools
+  and RPCs call, `GameRunStepRunner` and `GameRunRoleReactor` do its work. Every role is a fresh
+  ordinary Kurambit thread on the game's project with a `role` lineage under the creator's chat.
+  `role` only groups: sidebars, game opens and session lists skip it, and it has none of the
+  subagent run takeover, controls or completion delivery, which would tie a role to the creator's
+  live turn. Code never interprets model prose: a role hands its result through
+  `game_run_submit`, typed by the kind its step asks for.
 - `GameBot` plays a model-written bot file in real time, on every engine, and records video plus
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameUnity` does the same for Unity: one batchmode editor on a private display
@@ -180,7 +181,7 @@ from one per-OS/CPU table of official builds with their published SHA-256
 ## Tools
 
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
-over RPC. Threads the GameRun loop launches get play-level tools only (status, check, import,
+over RPC. Threads the production run launches get play-level tools (plus `game_run_submit`) only (status, check, import,
 export, explore start/act/close, bot run/view, blender, unity and asset library tools); every
 other MCP tool (threads, worktrees, projects, previews) hides from them unless it declares
 `EnabledWhen` itself, since a blind role that could list threads could map builds to reports. The `game_unity_*` tools
@@ -192,6 +193,58 @@ worker and `-job-worker-count 2` (the worker count is a per-user setting in
 three import workers cost about 0.7 GB each. Packaging, preview, stop and the
 run's own status, round, steer, decide and profile tools stay outside their catalog.
 
+## The run as an orchestration domain
+
+The run is records of the game's creator thread (`GameRun`, `GameRunStep`, `GameRunRound` in
+[gameRunRecords.ts](../../packages/contracts/src/gameRunRecords.ts)), changed only by `game-run.*`
+commands. The pure decider ([decide.ts](../../apps/server/src/orchestration-v2/gameRun/decide.ts))
+folds them into the run policy's state, lets [policy.ts](../../apps/server/src/game/run/policy.ts)
+plan or apply, and commits the new records with their outbox effects in one transaction. So a run
+has the guarantees every thread has: a retried command changes nothing, a restart loses no
+decision, and nothing outside the event log is the run's truth. Its events stay off the chat's
+stream; the Run tab and `game_run_status` read the records.
+
+- **Long work runs in jobs, never in effects.** An effect claim is a short lease on a worker pool
+  every thread's provider work shares. A step's effect (`game-run.step.execute`) hands its work to
+  `GameRunJobs` (in-process, bounded, scoped fibers) and settles at once; the job reports with
+  `game-run.step.complete` or `game-run.step.fail`. A role step's job only launches the role.
+- **Attempts.** A step planned again (a resume) is a new attempt. Every report carries its attempt
+  and a command id derived from step, attempt and action (`gameRunStepCommandId`), so a late report
+  of an earlier try is refused and a retried one is a no-op. Each attempt has its own role thread
+  id; `game-run.step.start` records a role's thread before its first turn, and replaces a thread
+  only when it names the one it replaces.
+- **Finish is an effect.** The commit that ends a run emits `game-run.finish`; its job stops the
+  run's jobs and live role turns, does the last outputs, returns to trunk and exports, then records
+  `game-run.finished`. A finish is safe to run twice.
+- **Recovery** (`GameRunRecovery`, at startup): a live run's unfinished step gets its job again,
+  and an ending whose finish is not recorded finishes again. Every step is safe to repeat because
+  its job first finds what an earlier try left: a role's thread, a turn of this attempt that ended
+  (landed now), one still running (its cap watched again). A stopped run is never continued except
+  by `game-run.resume`.
+- **The role reactor's rule.** A role turn's message id names its step and attempt; a restart's
+  continuation of a turn (`restartContinuationOfRunId`) is the same turn. `GameRunRoleReactor`
+  lands a settled turn only when the step is still that attempt's, the step record names that
+  thread, the thread is the run's project's and was launched by the run, and the turn is the
+  step's latest. It never goes by role names or launch order. A turn is capped only by the cap's
+  own interrupt (its command id), never by any interrupt.
+- **Decisions** wake the creator's chat the `DelegatedTaskQuestionReactor` way: one queued
+  `message.dispatch` per decision and attempt with a `game_run` notification source (stored as
+  `background_task` for older clients). The answer's wait starts when that turn finished presenting
+  (`game-run.step.start`), its default fires from the `game-run.decision.deadline` effect with no
+  fiber holding it, and an answer cancels a wake still queued.
+- **The outbox timer exception.** The outbox runs a thread's effects in order, and an earlier
+  pending effect holds later ones. The run's timers (a role's cap, a decision's deadline) wait
+  minutes on the creator thread, so a pending `game-run.step.deadline` or
+  `game-run.decision.deadline` holds nothing back
+  ([EffectOutbox.ts](../../apps/server/src/orchestration-v2/EffectOutbox.ts)); otherwise the next
+  step, the finish and the creator's own turns would wait out every cap and every default. Each
+  timer checks the run again when it fires.
+
+Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups,
+run.log) are written for people and later roles; nothing the run decides reads them. A game
+whose `.studio/run.json` comes from the run's earlier file-based form starts fresh from a brief;
+that state is not imported.
+
 `game_blender_render_sprites` exists because weak models cannot write sprite framing: their
 renders cropped heads, drifted across a walk cycle and came out near-black. It fits one fixed
 orthographic camera per view to the subject's evaluated geometry across every frame, renders in a
@@ -202,38 +255,33 @@ batches renders because the pinned server gives each Blender command 180 s. The 
 
 The creator's session and a live run share the game folder, and the run's git resets would undo the
 session's edits. The game's AGENTS.md tells the creator's agent to pass requests to the run with
-`game_run_steer` while one is live; the composer is never rerouted. Notes land in
-`.studio/steer.jsonl`, the driver folds them into `run.json` before each plan and each result, and
-the policy leads the next round's direction with them.
+`game_run_steer` while one is live; the composer is never rerouted. A note is a `game-run.steer`
+command; the policy leads the next round's direction with it.
 
 A Guided run's decisions (the vision's look, the prototype, the ladder) happen in that same chat,
 presented by the creator's own agent with whatever visuals it can generate, and answered in free
 text; there are no fixed buttons. The policy plans a `decide` step with what to show, the answers
 it accepts and a default; Autopilot never plans one, and a decide task planned after a switch to
-Autopilot is applied with its default inside `plan`. The driver wakes the creator thread the way
-`DelegatedTaskQuestionReactor` wakes a parent: a `message.dispatch` with
-`queue_after_active`, a command id derived from the run and decision ids (a resume never asks
-twice) and a `game_run` notification source, stored as `background_task` so older clients still
-decode it. The wait starts when that queued message's run leaves the queue, not when it is sent,
-so a busy chat does not spend it; `sent` and `deadline` persist on the in-flight step, so a resume
-waits only what is left, and a question still queued after ten minutes takes the default.
-`game_run_decide` validates the answer against the waiting decision (a ladder edit through
-`parseLadder`) and completes a deferred; a default completes the same deferred, so an answer and a
-timeout racing each other cannot both win. Role threads never see `game_run_decide`.
+Autopilot is applied with its default inside `plan`. The wake and its wait are above; `sent` and
+`deadline` live on the decide step, so a busy chat does not spend the wait, a resume waits only
+what is left, and a question still undelivered after ten minutes takes the default.
+`game_run_decide` is `game-run.decide`, checked against the waiting decision (a ladder edit through
+`parseLadder`); the decider takes either the answer or the default, never both. Role threads
+never see `game_run_decide`.
 
-## Loop
+## The run's course
 
 Vision, two core-loop prototypes, a blind pick, plan, art, one full build, then rounds until a ship
 review says yes, the run stalls, the creator stops it, or an optional budget ends: builder block, boot check, tester play with a bot run,
 blind compare in both orders, keep or revert, reviewer notes for the next round.
 
-Rounds climb a ladder. The plan writes `.studio/ladder.json`, 4 to 7 rungs from the picked
+Rounds climb a ladder. The plan submits it, 4 to 7 rungs from the picked
 prototype to a game with the shape of a Steam demo, each a sentence of what the game is after it
-plus 2 to 4 checks with how to observe them; code checks only the shape (one fix turn, else the
-run has an empty ladder and only finish rounds). The ladder then lives in `run.json`, the one
-truth for which rung landed; the file is the plan's output and is not read again. A round builds
-the first open rung, and the tester declares `CHECK k: PASS|FAIL` per check. The old loop
-measured why this matters: when every round's goal was the last review's top flaw and judges asked
+plus 2 to 4 checks with how to observe them; `game-run.submit` refuses a wrong shape in the plan's
+turn, and a plan that submits none gets one fix turn, else the run has an empty ladder and only
+finish rounds. The run's record is the one truth for which rung landed; `.studio/ladder.json` is a
+copy for people and roles. A round builds the first open rung, and the tester submits pass or
+fail per look check. An earlier run measured why this matters: when every round's goal was the last review's top flaw and judges asked
 which build handled that flaw better, a run spent five hours on one flaw while the game never
 grew, and two near-identical builds gave noisy ties. So acceptance is the rung's checks, and blind
 judging is only a regression gate: a round whose checks pass is kept unless the old build wins
@@ -248,20 +296,19 @@ evidence instead of replaying the build, and a gate whose best is the build an e
 blind player saw reuses that play and plays only the candidate. "The same build" is checked by
 the kept round's fast-forward, not assumed: the round's restore commit carries the tester's files,
 so the merged sha differs from the played one, and git compares the two trees a blind player sees
-(without `.studio` and `NOTES.md`). The held play lives in `run.json` with its question and sample
+(without `.studio` and `NOTES.md`). The held play lives in the run's record with its question and sample
 budget, and is never used under another question (finish rounds ask their own), budget or build.
 The comparators cannot tell the reused report from the fresh one; the comparison record names it.
 The bot still plays both builds: each round's tester rewrites `.studio/bot`, so an earlier bot
-result is not known to come from the same bot. The reviewer's next.md is a ledger of bugs and DO NOT REGRESS that the builder clears beside the
-rung, never a round's goal; the reviewer may add one rung through `.studio/rung-change.json`
+result is not known to come from the same bot. The reviewer's ledger (copied to next.md) lists bugs and DO NOT REGRESS that the builder clears beside the
+rung, never a round's goal; the reviewer may add one rung with its ledger
 when something blocks the ladder, one open at a time. The old round shape (the review's top flaw,
 judged on that flaw) runs only as finish rounds, and only on the creator's ask. The run's end
 point is its goal, not a round count: the ladder bounds the building (two tries per rung, one
 comeback), a finished ladder gets one ship check, and the run ends ("ready" or "done"). Polish past
 that is the creator's call: a game_run_steer note resumes an ended run for one round on it, so no
 tokens go to rounds nobody asked for. A run whose plan never wrote a ladder keeps finish rounds as
-its only work. A run.json from before the ladder writes one at
-its next round start.
+its only work.
 
 Before the
 comparators run, the tester's last play bot plays both builds in fresh worktrees for the same real
@@ -276,16 +323,16 @@ and bot starts hold one gate (`GameMemoryGate`) from that check through their im
 sample's time waiting there for memory is given back to its clock; a play turn refused
 `low-memory` is played again after a pause, and memory that stays short ends the run resumably
 rather than voiding the sample. Comparators
-never work in the game folder, where run.json and run.log map every sample to its sha: each gets a
+never work in the game folder, where run.log maps every sample to its sha: each gets a
 worktree of its own at one parentless empty-tree commit, holding only its two frame sheets under
-neutral names, and writes `.compare/verdict.md`; the root keeps the write-ups once all verdicts are
+neutral names, and submits its verdict; the root keeps the write-ups once all verdicts are
 in. That worktree still links to the game's repository, so its history and the root stay reachable
 by path; what is blind by construction is the comparator's folder, HEAD and prompt. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
-renders against the vision and may ask for one bounded redo (`ART: REDO`) before the art is
+renders against the vision and may ask for one bounded redo before the art is
 committed; a missing verdict keeps the art.
 
-The Unity lane needs three things the loop does nowhere else. A live editor holds the open scene in
+The Unity lane needs three things the run does nowhere else. A live editor holds the open scene in
 memory and saves it after every edit without reading the disk first, so every run git step that can
 move the root's checkout closes the root's live editors before it runs; otherwise the next
 prototype's first edit writes the previous branch's scene over its own (seen live). Its boot is the
@@ -339,8 +386,8 @@ the gameplay module `web/main.js` through `start`/`update`/`stop`. Its page open
 so the template's `gameplayScene` is `index.html?play` (boots straight into a run) and the
 three.js check loads that entry after the plain page, like the Godot check runs `game.tscn`. The manifest's
 `godotProject` names the engine project directory for every lane (`web` for three.js, `unity`), so snapshots,
-exports and the loop resolve it unchanged. `GameRun` takes the lane (the engine directory) from the
-manifest, and every engine question the loop has is the lane's engine profile.
+exports and the run resolve it unchanged. A run takes the lane (the engine directory) from the
+manifest, and every engine question the run has is the lane's engine profile.
 
 Two constraints hold everywhere:
 

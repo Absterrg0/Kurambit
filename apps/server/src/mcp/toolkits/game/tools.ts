@@ -71,7 +71,7 @@ const dependencies = [
 ];
 const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
 /**
- * Run threads from the GameRun production loop get play-level tools only
+ * Run threads from the production run get play-level tools only
  * (status, check, import, export, explore, game_bot_*, game_blender_*, game_unity_*, game_assets_*).
  * Every other game tool hides from them, as non-game tools do by default.
  */
