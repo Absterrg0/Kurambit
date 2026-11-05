@@ -3,8 +3,10 @@
 // own saved/ folder where the storage cleanup never looks. Only media in the
 // game's generated folders can be saved, and nothing in saved/ is overwritten.
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeStreamPromises from "node:stream/promises";
 import type { GameSavedMedia } from "@kurambit/contracts";
 import { isPathInside } from "./gameNativeUserDir.ts";
 
@@ -56,7 +58,10 @@ const savedDir = async (root: string, create: boolean): Promise<string | null> =
 };
 
 /** The source as a real file inside one of the game's generated folders, or a refusal. */
-const generatedSource = async (root: string, source: string): Promise<string> => {
+const generatedSource = async (
+  root: string,
+  source: string,
+): Promise<{ readonly real: string; readonly dev: number; readonly ino: number }> => {
   const realRoot = await NodeFSP.realpath(root);
   // Relative to the root as the transports know it, which round evidence paths are relative to.
   const given = NodePath.resolve(root, source);
@@ -82,7 +87,33 @@ const generatedSource = async (root: string, source: string): Promise<string> =>
     );
   const info = await NodeFSP.stat(real);
   if (!info.isFile()) throw new SavedMediaError("invalid-path", `${source} is not a file.`);
-  return real;
+  return { real, dev: info.dev, ino: info.ino };
+};
+
+/**
+ * Copies the checked file through a handle opened without following a final
+ * link and proven by fstat to be the same file, so a folder swapped for a link
+ * after the check cannot copy a file from outside the game.
+ */
+const copyChecked = async (
+  checked: { readonly real: string; readonly dev: number; readonly ino: number },
+  source: string,
+  temp: string,
+) => {
+  // Windows has no O_NOFOLLOW; the fstat identity check still holds there.
+  const noFollow = NodeFS.constants.O_NOFOLLOW ?? 0;
+  const handle = await NodeFSP.open(checked.real, NodeFS.constants.O_RDONLY | noFollow);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== checked.dev || opened.ino !== checked.ino)
+      throw new SavedMediaError("symlink", `${source} changed while it was being saved.`);
+    await NodeStreamPromises.pipeline(
+      handle.createReadStream({ autoClose: false }),
+      NodeFS.createWriteStream(temp, { flags: "wx" }),
+    );
+  } finally {
+    await handle.close();
+  }
 };
 
 /** A name a person reads, safe on every file system: "2026-11-05 round 2 bot run". */
@@ -128,7 +159,8 @@ export const saveMedia = async (
   /** The creator's calendar day the name starts with ("2026-11-05"). */
   day: string,
 ): Promise<GameSavedMedia> => {
-  const real = await generatedSource(root, source);
+  const checked = await generatedSource(root, source);
+  const real = checked.real;
   const dir = (await savedDir(root, true))!;
   const ext = NodePath.extname(real).toLowerCase();
   const given = label?.trim() ?? "";
@@ -138,7 +170,7 @@ export const saveMedia = async (
   );
   const temp = NodePath.join(dir, `.saving-${NodeCrypto.randomUUID()}${ext}`);
   try {
-    await NodeFSP.copyFile(real, temp);
+    await copyChecked(checked, source, temp);
     for (let n = 1; ; n++) {
       const name = `${stem}${n === 1 ? "" : ` (${n})`}${ext}`;
       const target = NodePath.join(dir, name);
