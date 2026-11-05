@@ -14,6 +14,10 @@ address that was not already listed, and only after the form has been answered, 
 timing nor the inbox reveals whether someone signed up before. If Resend fails, the signup is still
 stored and the function logs the Resend error name, never an address.
 
+`hello@kurambit.com` is a real address: Cloudflare Email Routing forwards it to the owner's Gmail,
+and Gmail sends as it through `smtp.resend.com` with its own sending-only Resend key. Point
+`WAITLIST_NOTIFY_EMAIL` at it so welcome replies and signup notices both go through hello@.
+
 Without `RESEND_API_KEY` and `WAITLIST_FROM`, signups are stored and nothing is sent. Resend's free
 plan allows 100 emails a day, which is 50 signups.
 
@@ -68,15 +72,17 @@ repository; `vercel firewall overview` from a directory linked to the `kurambit`
   and LinkedIn preview bots, AI crawlers and assistants, and PageSpeed Insights. Anything else that
   does not look like a browser gets a JavaScript challenge, so `curl` against the site sees a 429
   page.
-- **Waitlist API rate limit:** at most 10 requests a minute per IP to `/api`, ahead of the
-  endpoint's own hourly limit.
-- **Link previews and crawl files:** Slack, Discord, Telegram and WhatsApp preview bots cannot be
-  verified, so a bypass lets their GET requests through to pages and images, never to `/api`. The
-  same rule lets any GET of `robots.txt`, `sitemap.xml`, `llms.txt` and the IndexNow key file
-  through, for crawlers Vercel does not verify. Hobby allows three custom rules, which is why the
-  two share one.
-- **Waitlist export:** requests to `/api/waitlist-export` that carry an `Authorization` header skip
-  Bot Protection so the `curl` above keeps working; the endpoint checks the token itself.
+- **Public pages and the export (bypass):** GETs of the pages (`/`, `/waitlist`, `/privacy`), the
+  link card (`og.png`), the icons and manifest, and the crawl files (`robots.txt`, `sitemap.xml`,
+  `llms.txt`, the IndexNow key) skip Bot Protection, so link previews, launch directories and
+  crawlers Vercel cannot verify can read the site. Scripts, styles, fonts and art stay behind the
+  challenge; browsers pass it, scrapers do not need them. The same rule lets requests to
+  `/api/waitlist-export` that carry an `Authorization` header through, so the `curl` above keeps
+  working; the endpoint checks the token itself. A new public page has to be added to this list
+  and to the rate limit's.
+- **Rate limit:** at most 20 requests a minute per IP to `/api` and to the public paths above, ahead
+  of the endpoint's own hourly limit. It is the only rate-limit rule Hobby allows, which is why it
+  covers both, and it sits first so the bypass cannot skip it.
 
 The AI Bots ruleset is left off on purpose: the site wants answer engines to read and cite it.
 
