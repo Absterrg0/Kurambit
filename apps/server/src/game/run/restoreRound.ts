@@ -16,13 +16,14 @@ import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import { RESUMABLE, abandonsRound } from "../../orchestration-v2/gameRun/decide.ts";
 import type * as GameService from "../GameService.ts";
 import { causeText, logLine } from "../runSetup.ts";
-import { buildStep, captureBuild, isRestored, measureChange } from "./builds.ts";
+import { buildStep, captureBuild, type FolderLock, isRestored, measureChange } from "./builds.ts";
 import { BuildName, keptBuild, restoredPaths } from "./buildNames.ts";
 import type { RoundRecord, RunState } from "./state.ts";
 
 export const restoreKeptRound = (input: {
   readonly game: GameService.GameService["Service"];
   readonly checkpoints: CheckpointStore.CheckpointStore["Service"];
+  readonly lock: FolderLock;
   readonly root: string;
   readonly run: GameRun;
   readonly state: RunState;
@@ -30,6 +31,7 @@ export const restoreKeptRound = (input: {
   readonly requestId: string;
 }): Effect.Effect<GameRunRestoreOutcome> => {
   const { game, checkpoints, root, run, state, record } = input;
+  const deps = { game, checkpoints, lock: input.lock };
   const round = record.round;
   const lane = run.lane || "godot";
   const no = (reason: GameRunRestoreRefusal, message: string): GameRunRestoreOutcome => ({
@@ -72,7 +74,7 @@ export const restoreKeptRound = (input: {
     // A repeat after a restart finds the build by name; only a first attempt has its commit.
     const beforeSha = (yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: beforeRef }))
       ? ""
-      : yield* captureBuild(checkpoints, root, run.id, beforeName);
+      : yield* captureBuild(deps, root, run.id, beforeName);
     const before = keptBuild(run.id, beforeName, lane, beforeSha);
     const task = state.task;
     const dropped = !abandons
@@ -91,7 +93,6 @@ export const restoreKeptRound = (input: {
         message: `Round ${round}'s build (${what}) is already the game's current build.${dropped.length > 0 ? `${dropped} What the folder held is kept as ${before}` : ""}`,
       } satisfies GameRunRestoreOutcome;
     }
-    const deps = { game, checkpoints };
     const ctx = { root, runId: run.id, lane };
     const afterName = BuildName.restoreAfter(input.requestId);
     // From here the folder moves; any refusal puts the folder before back first.
@@ -103,7 +104,7 @@ export const restoreKeptRound = (input: {
       });
       if (!restored.build.ok)
         return no("commit-missing", `Round ${round}'s build is gone (${restored.build.detail}).`);
-      const after = yield* captureBuild(checkpoints, root, run.id, afterName);
+      const after = yield* captureBuild(deps, root, run.id, afterName);
       if ((yield* measureChange(checkpoints, root, restorePaths, build, after)).changed)
         return no("restore-incomplete", `Restoring round ${round} did not reproduce its build.`);
       return null;
@@ -116,7 +117,7 @@ export const restoreKeptRound = (input: {
         if (state.best.length > 0)
           yield* buildStep(deps, ctx, { _tag: "keep", names: [BuildName.best], sha: state.best });
         if (!back.build.ok) return back.build.detail;
-        const now = yield* captureBuild(checkpoints, root, run.id, afterName);
+        const now = yield* captureBuild(deps, root, run.id, afterName);
         return (yield* measureChange(checkpoints, root, restorePaths, beforeRef, now)).changed
           ? "the folder still differs from it"
           : null;

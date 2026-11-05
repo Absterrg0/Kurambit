@@ -45,12 +45,12 @@ export class GameOperations extends Context.Service<
      * and ends; a second one while it runs fails `busy`. `owner` is the thread
      * whose call started it.
      */
-    readonly exclusive: <A>(
+    readonly exclusive: <A, E extends { readonly message: string } = GameOperationError>(
       root: string,
       name: string,
-      work: Effect.Effect<A, GameOperationError>,
+      work: Effect.Effect<A, E>,
       owner: string,
-    ) => Effect.Effect<A, GameOperationError>;
+    ) => Effect.Effect<A, E | GameOperationError>;
     /** Cancels the game's running operation; with `owner`, only that thread's. */
     readonly cancel: (root: string, owner?: string) => Effect.Effect<void>;
   }
@@ -113,15 +113,20 @@ export const layer = Layer.effect(
       // The race interrupts work and awaits its finalizers, including native child exit.
       yield* Deferred.await(operation.done);
     });
-    const exclusive = <A>(
+    const exclusive = <A, E extends { readonly message: string } = GameOperationError>(
       root: string,
       name: string,
-      work: Effect.Effect<A, GameOperationError>,
+      work: Effect.Effect<A, E>,
       owner: string,
-    ) =>
+    ): Effect.Effect<A, E | GameOperationError> =>
       Effect.gen(function* () {
         if (active.has(root))
-          return yield* new GameOperationError({ operation: name, path: root, reason: "busy" });
+          return yield* new GameOperationError({
+            operation: name,
+            path: root,
+            reason: "busy",
+            detail: `${operations.get(root)?.name ?? "Another operation"} is running on this game.`,
+          });
         const cancelled = yield* Deferred.make<void>();
         const done = yield* Deferred.make<void>();
         const at = DateTime.formatIso(yield* DateTime.now);

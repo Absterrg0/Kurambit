@@ -1,18 +1,22 @@
 // The run's builds are T3 checkpoints under the run's own refs
 // (checkpointRefForGameRun): the run never commits, checks out, merges or
 // writes the user's index, HEAD or branches. A build is its commit oid.
-import { CheckpointRef } from "@kurambit/contracts";
+import { CheckpointRef, GameOperationError } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 
 import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../../checkpointing/Utils.ts";
+import type * as GameOperations from "../GameOperations.ts";
 import type * as GameService from "../GameService.ts";
 import { restoredPaths } from "./buildNames.ts";
 import { type BuildOutcome, classifyComparePair } from "./policy.ts";
 import type { BuildOp, RunState } from "./state.ts";
 
 type Checkpoints = CheckpointStore.CheckpointStore["Service"];
+const isGameOperationError = Schema.is(GameOperationError);
 
 /** What a blind player must not see: files that differ by round, not by game. */
 export const NOT_IN_SAMPLE = [".studio", "NOTES.md"];
@@ -125,8 +129,46 @@ export const pruneBuilds = (checkpoints: Checkpoints, root: string, state: RunSt
     return transient.length;
   });
 
-/** The folder as the build `name`, under the workspace lock T3's own captures take. */
-export const captureBuild = (checkpoints: Checkpoints, root: string, runId: string, name: string) =>
+/**
+ * How the run takes the game folder for one of its own moves (a capture, a
+ * restore, a kept name): as one operation of the game, owned by the run, so
+ * no export, check or Play of another owner reads a half-moved folder. `wait`
+ * queues behind another owner's operation for a while; without it a busy game
+ * fails `busy`, which a step hands back to its durable timer.
+ *
+ * Lock order: the game's operation lock, then the checkpoint workspace lock
+ * inside it. T3's per-turn captures take only the workspace lock, and nothing
+ * that holds the workspace lock asks for the operation lock, so the two never
+ * wait on each other.
+ */
+export interface FolderLock {
+  readonly operations: GameOperations.GameOperations["Service"];
+  readonly owner: string;
+  readonly wait: boolean;
+}
+
+// The end of a run, a restore and a turn's capture wait out a creator's Play
+// or an operation begun before the run; past this they fail as they found it.
+const FREE_POLL = "10 seconds";
+const FREE_TRIES = 60;
+const isBusy = (error: unknown) => isGameOperationError(error) && error.reason === "busy";
+
+/** `work` once the game is free for it, when the caller waits; otherwise one try. */
+export const onceFree = <A, E, R>(wait: boolean, work: Effect.Effect<A, E, R>) =>
+  wait
+    ? work.pipe(
+        Effect.retry({ while: isBusy, schedule: Schedule.spaced(FREE_POLL), times: FREE_TRIES }),
+      )
+    : work;
+
+const asRunOperation = <A, E extends { readonly message: string }>(
+  lock: FolderLock,
+  root: string,
+  name: string,
+  work: Effect.Effect<A, E>,
+) => onceFree(lock.wait, lock.operations.exclusive(root, name, work, lock.owner));
+
+const capture = (checkpoints: Checkpoints, root: string, runId: string, name: string) =>
   checkpoints.withWorkspaceLock(
     root,
     checkpoints.captureCheckpoint({
@@ -135,6 +177,14 @@ export const captureBuild = (checkpoints: Checkpoints, root: string, runId: stri
     }),
   );
 
+/** The folder as the build `name`. */
+export const captureBuild = (
+  deps: { readonly checkpoints: Checkpoints; readonly lock: FolderLock },
+  root: string,
+  runId: string,
+  name: string,
+) => asRunOperation(deps.lock, root, "Run capture", capture(deps.checkpoints, root, runId, name));
+
 /**
  * One build op on the game folder. It always finishes: a stop waits for it
  * rather than leaving a half-restored folder. A restore first closes the
@@ -142,7 +192,11 @@ export const captureBuild = (checkpoints: Checkpoints, root: string, runId: stri
  * the restored files.
  */
 export const buildStep = (
-  deps: { readonly game: GameService.GameService["Service"]; readonly checkpoints: Checkpoints },
+  deps: {
+    readonly game: GameService.GameService["Service"];
+    readonly checkpoints: Checkpoints;
+    readonly lock: FolderLock;
+  },
   ctx: { readonly root: string; readonly runId: string; readonly lane: string },
   op: BuildOp,
 ) => {
@@ -167,7 +221,7 @@ export const buildStep = (
   const run = Effect.gen(function* () {
     switch (op._tag) {
       case "capture": {
-        const sha = yield* captureBuild(checkpoints, root, runId, op.name);
+        const sha = yield* capture(checkpoints, root, runId, op.name);
         const change =
           op.base.length === 0
             ? { changed: true, lines: 0 }
@@ -195,5 +249,5 @@ export const buildStep = (
           : outcome({ ok: false, sha: op.sha, detail: "the build is gone" });
     }
   });
-  return run.pipe(Effect.uninterruptible);
+  return asRunOperation(deps.lock, root, `Run build ${op._tag}`, run.pipe(Effect.uninterruptible));
 };

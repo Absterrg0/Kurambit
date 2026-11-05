@@ -5,7 +5,10 @@
 // its job: a sleeping job would hold one of the run jobs' shared step slots.
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import type { GameOperationError } from "@kurambit/contracts";
+import * as Schema from "effect/Schema";
+import { GameOperationError } from "@kurambit/contracts";
+
+const isGameOperationError = Schema.is(GameOperationError);
 
 export const MEMORY_WAITS = 7;
 export const MEMORY_PAUSE = "2 minutes";
@@ -36,6 +39,56 @@ export const handBackOnLowMemory = <A, R>(
         ),
       )
     : attempt;
+
+// Another operation holding the game (a Play the creator started, an
+// operation begun before the run, the one live Unity editor busy elsewhere)
+// says nothing about the build either: the step hands back the same way, on
+// its own count, and past it the run stops resumably with what held the game.
+export const BUSY_WAITS = 15;
+export const BUSY_PAUSE = "1 minute";
+
+/** A step's work found the game held by another operation while the step still has waits left. */
+export class GameRunGameBusy extends Data.TaggedError("GameRunGameBusy")<{
+  readonly what: string;
+  readonly error: GameOperationError;
+}> {}
+
+/**
+ * The refusals that say the game was not free for this work: busy, a
+ * cancel that was not the run's, and a player build whose sources moved
+ * under it.
+ */
+export const isContention = (error: GameOperationError, what: string) =>
+  error.reason === "busy" ||
+  error.reason === "cancelled" ||
+  (what === "boot player build" && error.reason === "invalid-input");
+
+/** Hands the step back while the game is not free and it has waits left; past them the refusal fails through. */
+export const handBackOnBusy = <A, E, R>(
+  attempt: Effect.Effect<A, E | GameOperationError, R>,
+  what: string,
+  waitsLeft: boolean,
+): Effect.Effect<A, E | GameOperationError | GameRunGameBusy, R> =>
+  waitsLeft
+    ? attempt.pipe(
+        Effect.catchIf(
+          (error): error is GameOperationError =>
+            isGameOperationError(error) && isContention(error, what),
+          (error) => Effect.fail(new GameRunGameBusy({ what, error })),
+        ),
+      )
+    : attempt;
+
+/** The run's ending once the busy waits ran out: resumable, and it names what held the game. */
+export const busyEnded = (what: string, error: GameOperationError) =>
+  ({
+    kind: "failed",
+    reason:
+      `${what} could not run: the game stayed busy through ${BUSY_WAITS} waits (${(error.detail ?? error.reason).split("\n")[0]}); resume the run when it is free`.slice(
+        0,
+        300,
+      ),
+  }) as const;
 
 /** The run's ending once the waits ran out: resumable, like a usage limit. */
 export const memoryEnded = (error: GameOperationError) =>

@@ -6,7 +6,10 @@ import type * as GameService from "../GameService.ts";
 import { bootStep } from "./steps.ts";
 
 // The step builds its check once and runs that effect on every try.
-const boot = (check: () => Effect.Effect<{ ok: boolean }, GameOperationError>) =>
+const boot = (
+  check: () => Effect.Effect<{ ok: boolean }, GameOperationError>,
+  busyWaitsLeft = true,
+) =>
   bootStep(
     {
       check: () => Effect.suspend(check),
@@ -19,6 +22,7 @@ const boot = (check: () => Effect.Effect<{ ok: boolean }, GameOperationError>) =
       lane: "three",
       log: () => Effect.void,
       memoryWaitsLeft: true,
+      busyWaitsLeft,
     },
   );
 
@@ -48,4 +52,16 @@ it.effect("a browser that cannot be had fails the step, never the build", () =>
     const result = yield* boot(() => Effect.fail(refusal("tool-missing")));
     expect(result).toEqual({ kind: "failed", reason: "boot check could not run: why" });
   }),
+);
+
+// Another operation holding the game says nothing about the build.
+it.effect(
+  "a busy game hands the step back, and past its waits ends the run, never as a boot failure",
+  () =>
+    Effect.gen(function* () {
+      const handedBack = yield* boot(() => Effect.fail(refusal("busy"))).pipe(Effect.flip);
+      expect(handedBack._tag).toBe("GameRunGameBusy");
+      const ended = yield* boot(() => Effect.fail(refusal("busy")), false);
+      expect(ended.kind).toBe("failed");
+    }),
 );

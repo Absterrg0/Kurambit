@@ -3133,8 +3133,9 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
   /**
    * A step's timer, set by its own work: a role's cap again at a later due time
    * (memory waits extend it), a role turn sent again after a pause, or the
-   * step's work run again once memory may have freed (`n` counts those waits).
-   * Durable, so a restart keeps it.
+   * step's work run again once memory may have freed or the game's operation
+   * lock may be free (`n` counts each kind of wait). Durable, so a restart
+   * keeps it.
    */
   Schema.Struct({
     type: Schema.Literal("game-run.step.schedule"),
@@ -3151,6 +3152,7 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
         n: PositiveInt,
       }),
       Schema.Struct({ kind: Schema.Literal("memory"), n: PositiveInt }),
+      Schema.Struct({ kind: Schema.Literal("busy"), n: PositiveInt }),
     ]),
   }),
   /** The creator asks for a kept round's build back on an ended run; a job moves the folder. */

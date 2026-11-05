@@ -62,13 +62,19 @@ import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
-import { buildStep, captureBuild, pruneBuilds } from "./builds.ts";
+import { buildStep, captureBuild, type FolderLock, pruneBuilds } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import {
+  BUSY_PAUSE,
+  BUSY_WAITS,
+  busyEnded,
+  type GameRunGameBusy,
   type GameRunMemoryShort,
   MEMORY_PAUSE,
   MEMORY_WAITS,
+  handBackOnBusy,
   handBackOnLowMemory,
+  isContention,
   lastLine,
 } from "./lowMemory.ts";
 import { modelFacts } from "./modelFacts.ts";
@@ -160,9 +166,10 @@ const make = Effect.gen(function* () {
       }),
     );
   /**
-   * Memory short: the step's job ends and a durable timer runs its work again,
-   * so no job holds one of the shared step slots while it waits. The waits are
-   * counted on the step's record, so a restart does not reset them; both
+   * Memory short, or the game held by another operation: the step's job ends
+   * and a durable timer runs its work again, so no job holds one of the
+   * shared step slots while it waits. The waits are counted on the step's
+   * record, each kind on its own, so a restart does not reset them; both
    * halves of a pair refused at once make one wait (one command id). The run
    * finds a pair's step by a half's id, so the timer names the half refused.
    * A timer that could not be written fails the step: a step left running
@@ -172,48 +179,59 @@ const make = Effect.gen(function* () {
     job: GameRunJobs.GameRunStepJob,
     record: GameRunStep,
     stepId: GameRunStepId,
-    short: GameRunMemoryShort,
+    short: GameRunMemoryShort | GameRunGameBusy,
     log: (line: string) => Effect.Effect<void>,
   ) =>
     Effect.gen(function* () {
-      const n = (record.memoryWaits ?? 0) + 1;
+      const kind = short._tag === "GameRunGameBusy" ? "busy" : "memory";
+      const n = ((kind === "busy" ? record.busyWaits : record.memoryWaits) ?? 0) + 1;
+      const pause = kind === "busy" ? BUSY_PAUSE : MEMORY_PAUSE;
       yield* log(
-        `${short.what} refused, memory short (${lastLine(short.error)}); the step waits ${MEMORY_PAUSE} (${n} of ${MEMORY_WAITS})`,
+        kind === "busy"
+          ? `${short.what} found the game busy (${lastLine(short.error)}); the step waits ${BUSY_PAUSE} (${n} of ${BUSY_WAITS})`
+          : `${short.what} refused, memory short (${lastLine(short.error)}); the step waits ${MEMORY_PAUSE} (${n} of ${MEMORY_WAITS})`,
       );
       const at =
         DateTime.toEpochMillis(yield* DateTime.now) +
-        Duration.toMillis(Duration.fromInputUnsafe(MEMORY_PAUSE));
+        Duration.toMillis(Duration.fromInputUnsafe(pause));
       yield* engine
         .dispatch({
           type: "game-run.step.schedule",
           commandId: CommandId.make(
-            `server:game-run-memory:${record.id}:attempt:${job.attempt}:${n}`,
+            `server:game-run-${kind}:${record.id}:attempt:${job.attempt}:${n}`,
           ),
           threadId: job.threadId,
           runId: job.runId,
           stepId,
           attempt: job.attempt,
           at,
-          timer: { kind: "memory", n },
+          timer: { kind, n },
         })
         .pipe(
           Effect.asVoid,
           Effect.catchTags({
             // The run moved on or stopped, or the other half's wait already holds this one.
             OrchestratorGameRunRefusedError: (error) =>
-              Effect.logInfo("game run memory wait not taken", { detail: error.detail }),
+              Effect.logInfo("game run wait not taken", { kind, detail: error.detail }),
             OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
           }),
           Effect.catch((error) =>
             fail(
               { ...job, stepId },
               stepId,
-              `memory wait could not be scheduled (${error.message})`,
+              `${kind} wait could not be scheduled (${error.message})`,
             ),
           ),
         );
     });
   const memoryWaitsLeft = (record: GameRunStep) => (record.memoryWaits ?? 0) < MEMORY_WAITS;
+  const busyWaitsLeft = (record: GameRunStep) => (record.busyWaits ?? 0) < BUSY_WAITS;
+  // Steps hand a busy game back to their timer; the end of a run and a restore wait it out.
+  const folderLock = (run: GameRun, wait: boolean): FolderLock => ({
+    operations,
+    owner: gameRunOperationOwner(run.id),
+    wait,
+  });
 
   // A step's work that broke reports it, so the run ends resumably with why;
   // an interrupt is a stop and reports nothing.
@@ -615,9 +633,24 @@ const make = Effect.gen(function* () {
               : Effect.void
             ).pipe(
               Effect.andThen(
-                buildStep({ game, checkpoints }, { root, runId: run.id, lane: run.lane }, step.op),
+                handBackOnBusy(
+                  buildStep(
+                    { game, checkpoints, lock: folderLock(run, false) },
+                    { root, runId: run.id, lane: run.lane },
+                    step.op,
+                  ),
+                  `build ${step.op._tag}`,
+                  busyWaitsLeft(record),
+                ),
               ),
               Effect.flatMap(done),
+              Effect.catchTags({
+                GameRunGameBusy: (busy) => waitForMemory(job, record, record.id, busy, log),
+                GameOperationError: (error) =>
+                  isContention(error, "build")
+                    ? fail(job, record.id, busyEnded(`build ${step.op._tag}`, error).reason)
+                    : Effect.fail(error),
+              }),
             ),
           );
         case "git":
@@ -634,10 +667,12 @@ const make = Effect.gen(function* () {
               lane: run.lane,
               log,
               memoryWaitsLeft: memoryWaitsLeft(record),
+              busyWaitsLeft: busyWaitsLeft(record),
             }).pipe(
               Effect.flatMap(done),
               Effect.catchTags({
                 GameRunMemoryShort: (short) => waitForMemory(job, record, record.id, short, log),
+                GameRunGameBusy: (busy) => waitForMemory(job, record, record.id, busy, log),
               }),
             ),
           );
@@ -881,7 +916,7 @@ const make = Effect.gen(function* () {
         // cut after the best was restored must not keep the best as the work.
         // A run from before checkpoints holds no builds to park or restore:
         // its folder is exported as it is and left untouched.
-        const ops = { game, checkpoints };
+        const ops = { game, checkpoints, lock: folderLock(run, true) };
         const ctx = { root, runId: run.id, lane: run.lane };
         const name = BuildName.ending(job.endedAt);
         const parked = yield* Effect.gen(function* () {
@@ -889,22 +924,26 @@ const make = Effect.gen(function* () {
           const ref = checkpointRefForGameRun(run.id, name);
           const kept = yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: ref });
           if (!kept) {
-            const sha = yield* captureBuild(checkpoints, root, run.id, name);
+            const sha = yield* captureBuild(ops, root, run.id, name);
             yield* log(
               `the folder's work at the ending is kept as ${keptBuild(run.id, name, run.lane, sha)}`,
             );
           }
           const best = yield* buildStep(ops, ctx, { _tag: "restore", sha: run.best, keep: [] });
+          if (!best.build.ok)
+            yield* log(
+              `finishExports: the best build could not be restored (${best.build.detail}); exporting the folder as it is`,
+            );
           return best.build.ok ? ref : null;
         }).pipe(
           Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(null),
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : log(
+                  `finishExports: the best build could not be restored (${causeText(cause)}); exporting the folder as it is`,
+                ).pipe(Effect.as(null)),
           ),
         );
-        if (parked === null && !gitEra(run))
-          yield* log(
-            "finishExports: the best build could not be restored; exporting the folder as it is",
-          );
         yield* finishExports(root, run.threadId, game, log, gameRunOperationOwner(run.id)).pipe(
           Effect.ignore,
         );
@@ -978,6 +1017,7 @@ const make = Effect.gen(function* () {
               restoreKeptRound({
                 game,
                 checkpoints,
+                lock: folderLock(run, true),
                 root,
                 run,
                 state,

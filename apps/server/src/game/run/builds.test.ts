@@ -12,6 +12,7 @@ import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
+import type * as GameOperations from "../GameOperations.ts";
 import type * as GameService from "../GameService.ts";
 import { BuildName } from "./buildNames.ts";
 import { buildStep, captureBuild, pruneBuilds } from "./builds.ts";
@@ -45,13 +46,21 @@ const repo = () => {
 const game = {
   closeLiveEditors: () => Effect.void,
 } as unknown as GameService.GameService["Service"];
+// The run's own moves pass through the game's operation lock, held by nothing else here.
+const lock = {
+  operations: {
+    exclusive: <A, E>(_root: string, _name: string, work: Effect.Effect<A, E>) => work,
+  } as unknown as GameOperations.GameOperations["Service"],
+  owner: "game-run:test",
+  wait: false,
+};
 
 it.effect("keeps a round beside its candidate, under names git can store, again and again", () =>
   Effect.gen(function* () {
     const { root, git } = repo();
     const checkpoints = yield* CheckpointStore.CheckpointStore;
     const runId = "run_mzx1:a";
-    const capture = (name: string) => captureBuild(checkpoints, root, runId, name);
+    const capture = (name: string) => captureBuild({ checkpoints, lock }, root, runId, name);
     // Every kind of name the run makes, as real ids and times give them.
     const candidate = yield* capture(BuildName.candidate("round-1"));
     yield* capture(BuildName.unfinished("round-1", 7));
@@ -61,7 +70,7 @@ it.effect("keeps a round beside its candidate, under names git can store, again 
     yield* capture(BuildName.stage("plan"));
     yield* capture(BuildName.proto(1));
     const keep = buildStep(
-      { game, checkpoints },
+      { game, checkpoints, lock },
       { root, runId, lane: "godot" },
       { _tag: "keep", names: [BuildName.best, BuildName.kept("round-1")], sha: candidate },
     );
@@ -213,17 +222,12 @@ it.effect(
       const { root, git } = repo();
       const checkpoints = yield* CheckpointStore.CheckpointStore;
       const runId = "run_leave";
-      const deps = { game, checkpoints };
+      const deps = { game, checkpoints, lock };
       const ctx = { root, runId, lane: "godot" };
-      const best = yield* captureBuild(checkpoints, root, runId, BuildName.best);
+      const best = yield* captureBuild(deps, root, runId, BuildName.best);
       // Round 3's candidate, built and tested; the budget is spent before judging.
       NodeFS.writeFileSync(NodePath.join(root, "godot", "main.gd"), "extends Node2D\n");
-      const candidate = yield* captureBuild(
-        checkpoints,
-        root,
-        runId,
-        BuildName.candidate("round-3"),
-      );
+      const candidate = yield* captureBuild(deps, root, runId, BuildName.candidate("round-3"));
       const input = { now: 0, coin: 0.5, id: "x" };
       const fresh = freshState(
         {

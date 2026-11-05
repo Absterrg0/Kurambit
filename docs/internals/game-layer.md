@@ -11,7 +11,13 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 
 - Game operations are exclusive per game (`GameOperations.exclusive`) and reported as events, so
   the Game panel and the agent tools see the same operation, and a second operation on a game
-  refuses as busy rather than racing the first.
+  refuses as busy rather than racing the first. While a production run holds the game (live,
+  finishing or restoring), it is the folder's one writer: other owners' writing operations are
+  refused `busy` with `runReason: "run-live"` (`GameProjectService.admitWrite`), reads and Play of
+  an exported build stay open, and the run's role threads pass. The run's own folder moves
+  (captures, restores, kept names) run as operations owned by the run, taking the operation lock
+  and then the checkpoint workspace lock; T3's turn captures take only the latter, so the two
+  never wait in a cycle.
 - Every role of a production run is a fresh ordinary Kurambit thread on the game's project with a
   `role` lineage under the creator's chat. `role` only groups: sidebars, game opens and session
   lists skip it, and it has none of the subagent run takeover, controls or completion delivery,
@@ -351,9 +357,10 @@ not its whole cold import). Time queued behind the gate counts against the same 
 which the start is refused `low-memory`, never kept waiting unseen. No gated start may open an
 editor: the gate is one permit and does not nest. A sample's time waiting there for memory is given back to its clock; a
 play turn refused `low-memory` is played again after a pause. A step whose own work is refused
-`low-memory` ends its job and comes back on a durable `game-run.step.wake` timer, so a wait never
-holds one of the run jobs' shared step slots; the waits are counted on the step record, and memory
-that stays short ends the run resumably rather than voiding the sample. Samples play
+`low-memory`, or finds the game `busy` with another operation, ends its job and comes back on a
+durable `game-run.step.wake` timer, so a wait never holds one of the run jobs' shared step slots;
+each kind of wait is counted on the step record, and a cause that does not clear ends the run
+resumably rather than voiding the sample or judging the build. Samples play
 plain copies of their builds with no git (`materializeCheckpoint`, without `.studio` and
 `NOTES.md`), so no history, date or note tells the builds apart. Comparators never work in the
 game folder, where run.log maps every sample to its build: each gets a folder of its own, empty

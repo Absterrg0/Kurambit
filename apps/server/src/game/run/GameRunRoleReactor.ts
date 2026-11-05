@@ -35,6 +35,7 @@ import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
+  gameRunOperationOwner,
   type RoleTurn,
   type RoleTurnKind,
   parseRoleTurn,
@@ -47,6 +48,7 @@ import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../../serverActivation.ts";
+import * as GameOperations from "../GameOperations.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
@@ -197,6 +199,7 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const game = yield* GameService.GameService;
+  const operations = yield* GameOperations.GameOperations;
   const projects = yield* GameProjectService.GameProjectService;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const jobs = yield* GameRunJobs.GameRunJobs;
@@ -459,7 +462,12 @@ const make = Effect.gen(function* () {
       const since = role.since ?? "";
       const sourceAfter = role.source
         ? yield* captureBuild(
-            checkpoints,
+            {
+              checkpoints,
+              // The landing waits out another owner's operation: a capture
+              // that fails reads as a change, which would be a guess.
+              lock: { operations, owner: gameRunOperationOwner(at.run.id), wait: true },
+            },
             root,
             at.run.id,
             BuildName.turn(turn.stepId, turn.attempt),

@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import type { ThreadId } from "@kurambit/contracts";
 import type * as GameService from "../GameService.ts";
 import { walkFiles } from "../walkFiles.ts";
+import { onceFree } from "./builds.ts";
 
 type Row = {
   ok: boolean;
@@ -67,26 +68,31 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   owner: string,
 ) {
   // Ask only targets the backend declares; anything else is recorded skipped.
-  const targets = yield* game
-    .exportTargets(creatorThreadId, owner)
-    .pipe(
-      Effect.orElseSucceed(() => ({ targets: ["Web", "Linux"] as const, displayName: "Game" })),
-    );
+  const targets = yield* onceFree(true, game.exportTargets(creatorThreadId, owner)).pipe(
+    Effect.orElseSucceed(() => ({ targets: ["Web", "Linux"] as const, displayName: "Game" })),
+  );
   const runTarget = (target: "Web" | "Linux"): Effect.Effect<Row> =>
     targets.targets.includes(target)
-      ? game.export(creatorThreadId, target, owner).pipe(
+      ? // Another owner's operation is waited out, and a failure says why in the log and exports.json.
+        onceFree(true, game.export(creatorThreadId, target, owner)).pipe(
           Effect.map((r): Row => ({
             ok: r.success,
             skipped: null,
             message: r.message,
             path: r.path,
           })),
-          Effect.orElseSucceed((): Row => ({
-            ok: false,
-            skipped: null,
-            message: `${target} export errored`,
-            path: null,
-          })),
+          Effect.catch((error) =>
+            Effect.succeed<Row>({
+              ok: false,
+              skipped: null,
+              message:
+                `${target} export failed: ${error.reason === "busy" ? "the game stayed busy with another operation" : error.reason}: ${error.detail ?? ""}`.slice(
+                  0,
+                  400,
+                ),
+              path: null,
+            }),
+          ),
         )
       : Effect.succeed({
           ok: false,

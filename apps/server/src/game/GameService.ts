@@ -534,7 +534,19 @@ const make = Effect.gen(function* () {
             ),
       ),
     );
+  // An operation that may write the game: refused to other owners while a production run holds it.
   const withRoot = Effect.fnUntraced(function* <A>(
+    threadId: ThreadId,
+    name: string,
+    work: (root: string) => Effect.Effect<A, GameOperationError>,
+    owner: string = String(threadId),
+  ) {
+    const root = yield* projects.resolve(threadId);
+    yield* projects.admitWrite(threadId, root, name, owner);
+    return yield* operations.exclusive(root, name, work(root), owner);
+  });
+  // Reads only, so a production run never refuses it.
+  const readRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
     name: string,
     work: (root: string) => Effect.Effect<A, GameOperationError>,
@@ -711,7 +723,7 @@ const make = Effect.gen(function* () {
     export: (threadId, target, owner) =>
       withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target), owner),
     exportTargets: (threadId, owner) =>
-      withRoot(
+      readRoot(
         threadId,
         "Export targets",
         (root) =>
@@ -727,8 +739,13 @@ const make = Effect.gen(function* () {
     exploreStart: explore.start,
     exploreAct: explore.act,
     exploreClose: explore.close,
+    // Its results and video land in the game folder, where a run reads its own bots' evidence.
     botRun: (threadId, input) =>
-      Effect.flatMap(projects.resolve(threadId), (root) => botRunIn(root, input)),
+      Effect.flatMap(projects.resolve(threadId), (root) =>
+        projects
+          .admitWrite(threadId, root, "Bot run", String(threadId))
+          .pipe(Effect.andThen(botRunIn(root, input))),
+      ),
     botRunIn: (root, input) => botRunIn(root, input),
     botView: (threadId, input) =>
       Effect.gen(function* () {
@@ -845,11 +862,11 @@ const make = Effect.gen(function* () {
     blenderCode: (threadId, input) =>
       withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
     blenderLook: (threadId, input) =>
-      withRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
+      readRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
     blenderScene: (threadId, input) =>
-      withRoot(threadId, "Blender scene", (root) => liveBlender.scene(root, input)),
+      readRoot(threadId, "Blender scene", (root) => liveBlender.scene(root, input)),
     blenderAssetsSearch: (threadId, input) =>
-      withRoot(threadId, "Blender assets search", (root) => liveBlender.assetsSearch(root, input)),
+      readRoot(threadId, "Blender assets search", (root) => liveBlender.assetsSearch(root, input)),
     blenderAssetsImport: (threadId, input) =>
       withRoot(threadId, "Blender assets import", (root) => liveBlender.assetsImport(root, input)),
     blenderExport: (threadId, input) =>
@@ -900,17 +917,19 @@ const make = Effect.gen(function* () {
           process: null,
         };
       }
+      const admit = projects.admitWrite(threadId, root, action, String(threadId));
       return yield* operations.exclusive(
         root,
         action,
         action === "export-linux"
-          ? exporter.export(root, "Linux")
+          ? admit.pipe(Effect.andThen(exporter.export(root, "Linux")))
           : action === "export-windows"
-            ? exporter.export(root, "Windows")
+            ? admit.pipe(Effect.andThen(exporter.export(root, "Windows")))
             : // Rebuild forces a new export and publishes it.
               action === "rebuild"
-              ? exporter.publishWeb(root)
-              : exporter.play(root),
+              ? admit.pipe(Effect.andThen(exporter.publishWeb(root)))
+              : // Play of a build already exported only reads; one it must export first is a write.
+                exporter.play(root, admit),
         String(threadId),
       );
     }),
