@@ -2,11 +2,13 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Semaphore from "effect/Semaphore";
 import {
   GAME_BOT_BOUNDS,
   GameOperationError,
@@ -17,9 +19,14 @@ import {
   type GameBotRunResult,
   type GameBotViewInput,
   type GameBotViewResult,
+  type ThreadId,
 } from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerConfig from "../config.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as BotEvidence from "./botEvidence.ts";
+import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -48,10 +55,19 @@ const JEV_DEFAULT_BASE = "https://api.typesafe.ai";
 export class GameBot extends Context.Service<
   GameBot,
   {
+    /**
+     * With `owner`, each run is recorded on that thread's bot evidence before
+     * the next starts; a run that cannot be recorded fails the call.
+     */
     readonly run: (
       root: string,
       input: GameBotRunInput,
+      owner?: ThreadId,
     ) => Effect.Effect<GameBotRunResult, GameOperationError>;
+    /** The bot runs recorded on a thread; a run decides by these, never by a game file. */
+    readonly runs: (
+      threadId: ThreadId,
+    ) => Effect.Effect<BotEvidence.ThreadBots, GameOperationError>;
     readonly view: (
       root: string,
       input: GameBotViewInput,
@@ -386,8 +402,47 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const processes = yield* GameProcesses.GameProcesses;
   const gameBrowser = yield* makeGameBrowser;
+  const scheduler = yield* Scheduler.Scheduler;
   const sessions = new Map<string, Session>();
   const runs = new Map<string, { root: string; result: GameBotRunResult }>();
+  const evidenceDir = NodePath.join((yield* ServerConfig.ServerConfig).stateDir, "bot-evidence");
+  const evidenceLock = Semaphore.makeUnsafe(1);
+  // Records untouched as long as explore evidence's belong to runs long finished.
+  const prune = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    yield* evidenceLock
+      .withPermits(1)(Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, now)))
+      .pipe(
+        Effect.catchCause((cause) => Effect.logWarning("Pruning bot evidence failed.", { cause })),
+      );
+  });
+  yield* prune;
+  yield* scheduler.register("game-bot-evidence", yield* Scheduler.every(3_600_000, prune));
+  /** The caller holds `evidenceLock`. A damaged record counts as none, and says so. */
+  const loadRecord = (threadId: ThreadId, root: string) =>
+    Effect.tryPromise({
+      try: () => BotEvidence.read(evidenceDir, threadId),
+      catch: (cause) => opError("Bot evidence", evidenceDir, "io", undefined, cause),
+    }).pipe(
+      Effect.flatMap((found) =>
+        found === "damaged"
+          ? Effect.logWarning("A thread's bot evidence is unreadable; it counts as none.", {
+              threadId,
+            }).pipe(Effect.as(BotEvidence.empty(threadId, root)))
+          : Effect.succeed(found ?? BotEvidence.empty(threadId, root)),
+      ),
+    );
+  const recordRun = (threadId: ThreadId, root: string, run: BotEvidence.BotRun) =>
+    evidenceLock.withPermits(1)(
+      Effect.gen(function* () {
+        const next = BotEvidence.add(yield* loadRecord(threadId, root), root, run);
+        yield* Effect.tryPromise({
+          try: () => BotEvidence.write(evidenceDir, next),
+          catch: (cause) =>
+            opError("Bot run", evidenceDir, "io", "The bot run could not be recorded.", cause),
+        });
+      }),
+    );
 
   const drop = (root: string): void => {
     const session = sessions.get(root);
@@ -417,7 +472,7 @@ const make = Effect.gen(function* () {
 
   const isGameOperationError = Schema.is(GameOperationError);
 
-  const run = (root: string, input: GameBotRunInput) =>
+  const run = (root: string, input: GameBotRunInput, owner?: ThreadId) =>
     Effect.gen(function* () {
       if (sessions.has(root))
         return yield* opError(
@@ -650,8 +705,22 @@ const make = Effect.gen(function* () {
             const oldest = runs.keys().next();
             if (!oldest.done) runs.delete(oldest.value);
           }
-          // The service records every run itself so testers cannot forget or
-          // double-count: one JSON line per run, the same shape the loop reads.
+          const at = new Date().toISOString();
+          // A run that played is recorded even when a stop lands right after it.
+          if (owner !== undefined)
+            yield* Effect.uninterruptible(
+              recordRun(owner, root, {
+                runId,
+                file: NodePath.relative(root, botFile),
+                mode,
+                decider,
+                won: one.status.state === "done",
+                seconds: one.gameSeconds,
+                findings: one.findings.length,
+                at,
+              }),
+            );
+          // A copy for people reading the game folder; the run decides by the record above.
           yield* Effect.promise(() =>
             NodeFSP.appendFile(
               NodePath.join(root, ".studio", "bot-results.jsonl"),
@@ -667,7 +736,7 @@ const make = Effect.gen(function* () {
                 mode,
                 decider,
                 file: NodePath.relative(root, botFile),
-                at: new Date().toISOString(),
+                at,
               })}\n`,
             ).catch(() => undefined),
           );
@@ -806,7 +875,9 @@ const make = Effect.gen(function* () {
       } satisfies GameBotReportResult;
     });
 
-  return GameBot.of({ run, view, stop, report });
+  const threadRuns = (threadId: ThreadId) => evidenceLock.withPermits(1)(loadRecord(threadId, ""));
+
+  return GameBot.of({ run, runs: threadRuns, view, stop, report });
 });
 
 export const layer = Layer.effect(GameBot, make);

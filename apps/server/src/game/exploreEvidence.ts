@@ -119,18 +119,25 @@ export const read = async (dir: string, threadId: string): Promise<ThreadEvidenc
   return decoded._tag === "Some" && decoded.value.threadId === threadId ? decoded.value : null;
 };
 
-/** A fresh name then a rename, so a crash mid-write leaves the previous record whole. */
-export const write = async (dir: string, record: ThreadEvidence) => {
+/**
+ * A thread's record file under `dir`, written to a fresh name then renamed, so
+ * a crash mid-write leaves the previous record whole. Bot evidence keeps its
+ * records the same way.
+ */
+export const writeRecordFile = async (dir: string, threadId: string, text: string) => {
   await NodeFSP.mkdir(dir, { recursive: true });
-  const target = recordPath(dir, record.threadId);
+  const target = recordPath(dir, threadId);
   const temporary = `${target}.${NodeCrypto.randomUUID()}.tmp`;
   try {
-    await NodeFSP.writeFile(temporary, encode(record));
+    await NodeFSP.writeFile(temporary, text);
     await NodeFSP.rename(temporary, target);
   } finally {
     await NodeFSP.rm(temporary, { force: true });
   }
 };
+
+export const write = (dir: string, record: ThreadEvidence) =>
+  writeRecordFile(dir, record.threadId, encode(record));
 
 /**
  * Copies a kept frame next to the record; explore scratch sits in the temp
