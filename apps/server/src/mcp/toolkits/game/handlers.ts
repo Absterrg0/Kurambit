@@ -142,6 +142,28 @@ const handlers = {
       return yield* game.packageWeb(scope.thread.threadId);
     }),
   ),
+  game_media_save: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.saveMedia(scope.thread.threadId, input.source, input.label);
+    }),
+  ),
+  game_saved_list: McpToolAccess.readsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.listSaved(scope.thread.threadId);
+    }),
+  ),
+  game_saved_delete: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      yield* game.deleteSaved(scope.thread.threadId, input.name);
+      return {};
+    }),
+  ),
   game_preview: McpToolAccess.actsAsCaller(() =>
     Effect.gen(function* () {
       const scope = yield* caller;

@@ -39,6 +39,8 @@ export const RUN_STATE_IGNORES = [
   ".studio/worktrees/",
   ".studio/comparisons/",
   ".studio/saves/",
+  // The creator's saved videos and images (gameSavedMedia.ts).
+  "saved/",
   ".studio/play-*.md",
   ".studio/proto-*.md",
   ".studio/proto-*-frames.jpg",

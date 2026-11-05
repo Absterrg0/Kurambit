@@ -57,6 +57,10 @@ import {
   GameBotReportResult,
   GameBotViewInput,
   GameBotViewResult,
+  GameMediaSaveFields,
+  GameSavedDeleteFields,
+  GameSavedListResult,
+  GameSavedMedia,
   GameWebPackage,
   GameWindowsPackage,
   OrchestratorMcpFailure,
@@ -322,6 +326,39 @@ const PackageWebTool = Tool.make("game_package_web", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const MediaSaveTool = Tool.make("game_media_save", {
+  description:
+    "Keep a video or image Kurambit generated when the creator wants it: a bot run's run.mp4 or frames, an explore session's screenshots, a comparison frame sheet, the run's final video. The storage cleanup deletes game logs after a while; this copies the file into the game's saved/ folder (ignored by git) under a readable dated name, and the original keeps working until the cleanup removes it. source is the game-relative or absolute path a game tool returned, inside builds/logs, .studio/comparisons or .studio; label gives the words after the date (\"round 2 bot run\"). Nothing in saved/ is overwritten: a taken name gets a number.",
+  parameters: Schema.Struct(GameMediaSaveFields),
+  success: GameSavedMedia,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const SavedListTool = Tool.make("game_saved_list", {
+  description:
+    "The videos and images saved in this game's saved/ folder with game_media_save or the Save button, newest first, with absolute paths.",
+  success: GameSavedListResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const SavedDeleteTool = Tool.make("game_saved_delete", {
+  description:
+    "Delete one saved video or image from this game's saved/ folder when the creator asks, by the name game_saved_list gives. Only files directly in saved/ can be deleted.",
+  parameters: Schema.Struct(GameSavedDeleteFields),
+  success: Schema.Struct({}),
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const PreviewTool = Tool.make("game_preview", {
   description:
     "Build this thread's Web release when it is missing or older than the game sources, start its managed loopback static server, and return the playable URL. A fresh existing build is served without another export. This is an actual WebAssembly game, not a screenshot. game_stop closes the server.",
@@ -572,6 +609,9 @@ export const GameToolkit = Toolkit.make(
   ExportTool,
   PackageWindowsTool,
   PackageWebTool,
+  MediaSaveTool,
+  SavedListTool,
+  SavedDeleteTool,
   PreviewTool,
   StopTool,
   ExploreStartTool,
