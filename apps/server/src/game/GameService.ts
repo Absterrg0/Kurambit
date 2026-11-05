@@ -854,6 +854,19 @@ const make = Effect.gen(function* () {
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);
       if (action === "stop") {
+        // The production run's builds, bots and editors are its own: Stop game
+        // cancels only the caller's work while a run holds the game.
+        if (yield* projects.runLive(threadId)) {
+          yield* operations.cancel(root, String(threadId));
+          return {
+            success: true,
+            message:
+              "Stopped your work on this game. The production run's builds, bots and editors keep running; stop the run to stop them.",
+            path: null,
+            url: null,
+            process: null,
+          };
+        }
         yield* operations.cancel(root);
         yield* processes.stop(root);
         yield* liveBlender.stop(root).pipe(Effect.ignore);

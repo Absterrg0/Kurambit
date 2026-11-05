@@ -67,6 +67,8 @@ export class GameProjectService extends Context.Service<
      */
     readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
     readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
+    /** Whether a production run holds this thread's game now. */
+    readonly runLive: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /** Expensive reads (asset usage, viewport, builds). */
     readonly inventory: (root: string) => Effect.Effect<
@@ -80,7 +82,6 @@ export class GameProjectService extends Context.Service<
   }
 >()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
-// The library carries only what a card shows of a live run.
 
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
@@ -399,6 +400,14 @@ const make = Effect.gen(function* () {
   });
 
   return GameProjectService.of({
+    runLive: (threadId) =>
+      threads.getThreadShell(threadId).pipe(
+        Effect.flatMap((shell) =>
+          shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
+        ),
+        Effect.map((run) => run !== null && run.status !== "ended"),
+        Effect.orElseSucceed(() => false),
+      ),
     create,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
