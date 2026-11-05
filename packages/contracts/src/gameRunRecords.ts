@@ -613,11 +613,13 @@ export const GameRunTask = Schema.Union([
     comparison: Schema.String,
   }),
   GameRunRoundTask,
-  // A run that reached rounds without a ladder writes one first.
+  // A run that reached rounds without a ladder writes one first; "revise"
+  // rewrites it once with the creator's notes from a Guided ladder review.
   Schema.TaggedStruct("ladder", {
-    phase: Schema.Literals(["write", "fix"]),
+    phase: Schema.Literals(["write", "fix", "revise"]),
     thread: Schema.NullOr(ThreadId),
     error: Schema.String,
+    notes: Schema.optionalKey(Schema.String),
   }),
   Schema.TaggedStruct("ship", {
     n: Schema.Number,

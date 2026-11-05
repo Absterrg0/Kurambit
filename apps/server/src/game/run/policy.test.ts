@@ -1623,6 +1623,65 @@ describe("ladder", () => {
       1,
     );
   });
+
+  it("a Guided run reviews the rounds' own ladder, and every answer leads back to the rounds", () => {
+    const writeLadder = (state: State.RunState, id: string) => {
+      const planned = Policy.plan(state, { now: T0, coin: 0, id: `${id}-plan` });
+      if (planned.kind !== "step" || planned.step.kind !== "role")
+        throw new Error("expected a role");
+      expect(planned.step.role).toBe("plan");
+      return Policy.applyResult(
+        planned.state,
+        planned.step,
+        done(planned.step, ladderSubmitted(ladderJson(4))),
+        { now: T0, coin: 0, id: `${id}-apply` },
+      ).state;
+    };
+    const answer = (state: State.RunState, given: string, notes: string, id: string) => {
+      const planned = Policy.plan(state, { now: T0, coin: 0, id: `${id}-ask` });
+      if (planned.kind !== "step" || planned.step.kind !== "decide")
+        throw new Error("expected the ladder review");
+      expect(planned.step.decision.kind).toBe("ladder");
+      return {
+        answers: planned.step.decision.answers.map((a) => a.answer),
+        state: Policy.applyResult(
+          planned.state,
+          planned.step,
+          { kind: "decided", answer: given, notes, by: "creator" },
+          { now: T0, coin: 0, id: `${id}-answer` },
+        ).state,
+      };
+    };
+    const startedAtBuild = {
+      ...atLadder(),
+      ladder: null,
+      profile: "guided" as const,
+      stage: "build",
+    };
+
+    // Approve: straight to the first rung's round, never to the art stage.
+    const reviewed = writeLadder(startedAtBuild, "a");
+    expect(reviewed.task._tag).toBe("decide");
+    const approved = answer(reviewed, "approve", "", "a");
+    expect(approved.answers).toContain("rewrite");
+    expect(approved.state.task._tag).toBe("round");
+
+    // Rewrite: the plan rewrites the ladder with the notes, then the creator is asked again,
+    // this time without a second rewrite, and approving leads to the rounds.
+    const rewritten = answer(writeLadder(startedAtBuild, "b"), "rewrite", "shorter rungs", "b");
+    const revise = rewritten.state.task;
+    expect(revise._tag === "ladder" && revise.phase === "revise" && revise.notes).toBe(
+      "shorter rungs",
+    );
+    const askedAgain = writeLadder(rewritten.state, "c");
+    const second = answer(askedAgain, "approve", "", "c");
+    expect(second.answers).not.toContain("rewrite");
+    expect(second.state.task._tag).toBe("round");
+
+    // Autopilot is unchanged: no review.
+    const autopilot = writeLadder({ ...startedAtBuild, profile: "autopilot" as const }, "d");
+    expect(autopilot.task._tag).toBe("round");
+  });
 });
 
 describe("art review", () => {

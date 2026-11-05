@@ -574,14 +574,19 @@ const decide = (
         ? { ...s, task: { ...stageTask("vision"), phase: "revise", review: notes } }
         : proceed(s, "vision", input.now);
     case "ladder": {
+      // The plan stage asks after writing the ladder (stage "plan"); a run that
+      // reached its rounds without one asks after the rounds' ladder task, and
+      // its answer leads back to the rounds, never to the stages.
+      const inRounds = s.stage !== "plan";
       if (answer === "rewrite")
-        return { ...s, task: { ...stageTask("plan"), phase: "revise", review: notes } };
+        return inRounds
+          ? { ...s, task: { _tag: "ladder", phase: "revise", thread: null, error: "", notes } }
+          : { ...s, task: { ...stageTask("plan"), phase: "revise", review: notes } };
       const edited = answer === "edit" ? parseLadder(notes) : null;
-      return proceed(
-        edited !== null && "ladder" in edited ? { ...s, ladder: edited.ladder } : s,
-        "plan",
-        input.now,
-      );
+      const next = edited !== null && "ladder" in edited ? { ...s, ladder: edited.ladder } : s;
+      return inRounds
+        ? { ...next, task: newRound(next, input.now) }
+        : proceed(next, "plan", input.now);
     }
     case "prototype": {
       if (answer === "retry") {
@@ -650,13 +655,20 @@ const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
         prompt: Roles.ladderWrite(),
         capMs: CAP.plan,
       }
-    : {
-        role: "plan",
-        title: "studio ladder",
-        thread: t.thread,
-        prompt: Roles.ladderFix(),
-        capMs: CAP.ladderFix,
-      };
+    : t.phase === "revise"
+      ? {
+          role: "plan",
+          title: "studio ladder",
+          prompt: Roles.ladderRevise(t.notes ?? ""),
+          capMs: CAP.plan,
+        }
+      : {
+          role: "plan",
+          title: "studio ladder",
+          thread: t.thread,
+          prompt: Roles.ladderFix(),
+          capMs: CAP.ladderFix,
+        };
 const bit = (coin: number, k: number) => Math.floor(coin * 2 ** (k + 1)) % 2 === 1;
 
 // `base`: the build the block starts from, which its first turn's change is measured against.
@@ -2160,6 +2172,15 @@ export const applyResult = (
         return out({
           ...s,
           task: { ...t, phase: "fix", thread: taken.thread, error: taken.error },
+        });
+      // A Guided creator reviews the ladder whichever path wrote it: here the
+      // rounds' own ladder for a game that started at its build, as the plan
+      // stage's ladder is reviewed for a new one.
+      if (s.profile === "guided" && taken.ladder.rungs.length > 0)
+        return out({
+          ...s,
+          ladder: taken.ladder,
+          task: { _tag: "decide", decision: ladderDecision(s, taken.ladder) },
         });
       return out({ ...s, ladder: taken.ladder, task: newRound(s, now) });
     }
