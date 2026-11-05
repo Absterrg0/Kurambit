@@ -6,7 +6,6 @@ import * as NodeCrypto from "node:crypto";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
@@ -50,6 +49,7 @@ import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import { openPagePlay, openRunnerPlay } from "./playLaunch.ts";
 import { snapshotBuildSource } from "./sourceSnapshot.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
 
 /**
  * Free memory an explore session needs to start, in MB, from
@@ -154,6 +154,7 @@ export class GameExplore extends Context.Service<
 >()("kurambit/game/GameExplore") {}
 
 const make = Effect.gen(function* () {
+  const scheduler = yield* Scheduler.Scheduler;
   const processHost = yield* ProcessHost;
   const projects = yield* GameProjectService.GameProjectService;
   const processes = yield* GameProcesses.GameProcesses;
@@ -1219,28 +1220,26 @@ const make = Effect.gen(function* () {
         }),
       );
     });
-  // Idle and wall-clock expiry without a caller: one scoped fiber sweeps the
-  // live sessions. Production timers own it; every act/close also
+  // Idle and wall-clock expiry without a caller; every act/close also
   // checks the same deadlines lazily.
-  yield* Effect.forkScoped(
-    Effect.gen(function* () {
-      for (let sweep = 1; ; sweep += 1) {
-        yield* Effect.sleep(Duration.seconds(30));
-        yield* exploreReap;
-        // A server that runs for weeks never restarts to prune; once an hour.
-        if (sweep % 120 === 0) {
-          const now = yield* Clock.currentTimeMillis;
-          // Locked: a thread resuming mid-prune must not lose its fresh write.
-          yield* evidenceLock
-            .withPermits(1)(Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, now)))
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Pruning explore evidence failed.", { cause }),
-              ),
-            );
-        }
-      }
-    }),
+  yield* scheduler.register("game-explore-expiry", yield* Scheduler.every(30_000, exploreReap));
+  // A server that runs for weeks never restarts to prune; once an hour.
+  yield* scheduler.register(
+    "game-explore-evidence",
+    yield* Scheduler.every(
+      3_600_000,
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        // Locked: a thread resuming mid-prune must not lose its fresh write.
+        yield* evidenceLock
+          .withPermits(1)(Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, now)))
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Pruning explore evidence failed.", { cause }),
+            ),
+          );
+      }),
+    ),
   );
   return GameExplore.of({
     start: exploreStart,

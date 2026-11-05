@@ -41,10 +41,16 @@ import { engineProfile } from "./engineProfile.ts";
 import {
   commandFlag,
   commandHas,
+  LIVE_IDLE_MS,
+  LIVE_SWEEP_MS,
+  type McpContent,
   memoryShortfall,
   readRecord,
-  underIdleMemoryFloor,
+  stringEnv,
+  sweepIdle,
+  textOf,
 } from "./liveProcess.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
 import {
   adoptLaunch,
   LAUNCH_ENV,
@@ -59,7 +65,6 @@ import { OFFSCREEN_POSITION, findWindowHost, type HostedWindow } from "./windowH
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
-const IDLE_MS = 10 * 60_000;
 /**
  * Free memory a live Blender needs to open, in MB: Blender, its Xvfb and the
  * MCP child peaked about 1.2 GB (PSS) on this machine through code, an asset
@@ -183,15 +188,6 @@ const sessionEnv = (homeDir: string, extra?: NodeJS.ProcessEnv): NodeJS.ProcessE
   return env;
 };
 
-/** Plain record for the stdio transport: no undefined entries. */
-const stringEnv = (env: NodeJS.ProcessEnv): Record<string, string> => {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) out[key] = value;
-  }
-  return out;
-};
-
 /**
  * Network configuration the pinned-tool installer may need. The uvx
  * addon-install child fetches over HTTPS, so proxy and CA variables ride
@@ -219,23 +215,6 @@ const toolNetworkEnv = (): NodeJS.ProcessEnv => {
 
 /** Blender's window, the size its viewport looks render at. */
 const BLENDER_WINDOW = { width: 1280, height: 800 } as const;
-
-type McpContent = {
-  readonly content?: ReadonlyArray<{
-    readonly type: string;
-    readonly text?: string;
-    readonly data?: string;
-    readonly mimeType?: string;
-  }>;
-};
-
-type McpResult = McpContent & { readonly isError?: boolean };
-
-const textOf = (result: McpContent): string =>
-  (result.content ?? [])
-    .filter((entry) => entry.type === "text")
-    .map((entry) => entry.text ?? "")
-    .join("\n");
 
 /**
  * What a live session left on disk so a later server can reap it: the
@@ -347,6 +326,7 @@ export class GameBlender extends Context.Service<
 >()("kurambit/game/GameBlender") {}
 
 const make = Effect.gen(function* () {
+  const scheduler = yield* Scheduler.Scheduler;
   const processHost = yield* ProcessHost;
   const processes = yield* GameProcesses.GameProcesses;
   const gate = yield* GameMemoryGate.GameMemoryGate;
@@ -469,7 +449,7 @@ const make = Effect.gen(function* () {
       if (
         existing !== undefined &&
         existing.blender.running() &&
-        now - existing.lastActive < IDLE_MS
+        now - existing.lastActive < LIVE_IDLE_MS
       ) {
         existing.lastActive = now;
         return existing;
@@ -746,7 +726,7 @@ const make = Effect.gen(function* () {
     root: string,
     name: string,
     args: Record<string, unknown>,
-  ): Effect.Effect<McpResult, GameOperationError> =>
+  ): Effect.Effect<McpContent, GameOperationError> =>
     Effect.gen(function* () {
       const session = yield* ensure(root);
       const result = (yield* Effect.tryPromise({
@@ -766,7 +746,7 @@ const make = Effect.gen(function* () {
               : `Blender did not answer '${name}'.`,
             cause,
           ),
-      })) as McpResult;
+      })) as McpContent;
       session.lastActive = yield* Clock.currentTimeMillis;
       const text = textOf(result);
       if (result.isError === true || /^\s*error\b/i.test(text))
@@ -813,29 +793,25 @@ const make = Effect.gen(function* () {
       return BLEND_REL;
     });
 
-  // Idle sessions die on a detached sweep so one forgotten game cannot hold
-  // Blender, Xvfb and the MCP child forever, and close early when the
-  // machine runs short of memory. A held game's Blender is never idle.
-  yield* Effect.forever(
-    Effect.gen(function* () {
-      yield* Effect.sleep("15 seconds");
-      const now = yield* Clock.currentTimeMillis;
-      const idle = (root: string) => (held.get(root) ?? 0) === 0 && sessions.has(root);
-      const roots = Array.from(sessions.keys()).filter(idle);
-      const shortMb = roots.length === 0 ? null : yield* Effect.promise(underIdleMemoryFloor);
-      for (const root of roots) {
-        const expired = now - (sessions.get(root)?.lastActive ?? now) > IDLE_MS;
-        if (!expired && shortMb === null) continue;
-        if (!expired)
-          yield* Effect.logWarning("closing an idle live Blender: memory is short", {
-            root,
-            availableMb: shortMb,
-          });
-        // Re-checked in the same synchronous step that ends the session.
-        yield* Effect.suspend(() => (idle(root) ? reap(root, take(root)) : Effect.void));
-      }
-    }),
-  ).pipe(Effect.forkDetach);
+  // A held game's Blender is never idle; the check and the close are one synchronous step.
+  const idle = (root: string) => (held.get(root) ?? 0) === 0 && sessions.has(root);
+  yield* scheduler.register(
+    "game-blender-idle",
+    yield* Scheduler.every(
+      LIVE_SWEEP_MS,
+      sweepIdle({
+        what: "live Blender",
+        idle: () =>
+          Array.from(sessions)
+            .filter(([root]) => idle(root))
+            .map(([root, session]) => ({
+              root,
+              lastActive: session.lastActive,
+              close: Effect.suspend(() => (idle(root) ? reap(root, take(root)) : Effect.void)),
+            })),
+      }),
+    ),
+  );
   yield* Effect.addFinalizer(() =>
     Effect.forEach([...sessions.keys()], drop, { discard: true, concurrency: "unbounded" }),
   );

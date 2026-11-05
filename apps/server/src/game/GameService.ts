@@ -90,6 +90,7 @@ import {
 import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
 import { comparedSource, type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
 import { WEB_BUILD_DIRECTORY } from "./webBuild.ts";
+import { textOf } from "./liveProcess.ts";
 
 /**
  * A Godot bot peaked at 710 MB in its import and 505 MB playing (Godot,
@@ -869,10 +870,10 @@ const make = Effect.gen(function* () {
             Effect.gen(function* () {
               const result = yield* liveUnity.call(root, input.tool, { ...input.arguments });
               const saved = yield* liveUnity.call(root, "editor_save_all", {}).pipe(
-                Effect.map(GameUnity.textOf),
+                Effect.map(textOf),
                 Effect.orElseSucceed(() => "Saving the scene failed."),
               );
-              return { text: `${GameUnity.textOf(result).slice(0, 8000)}\n${saved}` };
+              return { text: `${textOf(result).slice(0, 8000)}\n${saved}` };
             }),
           );
         }),
@@ -883,7 +884,7 @@ const make = Effect.gen(function* () {
           Effect.andThen(
             liveUnity.call(root, "script_eval", { code: input.code, timeout: 60 }, 90_000),
           ),
-          Effect.map((result) => ({ text: GameUnity.textOf(result).slice(0, 8000) })),
+          Effect.map((result) => ({ text: textOf(result).slice(0, 8000) })),
         ),
       ),
     unityRecompile: (threadId) =>
@@ -914,7 +915,7 @@ const make = Effect.gen(function* () {
             {},
             120_000,
           );
-          return { text: GameUnity.textOf(result) };
+          return { text: textOf(result) };
         }),
       ),
     unityScreenshot: (threadId, input) =>
@@ -937,7 +938,7 @@ const make = Effect.gen(function* () {
               tail: input.tail ?? 50,
             }),
           ),
-          Effect.map((result) => ({ text: GameUnity.textOf(result).slice(0, 12000) })),
+          Effect.map((result) => ({ text: textOf(result).slice(0, 12000) })),
         ),
       ),
     blenderCode: (threadId, input) =>
