@@ -169,8 +169,9 @@ const make = Effect.gen(function* () {
    * Memory short, or the game held by another operation: the step's job ends
    * and a durable timer runs its work again, so no job holds one of the
    * shared step slots while it waits. The waits are counted on the step's
-   * record, each kind on its own, so a restart does not reset them; both
-   * halves of a pair refused at once make one wait (one command id). The run
+   * record, each kind on its own, so a restart does not reset them. Both
+   * halves of a pair refused at once make one wait, whatever each was refused
+   * for: the command id counts every wait the step made, not each kind. The run
    * finds a pair's step by a half's id, so the timer names the half refused.
    * A timer that could not be written fails the step: a step left running
    * with neither job nor timer would wait for a restart.
@@ -198,7 +199,7 @@ const make = Effect.gen(function* () {
         .dispatch({
           type: "game-run.step.schedule",
           commandId: CommandId.make(
-            `server:game-run-${kind}:${record.id}:attempt:${job.attempt}:${n}`,
+            `server:game-run-wait:${record.id}:attempt:${job.attempt}:${(record.memoryWaits ?? 0) + (record.busyWaits ?? 0) + 1}`,
           ),
           threadId: job.threadId,
           runId: job.runId,
