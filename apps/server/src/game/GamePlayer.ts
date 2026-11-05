@@ -47,11 +47,13 @@ export class GamePlayer extends Context.Service<
      * The Linux player of the game's current sources: the one it has, a copy
      * of its main checkout's of identical sources, or a build that runs as
      * the game's exclusive operation (so it never races game_export or
-     * game_check for the editor), outside any explore start lock.
+     * game_check for the editor), outside any explore start lock. A build
+     * imports into the folder, so it runs only once `beforeBuild` admits it.
      */
     readonly playerFor: (
       owner: string,
       root: string,
+      beforeBuild?: Effect.Effect<void, GameOperationError>,
     ) => Effect.Effect<PreparedPlayer, GameOperationError>;
     /**
      * Gives a game folder a complete player of its current sources.
@@ -85,7 +87,11 @@ const make = Effect.gen(function* () {
   // time: the second waits for the first's build instead of failing busy.
   const prepareLock = Semaphore.makeUnsafe(1);
 
-  const playerFor = (owner: string, root: string) =>
+  const playerFor = (
+    owner: string,
+    root: string,
+    beforeBuild: Effect.Effect<void, GameOperationError> = Effect.void,
+  ) =>
     Effect.gen(function* () {
       const { backend, ctx } = yield* engines.context(root);
       const engine = backend.profile.displayName;
@@ -141,6 +147,7 @@ const make = Effect.gen(function* () {
       );
       const early = yield* ready(before);
       if (early !== null) return early;
+      yield* beforeBuild;
       return yield* operations.exclusive(
         root,
         `${engine} play build`,

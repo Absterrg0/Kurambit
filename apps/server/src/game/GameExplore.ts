@@ -907,6 +907,12 @@ const make = Effect.gen(function* () {
               : null;
       const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
       if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
+      // A native session imports into the folder before it plays, and a player
+      // with none cached is built there: both write the game, so a production
+      // run holding it refuses them to anyone but itself. A copy is no run's
+      // game folder, and a web session only serves the sources.
+      const admit = projects.admitWrite(threadId, root, "Explore session", String(threadId));
+      if (target === "native" && engine.play === "native" && !exploreLive.has(root)) yield* admit;
       // The player build takes minutes and is the game's own exclusive
       // operation; the start lock is held only to launch and register.
       // The editor that builds it opens through the memory gate, outside this
@@ -915,7 +921,7 @@ const make = Effect.gen(function* () {
       const player =
         playsPlayer && !exploreLive.has(root)
           ? yield* players
-              .playerFor(String(threadId), root)
+              .playerFor(String(threadId), root, admit)
               .pipe(
                 Effect.tapError((error) =>
                   error.reason === "low-memory"

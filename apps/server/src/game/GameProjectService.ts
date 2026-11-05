@@ -21,6 +21,7 @@ import {
   GameOperationError,
   gameTemplateForEngine,
   type GameCreateInput,
+  type GameRun,
   type GameListResult,
   type GameOpenInput,
   type GameProjectResult,
@@ -434,20 +435,24 @@ const make = Effect.gen(function* () {
     return root;
   });
 
+  const projectRun = (threadId: ThreadId) =>
+    threads
+      .getThreadShell(threadId)
+      .pipe(
+        Effect.flatMap((shell) =>
+          shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
+        ),
+      );
+  const holdOf = (run: GameRun | null) => {
+    if (run === null) return null;
+    if (run.status !== "ended") return "live" as const;
+    const busy = settling(run);
+    if (busy === null || !Result.isFailure(busy)) return null;
+    return busy.failure.reason === "restoring" ? ("restoring" as const) : ("finishing" as const);
+  };
   const runHold: GameProjectService["Service"]["runHold"] = (threadId) =>
-    threads.getThreadShell(threadId).pipe(
-      Effect.flatMap((shell) =>
-        shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
-      ),
-      Effect.map((run) => {
-        if (run === null) return null;
-        if (run.status !== "ended") return "live" as const;
-        const busy = settling(run);
-        if (busy === null || !Result.isFailure(busy)) return null;
-        return busy.failure.reason === "restoring"
-          ? ("restoring" as const)
-          : ("finishing" as const);
-      }),
+    projectRun(threadId).pipe(
+      Effect.map(holdOf),
       // Unknown is held: a read that fails never lets a Stop game reach the run's work.
       Effect.orElseSucceed(() => "live" as const),
     );
@@ -465,8 +470,17 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       if (isGameRunOperationOwner(owner)) return;
-      const hold = yield* runHold(threadId);
+      // Unknown is held, as for Stop game.
+      const run = yield* projectRun(threadId).pipe(Effect.option);
+      const hold = Option.isSome(run) ? holdOf(run.value) : "live";
       if (hold === null) return;
+      // The run holds its game folder only: a copy or another checkout of the game is not it.
+      if (Option.isSome(run) && run.value !== null) {
+        const gameRoot = yield* resolve(run.value.threadId, { deleted: "allowed" }).pipe(
+          Effect.option,
+        );
+        if (Option.isSome(gameRoot) && gameRoot.value !== root) return;
+      }
       // A role thread is the live run's own hand; an unreadable one is not
       // taken for one, and an ended run's roles have no work left.
       const role =
