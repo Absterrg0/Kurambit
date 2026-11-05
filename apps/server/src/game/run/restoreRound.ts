@@ -1,29 +1,37 @@
 // A creator's restore of a kept round, as its job does it: the round's build
-// comes back as a new commit on trunk, and only when nothing would be lost.
-// Every refusal is an outcome the run records, never a failure of the job.
+// comes back into the game folder (engine project, art, ASSETS.md) and becomes
+// the best, and whatever the folder held before is kept as a build first, so a
+// restore loses nothing. Every refusal is an outcome the run records, never a
+// failure of the job.
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import type { GameRun, GameRunRestoreOutcome, GameRunRestoreRefusal } from "@kurambit/contracts";
+import {
+  type GameRun,
+  type GameRunRestoreOutcome,
+  type GameRunRestoreRefusal,
+} from "@kurambit/contracts";
 
-import type * as GameService from "../GameService.ts";
-import { logLine } from "../runSetup.ts";
-import { makeGit, restoredPaths, type RunGitError } from "./git.ts";
-import * as Policy from "./policy.ts";
+import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import { RESUMABLE } from "../../orchestration-v2/gameRun/decide.ts";
+import type * as GameService from "../GameService.ts";
+import { causeText, logLine } from "../runSetup.ts";
+import { buildStep, captureBuild, isRestored, measureChange } from "./builds.ts";
+import { BuildName, keptBuild, restoredPaths } from "./buildNames.ts";
 import type { RoundRecord, RunState } from "./state.ts";
 
 export const restoreKeptRound = (input: {
   readonly game: GameService.GameService["Service"];
+  readonly checkpoints: CheckpointStore.CheckpointStore["Service"];
   readonly root: string;
   readonly run: GameRun;
   readonly state: RunState;
   readonly record: RoundRecord;
-  /** Clears what an earlier git call cut short left in the folder (repairGit). */
-  readonly repair: (log: (line: string) => Effect.Effect<void>) => Effect.Effect<void, RunGitError>;
+  readonly requestId: string;
 }): Effect.Effect<GameRunRestoreOutcome> => {
-  const { game, root, run, state, record } = input;
+  const { game, checkpoints, root, run, state, record } = input;
   const round = record.round;
   const lane = run.lane || "godot";
-  const trunk = run.trunk.length > 0 ? run.trunk : "main";
   const no = (reason: GameRunRestoreRefusal, message: string): GameRunRestoreOutcome => ({
     kind: "refused",
     reason,
@@ -33,76 +41,79 @@ export const restoreKeptRound = (input: {
     if (!record.kept)
       return no(
         "not-kept",
-        `Round ${round} was not kept; only a kept round's build can be restored. Its work stays on branch ${record.branch}.`,
+        `Round ${round} was not kept; only a kept round's build can be restored.`,
       );
     const resumable = run.ending !== null && RESUMABLE.has(run.ending);
-    if (state.inFlight?.kind === "git" && resumable)
+    if (state.inFlight?.kind === "build" && resumable)
       return no(
         "mid-step",
-        "The stopped run saved an unfinished git step and would replay it on resume. Resume the run and let that step finish, then restore.",
+        "The stopped run saved an unfinished build step and would replay it on resume. Resume the run and let that step finish, then restore.",
       );
-    const log = (line: string) => logLine(root, line);
-    // A lock or a merge an earlier git call left would block the restore with git's raw error.
-    yield* input.repair(log);
-    const git = makeGit(root, lane, log);
-    const on = yield* git.current;
-    if (on !== trunk)
-      return no(
-        "off-trunk",
-        `The game is on ${on === "HEAD" || on === "" ? "a detached commit" : `branch ${on}`}, not ${trunk}. Resume the run to let it return to ${trunk}, or switch back yourself, then restore.`,
-      );
-    const expected = Policy.expectedBranch(state);
-    if (expected !== null && expected !== trunk && resumable)
+    if (resumable && state.task._tag === "round" && state.task.phase !== "start")
       return no(
         "mid-round",
-        `The stopped run is in the middle of its work on ${expected}. Resume it and let the round finish, then restore.`,
+        `The stopped run is in the middle of round ${state.task.n}. Resume it and let the round finish, then restore.`,
       );
-    const dirty = yield* git.uncommitted;
-    if (dirty.length > 0)
-      return no(
-        "uncommitted-work",
-        `The game has uncommitted changes, so nothing was restored: ${git.summary(dirty.join("\n"))}. Commit or discard them first.`,
-      );
-    const sha = yield* git.keptCommit(record.branch, trunk);
-    if (sha === null)
+    const build = record.build;
+    if (build === undefined || build.length === 0)
       return no(
         "commit-missing",
-        `Round ${round}'s commit (branch ${record.branch}) is no longer on ${trunk}.`,
+        `Round ${round}'s build is not recorded: the round is from before the run kept its builds on checkpoints, and its work is on branch ${record.branch}.`,
       );
+    const log = (line: string) => logLine(root, line);
     const what = restoredPaths(lane).join(", ");
-    if (yield* git.sameBuild(sha))
+    // The folder as it is, kept once per request: a restore a restart cut
+    // short must not keep its own half-restored folder as the creator's work.
+    const beforeName = BuildName.restoreBefore(input.requestId);
+    const beforeRef = checkpointRefForGameRun(run.id, beforeName);
+    // A repeat after a restart finds the build by name; only a first attempt has its commit.
+    const beforeSha = (yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: beforeRef }))
+      ? ""
+      : yield* captureBuild(checkpoints, root, run.id, beforeName);
+    const before = keptBuild(run.id, beforeName, lane, beforeSha);
+    const restorePaths = isRestored(lane);
+    if (!(yield* measureChange(checkpoints, root, restorePaths, beforeRef, build)).changed)
       return {
         kind: "restored",
-        sha,
+        sha: build,
         message: `Round ${round}'s build (${what}) is already the game's current build.`,
       } satisfies GameRunRestoreOutcome;
-    // Closed first, so no live editor saves its in-memory scene over the restored files.
-    yield* game.closeLiveEditors(root);
-    const restored = yield* git.restoreBuild(sha, `restore round ${round} (creator)`);
-    if (!(yield* git.sameBuild(sha)))
+    const restored = yield* buildStep(
+      { game, checkpoints },
+      { root, runId: run.id, lane },
+      { _tag: "restore", sha: build, keep: [BuildName.best] },
+    );
+    if (!restored.build.ok)
+      return no("commit-missing", `Round ${round}'s build is gone (${restored.build.detail}).`);
+    const after = yield* captureBuild(
+      checkpoints,
+      root,
+      run.id,
+      BuildName.restoreAfter(input.requestId),
+    );
+    if ((yield* measureChange(checkpoints, root, restorePaths, build, after)).changed)
       return no(
         "restore-incomplete",
-        `Restoring round ${round} did not reproduce its build; see .studio/run.log and the game's git status.`,
+        `Restoring round ${round} did not reproduce its build; see .studio/run.log.`,
       );
     yield* log(
-      `creator restored round ${round} (${sha.slice(0, 8)}) as ${restored.slice(0, 8)} on ${trunk}: ${what}`,
+      `creator restored round ${round} (${build.slice(0, 8)}): ${what}; the folder before is ${before}`,
     );
     return {
       kind: "restored",
-      sha: restored,
-      message: `Round ${round}'s ${what} are back as commit ${restored.slice(0, 8)} on ${trunk}; notes, PLAN.md, VISION.md, bots and run records were left as they are. Later commits stay in git history, and restoring a later kept round goes forward again.`,
+      sha: build,
+      message: `Round ${round}'s ${what} are back in the game folder; notes, PLAN.md, VISION.md, bots and run records were left as they are. What the folder held before is kept as ${before}`,
     } satisfies GameRunRestoreOutcome;
   }).pipe(
-    Effect.catchTags({
-      RunGitError: (cause) =>
-        Effect.succeed(
-          cause.op === "restore-apply"
-            ? no(
-                "local-changes",
-                `Nothing was restored: git refused to apply it (${cause.reason}). Usually a change made meanwhile touches a restored file, or another git command is running; commit or discard the change, then restore again.`,
-              )
-            : no("git-failed", `${cause.message} See .studio/run.log and the game's git status.`),
-        ),
-    }),
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.interrupt
+        : Effect.succeed(
+            no(
+              "git-failed",
+              `The restore could not finish (${causeText(cause)}); see .studio/run.log.`,
+            ),
+          ),
+    ),
   );
 };

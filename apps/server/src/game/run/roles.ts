@@ -133,7 +133,7 @@ export const proto = (
   lane: string,
   guided: { readonly pitch: string; readonly notes: string } | null = null,
 ): string =>
-  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. ${laneProfile(lane).run.prompts.shell}Keep the boot clean. ${
+  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} with placeholder art only: something winnable and losable. ${laneProfile(lane).run.prompts.shell}Keep the boot clean. ${
     guided === null
       ? ""
       : `${guided.notes.length > 0 ? `The creator saw an earlier pair of prototypes and asked for this: ${guided.notes}\n` : ""}The creator chooses between this prototype and another one. Before you finish, play your build once with game_explore_start/act/close, so the creator sees its frames. Then write ${guided.pitch}: two lines in plain words, what this version tries and how it feels to play. `
@@ -292,13 +292,19 @@ export const reviewerWrite = (n: number, move: string, verdicts: string, facts: 
   `Stop playing, now write it. Read .studio/reviewer-${n}.md. Rewrite the notes file with what you did and felt, then ${`submit the run's ledger with game_run_submit as {"_tag":"ledger","ledger":"<the ledger>"}, the run keeping it in .studio/next.md; the ledger holds`}: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the smallest change that fixes the top flaw, including a deeper rule or system change if needed, without filler or length targets; a DO NOT REGRESS list; and the furthest state you reached and what blocked further progress. Prior round worked from: ${move} Verdicts ${verdicts}. State whether that prior flaw is fixed, partly fixed, or unchanged, with what action reached which state. Code facts: ${facts} Play weakness first. ${`${REFUSED} You may only write .studio/reviewer-${n}.md.`}`;
 
 // Ladder rounds: next.md is a ledger the builder clears beside the next rung, never a goal.
-const LEDGER_READ = (n: number) =>
-  `This round's tester and blind players already played this build: do not play it again. Read PLAN.md, the tester's notes .studio/tester-${n}.md, this round's .studio/comparisons/round-${n}-*.json if there is one (the blind players' reports and frame sheets), .studio/bot-results.jsonl and the code. Write .studio/reviewer-${n}.md with what their play shows and what you see in the code.`;
+const LEDGER_READ = (n: number, comparison: string) =>
+  `This round's tester and blind players already played this build: do not play it again. Read PLAN.md, the tester's notes .studio/tester-${n}.md, ${comparison === "" ? "" : `this round's comparison ${comparison} (the blind players' reports and frame sheets), `}.studio/bot-results.jsonl and the code. Write .studio/reviewer-${n}.md with what their play shows and what you see in the code.`;
 const LEDGER_BODY = (built: string, ladder: string) =>
   `The ledger is what the builder clears alongside the next rung, never instead of it: the bugs and rough edges their play shows, most important first, each with where it shows; how to raise the feel and look; a DO NOT REGRESS list of what works now; the furthest state reached and what blocked further progress. Name no next move: the ladder sets each round's goal. This round: ${built} The ladder now:\n${ladder}\n`;
 
-export const reviewerLedger = (n: number, built: string, ladder: string, facts: string): string =>
-  `${SKILL_LINE}${LEDGER_READ(n)} Then submit the ledger with game_run_submit as {"_tag":"ledger","ledger":"<the ledger>"}; the run keeps it in .studio/next.md. ${LEDGER_BODY(built, ladder)} Only when something blocks the ladder (for example the core is unplayable, so no later rung can be built or checked) add one ladder change to the submission as "rungChange":{"why":"...","is":"...","checks":[{"what":"...","how":"..."}]} with 2 to 4 checks; it becomes the next rung. ${REFUSED} Code facts: ${facts} You may only write .studio/reviewer-${n}.md.`;
+export const reviewerLedger = (
+  n: number,
+  comparison: string,
+  built: string,
+  ladder: string,
+  facts: string,
+): string =>
+  `${SKILL_LINE}${LEDGER_READ(n, comparison)} Then submit the ledger with game_run_submit as {"_tag":"ledger","ledger":"<the ledger>"}; the run keeps it in .studio/next.md. ${LEDGER_BODY(built, ladder)} Only when something blocks the ladder (for example the core is unplayable, so no later rung can be built or checked) add one ladder change to the submission as "rungChange":{"why":"...","is":"...","checks":[{"what":"...","how":"..."}]} with 2 to 4 checks; it becomes the next rung. ${REFUSED} Code facts: ${facts} You may only write .studio/reviewer-${n}.md.`;
 
 export const SHIP_PLAY = `${PLAYBOOK}${PLAYTEST_LINE}Play the game in this folder to the end if you can. After every couple of plays, append what you did and felt to .studio/ship.md. Do not change files. Do not use subagents.`;
 export const shipWrite = (): string =>

@@ -228,6 +228,7 @@ const roleAt = (step: State.Step, seq: number): State.RoleStep | null => {
 // A step's result must be one its kind can produce; the policy relies on it.
 const RESULTS: Record<string, ReadonlyArray<GameRunStepResult["kind"]>> = {
   role: ["done", "failed", "ended"],
+  build: ["build", "failed", "ended"],
   git: ["git", "failed", "ended"],
   boot: ["boot", "failed", "ended"],
   facts: ["facts", "failed", "ended"],
@@ -461,6 +462,17 @@ type Command<T extends OrchestrationV2GameRunCommand["type"]> = Extract<
  * Why an ended run cannot be moved on yet: its ending's finish (stops, outputs,
  * exports) or a creator's restore is still working the game folder.
  */
+/**
+ * A run from before builds on checkpoints versioned on git branches its steps
+ * can no longer run: it is history, read but never continued.
+ */
+export const gitEra = (run: GameRun) => run.versions !== "checkpoints";
+const gitEraRefusal = (run: GameRun) =>
+  refuse(
+    "not-resumable",
+    `Run ${run.id} kept its builds on git branches (round-N), which this Kurambit no longer continues. Start a new run: it goes on from the game as it is, and the old branches stay as they are.`,
+  );
+
 /** Refuses a move while the run's ending or a restore still owns the game folder. */
 export const settling = (run: GameRun) =>
   run.endedAt !== null && run.finished !== run.endedAt
@@ -550,6 +562,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
         endedAt: null,
         finished: null,
         restore: null,
+        versions: "checkpoints",
         startedAt: work.at,
         updatedAt: work.at,
       },
@@ -589,6 +602,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
     if (run.status !== "ended") return refuse("run-live", `Run ${run.id} is still going.`);
     const busy = settling(run);
     if (busy !== null) return busy;
+    if (gitEra(run)) return gitEraRefusal(run);
     if (run.ending === null || !RESUMABLE.has(run.ending))
       return refuse(
         "not-resumable",
@@ -653,6 +667,7 @@ const steer = (work: Work, command: Command<"game-run.steer">) =>
   Result.flatMap(current(work, command.runId), (run) => {
     const busy = run.status === "ended" ? settling(run) : null;
     if (busy !== null) return busy;
+    if (run.status === "ended" && gitEra(run)) return gitEraRefusal(run);
     const inFlight = inFlightOf(work, run);
     const before = toState(run, work.records.rounds, inFlight);
     const noted = { ...before, steer: [...before.steer, command.note.trim()] };

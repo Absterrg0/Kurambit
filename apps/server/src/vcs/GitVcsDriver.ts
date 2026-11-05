@@ -12,6 +12,7 @@ import { ChildProcessSpawner } from "effect/process";
 
 import {
   GitCommandError,
+  CheckpointRef,
   VcsProcessExitError,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
@@ -790,15 +791,279 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     "core.fsyncMethod=fsync",
   ] as const;
 
+  // A private index for work on a checkpoint's tree: the user's index, HEAD and
+  // branches are never written, and its unique name never waits on another's lock.
+  const withTempIndex = <A, E, R>(
+    cwd: string,
+    work: (env: NodeJS.ProcessEnv) => Effect.Effect<A, E, R>,
+  ) =>
+    Effect.gen(function* () {
+      const gitCommonDir = yield* resolveGitCommonDir(cwd);
+      const indexId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+      const tempIndexPath = path.join(gitCommonDir, `kurambit-checkpoint-index-${indexId}`);
+      const cleanup = Effect.forEach(
+        [tempIndexPath, `${tempIndexPath}.lock`],
+        (indexFile) => fileSystem.remove(indexFile, { force: true }).pipe(Effect.ignore),
+        { discard: true },
+      );
+      return yield* work({ ...process.env, GIT_INDEX_FILE: tempIndexPath }).pipe(
+        Effect.ensuring(cleanup),
+      );
+    });
+
+  // A path with its symlinks resolved, for one that may not exist yet: the
+  // nearest existing folder above it is resolved and the rest kept.
+  const resolvedPath = (target: string): Effect.Effect<string> =>
+    fileSystem
+      .realPath(target)
+      .pipe(
+        Effect.catch(() =>
+          path.dirname(target) === target
+            ? Effect.succeed(target)
+            : resolvedPath(path.dirname(target)).pipe(
+                Effect.map((parent) => path.join(parent, path.basename(target))),
+              ),
+        ),
+      );
+
+  // The repository's top and where `cwd` sits in it ("" at the top, else "game/"):
+  // scoped work names paths relative to `cwd` and never reaches past it.
+  const resolveTopLevel = (cwd: string) =>
+    execute({
+      operation: "GitVcsDriver.checkpoints.resolveTopLevel",
+      cwd,
+      args: ["rev-parse", "--show-toplevel", "--show-prefix"],
+    }).pipe(
+      Effect.map((result) => {
+        const [top = "", prefix = ""] = result.stdout.split("\n");
+        return { top: top.trim(), prefix: prefix.trim() };
+      }),
+    );
+
+  // Checkpoint index work never reads an fsmonitor's cached answer, which can
+  // say a file is unchanged when it is not.
+  const checkpointIndexConfig = [
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "sparse.expectFilesOutsideOfPatterns=false",
+  ];
+
+  /**
+   * Seeds the private index at `env.GIT_INDEX_FILE` from a copy of the user's
+   * index read over `tree`, so entries the tree shares keep their stat data and
+   * only files that may differ are hashed. The copy keeps a timestamp below the
+   * user index's, preserving git's racy check. False when the user's index
+   * holds flags that would hide a change (skip-worktree outside a sparse cone,
+   * assume-unchanged): the caller then reads the tree plainly and hashes all.
+   */
+  const seedFromUserIndex = (input: {
+    readonly operation: string;
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly tree: string;
+    readonly sparseCheckout: boolean;
+  }) => {
+    const { operation, cwd, env, tree, sparseCheckout } = input;
+    const indexFile = env.GIT_INDEX_FILE!;
+    const indexConfig = checkpointIndexConfig;
+    return Effect.gen(function* () {
+      const indexPath = yield* execute({
+        operation,
+        cwd: cwd,
+        args: ["rev-parse", "--path-format=absolute", "--git-path", "index"],
+      });
+      const { mtime } = yield* fileSystem.stat(indexPath.stdout.trim());
+      if (Option.isNone(mtime)) return false;
+      // Stay below the source timestamp even if Date rounded up, preserving Git's racy check.
+      const indexTime = Math.floor((mtime.value.getTime() - 1) / 1000);
+      if (indexTime <= 0) return false;
+      yield* fileSystem.copyFile(indexPath.stdout.trim(), indexFile);
+      yield* execute({
+        operation,
+        cwd: cwd,
+        args: [...indexConfig, "read-tree", "--reset", tree],
+        env: env,
+      });
+      // read-tree can rewrite the index, so restore its racy timestamp afterward.
+      yield* fileSystem.utimes(indexFile, indexTime, indexTime);
+      let specialFlags = false;
+      let recordStart = true;
+      let skipped = false;
+      let skippedRecord: number[] = [];
+      const skippedPaths: string[] = [];
+      yield* vcsProcess.run({
+        operation,
+        command: "git",
+        cwd: cwd,
+        args: [...indexConfig, "ls-files", "--full-name", "--sparse", "-v", "-z"],
+        env: env,
+        maxOutputBytes: 4_096,
+        outputMode: "truncate",
+        onStdoutChunk: (chunk) => {
+          for (const byte of chunk) {
+            if (recordStart) skipped = byte === 83;
+            if (skipped && sparseCheckout) {
+              if (byte !== 0) skippedRecord.push(byte);
+              else {
+                if (skippedRecord.at(-1) !== 47) {
+                  const name = Buffer.from(skippedRecord).subarray(2);
+                  if (!NodeBuffer.isUtf8(name)) specialFlags = true;
+                  else skippedPaths.push(name.toString("utf8"));
+                }
+                skippedRecord = [];
+              }
+            }
+            if (recordStart && ((byte >= 97 && byte <= 122) || (!sparseCheckout && byte === 83))) {
+              specialFlags = true;
+            }
+            recordStart = byte === 0;
+          }
+        },
+      });
+      if (skippedPaths.length > 0 && !specialFlags) {
+        const selected = yield* execute({
+          operation,
+          cwd: cwd,
+          args: [...indexConfig, "sparse-checkout", "check-rules", "-z"],
+          stdin: skippedPaths.join("\0") + "\0",
+          env: env,
+          maxOutputBytes: 1,
+          outputMode: "truncate",
+        });
+        specialFlags = selected.stdout.length > 0 || selected.stdoutTruncated;
+      }
+      // Sparse Git clears skip-worktree for present files. Manual flags still need a reset.
+      return !specialFlags;
+    }).pipe(Effect.orElseSucceed(() => false));
+  };
+
+  // Large trees: these walk and write every file in scope.
+  const TREE_TIMEOUT_MS = 10 * 60_000;
+  const scopeSpecs = (prefix: string, filePaths: ReadonlyArray<string>) =>
+    filePaths.map((file) => `:(top,literal)${prefix}${file}`);
+
+  /**
+   * The checkpoint's files under `filePaths`, back in the worktree: only files
+   * that differ are written (an unchanged file keeps its mtime, so an engine
+   * watching the folder sees nothing), files the checkpoint lacks that are not
+   * ignored go, and nothing outside the scope, nor the user's index, changes.
+   */
+  const restoreScoped = (cwd: string, commitOid: string, filePaths: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const operation = "GitVcsDriver.checkpoints.restoreCheckpoint";
+      if (filePaths.length === 0) return;
+      const { top, prefix } = yield* resolveTopLevel(cwd);
+      const specs = scopeSpecs(prefix, filePaths);
+      yield* withTempIndex(top, (env) =>
+        Effect.gen(function* () {
+          // A seeded copy of the user's index hashes only the files that may
+          // differ. When its flags could hide a change, every file is hashed:
+          // a restore converges or fails, it never skips a differing file.
+          const seeded = yield* seedFromUserIndex({
+            operation,
+            cwd: top,
+            env,
+            tree: commitOid,
+            sparseCheckout: false,
+          });
+          if (!seeded) {
+            yield* Effect.forEach(
+              [env.GIT_INDEX_FILE!, `${env.GIT_INDEX_FILE!}.lock`],
+              (file) => fileSystem.remove(file, { force: true }).pipe(Effect.ignore),
+              { discard: true },
+            );
+            yield* execute({
+              operation,
+              cwd: top,
+              args: [...checkpointIndexConfig, "read-tree", commitOid],
+              env,
+            });
+          }
+          yield* execute({
+            operation,
+            cwd: top,
+            args: [...checkpointIndexConfig, "update-index", "-q", "--refresh"],
+            env,
+            allowNonZeroExit: true,
+            timeoutMs: TREE_TIMEOUT_MS,
+            maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+            outputMode: "truncate",
+          });
+          const differing = yield* execute({
+            operation,
+            cwd: top,
+            args: [...checkpointIndexConfig, "diff-files", "--name-only", "-z", "--", ...specs],
+            env,
+            timeoutMs: TREE_TIMEOUT_MS,
+            maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+            outputMode: "error",
+          });
+          const extra = yield* execute({
+            operation,
+            cwd: top,
+            args: [
+              ...checkpointIndexConfig,
+              "ls-files",
+              "--others",
+              "--exclude-standard",
+              "-z",
+              "--",
+              ...specs,
+            ],
+            env,
+            timeoutMs: TREE_TIMEOUT_MS,
+            maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+            outputMode: "error",
+          });
+          const extraPaths = splitNullSeparatedGitStdoutPaths(extra);
+          // git lists a nested repository it will not look into as "dir/". It is
+          // someone's own repository, not a file the checkpoint lacks: it stays.
+          const nested = extraPaths.filter((file) => file.endsWith("/"));
+          if (nested.length > 0)
+            yield* Effect.logWarning("A scoped restore left nested repositories in place", {
+              cwd,
+              nested,
+            });
+          for (const file of extraPaths.filter((entry) => !entry.endsWith("/")))
+            yield* fileSystem.remove(path.join(top, file), { force: true }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new VcsProcessExitError({
+                    operation,
+                    command: "rm",
+                    cwd: top,
+                    exitCode: 1,
+                    detail: `Could not remove ${file}: ${cause.message}`,
+                  }),
+              ),
+            );
+          const write = splitNullSeparatedGitStdoutPaths(differing);
+          if (write.length > 0)
+            yield* execute({
+              operation,
+              cwd: top,
+              args: [
+                ...checkpointIndexConfig,
+                "-c",
+                "core.longpaths=true",
+                "checkout-index",
+                "-f",
+                "-z",
+                "--stdin",
+              ],
+              stdin: `${write.join("\0")}\0`,
+              env,
+              timeoutMs: TREE_TIMEOUT_MS,
+            });
+        }),
+      );
+    });
+
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = VcsProcess.CHECKPOINT_CAPTURE_OPERATION;
-      const indexConfig = [
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "sparse.expectFilesOutsideOfPatterns=false",
-      ];
+      const indexConfig = checkpointIndexConfig;
       const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
       const indexId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
       const tempIndexPath = path.join(gitCommonDir, `kurambit-checkpoint-index-${indexId}`);
@@ -817,7 +1082,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         { discard: true },
       );
 
-      yield* Effect.gen(function* () {
+      return yield* Effect.gen(function* () {
         const headExists = yield* hasHeadCommit(input.cwd);
         const sparseConfig = yield* execute({
           operation,
@@ -836,78 +1101,13 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           sparseCheckout = /--(?:\[no-\])?sparse\b/.test(`${help.stdout}${help.stderr}`);
         }
         if (headExists) {
-          const reusedIndex = yield* Effect.gen(function* () {
-            const indexPath = yield* execute({
-              operation,
-              cwd: input.cwd,
-              args: ["rev-parse", "--path-format=absolute", "--git-path", "index"],
-            });
-            const { mtime } = yield* fileSystem.stat(indexPath.stdout.trim());
-            if (Option.isNone(mtime)) return false;
-            // Stay below the source timestamp even if Date rounded up, preserving Git's racy check.
-            const indexTime = Math.floor((mtime.value.getTime() - 1) / 1000);
-            if (indexTime <= 0) return false;
-            yield* fileSystem.copyFile(indexPath.stdout.trim(), tempIndexPath);
-            yield* execute({
-              operation,
-              cwd: input.cwd,
-              args: [...indexConfig, "read-tree", "--reset", "HEAD"],
-              env: commitEnv,
-            });
-            // read-tree can rewrite the index, so restore its racy timestamp afterward.
-            yield* fileSystem.utimes(tempIndexPath, indexTime, indexTime);
-            let specialFlags = false;
-            let recordStart = true;
-            let skipped = false;
-            let skippedRecord: number[] = [];
-            const skippedPaths: string[] = [];
-            yield* vcsProcess.run({
-              operation,
-              command: "git",
-              cwd: input.cwd,
-              args: [...indexConfig, "ls-files", "--full-name", "--sparse", "-v", "-z"],
-              env: commitEnv,
-              maxOutputBytes: 4_096,
-              outputMode: "truncate",
-              onStdoutChunk: (chunk) => {
-                for (const byte of chunk) {
-                  if (recordStart) skipped = byte === 83;
-                  if (skipped && sparseCheckout) {
-                    if (byte !== 0) skippedRecord.push(byte);
-                    else {
-                      if (skippedRecord.at(-1) !== 47) {
-                        const name = Buffer.from(skippedRecord).subarray(2);
-                        if (!NodeBuffer.isUtf8(name)) specialFlags = true;
-                        else skippedPaths.push(name.toString("utf8"));
-                      }
-                      skippedRecord = [];
-                    }
-                  }
-                  if (
-                    recordStart &&
-                    ((byte >= 97 && byte <= 122) || (!sparseCheckout && byte === 83))
-                  ) {
-                    specialFlags = true;
-                  }
-                  recordStart = byte === 0;
-                }
-              },
-            });
-            if (skippedPaths.length > 0 && !specialFlags) {
-              const selected = yield* execute({
-                operation,
-                cwd: input.cwd,
-                args: [...indexConfig, "sparse-checkout", "check-rules", "-z"],
-                stdin: skippedPaths.join("\0") + "\0",
-                env: commitEnv,
-                maxOutputBytes: 1,
-                outputMode: "truncate",
-              });
-              specialFlags = selected.stdout.length > 0 || selected.stdoutTruncated;
-            }
-            // Sparse Git clears skip-worktree for present files. Manual flags still need a reset.
-            return !specialFlags;
-          }).pipe(Effect.orElseSucceed(() => false));
+          const reusedIndex = yield* seedFromUserIndex({
+            operation,
+            cwd: input.cwd,
+            env: commitEnv,
+            tree: "HEAD",
+            sparseCheckout,
+          });
           if (!reusedIndex) {
             if (sparseCheckout) {
               const cone = yield* execute({
@@ -1053,6 +1253,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           cwd: input.cwd,
           args: [...durableWrite, "update-ref", input.checkpointRef, commitOid],
         });
+        return commitOid;
       }).pipe(Effect.ensuring(cleanupTempIndex));
     }),
 
@@ -1072,6 +1273,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
 
       if (!commitOid) {
         return false;
+      }
+      if (input.filePaths !== undefined) {
+        yield* restoreScoped(input.cwd, commitOid, input.filePaths);
+        return true;
       }
 
       const tracked = yield* execute({
@@ -1181,6 +1386,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         args: [
           "diff",
           ...(input.format === "numstat" ? ["--numstat", "-z"] : ["--patch"]),
+          ...(input.relative === true ? ["--relative"] : []),
           "--no-color",
           "--no-ext-diff",
           "--no-textconv",
@@ -1259,6 +1465,88 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       return new Set(pathLists.flat().filter((path) => path.length > 0));
     }),
 
+    updateCheckpointRef: Effect.fn("GitVcsDriver.checkpoints.updateCheckpointRef")(
+      function* (input) {
+        const operation = "GitVcsDriver.checkpoints.updateCheckpointRef";
+        const commitOid = yield* resolveCheckpointCommit(input.cwd, input.oid);
+        if (commitOid === null) return false;
+        yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: [...durableWrite, "update-ref", input.checkpointRef, commitOid],
+        });
+        return true;
+      },
+    ),
+
+    materializeCheckpoint: Effect.fn("GitVcsDriver.checkpoints.materializeCheckpoint")(
+      function* (input) {
+        const operation = "GitVcsDriver.checkpoints.materializeCheckpoint";
+        const commitOid = yield* resolveCheckpointCommit(input.cwd, input.checkpointRef);
+        if (commitOid === null) return false;
+        const { top, prefix } = yield* resolveTopLevel(input.cwd);
+        const fail = (detail: string) =>
+          new VcsProcessExitError({ operation, command: "mkdir", cwd: top, exitCode: 1, detail });
+        // The copy's folder is removed whole below, so it must share no path
+        // with the repository, its git dir or a folder holding either.
+        const destination = yield* resolvedPath(path.resolve(input.destination));
+        for (const guarded of [top, yield* resolveGitCommonDir(input.cwd)]) {
+          const real = yield* resolvedPath(guarded);
+          const within = (inner: string, outer: string) =>
+            inner === outer || inner.startsWith(`${outer}${path.sep}`);
+          if (within(destination, real) || within(real, destination))
+            return yield* fail(`Refusing to replace ${input.destination}: it overlaps ${guarded}.`);
+        }
+        // A fresh folder every time, so a repeat writes the same copy and nothing older survives.
+        yield* fileSystem
+          .remove(input.destination, { recursive: true, force: true })
+          .pipe(Effect.mapError((cause) => fail(cause.message)));
+        yield* fileSystem
+          .makeDirectory(input.destination, { recursive: true })
+          .pipe(Effect.mapError((cause) => fail(cause.message)));
+        yield* withTempIndex(top, (env) =>
+          Effect.gen(function* () {
+            // Only `cwd`'s own subtree, read as the index's root, so the copy
+            // holds the cwd's files at the paths they have below it.
+            const tree =
+              prefix.length === 0 ? commitOid : `${commitOid}:${prefix.replace(/\/$/, "")}`;
+            yield* execute({ operation, cwd: top, args: ["read-tree", tree], env });
+            const excluded = input.excludePaths ?? [];
+            if (excluded.length > 0)
+              yield* execute({
+                operation,
+                cwd: top,
+                args: [
+                  "rm",
+                  "-r",
+                  "-q",
+                  "--cached",
+                  "--ignore-unmatch",
+                  "--",
+                  ...scopeSpecs("", excluded),
+                ],
+                env,
+              });
+            yield* execute({
+              operation,
+              cwd: top,
+              args: [
+                "-c",
+                "core.longpaths=true",
+                "checkout-index",
+                "-a",
+                "-f",
+                `--prefix=${input.destination.replace(/[\\/]*$/, "")}/`,
+              ],
+              env,
+              timeoutMs: TREE_TIMEOUT_MS,
+            });
+          }),
+        );
+        return true;
+      },
+    ),
+
     deleteCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.deleteCheckpointRefs")(
       function* (input) {
         yield* Effect.forEach(
@@ -1274,6 +1562,30 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         );
       },
     ),
+    listCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.listCheckpointRefs")(function* (input) {
+      const listed = yield* execute({
+        operation: "GitVcsDriver.checkpoints.listCheckpointRefs",
+        cwd: input.cwd,
+        args: [
+          "for-each-ref",
+          "--format=%(refname)%00%(objectname)%00%(committerdate:unix)",
+          input.prefix,
+        ],
+        maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+        outputMode: "error",
+      });
+      return listed.stdout
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => {
+          const [ref = "", oid = "", at = "0"] = line.split("\0");
+          return {
+            checkpointRef: CheckpointRef.make(ref),
+            oid,
+            committedAt: Number.parseInt(at, 10) || 0,
+          };
+        });
+    }),
   };
 
   return {

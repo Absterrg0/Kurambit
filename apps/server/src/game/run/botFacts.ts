@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The round's bot files are copied from the game folder into the build's checkout on disk.
-// One bot-fact step: the round's tester bot plays one build in a fresh T3 worktree at its sha.
+// One bot-fact step: the round's tester bot plays one build in a fresh plain copy of it.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -8,7 +8,7 @@ import { GameOperationError } from "@kurambit/contracts";
 import { botEnding, botFinalState } from "../gameBotRuntime.ts";
 import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
-import type { RoleDeps } from "./roleWorkspace.ts";
+import { playCopy, type RoleDeps } from "./roleWorkspace.ts";
 import type { Step } from "./state.ts";
 
 type BotStep = Extract<Step, { kind: "bot" }>;
@@ -32,6 +32,7 @@ export const runBotFact = (
   ctx: {
     readonly root: string;
     readonly runId: string;
+    readonly copies: string;
     readonly log: (line: string) => Effect.Effect<void>;
   },
   step: BotStep,
@@ -40,34 +41,36 @@ export const runBotFact = (
     kind: "bot",
     fact: { ending: "error", seconds: 0, final: {}, note: plain(note, ctx.root) },
   });
-  const vcs = deps.vcs;
-  const branch = `studio-wt/${ctx.runId}-${step.id}-bot`;
-  // A resumed step reuses the name, so whatever an interrupted attempt left
-  // under it goes first. Best effort: a leftover that stays makes the create fail.
-  const clearStale = Effect.gen(function* () {
-    yield* vcs.pruneWorktrees({ cwd: ctx.root }).pipe(Effect.ignore);
-    const refs = yield* vcs.listRefs({
-      cwd: ctx.root,
-      query: branch,
-      refKind: "local",
-      refresh: true,
-    });
-    const stale = refs.refs.find((ref) => ref.name === branch);
-    if (stale === undefined) return;
-    if (stale.worktreePath !== null)
-      yield* vcs.removeWorktree({ cwd: ctx.root, path: stale.worktreePath, force: true });
-    yield* vcs.deleteLocalBranch({ cwd: ctx.root, refName: branch, force: true });
-  }).pipe(Effect.catchCause(() => ctx.log(`bot checkout ${branch}: stale cleanup failed`)));
+  // A fresh copy every time: a resumed step's earlier copy is replaced whole.
+  const copy = NodePath.join(ctx.copies, `bot-${step.id}`);
   const play = Effect.acquireUseRelease(
-    clearStale.pipe(
-      Effect.andThen(
-        vcs.createWorktree({ cwd: ctx.root, refName: step.sha, newRefName: branch, path: null }),
+    playCopy(deps, ctx.root, step.sha, copy).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GameOperationError({
+            operation: "Bot facts",
+            path: step.sha,
+            reason: "io",
+            detail: `could not copy the build (${cause.message})`,
+          }),
+      ),
+      Effect.flatMap((made) =>
+        made
+          ? Effect.succeed({ worktree: { path: copy } })
+          : Effect.fail(
+              new GameOperationError({
+                operation: "Bot facts",
+                path: step.sha,
+                reason: "io",
+                detail: "the build is gone",
+              }),
+            ),
       ),
     ),
     ({ worktree }) =>
       Effect.gen(function* () {
-        // The bot was written after the build was committed, so it lives only
-        // in the game folder; the checkout gets the folder's whole bot tree.
+        // The bot was written after the build was kept, so it lives only in
+        // the game folder; the copy gets the folder's whole bot tree.
         yield* Effect.tryPromise({
           try: () =>
             NodeFSP.cp(
@@ -80,7 +83,7 @@ export const runBotFact = (
               operation: "Bot facts",
               path: ".studio/bot",
               reason: "io",
-              detail: `could not copy the bot files into the build checkout (${cause instanceof Error && "code" in cause ? String(cause.code) : "copy failed"})`,
+              detail: `could not copy the bot files into the build's copy (${cause instanceof Error && "code" in cause ? String(cause.code) : "copy failed"})`,
             }),
         });
         const result = yield* waitOutLowMemory(
@@ -108,9 +111,8 @@ export const runBotFact = (
         } satisfies BotResult;
       }),
     ({ worktree }) =>
-      vcs.removeWorktree({ cwd: ctx.root, path: worktree.path, force: true }).pipe(
-        Effect.andThen(vcs.deleteLocalBranch({ cwd: ctx.root, refName: branch, force: true })),
-        Effect.catchCause(() => ctx.log(`bot checkout ${branch} kept: cleanup failed`)),
+      Effect.promise(() =>
+        NodeFSP.rm(worktree.path, { recursive: true, force: true }).catch(() => {}),
       ),
   );
   // A bot that cannot run on a build withholds bot facts, never drops the round;

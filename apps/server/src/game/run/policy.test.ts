@@ -52,26 +52,16 @@ const done = (step: State.Step, patch: Partial<Policy.RoleDone> = {}): Policy.Ro
   sheet: "",
   ...patch,
 });
-const gitOk = (patch: Partial<Policy.GitOutcome> = {}): Policy.StepResult => ({
-  kind: "git",
-  git: {
-    ok: true,
-    sha: "c0ffee",
-    branch: "round-1",
-    changed: true,
-    entered: false,
-    lines: 10,
-    detail: "",
-    same: false,
-    ...patch,
-  },
+const buildOk = (patch: Partial<Policy.BuildOutcome> = {}): Policy.StepResult => ({
+  kind: "build",
+  build: { ok: true, sha: "c0ffee", changed: true, lines: 10, detail: "", ...patch },
 });
 
 type Single = Exclude<State.Step, State.PairStep>;
 type Responder = (step: Single, state: State.RunState) => Policy.StepResult;
 
 const stepName = (s: Single) =>
-  s.kind === "role" ? s.role.replace(/-[0-9a-z]+$/, "") : s.kind === "git" ? s.op._tag : s.kind;
+  s.kind === "role" ? s.role.replace(/-[0-9a-z]+$/, "") : s.kind === "build" ? s.op._tag : s.kind;
 
 // A pair's halves answer in the order given (x then y, unless reversed), as a
 // driver would record them when each finishes; then the pair applies.
@@ -100,6 +90,12 @@ const applyStep = (
     : Policy.applyResult(state, step, respond(step, state), input);
 
 const asked = (state: State.RunState): State.RunState => ({ ...state, steer: [POLISH] });
+/** The restore that starts a round in the folder from its base. */
+const roundStart = (step: Single, state: State.RunState) =>
+  step.kind === "build" &&
+  step.op._tag === "restore" &&
+  state.task._tag === "round" &&
+  state.task.phase === "start";
 
 // Plans and applies until `until` holds or the run ends; returns the steps taken.
 const drive = (
@@ -168,12 +164,15 @@ const roundResponder =
     } = {},
   ): Responder =>
   (step, state) => {
-    if (step.kind === "git") {
-      if (step.op._tag === "start-round") return gitOk({ branch: "round-1", sha: "best" });
-      if (step.op._tag === "commit") return gitOk({ sha: "cand", changed: opts.changed ?? true });
-      if (step.op._tag === "ff-merge") return gitOk({ sha: "merged", branch: "main" });
-      return gitOk({ branch: "main" });
+    if (step.kind === "build") {
+      if (step.op._tag === "capture")
+        return buildOk({
+          sha: step.op.name === "base" ? "best" : "cand",
+          changed: opts.changed ?? true,
+        });
+      return buildOk({ sha: step.op.sha });
     }
+    if (step.kind === "git") throw new Error("a run on checkpoints plans no git step");
     if (step.kind === "boot")
       return { kind: "boot", ok: opts.bootOk ?? true, detail: "check failed" };
     if (step.kind === "facts") return { kind: "facts", jev: false, code: "facts." };
@@ -264,8 +263,8 @@ const atRound = (patch: Partial<State.RunState> = {}) =>
     steer: [POLISH],
     task: Policy.applyResult(
       base({ stage: "build" }),
-      { kind: "git", id: 1, op: { _tag: "init" } },
-      gitOk({ sha: "best", branch: "main" }),
+      { kind: "build", id: 1, op: { _tag: "capture", name: "base", base: "" } },
+      buildOk({ sha: "best" }),
       { now: T0, coin: 0, id: "i" },
     ).state.task,
     ...patch,
@@ -290,27 +289,27 @@ describe("rounds", () => {
       (s) => s.rounds.length === 1,
     );
     expect(steps).toEqual([
-      "start-round",
+      "restore",
       "builder",
-      "commit",
+      "capture",
       "boot",
       "facts",
       "tester",
       "tester",
-      "restore-commit",
+      "restore",
       "sample",
       "sample",
       "sample",
       "sample",
       "compare",
       "compare",
-      "ff-merge",
+      "keep",
       "facts",
       "reviewer",
       "reviewer",
     ]);
     expect(state.rounds[0]?.kept).toBe(true);
-    expect(state.best).toBe("merged");
+    expect(state.best).toBe("cand");
     expect(state.stallStreak).toBe(0);
     expect(state.next).toContain("fix the jump");
   });
@@ -326,8 +325,8 @@ describe("rounds", () => {
       },
       (s) => s.rounds.length === 1,
     );
-    expect(steps.slice(steps.indexOf("restore-commit"), steps.indexOf("ff-merge"))).toEqual([
-      "restore-commit",
+    expect(steps.slice(steps.indexOf("restore", 1), steps.indexOf("keep"))).toEqual([
+      "restore",
       "sample",
       "sample",
       "sample",
@@ -349,8 +348,8 @@ describe("rounds", () => {
       roundResponder("B", "A"),
       (s) => s.rounds.length === 1,
     );
-    expect(steps).toContain("to-trunk");
-    expect(steps).not.toContain("ff-merge");
+    expect(steps).toContain("restore");
+    expect(steps).not.toContain("keep");
     expect(state.rounds[0]?.kept).toBe(false);
     expect(state.best).toBe("best");
     expect(state.stallStreak).toBe(1);
@@ -382,7 +381,7 @@ describe("rounds", () => {
       roundResponder("A", "B", { bootOk: false }),
       () => false,
     );
-    expect(steps).toEqual(["start-round", "builder", "commit", "boot", "reject"]);
+    expect(steps).toEqual(["restore", "builder", "capture", "boot", "restore"]);
     expect(state.stallStreak).toBe(3);
     expect(state.rounds[0]?.note).toContain("boot failed");
     expect(state.ending).toBe("stalled");
@@ -394,14 +393,14 @@ describe("rounds", () => {
       roundResponder("A", "B", { changed: false }),
       (s) => s.rounds.length === 1,
     );
-    expect(steps).toEqual(["start-round", "builder", "commit", "builder", "commit", "to-trunk"]);
+    expect(steps).toEqual(["restore", "builder", "capture", "builder", "capture", "restore"]);
     expect(state.stallStreak).toBe(1);
   });
 
   it("ends the builder block on a turn without a source change", () => {
     const quiet: Responder = (step, state) =>
       step.kind === "role" && step.role.startsWith("builder")
-        ? done(step, { sourceBefore: "same", sourceAfter: "same", elapsedMs: 1000 })
+        ? done(step, { changed: false, elapsedMs: 1000 })
         : roundResponder("A", "B")(step, state);
     const { steps } = drive(
       atRound(),
@@ -712,8 +711,8 @@ describe("bot facts", () => {
     const { steps, prompts, state, pairs } = comparePrompts(
       withBot({ cand: fact("won", { jars: 5 }), best: fact("timed out", { jars: 2 }) }),
     );
-    expect(steps.slice(steps.indexOf("restore-commit"), steps.indexOf("compare"))).toEqual([
-      "restore-commit",
+    expect(steps.slice(steps.indexOf("restore", 1), steps.indexOf("compare"))).toEqual([
+      "restore",
       "sample",
       "sample",
       "sample",
@@ -1064,7 +1063,7 @@ describe("blind comparators", () => {
     const applied = Policy.applyResult(
       planned.state,
       planned.step,
-      gitOk({ ok: false, detail: "conflict" }),
+      buildOk({ ok: false, detail: "conflict" }),
       { now: T0, coin: 0.3, id: "a" },
     );
     expect(applied.state.task._tag).not.toBe("pick");
@@ -1146,7 +1145,7 @@ describe("ladder", () => {
     const planWith = (texts: string[]) => {
       const prompts: string[] = [];
       const respond: Responder = (step) => {
-        if (step.kind === "git") return gitOk({ sha: "plan", branch: "main", changed: false });
+        if (step.kind === "build") return buildOk({ sha: "plan", changed: false });
         if (step.kind !== "role") throw new Error(`unexpected ${step.kind}`);
         prompts.push(step.prompt);
         return done(step, {
@@ -1217,7 +1216,7 @@ describe("ladder", () => {
     const { state, logs } = oneRound(atLadder(), ladderResponder("TIE", "TIE"));
     expect(state.rounds[0]?.kept).toBe(true);
     expect(state.rounds[0]?.inconclusive).toBeUndefined();
-    expect(state.best).toBe("merged");
+    expect(state.best).toBe("cand");
     expect(state.pending).toBeNull();
     expect(logs.some((line) => line.includes("shows no regression; kept"))).toBe(true);
   });
@@ -1231,21 +1230,19 @@ describe("ladder", () => {
   it("retries a rung from the last try's branch when that try passed some checks", () => {
     const starts: Array<string | null> = [];
     const prompts: string[] = [];
-    const respond = ladderResponder("A", "B", [true, false], (step) => {
-      if (step.kind === "git" && step.op._tag === "start-round") {
-        starts.push(step.op.from);
-        return gitOk({
-          branch: `round-${starts.length}`,
-          sha: "best",
-          entered: step.op.from !== null,
-        });
+    const respond = ladderResponder("A", "B", [true, false], (step, state) => {
+      if (roundStart(step, state)) {
+        const from = step.kind === "build" && step.op._tag === "restore" ? step.op.sha : "";
+        starts.push(from === "best" ? null : from);
+        return buildOk({ sha: from });
       }
       if (step.kind === "role") prompts.push(step.prompt);
       return undefined;
     });
     const one = oneRound(atLadder(), respond);
     const two = oneRound(one.state, respond);
-    expect(starts).toEqual([null, "round-1"]);
+    // The retry starts from the last try's own build.
+    expect(starts).toEqual([null, "cand"]);
     expect(two.logs).toContain("round 2: continues the last try's work");
     expect(prompts.some((p) => p.includes("Its work is your starting point"))).toBe(true);
     expect(prompts.some((p) => p.includes("This build continues a try that failed"))).toBe(true);
@@ -1254,8 +1251,9 @@ describe("ladder", () => {
     expect(reviews).toHaveLength(2);
     expect(reviews.every((p) => p.includes("do not play it again"))).toBe(true);
     // A try that passed nothing starts again from the best.
-    const none = ladderResponder("A", "B", [false, false], (step) => {
-      if (step.kind === "git" && step.op._tag === "start-round") starts.push(step.op.from);
+    const none = ladderResponder("A", "B", [false, false], (step, state) => {
+      if (roundStart(step, state) && step.kind === "build" && step.op._tag === "restore")
+        starts.push(step.op.sha === "best" ? null : step.op.sha);
       return undefined;
     });
     oneRound(oneRound(atLadder(), none).state, none);
@@ -1363,7 +1361,7 @@ describe("ladder", () => {
     const respond = ladderResponder("A", "B", [true, false]);
     const one = oneRound(atLadder(), respond);
     expect(one.steps).not.toContain("sample");
-    expect(one.steps).not.toContain("ff-merge");
+    expect(one.steps).not.toContain("keep");
     expect(one.state.rounds[0]?.kept).toBe(false);
     expect(one.state.rounds[0]?.rung?.outcome).toBe("failed");
     expect(one.state.rounds[0]?.rung?.why).toContain("part 1 ends");
@@ -1509,15 +1507,11 @@ describe("ladder", () => {
   });
 
   describe("the gate's held play of the best", () => {
-    // Each kept round merges to its own sha; `same` is what git would say about the played build.
-    const merging = (same: boolean) =>
+    // Each round's candidate is a build of its own; a kept one becomes the best as it is.
+    const merging = (_same: boolean) =>
       ladderResponder("A", "B", [true, true], (step, state) =>
-        step.kind === "git" && step.op._tag === "ff-merge"
-          ? gitOk({
-              sha: `merged-${state.rounds.length + 1}`,
-              branch: "main",
-              same: same && step.op.played !== "",
-            })
+        step.kind === "build" && step.op._tag === "capture"
+          ? buildOk({ sha: `cand-${state.rounds.length + 1}` })
           : undefined,
       );
     const samples = (steps: ReadonlyArray<string>) => steps.filter((x) => x === "sample").length;
@@ -1532,15 +1526,15 @@ describe("ladder", () => {
       const respond = merging(true);
       const one = oneRound(atLadder(), respond);
       expect(samples(one.steps)).toBe(4);
-      expect(one.state.played).toMatchObject({ sha: "merged-1", round: 1, branch: "round-1" });
+      expect(one.state.played).toMatchObject({ sha: "cand-1", round: 1, branch: "round-1" });
       const two = oneRound(one.state, respond);
       expect(samples(two.steps)).toBe(2);
       expect(two.state.rounds[1]?.kept).toBe(true);
-      const record = comparison(two.written, "round-1");
+      const record = comparison(two.written, "round-2");
       expect(record.reusedPlay).toEqual({ build: "best", round: 1, branch: "round-1" });
       expect(record.reports.best).toBe(one.state.played?.sample.notes);
       expect(record.players.best).toBe(one.state.played?.sample.thread);
-      expect(two.state.played).toMatchObject({ sha: "merged-2", round: 2 });
+      expect(two.state.played).toMatchObject({ sha: "cand-2", round: 2 });
     });
 
     it("keeps the comparators blind to which report was reused", () => {
@@ -1556,12 +1550,6 @@ describe("ladder", () => {
         expect(prompt).not.toMatch(/reuse|round 1|earlier/i);
         expect(prompt).not.toContain(one.state.played!.sample.label);
       }
-    });
-
-    it("plays both builds when the merged build differs from the one played", () => {
-      const one = oneRound(atLadder(), merging(false));
-      expect(one.state.played).toBeNull();
-      expect(samples(oneRound(one.state, merging(false)).steps)).toBe(4);
     });
 
     it("plays both builds when the held play is of another build, question or budget", () => {
@@ -1659,7 +1647,7 @@ describe("art review", () => {
   const playArt = (review: { readonly redo: boolean; readonly defects: string } | null) => {
     const seen: State.RoleStep[] = [];
     const respond: Responder = (step) => {
-      if (step.kind === "git") return gitOk({ sha: "art", branch: "main" });
+      if (step.kind === "build") return buildOk({ sha: "art" });
       if (step.kind === "boot") return { kind: "boot", ok: true, detail: "boot clean" };
       if (step.kind !== "role") throw new Error(`unexpected ${step.kind}`);
       seen.push(step);
@@ -1678,7 +1666,7 @@ describe("art review", () => {
   it("commits the art as it is on KEEP", () => {
     const { state, roles, steps } = playArt({ redo: false, defects: "- key.png: fine" });
     expect(roles.map((r) => r.role)).toEqual(["art", "art-director"]);
-    expect(steps.slice(-2)).toEqual(["commit", "boot"]);
+    expect(steps.slice(-2)).toEqual(["capture", "boot"]);
     expect(state.best).toBe("art");
   });
 
@@ -1691,7 +1679,7 @@ describe("art review", () => {
     const redo = roles[2]!;
     expect(redo.thread).toBe("art-thread");
     expect(redo.prompt).toContain("plain white dot, no glow");
-    expect(steps.slice(-2)).toEqual(["commit", "boot"]);
+    expect(steps.slice(-2)).toEqual(["capture", "boot"]);
     expect(state.task._tag === "stage" && state.task.name).toBe("build");
   });
 
@@ -1750,7 +1738,7 @@ describe("budget", () => {
       roundResponder("A", "B"),
       () => false,
     );
-    expect(steps).toEqual(["start-round", "to-trunk"]);
+    expect(steps).toEqual(["restore", "capture", "restore"]);
     expect(state.ending).toBe("budget");
   });
 
@@ -1763,7 +1751,7 @@ describe("budget", () => {
     ).state;
     expect(drive(atRestore, roundResponder("A", "B"), () => false, T0).steps).toContain("sample");
     const late = drive(atRestore, roundResponder("A", "B"), () => false, T0 + 12 * MIN);
-    expect(late.steps).toEqual(["restore-commit", "to-trunk"]);
+    expect(late.steps).toEqual(["restore", "restore"]);
     expect(late.state.ending).toBe("budget");
     expect(late.state.best).toBe("best");
   });
@@ -1787,7 +1775,7 @@ describe("resume", () => {
       if (planned.kind === "end") break;
       const again = Policy.plan(planned.state, { now: T0 + MIN, coin: 0.1, id: "other" });
       expect(again.kind === "step" && again.step).toEqual(planned.step);
-      seen.add(planned.step.kind === "git" ? `git:${planned.step.op._tag}` : planned.step.kind);
+      seen.add(planned.step.kind === "build" ? `build:${planned.step.op._tag}` : planned.step.kind);
       state = applyStep(planned.state, planned.step, respond, {
         now: T0,
         coin: 0.7,
@@ -1799,10 +1787,10 @@ describe("resume", () => {
       "boot",
       "facts",
       "pair",
-      "git:start-round",
-      "git:commit",
-      "git:restore-commit",
-      "git:ff-merge",
+      "build:restore",
+      "build:capture",
+      "build:restore",
+      "build:keep",
     ])
       expect(seen).toContain(kind);
   });
@@ -1845,8 +1833,8 @@ describe("guided decisions", () => {
           ? { kind: "decided", answer: step.decision.fallback, notes: "", by: "default" }
           : { kind: "decided", answer: next.answer, notes: next.notes ?? "", by: "creator" };
       }
-      if (step.kind === "git" && step.op._tag === "branch-commit")
-        return gitOk({ branch: step.op.name, sha: step.op.name });
+      if (step.kind === "build" && step.op._tag === "capture" && step.op.name.startsWith("proto-"))
+        return buildOk({ sha: step.op.name });
       if (step.kind === "role" && step.role === "plan")
         return done(step, ladderSubmitted(ladderJson(4)));
       return roundResponder("A", "B")(step, state);

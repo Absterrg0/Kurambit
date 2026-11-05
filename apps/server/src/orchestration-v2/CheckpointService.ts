@@ -15,7 +15,6 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Hex from "effect/encoding/Hex";
-import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
@@ -255,9 +254,10 @@ export const layer: Layer.Layer<
     const checkpointRefFor = (input: Parameters<typeof checkpointRefForScopeOrdinal>[0]) =>
       checkpointRefForScopeOrdinal(input).pipe(Effect.provideService(Crypto.Crypto, crypto));
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
-    const workspaceLocks = yield* KeyedLock.make<string>();
+    // The store's lock, so every caller that captures or restores a workspace
+    // (turn checkpoints, rollbacks, a production run's builds) takes the same one.
     const withWorkspaceLock = <A, E, R>(cwd: string, effect: Effect.Effect<A, E, R>) =>
-      workspaceLocks.withLock(cwd, effect);
+      checkpointStore.withWorkspaceLock(cwd, effect);
 
     const isGitCheckpointable = (cwd: string) =>
       checkpointStore.isGitRepository(cwd).pipe(Effect.orElseSucceed(() => false));

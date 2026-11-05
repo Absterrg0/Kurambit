@@ -1,27 +1,12 @@
-// The run's git and boot steps, as the step runner runs them on the game folder.
+// The run's boot step, as the step runner runs it on the game folder.
 import * as Effect from "effect/Effect";
 import type { GameOperationError, ThreadId } from "@kurambit/contracts";
 import type * as GameService from "../GameService.ts";
 import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
-import { movesCheckout, type makeGit } from "./git.ts";
 import type { StepResult } from "./policy.ts";
-import type { GitOp } from "./state.ts";
 import { laneProfile } from "../engineProfile.ts";
 
 type Game = GameService.GameService["Service"];
-
-/**
- * A git op always finishes: a stop waits for it rather than leaving a
- * half-moved tree. An op that can move the checkout first closes the root's
- * live editors: a Unity scene held in memory would otherwise be saved over
- * the other branch's files by the next edit.
- */
-export const gitStep = (game: Game, git: ReturnType<typeof makeGit>, root: string, op: GitOp) =>
-  (movesCheckout(op) ? game.closeLiveEditors(root) : Effect.void).pipe(
-    Effect.andThen(git.run(op)),
-    Effect.map((outcome) => ({ kind: "git", git: outcome }) as const),
-    Effect.uninterruptible,
-  );
 
 export const bootStep = (
   game: Game,

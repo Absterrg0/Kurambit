@@ -8,7 +8,6 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import { ENGINE_SKILLS, laneProfile } from "./engineProfile.ts";
 import { CHECK_BOT_DIR } from "./run/checkRunner.ts";
-import type { makeGit } from "./run/git.ts";
 import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
 
@@ -130,14 +129,13 @@ const templatesDir = async () => {
 // and be lost with it when the role is rejected, or land on a leftover
 // round branch instead of trunk.
 export const refreshHarnessFiles = (
-  git: ReturnType<typeof makeGit>,
   root: string,
   lane: string,
   log: (line: string) => Effect.Effect<void>,
 ) =>
   Effect.gen(function* () {
     const owned = laneProfile(lane).run.harnessFiles;
-    if (owned === null) return null;
+    if (owned === null) return;
     const templates = yield* Effect.promise(templatesDir);
     const paths = owned.files.map((file) => NodePath.join(lane, file));
     const copied = yield* Effect.promise(async () => {
@@ -152,27 +150,17 @@ export const refreshHarnessFiles = (
         return String(error).slice(0, 300);
       }
     });
-    if (copied !== null) {
-      yield* log(`harness files not refreshed: ${copied}`);
-      return null;
-    }
-    const before = yield* git.current;
-    const sha = yield* git.commitPaths(`harness: refresh ${owned.files.join(", ")}`, paths);
-    yield* log(`harness files refreshed on ${before} at ${sha.slice(0, 8)}`);
-    return sha;
+    if (copied !== null) return yield* log(`harness files not refreshed: ${copied}`);
+    // The run's base build carries them; the run never commits them.
+    yield* log(`harness files refreshed: ${paths.join(", ")}`);
   }).pipe(Effect.uninterruptible);
 
-// Skill pack, bot kit and the run-state ignores, so the committed tree each
-// worktree role starts from has them. Only a new run refreshes the skills
-// and the kit: a resume after a server update would otherwise change them
-// mid-run, and the next build's commit would carry harness text as its
-// own work while earlier builds were made under different guidance.
-export const ensureScaffold = (
-  root: string,
-  lane: string,
-  untrack: (p: ReadonlyArray<string>) => Effect.Effect<void>,
-  fresh: boolean,
-) =>
+// Skill pack, bot kit and the run-state ignores, so every build the run keeps
+// has them. Only a new run refreshes the skills and the kit: a resume after a
+// server update would otherwise change them mid-run, and the next build would
+// carry harness text as its own work while earlier builds were made under
+// different guidance.
+export const ensureScaffold = (root: string, lane: string, fresh: boolean) =>
   Effect.promise(async () => {
     const templates = await templatesDir();
     await NodeFSP.mkdir(NodePath.join(root, ".studio", "bot"), { recursive: true });
@@ -201,7 +189,7 @@ export const ensureScaffold = (
         NodePath.join(root, ".gitignore"),
         `${ignore}${ignore === "" || ignore.endsWith("\n") ? "" : "\n"}${missing.join("\n")}\n`,
       );
-  }).pipe(Effect.ignore, Effect.andThen(untrack(RUN_STATE_IGNORES)));
+  }).pipe(Effect.ignore);
 
 export const causeText = (cause: Cause.Cause<unknown>): string => {
   const squashed: unknown = Cause.squash(cause);

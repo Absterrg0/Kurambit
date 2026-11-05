@@ -23,6 +23,29 @@ export interface VcsRestoreCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
   readonly fallbackToHead?: boolean;
+  /**
+   * Restores only these paths, relative to `cwd` (a directory covers its
+   * contents), writing only the files that differ and never the index; nothing
+   * outside `cwd` is touched. Without it the whole workspace is restored and
+   * its index reset.
+   */
+  readonly filePaths?: ReadonlyArray<string>;
+}
+
+export interface VcsUpdateCheckpointRefInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+  /** A commit an earlier capture returned; false when it no longer exists. */
+  readonly oid: string;
+}
+
+export interface VcsMaterializeCheckpointInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+  /** A folder outside the repository; it is replaced, and gets no git metadata. */
+  readonly destination: string;
+  /** Paths relative to `cwd` left out of the copy, which holds only `cwd`'s subtree. */
+  readonly excludePaths?: ReadonlyArray<string>;
 }
 
 export interface VcsDiffCheckpointsInput {
@@ -34,6 +57,8 @@ export interface VcsDiffCheckpointsInput {
   readonly format?: "patch" | "numstat";
   /** An empty list yields an empty diff. */
   readonly filePaths?: ReadonlyArray<string>;
+  /** Only what changed below `cwd`, with paths relative to it (`git diff --relative`). */
+  readonly relative?: boolean;
 }
 
 export interface VcsListAuthoredPathsInput {
@@ -47,8 +72,22 @@ export interface VcsDeleteCheckpointRefsInput {
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
 
+export interface VcsListCheckpointRefsInput {
+  readonly cwd: string;
+  /** A ref folder, such as one run's `refs/kurambit/game-runs/<id>/`. */
+  readonly prefix: string;
+}
+
+export interface VcsCheckpointRefEntry {
+  readonly checkpointRef: CheckpointRef;
+  readonly oid: string;
+  /** The commit's time, in unix seconds. */
+  readonly committedAt: number;
+}
+
 export interface VcsCheckpointOps {
-  readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<void, VcsError>;
+  /** The commit oid of the checkpoint it wrote. */
+  readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<string, VcsError>;
   readonly hasCheckpointRef: (
     input: Omit<VcsRestoreCheckpointInput, "fallbackToHead">,
   ) => Effect.Effect<boolean, VcsError>;
@@ -62,6 +101,15 @@ export interface VcsCheckpointOps {
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,
   ) => Effect.Effect<void, VcsError>;
+  readonly listCheckpointRefs: (
+    input: VcsListCheckpointRefsInput,
+  ) => Effect.Effect<ReadonlyArray<VcsCheckpointRefEntry>, VcsError>;
+  readonly updateCheckpointRef: (
+    input: VcsUpdateCheckpointRefInput,
+  ) => Effect.Effect<boolean, VcsError>;
+  readonly materializeCheckpoint: (
+    input: VcsMaterializeCheckpointInput,
+  ) => Effect.Effect<boolean, VcsError>;
 }
 
 export class VcsDriver extends Context.Service<

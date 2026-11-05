@@ -31,7 +31,8 @@ import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import * as GitWorkflow from "../../git/GitWorkflowService.ts";
+import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import * as ServerConfig from "../../config.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   type RoleTurn,
@@ -49,10 +50,11 @@ import { forkParked } from "../../serverActivation.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
-import { snapshotBuildSource } from "../sourceSnapshot.ts";
+import { BuildName } from "./buildNames.ts";
+import { captureBuild, isGameCode, measureChange } from "./builds.ts";
 import { botRunCount } from "./facts.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
-import { lastBotRun, releaseWorktree } from "./roleWorkspace.ts";
+import { lastBotRun, releaseCopy, runCopies } from "./roleWorkspace.ts";
 import type { RoleStep, Step } from "./state.ts";
 
 // An instantly failed turn never reached the model (provider or session
@@ -196,9 +198,10 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const game = yield* GameService.GameService;
   const projects = yield* GameProjectService.GameProjectService;
-  const vcs = yield* GitWorkflow.GitWorkflowService;
+  const checkpoints = yield* CheckpointStore.CheckpointStore;
   const jobs = yield* GameRunJobs.GameRunJobs;
-  const deps = { threads, game, vcs };
+  const config = yield* ServerConfig.ServerConfig;
+  const deps = { threads, game };
   // One settle per step attempt at a time: a turn's run is updated more than
   // once after it ends, and its evidence is read (and reset) only once. Other
   // steps (a pair's other half) land meanwhile.
@@ -459,18 +462,35 @@ const make = Effect.gen(function* () {
               ),
             );
       const before = entry.before ?? { source: "", bots: 0 };
+      // A source role's work is a build of its own, measured against the build
+      // before it; a capture or a diff that fails reads as a change.
+      const since = role.since ?? "";
       const sourceAfter = role.source
-        ? yield* Effect.promise(() =>
-            snapshotBuildSource(root, at.run.lane).then(
-              (s) => (s.kind === "known" ? s.sourceId : ""),
-              () => "",
+        ? yield* captureBuild(
+            checkpoints,
+            root,
+            at.run.id,
+            BuildName.turn(turn.stepId, turn.attempt),
+          ).pipe(
+            Effect.catch((error) =>
+              log(`${role.role}: its turn could not be kept as a build (${error.message})`).pipe(
+                Effect.as(""),
+              ),
             ),
           )
         : "";
+      const changed = role.source
+        ? (yield* measureChange(checkpoints, root, isGameCode(at.run.lane), since, sourceAfter))
+            .changed
+        : undefined;
       const botsAfter = role.bots ? yield* Effect.promise(() => botRunCount(root)) : 0;
       const bot = role.bots ? yield* Effect.promise(() => lastBotRun(root, before.bots)) : null;
       if (role.at !== null && (role.release || budgetCut))
-        yield* releaseWorktree(deps, { root, log }, roleThreadId);
+        yield* releaseCopy(
+          deps,
+          { copies: runCopies(config.worktreesDir, at.run.id), log },
+          roleThreadId,
+        );
       yield* log(
         `  step ${at.seq}: ${role.role} done${timedOut ? " (capped)" : ""} on ${roleThreadId}`,
       );
@@ -481,8 +501,9 @@ const make = Effect.gen(function* () {
         timedOut,
         budgetCut,
         elapsedMs: now - startedMs,
-        sourceBefore: before.source,
+        sourceBefore: since,
         sourceAfter,
+        ...(changed === undefined ? {} : { changed }),
         botsBefore: before.bots,
         botsAfter,
         bot,
