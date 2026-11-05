@@ -50,7 +50,12 @@ import {
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { readSecretFieldValues, sourceControlHostSecretName } from "./sourceControlHostSecrets.ts";
 
-import { mapSettingsSecrets, SECRET_REDACTED, type SettingsSecret } from "./settingsSecrets.ts";
+import {
+  mapSettingsSecrets,
+  SECRET_REDACTED,
+  type SettingsSecret,
+  TOP_LEVEL_SETTINGS_SECRETS,
+} from "./settingsSecrets.ts";
 
 export {
   resolveReviewGuideModelSelection,
@@ -651,6 +656,30 @@ const make = Effect.gen(function* () {
       );
     });
 
+  // Game Tools keys were stored by their own RPC before they were settings fields. A key
+  // already under a field's store name marks the field stored, so it reads, redacts and
+  // clears like any settings secret; clearing removes the key, so this never revives one.
+  const adoptStoredSettingsSecrets = (settings: ServerSettings) =>
+    Effect.gen(function* () {
+      const adopted: Record<string, string> = {};
+      for (const [field, secretName] of TOP_LEVEL_SETTINGS_SECRETS) {
+        if ((settings as Readonly<Record<string, unknown>>)[field] !== "") continue;
+        // A blank key was never a key: the old status check reported it as unset.
+        const stored = yield* secretStore.get(secretName).pipe(
+          Effect.map(
+            (found) => Option.isSome(found) && textDecoder.decode(found.value).trim() !== "",
+          ),
+          Effect.catch(() =>
+            Effect.logWarning("failed to read a stored settings secret", { secretName }).pipe(
+              Effect.as(false),
+            ),
+          ),
+        );
+        if (stored) adopted[field] = SECRET_REDACTED;
+      }
+      return Object.keys(adopted).length === 0 ? settings : { ...settings, ...adopted };
+    });
+
   const loadSettingsFromDisk = Effect.gen(function* () {
     let settings = DEFAULT_SERVER_SETTINGS;
     let legacyProviders: Readonly<Record<string, unknown>> | undefined;
@@ -772,7 +801,9 @@ const make = Effect.gen(function* () {
       ? migrateLegacySourceControlSettings(folded, legacySourceControl)
       : { settings: folded, secretMoves: [] };
     const migrated = settingsFileTrusted
-      ? yield* moveInlineSettingsSecrets(sourceControlMigration.settings)
+      ? yield* moveInlineSettingsSecrets(sourceControlMigration.settings).pipe(
+          Effect.flatMap(adoptStoredSettingsSecrets),
+        )
       : folded;
     if (
       migrated !== loaded ||
@@ -860,6 +891,12 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
+  // Only a secret the current settings show as stored is ever removed. A field can read
+  // empty while its key is stored (an adoption read that failed, or a settings file that
+  // did not decode and fell back to defaults); saving another setting must not delete it.
+  const wasStored = (secret: SettingsSecret | undefined) =>
+    secret !== undefined && (secret.redacted || secret.value.length > 0);
+
   const persistSettingsSecrets = (current: ServerSettings, next: ServerSettings) =>
     Effect.sync(() => {
       const previous = new Map<string, SettingsSecret>();
@@ -892,7 +929,9 @@ const make = Effect.gen(function* () {
           return { value: "", redacted: true };
         }
         if (value.length === 0) {
-          changes.push({ ...metadata, kind: "remove", operation: "remove-secret" });
+          if (wasStored(old)) {
+            changes.push({ ...metadata, kind: "remove", operation: "remove-secret" });
+          }
           return { value: "", redacted: false };
         }
         nextSecretNames.add(secret.secretName);
@@ -900,7 +939,8 @@ const make = Effect.gen(function* () {
         return { value: "", redacted: true };
       });
       for (const secret of previous.values()) {
-        if (!secret.sensitive || nextSecretNames.has(secret.secretName)) continue;
+        if (!secret.sensitive || !wasStored(secret) || nextSecretNames.has(secret.secretName))
+          continue;
         if (changes.some((change) => change.secretName === secret.secretName)) continue;
         changes.push({
           kind: "remove",

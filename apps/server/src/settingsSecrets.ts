@@ -2,7 +2,9 @@ import {
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
-  type ServerSettings,
+  isSecretSetting,
+  ServerSettings,
+  settingsSecretName,
   UsageLimitSourceConfig,
   secretSettingsFields,
 } from "@kurambit/contracts";
@@ -32,6 +34,15 @@ const providerSecretFields = new Map([
 ]);
 const usageLimitSecretFields = secretSettingsFields(UsageLimitSourceConfig);
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
+
+/** Top-level secret fields and the store name each is kept under. */
+export const TOP_LEVEL_SETTINGS_SECRETS: ReadonlyMap<string, string> = new Map(
+  Object.entries(ServerSettings.fields).flatMap(([field, schema]) =>
+    isSecretSetting(schema)
+      ? [[field, settingsSecretName(schema) ?? `settings-${encode(field)}`] as const]
+      : [],
+  ),
+);
 
 export interface SettingsSecret {
   readonly secretName: string;
@@ -142,5 +153,15 @@ export function mapSettingsSecrets(
     ]),
   ) as ServerSettings["usageLimitSources"];
 
-  return { ...settings, providerInstances, sourceControlHosts, usageLimitSources };
+  let topLevel: Readonly<Record<string, unknown>> = settings;
+  for (const [field, secretName] of TOP_LEVEL_SETTINGS_SECRETS) {
+    topLevel = mapFields(topLevel, [field], () => secretName);
+  }
+
+  return {
+    ...(topLevel as ServerSettings),
+    providerInstances,
+    sourceControlHosts,
+    usageLimitSources,
+  };
 }

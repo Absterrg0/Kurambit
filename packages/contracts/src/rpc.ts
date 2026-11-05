@@ -25,9 +25,6 @@ import {
   GameOperationError,
   GameOperationEvent,
   GameProjectResult,
-  GameSecretsStatusResult,
-  GameSetSecretInput,
-  GameSetSecretResult,
   GameStatus,
   GameThreadInput,
   GameToolchainStatus,
@@ -350,8 +347,6 @@ export const WS_METHODS = {
   gameWindowsPackage: "game.windowsPackage",
   gameWebPackage: "game.webPackage",
   gameToolchainStatus: "game.toolchainStatus",
-  gameSecretsStatus: "game.secretsStatus",
-  gameSecretsSet: "game.secretsSet",
   gameRunStart: "game.runStart",
   gameRunStatus: "game.runStatus",
   gameRunStop: "game.runStop",
@@ -1458,16 +1453,6 @@ const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   success: GameToolchainStatus,
   error: gameError,
 });
-const WsGameSecretsStatusRpc = Rpc.make(WS_METHODS.gameSecretsStatus, {
-  payload: Schema.Struct({}),
-  success: GameSecretsStatusResult,
-  error: gameError,
-});
-const WsGameSecretsSetRpc = Rpc.make(WS_METHODS.gameSecretsSet, {
-  payload: GameSetSecretInput,
-  success: GameSetSecretResult,
-  error: gameError,
-});
 
 const WsGameRunStartRpc = Rpc.make(WS_METHODS.gameRunStart, {
   payload: GameRunStartInput,
@@ -1542,8 +1527,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameWindowsPackageRpc,
   WsGameWebPackageRpc,
   WsGameToolchainStatusRpc,
-  WsGameSecretsStatusRpc,
-  WsGameSecretsSetRpc,
   WsGameRunStartRpc,
   WsGameRunStatusRpc,
   WsGameRunStopRpc,

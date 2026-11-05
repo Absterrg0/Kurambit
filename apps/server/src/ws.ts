@@ -6,7 +6,6 @@ import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
-import * as GamePackageDownload from "./game/GamePackageDownload.ts";
 import { OrchestrationDispatchCommandError, type GameRunComparison } from "@kurambit/contracts";
 import * as Crypto from "effect/Crypto";
 
@@ -243,6 +242,38 @@ const signRunFile = (threadId: ThreadId, path: string) =>
   issueAssetUrl({ resource: { _tag: "media-file", threadId, path } }).pipe(
     Effect.map((asset): string | null => asset.relativeUrl),
     Effect.orElseSucceed(() => null),
+  );
+
+// A package downloads through the same capability, served as an attachment.
+// A download URL is bound to the archive's inode, size and mtime, so a
+// re-packaged archive retires it even when the filesystem hands the new archive
+// a freed inode; a Web archive's path names its build, so its URL never serves
+// another build.
+const signPackage = <P extends { readonly archivePath: string; readonly fileName: string }>(
+  threadId: ThreadId,
+  operation: string,
+  packaged: P,
+) =>
+  issueAssetUrl({
+    resource: { _tag: "media-file", threadId, path: packaged.archivePath },
+    download: true,
+    downloadName: packaged.fileName,
+  }).pipe(
+    Effect.map((asset) => ({
+      ...packaged,
+      downloadPath: asset.relativeUrl,
+      expiresAt: DateTime.formatIso(DateTime.makeUnsafe(asset.expiresAt)),
+    })),
+    Effect.mapError(
+      (cause) =>
+        new GameOperationError({
+          operation,
+          path: packaged.archivePath,
+          reason: "io",
+          detail: cause.message,
+          cause,
+        }),
+    ),
   );
 
 // The frame sheets a blind comparison's players made, signed the same way.
@@ -1855,54 +1886,19 @@ const layerWsRpc = (
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
         [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
         [WS_METHODS.gameWindowsPackage]: ({ threadId }) =>
-          Effect.gen(function* () {
-            const packaged = yield* game.packageWindows(threadId);
-            const download = yield* GamePackageDownload.issueGamePackageDownload(
-              threadId,
-              packaged.sha256,
-            ).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new GameOperationError({
-                    operation: "Package Windows build",
-                    path: packaged.archivePath,
-                    reason: "io",
-                    detail: cause.message,
-                    cause,
-                  }),
+          game
+            .packageWindows(threadId)
+            .pipe(
+              Effect.flatMap((packaged) =>
+                signPackage(threadId, "Package Windows build", packaged),
               ),
-            );
-            return {
-              ...packaged,
-              downloadPath: download.path,
-              expiresAt: DateTime.formatIso(DateTime.makeUnsafe(download.expiresAt)),
-            };
-          }),
+            ),
         [WS_METHODS.gameWebPackage]: ({ threadId }) =>
-          Effect.gen(function* () {
-            const packaged = yield* game.packageWeb(threadId);
-            const download = yield* GamePackageDownload.issueGameWebPackageDownload(
-              threadId,
-              packaged.buildId,
-              packaged.sha256,
-            ).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new GameOperationError({
-                    operation: "Package Web build",
-                    path: packaged.archivePath,
-                    reason: "io",
-                    detail: cause.message,
-                    cause,
-                  }),
-              ),
-            );
-            return {
-              ...packaged,
-              downloadPath: download.path,
-              expiresAt: DateTime.formatIso(DateTime.makeUnsafe(download.expiresAt)),
-            };
-          }),
+          game
+            .packageWeb(threadId)
+            .pipe(
+              Effect.flatMap((packaged) => signPackage(threadId, "Package Web build", packaged)),
+            ),
         [WS_METHODS.gameMediaSave]: ({ threadId, source, label }) =>
           game.saveMedia(threadId, source, label),
         [WS_METHODS.gameSavedList]: ({ threadId }) => game.listSaved(threadId),
@@ -1911,8 +1907,6 @@ const layerWsRpc = (
         [WS_METHODS.subscribeGameEvents]: (input) =>
           input.threadId === undefined ? game.events : game.threadEvents(input.threadId),
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status(),
-        [WS_METHODS.gameSecretsStatus]: () => game.secretsStatus(),
-        [WS_METHODS.gameSecretsSet]: (input) => game.setSecret(input),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

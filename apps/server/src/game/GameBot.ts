@@ -19,6 +19,7 @@ import {
   type GameBotViewResult,
 } from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -41,8 +42,6 @@ import {
   type Session,
 } from "./gameBotRuntime.ts";
 
-/** The Jev key lives in the server secret store under this name; bots never see it. */
-export const GAME_BOT_JEV_SECRET = "game-bot-jev-api-key";
 const GAME_BOT_JEV_BASE_SECRET = "game-bot-jev-base-url";
 const JEV_DEFAULT_BASE = "https://api.typesafe.ai";
 
@@ -384,6 +383,7 @@ const make = Effect.gen(function* () {
   const players = yield* GamePlayer.GamePlayer;
   const projects = yield* GameProjectService.GameProjectService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const processes = yield* GameProcesses.GameProcesses;
   const gameBrowser = yield* makeGameBrowser;
   const sessions = new Map<string, Session>();
@@ -501,14 +501,20 @@ const make = Effect.gen(function* () {
       let jevBase = JEV_DEFAULT_BASE;
       let policyNote: string | null = null;
       if (decider === "jev") {
-        jevKey = yield* readSecretText(GAME_BOT_JEV_SECRET);
+        // The Jev key is a settings secret (Settings → Game tools); bots never see it.
+        const { gameJevApiKey } = yield* settings.getSettings.pipe(
+          Effect.mapError((cause) =>
+            opError("Bot secret", "gameJevApiKey", "io", undefined, cause),
+          ),
+        );
+        jevKey = gameJevApiKey === "" ? null : gameJevApiKey;
         const base = yield* readSecretText(GAME_BOT_JEV_BASE_SECRET);
         if (base !== null) jevBase = base;
         if (jevKey === null)
           policyNote =
             mode === "explore"
-              ? `No Jev key in the server secret store (${GAME_BOT_JEV_SECRET}); this exploration ran with randomised policy choices, not Jev.`
-              : `No Jev key in the server secret store (${GAME_BOT_JEV_SECRET}); this run used the bot's own policy.`;
+              ? "No Jev key is set in Settings → Game tools; this exploration ran with randomised policy choices, not Jev."
+              : "No Jev key is set in Settings → Game tools; this run used the bot's own policy.";
       }
       const jevLive = decider === "jev" && jevKey !== null;
       // One session object spans the whole call: drop() flips its flag, so

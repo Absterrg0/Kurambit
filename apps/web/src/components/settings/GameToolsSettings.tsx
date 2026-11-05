@@ -11,6 +11,7 @@ import { GAME_TOOL_NAMES, GameToolLink } from "../game/GameToolLink";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { SecretInput } from "./SecretInput";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const TOOL_PURPOSE = {
@@ -45,17 +46,11 @@ type PathKey = (typeof PATH_ROWS)[number]["key"];
 export function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
   const query = useEnvironmentQuery(gameEnvironment.toolchain({ environmentId, input: {} }));
-  const keysQuery = useEnvironmentQuery(
-    gameEnvironment.secretsStatus({ environmentId, input: {} }),
-  );
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const canWrite = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
   const [paths, setPaths] = useState<Partial<Record<PathKey, string>>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
-  const [keyBusy, setKeyBusy] = useState<string | null>(null);
-  const [keyError, setKeyError] = useState<string | null>(null);
   const savePaths = async () => {
     if (saving) return;
     setSaving(true);
@@ -145,131 +140,84 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           {saving ? "Saving…" : "Save paths"}
         </Button>
       </div>
-      <GameToolsKeysSection
-        environmentId={environmentId}
-        keys={keysQuery.data ?? null}
-        keysError={keysQuery.error ? String(keysQuery.error) : null}
-        drafts={keyDrafts}
-        setDrafts={setKeyDrafts}
-        keyBusy={keyBusy}
-        setKeyBusy={setKeyBusy}
-        keyError={keyError}
-        setKeyError={setKeyError}
-        refreshKeys={() => keysQuery.refresh()}
-      />
+      <GameToolsKeysSection environmentId={environmentId} />
     </SettingsSection>
   );
 }
 
 const KEY_ROWS = [
   {
-    name: "jev",
+    key: "gameJevApiKey",
     title: "Jev key",
     description:
       "Optional playtest route: Jev picks exploration options at play speed. Unset means the policy fallback.",
   },
   {
-    name: "sketchfab",
+    key: "gameSketchfabApiKey",
     title: "Sketchfab key",
     description: "Passed to the pinned Blender addon for Sketchfab search and import.",
   },
   {
-    name: "polypizza",
+    key: "gamePolyPizzaApiKey",
     title: "Poly Pizza key",
     description: "Passed to the pinned Blender addon for Poly Pizza search and import.",
   },
 ] as const;
+type KeyField = (typeof KEY_ROWS)[number]["key"];
 
-function GameToolsKeysSection({
-  environmentId,
-  keys,
-  keysError,
-  drafts,
-  setDrafts,
-  keyBusy,
-  setKeyBusy,
-  keyError,
-  setKeyError,
-  refreshKeys,
-}: {
-  environmentId: EnvironmentId;
-  keys: { jev: boolean; sketchfab: boolean; polypizza: boolean } | null;
-  keysError: string | null;
-  drafts: Record<string, string>;
-  setDrafts: (drafts: Record<string, string>) => void;
-  keyBusy: string | null;
-  setKeyBusy: (busy: string | null) => void;
-  keyError: string | null;
-  setKeyError: (error: string | null) => void;
-  refreshKeys: () => void;
-}) {
-  const setSecret = useAtomCommand(gameEnvironment.setSecret, { reportFailure: false });
-  const canSetSecret = useAtomValue(gameEnvironment.setSecret.permissionAtom(environmentId));
-  const saveKey = async (name: "jev" | "sketchfab" | "polypizza", clear: boolean) => {
-    if (keyBusy) return;
-    setKeyBusy(name);
-    setKeyError(null);
+function GameToolsKeysSection({ environmentId }: { environmentId: EnvironmentId }) {
+  const settings = useEnvironmentSettings(environmentId);
+  const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
+  const canWrite = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const saveKey = async (key: KeyField, value: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
     try {
-      const result = await setSecret({
-        environmentId,
-        input: { name, secret: clear ? "" : (drafts[name] ?? "") },
-      });
-      if (result._tag === "Failure") {
-        setKeyError(String(squashAtomCommandFailure(result)));
-        return;
-      }
-      setDrafts({ ...drafts, [name]: "" });
-      refreshKeys();
+      const patch: Partial<Record<KeyField, string>> = { [key]: value };
+      const saved = await update({ environmentId, input: { patch } });
+      if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
     } finally {
-      setKeyBusy(null);
+      setBusy(false);
     }
   };
   return (
     <div className="space-y-3 px-4 py-3 text-sm">
       <p className="font-medium">Keys</p>
       <p className="text-xs text-muted-foreground">
-        Stored in this environment&apos;s secret store. The UI only shows whether a key is set,
+        Stored in this environment&apos;s secret store. Settings only show whether a key is set,
         never the value.
       </p>
-      {keysError ? <p role="alert">{keysError}</p> : null}
-      {keyError ? (
+      {error ? (
         <p role="alert" className="whitespace-pre-wrap text-destructive">
-          {keyError}
+          {error}
         </p>
       ) : null}
       {KEY_ROWS.map((row) => {
-        const isSet = keys?.[row.name] ?? false;
+        const configured = settings[row.key].length > 0;
         return (
-          <SettingsRow key={row.name} title={row.title} description={row.description}>
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-muted-foreground">{isSet ? "Set" : "Not set"}</p>
-              <div className="flex flex-wrap gap-2">
-                <Input
-                  aria-label={`${row.title} value`}
-                  type="password"
-                  value={drafts[row.name] ?? ""}
-                  disabled={!canSetSecret || keyBusy !== null}
-                  onChange={(event) => setDrafts({ ...drafts, [row.name]: event.target.value })}
-                  placeholder={isSet ? "Enter a new value to replace" : "Paste the key"}
-                />
-                <Button
-                  size="sm"
-                  disabled={
-                    !canSetSecret || keyBusy !== null || (drafts[row.name] ?? "").length === 0
-                  }
-                  onClick={() => void saveKey(row.name, false)}
-                >
-                  Save
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!canSetSecret || keyBusy !== null || !isSet}
-                  onClick={() => void saveKey(row.name, true)}
-                >
-                  Clear
-                </Button>
-              </div>
+          <SettingsRow key={row.key} title={row.title} description={row.description}>
+            <div className="flex flex-wrap gap-2">
+              <SecretInput
+                aria-label={`${row.title} value`}
+                configured={configured}
+                value=""
+                disabled={!canWrite || busy}
+                placeholder="Paste the key"
+                onCommit={(next) => {
+                  if (next !== "") void saveKey(row.key, next);
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canWrite || busy || !configured}
+                onClick={() => void saveKey(row.key, "")}
+              >
+                Clear
+              </Button>
             </div>
           </SettingsRow>
         );

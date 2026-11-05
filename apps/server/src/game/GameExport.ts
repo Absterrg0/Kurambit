@@ -12,7 +12,6 @@ import {
   type GameWebPackage,
   type GameWindowsPackage,
 } from "@kurambit/contracts";
-import { openMediaFile, type OpenMediaFile } from "../assets/MediaFile.ts";
 import { commandDetail } from "./commandDetail.ts";
 import * as GameEngine from "./GameEngine.ts";
 import type { GameExportTarget } from "./engineProfile.ts";
@@ -29,39 +28,16 @@ import {
 } from "./webBuild.ts";
 import { inspectWindowsBuild, type WindowsBuildInspection } from "./windowsExport.ts";
 import { publishWindowsBuild } from "./windowsPublication.ts";
-import {
-  WEB_PACKAGE_FILE,
-  packageWebRelease,
-  WebPackageError,
-  webPackageArchivePath,
-} from "./webPackage.ts";
+import { packageWebRelease, WebPackageError } from "./webPackage.ts";
 import {
   packageWindowsRelease,
   retireWindowsArchive,
   WindowsPackageError,
-  WINDOWS_PACKAGE_FILE,
   windowsPackageArchivePath,
 } from "./windowsPackage.ts";
 
 /** Short confirmation the creator reads after an export lands. */
 const WEB_READY_MESSAGE = "Web game is ready to play. Open it with Play.";
-
-/**
- * Hashes an already opened, identity-checked archive. A download names the
- * archive it was minted for, so the bytes served must still be those bytes.
- */
-const hashOpenFile = async (file: OpenMediaFile) => {
-  const hash = NodeCrypto.createHash("sha256");
-  const buffer = Buffer.allocUnsafe(1024 * 1024);
-  let offset = 0;
-  for (;;) {
-    const result = await file.handle.read(buffer, 0, buffer.byteLength, offset);
-    if (result.bytesRead === 0) break;
-    hash.update(buffer.subarray(0, result.bytesRead));
-    offset += result.bytesRead;
-  }
-  return { bytes: offset, sha256: hash.digest("hex") };
-};
 
 /** The build Play serves, written at each Web export. */
 const SelectedWebBuild = Schema.Struct({
@@ -75,14 +51,6 @@ const decodeSelectedBuild = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.NullOr(SelectedWebBuild)),
 );
 const encodeSelectedBuild = Schema.encodeSync(Schema.fromJsonString(SelectedWebBuild));
-
-interface GamePackageFile {
-  readonly path: string;
-  readonly fileName: string;
-  readonly bytes: number;
-  readonly sha256: string;
-  readonly identity: { readonly device: string; readonly inode: string };
-}
 
 /**
  * Release exports, the Web build Play serves, and the packages made from
@@ -114,17 +82,6 @@ export class GameExport extends Context.Service<
      * static-host ZIP. It never exports and never chooses another build.
      */
     readonly packageWeb: (root: string) => Effect.Effect<GameWebPackage, GameOperationError>;
-    /** The complete archive a signed download URL serves; never creates one. */
-    readonly webPackageFile: (
-      root: string,
-      buildId: string,
-      packageSha256: string,
-    ) => Effect.Effect<GamePackageFile, GameOperationError>;
-    /** The complete archive a signed download URL serves; never creates one. */
-    readonly windowsPackageFile: (
-      root: string,
-      packageSha256: string,
-    ) => Effect.Effect<GamePackageFile, GameOperationError>;
   }
 >()("kurambit/game/GameExport") {}
 
@@ -452,72 +409,6 @@ const make = Effect.gen(function* () {
             url: served.url,
           };
     });
-  /** Serves a minted package download after proving the bytes are still the minted ones. */
-  const verifyPackageFile = (
-    operation: string,
-    path: string,
-    packageSha256: string,
-    fileName: string,
-    missingDetail: string,
-  ) =>
-    Effect.gen(function* () {
-      const opened = yield* openMediaFile(path).pipe(
-        Effect.mapError(
-          (cause) =>
-            new GameOperationError({
-              operation,
-              path,
-              reason: "io",
-              detail: "The package could not be opened.",
-              cause,
-            }),
-        ),
-      );
-      if (opened === null)
-        return yield* new GameOperationError({
-          operation,
-          path,
-          reason: "download",
-          detail: missingDetail,
-        });
-      const verified = yield* Effect.tryPromise({
-        try: () => hashOpenFile(opened),
-        catch: (cause) =>
-          new GameOperationError({
-            operation,
-            path,
-            reason: "io",
-            detail: "The package could not be read.",
-            cause,
-          }),
-      });
-      const after = yield* Effect.tryPromise({
-        try: () => opened.handle.stat({ bigint: true }),
-        catch: (cause) =>
-          new GameOperationError({
-            operation,
-            path,
-            reason: "io",
-            detail: "The package could not be checked.",
-            cause,
-          }),
-      });
-      if (BigInt(verified.bytes) !== after.size || verified.sha256 !== packageSha256)
-        return yield* new GameOperationError({
-          operation,
-          path,
-          reason: "checksum",
-          detail:
-            "The package changed after this download link was created. Open Builds, then choose Download package again.",
-        });
-      return {
-        path,
-        fileName,
-        bytes: verified.bytes,
-        sha256: verified.sha256,
-        identity: { device: after.dev.toString(), inode: after.ino.toString() },
-      };
-    });
   return GameExport.of({
     export: runExport,
     publishWeb,
@@ -667,45 +558,6 @@ const make = Effect.gen(function* () {
           message: `Web package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB) for selected build ${build}.`,
         };
       }),
-    webPackageFile: (root, buildId, packageSha256) =>
-      Effect.gen(function* () {
-        if (!/^[0-9a-f]{64}$/.test(buildId))
-          return yield* new GameOperationError({
-            operation: "Download Web package",
-            path: NodePath.join(root, "builds/web-packages"),
-            reason: "download",
-            detail:
-              "This Web package link does not name a build. Open Builds and download the selected build again.",
-          });
-        const selected = yield* readSelectedBuild(root);
-        const path = webPackageArchivePath(root, buildId);
-        if (selected === null || selected.buildId !== buildId)
-          return yield* new GameOperationError({
-            operation: "Download Web package",
-            path,
-            reason: "download",
-            detail:
-              "The selected Web build changed after this download link was created. Open Builds and download the package for the selected build.",
-          });
-        return yield* verifyPackageFile(
-          "Download Web package",
-          path,
-          packageSha256,
-          WEB_PACKAGE_FILE,
-          "No complete Web package is ready for the selected build. Open Builds, then choose Download package on the selected Web build.",
-        );
-      }).pipe(Effect.scoped),
-    windowsPackageFile: (root, packageSha256) =>
-      Effect.gen(function* () {
-        const path = windowsPackageArchivePath(root);
-        return yield* verifyPackageFile(
-          "Download Windows package",
-          path,
-          packageSha256,
-          WINDOWS_PACKAGE_FILE,
-          "No Windows package is ready. Open Builds, then choose Download package on the Windows build.",
-        );
-      }).pipe(Effect.scoped),
   });
 });
 

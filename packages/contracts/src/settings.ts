@@ -514,6 +514,8 @@ declare module "effect/Schema" {
     interface Annotations {
       /** Store this credential separately and expose only whether it is configured to clients. */
       readonly settingsSecret?: boolean | undefined;
+      /** The secret-store name of a top-level secret field, when it must not be derived. */
+      readonly settingsSecretName?: string | undefined;
       readonly providerSettingsForm?: ProviderSettingsFormAnnotation | undefined;
       readonly providerSettingsFormSchema?: ProviderSettingsFormSchemaAnnotation | undefined;
     }
@@ -522,6 +524,17 @@ declare module "effect/Schema" {
 
 export function secretSetting<S extends Schema.Top>(schema: S): S["Rebuild"] {
   return schema.annotateKey({ settingsSecret: true });
+}
+
+/** A secret setting kept under a fixed store name, so a key stored there before the field existed is its value. */
+export const namedSecretSetting =
+  (secretName: string) =>
+  <S extends Schema.Top>(schema: S): S["Rebuild"] =>
+    schema.annotateKey({ settingsSecret: true, settingsSecretName: secretName });
+
+export function settingsSecretName(schema: Schema.Top): string | undefined {
+  return (Schema.resolveAnnotationsKey(schema) ?? Schema.resolveAnnotations(schema))
+    ?.settingsSecretName;
 }
 
 /** A masked form field is a credential too, so none is saved or sent to clients as plain text. */
@@ -1042,6 +1055,19 @@ export const ServerSettings = Schema.Struct({
   gameBlenderPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   gameGodotPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   gameUnityPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  // Game Tools keys, under the names they were stored by before they were settings.
+  gameJevApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    namedSecretSetting("game-bot-jev-api-key"),
+  ),
+  gameSketchfabApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    namedSecretSetting("game-blender-sketchfab-key"),
+  ),
+  gamePolyPizzaApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    namedSecretSetting("game-blender-polypizza-key"),
+  ),
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1334,6 +1360,9 @@ export const ServerSettingsPatch = Schema.Struct({
   gameBlenderPath: Schema.optionalKey(Schema.String),
   gameGodotPath: Schema.optionalKey(Schema.String),
   gameUnityPath: Schema.optionalKey(Schema.String),
+  gameJevApiKey: Schema.optionalKey(TrimmedString),
+  gameSketchfabApiKey: Schema.optionalKey(TrimmedString),
+  gamePolyPizzaApiKey: Schema.optionalKey(TrimmedString),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),

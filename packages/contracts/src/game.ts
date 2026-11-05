@@ -638,30 +638,3 @@ export const GameCheckResult = Schema.Struct({
   durationMs: Schema.Number,
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
-
-/**
- * Keys users can set in Game Tools. Values live only in the server secret
- * store; clients and agents see presence alone, never the value.
- * `jev` picks exploration options (TypeSafe); `sketchfab`/`polypizza` ride
- * the pinned Blender addon's environment (it reads BLENDERMCP_* keys).
- */
-export const GameSecretName = Schema.Literals(["jev", "sketchfab", "polypizza"]);
-export type GameSecretName = typeof GameSecretName.Type;
-export const GameSecretsStatusResult = Schema.Struct({
-  jev: Schema.Boolean,
-  sketchfab: Schema.Boolean,
-  polypizza: Schema.Boolean,
-});
-export type GameSecretsStatusResult = typeof GameSecretsStatusResult.Type;
-export const GameSetSecretInput = Schema.Struct({
-  name: GameSecretName,
-  /** An empty value clears the stored key. */
-  secret: Schema.String.check(Schema.isMaxLength(4000)),
-});
-export type GameSetSecretInput = typeof GameSetSecretInput.Type;
-export const GameSetSecretResult = Schema.Struct({
-  name: GameSecretName,
-  /** True when a non-empty value is stored now. */
-  set: Schema.Boolean,
-});
-export type GameSetSecretResult = typeof GameSetSecretResult.Type;
