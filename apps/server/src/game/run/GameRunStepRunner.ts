@@ -757,20 +757,16 @@ const make = Effect.gen(function* () {
       );
     });
 
-  // The Game panel's live run line: the step label, refreshed as the run moves.
+  // Every move of the run is news to the library and the Run view, which
+  // reread the run's records; the step label rides along for the push.
   const showLive = (run: GameRun) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(run.threadId);
-      if (run.status === "ended") return yield* operations.recordRun(root, null);
+      if (run.status === "ended") return yield* operations.runChanged(root, null);
       const records = yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" });
       const held =
         records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
-      yield* operations.recordRun(root, {
-        step: currentStep(toState(run, records.gameRunRounds, held)),
-        startedAt: run.startedAt,
-        // Any change is news to the panel; each step is one.
-        threads: run.seq,
-      });
+      yield* operations.runChanged(root, currentStep(toState(run, records.gameRunRounds, held)));
     });
 
   // The run log is for people: each step's decisions, written once it settles.

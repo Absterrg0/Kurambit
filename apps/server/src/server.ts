@@ -516,7 +516,7 @@ const layerGameServices = GameRunControl.layer.pipe(
   Layer.provideMerge(layerGameRunWork),
   Layer.provide(ProjectionStoreV2.layer),
   Layer.provideMerge(GameService.layer),
-  Layer.provideMerge(GameProjectService.layer),
+  Layer.provideMerge(GameProjectService.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
   Layer.provideMerge(GamePreview.layer),

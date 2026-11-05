@@ -17,6 +17,7 @@ import {
   GameRunId,
   type GameRunStep,
   type GameRunStepResult,
+  type OrchestrationV2DomainEvent,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadShell,
   ProjectId,
@@ -585,6 +586,8 @@ interface World {
   readonly launched: Queue.Queue<ThreadId>;
   /** Each interrupt's command id, as it is sent. */
   readonly interrupted: Queue.Queue<string>;
+  /** Each push of the run's move to the library and the Run view (its step, null once ended). */
+  readonly pushes: Queue.Queue<string | null>;
 }
 const newWorld = Effect.gen(function* () {
   const world: World = {
@@ -602,6 +605,7 @@ const newWorld = Effect.gen(function* () {
     capWatched: yield* Deferred.make<void>(),
     launched: yield* Queue.unbounded<ThreadId>(),
     interrupted: yield* Queue.unbounded<string>(),
+    pushes: yield* Queue.unbounded<string | null>(),
   };
   return world;
 });
@@ -751,8 +755,7 @@ const layerGame = (root: string, world: World) =>
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
-          run: () => null,
-          recordRun: () => Effect.void,
+          runChanged: (_root, step) => Queue.offer(world.pushes, step).pipe(Effect.asVoid),
         }),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
         Layer.mock(ThreadLaunch.ThreadLaunchService)({
@@ -1278,4 +1281,28 @@ it.effect("a role's cap not yet due fires later from its timer, with no fiber ho
       assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
     }),
   ),
+);
+
+it.effect(
+  "every move of the run is pushed, and the game's card reads the run from its records",
+  () =>
+    withGame((world) =>
+      Effect.gen(function* () {
+        const runner = yield* GameRunStepRunner.GameRunStepRunner;
+        const pushOf = (dispatched: {
+          readonly storedEvents: ReadonlyArray<{ readonly event: OrchestrationV2DomainEvent }>;
+        }) =>
+          Effect.forEach(dispatched.storedEvents, ({ event }) => runner.handle(event), {
+            discard: true,
+          });
+        yield* createCreator;
+        yield* pushOf(yield* startRun("autopilot"));
+        assert.isString(yield* Queue.take(world.pushes));
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        assert.equal((yield* projections.getProjectGameRun(projectId))?.id, runId);
+        yield* pushOf(yield* stopRun);
+        assert.isNull(yield* Queue.take(world.pushes));
+        assert.equal((yield* projections.getProjectGameRun(projectId))?.status, "ended");
+      }),
+    ),
 );

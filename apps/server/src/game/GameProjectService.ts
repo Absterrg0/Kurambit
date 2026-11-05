@@ -29,6 +29,9 @@ import * as GameOperations from "./GameOperations.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import { toState } from "../orchestration-v2/gameRun/decide.ts";
+import { currentStep } from "./run/runView.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
@@ -78,15 +81,28 @@ export class GameProjectService extends Context.Service<
 >()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 // The library carries only what a card shows of a live run.
-const liveRun = (run: GameOperations.GameRunLive | null): GameSummary["run"] =>
-  run === null ? null : { step: run.step, startedAt: run.startedAt };
+
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const launches = yield* ThreadLaunchService.ThreadLaunchService;
   const processes = yield* GameProcesses.GameProcesses;
   const operations = yield* GameOperations.GameOperations;
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
   const fileSystem = yield* FileSystem.FileSystem;
+  // The game's run as its records hold it: a card says what a live run is doing.
+  const liveRun = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const run = yield* projections.getProjectGameRun(projectId);
+      if (run === null || run.status === "ended") return null;
+      const records = yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" });
+      const held =
+        records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
+      return {
+        step: currentStep(toState(run, records.gameRunRounds, held)),
+        startedAt: run.startedAt,
+      } satisfies GameSummary["run"];
+    }).pipe(Effect.orElseSucceed(() => null));
   const path = yield* Path.Path;
   /**
    * Every record, lock and cache is keyed by this path, so registration and
@@ -445,7 +461,7 @@ const make = Effect.gen(function* () {
                 currentOperation === null
                   ? null
                   : { name: currentOperation.name, state: currentOperation.state },
-              run: liveRun(operations.run(root)),
+              run: yield* liveRun(project.id),
               keyArt,
               updatedAt: latestGameActivity(
                 project.updatedAt,
