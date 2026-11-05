@@ -6,7 +6,7 @@ import * as NodeURL from "node:url";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Semaphore from "effect/Semaphore";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import {
   GameOperationError,
   type GameAssetsAddInput,
@@ -16,11 +16,11 @@ import {
   type GameLibraryKind,
 } from "@kurambit/contracts";
 import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
+import { fileSha256 } from "./fileHash.ts";
 import {
   INDEX_VERSION,
   UNPACK_LIMITS,
   downloadPinned,
-  fileSha256,
   indexPack,
   loadableIn,
   matchScore,
@@ -192,14 +192,7 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const directory = libraryDirectory();
   const scratch = NodePath.join(directory, "tmp");
-  const locks = new Map<string, Semaphore.Semaphore>();
-  const lockOf = (id: string) => {
-    const known = locks.get(id);
-    if (known !== undefined) return known;
-    const made = Semaphore.makeUnsafe(1);
-    locks.set(id, made);
-    return made;
-  };
+  const locks = yield* KeyedLock.make<string>();
   const indexes = new Map<string, LibraryIndex>();
   const fontDirectory = yield* labelFontDirectory();
   if (fontDirectory === undefined)
@@ -366,7 +359,7 @@ const make = Effect.gen(function* () {
         // The cache was cleared while the server ran: fetch again instead of failing until restart.
         indexes.delete(pack.id);
       }
-      return yield* fetchPack(pack).pipe(lockOf(pack.id).withPermits(1));
+      return yield* locks.withLock(pack.id, fetchPack(pack));
     });
 
   /**

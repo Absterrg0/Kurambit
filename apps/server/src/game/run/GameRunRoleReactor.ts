@@ -27,7 +27,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Semaphore from "effect/Semaphore";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -205,15 +205,7 @@ const make = Effect.gen(function* () {
   // One settle per step attempt at a time: a turn's run is updated more than
   // once after it ends, and its evidence is read (and reset) only once. Other
   // steps (a pair's other half) land meanwhile.
-  const locks = new Map<string, Semaphore.Semaphore>();
-  const lockOf = (turn: RoleTurn) => {
-    const key = `${turn.stepId}:${turn.attempt}`;
-    const known = locks.get(key);
-    if (known !== undefined) return known;
-    const made = Semaphore.makeUnsafe(1);
-    locks.set(key, made);
-    return made;
-  };
+  const locks = yield* KeyedLock.make<string>();
 
   const locate: GameRunRoleReactor["Service"]["locate"] = (creator, stepId, attempt) =>
     projections.getGameRunRecords(creator, { steps: "in-flight" }).pipe(
@@ -531,18 +523,16 @@ const make = Effect.gen(function* () {
     );
 
   const settleTurn = (roleThreadId: ThreadId, turnRun: OrchestrationV2Run, turn: RoleTurn) =>
-    lockOf(turn)
-      .withPermits(1)(settleLocked(roleThreadId, turnRun))
-      .pipe(
-        Effect.map((outcome): SettleOutcome =>
-          outcome === "fresh" || outcome === "continue" ? outcome : null,
+    locks.withLock(`${turn.stepId}:${turn.attempt}`, settleLocked(roleThreadId, turnRun)).pipe(
+      Effect.map((outcome): SettleOutcome =>
+        outcome === "fresh" || outcome === "continue" ? outcome : null,
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("game run role result failed", { threadId: roleThreadId, cause }).pipe(
+          Effect.as(null),
         ),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("game run role result failed", { threadId: roleThreadId, cause }).pipe(
-            Effect.as(null),
-          ),
-        ),
-      );
+      ),
+    );
 
   // The event consumer only reads and hands over: landing a turn (closing its
   // explorer, drawing its sheet, hashing its sources) is a job of the run's.

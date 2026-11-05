@@ -2,7 +2,7 @@
 import * as Effect from "effect/Effect";
 import type { GameOperationError, ThreadId } from "@kurambit/contracts";
 import type * as GameService from "../GameService.ts";
-import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
+import { type GameRunMemoryShort, handBackOnLowMemory, memoryEnded } from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
 import { laneProfile } from "../engineProfile.ts";
 
@@ -17,10 +17,12 @@ export const bootStep = (
     readonly root: string;
     readonly lane: string;
     readonly log: (line: string) => Effect.Effect<void>;
+    /** The step may still hand itself back to wait for memory. */
+    readonly memoryWaitsLeft: boolean;
   },
-): Effect.Effect<StepResult, GameOperationError> => {
+): Effect.Effect<StepResult, GameOperationError | GameRunMemoryShort> => {
   // A check that could not run is not a verdict on the build: a busy
-  // game or a cancelled check is retried; memory short is waited out;
+  // game or a cancelled check is retried; memory short hands the step back to wait;
   // a missing tool, or memory still short after the waits, ends the
   // run (resumable) rather than rejecting good work. Anything else
   // the check reports is the build failing to boot.
@@ -29,8 +31,8 @@ export const bootStep = (
     what: string,
     attempt: Effect.Effect<Verdict, GameOperationError>,
     tries = 1,
-  ): Effect.Effect<StepResult, GameOperationError> =>
-    waitOutLowMemory(attempt, what, ctx.log).pipe(
+  ): Effect.Effect<StepResult, GameOperationError | GameRunMemoryShort> =>
+    handBackOnLowMemory(attempt, what, ctx.memoryWaitsLeft).pipe(
       Effect.map((r) => ({ kind: "boot", ...r }) as const),
       Effect.catchTags({
         GameOperationError: (error) => {

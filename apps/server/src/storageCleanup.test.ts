@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -1574,6 +1575,82 @@ describe("storage cleanup reports and local file policies", () => {
           "browser-artifacts",
           "logs",
         ]);
+      }),
+    ),
+  );
+  it.live("skips an entry it cannot read whole and still cleans every game", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, repo, disable, setProjectRoots } = yield* cleanupFixture();
+        disable();
+        const other = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-game-" });
+        const oldLog = (root: string) =>
+          `${root}/builds/logs/1700000000000-godot-export-0b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log`;
+        for (const root of [repo, other]) {
+          yield* fs.writeFileString(`${root}/game.json`, "{}");
+          yield* fs.makeDirectory(`${root}/builds/logs`, { recursive: true });
+          yield* fs.writeFileString(oldLog(root), "old");
+          yield* fs.utimes(oldLog(root), 1, 1);
+        }
+        // A bot run whose frames cannot be listed, as when a tool swaps them mid-walk.
+        const locked = `${repo}/builds/logs/game-bot-run1/frames`;
+        yield* fs.makeDirectory(locked, { recursive: true });
+        yield* fs.utimes(`${repo}/builds/logs/game-bot-run1`, 1, 1);
+        yield* fs.chmod(locked, 0o000);
+        yield* Effect.addFinalizer(() => fs.chmod(locked, 0o755).pipe(Effect.ignore));
+        setProjectRoots([repo, other]);
+        const report = yield* service.runNow;
+        expect(report.entries.find((entry) => entry.kind === "game-logs")).toMatchObject({
+          outcome: "removed",
+          files: 2,
+        });
+        expect(yield* fs.exists(`${repo}/builds/logs/game-bot-run1`)).toBe(true);
+        expect(yield* fs.exists(oldLog(repo))).toBe(false);
+        expect(yield* fs.exists(oldLog(other))).toBe(false);
+      }),
+    ),
+  );
+  it.live("removes only a game's own expired logs, never editor homes, players or links", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, repo, disable } = yield* cleanupFixture();
+        disable();
+        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-outside-" });
+        const logs = `${repo}/builds/logs`;
+        yield* fs.writeFileString(`${repo}/game.json`, "{}");
+        yield* fs.makeDirectory(logs, { recursive: true });
+        const old = `${logs}/1700000000000-godot-export-0b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log`;
+        const fresh = `${logs}/${yield* Clock.currentTimeMillis}-godot-export-1b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log`;
+        yield* fs.writeFileString(old, "old");
+        yield* fs.utimes(old, 1, 1);
+        yield* fs.writeFileString(fresh, "fresh");
+        for (const dir of ["game-bot-run1", "unity-play-0123456789abcdef", "blender-live"]) {
+          yield* fs.makeDirectory(`${logs}/${dir}`);
+          yield* fs.writeFileString(`${logs}/${dir}/frame.png`, "png");
+          yield* fs.utimes(`${logs}/${dir}/frame.png`, 1, 1);
+          yield* fs.utimes(`${logs}/${dir}`, 1, 1);
+        }
+        yield* fs.writeFileString(`${logs}/notes.txt`, "mine");
+        yield* fs.utimes(`${logs}/notes.txt`, 1, 1);
+        yield* fs.makeDirectory(`${outside}/game-bot-run2`);
+        yield* fs.utimes(`${outside}/game-bot-run2`, 1, 1);
+        yield* fs.symlink(`${outside}/game-bot-run2`, `${logs}/game-bot-run2`);
+        const report = yield* service.runNow;
+        expect(report.entries.find((entry) => entry.kind === "game-logs")).toMatchObject({
+          outcome: "removed",
+          reason: "Removed 2 game logs",
+          files: 2,
+        });
+        expect((yield* fs.readDirectory(logs)).toSorted()).toEqual(
+          [
+            fresh.slice(logs.length + 1),
+            "blender-live",
+            "game-bot-run2",
+            "notes.txt",
+            "unity-play-0123456789abcdef",
+          ].toSorted(),
+        );
+        expect(yield* fs.exists(`${outside}/game-bot-run2`)).toBe(true);
       }),
     ),
   );

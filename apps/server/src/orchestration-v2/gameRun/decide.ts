@@ -68,6 +68,7 @@ export const GAME_RUN_EFFECT_TYPES = [
   "game-run.decision.deadline",
   "game-run.step.deadline",
   "game-run.step.resend",
+  "game-run.step.wake",
 ] as const satisfies ReadonlyArray<GameRunEffectRequest["type"]>;
 
 interface GameRunEffect {
@@ -265,6 +266,8 @@ const stepRecord = (
         result: null,
         endedHalves: [],
         logs: [...existing.logs, ...logs],
+        // A new attempt (a resume after the waits ran out) waits afresh.
+        memoryWaits: 0,
         completedAt: null,
       }
     : {
@@ -914,7 +917,7 @@ const restore = (work: Work, command: Command<"game-run.restore">) =>
     return Result.succeed(settle(work, landed, state, next, [], []));
   });
 
-/** A role step's own timer: its cap at a later due time, or a turn sent again after a pause. */
+/** A step's own timer: a role's cap at a later due time, a turn sent again, or its work after a memory wait. */
 const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(currentStep(work, run, command.stepId), ({ record }) => {
@@ -924,6 +927,22 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
           `Attempt ${command.attempt} of step ${command.stepId} was superseded.`,
         );
       const state = toState(run, work.records.rounds, record);
+      if (command.timer.kind === "memory") {
+        const waited: GameRunStep = {
+          ...record,
+          memoryWaits: Math.max(record.memoryWaits ?? 0, command.timer.n),
+        };
+        const wake = effectFor(
+          {
+            type: "game-run.step.wake",
+            runId: run.id,
+            stepId: record.id,
+            attempt: command.attempt,
+          },
+          command.at,
+        );
+        return Result.succeed(settle(work, run, state, state, [waited], [wake]));
+      }
       const timer =
         command.timer.kind === "cap"
           ? effectFor(

@@ -1,11 +1,11 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Fixture trees are written with plain fs.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- Fixture trees are written with plain fs and dated with utimes.
 // A build is attached to sources only when they did not change under it. URP's
 // runtime-settings list, which the editor empties and a build refills, is not a source.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, describe, expect, it } from "@effect/vitest";
-import { snapshotBuildSource } from "./sourceSnapshot.ts";
+import { type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
 
 const roots: string[] = [];
 afterAll(() =>
@@ -66,5 +66,35 @@ describe("snapshotBuildSource on a Unity project", () => {
       settings(filled).replace("      - rid: 12\n    m_Runtime", "      - rid: 13\n    m_Runtime"),
     );
     expect(await idOf(root)).not.toBe(start);
+  });
+});
+
+describe("snapshotBuildSource with a hash cache", () => {
+  it("sees a same-size edit whose mtime was put back", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "source-snapshot-"));
+    roots.push(root);
+    const script = NodePath.join(root, "godot/main.gd");
+    await NodeFSP.mkdir(NodePath.dirname(script), { recursive: true });
+    await NodeFSP.writeFile(script, "speed = 1\n");
+    const old = new Date(Date.now() - 60_000);
+    await NodeFSP.utimes(script, old, old);
+    const cache: SourceHashCache = new Map();
+    const first = await snapshotBuildSource(root, "godot", { cache });
+    expect(cache.size).toBe(1);
+    await NodeFSP.writeFile(script, "speed = 9\n");
+    await NodeFSP.utimes(script, old, old);
+    const second = await snapshotBuildSource(root, "godot", { cache });
+    if (first.kind !== "known" || second.kind !== "known") throw new Error("unknown snapshot");
+    expect(second.sourceId).not.toBe(first.sourceId);
+  });
+
+  it("does not cache a file written within the racy window", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "source-snapshot-"));
+    roots.push(root);
+    await NodeFSP.mkdir(NodePath.join(root, "godot"), { recursive: true });
+    await NodeFSP.writeFile(NodePath.join(root, "godot/main.gd"), "speed = 1\n");
+    const cache: SourceHashCache = new Map();
+    await snapshotBuildSource(root, "godot", { cache });
+    expect(cache.size).toBe(0);
   });
 });

@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off preferSchemaOverJson:off -- Streams pinned archives to disk with an AbortSignal and a stall timer like the toolchain downloader, unpacks them, and reads glTF JSON headers of any shape.
 // The pinned CC0 library's file boundary: pins, safe unpacking and cheap facts about the files.
-import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -10,6 +9,7 @@ import * as Effect from "effect/Effect";
 import { GameOperationError, type GameLibraryKind } from "@kurambit/contracts";
 import { openZipArchive } from "../zipArchive.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
+import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 export interface LibraryPack {
   readonly id: string;
@@ -125,16 +125,6 @@ export const loadableIn = (engine: LibraryEngine, format: string) => LOADABLE[en
 export const modelRank = (engine: LibraryEngine, format: string) => {
   const rank = MODEL_RANK[engine].indexOf(format);
   return rank === -1 ? MODEL_RANK[engine].length : rank;
-};
-
-export const fileSha256 = async (path: string) => {
-  const hash = NodeCrypto.createHash("sha256");
-  let bytes = 0;
-  for await (const chunk of NodeFS.createReadStream(path)) {
-    hash.update(chunk as Buffer);
-    bytes += (chunk as Buffer).byteLength;
-  }
-  return { sha256: hash.digest("hex"), bytes };
 };
 
 /** Null when the bytes are the pinned ones; otherwise what differs, for the error detail. */
@@ -330,13 +320,6 @@ const readHead = async (path: string, bytes: number, position = 0) => {
   }
 };
 
-const pngSize = (head: Buffer) =>
-  head.length >= 24 &&
-  head.readUInt32BE(0) === 0x89504e47 &&
-  head.toString("latin1", 12, 16) === "IHDR"
-    ? { width: head.readUInt32BE(16), height: head.readUInt32BE(20) }
-    : undefined;
-
 const wavSeconds = (head: Buffer) => {
   if (head.length < 12 || head.toString("latin1", 0, 4) !== "RIFF") return undefined;
   let offset = 12;
@@ -492,7 +475,7 @@ export const indexPack = async (
     const absolute = NodePath.join(directory, path);
     const { size } = await NodeFSP.stat(absolute);
     let file: LibraryFile = { path, bytes: size, media, format };
-    if (format === "png") file = { ...file, ...pngSize(await readHead(absolute, 24)) };
+    if (format === "png") file = { ...file, ...readImageDimensions(await readHead(absolute, 24)) };
     if (format === "wav") {
       const seconds = wavSeconds(await readHead(absolute, 65_536));
       if (seconds !== undefined) file = { ...file, seconds: Math.round(seconds * 100) / 100 };

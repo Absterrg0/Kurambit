@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This helper owns the game build path on the native filesystem.
 import * as NodeCrypto from "node:crypto";
-import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import { fileSha256 } from "./fileHash.ts";
 
 /** The legacy mutable build directory. A new export never writes here. */
 export const WEB_BUILD_DIRECTORY = "builds/web";
@@ -111,16 +111,6 @@ export const describeWebArtifacts = async (
   }));
 };
 
-const hashFile = async (absolute: string): Promise<{ size: number; sha256: string }> => {
-  const hash = NodeCrypto.createHash("sha256");
-  let size = 0;
-  for await (const chunk of NodeFS.createReadStream(absolute)) {
-    size += chunk.length;
-    hash.update(chunk as Buffer);
-  }
-  return { size, sha256: hash.digest("hex") };
-};
-
 /** SHA-256 over the artifact's sorted path/content lines. */
 export const webBuildId = (files: readonly WebBuildFile[]): string => {
   const hash = NodeCrypto.createHash("sha256");
@@ -137,7 +127,10 @@ export const hashWebBuildDirectory = async (directory: string): Promise<HashedWe
   const walked = await walkBuild(directory);
   if (walked === null || walked.length === 0) return null;
   const files: WebBuildFile[] = [];
-  for (const file of walked) files.push({ path: file.path, ...(await hashFile(file.absolute)) });
+  for (const file of walked) {
+    const { sha256, bytes } = await fileSha256(file.absolute);
+    files.push({ path: file.path, size: bytes, sha256 });
+  }
   return { buildId: webBuildId(files), directory, files };
 };
 

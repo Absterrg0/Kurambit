@@ -15,11 +15,11 @@ import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { RelativeTime } from "../RelativeTime";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { useGameDialogStore, type GameDraft } from "./gameDialogStore";
 import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import {
-  formatGameEditedAt,
   gameInitial,
   gamePigment,
   gameTemplateAppearance,
@@ -310,7 +310,7 @@ function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate font-medium text-sm">{card.game.name}</span>
           <span className="text-xs text-muted-foreground">
-            {formatGameEditedAt(gameActivityTimestamp(card))}
+            edited <RelativeTime timestamp={gameActivityTimestamp(card)} />
           </span>
         </span>
         <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors group-hover:border-primary group-hover:bg-primary group-hover:text-primary-foreground">

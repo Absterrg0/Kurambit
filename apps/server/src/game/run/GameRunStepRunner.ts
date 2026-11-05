@@ -25,6 +25,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -63,7 +64,13 @@ import { restoreKeptRound } from "./restoreRound.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
 import { buildStep, captureBuild, pruneBuilds } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
-import { waitOutLowMemory } from "./lowMemory.ts";
+import {
+  type GameRunMemoryShort,
+  MEMORY_PAUSE,
+  MEMORY_WAITS,
+  handBackOnLowMemory,
+  lastLine,
+} from "./lowMemory.ts";
 import { modelFacts } from "./modelFacts.ts";
 import {
   blankFolder,
@@ -151,6 +158,62 @@ const make = Effect.gen(function* () {
         reason: reason.slice(0, 300),
       }),
     );
+  /**
+   * Memory short: the step's job ends and a durable timer runs its work again,
+   * so no job holds one of the shared step slots while it waits. The waits are
+   * counted on the step's record, so a restart does not reset them; both
+   * halves of a pair refused at once make one wait (one command id). The run
+   * finds a pair's step by a half's id, so the timer names the half refused.
+   * A timer that could not be written fails the step: a step left running
+   * with neither job nor timer would wait for a restart.
+   */
+  const waitForMemory = (
+    job: GameRunJobs.GameRunStepJob,
+    record: GameRunStep,
+    stepId: GameRunStepId,
+    short: GameRunMemoryShort,
+    log: (line: string) => Effect.Effect<void>,
+  ) =>
+    Effect.gen(function* () {
+      const n = (record.memoryWaits ?? 0) + 1;
+      yield* log(
+        `${short.what} refused, memory short (${lastLine(short.error)}); the step waits ${MEMORY_PAUSE} (${n} of ${MEMORY_WAITS})`,
+      );
+      const at =
+        DateTime.toEpochMillis(yield* DateTime.now) +
+        Duration.toMillis(Duration.fromInputUnsafe(MEMORY_PAUSE));
+      yield* engine
+        .dispatch({
+          type: "game-run.step.schedule",
+          commandId: CommandId.make(
+            `server:game-run-memory:${record.id}:attempt:${job.attempt}:${n}`,
+          ),
+          threadId: job.threadId,
+          runId: job.runId,
+          stepId,
+          attempt: job.attempt,
+          at,
+          timer: { kind: "memory", n },
+        })
+        .pipe(
+          Effect.asVoid,
+          Effect.catchTags({
+            // The run moved on or stopped, or the other half's wait already holds this one.
+            OrchestratorGameRunRefusedError: (error) =>
+              Effect.logInfo("game run memory wait not taken", { detail: error.detail }),
+            OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+          }),
+          Effect.catch((error) =>
+            fail(
+              { ...job, stepId },
+              stepId,
+              `memory wait could not be scheduled (${error.message})`,
+            ),
+          ),
+        );
+    });
+  const memoryWaitsLeft = (record: GameRunStep) => (record.memoryWaits ?? 0) < MEMORY_WAITS;
+
   // A step's work that broke reports it, so the run ends resumably with why;
   // an interrupt is a stop and reports nothing.
   const reporting = <E>(
@@ -233,12 +296,18 @@ const make = Effect.gen(function* () {
     });
 
   const copiesOf = (runId: string) => runCopies(config.worktreesDir, runId);
-  const roleContext = (run: GameRun, root: string, log: RoleContext["log"]): RoleContext => ({
+  const roleContext = (
+    run: GameRun,
+    record: GameRunStep,
+    root: string,
+    log: RoleContext["log"],
+  ): RoleContext => ({
     root,
     lane: run.lane,
     runId: run.id,
     copies: copiesOf(run.id),
     log,
+    memoryWaitsLeft: memoryWaitsLeft(record),
   });
 
   /**
@@ -306,16 +375,16 @@ const make = Effect.gen(function* () {
           if (!projectLive)
             return yield* fail(half, stepId, `${role.role}: its project was deleted`);
           const measured = yield* before();
-          const ctx = roleContext(run, root, log);
+          const ctx = roleContext(run, record, root, log);
           // An engine whose first editor open imports the whole project (minutes;
           // later opens take seconds) pays it here, before any role's clock.
           const engineProfile = laneProfile(run.lane);
           if (engineProfile.run.warmEditor && role.at === null) {
             const from = Date.now();
-            yield* waitOutLowMemory(
+            yield* handBackOnLowMemory(
               game.warmEditor(root),
               `${engineProfile.displayName} warm-up`,
-              log,
+              ctx.memoryWaitsLeft,
             ).pipe(
               Effect.matchEffect({
                 onSuccess: (warmed) =>
@@ -325,9 +394,11 @@ const make = Effect.gen(function* () {
                       )
                     : Effect.void,
                 onFailure: (error) =>
-                  log(
-                    `${engineProfile.displayName} warm-up skipped (${(error.detail ?? error.reason).slice(0, 200)}); the role opens the editor itself`,
-                  ),
+                  error._tag === "GameRunMemoryShort"
+                    ? Effect.fail(error)
+                    : log(
+                        `${engineProfile.displayName} warm-up skipped (${(error.detail ?? error.reason).slice(0, 200)}); the role opens the editor itself`,
+                      ),
               }),
             );
           }
@@ -462,19 +533,44 @@ const make = Effect.gen(function* () {
       // A thread the creator deleted is replaced, never waited on.
       yield* log(`${role.role}: thread ${threadId} is gone; launching the step again`);
       return yield* launchThread(own, entry?.threadId ?? undefined, prompt);
-    });
+    }).pipe(
+      Effect.catchTags({
+        GameRunMemoryShort: (short) =>
+          waitForMemory(
+            job,
+            record,
+            record.step.kind === "pair" ? gameRunStepId(run.id, role.id) : record.id,
+            short,
+            log,
+          ),
+      }),
+    );
 
   const botHalf = (
     job: GameRunJobs.GameRunStepJob,
     run: GameRun,
+    record: GameRunStep,
     stepId: GameRunStepId,
     step: BotStep,
     root: string,
     log: (line: string) => Effect.Effect<void>,
   ) =>
-    runBotFact(deps, { root, runId: run.id, copies: copiesOf(run.id), log }, step).pipe(
+    runBotFact(
+      deps,
+      {
+        root,
+        runId: run.id,
+        copies: copiesOf(run.id),
+        log,
+        memoryWaitsLeft: memoryWaitsLeft(record),
+      },
+      step,
+    ).pipe(
       Effect.tap((result) => log(`  step ${step.id}: ${summarize(result)}`)),
       Effect.flatMap((result) => complete({ ...job, stepId }, stepId, result)),
+      Effect.catchTags({
+        GameRunMemoryShort: (short) => waitForMemory(job, record, stepId, short, log),
+      }),
     );
 
   const execute = (job: GameRunJobs.GameRunStepJob) =>
@@ -524,7 +620,13 @@ const make = Effect.gen(function* () {
               root,
               lane: run.lane,
               log,
-            }).pipe(Effect.flatMap(done)),
+              memoryWaitsLeft: memoryWaitsLeft(record),
+            }).pipe(
+              Effect.flatMap(done),
+              Effect.catchTags({
+                GameRunMemoryShort: (short) => waitForMemory(job, record, record.id, short, log),
+              }),
+            ),
           );
         case "facts":
           return yield* reporting(
@@ -551,7 +653,11 @@ const make = Effect.gen(function* () {
           );
         }
         case "bot":
-          return yield* reporting(job, record.id, botHalf(job, run, record.id, step, root, log));
+          return yield* reporting(
+            job,
+            record.id,
+            botHalf(job, run, record, record.id, step, root, log),
+          );
         case "note":
           return yield* reporting(
             job,
@@ -583,7 +689,7 @@ const make = Effect.gen(function* () {
                 stepId,
                 h.kind === "role"
                   ? roleHalf(job, run, record, h, root, log)
-                  : botHalf(job, run, stepId, h, root, log),
+                  : botHalf(job, run, record, stepId, h, root, log),
               );
             },
             { concurrency: 2, discard: true },

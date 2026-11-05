@@ -63,6 +63,8 @@ describe("storage cleanup settings", () => {
       worktreeKeepWhen: "uncommitted-changes",
       browserArtifactsAfterDays: null,
       logsAfterDays: null,
+      // A game's own logs grow fast and are not the user's files; their rule starts on.
+      gameLogsAfterDays: 14,
     });
   });
 

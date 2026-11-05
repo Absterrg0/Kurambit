@@ -30,6 +30,8 @@ import {
   type GameBlenderSceneResult,
   type GameManifest,
 } from "@kurambit/contracts";
+import * as GameMemoryGate from "./GameMemoryGate.ts";
+import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
@@ -54,6 +56,7 @@ import {
   stopRecorded,
 } from "./processHost.ts";
 import { OFFSCREEN_POSITION, findWindowHost, type HostedWindow } from "./windowHost.ts";
+import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
@@ -63,6 +66,11 @@ const IDLE_MS = 10 * 60_000;
  * import, a GLB export and solid looks; 1.5 GB leaves a little headroom.
  */
 const NEEDED_MB = 1536;
+const BLENDER_ROOM: MemoryRoom = {
+  what: "live Blender",
+  neededMb: NEEDED_MB,
+  env: "KURAMBIT_BLENDER_MEMORY_MB",
+};
 /**
  * Further free memory a rendered look needs, in MB: on the same machine a
  * `shading: "rendered"` look took the session to about 3 GB and MemAvailable
@@ -212,18 +220,6 @@ const toolNetworkEnv = (): NodeJS.ProcessEnv => {
 /** Blender's window, the size its viewport looks render at. */
 const BLENDER_WINDOW = { width: 1280, height: 800 } as const;
 
-/** PNG IHDR dimensions without a decoder: width/height at bytes 16/20. */
-const pngSizeOf = (data: string, fallback: number): { width: number; height: number } => {
-  try {
-    const bytes = Buffer.from(data, "base64");
-    if (bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47)
-      return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
-  } catch {
-    /* fall through */
-  }
-  return { width: fallback, height: fallback };
-};
-
 type McpContent = {
   readonly content?: ReadonlyArray<{
     readonly type: string;
@@ -353,6 +349,7 @@ export class GameBlender extends Context.Service<
 const make = Effect.gen(function* () {
   const processHost = yield* ProcessHost;
   const processes = yield* GameProcesses.GameProcesses;
+  const gate = yield* GameMemoryGate.GameMemoryGate;
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -488,10 +485,6 @@ const make = Effect.gen(function* () {
           "tool-missing",
           "The live Blender needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
         );
-      const short = yield* Effect.promise(() =>
-        memoryShortfall("live Blender", NEEDED_MB, "KURAMBIT_BLENDER_MEMORY_MB"),
-      );
-      if (short !== null) return yield* opError("blender-live", root, "low-memory", short);
       const addonKeys = yield* readAddonKeyEnv;
       const homeDir = homeDirOf(root);
       const port = portFor(root);
@@ -598,70 +591,81 @@ const make = Effect.gen(function* () {
           .then(() => [blendPath])
           .catch(() => [] as string[]),
       );
-      const hosted = yield* Effect.tryPromise({
-        try: async () => {
-          const logFd = NodeFS.openSync(logPath, "w");
-          // Blender hands what follows `--` to Python and ignores it, so the
-          // token rides the command line where an OS hides environments.
-          const token = launchToken();
-          try {
-            // cwd is the game root so relative paths in model code land in the game.
-            return await host.launch(
-              {
-                executable: blender.path,
-                args: [
-                  ...reopen,
-                  ...(host.kind === "offscreen"
-                    ? // The user's desktop: a window far off every monitor that
-                      // opens behind other windows without taking focus.
-                      [
-                        "--window-geometry",
-                        String(OFFSCREEN_POSITION.x),
-                        String(OFFSCREEN_POSITION.y),
-                        String(BLENDER_WINDOW.width),
-                        String(BLENDER_WINDOW.height),
-                        "--no-window-focus",
-                      ]
-                    : []),
-                  "--python",
-                  bootPy,
-                  "--",
-                  token,
-                ],
-                cwd: root,
-                env: withBinDir({ ...sessionEnv(homeDir), ...addonKeys }, uv.binDir),
-                stdio: ["ignore", logFd, logFd],
-                token,
-              },
-              BLENDER_WINDOW,
-            );
-          } finally {
-            NodeFS.closeSync(logFd);
+      // Blender starts through the shared memory gate, held until its addon
+      // socket opens, so its load is in the next heavy start's memory check.
+      const hosted = yield* gate.admit(
+        "blender-live",
+        root,
+        BLENDER_ROOM,
+        Effect.gen(function* () {
+          const hosted = yield* Effect.tryPromise({
+            try: async () => {
+              const logFd = NodeFS.openSync(logPath, "w");
+              // Blender hands what follows `--` to Python and ignores it, so the
+              // token rides the command line where an OS hides environments.
+              const token = launchToken();
+              try {
+                // cwd is the game root so relative paths in model code land in the game.
+                return await host.launch(
+                  {
+                    executable: blender.path,
+                    args: [
+                      ...reopen,
+                      ...(host.kind === "offscreen"
+                        ? // The user's desktop: a window far off every monitor that
+                          // opens behind other windows without taking focus.
+                          [
+                            "--window-geometry",
+                            String(OFFSCREEN_POSITION.x),
+                            String(OFFSCREEN_POSITION.y),
+                            String(BLENDER_WINDOW.width),
+                            String(BLENDER_WINDOW.height),
+                            "--no-window-focus",
+                          ]
+                        : []),
+                      "--python",
+                      bootPy,
+                      "--",
+                      token,
+                    ],
+                    cwd: root,
+                    env: withBinDir({ ...sessionEnv(homeDir), ...addonKeys }, uv.binDir),
+                    stdio: ["ignore", logFd, logFd],
+                    token,
+                  },
+                  BLENDER_WINDOW,
+                );
+              } finally {
+                NodeFS.closeSync(logFd);
+              }
+            },
+            catch: (cause) =>
+              opError("blender-live", root, "io", "Blender's window did not open.", cause),
+          });
+          const stopStarted = Effect.promise(() => hosted.stop());
+          const blenderLaunch = yield* Effect.promise(() => hosted.process.record);
+          yield* remember({
+            display: hosted.label,
+            ...(blenderLaunch === null ? {} : { blenderLaunch }),
+          });
+          if (blenderLaunch === null) {
+            yield* stopStarted;
+            return yield* opError("blender-live", root, "io", "Blender did not start.");
           }
-        },
-        catch: (cause) =>
-          opError("blender-live", root, "io", "Blender's window did not open.", cause),
-      });
+          if (!(yield* Effect.promise(() => waitPort(port, 90_000)))) {
+            yield* stopStarted;
+            return yield* opError(
+              "blender-live",
+              logPath,
+              "command-failed",
+              "Blender's addon socket did not open in 90s; see builds/logs/blender-live/blender.log.",
+            );
+          }
+          return hosted;
+        }),
+      );
       const blenderProcess = hosted.process;
       const stopStarted = Effect.promise(() => hosted.stop());
-      const blenderLaunch = yield* Effect.promise(() => blenderProcess.record);
-      yield* remember({
-        display: hosted.label,
-        ...(blenderLaunch === null ? {} : { blenderLaunch }),
-      });
-      if (blenderLaunch === null) {
-        yield* stopStarted;
-        return yield* opError("blender-live", root, "io", "Blender did not start.");
-      }
-      if (!(yield* Effect.promise(() => waitPort(port, 90_000)))) {
-        yield* stopStarted;
-        return yield* opError(
-          "blender-live",
-          logPath,
-          "command-failed",
-          "Blender's addon socket did not open in 90s; see builds/logs/blender-live/blender.log.",
-        );
-      }
       // One child of the pinned server per game, telemetry off, over stdio.
       // The addon reads Sketchfab/Poly Pizza keys from BLENDERMCP_* env, so
       // keys set in Game Tools ride the Blender and MCP environments below.
@@ -881,7 +885,10 @@ const make = Effect.gen(function* () {
           const image = (result.content ?? []).find((entry) => entry.type === "image");
           if (image?.data === undefined)
             return { text: text === "" ? "Blender returned no image." : text };
-          const size = pngSizeOf(image.data, input.maxSize ?? 768);
+          const size = readImageDimensions(Buffer.from(image.data, "base64")) ?? {
+            width: input.maxSize ?? 768,
+            height: input.maxSize ?? 768,
+          };
           return {
             text: text === "" ? "See the attached viewport image." : text,
             screenshot: {

@@ -7,7 +7,6 @@ import * as NodeStreamPromises from "node:stream/promises";
 import * as NodeStream from "node:stream";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
-import * as NodeCrypto from "node:crypto";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -51,6 +50,7 @@ import {
   plumbingHost,
   type PlumbingBuild,
 } from "./plumbingBuilds.ts";
+import { fileSha256 } from "./fileHash.ts";
 
 const DOWNLOADS = {
   blender: "https://www.blender.org/download/",
@@ -425,9 +425,7 @@ const make = Effect.gen(function* () {
       const file = yield* Effect.tryPromise({
         try: async (signal) => {
           const downloaded = await downloadPlainFile(build.url, name, stage, signal);
-          const hash = NodeCrypto.createHash("sha256");
-          for await (const chunk of NodeFS.createReadStream(downloaded)) hash.update(chunk);
-          if (hash.digest("hex") !== build.sha256)
+          if ((await fileSha256(downloaded)).sha256 !== build.sha256)
             throw new GameOperationError({ operation, path: build.url, reason: "checksum" });
           return downloaded;
         },

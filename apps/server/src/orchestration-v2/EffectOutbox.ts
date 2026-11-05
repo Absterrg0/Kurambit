@@ -162,6 +162,13 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     turn: Schema.Literals(["retry", "memory"]),
     n: PositiveInt,
   }),
+  // A step's work run again after it waited for memory, without holding a job meanwhile.
+  Schema.Struct({
+    type: Schema.Literal("game-run.step.wake"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    attempt: PositiveInt,
+  }),
   // A creator's restore of a kept round: its job moves the folder and lands with game-run.restore.
   Schema.Struct({
     type: Schema.Literal("game-run.restore.execute"),
@@ -189,6 +196,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.finish",
   "game-run.restore.execute",
   "game-run.step.resend",
+  "game-run.step.wake",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [
@@ -401,7 +409,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
                 -- thread: the creator's chat, the next step and an ending's
                 -- finish are queued behind it, and the timer checks the run
                 -- again whenever it fires.
-                AND active.effect_type NOT IN ('game-run.step.deadline', 'game-run.decision.deadline', 'game-run.step.resend')
+                AND active.effect_type NOT IN ('game-run.step.deadline', 'game-run.decision.deadline', 'game-run.step.resend', 'game-run.step.wake')
                 AND ${
                   excludeRestartContinuations
                     ? sql`active.effect_type != 'provider-runtime.continue'`

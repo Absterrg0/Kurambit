@@ -60,3 +60,29 @@ it.effect("refuses after the bound, with the time it waited", () =>
     expect(credited).toEqual([[75_000, true]]);
   }),
 );
+
+it.effect(
+  "refuses a start queued behind a long hold once its bound passes, never interrupting the holder",
+  () =>
+    Effect.gen(function* () {
+      const gate = Semaphore.makeUnsafe(1);
+      const admit = (start: Effect.Effect<string>) =>
+        admitWithMemory({
+          gate,
+          shortfall: Effect.succeed(null),
+          maxWaitMs: 75_000,
+          poll: "5 seconds",
+          refuse: (short, waitedMs) => ({ short, waitedMs }),
+          onWaited: () => {},
+          start,
+        });
+      const holder = yield* Effect.forkChild(
+        admit(Effect.sleep("15 minutes").pipe(Effect.as("held"))),
+      );
+      const queued = yield* Effect.forkChild(Effect.flip(admit(Effect.succeed("ran"))));
+      yield* TestClock.adjust("2 minutes");
+      expect(yield* Fiber.join(queued)).toMatchObject({ waitedMs: 75_000 });
+      yield* TestClock.adjust("15 minutes");
+      expect(yield* Fiber.join(holder)).toBe("held");
+    }),
+);

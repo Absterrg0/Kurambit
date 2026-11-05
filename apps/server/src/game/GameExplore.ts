@@ -1011,9 +1011,9 @@ const make = Effect.gen(function* () {
       if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
       // The player build takes minutes and is the game's own exclusive
       // operation; the start lock is held only to launch and register.
-      // The editor that builds it refuses at once when memory is short; that
-      // refusal counts like a gated start's, so a run replays a sample turn
-      // that never played instead of voiding it.
+      // The editor that builds it opens through the memory gate, outside this
+      // start's own gate hold; its refusal counts like a gated start's, so a
+      // run replays a sample turn that never played instead of voiding it.
       const player =
         playsPlayer && !exploreLive.has(root)
           ? yield* players

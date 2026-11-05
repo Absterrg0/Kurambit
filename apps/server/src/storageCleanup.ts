@@ -63,6 +63,16 @@ const SETTLE_SCRIPT_GRACE_MS = 60_000;
 // Worktree creation can precede its thread row, including review-guide checkouts.
 const ORPHAN_WORKTREE_GRACE_MS = 60 * 60 * 1_000;
 
+// A game's builds/logs holds tool logs of up to 16 MB each and bot runs with
+// frames and video. Only these entries are Kurambit's own logs: the live
+// editors' homes and the cached Unity players there belong to their services.
+const GAME_LOG_ENTRY =
+  /^(?:\d+-[\w.-]+-[0-9a-f-]{36}\.log|(?:game-bot|game-explore|godot-import|godot-check|three-check)-[\w.-]+)$/;
+/** Past this per game, the oldest game logs go before their age. */
+const GAME_LOGS_MAX_BYTES = 2 * 1024 ** 3;
+/** A game log touched this recently may be a live tool's, session's or run step's; it stays. */
+const GAME_LOG_LIVE_MS = DAY_MS;
+
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const REPORT_ENTRY_LIMIT = 200;
 const isGitCommandError = Schema.is(GitCommandError);
@@ -861,6 +871,98 @@ const make = Effect.gen(function* () {
     return removed;
   });
 
+  /** Bytes and newest change of one entry, not following links. */
+  const measureEntry = Effect.fn("StorageCleanup.measureEntry")(function* (
+    target: string,
+  ): Effect.fn.Return<{ bytes: number; modified: number }, PlatformError> {
+    const stat = yield* fs.stat(target);
+    const own = Option.getOrNull(stat.mtime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    if (stat.type !== "Directory") return { bytes: Number(stat.size), modified: own };
+    let bytes = 0;
+    let modified = own;
+    for (const name of yield* fs.readDirectory(target)) {
+      const child = path.join(target, name);
+      if ((yield* fs.realPath(child)) !== child) continue;
+      const measured = yield* measureEntry(child);
+      bytes += measured.bytes;
+      modified = Math.max(modified, measured.modified);
+    }
+    return { bytes, modified };
+  });
+
+  // Each registered game's own logs, by age, then oldest first past the size
+  // bound. Only entries directly in <game>/builds/logs that Kurambit names are
+  // touched, and a game whose builds or logs folder is a link is skipped.
+  // Tools write and remove these entries while the sweep walks them, so an
+  // entry that cannot be read whole is skipped this sweep: measured in part
+  // it could look older than it is. A game that cannot be read is skipped too.
+  const cleanGameLogs = Effect.fn("StorageCleanup.cleanGameLogs")(function* (
+    days: number,
+    now: number,
+    removed: { files: number; bytes: number; games: number; unreadable: number },
+  ): Effect.fn.Return<void, ProjectStore.ProjectStoreV2Error> {
+    for (const project of yield* projectStore.listShells()) {
+      const root = path.resolve(project.workspaceRoot);
+      // A project root that cannot be probed is no game this sweep can clean.
+      const isGame = yield* fs
+        .exists(path.join(root, "game.json"))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!isGame) continue;
+      removed.games++;
+      const stop = yield* cleanGameLogsOf(root, days, now, removed).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("game log cleanup skipped a game", { root, error }).pipe(
+            Effect.andThen(Effect.sync(() => void removed.unreadable++)),
+            Effect.as(false),
+          ),
+        ),
+      );
+      if (stop) return;
+    }
+  });
+
+  /** One game's logs; true when the setting changed and the sweep must stop. */
+  const cleanGameLogsOf = Effect.fn("StorageCleanup.cleanGameLogsOf")(function* (
+    root: string,
+    days: number,
+    now: number,
+    removed: { files: number; bytes: number },
+  ): Effect.fn.Return<boolean, PlatformError | ServerSettingsError> {
+    if (!(yield* fs.exists(path.join(root, "builds", "logs")))) return false;
+    const realRoot = yield* fs.realPath(root);
+    const logs = path.join(realRoot, "builds", "logs");
+    if ((yield* fs.realPath(logs)) !== logs) return false;
+    const owned: Array<{ target: string; bytes: number; modified: number }> = [];
+    for (const name of yield* fs.readDirectory(logs)) {
+      if (!GAME_LOG_ENTRY.test(name)) continue;
+      const target = path.join(logs, name);
+      const measured = yield* Effect.gen(function* () {
+        if ((yield* fs.realPath(target)) !== target) return null;
+        return yield* measureEntry(target);
+      }).pipe(Effect.orElseSucceed(() => null));
+      if (measured !== null) owned.push({ target, ...measured });
+    }
+    owned.sort((a, b) => a.modified - b.modified);
+    let total = owned.reduce((sum, entry) => sum + entry.bytes, 0);
+    for (const entry of owned) {
+      const expired = entry.modified < now - days * DAY_MS;
+      const over = total > GAME_LOGS_MAX_BYTES && entry.modified < now - GAME_LOG_LIVE_MS;
+      if (!expired && !over) continue;
+      if ((yield* settingsService.getSettings).storageCleanup.gameLogsAfterDays !== days)
+        return true;
+      // One the tool removed itself meanwhile is gone either way; it is not counted.
+      const gone = yield* fs.remove(entry.target, { recursive: true }).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      );
+      if (!gone) continue;
+      total -= entry.bytes;
+      removed.files++;
+      removed.bytes += entry.bytes;
+    }
+    return false;
+  });
+
   const reportRef = yield* SubscriptionRef.make<StorageCleanupReport | null>(null);
   const sweep = Effect.fn("StorageCleanup.sweep")(function* (
     trigger: StorageCleanupReport["trigger"],
@@ -899,21 +1001,42 @@ const make = Effect.gen(function* () {
         days: settings.logsAfterDays,
         label: "rotated logs",
       },
+      {
+        kind: "game-logs" as const,
+        root: null,
+        days: settings.gameLogsAfterDays,
+        label: "game logs",
+      },
     ]) {
-      if (category.days === null) continue;
-      const removed = { files: 0, bytes: 0 };
-      yield* cleanFiles(category.root, category.days, now, category.kind === "logs", removed).pipe(
+      const days = category.days;
+      if (days === null) continue;
+      const removed = { files: 0, bytes: 0, games: 0, unreadable: 0 };
+      const clean: Effect.Effect<
+        { readonly files: number; readonly bytes: number },
+        PlatformError | ProjectStore.ProjectStoreV2Error | ServerSettingsError
+      > =
+        category.root === null
+          ? cleanGameLogs(days, now, removed).pipe(Effect.as(removed))
+          : cleanFiles(category.root, days, now, category.kind === "logs", removed);
+      yield* clean.pipe(
         Effect.map(({ files, bytes }) =>
-          entries.push({
-            kind: category.kind,
-            outcome: files > 0 ? "removed" : "kept",
-            reason: files === 0 ? "No expired files" : `Removed ${files} ${category.label}`,
-            path: null,
-            threadId: null,
-            threadTitle: null,
-            bytes: files > 0 ? bytes : null,
-            files: files > 0 ? files : null,
-          }),
+          // With no game registered there is nothing to report on game logs.
+          category.root === null && removed.games === 0
+            ? undefined
+            : entries.push({
+                kind: category.kind,
+                outcome: files > 0 ? "removed" : "kept",
+                reason: `${files === 0 ? "No expired files" : `Removed ${files} ${category.label}`}${
+                  removed.unreadable > 0
+                    ? `; ${removed.unreadable} ${removed.unreadable === 1 ? "game" : "games"} could not be read`
+                    : ""
+                }`,
+                path: null,
+                threadId: null,
+                threadTitle: null,
+                bytes: files > 0 ? bytes : null,
+                files: files > 0 ? files : null,
+              }),
         ),
         Effect.catch((error) =>
           Effect.gen(function* () {

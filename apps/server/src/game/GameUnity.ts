@@ -13,16 +13,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { GameOperationError, type GameProcessResult } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
+import * as GameMemoryGate from "./GameMemoryGate.ts";
+import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import {
-  commandFlag,
-  commandHas,
-  memoryShortfall,
-  readRecord,
-  underIdleMemoryFloor,
-} from "./liveProcess.ts";
+import { commandFlag, commandHas, readRecord, underIdleMemoryFloor } from "./liveProcess.ts";
 import {
   adoptLaunch,
   LAUNCH_ENV,
@@ -44,6 +40,7 @@ import {
   unityEditorEnv,
 } from "./unityToolchain.ts";
 import { checkoutOf, cloneTree } from "./unityPlayerCache.ts";
+import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 const IDLE_MS = 10 * 60_000;
 /**
@@ -53,11 +50,24 @@ const IDLE_MS = 10 * 60_000;
  * mid-build once other processes grew.
  */
 const NEEDED_MB = 4096;
+const UNITY_ROOM: MemoryRoom = {
+  what: "live Unity editor",
+  neededMb: NEEDED_MB,
+  env: "KURAMBIT_UNITY_MEMORY_MB",
+};
 const SESSION_FILE = "session.json";
 /** The editor's window: big enough for its scene-view captures. */
 const EDITOR_WINDOW = { width: 1280, height: 720 } as const;
 /** A first open resolves packages and imports every asset; later opens reuse Library/. */
 const READY_TIMEOUT_S = 900;
+/**
+ * How long an open holds the shared memory gate into its ready wait. The
+ * editor commits most of its memory while it starts and loads the project; a
+ * cold import grows for minutes after, and the peak (a player build) comes
+ * later still, past any hold. Shorter than the gate's 75 s queue bound, so a
+ * start queued behind an open is never refused by the hold alone.
+ */
+const GATE_HOLD_S = 60;
 /**
  * The editor tools agents reach through `unity mcp` (its `--tools` filter).
  * Scene, object, component, prefab, material and settings editing plus C#
@@ -298,11 +308,7 @@ export const textOf = (result: McpContent): string =>
     .map((entry) => entry.text ?? "")
     .join("\n");
 
-/** PNG IHDR dimensions without a decoder: width/height at bytes 16/20. */
-const pngSize = (bytes: Buffer): { width: number; height: number } | null =>
-  bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47
-    ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
-    : null;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /**
  * The capture as an image: either MCP image content or a base64 PNG field in
@@ -329,7 +335,10 @@ export const screenshotOf = (
     }
   }
   if (data === undefined) return { text: text.slice(0, 4000) || "The editor returned no image." };
-  const size = pngSize(Buffer.from(data, "base64"));
+  const bytes = Buffer.from(data, "base64");
+  // The result is labelled image/png, and a provider refuses a turn whose
+  // image bytes are another format; the shared reader accepts several.
+  const size = bytes.subarray(0, 8).equals(PNG_SIGNATURE) ? readImageDimensions(bytes) : null;
   if (size === null)
     return { text: `The editor returned an image that is not a PNG. ${text.slice(0, 2000)}` };
   return {
@@ -510,6 +519,7 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
+  const gate = yield* GameMemoryGate.GameMemoryGate;
   const { stateDir } = yield* ServerConfig.ServerConfig;
   const sessions = new Map<string, Session>();
   // Opening an editor takes minutes; two callers for one game must share it.
@@ -725,11 +735,6 @@ const make = Effect.gen(function* () {
             "tool-missing",
             "The live Unity editor needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
           );
-        // After the drops above, so an editor this server just closed counts as free.
-        const short = yield* Effect.promise(() =>
-          memoryShortfall("live Unity editor", NEEDED_MB, "KURAMBIT_UNITY_MEMORY_MB"),
-        );
-        if (short !== null) return yield* opError("unity-live", root, "low-memory", short);
         const homeDir = homeDirOf(root);
         yield* Effect.tryPromise({
           try: async () => {
@@ -793,71 +798,96 @@ const make = Effect.gen(function* () {
         // an OS without readable environments can still verify it.
         const editorToken = launchToken();
         // The editor leads its own tree so a stop takes its asset-import
-        // workers and shader compilers with it.
-        const hosted = yield* Effect.tryPromise({
-          try: () =>
-            host.launch(
-              {
-                executable: unity.editor,
-                args: [
-                  "-batchmode",
-                  "-projectPath",
-                  projectDir,
-                  "-logFile",
-                  logPath,
-                  // Xvfb offers software OpenGL only; elsewhere the editor
-                  // keeps its default graphics API.
-                  ...(host.kind === "private-display" ? ["-force-glcore"] : []),
-                  // Caps the job system's worker threads (the log confirms
-                  // "Creating JobQueue using job-worker-count value 2").
-                  "-job-worker-count",
-                  "2",
-                  "-kurambitLaunch",
-                  editorToken,
-                ],
-                cwd: root,
-                env: unityEditorEnv({ LIBGL_ALWAYS_SOFTWARE: "1" }),
-                stdio: "ignore",
-                token: editorToken,
-              },
-              EDITOR_WINDOW,
-            ),
-          catch: (cause) =>
-            opError("unity-live", root, "io", "The Unity editor's window did not open.", cause),
-        });
-        const editorProcess = hosted.process;
-        const editor = editorProcess.child;
-        const editorLaunch = yield* Effect.promise(() => editorProcess.record);
-        yield* remember({
-          display: hosted.label,
-          ...(editorLaunch === null ? {} : { editorLaunch }),
-        });
-        if (editorLaunch === null) return yield* fail("The Unity editor did not start.", "io");
-        // A batchmode editor that cannot open the project (compile errors, a
-        // licence refusal) exits within seconds; the CLI would still wait out
-        // its whole timeout for an editor that is gone.
-        const exited = Effect.callback<null>((resume) => {
-          const done = () => resume(Effect.succeed(null));
-          if (editor.exitCode !== null || editor.signalCode !== null) return done();
-          editor.once("exit", done);
-          return Effect.sync(() => editor.off("exit", done));
-        });
-        const ready = yield* Effect.raceFirst(
-          runCli(
-            root,
-            unity.cli,
-            [
-              "status",
-              "--until-ready",
-              "--project-path",
-              projectDir,
-              "--timeout",
-              String(READY_TIMEOUT_S),
-            ],
-            { operation: "unity-ready", timeoutMs: (READY_TIMEOUT_S + 30) * 1000 },
-          ),
-          exited,
+        // workers and shader compilers with it. It starts through the shared
+        // memory gate, held through the launch and the first GATE_HOLD_S of
+        // its ready wait, so what it takes is in the next start's memory
+        // check. Checked after the drops above, so an editor this server just
+        // closed counts as free.
+        const {
+          hosted,
+          editorProcess,
+          editor,
+          ready: early,
+          waitReady,
+        } = yield* gate.admit(
+          "unity-live",
+          root,
+          UNITY_ROOM,
+          Effect.gen(function* () {
+            const hosted = yield* Effect.tryPromise({
+              try: () =>
+                host.launch(
+                  {
+                    executable: unity.editor,
+                    args: [
+                      "-batchmode",
+                      "-projectPath",
+                      projectDir,
+                      "-logFile",
+                      logPath,
+                      // Xvfb offers software OpenGL only; elsewhere the editor
+                      // keeps its default graphics API.
+                      ...(host.kind === "private-display" ? ["-force-glcore"] : []),
+                      // Caps the job system's worker threads (the log confirms
+                      // "Creating JobQueue using job-worker-count value 2").
+                      "-job-worker-count",
+                      "2",
+                      "-kurambitLaunch",
+                      editorToken,
+                    ],
+                    cwd: root,
+                    env: unityEditorEnv({ LIBGL_ALWAYS_SOFTWARE: "1" }),
+                    stdio: "ignore",
+                    token: editorToken,
+                  },
+                  EDITOR_WINDOW,
+                ),
+              catch: (cause) =>
+                opError("unity-live", root, "io", "The Unity editor's window did not open.", cause),
+            });
+            const editorProcess = hosted.process;
+            const editor = editorProcess.child;
+            const editorLaunch = yield* Effect.promise(() => editorProcess.record);
+            yield* remember({
+              display: hosted.label,
+              ...(editorLaunch === null ? {} : { editorLaunch }),
+            });
+            if (editorLaunch === null) return yield* fail("The Unity editor did not start.", "io");
+            // A batchmode editor that cannot open the project (compile errors, a
+            // licence refusal) exits within seconds; the CLI would still wait out
+            // its whole timeout for an editor that is gone.
+            const exited = Effect.callback<null>((resume) => {
+              const done = () => resume(Effect.succeed(null));
+              if (editor.exitCode !== null || editor.signalCode !== null) return done();
+              editor.once("exit", done);
+              return Effect.sync(() => editor.off("exit", done));
+            });
+            const waitReady = (seconds: number) =>
+              Effect.raceFirst(
+                runCli(
+                  root,
+                  unity.cli,
+                  [
+                    "status",
+                    "--until-ready",
+                    "--project-path",
+                    projectDir,
+                    "--timeout",
+                    String(seconds),
+                  ],
+                  { operation: "unity-ready", timeoutMs: (seconds + 30) * 1000 },
+                ),
+                exited,
+              );
+            const ready = yield* waitReady(GATE_HOLD_S);
+            return { hosted, editorProcess, editor, ready, waitReady };
+          }),
         );
+        // A cold import is still running: the rest of its wait is outside the gate.
+        const ready =
+          early !== null && !early.ok && editorProcess.running()
+            ? yield* waitReady(READY_TIMEOUT_S - GATE_HOLD_S)
+            : early;
         if (ready === null || !ready.ok || !editorProcess.running()) {
           const tail = yield* logTail(root);
           if (UNITY_LICENSE_FAILURE.test(tail))
