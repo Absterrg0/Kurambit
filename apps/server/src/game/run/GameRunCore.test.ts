@@ -252,7 +252,7 @@ const countingRunner = Effect.gen(function* () {
 });
 
 it.effect(
-  "a job a restart lost runs again once, and a step that finished never does",
+  "a job a restart lost runs again, and a step that finished lands nothing more",
   () =>
     Effect.gen(function* () {
       yield* createCreator;
@@ -263,22 +263,25 @@ it.effect(
       // The step's effect never ran: the server stopped before the worker claimed it.
       yield* recovery.recover();
       assert.equal(yield* next, `${first.id}#1`);
-      // A second pass while the job is live hands nothing new.
+      // A second pass while the job is live starts nothing alongside it: it asks
+      // for one run after, which reads the records afresh.
       yield* recovery.recover();
       assert.deepEqual(handed, [`${first.id}#1`]);
 
       const landed = yield* awaitStep(first.id, "completed");
       yield* release;
       yield* Fiber.join(landed);
+      // That run after finds the step done and lands nothing more.
+      assert.equal(yield* next, `${first.id}#1`);
       const second = (yield* inFlight).step!;
       assert.notEqual(second.id, first.id);
       yield* recovery.recover();
       assert.equal(yield* next, `${second.id}#1`);
-      assert.deepEqual(handed, [`${first.id}#1`, `${second.id}#1`]);
+      assert.deepEqual(handed, [`${first.id}#1`, `${first.id}#1`, `${second.id}#1`]);
       // The outbox's own effects for the finished step change nothing either.
       const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       yield* worker.drain();
-      assert.deepEqual(handed.filter((h) => h === `${first.id}#1`).length, 1);
+      assert.deepEqual(handed.filter((h) => h === `${first.id}#1`).length, 2);
       assert.equal((yield* inFlight).steps.find((s) => s.id === first.id)?.status, "completed");
     }).pipe(Effect.provide(layerWithRecovery)),
   20_000,

@@ -106,25 +106,53 @@ export const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const runner = yield* Deferred.make<GameRunJobRunner>();
   const permits = yield* Semaphore.make(STEP_CONCURRENCY);
-  const live = new Map<string, { readonly runId: GameRunId; fiber: Fiber.Fiber<void> | null }>();
 
   // Registered before the fork and removed only once the work ends, so a job
-  // whose last act was a committed report is never started twice meanwhile.
+  // whose last act was a committed report is never started twice meanwhile. A
+  // job asked for while it runs (a pair half handed back while its sibling is
+  // still preparing) runs once more when it ends, reading the records afresh:
+  // at most one re-run is pending, a request during the re-run is kept for
+  // the next, and an interrupt (a stop) drops whatever is pending.
+  interface LiveJob {
+    readonly runId: GameRunId;
+    fiber: Fiber.Fiber<void> | null;
+    again: boolean;
+  }
+  const live = new Map<string, LiveJob>();
   const fork = (key: string, runId: GameRunId, work: Effect.Effect<void>) =>
     Effect.suspend(() => {
-      if (live.has(key)) return Effect.void;
-      const entry: { readonly runId: GameRunId; fiber: Fiber.Fiber<void> | null } = {
-        runId,
-        fiber: null,
-      };
+      const running = live.get(key);
+      if (running !== undefined) {
+        running.again = true;
+        return Effect.void;
+      }
+      const entry: LiveJob = { runId, fiber: null, again: false };
       live.set(key, entry);
-      return work.pipe(
+      // The check for a pending re-run and the job's removal are one step, so
+      // a request can never land between them and be lost.
+      const settle = Effect.suspend((): Effect.Effect<void> => {
+        if (entry.again) {
+          entry.again = false;
+          return runOnce;
+        }
+        if (live.get(key) === entry) live.delete(key);
+        return Effect.void;
+      });
+      const runOnce: Effect.Effect<void> = work.pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
-            ? Effect.void
+            ? Effect.failCause(cause)
             : Effect.logWarning("game run job failed", { key, cause }),
         ),
-        Effect.ensuring(Effect.sync(() => live.get(key) === entry && live.delete(key))),
+        Effect.andThen(settle),
+      );
+      return runOnce.pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            entry.again = false;
+            if (live.get(key) === entry) live.delete(key);
+          }),
+        ),
         Effect.forkIn(scope),
         Effect.tap((fiber) => Effect.sync(() => void (entry.fiber = fiber))),
         Effect.uninterruptible,
