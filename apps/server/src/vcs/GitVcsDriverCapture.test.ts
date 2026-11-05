@@ -664,3 +664,49 @@ it.layer(layer)("persistent capture index oracle", (it) => {
     120_000,
   );
 });
+
+it.layer(layer)("capture index lifetime", (it) => {
+  it.effect("goes with the last checkpoint that names its commit, freeing what it pinned", () =>
+    Effect.gen(function* () {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-capture-release-"));
+      try {
+        baseGame(root);
+        const driver = yield* GitVcsDriver.makeVcsDriverShape();
+        const ref = (name: string) =>
+          CheckpointRef.make(`refs/kurambit/checkpoints/release/${name}`);
+        const capture = (name: string) =>
+          driver.checkpoints.captureCheckpoint({ cwd: root, checkpointRef: ref(name) });
+        const indexRefs = () =>
+          git(root, ["for-each-ref", "--format=%(refname)", "refs/kurambit/capture-index/"]).trim();
+        const asset = git(root, ["hash-object", "assets/a.txt"]).trim();
+        yield* capture("first");
+        yield* capture("second");
+        // An older checkpoint goes: the index's commit is still named by "second".
+        yield* driver.checkpoints.deleteCheckpointRefs({
+          cwd: root,
+          checkpointRefs: [ref("first")],
+        });
+        assert.notStrictEqual(indexRefs(), "");
+        assert.strictEqual(captureIndexes(root).length, 1);
+        // The last one goes: so do the index's ref and file, and gc frees the asset.
+        yield* driver.checkpoints.deleteCheckpointRefs({
+          cwd: root,
+          checkpointRefs: [ref("second")],
+        });
+        assert.strictEqual(indexRefs(), "");
+        assert.strictEqual(captureIndexes(root).length, 0);
+        NodeFS.rmSync(NodePath.join(root, "assets"), { recursive: true });
+        git(root, ["reflog", "expire", "--expire=now", "--all"]);
+        git(root, ["gc", "-q", "--prune=now"]);
+        assert.throws(() => git(root, ["cat-file", "-e", asset]));
+        // The next capture seeds afresh and keeps an index again.
+        write(NodePath.join(root, "assets/a.txt"), "asset a\n");
+        const commit = yield* capture("third");
+        assert.strictEqual(git(root, ["rev-parse", `${commit}^{tree}`]).trim(), todayTree(root));
+        assert.strictEqual(captureIndexes(root).length, 1);
+      } finally {
+        NodeFS.rmSync(root, { recursive: true, force: true });
+      }
+    }),
+  );
+});

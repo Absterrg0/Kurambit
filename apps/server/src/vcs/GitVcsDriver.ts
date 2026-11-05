@@ -436,6 +436,7 @@ const SLOW_CAPTURE_MS = 2_000;
 // Longer than any capture runs, so a temp file this old belongs to no running capture.
 const STRAY_CAPTURE_INDEX_MS = 2 * 60 * 60_000;
 const CAPTURE_INDEX_FILE = /^capture-index-[0-9a-f]{16}-[0-9a-f]{16}$/;
+const CAPTURE_INDEX_REFS = "refs/kurambit/capture-index/";
 const CAPTURE_INDEX_TEMP =
   /^capture-index-[0-9a-f]{16}-[0-9a-f]{16}\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\.lock)?$/;
 
@@ -1290,7 +1291,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         dir,
         file: path.join(dir, `capture-index-${id}-${key}`),
         // Keeps every object the index names reachable, so git's gc never prunes one.
-        ref: `refs/kurambit/capture-index/${id}`,
+        ref: `${CAPTURE_INDEX_REFS}${id}`,
         ignoreCase: gitConfigTrue(settings.get("core.ignorecase")),
         precomposeUnicode: gitConfigTrue(settings.get("core.precomposeunicode")),
       };
@@ -1634,6 +1635,61 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning("checkpoint capture index not kept", { cwd, error: error.message }),
+      ),
+    );
+
+  /**
+   * A capture-index ref names its folder's last capture, a commit that
+   * capture's own checkpoint ref names too. Once no other Kurambit ref names
+   * it, the capture-index ref alone would pin a folder state nobody keeps, so
+   * it goes, with this working tree's index for it (another working tree's
+   * goes at its next capture, which finds the ref missing and seeds afresh).
+   * The ref therefore never pins an object no checkpoint pins. Deleting only
+   * while it still names that commit leaves a capture that just moved it alone.
+   */
+  const releaseCaptureIndexes = (cwd: string) =>
+    Effect.gen(function* () {
+      const operation = "GitVcsDriver.checkpoints.releaseCaptureIndexes";
+      const listed = yield* execute({
+        operation,
+        cwd,
+        args: ["for-each-ref", "--format=%(objectname) %(refname)", "refs/kurambit/"],
+        maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+        outputMode: "error",
+      });
+      const named = new Set<string>();
+      const indexRefs: Array<{ readonly oid: string; readonly ref: string }> = [];
+      for (const line of listed.stdout.split("\n")) {
+        const space = line.indexOf(" ");
+        if (space < 0) continue;
+        const oid = line.slice(0, space);
+        const ref = line.slice(space + 1);
+        if (ref.startsWith(CAPTURE_INDEX_REFS)) indexRefs.push({ oid, ref });
+        else named.add(oid);
+      }
+      const released: string[] = [];
+      for (const { oid, ref } of indexRefs.filter((entry) => !named.has(entry.oid))) {
+        const deleted = yield* execute({
+          operation,
+          cwd,
+          args: [...durableWrite, "update-ref", "-d", ref, oid],
+          allowNonZeroExit: true,
+        });
+        if (deleted.exitCode === 0) released.push(ref.slice(CAPTURE_INDEX_REFS.length));
+      }
+      if (released.length === 0) return;
+      const gitDir = yield* execute({ operation, cwd, args: ["rev-parse", "--absolute-git-dir"] });
+      const dir = path.join(gitDir.stdout.trim(), "kurambit");
+      for (const name of yield* fileSystem.readDirectory(dir))
+        if (
+          CAPTURE_INDEX_FILE.test(name) &&
+          released.some((id) => name.startsWith(`capture-index-${id}-`))
+        )
+          yield* fileSystem.remove(path.join(dir, name), { force: true });
+    }).pipe(
+      // Freeing space never fails the ref change that asked for it.
+      Effect.catch((error) =>
+        Effect.logWarning("capture index not released", { cwd, error: error.message }),
       ),
     );
 
@@ -2136,6 +2192,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           cwd: input.cwd,
           args: [...durableWrite, "update-ref", input.checkpointRef, commitOid],
         });
+        yield* releaseCaptureIndexes(input.cwd);
         return true;
       },
     ),
@@ -2221,6 +2278,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             }),
           { discard: true },
         );
+        yield* releaseCaptureIndexes(input.cwd);
       },
     ),
     listCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.listCheckpointRefs")(function* (input) {
