@@ -48,6 +48,7 @@ import * as ThreadManagement from "../../orchestration-v2/ThreadManagementServic
 import { forkParked } from "../../serverActivation.ts";
 import { laneProfile } from "../engineProfile.ts";
 import * as GameOperations from "../GameOperations.ts";
+import * as ProjectService from "../../project/ProjectService.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameService from "../GameService.ts";
 import { causeText, logLine, refreshHarnessFiles, writeAtomic } from "../runSetup.ts";
@@ -98,6 +99,7 @@ const make = Effect.gen(function* () {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
   const game = yield* GameService.GameService;
   const projects = yield* GameProjectService.GameProjectService;
+  const projectStore = yield* ProjectService.ProjectService;
   const operations = yield* GameOperations.GameOperations;
   const vcs = yield* GitWorkflow.GitWorkflowService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -294,6 +296,14 @@ const make = Effect.gen(function* () {
 
       const launchThread = (target: ThreadId, replaces: ThreadId | undefined, text: string) =>
         Effect.gen(function* () {
+          // A deleted project takes no new threads; a read that fails is no
+          // proof it lives, so the step fails rather than launching blind.
+          const projectLive = yield* projectStore.getById(run.projectId).pipe(
+            Effect.map(Option.isSome),
+            Effect.orElseSucceed(() => false),
+          );
+          if (!projectLive)
+            return yield* fail(half, stepId, `${role.role}: its project was deleted`);
           const measured = yield* before();
           const ctx = roleContext(run, root, log);
           // An engine whose first editor open imports the whole project (minutes;

@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   EventId,
+  GameRunId,
   type OrchestrationV2AppThread,
   ProjectId,
   ProviderInstanceId,
@@ -12,6 +13,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -20,6 +22,7 @@ import * as ServerConfig from "../config.ts";
 import { OrchestrationEffectRequestV2 } from "../orchestration-v2/EffectOutbox.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
+import { planGameRunCommand } from "../orchestration-v2/gameRun/plan.ts";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as LegacyV1ThreadImporter from "../orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
 import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenance.ts";
@@ -253,6 +256,61 @@ it.effect("retries a partial project deletion without repeating child events or 
       }
     }).pipe(Effect.provide(layerServices));
   }).pipe(Effect.provide(layerDatabase)),
+);
+
+it.effect(
+  "a forced project delete stops a chat's live production run in the deletion's commit",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const projectId = ProjectId.make("project:game-deletion");
+      const chat = ThreadId.make("thread:game-chat");
+      const commandId = CommandId.make("command:game-project-delete");
+      yield* seedProject(projectId);
+      yield* TestClock.setTime(Date.parse("2026-09-04T12:00:00.000Z"));
+
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        yield* eventSink.write({ events: [nativeThreadCreated(projectId, chat)] });
+        const start = {
+          type: "game-run.start" as const,
+          commandId: CommandId.make("command:game-run-start"),
+          threadId: chat,
+          runId: GameRunId.make("run_deleted_chat"),
+          lane: "godot",
+          brief: "A small arena game.",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+          runtimeMode: "full-access" as const,
+        };
+        const started = yield* planGameRunCommand({ projections, idAllocator }, start);
+        if (Result.isFailure(started)) return assert.fail("The run did not start");
+        yield* eventSink.commitCommand({
+          commandId: start.commandId,
+          commandType: start.type,
+          threadId: chat,
+          acceptedAt: yield* DateTime.now,
+          events: started.success.events,
+          effects: [],
+        });
+
+        const service = yield* ProjectService.make;
+        yield* service.delete({ commandId, projectId, force: true });
+        const run = (yield* projections.getGameRunRecords(chat)).gameRuns.at(-1);
+        assert.equal(run?.status, "ended");
+        assert.equal(run?.ending, "stopped");
+        // Its finish, which stops the run's roles, was committed with the deletion.
+        const finish = yield* sql<{ readonly command_id: string }>`
+        SELECT command_id FROM orchestration_v2_effect_outbox
+        WHERE thread_id = ${chat} AND effect_type = 'game-run.finish'
+      `;
+        assert.deepEqual(
+          finish.map((row) => row.command_id),
+          [`${commandId}:delete-thread:${chat}`],
+        );
+      }).pipe(Effect.provide(layerServices));
+    }).pipe(Effect.provide(layerDatabase)),
 );
 
 it.effect(

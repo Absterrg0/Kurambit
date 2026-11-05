@@ -33,6 +33,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
@@ -56,6 +57,7 @@ import * as ThreadManagement from "../../orchestration-v2/ThreadManagementServic
 import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as GameOperations from "../GameOperations.ts";
+import * as ProjectService from "../../project/ProjectService.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameRunControl from "../GameRunControl.ts";
 import * as GameService from "../GameService.ts";
@@ -580,6 +582,8 @@ interface World {
   readonly exportOwners: Array<string | undefined>;
   /** The export breaks with a defect, as a rejected promise does. */
   exportsBreak: boolean;
+  /** The game's project was deleted under the run. */
+  projectDeleted: boolean;
   /** Runs when the runner reads the creator's shell, which it does just before a role's start. */
   onCreatorShell: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
@@ -606,6 +610,7 @@ const newWorld = Effect.gen(function* () {
     exportsAsked: 0,
     exportOwners: [],
     exportsBreak: false,
+    projectDeleted: false,
     onCreatorShell: null,
     onSend: null,
     capWatched: yield* Deferred.make<void>(),
@@ -753,6 +758,12 @@ const layerGame = (root: string, world: World) =>
               if (world.exportsBreak) throw new Error("disk gone");
               return { targets: [], displayName: "Arena" };
             }),
+        }),
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () =>
+            Effect.succeed(
+              world.projectDeleted ? Option.none() : Option.some({ id: projectId } as never),
+            ),
         }),
         Layer.mock(GameProjectService.GameProjectService)({
           resolve: () => Effect.succeed(root),
@@ -1073,6 +1084,24 @@ it.effect("a role launches nothing once the run refuses its start", () =>
       yield* runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 });
       assert.equal((yield* inFlight).run.ending, "stopped");
       assert.deepEqual(world.launches, []);
+    }),
+  ),
+);
+
+it.effect("a role is never launched into a deleted project; its step fails instead", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* completeStep((yield* inFlight).step!, gitOk);
+      const vision = (yield* inFlight).step!;
+      world.projectDeleted = true;
+      const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      yield* runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 });
+      assert.deepEqual(world.launches, []);
+      const { run } = yield* inFlight;
+      assert.equal(run.ending, "failed");
+      assert.match(run.lastFailure ?? "", /its project was deleted/);
     }),
   ),
 );
