@@ -552,6 +552,8 @@ export const layerExecutor: Layer.Layer<
               runId: request.runId,
               stepId: request.stepId,
               attempt: request.attempt,
+              effectId: effect.id,
+              final: !willRetry,
             };
             return (
               request.type === "game-run.step.deadline"
@@ -576,6 +578,8 @@ export const layerExecutor: Layer.Layer<
                 runId: effect.request.runId,
                 files: effect.request.files,
                 release: effect.request.release,
+                effectId: effect.id,
+                final: !willRetry,
               })
               .pipe(
                 Effect.mapError(

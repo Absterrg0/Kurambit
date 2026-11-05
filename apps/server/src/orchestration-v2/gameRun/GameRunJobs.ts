@@ -44,6 +44,15 @@ export interface GameRunResend extends GameRunStepJob {
   readonly n: number;
 }
 
+/**
+ * Which try of its effect a timer or an outputs effect is: on the outbox's last
+ * try (`final`) the work gives up its own way, so nothing is lost with it.
+ */
+export interface GameRunEffectTry {
+  readonly effectId: string;
+  readonly final: boolean;
+}
+
 /** What a step's landing asks of the game folder; GameRunOutputs' effect does it. */
 export interface GameRunOutputs {
   readonly threadId: ThreadId;
@@ -68,15 +77,21 @@ export interface GameRunJobRunner {
   /** A step's work, reported with game-run.step.complete or game-run.step.fail. */
   readonly execute: (job: GameRunStepJob) => Effect.Effect<void>;
   /** A role turn's cap: interrupts its run once due, else sets the timer again; inside its effect. */
-  readonly deadline: (job: GameRunStepJob) => Effect.Effect<void, GameRunEffectError>;
+  readonly deadline: (
+    job: GameRunStepJob & GameRunEffectTry,
+  ) => Effect.Effect<void, GameRunEffectError>;
   /** A run's ending: stops its turns and jobs, does its last outputs and exports, records it. */
   readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
   /** A creator's restore of a kept round: moves the folder, lands with game-run.restore. */
   readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
   /** A role turn sent again once its pause is over, then capped like the first; inside its effect. */
-  readonly resend: (job: GameRunResend) => Effect.Effect<void, GameRunEffectError>;
+  readonly resend: (
+    job: GameRunResend & GameRunEffectTry,
+  ) => Effect.Effect<void, GameRunEffectError>;
   /** A landing's records written and copies released; inside its effect, and safe to repeat. */
-  readonly outputs: (job: GameRunOutputs) => Effect.Effect<void, GameRunEffectError>;
+  readonly outputs: (
+    job: GameRunOutputs & GameRunEffectTry,
+  ) => Effect.Effect<void, GameRunEffectError>;
   /** Every copy of a spent run removed; inside its effect, and safe to repeat. */
   readonly releaseCopies: (job: {
     readonly threadId: ThreadId;

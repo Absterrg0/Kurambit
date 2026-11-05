@@ -325,19 +325,69 @@ const make = Effect.gen(function* () {
 
   /**
    * What a landing asks of the game folder, from the effect its commit queued
-   * before the run's next step: the records first (the next step may read
-   * them), then the copies no role needs. Writing the same files and releasing
-   * the same copies again is harmless, so a re-run after a death is too.
+   * before the run's next step: the copies no role needs, then the records the
+   * next step may read. Releasing the same copies and writing the same files
+   * again is harmless, so a re-run after a death is too. Records that still
+   * cannot be written on the outbox's last try stop the run with why, which
+   * cancels the next step in the same commit: it must not run without them.
    */
-  const outputs = (job: GameRunJobs.GameRunOutputs) =>
+  const outputs = (job: GameRunJobs.GameRunOutputs & GameRunJobs.GameRunEffectTry) =>
     Effect.gen(function* () {
-      const root = yield* projects.resolve(job.threadId, { deleted: "allowed" });
-      for (const file of job.files)
-        yield* Effect.tryPromise(() => writeAtomic(NodePath.join(root, file.path), file.text));
-      const log = (line: string) => logLine(root, line);
+      const root = yield* projects
+        .resolve(job.threadId, { deleted: "allowed" })
+        .pipe(Effect.option);
+      const log = (line: string) =>
+        Option.isSome(root) ? logLine(root.value, line) : Effect.logInfo(line);
       for (const thread of job.release)
         yield* releaseCopy(deps, { copies: copiesOf(job.runId), log }, thread);
+      if (job.files.length === 0) return;
+      const writes = Effect.gen(function* () {
+        if (Option.isNone(root))
+          return yield* new GameRunJobs.GameRunEffectError({
+            cause: "the game folder could not be found",
+          });
+        for (const file of job.files)
+          yield* Effect.tryPromise(() =>
+            writeAtomic(NodePath.join(root.value, file.path), file.text),
+          );
+      });
+      const stop = <E>(cause: Cause.Cause<E>) =>
+        refusedOnly(
+          engine.dispatch({
+            type: "game-run.stop",
+            commandId: CommandId.make(`server:game-run-outputs-failed:${job.effectId}`),
+            threadId: job.threadId,
+            runId: job.runId,
+            reason: `the run's records could not be written (${causeText(cause).slice(0, 200)})`,
+          }),
+        );
+      yield* job.final
+        ? writes.pipe(Effect.catchCauseIf((cause) => !Cause.hasInterruptsOnly(cause), stop))
+        : writes;
     });
+
+  /**
+   * A timer's work, given up its own way on the outbox's last try (`giveUp`),
+   * so the effect's end loses nothing; an interrupt (a stop) is never given up.
+   */
+  const lastTry = <E, E2>(
+    job: GameRunJobs.GameRunEffectTry,
+    work: Effect.Effect<void, E>,
+    giveUp: (cause: Cause.Cause<E>) => Effect.Effect<void, E2>,
+  ): Effect.Effect<void, GameRunJobs.GameRunEffectError> =>
+    (job.final
+      ? work.pipe(
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              Effect.logWarning("game run timer gave up on its last try", {
+                effectId: job.effectId,
+                cause,
+              }).pipe(Effect.andThen(giveUp(cause))),
+          ),
+        )
+      : work
+    ).pipe(Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })));
 
   /**
    * A spent run's copies, from the effect the commit that found them spent
@@ -1259,13 +1309,37 @@ const make = Effect.gen(function* () {
             Effect.orElseSucceed(() => true),
           ),
         execute: executeJob,
+        // On the outbox's last try a cap that could not be checked is set
+        // again a minute on, under a command id of its own, so no turn goes
+        // uncapped; the interrupt it sends keeps the cap's id, so a budget cut
+        // still reads as one.
         deadline: (job) =>
-          deadline(job).pipe(
-            Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
+          lastTry(job, deadline(job), () =>
+            Effect.flatMap(DateTime.now, (now) =>
+              refusedOnly(
+                engine.dispatch({
+                  type: "game-run.step.schedule",
+                  commandId: CommandId.make(
+                    `server:game-run-cap:${job.stepId}:attempt:${job.attempt}:rearm:${job.effectId}`,
+                  ),
+                  threadId: job.threadId,
+                  runId: job.runId,
+                  stepId: job.stepId,
+                  attempt: job.attempt,
+                  at: DateTime.toEpochMillis(now) + 60_000,
+                  timer: { kind: "cap" },
+                }),
+              ),
+            ),
           ),
+        // A turn that could not be sent again on the last try fails its step.
         resend: (job) =>
-          resend(job).pipe(
-            Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
+          lastTry(job, resend(job), (cause) =>
+            fail(
+              job,
+              job.stepId,
+              `${job.turn === "memory" ? "a memory wait's" : "a retry's"} turn could not be sent (${causeText(cause)})`,
+            ),
           ),
         outputs: (job) =>
           outputs(job).pipe(

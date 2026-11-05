@@ -1565,6 +1565,82 @@ it.effect("a step whose job cannot report is tried again, then fails", () =>
   ),
 );
 
+/** Drains the outbox while its clock moves on, so effects run every try they have. */
+const drainThroughRetries = Effect.gen(function* () {
+  const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+  for (let round = 0; round < 30; round += 1) {
+    yield* worker.drain();
+    yield* TestClock.adjust("2 seconds");
+  }
+});
+
+it.effect("a turn its timer cannot send by the last try fails its step", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.settle(thread, world.runs.get(thread)![0]!);
+      world.sendBreaks = 1_000;
+      yield* TestClock.setTime(Date.now() + 20_000);
+      yield* drainThroughRetries;
+      const { run } = yield* inFlight;
+      assert.equal(run.ending, "failed");
+      assert.match(run.lastFailure ?? "", /turn could not be sent/);
+    }),
+  ),
+);
+
+it.effect("a cap its timer cannot send by the last try is set again a minute on", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      yield* startRunner;
+      world.interruptBreaks = 1_000;
+      yield* TestClock.setTime(Date.now() + 11 * 60_000);
+      yield* drainThroughRetries;
+      assert.lengthOf(world.interrupts, 0);
+      // The interrupt works again: nothing is left to send it but the cap set
+      // again a minute on.
+      world.interruptBreaks = 0;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      assert.lengthOf(world.interrupts, 0);
+      yield* TestClock.adjust("61 seconds");
+      yield* worker.drain();
+      assert.isTrue(
+        world.interrupts.some((i) => i.commandId.startsWith("server:game-run-role-cap:")),
+      );
+    }),
+  ),
+);
+
+it.effect("records a landing cannot write by the last try stop the run before its next step", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* atVision(world);
+      yield* startRunner;
+      world.folderGone = true;
+      const jobs = yield* GameRunJobs.GameRunJobs;
+      yield* jobs.outputs({
+        threadId: creator,
+        runId,
+        files: [{ path: ".studio/next.md", text: "1. The jump clips.\n" }],
+        release: [],
+        effectId: "effect:outputs-test",
+        final: true,
+      });
+      assert.equal((yield* inFlight).run.ending, "stopped");
+      // The step the records were for never starts: the stop cancelled its effect.
+      world.folderGone = false;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      assert.deepEqual(world.launches, []);
+    }),
+  ),
+);
+
 it.effect("a role turn someone else interrupted is not read as capped", () =>
   withGame((world) =>
     Effect.gen(function* () {
