@@ -108,6 +108,15 @@ const isJobBroke = (error: unknown): error is GameRunJobBroke => error instanceo
 const needed = <A, E, R>(work: Effect.Effect<A, E, R>) =>
   work.pipe(Effect.mapError((cause) => new GameRunJobBroke({ cause })));
 
+/** Every thread the run's steps ran a role on, each once. */
+const runRoleThreads = (records: ProjectionStore.GameRunThreadRecords, runId: GameRun["id"]) => [
+  ...new Set(
+    records.gameRunSteps
+      .filter((s) => s.runId === runId)
+      .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
+  ),
+];
+
 export class GameRunStepRunner extends Context.Service<
   GameRunStepRunner,
   {
@@ -419,17 +428,13 @@ const make = Effect.gen(function* () {
   const releaseCopies = (job: { readonly threadId: ThreadId; readonly runId: GameRun["id"] }) =>
     Effect.gen(function* () {
       const records = yield* projections.getGameRunRecords(job.threadId);
-      const roleThreads = new Set(
-        records.gameRunSteps
-          .filter((s) => s.runId === job.runId)
-          .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
-      );
+      const roleThreads = runRoleThreads(records, job.runId);
       const root = yield* projects
         .resolve(job.threadId, { deleted: "allowed" })
         .pipe(Effect.option);
       const log = (line: string) =>
         Option.isSome(root) ? logLine(root.value, line) : Effect.logInfo(line);
-      yield* dropRunCopies(deps, { copies: copiesOf(job.runId), log }, [...roleThreads], false);
+      yield* dropRunCopies(deps, { copies: copiesOf(job.runId), log }, roleThreads, false);
     });
 
   // The art director judges files, so it gets the asset-list and measured
@@ -820,7 +825,18 @@ const make = Effect.gen(function* () {
                 Effect.map(({ gameJevApiKey }) => gameJevApiKey !== ""),
                 Effect.orElseSucceed(() => false),
               );
-              const code = yield* Effect.promise(() => reviewerFacts(root, run.lane));
+              // A record that cannot be read breaks the job: the reviewer is
+              // never told no bot ran because a read failed.
+              const bots = yield* Effect.forEach(runRoleThreads(found.records, run.id), (thread) =>
+                needed(game.botRuns(thread)),
+              );
+              const code = yield* Effect.promise(() =>
+                reviewerFacts(
+                  root,
+                  run.lane,
+                  bots.flatMap((each) => (each.root === root ? each.runs : [])),
+                ),
+              );
               yield* done({ kind: "facts", jev, code });
             }),
           );
@@ -1089,11 +1105,7 @@ const make = Effect.gen(function* () {
       yield* log(
         `run ended: ${run.ending ?? "unknown"}${run.lastFailure ? ` (${run.lastFailure})` : ""}`,
       );
-      const roleThreads = new Set(
-        records.gameRunSteps
-          .filter((s) => s.runId === run.id)
-          .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
-      );
+      const roleThreads = runRoleThreads(records, run.id);
       if (run.ending !== null && !NO_EXPORT.has(run.ending)) {
         // An ending mid-round (a usage limit, a provider outage) leaves the
         // round's unfinished work in the folder. The exports are of the best
@@ -1139,7 +1151,7 @@ const make = Effect.gen(function* () {
           log,
           gameRunOperationOwner(run.id),
           waitUntil,
-          [...roleThreads],
+          roleThreads,
         ).pipe(Effect.ignore);
         if (parked !== null)
           yield* buildStep(ops, ctx, { _tag: "restore", sha: parked, keep: [] }).pipe(
@@ -1180,7 +1192,7 @@ const make = Effect.gen(function* () {
       yield* dropRunCopies(
         deps,
         { copies: copiesOf(run.id), log },
-        [...roleThreads],
+        roleThreads,
         RESUMABLE.has(run.ending ?? "") && chatLive && projectLive,
       ).pipe(
         Effect.catchCause((cause) =>
