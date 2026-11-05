@@ -27,6 +27,8 @@ export const bootStep = (
   game: Game,
   ctx: {
     readonly creator: ThreadId;
+    /** Whose work the check is: the run's, never the creator chat's. */
+    readonly owner: string;
     readonly root: string;
     readonly lane: string;
     readonly log: (line: string) => Effect.Effect<void>;
@@ -69,7 +71,7 @@ export const bootStep = (
         },
       }),
     );
-  const check = game.check(ctx.creator).pipe(
+  const check = game.check(ctx.creator, ctx.owner).pipe(
     Effect.map((r): Verdict => ({
       ok: r.ok,
       // The run log says why a build was rejected, not only that it was.

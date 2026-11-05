@@ -67,16 +67,17 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   creatorThreadId: ThreadId,
   game: GameService.GameService["Service"],
   log: (line: string) => Effect.Effect<void>,
+  owner: string,
 ) {
   // Ask only targets the backend declares; anything else is recorded skipped.
   const targets = yield* game
-    .exportTargets(creatorThreadId)
+    .exportTargets(creatorThreadId, owner)
     .pipe(
       Effect.orElseSucceed(() => ({ targets: ["Web", "Linux"] as const, displayName: "Game" })),
     );
   const runTarget = (target: "Web" | "Linux"): Effect.Effect<Row> =>
     targets.targets.includes(target)
-      ? game.export(creatorThreadId, target).pipe(
+      ? game.export(creatorThreadId, target, owner).pipe(
           Effect.map((r): Row => ({
             ok: r.success,
             skipped: null,

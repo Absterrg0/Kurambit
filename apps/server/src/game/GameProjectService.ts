@@ -30,7 +30,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import { toState } from "../orchestration-v2/gameRun/decide.ts";
+import { settling, toState } from "../orchestration-v2/gameRun/decide.ts";
 import { currentStep } from "./run/runView.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
@@ -67,7 +67,7 @@ export class GameProjectService extends Context.Service<
      */
     readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
     readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
-    /** Whether a production run holds this thread's game now. */
+    /** Whether a production run holds this thread's game now, its ending's exports and a restore included. */
     readonly runLive: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /** Expensive reads (asset usage, viewport, builds). */
@@ -405,7 +405,7 @@ const make = Effect.gen(function* () {
         Effect.flatMap((shell) =>
           shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
         ),
-        Effect.map((run) => run !== null && run.status !== "ended"),
+        Effect.map((run) => run !== null && (run.status !== "ended" || settling(run) !== null)),
         Effect.orElseSucceed(() => false),
       ),
     create,

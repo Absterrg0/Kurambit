@@ -63,6 +63,13 @@ export const roleThreadId = (
   );
 };
 
+/**
+ * Who a run's own game operations belong to. A chat's Stop game cancels only
+ * its own thread's work while a run holds the game, so the run's boot checks
+ * and exports must never carry the creator chat's id.
+ */
+export const gameRunOperationOwner = (runId: string) => `game-run:${runId}`;
+
 /** The interrupt a role turn's cap sends: its receipt is how the turn's end reads as capped. */
 export const roleCapCommandId = (stepId: GameRunStepId, attempt: number, runId: string) =>
   CommandId.make(`server:game-run-role-cap:${stepId}:attempt:${attempt}:${runId}`);

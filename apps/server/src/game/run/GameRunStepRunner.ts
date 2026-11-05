@@ -36,6 +36,7 @@ import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
+  gameRunOperationOwner,
   roleCapCommandId,
   roleThreadId,
   roleTurnMessageId,
@@ -534,9 +535,13 @@ const make = Effect.gen(function* () {
           return yield* reporting(
             job,
             record.id,
-            bootStep(game, { creator: run.threadId, root, lane: run.lane, log }).pipe(
-              Effect.flatMap(done),
-            ),
+            bootStep(game, {
+              creator: run.threadId,
+              owner: gameRunOperationOwner(run.id),
+              root,
+              lane: run.lane,
+              log,
+            }).pipe(Effect.flatMap(done)),
           );
         case "facts":
           return yield* reporting(
@@ -734,7 +739,9 @@ const make = Effect.gen(function* () {
           if (Option.isNone(parked) || !parked.value.git.ok)
             yield* log(`finishExports: could not return to ${run.trunk}; exporting where HEAD is`);
         }
-        yield* finishExports(root, run.threadId, game, log).pipe(Effect.ignore);
+        yield* finishExports(root, run.threadId, game, log, gameRunOperationOwner(run.id)).pipe(
+          Effect.ignore,
+        );
       }
       yield* refused(
         engine.dispatch({

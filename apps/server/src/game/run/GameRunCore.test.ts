@@ -576,6 +576,8 @@ interface World {
   readonly launches: ThreadId[];
   readonly sends: Array<{ readonly threadId: ThreadId; readonly messageId: string }>;
   exportsAsked: number;
+  /** Whose work each export was, as the run named it. */
+  readonly exportOwners: Array<string | undefined>;
   /** Runs when the runner reads the creator's shell, which it does just before a role's start. */
   onCreatorShell: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
@@ -600,6 +602,7 @@ const newWorld = Effect.gen(function* () {
     launches: [],
     sends: [],
     exportsAsked: 0,
+    exportOwners: [],
     onCreatorShell: null,
     onSend: null,
     capWatched: yield* Deferred.make<void>(),
@@ -740,9 +743,10 @@ const layerGame = (root: string, world: World) =>
             ),
           limitExploreInput: () => Effect.void,
           closeLiveEditors: () => Effect.void,
-          exportTargets: () =>
+          exportTargets: (_threadId, owner) =>
             Effect.sync(() => {
               world.exportsAsked += 1;
+              world.exportOwners.push(owner);
               return { targets: [], displayName: "Arena" };
             }),
         }),
@@ -970,6 +974,8 @@ it.effect("an ending returns to trunk and exports, from its outbox effect", () =
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       yield* Fiber.join(finished);
       assert.equal(world.exportsAsked, 1);
+      // The run's own work: a Stop game from the creator's chat never cancels it.
+      assert.deepEqual(world.exportOwners, [`game-run:${runId}`]);
       assert.deepEqual(
         world.interrupts.map((i) => i.threadId),
         [thread],
