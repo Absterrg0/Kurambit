@@ -24,6 +24,7 @@ import {
 } from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -93,6 +94,14 @@ import { currentStep, describe, summarize } from "./runView.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { BLANK, type BotStep, type RoleStep } from "./state.ts";
 import { bootStep } from "./steps.ts";
+import { RETRIES, retrying } from "./retrying.ts";
+
+/** A step's report that could not be written: its job is tried again, never reported as a failed step. */
+class GameRunReportBroke extends Data.TaggedError("GameRunReportBroke")<{
+  readonly cause: unknown;
+}> {}
+const isReportBroke = (error: unknown): error is GameRunReportBroke =>
+  error instanceof GameRunReportBroke;
 
 export class GameRunStepRunner extends Context.Service<
   GameRunStepRunner,
@@ -169,12 +178,25 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  // A report the run refuses is the answer; one that could not be written
+  // breaks the job, which is tried again (executeJob).
+  const reported = <A, R>(dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
+    dispatch.pipe(
+      Effect.asVoid,
+      Effect.catchTags({
+        OrchestratorGameRunRefusedError: (error) =>
+          Effect.logInfo("game run report not taken", { detail: error.detail }),
+        OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+      }),
+      Effect.mapError((cause) => new GameRunReportBroke({ cause })),
+    );
+
   const complete = (
     job: GameRunJobs.GameRunStepJob,
     stepId: GameRunStepId,
     result: GameRunStepResult,
   ) =>
-    refused(
+    reported(
       engine.dispatch({
         type: "game-run.step.complete",
         commandId: gameRunStepCommandId(stepId, job.attempt, "complete"),
@@ -186,7 +208,7 @@ const make = Effect.gen(function* () {
       }),
     );
   const fail = (job: GameRunJobs.GameRunStepJob, stepId: GameRunStepId, reason: string) =>
-    refused(
+    reported(
       engine.dispatch({
         type: "game-run.step.fail",
         commandId: gameRunStepCommandId(stepId, job.attempt, "fail"),
@@ -267,16 +289,21 @@ const make = Effect.gen(function* () {
   });
 
   // A step's work that broke reports it, so the run ends resumably with why;
-  // an interrupt is a stop and reports nothing.
+  // an interrupt is a stop and reports nothing, and a report that could not be
+  // written goes up to the job, which is tried again.
   const reporting = <E>(
     job: GameRunJobs.GameRunStepJob,
     stepId: GameRunStepId,
     work: Effect.Effect<void, E>,
-  ) =>
+  ): Effect.Effect<void, GameRunReportBroke> =>
     work.pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause) ? Effect.interrupt : fail(job, stepId, causeText(cause)),
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
+        const broke = Cause.findErrorOption(cause).pipe(Option.filter(isReportBroke));
+        return Option.isSome(broke)
+          ? Effect.fail(broke.value)
+          : fail(job, stepId, causeText(cause));
+      }),
     );
 
   /** The run and its step in flight, if this job's attempt still holds it. */
@@ -415,11 +442,14 @@ const make = Effect.gen(function* () {
           })
           .pipe(
             Effect.as(true),
-            Effect.catch((error) =>
-              log(`${role.role}: the run did not take the step's start (${error.message})`).pipe(
-                Effect.as(false),
-              ),
-            ),
+            Effect.catchTags({
+              OrchestratorGameRunRefusedError: (error) =>
+                log(`${role.role}: the run did not take the step's start (${error.detail})`).pipe(
+                  Effect.as(false),
+                ),
+              OrchestratorCommandPreviouslyRejectedError: () => Effect.succeed(false),
+            }),
+            Effect.mapError((cause) => new GameRunReportBroke({ cause })),
           );
       const limitInput = (target: ThreadId) =>
         role.inputCapMs > 0 ? game.limitExploreInput(target, role.inputCapMs) : Effect.void;
@@ -1176,12 +1206,41 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * A step's job whose report could not be written, or that broke outside its
+   * work, is tried again (every step is safe to repeat); one that never gets
+   * through fails the step, each owed half of a pair, so the run ends
+   * resumably instead of waiting for a restart.
+   */
   const executeJob = (job: GameRunJobs.GameRunStepJob) =>
-    execute(job).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.interrupt
-          : Effect.logWarning("game run step job failed", { stepId: job.stepId, cause }),
+    retrying(execute(job)).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          yield* Effect.logWarning("game run step job failed", { stepId: job.stepId, error });
+          const found = yield* current(job);
+          if (found === null) return;
+          const step = found.record.step;
+          const owed =
+            step.kind === "pair"
+              ? step.halves
+                  .filter(
+                    (h) =>
+                      !step.results.some((r) => r.id === h.id) &&
+                      !found.record.endedHalves.some((r) => r.seq === h.id),
+                  )
+                  .map((h) => gameRunStepId(job.runId, h.id))
+              : [found.record.id];
+          const reason = `the step's work could not be reported after ${RETRIES + 1} tries (${causeText(Cause.fail(error))})`;
+          for (const stepId of owed)
+            yield* fail({ ...job, stepId }, stepId, reason).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("game run step could not be failed; recovery owes it", {
+                  stepId,
+                  cause,
+                }),
+              ),
+            );
+        }),
       ),
     );
 
