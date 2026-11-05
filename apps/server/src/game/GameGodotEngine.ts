@@ -72,15 +72,34 @@ export const makeGodotBackend = (
 ): GameEngineBackend => {
   const importProject: GameEngineBackend["importProject"] = (ctx) =>
     Effect.gen(function* () {
-      const run = yield* processes.run({
-        root: ctx.root,
-        executable: ctx.binary.path,
-        args: ["--headless", "--path", ctx.projectDir, "--editor", "--import"],
-        operation: "godot-import",
-        timeoutMs: 180_000,
-        env: GameProcesses.engineChildEnv(),
-        envMode: "replace",
+      // The editor's import runs the project's tool scripts and keeps logs under
+      // user://: both go to scratch, never the user's real Godot data. The
+      // folder holds nothing the import result needs, so it goes afterwards.
+      const scratch = NodePath.join(
+        ctx.root,
+        "builds/logs",
+        `godot-import-${NodeCrypto.randomUUID()}`,
+      );
+      const isolation = yield* Effect.tryPromise({
+        try: () => prepareNativeUserIsolation(scratch),
+        catch: (cause) =>
+          new GameOperationError({ operation: "godot-import", path: scratch, reason: "io", cause }),
       });
+      const run = yield* processes
+        .run({
+          root: ctx.root,
+          executable: ctx.binary.path,
+          args: ["--headless", "--path", ctx.projectDir, "--editor", "--import"],
+          operation: "godot-import",
+          timeoutMs: 180_000,
+          env: GameProcesses.engineChildEnv(isolation.env),
+          envMode: "replace",
+        })
+        .pipe(
+          Effect.ensuring(
+            Effect.promise(() => NodeFSP.rm(scratch, { recursive: true, force: true })),
+          ),
+        );
       return {
         result: response(run),
         issues: parseGodotIssues(`${run.stdout}\n${run.stderr}`),
