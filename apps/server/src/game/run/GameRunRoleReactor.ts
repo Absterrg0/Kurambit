@@ -53,7 +53,7 @@ import { logLine } from "../runSetup.ts";
 import { captureBuild, isGameCode, measureChange } from "./builds.ts";
 import { botRunCount } from "./facts.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
-import { lastBotRun, releaseWorktree, runCopies } from "./roleWorkspace.ts";
+import { lastBotRun, releaseCopy, runCopies } from "./roleWorkspace.ts";
 import type { RoleStep, Step } from "./state.ts";
 
 // An instantly failed turn never reached the model (provider or session
@@ -485,7 +485,7 @@ const make = Effect.gen(function* () {
       const botsAfter = role.bots ? yield* Effect.promise(() => botRunCount(root)) : 0;
       const bot = role.bots ? yield* Effect.promise(() => lastBotRun(root, before.bots)) : null;
       if (role.at !== null && (role.release || budgetCut))
-        yield* releaseWorktree(
+        yield* releaseCopy(
           deps,
           { copies: runCopies(config.worktreesDir, at.run.id), log },
           roleThreadId,

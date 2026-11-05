@@ -94,7 +94,9 @@ player's report and frames. Each round after it says what it tried and whether i
 verdicts and reasoning, the blind players' reports, the bot's results and video, the tester's note
 and the reviewer's direction. Your agent can read the same with `game_run_round`, so you can ask it
 what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
-the work. **Stop run** ends it; rejected work stays on its branch. Starting the run again without
+the work. **Stop run** ends it; every build the run made, rejected ones too, stays kept. The run never
+commits, switches branches or touches your git: its builds are Kurambit checkpoints, and your
+game folder holds the current build as uncommitted work you commit when you like. Starting the run again without
 a new brief continues it where it stopped, and if Kurambit restarts during a run, the run picks up
 where it was on its own. A game whose run was made by an earlier version of Kurambit needs a new
 run from your brief, which continues from the game as it is: no new vision or prototypes, a plan
@@ -128,11 +130,12 @@ ladder stops the run as **No ladder**; resuming gives the plan another go. The *
 which were set aside and why; each round shows how many of its checks passed.
 
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this
-round**, or ask your agent to restore it. The engine project, the art sources under `art/` and `ASSETS.md` return to that build as
-a new commit, so later commits stay in git history, and restoring a later kept round goes forward
-again. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`, bots and the run's records stay as they are. A resumed run judges its next
-round against the restored build. Restore refuses while a run is live, while a stopped run is in
-the middle of a round, and while the game has uncommitted changes; it never discards work.
+round**, or ask your agent to restore it. The engine project, the art sources under `art/` and `ASSETS.md` return to that build in the
+game folder, and restoring a later kept round goes forward again. What the folder held before is
+kept as a build first, so a restore never discards work. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
+bots and the run's records stay as they are. A resumed run judges its next round against the
+restored build. Restore refuses while a run is live and while a stopped run is in the middle of a
+round.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to

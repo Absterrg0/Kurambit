@@ -103,7 +103,7 @@ const stepCopy = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, build: strin
 
 // A blind comparator's folder, made before its thread so the model's first
 // look finds its files in place: empty but for the step's copies, with no git.
-export const blankWorktree = (_deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
+export const blankFolder = (_deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
   Effect.tryPromise(async () => {
     const dir = copyPath(ctx, step);
     await NodeFSP.mkdir(dir, { recursive: true });
@@ -174,7 +174,7 @@ export const removeBlank = (_deps: RoleDeps, _ctx: RoleContext, blank: { readonl
 // thread's binding to it. An editor still open on it (a Unity sample's player
 // build) closes first, so nothing writes into a folder being deleted. Only a
 // folder of the run's own copies is ever removed; anything else stays.
-export const releaseWorktree = (
+export const releaseCopy = (
   deps: Pick<RoleDeps, "threads" | "game">,
   ctx: Pick<RoleContext, "copies" | "log">,
   threadId: ThreadId,

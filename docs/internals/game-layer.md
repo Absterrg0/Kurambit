@@ -83,16 +83,17 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   tools directory, because the CLI logs each invocation with its full arguments to
   `~/.config/unityhub/logs/cli-log.json`; it reaches the live editor through the project's
   `Library/Pipeline` port file, so nothing Kurambit runs writes the user's Unity Hub data.
-  Blind samples play in T3 worktrees at a sha, each a separate Unity project with no `Library/`.
+  Blind samples play plain copies of a build, each a separate Unity project with no `Library/`.
   Before an editor opens on one, `GameUnity` gives it a copy-on-write copy
-  (`cp -a --reflink=auto`) of its main checkout's `Library/`, found through git's common dir and
-  taken after the main checkout's idle editor closed, so only what differs at that commit is
-  reimported (about a minute warm, against two cold). The compiled-script
+  (`cp -a --reflink=auto`) of its game folder's `Library/`, found through the folder the copy
+  names in `.kurambit-copy-of` (or a worktree's git common dir) and taken after the game folder's
+  idle editor closed, so only what differs in that build is reimported (about a minute warm,
+  against two cold). The compiled-script
   state (`Bee/`, `ScriptAssemblies/`, the player data caches) is left out: it is keyed by the main
   checkout's path, a player built from it lost the scene's MonoBehaviours, and the worktree
   recompiles its scripts anyway. The editor is
   needed there only to build the Linux player; the role runner closes it before removing the
-  worktree, which removes the copy too. Other checkouts whose `.git` is a file (submodules) are
+  copy. Other checkouts whose `.git` is a file (submodules) are
   refused.
 - Web play shares the services: the browser host (`webPlaySession`) opens real-time
   headless-Chromium sessions on the served static folder (real keyboard/mouse, the read-only
@@ -102,12 +103,11 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   without touching Preview state.
 - Unity play is a real Linux player of the current sources, built once per source identity
   under `builds/logs/unity-play-*`, run in a window host's window. The role runner makes a Unity sample's
-  worktree itself and readies its player before the thread exists, so neither side of a
-  comparison spends play time on a build: a copy-on-write copy of the main checkout's player of
-  the same source identity (the content hash, never a commit: samples check out a neutral
-  commit), else a build in the worktree. The main checkout keeps its three most recently built or
+  copy itself and readies its player before the thread exists, so neither side of a
+  comparison spends play time on a build: a copy-on-write copy of the game folder's player of
+  the same source identity (the content hash), else a build in the copy. The main checkout keeps its three most recently built or
   copied players, so a best that keeps being sampled stays reusable; a best whose player was
-  pruned builds in its worktree, still outside its clock. Where a player came from stays out of the explore result, since sample notes reach
+  pruned builds in its copy, still outside its clock. Where a player came from stays out of the explore result, since sample notes reach
   the blind comparator verbatim. Bot runs play the same prepared player. The template's
   `StudioProbe.cs` is Unity's play-session runner; input is queued on virtual Input System
   devices, which is why the lane asks games to read input through the Input System.
@@ -131,8 +131,8 @@ reports are shared; an engine adds only how a session launches.
   the server.
 - Unity's runner is `Assets/Kurambit/StudioProbe.cs` inside the game, because a player only runs
   code it was built with. The harness owns that file: a new production run copies it from the
-  template (`profile.run.harnessFiles`) right after init and commits it alone on trunk, so it never
-  rides in (or is rejected with) a role's commit. A game whose probe predates
+  template (`profile.run.harnessFiles`) before the run's base build, so every build the run keeps
+  carries the same runner and none counts it as a role's work. A game whose probe predates
   the versioned protocol still explores (it reads as protocol 0, acts only) but refuses bots with a
   message saying so, until a fresh run refreshes it.
 - three.js has no runner process. The browser host speaks the protocol to the page through the
@@ -219,8 +219,10 @@ reach none of its controls.
   id; `game-run.step.start` records a role's thread before its first turn, and replaces a thread
   only when it names the one it replaces.
 - **Finish is an effect.** The commit that ends a run emits `game-run.finish`; its job stops the
-  run's jobs and live role turns, does the last outputs, returns to trunk and exports, then records
-  `game-run.finished`. A finish is safe to run twice.
+  run's jobs and live role turns, does the last outputs, exports the best build, then records
+  `game-run.finished`. A finish is safe to run twice: an ending mid-round keeps the folder's
+  unfinished work as a build once per ending, restores the best for the exports and puts the work
+  back, so a resume goes on from it.
 - **Restore is a command first.** `game-run.restore.request` records the pending restore, a job does
   the git work, and `game-run.restore` lands its outcome. The git work and a run's next move would
   race on the game folder, so the decider refuses resume, steer and another restore while an ending
@@ -251,17 +253,19 @@ reach none of its controls.
   timer checks the run again when it fires; a cap extended meanwhile schedules itself again at the
   new due time (`game-run.step.schedule`) instead of polling.
 
-A server death can cut a git call half-way and leave `index.lock` or a merge in progress, which
-would fail the step on every resume. Before the run's own git moves a folder (a git step, a branch
-enter, the finish's return to trunk, a restore, a reused role worktree), `repairGit`
-([git.ts](../../apps/server/src/game/run/git.ts)) clears that, but only what is provably stale. The
-run's own git calls are awaited and uninterruptible inside its jobs, so none is running then; what
-it cannot see is a provider CLI's git and an orphaned git of a server that was killed. So a lock
-goes only when no thread of the game's project has a live turn in that folder and the lock has
-sat unchanged for the run's slowest git timeout (10 minutes); otherwise the step fails saying so
-and a later resume clears it. Only the run's own pick merge (`pick base … (unjudged)`, the one
-merge that can stop half-way) is aborted; any other merge, cherry-pick, revert or rebase is left
-and reported. The system process list is never read for this.
+The run's builds are T3 checkpoints under the run's own refs (`checkpointRefForGameRun`,
+[builds.ts](../../apps/server/src/game/run/builds.ts)), and the game folder is the live build: a
+build step captures the folder, restores a build's engine project, art and `ASSETS.md` (a path-scoped
+`restoreCheckpoint`), or keeps a build under names (`best`, `round-N`). The run never commits,
+checks out, merges or writes the user's index, HEAD or branches, so the user's git and an agent's
+own git use are theirs, and a cut capture or restore leaves no lock or merge that could fail a
+resume: captures and restores work through private indexes, and a restore writes only the files
+that differ (an unchanged file keeps its mtime, so an engine watching the folder reimports
+nothing). Records hold builds by commit oid; labels (`round-N`, `proto-N`) only name files and
+text. A builder turn's change is measured at its landing: the folder is captured and diffed with
+the build before it, and a diff that cannot be read counts as a change. A run from before kept
+its builds on git branches (`GameRun.versions` absent): it is history, read but never continued,
+and recovery stops one left live without touching the folder.
 
 Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups,
 run.log) are written for people and later roles; nothing the run decides reads them. A game
@@ -310,17 +314,16 @@ which build handled that flaw better, a run spent five hours on one flaw while t
 grew, and two near-identical builds gave noisy ties. So acceptance is the rung's checks, and blind
 judging is only a regression gate: a round whose checks pass is kept unless the old build wins
 both orders (ties, splits and missing verdicts keep it). A round whose checks fail is not judged
-at all, since no verdict could keep it, and its work stays on its branch. Any round that does not
+at all, since no verdict could keep it, and its work stays a build of its own. Any round that does not
 land its rung (failed checks, a regression, a boot failure, no change) counts against the rung;
 the second sets it aside with its reason, and set-aside rungs come back once after the rest. A
 run never pays twice for the same work: a retry right after a try that passed some checks grows
-that try's branch (the gate still judges it against the best), a builder turn that changes no game
+that try's build (the gate still judges it against the best), a builder turn that changes no game
 file ends its block, a rung round's reviewer writes from the tester's and blind players'
 evidence instead of replaying the build, and a gate whose best is the build an earlier gate's
-blind player saw reuses that play and plays only the candidate. "The same build" is checked by
-the kept round's fast-forward, not assumed: the round's restore commit carries the tester's files,
-so the merged sha differs from the played one, and git compares the two trees a blind player sees
-(without `.studio` and `NOTES.md`). The held play lives in the run's record with its question and sample
+blind player saw reuses that play and plays only the candidate. "The same build" is exact: a kept
+round's build is its candidate's own checkpoint, so a play of the candidate is a play of the new
+best. The held play lives in the run's record with its question and sample
 budget, and is never used under another question (finish rounds ask their own), budget or build.
 The comparators cannot tell the reused report from the fresh one; the comparison record names it.
 The bot still plays both builds: each round's tester rewrites `.studio/bot`, so an earlier bot
@@ -339,7 +342,7 @@ checks can never pass (a broken state hook) works through every rung, its retry 
 it ends (`finishRound` or `stallRound`), and a resume or a note's round starts it fresh.
 
 Before the
-comparators run, the tester's last play bot plays both builds in fresh worktrees for the same real
+comparators run, the tester's last play bot plays both builds in fresh copies for the same real
 time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
 that bot against the candidate, and a bot that fails on only one build would name it, so the
 comparators get bot facts only when the bot ran on both builds; otherwise neither report has them,
@@ -350,20 +353,22 @@ Two starts at once would both pass a free-memory check made before either alloca
 and bot starts hold one gate (`GameMemoryGate`) from that check through their import and boot. A
 sample's time waiting there for memory is given back to its clock; a play turn refused
 `low-memory` is played again after a pause, and memory that stays short ends the run resumably
-rather than voiding the sample. Comparators
-never work in the game folder, where run.log maps every sample to its sha: each gets a
-worktree of its own at one parentless empty-tree commit, holding only its two frame sheets under
-neutral names, and submits its verdict; the root keeps the write-ups once all verdicts are
-in. That worktree still links to the game's repository, so its history and the root stay reachable
-by path; what is blind by construction is the comparator's folder, HEAD and prompt. The only hard
+rather than voiding the sample. Samples play
+plain copies of their builds with no git (`materializeCheckpoint`, without `.studio` and
+`NOTES.md`), so no history, date or note tells the builds apart. Comparators never work in the
+game folder, where run.log maps every sample to its build: each gets a folder of its own, empty
+but for its two frame sheets under neutral names, and submits its verdict; the root keeps the
+write-ups once all verdicts are in. The copies live in a folder of the run's own under
+Kurambit's worktrees folder, never in the game repository; the game folder stays reachable by
+path, and what is blind by construction is the player's or comparator's folder and prompt. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
 renders against the vision and may ask for one bounded redo before the art is
 committed; a missing verdict keeps the art.
 
 The Unity lane needs three things the run does nowhere else. A live editor holds the open scene in
-memory and saves it after every edit without reading the disk first, so every run git step that can
-move the root's checkout closes the root's live editors before it runs; otherwise the next
-prototype's first edit writes the previous branch's scene over its own (seen live). Its boot is the
+memory and saves it after every edit without reading the disk first, so every restore of the
+root closes the root's live editors before it runs; otherwise the next prototype's first edit
+writes the previous build's scene over its own (seen live). Its boot is the
 editor check plus a Linux player build, because testers and samples play only the player and a
 build can pass the editor (an editor-only API in a runtime script) and still fail as a player.
 And the project's first editor open, a full import of minutes, runs before the first root role's
@@ -378,7 +383,7 @@ every round. Craft advice lives in the skill pack under `apps/server/templates/s
 for the browser lane, `unity.md` for Unity) and the bot
 kit under `apps/server/templates/bot-kit/`; both are copied into each game when a run starts, not the product. A
 resume keeps the run's copy, so every build of one run is made and judged under the same guidance and no
-build's commit carries harness text. `GameCreateInput.engine`
+build carries harness text as its own work. `GameCreateInput.engine`
 (`godot` default, `three` for the browser lane, `unity`) picks the starter template (`blank` /
 `blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
 project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.

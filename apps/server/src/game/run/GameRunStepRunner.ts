@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off -- A step's work is the game folder's: notes written on disk, worktrees, wall-clock caps.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off -- A step's work is the game folder's: notes written on disk, build copies, wall-clock caps.
 // The work behind a game run's step effects, as GameRunJobs runs it: each job
 // reads the step from the run's records, does what the step asks through the
 // existing executors (git ops, boot, checks, facts, bots, role launches) and
@@ -65,8 +65,8 @@ import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
 import { modelFacts } from "./modelFacts.ts";
 import {
-  blankWorktree,
-  releaseWorktree,
+  blankFolder,
+  releaseCopy,
   removeBlank,
   runCopies,
   sampleCopy,
@@ -182,7 +182,7 @@ const make = Effect.gen(function* () {
 
   // What the steps landed since the last job asks of the game folder: a
   // decision has no job of its own, so the walk back passes over decisions.
-  // Writing the same files and releasing the same worktrees again is harmless.
+  // Writing the same files and releasing the same copies again is harmless.
   const performOutputs = (
     run: GameRun,
     steps: ReadonlyArray<GameRunStep>,
@@ -205,7 +205,7 @@ const make = Effect.gen(function* () {
             writeAtomic(NodePath.join(root, file.path), file.text),
           ).pipe(Effect.ignore);
         for (const thread of step.outputs.release)
-          yield* releaseWorktree(deps, { copies: copiesOf(run.id), log }, thread);
+          yield* releaseCopy(deps, { copies: copiesOf(run.id), log }, thread);
       }
     });
 
@@ -330,7 +330,7 @@ const make = Effect.gen(function* () {
               }),
             );
           }
-          const blank = role.at === BLANK ? yield* blankWorktree(deps, ctx, role) : null;
+          const blank = role.at === BLANK ? yield* blankFolder(deps, ctx, role) : null;
           if (role.at === BLANK && blank === null)
             return yield* fail(half, stepId, `${role.role}: no folder of its own`);
           if (role.at === null && replaces === undefined)
@@ -434,8 +434,7 @@ const make = Effect.gen(function* () {
           );
         }
         if (role.at !== null && shell.worktreePath === null) {
-          if (threadId === own)
-            return yield* fail(half, stepId, `${role.role}: its worktree is gone`);
+          if (threadId === own) return yield* fail(half, stepId, `${role.role}: its copy is gone`);
           return yield* launchThread(own, threadId, yield* promptOf(run, role, root));
         }
         if (!(yield* startStep(threadId, yield* before()))) return;
