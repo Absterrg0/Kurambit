@@ -1578,6 +1578,38 @@ describe("storage cleanup reports and local file policies", () => {
       }),
     ),
   );
+  it.live("skips an entry it cannot read whole and still cleans every game", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, repo, disable, setProjectRoots } = yield* cleanupFixture();
+        disable();
+        const other = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-game-" });
+        const oldLog = (root: string) =>
+          `${root}/builds/logs/1700000000000-godot-export-0b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log`;
+        for (const root of [repo, other]) {
+          yield* fs.writeFileString(`${root}/game.json`, "{}");
+          yield* fs.makeDirectory(`${root}/builds/logs`, { recursive: true });
+          yield* fs.writeFileString(oldLog(root), "old");
+          yield* fs.utimes(oldLog(root), 1, 1);
+        }
+        // A bot run whose frames cannot be listed, as when a tool swaps them mid-walk.
+        const locked = `${repo}/builds/logs/game-bot-run1/frames`;
+        yield* fs.makeDirectory(locked, { recursive: true });
+        yield* fs.utimes(`${repo}/builds/logs/game-bot-run1`, 1, 1);
+        yield* fs.chmod(locked, 0o000);
+        yield* Effect.addFinalizer(() => fs.chmod(locked, 0o755).pipe(Effect.ignore));
+        setProjectRoots([repo, other]);
+        const report = yield* service.runNow;
+        expect(report.entries.find((entry) => entry.kind === "game-logs")).toMatchObject({
+          outcome: "removed",
+          files: 2,
+        });
+        expect(yield* fs.exists(`${repo}/builds/logs/game-bot-run1`)).toBe(true);
+        expect(yield* fs.exists(oldLog(repo))).toBe(false);
+        expect(yield* fs.exists(oldLog(other))).toBe(false);
+      }),
+    ),
+  );
   it.live("removes only a game's own expired logs, never editor homes, players or links", () =>
     runCleanupTest(
       Effect.gen(function* () {

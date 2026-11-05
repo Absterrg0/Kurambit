@@ -893,14 +893,14 @@ const make = Effect.gen(function* () {
   // Each registered game's own logs, by age, then oldest first past the size
   // bound. Only entries directly in <game>/builds/logs that Kurambit names are
   // touched, and a game whose builds or logs folder is a link is skipped.
+  // Tools write and remove these entries while the sweep walks them, so an
+  // entry that cannot be read whole is skipped this sweep: measured in part
+  // it could look older than it is. A game that cannot be read is skipped too.
   const cleanGameLogs = Effect.fn("StorageCleanup.cleanGameLogs")(function* (
     days: number,
     now: number,
-    removed: { files: number; bytes: number; games: number },
-  ): Effect.fn.Return<
-    void,
-    PlatformError | ProjectStore.ProjectStoreV2Error | ServerSettingsError
-  > {
+    removed: { files: number; bytes: number; games: number; unreadable: number },
+  ): Effect.fn.Return<void, ProjectStore.ProjectStoreV2Error> {
     for (const project of yield* projectStore.listShells()) {
       const root = path.resolve(project.workspaceRoot);
       // A project root that cannot be probed is no game this sweep can clean.
@@ -909,30 +909,58 @@ const make = Effect.gen(function* () {
         .pipe(Effect.orElseSucceed(() => false));
       if (!isGame) continue;
       removed.games++;
-      if (!(yield* fs.exists(path.join(root, "builds", "logs")))) continue;
-      const realRoot = yield* fs.realPath(root);
-      const logs = path.join(realRoot, "builds", "logs");
-      if ((yield* fs.realPath(logs)) !== logs) continue;
-      const owned: Array<{ target: string; bytes: number; modified: number }> = [];
-      for (const name of yield* fs.readDirectory(logs)) {
-        if (!GAME_LOG_ENTRY.test(name)) continue;
-        const target = path.join(logs, name);
-        if ((yield* fs.realPath(target)) !== target) continue;
-        owned.push({ target, ...(yield* measureEntry(target)) });
-      }
-      owned.sort((a, b) => a.modified - b.modified);
-      let total = owned.reduce((sum, entry) => sum + entry.bytes, 0);
-      for (const entry of owned) {
-        const expired = entry.modified < now - days * DAY_MS;
-        const over = total > GAME_LOGS_MAX_BYTES && entry.modified < now - GAME_LOG_LIVE_MS;
-        if (!expired && !over) continue;
-        if ((yield* settingsService.getSettings).storageCleanup.gameLogsAfterDays !== days) return;
-        yield* fs.remove(entry.target, { recursive: true });
-        total -= entry.bytes;
-        removed.files++;
-        removed.bytes += entry.bytes;
-      }
+      const stop = yield* cleanGameLogsOf(root, days, now, removed).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("game log cleanup skipped a game", { root, error }).pipe(
+            Effect.andThen(Effect.sync(() => void removed.unreadable++)),
+            Effect.as(false),
+          ),
+        ),
+      );
+      if (stop) return;
     }
+  });
+
+  /** One game's logs; true when the setting changed and the sweep must stop. */
+  const cleanGameLogsOf = Effect.fn("StorageCleanup.cleanGameLogsOf")(function* (
+    root: string,
+    days: number,
+    now: number,
+    removed: { files: number; bytes: number },
+  ): Effect.fn.Return<boolean, PlatformError | ServerSettingsError> {
+    if (!(yield* fs.exists(path.join(root, "builds", "logs")))) return false;
+    const realRoot = yield* fs.realPath(root);
+    const logs = path.join(realRoot, "builds", "logs");
+    if ((yield* fs.realPath(logs)) !== logs) return false;
+    const owned: Array<{ target: string; bytes: number; modified: number }> = [];
+    for (const name of yield* fs.readDirectory(logs)) {
+      if (!GAME_LOG_ENTRY.test(name)) continue;
+      const target = path.join(logs, name);
+      const measured = yield* Effect.gen(function* () {
+        if ((yield* fs.realPath(target)) !== target) return null;
+        return yield* measureEntry(target);
+      }).pipe(Effect.orElseSucceed(() => null));
+      if (measured !== null) owned.push({ target, ...measured });
+    }
+    owned.sort((a, b) => a.modified - b.modified);
+    let total = owned.reduce((sum, entry) => sum + entry.bytes, 0);
+    for (const entry of owned) {
+      const expired = entry.modified < now - days * DAY_MS;
+      const over = total > GAME_LOGS_MAX_BYTES && entry.modified < now - GAME_LOG_LIVE_MS;
+      if (!expired && !over) continue;
+      if ((yield* settingsService.getSettings).storageCleanup.gameLogsAfterDays !== days)
+        return true;
+      // One the tool removed itself meanwhile is gone either way; it is not counted.
+      const gone = yield* fs.remove(entry.target, { recursive: true }).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      );
+      if (!gone) continue;
+      total -= entry.bytes;
+      removed.files++;
+      removed.bytes += entry.bytes;
+    }
+    return false;
   });
 
   const reportRef = yield* SubscriptionRef.make<StorageCleanupReport | null>(null);
@@ -982,7 +1010,7 @@ const make = Effect.gen(function* () {
     ]) {
       const days = category.days;
       if (days === null) continue;
-      const removed = { files: 0, bytes: 0, games: 0 };
+      const removed = { files: 0, bytes: 0, games: 0, unreadable: 0 };
       const clean: Effect.Effect<
         { readonly files: number; readonly bytes: number },
         PlatformError | ProjectStore.ProjectStoreV2Error | ServerSettingsError
@@ -998,7 +1026,11 @@ const make = Effect.gen(function* () {
             : entries.push({
                 kind: category.kind,
                 outcome: files > 0 ? "removed" : "kept",
-                reason: files === 0 ? "No expired files" : `Removed ${files} ${category.label}`,
+                reason: `${files === 0 ? "No expired files" : `Removed ${files} ${category.label}`}${
+                  removed.unreadable > 0
+                    ? `; ${removed.unreadable} ${removed.unreadable === 1 ? "game" : "games"} could not be read`
+                    : ""
+                }`,
                 path: null,
                 threadId: null,
                 threadTitle: null,
