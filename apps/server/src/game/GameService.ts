@@ -117,7 +117,10 @@ export class GameService extends Context.Service<
      * Caps the explore input this thread may use across all its sessions;
      * starts and acts past it are refused with the reason.
      */
-    readonly limitExploreInput: (threadId: ThreadId, totalMs: number) => Effect.Effect<void>;
+    readonly limitExploreInput: (
+      threadId: ThreadId,
+      totalMs: number,
+    ) => Effect.Effect<void, GameOperationError>;
     /**
      * Since this thread's last finishExploration: how long its explore starts
      * waited for memory, how many were refused `low-memory` and whether the

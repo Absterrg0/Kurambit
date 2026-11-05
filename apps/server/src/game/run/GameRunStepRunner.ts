@@ -524,8 +524,10 @@ const make = Effect.gen(function* () {
             }),
             Effect.mapError((cause) => new GameRunJobBroke({ cause })),
           );
+      // A sample's cap that cannot be kept breaks the job, which is tried
+      // again, then fails the step: no sample is sent a turn without it.
       const limitInput = (target: ThreadId) =>
-        role.inputCapMs > 0 ? game.limitExploreInput(target, role.inputCapMs) : Effect.void;
+        role.inputCapMs > 0 ? needed(game.limitExploreInput(target, role.inputCapMs)) : Effect.void;
 
       const launchThread = (target: ThreadId, replaces: ThreadId | undefined, text: string) =>
         Effect.gen(function* () {
