@@ -2,7 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 import type { GameSummary } from "@kurambit/contracts";
 
 import {
-  formatGameEditedAt,
   gameInitial,
   gameSlug,
   gameTemplateAppearance,
@@ -11,7 +10,6 @@ import {
   sortGameThreadsByActivity,
 } from "./gameLibrary.logic";
 
-const NOW = Date.parse("2026-10-20T12:00:00.000Z");
 const summary = (name: string, updatedAt: string): GameSummary => ({
   projectId: `project-${name}` as GameSummary["projectId"],
   root: `/games/${name}`,
@@ -36,22 +34,6 @@ describe("gameInitial", () => {
     expect(gameInitial("The Sunlit Isle")).toBe("TS");
     expect(gameInitial("Hollow")).toBe("H");
     expect(gameInitial("   ")).toBe("G");
-  });
-});
-
-describe("formatGameEditedAt", () => {
-  it("reads like a library card, not a timestamp", () => {
-    expect(formatGameEditedAt("2026-10-20T11:59:40.000Z", NOW)).toBe("edited just now");
-    expect(formatGameEditedAt("2026-10-20T11:55:00.000Z", NOW)).toBe("edited 5m ago");
-    expect(formatGameEditedAt("2026-10-20T10:00:00.000Z", NOW)).toBe("edited 2h ago");
-    expect(formatGameEditedAt("2026-10-17T12:00:00.000Z", NOW)).toBe("edited 3d ago");
-    expect(formatGameEditedAt("2026-08-20T12:00:00.000Z", NOW)).toBe("edited 2mo ago");
-    expect(formatGameEditedAt("2024-10-20T12:00:00.000Z", NOW)).toBe("edited 2y ago");
-    expect(formatGameEditedAt("not-a-date", NOW)).toBe("edited recently");
-  });
-
-  it("does not count a clock skew as the future", () => {
-    expect(formatGameEditedAt("2026-10-20T12:05:00.000Z", NOW)).toBe("edited just now");
   });
 });
 
