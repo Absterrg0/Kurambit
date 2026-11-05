@@ -472,6 +472,7 @@ const ENDING: Record<string, string> = {
   budget: "Budget spent",
   failed: "Failed",
   stalled: "Stalled",
+  "no-ladder": "No ladder",
   done: "Done",
   "usage-limit": "Usage limit",
   "provider-down": "Provider down",

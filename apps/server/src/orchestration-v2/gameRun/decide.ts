@@ -96,9 +96,13 @@ export const RESUMABLE: ReadonlySet<string> = new Set([
   "low-memory",
   "stopped",
   "failed",
+  // A resume starts a fresh stall count (Policy.resume).
+  "stalled",
+  // A resume plans the ladder again.
+  "no-ladder",
 ]);
-// A run that reached its goal comes back for a creator's note, one round per note.
-const REOPENED_BY_NOTE: ReadonlySet<string> = new Set(["done", "ready"]);
+// A run with no rung left to build comes back for a creator's note, one round per note.
+const REOPENED_BY_NOTE: ReadonlySet<string> = new Set(["done", "ready", "no-ladder"]);
 
 const isEnding = Schema.is(GameRunEnding);
 
@@ -302,7 +306,15 @@ const advance = (
   if (state.ending !== null) return { state, step: null, effects: [] };
   const planned = Policy.plan(state, { now: work.now, coin: work.input.coin, id: work.input.id });
   if (planned.kind === "end")
-    return { state: { ...state, ending: planned.reason }, step: null, effects: [] };
+    return {
+      state: {
+        ...state,
+        ending: planned.reason,
+        ...(planned.why === undefined ? {} : { lastFailure: planned.why }),
+      },
+      step: null,
+      effects: [],
+    };
   const step: State.Step =
     planned.step.kind === "decide" && planned.step.sent === null
       ? { ...planned.step, sent: work.now }
@@ -593,7 +605,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
     const inFlight = inFlightOf(work, run);
     const before = toState(resumed, work.records.rounds, inFlight);
     const state: State.RunState = {
-      ...before,
+      ...Policy.resume(before),
       ending: null,
       profile: command.profile ?? before.profile,
       budgetEndsAt: budgetMinutes === null ? null : work.now + budgetMinutes * 60_000,

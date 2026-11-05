@@ -96,7 +96,12 @@ export type Planned =
       /** Decisions made while planning, for the run log. */
       readonly logs?: ReadonlyArray<string>;
     }
-  | { readonly kind: "end"; readonly reason: string };
+  | {
+      readonly kind: "end";
+      readonly reason: string;
+      /** Why, for the run's lastFailure; absent keeps what the last round recorded. */
+      readonly why?: string;
+    };
 export type Applied = {
   readonly state: RunState;
   readonly logs: ReadonlyArray<string>;
@@ -143,17 +148,26 @@ export const classifyComparePair = (order1: string, order2: string): PairKind =>
   return "inconclusive";
 };
 
-/** Three consecutive inconclusive rounds drop the pending line and count one stall. */
+/**
+ * Three consecutive inconclusive rounds drop the pending line. Each of them is
+ * already a stall (it landed nothing), so dropping it counts none of its own.
+ */
 export const advancePending = (
   current: Pending | null,
   branch: string,
   round: number,
   verdicts: ReadonlyArray<Verdict>,
-): { pending: Pending | null; dropStall: boolean } => {
+): Pending | null => {
   const streak = (current?.streak ?? 0) + 1;
-  if (streak >= 3) return { pending: null, dropStall: true };
-  return { pending: { branch, round, verdicts, streak }, dropStall: false };
+  return streak >= 3 ? null : { branch, round, verdicts, streak };
 };
+
+/**
+ * Rounds in a row that land nothing, whatever the reason, before the run ends
+ * "stalled": a broken game would otherwise work through every rung and its
+ * retries (30 rounds on a full ladder) for nothing. A kept round resets it.
+ */
+export const STALL_LIMIT = 3;
 
 /** Both builds need recorded hands-on input within the equal budget; null when usable. */
 const validatePlayEvidence = (a: Evidence | null, b: Evidence | null): string | null => {
@@ -1323,7 +1337,8 @@ const proceed = (state: RunState, done: string, now: number): RunState => {
   return { ...state, stage: done === "art" ? "build" : done, task: newRound(state, now) };
 };
 
-const end = (reason: string): Planned => ({ kind: "end", reason });
+const end = (reason: string, why?: string): Planned =>
+  why === undefined ? { kind: "end", reason } : { kind: "end", reason, why };
 const step = (state: RunState, task: Task, s: Step, logs: ReadonlyArray<string> = []): Planned => ({
   kind: "step",
   state: { ...state, task, seq: s.id, inFlight: s },
@@ -1395,12 +1410,27 @@ export const asked = (state: RunState, step: RoleStep): Asked => {
   }
 };
 
-/** A finished run comes back for a creator's note: one round on it, then it ends again. */
+/**
+ * A finished run comes back for a creator's note: one round on it, then it
+ * ends again. The note's round starts a fresh stall count.
+ */
 export const reopen = (state: RunState, now: number): RunState => ({
   ...state,
   ending: null,
   inFlight: null,
+  stallStreak: 0,
   task: newRound(state, now),
+});
+
+/**
+ * A resumed run starts a fresh stall count, so resuming one that stalled
+ * gets its rounds, and a run whose plan wrote no valid ladder plans again
+ * instead of ending at once on the same empty ladder.
+ */
+export const resume = (state: RunState): RunState => ({
+  ...state,
+  stallStreak: 0,
+  ladder: state.ladder !== null && state.ladder.rungs.length === 0 ? null : state.ladder,
 });
 
 export const plan = (state: RunState, input: Inputs): Planned => {
@@ -1533,7 +1563,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     act({ role: `tester-${n}`, thread: r.thread, prompt, capMs, bots: true });
   switch (r.phase) {
     case "start": {
-      if (state.stallStreak >= 3) return end("stalled");
+      if (state.stallStreak >= STALL_LIMIT) return end("stalled");
       if (remaining(state, input.now) < ROUND_RESERVE_MS) return end("budget");
       if (state.ladder === null) {
         const task: Task = { _tag: "ladder", phase: "write", thread: null, error: "" };
@@ -1549,10 +1579,11 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         from,
       });
       const pick = pickRung(state.ladder);
-      // Polish is the creator's call: past a finished ladder a round runs only on
-      // their ask. A run whose plan never wrote a ladder has only these rounds.
-      if (pick.kind === "finish" && pick.why === LADDER_DONE && state.steer.length === 0)
-        return end("done");
+      // Polish is the creator's call: with no rung left (the ladder is done, or
+      // the plan wrote none) a round runs only on their ask. A run without a
+      // ladder ends resumably, and a resume plans one again.
+      if (pick.kind === "finish" && state.steer.length === 0)
+        return pick.why === LADDER_DONE ? end("done") : end("no-ladder", pick.why.slice(0, 300));
       if (pick.kind === "finish") {
         const { direction, repeating } = roundDirection(state);
         const move = direction.slice(0, 300);
@@ -2389,7 +2420,6 @@ const applyRound = (
           ...s,
           best: g!.sha,
           played: carried ? { ...held, sha: g!.sha } : null,
-          stallStreak: 0,
           pending: null,
           task: {
             ...r,
@@ -2403,7 +2433,6 @@ const applyRound = (
         const onTrunk = g!.branch === s.trunk;
         return {
           ...s,
-          stallStreak: s.stallStreak + 1,
           pending: null,
           task: {
             ...r,
@@ -2507,7 +2536,6 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
   if (kind === "best-wins")
     return {
       ...s,
-      stallStreak: s.stallStreak + 1,
       pending: null,
       lastFailure: `round ${r.n}: rejected, best won both orders`,
       task: round(
@@ -2520,7 +2548,6 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
     const why = verdicts[0]!.verdict === "NONE" ? verdicts[0]!.reason : verdicts[1]!.reason;
     return {
       ...s,
-      stallStreak: s.stallStreak + 1,
       pending: null,
       lastFailure: `round ${r.n}: ${why}`.slice(0, 300),
       task: round(
@@ -2535,16 +2562,15 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
   // A tie or split is an honest non-finding, never a keep: the best stands and
   // later rounds refine this candidate against the same judged best.
   const split = `${verdicts[0]!.verdict}/${verdicts[1]!.verdict}`;
-  const advanced = advancePending(s.pending, r.branch, r.n, verdicts);
+  const pending = advancePending(s.pending, r.branch, r.n, verdicts);
   logs.push(`round ${r.n}: inconclusive ${split}; best stands, kept on branch ${r.branch}`);
   const note = noteOf(
     r,
-    `inconclusive (${split}); best stands, kept on branch ${r.branch}${advanced.dropStall ? "; pending dropped after 3 inconclusive rounds" : ""}`,
+    `inconclusive (${split}); best stands, kept on branch ${r.branch}${pending === null ? "; pending dropped after 3 inconclusive rounds" : ""}`,
   );
   return {
     ...s,
-    stallStreak: s.stallStreak + (advanced.dropStall ? 1 : 0),
-    pending: advanced.pending,
+    pending,
     task: round(
       {
         outcome: "hold",
@@ -2580,6 +2606,10 @@ const finishRound = (
   const ladder = settled.state.ladder;
   const change = (id: number) =>
     ledger?.rungChange === undefined ? null : rungOfChange(ledger.rungChange, id);
+  // The one place a judged or dropped round ends: kept resets the stall count,
+  // anything else (rejected, unjudged, inconclusive, failed checks, a failed
+  // merge) is one more stall, with its reason for a "stalled" ending.
+  const kept = settled.record.kept;
   const state: RunState = {
     ...settled.state,
     ladder: r.rung === null || ladder === null ? ladder : insertRung(ladder, change, r.n, logs),
@@ -2588,9 +2618,15 @@ const finishRound = (
     next,
     lastDirection: r.direction,
     ending,
+    stallStreak: kept ? 0 : s.stallStreak + 1,
+    lastFailure: kept
+      ? s.lastFailure
+      : `round ${r.n}: ${settled.record.note || "nothing landed"}`.slice(0, 300),
   };
   const ship: RunState["task"] = { _tag: "ship", n: r.n, phase: "play", thread: null };
-  if (ending !== null || state.steer.length > 0) return { ...state, task: newRound(state, now) };
+  // A stalled run ends at the next round's start, before any ship check.
+  if (ending !== null || state.steer.length > 0 || state.stallStreak >= STALL_LIMIT)
+    return { ...state, task: newRound(state, now) };
   // A finished ladder is the demo the run set out to build: the ship check plays
   // it before any polish is paid for.
   if (r.rung !== null && state.ladder !== null && ladderDone(state.ladder)) {

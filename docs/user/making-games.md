@@ -122,7 +122,9 @@ check passes and the blind judges do not find the old build clearly better. A st
 land in two rounds is set aside and tried once more after the rest. When the ladder is done, a
 ship review plays the whole game and the run ends with its verdict and reasons. The run never
 polishes on its own: ask for what you want polished in the chat, and the run comes back for one
-round on it. The **Ladder** list on the Run tab shows which steps landed, which one is being built and
+round on it. Three rounds in a row that land nothing stop the run as **Stalled**, with the last
+round's reason; fix what it names (or ask for a change), then resume. A plan that wrote no valid
+ladder stops the run as **No ladder**; resuming gives the plan another go. The **Ladder** list on the Run tab shows which steps landed, which one is being built and
 which were set aside and why; each round shows how many of its checks passed.
 
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this

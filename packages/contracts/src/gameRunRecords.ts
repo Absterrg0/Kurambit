@@ -621,6 +621,8 @@ export const GameRunEnding = Schema.Literals([
   "done",
   "stopped",
   "stalled",
+  /** The plan wrote no valid ladder: nothing to build without the creator's ask. */
+  "no-ladder",
   "budget",
   "failed",
   "usage-limit",

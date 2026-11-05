@@ -515,6 +515,12 @@ describe("game-run commands", () => {
     expect(stepOf(resumed)).toMatchObject({ attempt: pair.attempt + 1, endedHalves: [] });
   });
 
+  it("a run that stalled resumes with a fresh stall count", () => {
+    const resumed = runOf(resumedAt(started(), { ending: "stalled", stallStreak: 3 }));
+    expect(resumed.status).not.toBe("ended");
+    expect(resumed.stallStreak).toBe(0);
+  });
+
   it("a step that ended on a usage limit runs again as a new attempt after a resume", () => {
     const limited = complete(started(), {
       kind: "ended",
