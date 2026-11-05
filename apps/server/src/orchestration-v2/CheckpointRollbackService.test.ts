@@ -102,6 +102,7 @@ it.effect.each(["initial", "waiting"])(
           Layer.mock(EventSink.EventSinkV2)({}),
           IdAllocator.layer,
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getProjectGameRun: () => Effect.succeed(null),
             getThreadRecords,
             getShellSnapshot: () =>
               Effect.succeed({
@@ -204,6 +205,7 @@ it.effect("rejects a rollback when another provider thread became active", () =>
         Layer.mock(EventSink.EventSinkV2)({}),
         IdAllocator.layer,
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getProjectGameRun: () => Effect.succeed(null),
           getThreadRecords: () => Effect.succeed(projection),
           getShellSnapshot: () =>
             Effect.succeed({
@@ -285,6 +287,7 @@ it.effect("rejects a rollback when provider selection changed before execution",
         Layer.mock(EventSink.EventSinkV2)({}),
         IdAllocator.layer,
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getProjectGameRun: () => Effect.succeed(null),
           getThreadRecords: () => Effect.succeed(projection),
           getShellSnapshot: () =>
             Effect.succeed({
@@ -359,6 +362,7 @@ it.effect("rejects an unavailable rollback target before opening a session", () 
         Layer.mock(EventSink.EventSinkV2)({}),
         IdAllocator.layer,
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getProjectGameRun: () => Effect.succeed(null),
           getThreadRecords: () => Effect.succeed(projection),
           getShellSnapshot: () =>
             Effect.succeed({
@@ -491,6 +495,7 @@ it.effect.each([
           }),
           IdAllocator.layer,
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getProjectGameRun: () => Effect.succeed(null),
             getThreadRecords: () => Effect.succeed(projection),
             getShellSnapshot: () =>
               Effect.succeed({
@@ -673,6 +678,7 @@ it.effect.each([
           }),
           IdAllocator.layer,
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getProjectGameRun: () => Effect.succeed(null),
             getThreadRecords: () => Effect.succeed(projection),
             getThreadProviderContext: () => Effect.succeed({ providerSessions: [] } as never),
             getCheckpointContext: () =>

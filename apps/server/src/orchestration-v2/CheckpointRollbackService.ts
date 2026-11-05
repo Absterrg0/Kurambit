@@ -25,6 +25,7 @@ import {
   SHARED_WORKSPACE_RESTORE_MESSAGE,
 } from "./CheckpointRestoreSafety.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
+import { GAME_RUN_HOLDS_FOLDER_MESSAGE, gameRunHold } from "./CommandPolicy.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import { ProjectionStoreV2 } from "./ProjectionStore.ts";
@@ -46,6 +47,7 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
       "provider-turn-unavailable",
       "unexpected-failure",
       "shared-workspace",
+      "game-run-holds-folder",
     ]),
     threadId: ThreadId,
     providerThreadId: ProviderThreadId,
@@ -63,6 +65,8 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
         return `Provider turn for rollback target ${this.checkpointId} is unavailable on provider thread ${this.providerThreadId}.`;
       case "shared-workspace":
         return SHARED_WORKSPACE_RESTORE_MESSAGE;
+      case "game-run-holds-folder":
+        return GAME_RUN_HOLDS_FOLDER_MESSAGE;
       case "unexpected-failure":
         return ROLLBACK_FAILED_MESSAGE;
     }
@@ -231,6 +235,18 @@ export const layer: Layer.Layer<
       ) {
         return yield* new CheckpointRollbackExecutionError({
           reason: "shared-workspace",
+          threadId: input.threadId,
+          providerThreadId: input.providerThreadId,
+          checkpointId: input.checkpointId,
+        });
+      }
+      // Checked again here, as isolation is: a run may have started since admission.
+      if (
+        input.restoreFiles !== false &&
+        gameRunHold(yield* projections.getProjectGameRun(projection.thread.projectId)) !== null
+      ) {
+        return yield* new CheckpointRollbackExecutionError({
+          reason: "game-run-holds-folder",
           threadId: input.threadId,
           providerThreadId: input.providerThreadId,
           checkpointId: input.checkpointId,

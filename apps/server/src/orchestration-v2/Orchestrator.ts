@@ -80,6 +80,8 @@ import {
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import {
   CommandPolicyV2,
+  GAME_RUN_HOLDS_FOLDER_MESSAGE,
+  gameRunHold,
   isNativeMaintenanceCommand,
   resolveMessageDispatchIntent,
   threadTurnsOwnedByRun,
@@ -9450,6 +9452,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             commandId: command.commandId,
             commandType: command.type,
             cause: SHARED_WORKSPACE_RESTORE_MESSAGE,
+          });
+        // The run's own builds are its checkpoints; a T3 file restore beside them rewrites its folder.
+        const gameRun = yield* projectionStore.getProjectGameRun(projection.thread.projectId).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+                cause,
+              }),
+          ),
+        );
+        if (gameRunHold(gameRun) !== null)
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: GAME_RUN_HOLDS_FOLDER_MESSAGE,
           });
       }
 

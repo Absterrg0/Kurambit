@@ -116,6 +116,7 @@ it.effect.each([
             get: () => Effect.succeed(Option.some({ workspaceRoot: parent } as never)),
           }),
           Layer.mock(ProjectionStoreV2)({
+            getProjectGameRun: () => Effect.succeed(null),
             getThreadRecords: () => Effect.succeed(projection),
             getShellSnapshot: () =>
               Effect.succeed({

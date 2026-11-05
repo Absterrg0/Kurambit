@@ -10,7 +10,6 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Result from "effect/Result";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import {
@@ -21,7 +20,6 @@ import {
   GameOperationError,
   gameTemplateForEngine,
   type GameCreateInput,
-  type GameRun,
   type GameListResult,
   type GameOpenInput,
   type GameProjectResult,
@@ -32,8 +30,9 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import { settling, toState } from "../orchestration-v2/gameRun/decide.ts";
+import { toState } from "../orchestration-v2/gameRun/decide.ts";
 import { isGameRunOperationOwner } from "../orchestration-v2/gameRun/ids.ts";
+import { gameRunHold } from "../orchestration-v2/CommandPolicy.ts";
 import { currentStep } from "./run/runView.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
@@ -443,13 +442,7 @@ const make = Effect.gen(function* () {
           shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
         ),
       );
-  const holdOf = (run: GameRun | null) => {
-    if (run === null) return null;
-    if (run.status !== "ended") return "live" as const;
-    const busy = settling(run);
-    if (busy === null || !Result.isFailure(busy)) return null;
-    return busy.failure.reason === "restoring" ? ("restoring" as const) : ("finishing" as const);
-  };
+  const holdOf = gameRunHold;
   const runHold: GameProjectService["Service"]["runHold"] = (threadId) =>
     projectRun(threadId).pipe(
       Effect.map(holdOf),
