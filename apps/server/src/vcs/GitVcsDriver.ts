@@ -1201,7 +1201,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
   /**
    * Where one working tree keeps its capture index for captures of one folder.
    * The index is valid only for the inputs `add` reads besides the files
-   * themselves (HEAD, the config, the attribute files), so they are its name:
+   * themselves (git's version, HEAD, the config, the attribute files), so they are its name:
    * when any of them changes the index is missing and is seeded afresh.
    */
   const capturePlace = (operation: string, cwd: string) =>
@@ -1264,6 +1264,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           Effect.map((result) => (result.exitCode === 0 ? result.stdout.trim() : "")),
         );
       const systemAttributes = yield* gitVar("GIT_ATTR_SYSTEM");
+      // An upgraded git may stage differently: a new version reseeds.
+      const version = (yield* execute({ operation, cwd, args: ["--version"] })).stdout.trim();
       const home = process.env.HOME || NodeOS.homedir();
       const configured = settings.get("core.attributesfile");
       const globalAttributes =
@@ -1287,7 +1289,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         ...listed.map((file) => path.join(top, file)),
       ];
       const encoder = new TextEncoder();
-      const parts: Uint8Array[] = [encoder.encode(`v1\0${prefix}\0${head}\0${config.stdout}\0`)];
+      const parts: Uint8Array[] = [
+        encoder.encode(`v1\0${version}\0${prefix}\0${head}\0${config.stdout}\0`),
+      ];
       for (const file of attributeFiles) {
         const contents = yield* fileSystem
           .readFile(file)
