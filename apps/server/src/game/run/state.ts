@@ -304,6 +304,9 @@ export type Task = typeof Task.Type;
 
 const RunState = Schema.Struct({
   version: Schema.Literal(3),
+  // A run on the orchestration core: its roles submit with game_run_submit
+  // instead of ending their files with a line. The loop's run.json has none.
+  typed: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   runId: Schema.String,
   // Older run.json files decided everything themselves.
   profile: GameRunProfile.pipe(Schema.withDecodingDefaultKey(Effect.succeed("autopilot"))),
@@ -401,6 +404,7 @@ export const freshState = (
   history: { readonly rounds: ReadonlyArray<RoundRecord>; readonly pending: Pending | null },
 ): RunState => ({
   version: 3,
+  typed: false,
   ...input,
   decided: [],
   buildNotes: "",

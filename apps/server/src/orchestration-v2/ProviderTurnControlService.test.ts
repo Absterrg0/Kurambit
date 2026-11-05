@@ -233,6 +233,7 @@ it.effect(
           getTurnItem: () => Effect.die("unused turn item read"),
           getThreadRecords: () => Effect.die("unused record read"),
           getGameRunRecords: () => Effect.die("unused game run read"),
+          listGameRunThreadsToRecover: () => Effect.die("unused game run read"),
           getRuntimeRequest: () => Effect.die("unused getRuntimeRequest"),
           getRunningTurnContext: () => Effect.die("unused getRunningTurnContext"),
           getThreadProviderContext: () => Effect.die("unused getThreadProviderContext"),

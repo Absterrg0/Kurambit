@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import { CommandId, MessageId, type ThreadId } from "@kurambit/contracts";
 import { findKeyArt } from "../keyArt.ts";
 import * as Policy from "./policy.ts";
+import { PRESENTING, SUMMARY, wakeText } from "./decisionText.ts";
 import { LADDER_FILE } from "./roles.ts";
 import type { RoleDeps } from "./roleRunner.ts";
 import type { DecideStep, Decided, Decision } from "./state.ts";
@@ -19,19 +20,6 @@ export type Answer = {
   readonly by: Decided["by"];
 };
 
-const WHAT: Record<Decision["kind"], string> = {
-  style: "the game's vision and look",
-  prototype: "which prototype the game continues from",
-  ladder: "the ladder the run builds",
-};
-const SUMMARY: Record<Decision["kind"], string> = {
-  style: "The production run asks about the look",
-  prototype: "The production run asks which prototype to keep",
-  ladder: "The production run asks about the ladder",
-};
-// The creator's run is still presenting in these states; any other has handed the
-// question to the user ("waiting" is the agent asking them itself).
-const PRESENTING = new Set(["preparing", "queued", "starting", "running"]);
 // How often a question queued behind a busy chat checks whether it reached the agent.
 const DELIVERY_CHECK = Duration.seconds(5);
 
@@ -43,14 +31,8 @@ const keys = (runId: string, decision: Decision) => {
   };
 };
 
-export const wakeText = (decision: Decision): string => {
-  const fallback = decision.answers.find((a) => a.answer === decision.fallback);
-  const minutes = Math.round(decision.waitMs / 60_000);
-  return `The production run is waiting for the creator's call on ${WHAT[decision.kind]} (decision ${decision.id}). Read it with game_run_status: its decision lists the evidence files, the answers the run accepts and its default. Show the creator the evidence as a visual reply: an HTML render with the images by their local paths, and a few plain lines on what to look at and what differs. Then ask, and invite an answer in their own words; they may combine or change things freely. Record what they say with game_run_decide (decisionId ${decision.id}): pick the answer that fits and put their words in notes. If nobody answers within ${minutes} minutes of this message, the run takes its default (${decision.fallback}${fallback === undefined ? "" : `: ${fallback.means}`}); tell them, with the time game_run_status gives.`;
-};
-
 /** The decision's evidence that exists on disk, with the vision's key art for a style call. */
-const presentable = async (root: string, lane: string, decision: Decision) => {
+export const presentable = async (root: string, lane: string, decision: Decision) => {
   const art = decision.kind === "style" ? await findKeyArt(root, lane, "vision") : null;
   const all = [...(art === null ? [] : [{ label: "Key art", path: art }]), ...decision.evidence];
   const kept: Array<Decision["evidence"][number]> = [];

@@ -42,6 +42,8 @@ import {
   GameRunDecideResult,
   GameRunProfile,
   GameRunProfileResult,
+  GameRunSubmitInput,
+  GameRunSubmitResult,
   GameStatus,
   GameExploreStartInput,
   GameExploreActInput,
@@ -58,7 +60,7 @@ import {
   GameWindowsPackage,
   OrchestratorMcpFailure,
 } from "@kurambit/contracts";
-import * as GameRun from "../../../game/GameRun.ts";
+import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -75,6 +77,7 @@ const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
  */
 const visibleToRunThreads = () => true;
 const hiddenFromRunThreads = () => !McpInvocationContext.isGameRunThread();
+const onlyForRunThreads = () => McpInvocationContext.isGameRunThread();
 const GameStatusTool = Tool.make("game_status", {
   description:
     "Inspect this thread's Kurambit project: brief path, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
@@ -406,7 +409,7 @@ const BotViewTool = Tool.make("game_bot_view", {
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const runDependencies = [
-  GameRun.GameRun,
+  GameRunControl.GameRunControl,
   McpInvocationContext.McpInvocationContext,
   ThreadManagementService.ThreadManagementService,
 ];
@@ -511,6 +514,19 @@ const RunProfileTool = Tool.make("game_run_profile", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+// A run role's result: the run reads this, never a file the role wrote, so a
+// slip in its shape is refused in the role's own turn and fixed there.
+const RunSubmitTool = Tool.make("game_run_submit", {
+  description:
+    'Hand your role\'s result to this game\'s production run, in the shape your prompt names: {"_tag":"checks",...}, {"_tag":"ladder",...}, {"_tag":"verdict",...}, {"_tag":"select",...}, {"_tag":"ship",...}, {"_tag":"ledger",...}, {"_tag":"report",...} or {"_tag":"art",...}. A submission that does not fit what your step asks for is refused with the reason: fix it and submit again. A later submission replaces an earlier one. Then finish your turn.',
+  parameters: GameRunSubmitInput,
+  success: GameRunSubmitResult,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, onlyForRunThreads);
 /** The studio toolkit: status, export and play-level tools for every thread. */
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
@@ -547,4 +563,5 @@ export const GameToolkit = Toolkit.make(
   RunStopTool,
   RunDecideTool,
   RunProfileTool,
+  RunSubmitTool,
 );

@@ -420,6 +420,11 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
     filter?: GameRunRecordFilter,
   ) => Effect.Effect<GameRunThreadRecords, ProjectionStoreV2Error>;
+  /** Creator threads with a game run that has not ended or whose ending's finish is owed, for startup recovery. */
+  readonly listGameRunThreadsToRecover: () => Effect.Effect<
+    ReadonlyArray<ThreadId>,
+    ProjectionStoreV2Error
+  >;
 
   readonly apply: (
     event: OrchestrationV2DomainEvent,
@@ -5086,6 +5091,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           Effect.mapError(controlReadError(threadId)),
         );
 
+    const listGameRunThreadsToRecover: ProjectionStoreV2Shape["listGameRunThreadsToRecover"] = () =>
+      sql<{ readonly thread_id: string }>`
+        SELECT DISTINCT thread_id FROM orchestration_v2_projection_game_runs
+        WHERE status != 'ended'
+          OR json_extract(payload_json, '$.finished') IS NOT json_extract(payload_json, '$.endedAt')
+      `.pipe(
+        Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const getThreadRecords: ProjectionStoreV2Shape["getThreadRecords"] = (
       threadId,
       fields,
@@ -6310,6 +6325,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getTurnItem,
       getThreadRecords,
       getGameRunRecords,
+      listGameRunThreadsToRecover,
       getRuntimeRequest,
       getPlan,
       getProviderControlContext,
@@ -6682,6 +6698,16 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ),
           };
         }),
+      listGameRunThreadsToRecover: () =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.gameRunRecords].flatMap(([threadId, records]) =>
+              records.gameRuns.some((run) => run.status !== "ended" || run.finished !== run.endedAt)
+                ? [threadId]
+                : [],
+            ),
+          ),
+        ),
       getRuntimeRequest: (threadId, requestId) =>
         Effect.gen(function* () {
           const projection = (yield* Ref.get(replayState)).projections.get(threadId);

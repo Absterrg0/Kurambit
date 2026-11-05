@@ -27,6 +27,8 @@ import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as GameRunDecisions from "./gameRun/GameRunDecisions.ts";
+import * as GameRunJobs from "./gameRun/GameRunJobs.ts";
 import { continueRestartedRun } from "./RestartContinuation.ts";
 
 export class OrchestrationEffectExecutionError extends Schema.TaggedError<OrchestrationEffectExecutionError>()(
@@ -83,6 +85,8 @@ export const layerExecutor: Layer.Layer<
   | ThreadTitleRegenerationService.ThreadTitleRegenerationService
   | ThreadManagementService.ThreadManagementService
   | ServerSettings.ServerSettingsService
+  | GameRunJobs.GameRunJobs
+  | GameRunDecisions.GameRunDecisions
 > = Layer.effect(
   OrchestrationEffectExecutorV2,
   Effect.gen(function* () {
@@ -97,6 +101,8 @@ export const layerExecutor: Layer.Layer<
       yield* ThreadTitleRegenerationService.ThreadTitleRegenerationService;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const settings = yield* ServerSettings.ServerSettingsService;
+    const gameRunJobs = yield* GameRunJobs.GameRunJobs;
+    const gameRunDecisions = yield* GameRunDecisions.GameRunDecisions;
     return OrchestrationEffectExecutorV2.of({
       execute: (effect, options) => {
         const willRetry = options?.willRetry ?? false;
@@ -526,19 +532,53 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          // A step's work and a role's cap are long, so they become jobs and
+          // the effect settles at once; the jobs report back with commands.
           case "game-run.step.execute":
-          case "game-run.decision.wake":
-          case "game-run.decision.deadline":
+            return gameRunJobs.execute({
+              threadId: effect.threadId,
+              runId: effect.request.runId,
+              stepId: effect.request.stepId,
+              attempt: effect.request.attempt,
+            });
           case "game-run.step.deadline":
-            // The game run's executor is not wired in yet, so these fail visibly
-            // rather than settle as if their work had run.
-            return Effect.fail(
-              new OrchestrationEffectExecutionError({
-                effectId: effect.id,
-                effectType: effect.request.type,
-                cause: "The game run has no effect executor in this build.",
-              }),
+            return gameRunJobs.deadline({
+              threadId: effect.threadId,
+              runId: effect.request.runId,
+              stepId: effect.request.stepId,
+              attempt: effect.request.attempt,
+            });
+          case "game-run.finish":
+            return gameRunJobs.finish({
+              threadId: effect.threadId,
+              runId: effect.request.runId,
+              endedAt: effect.request.endedAt,
+            });
+          case "game-run.decision.wake":
+          case "game-run.decision.deadline": {
+            const request = effect.request;
+            const decision = {
+              effectId: effect.id,
+              threadId: effect.threadId,
+              runId: request.runId,
+              stepId: request.stepId,
+              decisionId: request.decisionId,
+            };
+            return (
+              request.type === "game-run.decision.wake"
+                ? gameRunDecisions.wake(decision)
+                : gameRunDecisions.expire(decision)
+            ).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: request.type,
+                    cause,
+                  }),
+              ),
             );
+          }
         }
       },
     });

@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
@@ -219,6 +220,10 @@ export const GameRunBotFact = Schema.Struct({ side: GameRunSide, ...BotFactField
 export type GameRunBotFact = typeof GameRunBotFact.Type;
 
 // ── What a step's execution hands back. ────────────────────────────────────
+/** A role turn's starting point: the build's source id and the bot runs on record. */
+export const GameRunRoleBefore = Schema.Struct({ source: Schema.String, bots: Schema.Number });
+export type GameRunRoleBefore = typeof GameRunRoleBefore.Type;
+
 /** A role turn's end: the typed submission the role made, if any, and what the harness saw. */
 export const GameRunRoleDone = Schema.Struct({
   kind: Schema.Literal("done"),
@@ -661,6 +666,10 @@ export const GameRun = Schema.Struct({
   seq: NonNegativeInt,
   /** The number of the step the run holds in flight; null between steps and once ended. */
   inFlight: Schema.NullOr(Schema.Number),
+  /** When the run last ended; its finish (stops, exports) is owed until `finished` names it. */
+  endedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  /** The `endedAt` whose finish completed. */
+  finished: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -701,6 +710,8 @@ export const GameRunStep = Schema.Struct({
       seq: PositiveInt,
       threadId: Schema.NullOr(ThreadId),
       submission: Schema.NullOr(GameRunSubmission),
+      /** What the harness measured before the role's first turn, kept for the turn's result. */
+      before: Schema.optionalKey(GameRunRoleBefore),
     }),
   ),
   /** A pair keeps its halves' results in `step`; this is a single step's result, or an ending. */
