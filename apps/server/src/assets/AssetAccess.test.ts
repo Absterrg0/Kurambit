@@ -658,6 +658,31 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("names a download by its download name, not the file's own name", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-media-download-name-" });
+      const fileName = `${"a".repeat(64)}.zip`;
+      const filePath = path.join(root, fileName);
+      yield* fs.writeFileString(filePath, "zip bytes");
+      const issued = yield* issueAssetUrl({
+        resource: { _tag: "media-file", threadId: ThreadId.make("thread-1"), path: filePath },
+        download: true,
+        downloadName: "game-web.zip",
+      });
+      const suffix = issued.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      expect(suffix.slice(separator + 1)).toBe(fileName);
+      const asset = yield* resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1));
+      if (asset?.kind !== "file") throw new Error("Expected the download");
+      const response = HttpServerResponse.toWeb(yield* assetFileResponse(asset));
+      expect(response.headers.get("content-disposition")).toBe(
+        'attachment; filename="game-web.zip"',
+      );
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("issues workspace URLs that resolve the entry file and sibling assets", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

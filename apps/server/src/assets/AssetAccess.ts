@@ -119,6 +119,8 @@ const AssetClaimsSchema = Schema.Union([
     inode: Schema.String,
     /** Served as an attachment, so any file type may be signed; set only by server code. */
     download: Schema.optionalKey(Schema.Literal(true)),
+    /** The attachment's file name when it differs from the file's own. */
+    downloadName: Schema.optionalKey(Schema.String),
     expiresAt: Schema.Number,
   }),
   Schema.Struct({
@@ -354,6 +356,7 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     readonly resource: AssetResource;
     readonly expiresAt: number;
     readonly download?: boolean;
+    readonly downloadName?: string;
   }) {
     const path = yield* Path.Path;
     const canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
@@ -397,6 +400,9 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
         filePath: canonicalFile,
         ...opened.identity,
         ...(input.download ? { download: true as const } : {}),
+        ...(input.download && input.downloadName !== undefined
+          ? { downloadName: input.downloadName }
+          : {}),
         expiresAt: input.expiresAt,
       },
       fileName: path.basename(canonicalFile),
@@ -498,6 +504,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
    * already chosen the file may set it.
    */
   readonly download?: boolean;
+  /** The download's file name, for a file whose own name means nothing to the user. */
+  readonly downloadName?: string;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -530,6 +538,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         resource: input.resource,
         expiresAt,
         ...(input.download ? { download: true } : {}),
+        ...(input.downloadName !== undefined ? { downloadName: input.downloadName } : {}),
       });
       claims = finalized.claims;
       fileName = finalized.fileName;
@@ -956,7 +965,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
         kind: "file",
         path: canonicalFile,
         download: true,
-        fileName: path.basename(canonicalFile),
+        fileName: claims.downloadName ?? path.basename(canonicalFile),
         ...(mimeType ? { mimeType } : {}),
         file,
       } satisfies ResolvedAsset;

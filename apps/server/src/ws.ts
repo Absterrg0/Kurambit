@@ -248,7 +248,7 @@ const signRunFile = (threadId: ThreadId, path: string) =>
 // Packaging publishes by rename, so the inode binding retires the URL when the
 // archive is re-packaged; a Web archive's path names its build, so its URL never
 // serves another build.
-const signPackage = <P extends { readonly archivePath: string }>(
+const signPackage = <P extends { readonly archivePath: string; readonly fileName: string }>(
   threadId: ThreadId,
   operation: string,
   packaged: P,
@@ -256,6 +256,7 @@ const signPackage = <P extends { readonly archivePath: string }>(
   issueAssetUrl({
     resource: { _tag: "media-file", threadId, path: packaged.archivePath },
     download: true,
+    downloadName: packaged.fileName,
   }).pipe(
     Effect.map((asset) => ({
       ...packaged,
