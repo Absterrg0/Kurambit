@@ -103,7 +103,7 @@ export class WebPageNotReady extends Error {
   constructor(timedOut: boolean, bootTimeoutMs: number, navigation: string | null = null) {
     super(
       timedOut
-        ? `The page never reported ready (window.__studio.ready stayed false past ${Math.round(bootTimeoutMs / 1000)}s); no session was opened.`
+        ? `The page never reported ready (window.__studio.ready stayed false past ${Math.round(bootTimeoutMs / 1000)}s${navigation === null ? "" : `; its navigation failed: ${navigation}`}); no session was opened.`
         : navigation !== null
           ? `The page could not be opened (${navigation}); no session was opened.`
           : "The page errored before window.__studio appeared; no session was opened.",
@@ -276,6 +276,9 @@ export const openWebPlaySession = async (input: {
     };
     try {
       const bootDeadline = Date.now() + input.bootTimeoutMs;
+      // A page that navigates while it boots (a redirect, a reload) rejects
+      // the first goto though it loads; only a bridge that never appears fails.
+      let navigation: string | null = null;
       const loaded = await page
         .goto(input.url, { timeout: input.bootTimeoutMs, waitUntil: "load" })
         .then(
@@ -283,16 +286,13 @@ export const openWebPlaySession = async (input: {
           (cause: unknown) => {
             if (input.signal?.aborted) throw cause;
             if (cause instanceof Error && cause.name === "TimeoutError") return false;
-            throw new WebPageNotReady(
-              false,
-              input.bootTimeoutMs,
-              (cause instanceof Error ? cause.message : String(cause)).slice(0, 500),
-            );
+            navigation = (cause instanceof Error ? cause.message : String(cause)).slice(0, 500);
+            return true;
           },
         );
       for (;;) {
         if (!loaded || Date.now() >= bootDeadline)
-          throw new WebPageNotReady(true, input.bootTimeoutMs);
+          throw new WebPageNotReady(true, input.bootTimeoutMs, navigation);
         let ready: unknown = null;
         try {
           ready = await page.evaluate(READ_STUDIO_READY);
@@ -302,7 +302,8 @@ export const openWebPlaySession = async (input: {
         if (ready === true) break;
         // Top-level await can delay the bridge past load, so only an error
         // and no bridge together end the wait early.
-        if (pageErrored && ready === null) throw new WebPageNotReady(false, input.bootTimeoutMs);
+        if (pageErrored && ready === null)
+          throw new WebPageNotReady(false, input.bootTimeoutMs, navigation);
         await sleep(500, input.signal);
       }
     } catch (cause) {
