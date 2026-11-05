@@ -13,6 +13,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { CheckpointRef } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import { afterAll, beforeAll } from "vite-plus/test";
 
@@ -135,6 +136,8 @@ interface Step {
   /** Whether the capture seeds a fresh index (true) or reuses the kept one (false). */
   readonly seeds: boolean;
   readonly preWrites?: boolean;
+  /** Today's method refuses this folder state: the capture must refuse it too. */
+  readonly fails?: boolean;
   readonly restoreTo?: { readonly step: string; readonly paths: ReadonlyArray<string> };
 }
 interface Case {
@@ -432,6 +435,27 @@ const cases: ReadonlyArray<Case> = [
     ],
   },
   {
+    // A project copied from a case-insensitive disk keeps core.ignorecase=true.
+    name: "core.ignorecase on a case-sensitive disk",
+    setup: (root) => {
+      initRepo(root);
+      git(root, ["config", "core.ignorecase", "true"]);
+      write(NodePath.join(root, "README.md"), "# game\n");
+      commitAll(root, "base");
+      write(NodePath.join(root, "art/file.txt"), "one\n");
+      return root;
+    },
+    steps: [
+      { name: "cold", seeds: true },
+      {
+        name: "a second spelling of a kept file appears",
+        seeds: false,
+        fails: true,
+        act: (cwd) => write(NodePath.join(cwd, "art/File.txt"), "two, different\n"),
+      },
+    ],
+  },
+  {
     name: "sparse checkout",
     setup: (root) => {
       initRepo(root);
@@ -639,7 +663,15 @@ it.layer(layer)("persistent capture index oracle", (it) => {
             }
             const before = userState(cwd);
             commands = [];
-            const commit = yield* capture(`${index}-${step.name.replace(/[^a-z0-9]+/gi, "-")}`);
+            const checkpointName = `${index}-${step.name.replace(/[^a-z0-9]+/gi, "-")}`;
+            if (step.fails) {
+              const exit = yield* Effect.exit(capture(checkpointName));
+              assert.isTrue(Exit.isFailure(exit), `${label}: the capture succeeded`);
+              assert.throws(() => todayTree(cwd), undefined, undefined, `${label}: today's method`);
+              assert.strictEqual(userState(cwd), before, `${label}: the user's git state changed`);
+              continue;
+            }
+            const commit = yield* capture(checkpointName);
             const ran = commands;
             assert.strictEqual(userState(cwd), before, `${label}: the user's git state changed`);
             // Every object the capture names exists, before the oracle writes any.

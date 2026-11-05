@@ -1466,55 +1466,76 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             (dirty.has(record.path) || record.srcMode === "160000" || record.dstMode === "160000")),
       );
       const added = records.filter((record) => record.status === "A");
-      let foreignCase = (_file: string): Effect.Effect<boolean> => Effect.succeed(false);
-      if (place.ignoreCase && added.length > 0) {
-        const entries = splitNul(
-          yield* captureListing(run, [
-            ...checkpointIndexConfig,
-            "ls-files",
-            "-z",
-            "--full-name",
-            "--",
-            ".",
-          ]),
-        );
-        const conflicted = caseConflicts([
-          ...entries,
+      // Under core.ignorecase an added entry must be spelled as on disk, and
+      // alone in its folder once names are folded (lowercase, NFC where git
+      // precomposes): on a case-sensitive disk (a project copied from a
+      // case-insensitive one) git would fold a second spelling into the kept
+      // one where a seed refuses it. Git also folds names spelled two ways in
+      // the index.
+      const fold = (name: string) =>
+        (place.precomposeUnicode ? name.normalize("NFC") : name).toLowerCase();
+      let conflicted: ReadonlySet<string> = new Set();
+      if (place.ignoreCase && added.length > 0)
+        conflicted = caseConflicts([
+          ...splitNul(
+            yield* captureListing(run, [
+              ...checkpointIndexConfig,
+              "ls-files",
+              "-z",
+              "--full-name",
+              "--",
+              ".",
+            ]),
+          ),
           ...records.filter((record) => record.status === "D").map((record) => record.path),
         ]);
-        const listings = new Map<string, ReadonlySet<string> | null>();
-        const namesIn = (folder: string) =>
-          listings.has(folder)
-            ? Effect.succeed(listings.get(folder)!)
-            : fileSystem.readDirectory(path.join(place.top, folder)).pipe(
-                Effect.map(
-                  (names) =>
-                    new Set(
-                      place.precomposeUnicode ? names.map((name) => name.normalize("NFC")) : names,
-                    ),
-                ),
-                Effect.orElseSucceed(() => null),
-                Effect.tap((names) => Effect.sync(() => listings.set(folder, names))),
-              );
-        foreignCase = (file) =>
-          Effect.gen(function* () {
-            const parts = file.split("/");
-            for (let depth = 0; depth < parts.length; depth += 1) {
-              if (
-                conflicted.has(
-                  parts
-                    .slice(0, depth + 1)
-                    .join("/")
-                    .toLowerCase(),
-                )
-              )
-                return true;
-              const names = yield* namesIn(parts.slice(0, depth).join("/"));
-              if (names === null || !names.has(parts[depth]!)) return true;
-            }
-            return false;
-          });
-      }
+      const listedFolders = [
+        ...new Set(
+          (place.ignoreCase ? added : []).flatMap((record) => {
+            const parts = record.path.split("/");
+            return parts.map((_, depth) => parts.slice(0, depth).join("/"));
+          }),
+        ),
+      ];
+      const listings = new Map(
+        yield* Effect.forEach(
+          listedFolders,
+          (folder) =>
+            fileSystem.readDirectory(path.join(place.top, folder)).pipe(
+              Effect.map((names) => {
+                const spelled = place.precomposeUnicode
+                  ? names.map((name) => name.normalize("NFC"))
+                  : names;
+                const folds = new Map<string, number>();
+                for (const name of spelled) folds.set(fold(name), (folds.get(fold(name)) ?? 0) + 1);
+                return [folder, { names: new Set(spelled), folds }] as const;
+              }),
+              Effect.orElseSucceed(() => [folder, null] as const),
+            ),
+          { concurrency: 32 },
+        ),
+      );
+      const foreignCase = (file: string) => {
+        const parts = file.split("/");
+        return parts.some((part, depth) => {
+          if (
+            conflicted.has(
+              parts
+                .slice(0, depth + 1)
+                .join("/")
+                .toLowerCase(),
+            )
+          )
+            return true;
+          const listing = listings.get(parts.slice(0, depth).join("/"));
+          return (
+            listing === undefined ||
+            listing === null ||
+            !listing.names.has(part) ||
+            (listing.folds.get(fold(part)) ?? 0) > 1
+          );
+        });
+      };
       // A folder that became a repository since its files were added (a
       // `.git` file or folder, as in a worktree or a submodule) is a gitlink or
       // left out after a seed, never its files: one lstat per folder.
@@ -1547,7 +1568,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           dirty.has(record.path) ||
           ignored.has(record.path) ||
           insideRepository(record.path) ||
-          (place.ignoreCase && (yield* foreignCase(record.path)));
+          (place.ignoreCase && foreignCase(record.path));
         if (drop) lines.push(`0 ${"0".repeat(record.srcOid.length)}\t${record.path}`);
       }
       if (lines.length > 0)
