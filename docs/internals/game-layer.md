@@ -251,6 +251,18 @@ reach none of its controls.
   timer checks the run again when it fires; a cap extended meanwhile schedules itself again at the
   new due time (`game-run.step.schedule`) instead of polling.
 
+A server death can cut a git call half-way and leave `index.lock` or a merge in progress, which
+would fail the step on every resume. Before the run's own git moves a folder (a git step, a branch
+enter, the finish's return to trunk, a restore, a reused role worktree), `repairGit`
+([git.ts](../../apps/server/src/game/run/git.ts)) clears that, but only what is provably stale. The
+run's own git calls are awaited and uninterruptible inside its jobs, so none is running then; what
+it cannot see is a provider CLI's git and an orphaned git of a server that was killed. So a lock
+goes only when no thread of the game's project has a live turn in that folder and the lock has
+sat unchanged for the run's slowest git timeout (10 minutes); otherwise the step fails saying so
+and a later resume clears it. Only the run's own pick merge (`pick base … (unjudged)`, the one
+merge that can stop half-way) is aborted; any other merge, cherry-pick, revert or rebase is left
+and reported. The system process list is never read for this.
+
 Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups,
 run.log) are written for people and later roles; nothing the run decides reads them. A game
 whose `.studio/run.json` comes from the run's earlier file-based form imports nothing of it but

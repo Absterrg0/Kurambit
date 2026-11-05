@@ -5,12 +5,13 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { GitOutcome } from "./policy.ts";
 import type { GitOp } from "./state.ts";
 
-class RunGitError extends Schema.TaggedError<RunGitError>()("RunGitError", {
+export class RunGitError extends Schema.TaggedError<RunGitError>()("RunGitError", {
   op: Schema.String,
   path: Schema.String,
   reason: Schema.String,
@@ -125,6 +126,109 @@ export const neutralBuild = (root: string, sha: string): Effect.Effect<string | 
       return made.code === 0 && commit.length > 0 ? commit : null;
     }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(index, { force: true }))));
   });
+
+/**
+ * How long a git index lock must sit unchanged before the run calls it stale.
+ * The run's own slowest git call is bounded by this, so a git child of a
+ * server that died mid-call (an OOM kill leaves it orphaned, still running)
+ * has had the time its own timeout would have given it.
+ */
+const LOCK_STALE_MS = SLOW_MS;
+/** The run's only merge that can stop half-way: a prototype pick's --no-ff merge (adopt). */
+const OWN_MERGE = /^pick base .+ \(unjudged\)/;
+const OTHERS_IN_PROGRESS: ReadonlyArray<readonly [string, string]> = [
+  ["CHERRY_PICK_HEAD", "a cherry-pick"],
+  ["REVERT_HEAD", "a revert"],
+  ["rebase-merge", "a rebase"],
+  ["rebase-apply", "a rebase"],
+];
+
+/**
+ * Clears what a git call cut short left in `dir`'s repository (the game root,
+ * or a run worktree, whose own index and merge state live in its admin dir)
+ * before the run's git moves it again. Call only from a run job that holds
+ * the folder: the run's own git calls are awaited and uninterruptible inside
+ * its jobs, so none of this server's is running there then.
+ *
+ * - A stale index.lock goes only when nothing of Kurambit's works in `dir`
+ *   (`working` names a live turn on a thread there, asked only once a lock
+ *   is found) and the lock has sat unchanged for LOCK_STALE_MS. Anything
+ *   less certain leaves the lock and fails with why.
+ * - A merge half-way is aborted only when it is the run's own pick merge;
+ *   one the user or an agent started, and any cherry-pick, revert or rebase
+ *   (the run uses none), is left and reported.
+ */
+export const repairGit = (
+  dir: string,
+  working: Effect.Effect<string | null>,
+  log: (line: string) => Effect.Effect<void>,
+): Effect.Effect<void, RunGitError> =>
+  Effect.gen(function* () {
+    const refuse = (reason: string) =>
+      log(`git repair: ${reason}`).pipe(
+        Effect.andThen(Effect.fail(new RunGitError({ op: "repair", path: dir, reason }))),
+      );
+    const located = yield* exec(dir, ["rev-parse", "--absolute-git-dir"]);
+    // Not a repository: the git call that follows says so in its own words.
+    if (located.code !== 0) return;
+    const gitDir = located.stdout.trim();
+    const shown = (name: string) => NodePath.relative(dir, NodePath.join(gitDir, name)) || name;
+    const present = (name: string) =>
+      Effect.promise(() =>
+        NodeFSP.stat(NodePath.join(gitDir, name)).then(
+          (stat) => stat,
+          () => null,
+        ),
+      );
+
+    const lock = yield* present("index.lock");
+    if (lock !== null) {
+      const holder = yield* working;
+      if (holder !== null)
+        return yield* refuse(
+          `the git index is locked (${shown("index.lock")}) while ${holder} works there; it is left for that work`,
+        );
+      const still = (yield* Clock.currentTimeMillis) - lock.mtimeMs;
+      if (still < LOCK_STALE_MS)
+        return yield* refuse(
+          `the git index is locked (${shown("index.lock")}, changed ${Math.round(still / 1000)} s ago) and no work of the run holds it; it is cleared once it has sat for ${LOCK_STALE_MS / 60_000} minutes, or remove it yourself if no git is running there`,
+        );
+      yield* Effect.promise(() =>
+        NodeFSP.rm(NodePath.join(gitDir, "index.lock"), { force: true }).catch(() => undefined),
+      );
+      if ((yield* present("index.lock")) !== null)
+        return yield* refuse(
+          `the stale git index lock ${shown("index.lock")} could not be removed`,
+        );
+      yield* log(
+        `git repair: removed a stale index lock ${shown("index.lock")} (${Math.round(still / 60_000)} min unchanged; nothing of the run worked there)`,
+      );
+    }
+
+    if ((yield* present("MERGE_HEAD")) !== null) {
+      const message = yield* Effect.promise(() =>
+        NodeFSP.readFile(NodePath.join(gitDir, "MERGE_MSG"), "utf8").catch(() => ""),
+      );
+      if (!OWN_MERGE.test(message))
+        return yield* refuse(
+          "a merge the run did not start is in progress (MERGE_HEAD); finish or abort it, then resume the run",
+        );
+      const aborted = yield* exec(dir, ["merge", "--abort"]);
+      if ((yield* present("MERGE_HEAD")) !== null)
+        return yield* refuse(
+          `the run's own unfinished pick merge could not be aborted: ${aborted.output.trim().slice(0, 200)}`,
+        );
+      yield* log(
+        `git repair: aborted the run's own unfinished merge (${message.split("\n")[0]?.slice(0, 120) ?? ""})`,
+      );
+    }
+
+    for (const [name, what] of OTHERS_IN_PROGRESS)
+      if ((yield* present(name)) !== null)
+        return yield* refuse(
+          `${what} the run did not start is in progress (${name}); finish or abort it, then resume the run`,
+        );
+  }).pipe(Effect.uninterruptible);
 
 /** The game's own sources: bots, notes and skill files never count as game change. */
 const gamePaths = (lane: string) => [

@@ -59,7 +59,7 @@ import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
-import { makeGit, neutralBuild } from "./git.ts";
+import { makeGit, neutralBuild, repairGit } from "./git.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
 import { modelFacts } from "./modelFacts.ts";
@@ -233,11 +233,36 @@ const make = Effect.gen(function* () {
         : `${role.prompt}${spriteBlock(sprites, true)}${modelBlock(models, true)}`;
     });
 
+  // Who of Kurambit's works in `dir` now: a live turn on a thread of the
+  // game's project there, whose provider CLI may run git; a thread with no
+  // worktree works in the game root. A read that fails counts as someone.
+  const workingIn = (run: GameRun, root: string, dir: string) =>
+    projections.getShellSnapshot().pipe(
+      Effect.flatMap((snapshot) =>
+        Effect.promise(async () => {
+          const real = (path: string) => NodeFSP.realpath(path).catch(() => NodePath.resolve(path));
+          const target = await real(dir);
+          const inRoot = await real(root);
+          for (const thread of [...snapshot.threads, ...snapshot.archivedThreads]) {
+            if (thread.projectId !== run.projectId || thread.activeRunId === null) continue;
+            const where = thread.worktreePath === null ? inRoot : await real(thread.worktreePath);
+            if (where === target) return `"${thread.title}" (${thread.id})`;
+          }
+          return null;
+        }),
+      ),
+      Effect.orElseSucceed(() => "a thread whose state could not be read"),
+    );
+  /** The repair before the run's own git moves the game root (see repairGit). */
+  const repairRoot = (run: GameRun, root: string, log: (line: string) => Effect.Effect<void>) =>
+    repairGit(root, workingIn(run, root, root), log);
+
   const roleContext = (run: GameRun, root: string, log: RoleContext["log"]): RoleContext => ({
     root,
     lane: run.lane,
     runId: run.id,
     log,
+    working: (dir) => workingIn(run, root, dir),
   });
 
   /**
@@ -514,9 +539,13 @@ const make = Effect.gen(function* () {
       // The checkout follows the run: through gitStep, so live editors close before it moves.
       const expected = Policy.expectedBranch(state);
       if (expected !== null && step.kind !== "git" && (yield* git.current) !== expected) {
-        const entered = yield* gitStep(git, root, { _tag: "enter", branch: expected }).pipe(
-          Effect.option,
+        const repaired = yield* repairRoot(run, root, log).pipe(
+          Effect.as(true),
+          Effect.catch(() => Effect.succeed(false)),
         );
+        const entered = repaired
+          ? yield* gitStep(git, root, { _tag: "enter", branch: expected }).pipe(Effect.option)
+          : Option.none();
         if (Option.isNone(entered) || !entered.value.git.ok)
           yield* log(`could not enter ${expected}; continuing where HEAD is`);
       }
@@ -528,7 +557,8 @@ const make = Effect.gen(function* () {
           return yield* reporting(
             job,
             record.id,
-            gitStep(git, root, step.op).pipe(
+            repairRoot(run, root, log).pipe(
+              Effect.andThen(gitStep(git, root, step.op)),
               Effect.flatMap((result) =>
                 step.op._tag !== "init" || !result.git.ok
                   ? Effect.succeed(result)
@@ -793,11 +823,14 @@ const make = Effect.gen(function* () {
         if (run.trunk.length > 0) {
           const git = makeGit(root, run.lane, log);
           // Any break here only means HEAD stays where it is; the export still runs.
-          const parked = yield* gitStep(git, root, {
-            _tag: "to-trunk",
-            trunk: run.trunk,
-            message: `unfinished: the run ended (${run.ending})`,
-          }).pipe(
+          const parked = yield* repairRoot(run, root, log).pipe(
+            Effect.andThen(
+              gitStep(git, root, {
+                _tag: "to-trunk",
+                trunk: run.trunk,
+                message: `unfinished: the run ended (${run.ending})`,
+              }),
+            ),
             Effect.map((step) => step.git.ok),
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(false),
@@ -835,7 +868,14 @@ const make = Effect.gen(function* () {
               message: `Round ${pending.round} is not recorded.`,
             })
           : Effect.flatMap(projects.resolve(run.threadId, { deleted: "allowed" }), (root) =>
-              restoreKeptRound({ game, root, run, state, record }),
+              restoreKeptRound({
+                game,
+                root,
+                run,
+                state,
+                record,
+                repair: (log) => repairRoot(run, root, log),
+              }),
             )
       ).pipe(
         Effect.catchCause((cause) =>

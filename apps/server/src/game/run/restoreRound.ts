@@ -6,7 +6,7 @@ import type { GameRun, GameRunRestoreOutcome, GameRunRestoreRefusal } from "@kur
 
 import type * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
-import { makeGit, restoredPaths } from "./git.ts";
+import { makeGit, restoredPaths, type RunGitError } from "./git.ts";
 import * as Policy from "./policy.ts";
 import { RESUMABLE } from "../../orchestration-v2/gameRun/decide.ts";
 import type { RoundRecord, RunState } from "./state.ts";
@@ -17,6 +17,8 @@ export const restoreKeptRound = (input: {
   readonly run: GameRun;
   readonly state: RunState;
   readonly record: RoundRecord;
+  /** Clears what an earlier git call cut short left in the folder (repairGit). */
+  readonly repair: (log: (line: string) => Effect.Effect<void>) => Effect.Effect<void, RunGitError>;
 }): Effect.Effect<GameRunRestoreOutcome> => {
   const { game, root, run, state, record } = input;
   const round = record.round;
@@ -40,6 +42,8 @@ export const restoreKeptRound = (input: {
         "The stopped run saved an unfinished git step and would replay it on resume. Resume the run and let that step finish, then restore.",
       );
     const log = (line: string) => logLine(root, line);
+    // A lock or a merge an earlier git call left would block the restore with git's raw error.
+    yield* input.repair(log);
     const git = makeGit(root, lane, log);
     const on = yield* git.current;
     if (on !== trunk)
