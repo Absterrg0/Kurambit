@@ -535,6 +535,7 @@ export const layerExecutor: Layer.Layer<
           // A step's work and a role's cap are long, so they become jobs and
           // the effect settles at once; the jobs report back with commands.
           case "game-run.step.execute":
+          case "game-run.step.wake":
             return gameRunJobs.execute({
               threadId: effect.threadId,
               runId: effect.request.runId,

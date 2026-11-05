@@ -1,33 +1,41 @@
 // A `low-memory` refusal says nothing about the build: the run waits it out
 // (it clears on its own, often when the run's own processes end) and only
-// past about a quarter of an hour stops, resumably, rather than judging.
+// past about a quarter of an hour stops, resumably, rather than judging. A
+// step waits by handing its work back to a durable timer, never by sleeping in
+// its job: a sleeping job would hold one of the run jobs' shared step slots.
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import type { GameOperationError } from "@kurambit/contracts";
 
 export const MEMORY_WAITS = 7;
 export const MEMORY_PAUSE = "2 minutes";
 
-const lastLine = (error: GameOperationError) =>
+export const lastLine = (error: GameOperationError) =>
   (error.detail ?? "").split("\n").at(-1)?.slice(0, 200) ?? "";
 
-/** Runs `attempt`, retrying a `low-memory` refusal after a pause; the last refusal fails through. */
-export const waitOutLowMemory = <A, R>(
+/** A step's work refused for memory while the step still has waits left. */
+export class GameRunMemoryShort extends Data.TaggedError("GameRunMemoryShort")<{
+  readonly what: string;
+  readonly error: GameOperationError;
+}> {}
+
+/**
+ * Hands the step back on a `low-memory` refusal while it has waits left; the
+ * runner sets its timer. Past the last wait the refusal fails through as itself.
+ */
+export const handBackOnLowMemory = <A, R>(
   attempt: Effect.Effect<A, GameOperationError, R>,
   what: string,
-  log: (line: string) => Effect.Effect<void>,
-): Effect.Effect<A, GameOperationError, R> => {
-  const go = (waits: number): Effect.Effect<A, GameOperationError, R> =>
-    attempt.pipe(
-      Effect.catchIf(
-        (error) => error.reason === "low-memory" && waits < MEMORY_WAITS,
-        (error) =>
-          log(
-            `${what} refused, memory short (${lastLine(error)}); waiting ${MEMORY_PAUSE} (${waits + 1} of ${MEMORY_WAITS})`,
-          ).pipe(Effect.andThen(Effect.sleep(MEMORY_PAUSE)), Effect.andThen(go(waits + 1))),
-      ),
-    );
-  return go(0);
-};
+  waitsLeft: boolean,
+): Effect.Effect<A, GameOperationError | GameRunMemoryShort, R> =>
+  waitsLeft
+    ? attempt.pipe(
+        Effect.catchIf(
+          (error) => error.reason === "low-memory",
+          (error) => Effect.fail(new GameRunMemoryShort({ what, error })),
+        ),
+      )
+    : attempt;
 
 /** The run's ending once the waits ran out: resumable, like a usage limit. */
 export const memoryEnded = (error: GameOperationError) =>

@@ -553,6 +553,34 @@ describe("game-run commands", () => {
     expect(stepOf(landed).step).toMatchObject({ role: "vision" });
   });
 
+  it("a memory wait is a durable wake counted on the step, and a new attempt waits afresh", () => {
+    const stepId = gameRunStepId(runId, 1);
+    const wait = (records: Records, n: number) =>
+      accept(records, {
+        type: "game-run.step.schedule",
+        runId,
+        stepId,
+        attempt: stepOf(records).attempt,
+        at: T0 + 2 * MIN,
+        timer: { kind: "memory", n },
+      });
+    const { records: waited, decision } = wait(started(), 1);
+    expect(stepOf(waited)).toMatchObject({ status: "planned", attempt: 1, memoryWaits: 1 });
+    expect(decision.effects).toEqual([
+      {
+        request: { type: "game-run.step.wake", runId, stepId, attempt: 1 },
+        availableAt: T0 + 2 * MIN,
+      },
+    ]);
+    const limited = complete(wait(waited, 2).records, {
+      kind: "ended",
+      ending: "low-memory",
+      reason: "memory short",
+    });
+    const resumed = accept(finished(limited), { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed)).toMatchObject({ attempt: 2, memoryWaits: 0 });
+  });
+
   it("a reviewer's ladder change the run would not take is refused in-turn", () => {
     const base = complete(started(), gitOk());
     const round = Policy.reopen(

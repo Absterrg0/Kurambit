@@ -15,7 +15,7 @@ import type * as GameService from "../GameService.ts";
 import { laneProfile } from "../engineProfile.ts";
 import { COPY_OF } from "../unityPlayerCache.ts";
 import { NOT_IN_SAMPLE } from "./builds.ts";
-import { waitOutLowMemory } from "./lowMemory.ts";
+import { handBackOnLowMemory } from "./lowMemory.ts";
 import type { RoleDone, RoleStep } from "./state.ts";
 
 export type RoleDeps = {
@@ -31,6 +31,8 @@ export type RoleContext = {
   /** Where this run's copies live: a folder of Kurambit's own, outside the game repository. */
   readonly copies: string;
   readonly log: (line: string) => Effect.Effect<void>;
+  /** The step may still hand itself back to wait for memory. */
+  readonly memoryWaitsLeft: boolean;
 };
 
 const BotRow = Schema.Struct({
@@ -137,6 +139,8 @@ export const blankFolder = (_deps: RoleDeps, ctx: RoleContext, step: RoleStep) =
  * from the main checkout when that holds one of the same sources, else built.
  * A failed preparation still plays (its first explore start builds, as it
  * always could), and only this log, which comparators never read, says which.
+ * Memory short hands the step back to wait, before either side's clock; the
+ * copy stays and the step's next try reuses it.
  */
 export const sampleCopy = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, build: string) =>
   Effect.gen(function* () {
@@ -151,23 +155,23 @@ export const sampleCopy = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, bui
     const name = engine.displayName;
     const from = Date.now();
     const seconds = () => `${Math.round((Date.now() - from) / 1000)} s`;
-    // Memory short is waited out here, before either side's clock.
-    yield* waitOutLowMemory(
+    yield* handBackOnLowMemory(
       deps.game.preparePlayer(path),
       `${step.role}: ${name} player preparation`,
-      ctx.log,
+      ctx.memoryWaitsLeft,
     ).pipe(
-      Effect.matchEffect({
-        onSuccess: (prepared) =>
-          ctx.log(
-            `${step.role}: ${name} player ${prepared.origin} for ${prepared.sourceId.slice(0, 12)} in ${seconds()} before launch`,
-          ),
-        onFailure: (error) =>
+      Effect.flatMap((prepared) =>
+        ctx.log(
+          `${step.role}: ${name} player ${prepared.origin} for ${prepared.sourceId.slice(0, 12)} in ${seconds()} before launch`,
+        ),
+      ),
+      Effect.catchTags({
+        GameOperationError: (error) =>
           ctx.log(
             `${step.role}: ${name} player not prepared after ${seconds()} (${(error.detail ?? error.reason).slice(0, 300)}); its first explore start builds one`,
           ),
       }),
-      Effect.catchCause(() =>
+      Effect.catchDefect(() =>
         ctx.log(
           `${step.role}: ${name} player preparation broke after ${seconds()}; its first explore start builds one`,
         ),

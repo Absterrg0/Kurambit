@@ -13,16 +13,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { GameOperationError, type GameProcessResult } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
+import * as GameMemoryGate from "./GameMemoryGate.ts";
+import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import {
-  commandFlag,
-  commandHas,
-  memoryShortfall,
-  readRecord,
-  underIdleMemoryFloor,
-} from "./liveProcess.ts";
+import { commandFlag, commandHas, readRecord, underIdleMemoryFloor } from "./liveProcess.ts";
 import {
   adoptLaunch,
   LAUNCH_ENV,
@@ -53,6 +49,11 @@ const IDLE_MS = 10 * 60_000;
  * mid-build once other processes grew.
  */
 const NEEDED_MB = 4096;
+const UNITY_ROOM: MemoryRoom = {
+  what: "live Unity editor",
+  neededMb: NEEDED_MB,
+  env: "KURAMBIT_UNITY_MEMORY_MB",
+};
 const SESSION_FILE = "session.json";
 /** The editor's window: big enough for its scene-view captures. */
 const EDITOR_WINDOW = { width: 1280, height: 720 } as const;
@@ -510,6 +511,7 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
+  const gate = yield* GameMemoryGate.GameMemoryGate;
   const { stateDir } = yield* ServerConfig.ServerConfig;
   const sessions = new Map<string, Session>();
   // Opening an editor takes minutes; two callers for one game must share it.
@@ -725,11 +727,6 @@ const make = Effect.gen(function* () {
             "tool-missing",
             "The live Unity editor needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
           );
-        // After the drops above, so an editor this server just closed counts as free.
-        const short = yield* Effect.promise(() =>
-          memoryShortfall("live Unity editor", NEEDED_MB, "KURAMBIT_UNITY_MEMORY_MB"),
-        );
-        if (short !== null) return yield* opError("unity-live", root, "low-memory", short);
         const homeDir = homeDirOf(root);
         yield* Effect.tryPromise({
           try: async () => {
@@ -793,70 +790,81 @@ const make = Effect.gen(function* () {
         // an OS without readable environments can still verify it.
         const editorToken = launchToken();
         // The editor leads its own tree so a stop takes its asset-import
-        // workers and shader compilers with it.
-        const hosted = yield* Effect.tryPromise({
-          try: () =>
-            host.launch(
-              {
-                executable: unity.editor,
-                args: [
-                  "-batchmode",
-                  "-projectPath",
+        // workers and shader compilers with it. It starts through the shared
+        // memory gate, held until the editor is ready, so its import is in
+        // the next start's memory check. Checked after the drops above, so an
+        // editor this server just closed counts as free.
+        const { hosted, editorProcess, editor, ready } = yield* gate.admit(
+          "unity-live",
+          root,
+          UNITY_ROOM,
+          Effect.gen(function* () {
+            const hosted = yield* Effect.tryPromise({
+              try: () =>
+                host.launch(
+                  {
+                    executable: unity.editor,
+                    args: [
+                      "-batchmode",
+                      "-projectPath",
+                      projectDir,
+                      "-logFile",
+                      logPath,
+                      // Xvfb offers software OpenGL only; elsewhere the editor
+                      // keeps its default graphics API.
+                      ...(host.kind === "private-display" ? ["-force-glcore"] : []),
+                      // Caps the job system's worker threads (the log confirms
+                      // "Creating JobQueue using job-worker-count value 2").
+                      "-job-worker-count",
+                      "2",
+                      "-kurambitLaunch",
+                      editorToken,
+                    ],
+                    cwd: root,
+                    env: unityEditorEnv({ LIBGL_ALWAYS_SOFTWARE: "1" }),
+                    stdio: "ignore",
+                    token: editorToken,
+                  },
+                  EDITOR_WINDOW,
+                ),
+              catch: (cause) =>
+                opError("unity-live", root, "io", "The Unity editor's window did not open.", cause),
+            });
+            const editorProcess = hosted.process;
+            const editor = editorProcess.child;
+            const editorLaunch = yield* Effect.promise(() => editorProcess.record);
+            yield* remember({
+              display: hosted.label,
+              ...(editorLaunch === null ? {} : { editorLaunch }),
+            });
+            if (editorLaunch === null) return yield* fail("The Unity editor did not start.", "io");
+            // A batchmode editor that cannot open the project (compile errors, a
+            // licence refusal) exits within seconds; the CLI would still wait out
+            // its whole timeout for an editor that is gone.
+            const exited = Effect.callback<null>((resume) => {
+              const done = () => resume(Effect.succeed(null));
+              if (editor.exitCode !== null || editor.signalCode !== null) return done();
+              editor.once("exit", done);
+              return Effect.sync(() => editor.off("exit", done));
+            });
+            const ready = yield* Effect.raceFirst(
+              runCli(
+                root,
+                unity.cli,
+                [
+                  "status",
+                  "--until-ready",
+                  "--project-path",
                   projectDir,
-                  "-logFile",
-                  logPath,
-                  // Xvfb offers software OpenGL only; elsewhere the editor
-                  // keeps its default graphics API.
-                  ...(host.kind === "private-display" ? ["-force-glcore"] : []),
-                  // Caps the job system's worker threads (the log confirms
-                  // "Creating JobQueue using job-worker-count value 2").
-                  "-job-worker-count",
-                  "2",
-                  "-kurambitLaunch",
-                  editorToken,
+                  "--timeout",
+                  String(READY_TIMEOUT_S),
                 ],
-                cwd: root,
-                env: unityEditorEnv({ LIBGL_ALWAYS_SOFTWARE: "1" }),
-                stdio: "ignore",
-                token: editorToken,
-              },
-              EDITOR_WINDOW,
-            ),
-          catch: (cause) =>
-            opError("unity-live", root, "io", "The Unity editor's window did not open.", cause),
-        });
-        const editorProcess = hosted.process;
-        const editor = editorProcess.child;
-        const editorLaunch = yield* Effect.promise(() => editorProcess.record);
-        yield* remember({
-          display: hosted.label,
-          ...(editorLaunch === null ? {} : { editorLaunch }),
-        });
-        if (editorLaunch === null) return yield* fail("The Unity editor did not start.", "io");
-        // A batchmode editor that cannot open the project (compile errors, a
-        // licence refusal) exits within seconds; the CLI would still wait out
-        // its whole timeout for an editor that is gone.
-        const exited = Effect.callback<null>((resume) => {
-          const done = () => resume(Effect.succeed(null));
-          if (editor.exitCode !== null || editor.signalCode !== null) return done();
-          editor.once("exit", done);
-          return Effect.sync(() => editor.off("exit", done));
-        });
-        const ready = yield* Effect.raceFirst(
-          runCli(
-            root,
-            unity.cli,
-            [
-              "status",
-              "--until-ready",
-              "--project-path",
-              projectDir,
-              "--timeout",
-              String(READY_TIMEOUT_S),
-            ],
-            { operation: "unity-ready", timeoutMs: (READY_TIMEOUT_S + 30) * 1000 },
-          ),
-          exited,
+                { operation: "unity-ready", timeoutMs: (READY_TIMEOUT_S + 30) * 1000 },
+              ),
+              exited,
+            );
+            return { hosted, editorProcess, editor, ready };
+          }),
         );
         if (ready === null || !ready.ok || !editorProcess.running()) {
           const tail = yield* logTail(root);

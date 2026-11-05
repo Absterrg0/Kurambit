@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError } from "@kurambit/contracts";
 import { botEnding, botFinalState } from "../gameBotRuntime.ts";
-import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
+import { type GameRunMemoryShort, handBackOnLowMemory, memoryEnded } from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
 import { playCopy, type RoleDeps } from "./roleWorkspace.ts";
 import type { Step } from "./state.ts";
@@ -34,9 +34,11 @@ export const runBotFact = (
     readonly runId: string;
     readonly copies: string;
     readonly log: (line: string) => Effect.Effect<void>;
+    /** The step may still hand itself back to wait for memory. */
+    readonly memoryWaitsLeft: boolean;
   },
   step: BotStep,
-): Effect.Effect<BotResult | ReturnType<typeof memoryEnded>> => {
+): Effect.Effect<BotResult | ReturnType<typeof memoryEnded>, GameRunMemoryShort> => {
   const errorFact = (note: string): BotResult => ({
     kind: "bot",
     fact: { ending: "error", seconds: 0, final: {}, note: plain(note, ctx.root) },
@@ -86,7 +88,7 @@ export const runBotFact = (
               detail: `could not copy the bot files into the build's copy (${cause instanceof Error && "code" in cause ? String(cause.code) : "copy failed"})`,
             }),
         });
-        const result = yield* waitOutLowMemory(
+        const result = yield* handBackOnLowMemory(
           deps.game.botRunIn(worktree.path, {
             file: step.file,
             seconds: step.seconds,
@@ -94,7 +96,7 @@ export const runBotFact = (
             decider: step.decider,
           }),
           "bot run",
-          ctx.log,
+          ctx.memoryWaitsLeft,
         );
         // The tester's decider is replayed; without its key the bot's own policy chose.
         const fallback =
@@ -116,15 +118,17 @@ export const runBotFact = (
       ),
   );
   // A bot that cannot run on a build withholds bot facts, never drops the round;
-  // memory that stays short ends the run resumably, as it would for any step.
+  // memory still short after the step's waits ends the run resumably, as it
+  // would for any step.
   // Error messages open with generic advice; detail carries the cause.
   return play.pipe(
-    Effect.catch((error) =>
-      Effect.succeed(
-        error.reason === "low-memory"
-          ? memoryEnded(error)
-          : errorFact(error.detail ?? error.reason ?? "the bot run failed"),
-      ),
-    ),
+    Effect.catchTags({
+      GameOperationError: (error) =>
+        Effect.succeed(
+          error.reason === "low-memory"
+            ? memoryEnded(error)
+            : errorFact(error.detail ?? error.reason ?? "the bot run failed"),
+        ),
+    }),
   );
 };

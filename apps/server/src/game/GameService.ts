@@ -936,11 +936,12 @@ export const layer = Layer.effect(GameService, make).pipe(
   Layer.provide(GameBot.layer),
   Layer.provide(GameExport.layer),
   Layer.provide(GamePlayer.layer),
-  Layer.provide(GameMemoryGate.layer),
   Layer.provide(GameEngine.layer),
   // After GameEngine, so the engine backend and the service share one live editor.
   Layer.provide(GameUnity.layer),
   Layer.provide(GameBlender.layer),
+  // After the editors, so every heavy start, editor opens included, shares one gate.
+  Layer.provide(GameMemoryGate.layer),
   Layer.provide(GameAssetLibrary.layer),
   Layer.provideMerge(GameOperations.layer),
 );
