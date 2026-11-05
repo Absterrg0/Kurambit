@@ -19,11 +19,12 @@
 
 Kurambit is a desktop app for making games with coding agents. Describe a game, and the agent you
 already use (Codex, Claude Code, Cursor, Grok Build, OpenCode, or Antigravity) builds it with real
-production tools: Blender for models, Godot for native games and three.js for quick browser games.
+production tools: Blender for models, Godot and Unity for native games and three.js for quick browser games.
 You play the result inside the app, ask for changes in plain language, and export a build.
 
 What sets it apart is the loop around the model. Kurambit plays every build with a separate tester
-session, compares builds blind so a worse one never lands, and keeps working until the budget ends.
+session, compares builds blind so a worse one never lands, and stops when the game is done or stops
+getting better.
 
 ## What it does
 
@@ -31,8 +32,8 @@ session, compares builds blind so a worse one never lands, and keeps working unt
   to use. Kurambit scaffolds a portable project and starts its production run on the brief.
 - **A production loop that plays its own builds.** Every new game is made by a run: the harness builds,
   plays every build with a separate tester session, compares builds blind so a worse one never
-  lands, and keeps working until the budget ends.
-- **Real tools, one execution system.** Agents reach Blender and Godot through Kurambit's own
+  lands, and stops when the game is done or stops getting better.
+- **Real tools, one execution system.** Agents reach Blender, Godot and Unity through Kurambit's own
   `game_*` tools in the app's MCP server, which every provider session already gets. Nothing to
   configure per agent.
 - **Assets you can edit.** Each Blender asset keeps its `.blend` source and the script that made it.

@@ -1,10 +1,10 @@
 # Kurambit
 
-Kurambit is a local desktop app for making games with coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves the Electron desktop app and the same UI in a local browser. On top of that agent harness sits the game layer: agents build Godot and three.js games with Blender through the server's `game_*` tools, and users play, revise, and export them in the app.
+Kurambit is a local desktop app for making games with coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves the Electron desktop app and the same UI in a local browser. On top of that agent harness sits the game layer: agents build Godot, Unity and three.js games, with Blender for art, through the server's `game_*` tools, and users play, revise, and export them in the app.
 
 ## Where Kurambit is going
 
-One brief should produce a game at a decent stage with the shape of a Steam demo, and creators keep improving it with the studio. Any genre. What the harness itself does around the model is the product: it plays every build with a separate tester session, compares builds blind so a worse one never lands, and keeps working until the budget ends.
+One brief should produce a game at a decent stage with the shape of a Steam demo, and creators keep improving it with the studio. Any genre. What the harness itself does around the model is the product: it plays every build with a separate tester session, compares builds blind so a worse one never lands, and stops when the game is done or stops getting better. Creators decide taste and direction; the harness never spends tokens on work that adds nothing.
 
 ## What we keep
 
@@ -30,6 +30,17 @@ We like ambitious ideas, simple systems, and software that feels obvious. Do not
 
 Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to honor the dev's intent in both a minimal and realistic fashion.
 
+### Build on what exists
+
+Kurambit is T3 Code underneath, and T3 already solved most of the problems the game layer meets: durable state, effects and timers, recovery after restarts, threads and their lineage, checkpoints, worktrees, previews, secrets, settings, MCP tools. Before writing any mechanism, take the first of these that fits:
+
+1. A T3 primitive in this repo, used as it is. If it lacks one thing, add a small general option to it rather than a parallel mechanism beside it.
+2. A dependency the repo already has.
+3. A well-maintained, widely used open-source library, wrapped in one small Effect helper the way `apps/server/src/zipArchive.ts` wraps yauzl. Prefer pure JS over native builds. Name its licence and why in the PR.
+4. Our own code, only for logic that is truly about Kurambit's games.
+
+"T3 has no X" is never a reason to hand-write X: find how T3 handles that kind of problem and follow it. Do not hand-write file formats, parsers, codecs, process utilities or caches.
+
 The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
 Of note: Most contributions are made by agents running on this same machine, often inside another running Kurambit. Be careful about accessing data, killing dev servers, and other things that may damage the instance the contributor is using.
@@ -48,7 +59,7 @@ We need to be on the same page with terminology. When communicating, use this la
 - **project** means an environment-local workspace record rooted at a directory.
 - **thread** means the durable conversation and work history for a project.
 - **turn** means one user-to-agent cycle, including follow-up work such as checkpointing.
-- **game** means a project whose root contains `game.json`: a git repository holding an engine project (Godot today), its assets and the model's own documents.
+- **game** means a project whose root contains `game.json`: a git repository holding an engine project (Godot, Unity or three.js), its assets and the model's own documents.
 - **home** means the base data directory (`~/.kurambit`, `KURAMBIT_HOME`, or a dev checkout's `.kurambit`). Runtime state normally lives below its userdata directory.
 
 ## The three ways to hurt yourself
@@ -94,6 +105,7 @@ An empty database is a bad test. Seed your worktree's `.kurambit` with a copy of
 
 - Smallest proof that the change works, by running it. For game-layer work that means making a real game and looking at it. Targeted typecheck and lint for what you changed.
 - Do not write test suites for the game layer or ask generated games to carry smoke tests or scripted routes: games get played. A small test is fine only for data safety or tricky pure logic. Keep only a bare minimum protecting user data and evidence honesty, such as path-traversal or root checks.
+- A green test run is not proof. Trace the real paths yourself: what happens if the server dies between two commits, if a report arrives late or twice, if two things race. Test meaningful behaviour, never callback wiring or a mirror of the implementation.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
 - The server is event-sourced, and side effects run after the command commits. In tests, drain the effect worker (`OrchestrationEffectWorkerV2.drain`) or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong.
 - Upon request, user-visible frontend changes should get one integrated pass in a real client (`test-kurambit-app`). The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
