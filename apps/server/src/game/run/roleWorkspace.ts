@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CheckpointRef, CommandId, type ThreadId } from "@kurambit/contracts";
 import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import { GAME_RUN_COPIES } from "../../config.ts";
 import type * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
 import type * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import type * as GameService from "../GameService.ts";
@@ -62,7 +63,7 @@ export const lastBotRun = async (root: string, after: number): Promise<RoleDone[
 
 /** A run's copies: under Kurambit's own worktrees folder, never in the game repository. */
 export const runCopies = (worktreesDir: string, runId: string) =>
-  NodePath.join(worktreesDir, "game-runs", runId);
+  NodePath.join(worktreesDir, GAME_RUN_COPIES, runId);
 
 /** A step's own folder, by its step number: a resumed step finds the one an earlier attempt made. */
 const copyPath = (ctx: RoleContext, step: RoleStep) => NodePath.join(ctx.copies, `step-${step.id}`);

@@ -360,7 +360,10 @@ plain copies of their builds with no git (`materializeCheckpoint`, without `.stu
 game folder, where run.log maps every sample to its build: each gets a folder of its own, empty
 but for its two frame sheets under neutral names, and submits its verdict; the root keeps the
 write-ups once all verdicts are in. The copies live in a folder of the run's own under
-Kurambit's worktrees folder, never in the game repository; the game folder stays reachable by
+Kurambit's worktrees folder, never in the game repository. A home inside some repository would
+otherwise lend every copy that repository's git, so the server puts the copies' folder in
+`GIT_CEILING_DIRECTORIES` for itself and everything it starts ([config.ts](../../apps/server/src/config.ts)):
+T3 then treats a copy as the non-repository it is. The game folder stays reachable by
 path, and what is blind by construction is the player's or comparator's folder and prompt. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
 renders against the vision and may ask for one bounded redo before the art is
