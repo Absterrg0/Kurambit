@@ -7,13 +7,15 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeStreamPromises from "node:stream/promises";
-import type { GameSavedMedia } from "@kurambit/contracts";
+import { GAME_SAVED_MEDIA_EVENT, type GameSavedMedia } from "@kurambit/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { isPathInside } from "./gameNativeUserDir.ts";
 
 /** Game-relative; the scaffold's .gitignore ignores it, so saves stay out of commits and checkpoints. */
 export const SAVED_DIR = "saved";
+/** The game event a save or delete pushes; clients reread the Saved list on it. */
+export const SAVED_EVENT = GAME_SAVED_MEDIA_EVENT;
 
 /**
  * Where Kurambit writes the media it generates: bot runs, explore sessions and

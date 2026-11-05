@@ -79,7 +79,14 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameUnity from "./GameUnity.ts";
-import { SAVED_DIR, SavedMediaError, deleteSaved, listSaved, saveMedia } from "./gameSavedMedia.ts";
+import {
+  SAVED_DIR,
+  SAVED_EVENT,
+  SavedMediaError,
+  deleteSaved,
+  listSaved,
+  saveMedia,
+} from "./gameSavedMedia.ts";
 import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
 import { comparedSource, type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
 import { WEB_BUILD_DIRECTORY } from "./webBuild.ts";
@@ -608,11 +615,26 @@ const make = Effect.gen(function* () {
         const day = DateTime.formatIsoDate(
           DateTime.makeZonedUnsafe(now, { timeZone: DateTime.zoneMakeLocal() }),
         );
-        return savedMedia("Save media", threadId, (root) => saveMedia(root, source, label, day));
+        // Pushed to every client of the game, so a save an agent made shows in the Saved list.
+        return savedMedia("Save media", threadId, (root) =>
+          saveMedia(root, source, label, day),
+        ).pipe(
+          Effect.tap((saved) =>
+            Effect.flatMap(projects.resolve(threadId), (root) =>
+              operations.changed(root, SAVED_EVENT, `Saved ${saved.name}`),
+            ).pipe(Effect.ignore),
+          ),
+        );
       }),
     listSaved: (threadId) => savedMedia("List saved media", threadId, listSaved),
     deleteSaved: (threadId, name) =>
-      savedMedia("Delete saved media", threadId, (root) => deleteSaved(root, name)),
+      savedMedia("Delete saved media", threadId, (root) => deleteSaved(root, name)).pipe(
+        Effect.tap(() =>
+          Effect.flatMap(projects.resolve(threadId), (root) =>
+            operations.changed(root, SAVED_EVENT, `Deleted ${name}`),
+          ).pipe(Effect.ignore),
+        ),
+      ),
     events: operations.events,
     threadEvents: (threadId) =>
       Stream.unwrap(

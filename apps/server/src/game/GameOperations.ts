@@ -31,7 +31,8 @@ export class GameOperations extends Context.Service<
       operation: Omit<GameOperation, "revision">,
       eventState: GameOperationEventState,
     ) => Effect.Effect<void>;
-    readonly changed: (root: string, message: string) => Effect.Effect<void>;
+    /** Something of the game other than an operation changed (`name` says what): a push, no record. */
+    readonly changed: (root: string, name: string, message: string) => Effect.Effect<void>;
     /**
      * The game's run moved (a step, a decision, its end): the push lets the
      * library and the Run view reread the run's records without polling. The
@@ -195,11 +196,11 @@ export const layer = Layer.effect(
         );
       });
     return GameOperations.of({
-      changed: (root, message) =>
+      changed: (root, name, message) =>
         Effect.gen(function* () {
           yield* PubSub.publish(events, {
             root,
-            name: "review",
+            name,
             state: "succeeded",
             message,
             revision: ++revision,

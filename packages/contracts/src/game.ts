@@ -587,6 +587,8 @@ export const GameWebPackageResult = Schema.Struct({
   expiresAt: Schema.String,
 });
 export type GameWebPackageResult = typeof GameWebPackageResult.Type;
+/** The GameOperationEvent name a change to a game's saved/ folder is pushed under. */
+export const GAME_SAVED_MEDIA_EVENT = "saved";
 /** A creator's copy of generated media in the game's saved/ folder, kept past the log cleanup. */
 export const GameSavedMedia = Schema.Struct({
   name: Schema.String,

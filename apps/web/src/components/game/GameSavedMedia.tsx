@@ -6,7 +6,7 @@ import type { GameSavedMedia, ScopedThreadRef } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { gameEnvironment, noteSavedMediaChanged } from "../../state/game";
+import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { shellEnvironment } from "../../state/shell";
@@ -105,7 +105,6 @@ export function SaveMediaButton({
     }
     setError(null);
     setJustSaved({ media: result.value, listAt: list.dataUpdatedAt });
-    noteSavedMediaChanged(threadRef.environmentId);
   };
   return (
     <div className="flex flex-wrap items-center gap-1">
@@ -163,7 +162,6 @@ export function GameSavedList({ threadRef }: { threadRef: ScopedThreadRef }) {
       input: { threadId: threadRef.threadId, name },
     });
     setError(result._tag === "Failure" ? String(squashAtomCommandFailure(result)) : null);
-    noteSavedMediaChanged(threadRef.environmentId);
   };
   return (
     <section className="space-y-2 rounded-lg border border-border bg-card p-4">
