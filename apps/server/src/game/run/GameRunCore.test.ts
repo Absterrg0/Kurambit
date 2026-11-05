@@ -1009,6 +1009,36 @@ it.effect("an ending whose finish breaks is still recorded, so the run can resum
   ),
 );
 
+it.effect("deleting the creator chat stops its run, which holds the game until it finished", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: (yield* inFlight).step!.id, status: "running" })]);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: nextId(),
+        threadId: creator,
+      });
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const stopped = (yield* projections.getGameRunRecords(creator)).gameRuns.at(-1)!;
+      assert.equal(stopped.ending, "stopped");
+      // Its finish still works the folder, so the game is still this run's.
+      assert.equal((yield* projections.getProjectGameRun(projectId))?.id, runId);
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
+      // The finish stopped the role and was recorded on the deleted chat; the game is free.
+      assert.deepEqual(
+        world.interrupts.map((i) => i.threadId),
+        [thread],
+      );
+      assert.isNull(yield* projections.getProjectGameRun(projectId));
+    }),
+  ),
+);
+
 it.effect("recovery finishes an ending whose finish never completed, and only once", () =>
   withGame((world) =>
     Effect.gen(function* () {

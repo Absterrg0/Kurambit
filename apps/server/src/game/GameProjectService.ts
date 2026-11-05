@@ -66,7 +66,14 @@ export class GameProjectService extends Context.Service<
      * asking for game status per project.
      */
     readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
-    readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
+    /**
+     * The game folder a thread works in. `deleted: "allowed"` resolves a deleted
+     * chat's too, for a run's finish and restore, which outlive the chat.
+     */
+    readonly resolve: (
+      threadId: ThreadId,
+      options?: { readonly deleted?: "allowed" },
+    ) => Effect.Effect<string, GameOperationError>;
     /** Whether a production run holds this thread's game now, its ending's exports and a restore included. */
     readonly runLive: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
@@ -356,19 +363,26 @@ const make = Effect.gen(function* () {
       );
     },
   );
-  const resolve = Effect.fn("GameProjectService.resolve")(function* (threadId: ThreadId) {
-    const thread = yield* threads.getThreadShell(threadId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GameOperationError({
-            operation: "resolve-thread",
-            path: threadId,
-            reason: "project-not-found",
-            cause,
-          }),
-      ),
-    );
-    if (!thread || thread.deletedAt !== null)
+  const resolve = Effect.fn("GameProjectService.resolve")(function* (
+    threadId: ThreadId,
+    options: { readonly deleted?: "allowed" } = {},
+  ) {
+    const unresolved = (cause: unknown) =>
+      new GameOperationError({
+        operation: "resolve-thread",
+        path: threadId,
+        reason: "project-not-found",
+        cause,
+      });
+    // A deleted thread has no shell; its record still names its project and checkout.
+    const thread =
+      options.deleted === "allowed"
+        ? yield* threads.getThreadRecords(threadId, []).pipe(
+            Effect.map(({ thread: record }) => record),
+            Effect.mapError(unresolved),
+          )
+        : yield* threads.getThreadShell(threadId).pipe(Effect.mapError(unresolved));
+    if (!thread || (thread.deletedAt !== null && options.deleted !== "allowed"))
       return yield* new GameOperationError({
         operation: "resolve-thread",
         path: threadId,

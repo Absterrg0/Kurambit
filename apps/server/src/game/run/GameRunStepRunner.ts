@@ -710,7 +710,7 @@ const make = Effect.gen(function* () {
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.failCause(cause)
-            : projects.resolve(run.threadId).pipe(
+            : projects.resolve(run.threadId, { deleted: "allowed" }).pipe(
                 Effect.flatMap((root) =>
                   logLine(
                     root,
@@ -741,7 +741,7 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       yield* jobs.stopRun(run.id);
-      const root = yield* projects.resolve(run.threadId);
+      const root = yield* projects.resolve(run.threadId, { deleted: "allowed" });
       const log = (line: string) => logLine(root, line);
       const held = records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight);
       for (const role of held?.roles ?? []) {
@@ -810,7 +810,7 @@ const make = Effect.gen(function* () {
               reason: "round-not-found",
               message: `Round ${pending.round} is not recorded.`,
             })
-          : Effect.flatMap(projects.resolve(run.threadId), (root) =>
+          : Effect.flatMap(projects.resolve(run.threadId, { deleted: "allowed" }), (root) =>
               restoreKeptRound({ game, root, run, state, record }),
             )
       ).pipe(

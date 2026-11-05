@@ -6552,7 +6552,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const threadId = command.threadId;
       const unreadable = (cause: unknown) => new OrchestratorProjectionError({ threadId, cause });
       const thread = yield* projectionStore.getThread(threadId).pipe(Effect.mapError(unreadable));
-      if (thread.deletedAt !== null)
+      // A deleted chat's run keeps only its ways out: a stop (recovery stops a
+      // run an older server left live there), and the records of the finish
+      // and restore already under way, so nothing waits on it after a restart.
+      if (
+        thread.deletedAt !== null &&
+        command.type !== "game-run.stop" &&
+        command.type !== "game-run.finished" &&
+        command.type !== "game-run.restore"
+      )
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -6610,6 +6618,40 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             reason: "The game run was stopped.",
           }
         : undefined;
+    });
+
+  const stopRunOfDeletedChat = (
+    command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.delete" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) =>
+    Effect.gen(function* () {
+      const records = yield* projectionStore
+        .getGameRunRecords(command.threadId, { steps: "in-flight" })
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      const run = records.gameRuns.at(-1);
+      if (run === undefined || run.status === "ended") return undefined;
+      return yield* dispatchGameRun(
+        {
+          type: "game-run.stop",
+          commandId: command.commandId,
+          threadId: command.threadId,
+          runId: run.id,
+        },
+        events,
+        effects,
+      ).pipe(
+        // A chat already deleted, or a run the decider will not stop, is
+        // deleted as before.
+        Effect.catchTags({
+          OrchestratorGameRunRefusedError: () => Effect.succeed(undefined),
+          OrchestratorDispatchError: () => Effect.succeed(undefined),
+        }),
+      );
     });
 
   const dispatchGameRoundTaskRequest = (
@@ -10537,6 +10579,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       }
       case "thread.delete": {
+        // A production run lives on its creator chat: deleting the chat stops
+        // the run in the same commit, so its finish stops its roles and no run
+        // stays live where no chat can reach it.
+        const runStop = yield* stopRunOfDeletedChat(command, events, effects);
         const projection = yield* projectionStore
           .getThreadRecords(command.threadId, [
             "runs",
@@ -10551,7 +10597,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
             ),
           );
-        return yield* mapDispatchError(command)(
+        const deletion = yield* mapDispatchError(command)(
           planThreadDeletion({
             command,
             projection,
@@ -10562,6 +10608,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             idAllocator,
           }),
         );
+        return {
+          events: [...(yield* Ref.get(events)), ...deletion.events],
+          effects: [...(yield* Ref.get(effects)), ...deletion.effects],
+          ...(runStop === undefined ? {} : { cancelUnsettledEffects: runStop }),
+        };
       }
       case "thread.archive":
       case "thread.unarchive":

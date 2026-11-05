@@ -344,6 +344,12 @@ export interface GameRunThreadRecords {
   readonly gameRunSteps: ReadonlyArray<GameRunStep>;
   readonly gameRunRounds: ReadonlyArray<GameRunRound>;
 }
+/** A run that no longer works the game folder: it ended, its finish was recorded and no restore is pending. */
+const gameRunSettled = (run: GameRun) =>
+  run.status === "ended" &&
+  run.finished === run.endedAt &&
+  (run.restore === null || run.restore.outcome !== null);
+
 const emptyGameRunRecords: GameRunThreadRecords = {
   gameRuns: [],
   gameRunSteps: [],
@@ -427,7 +433,10 @@ export interface ProjectionStoreV2Shape {
   >;
   /**
    * A game's latest production run, on whichever of its project's threads it
-   * lives: the game folder is the project's, so its run is too.
+   * lives: the game folder is the project's, so its run is too. A run whose
+   * chat was deleted stops being the game's once it settled (its ending
+   * finished, no restore pending), so the game can run again from another
+   * chat; until then it still holds the folder.
    */
   readonly getProjectGameRun: (
     projectId: ProjectId,
@@ -5108,16 +5117,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         );
 
     const getProjectGameRun: ProjectionStoreV2Shape["getProjectGameRun"] = (projectId) =>
-      sql<PayloadRow>`
-        SELECT payload_json FROM orchestration_v2_projection_game_runs
-        WHERE project_id = ${projectId}
-        ORDER BY started_at DESC, rowid DESC
+      sql<PayloadRow & { readonly deleted_at: string | null }>`
+        SELECT run.payload_json, thread.deleted_at
+        FROM orchestration_v2_projection_game_runs AS run
+        LEFT JOIN orchestration_v2_projection_threads AS thread
+          ON thread.thread_id = run.thread_id
+        WHERE run.project_id = ${projectId}
+        ORDER BY run.started_at DESC, run.rowid DESC
         LIMIT 1
       `.pipe(
         Effect.flatMap((rows) =>
           rows[0] === undefined
             ? Effect.succeed(null)
             : decodeGameRunPayload(rows[0].payload_json).pipe(
+                Effect.map((run) =>
+                  rows[0]!.deleted_at !== null && gameRunSettled(run) ? null : run,
+                ),
                 Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
               ),
         ),
@@ -6769,14 +6784,18 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
         }),
       getProjectGameRun: (projectId) =>
         Ref.get(replayState).pipe(
-          Effect.map(
-            (state) =>
+          Effect.map((state) => {
+            const run =
               [...state.gameRunRecords.values()]
                 .flatMap((records) => records.gameRuns)
-                .filter((run) => run.projectId === projectId)
+                .filter((each) => each.projectId === projectId)
                 .toSorted((a, b) => a.startedAt.localeCompare(b.startedAt))
-                .at(-1) ?? null,
-          ),
+                .at(-1) ?? null;
+            const deleted =
+              run !== null &&
+              (state.projections.get(run.threadId)?.thread.deletedAt ?? null) !== null;
+            return deleted && gameRunSettled(run) ? null : run;
+          }),
         ),
       listLiveGameRunRoleTurns: () =>
         Ref.get(replayState).pipe(

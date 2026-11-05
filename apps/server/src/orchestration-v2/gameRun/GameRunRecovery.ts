@@ -91,6 +91,18 @@ const make = Effect.gen(function* () {
           yield* jobs.restore({ threadId, runId: run.id, requestId: run.restore.requestId });
         return;
       }
+      // A live run on a chat deleted before deletion stopped its run: nothing
+      // could reach it, so it stops now, and its finish stops its roles.
+      const chat = yield* projections.getThread(threadId);
+      if (chat.deletedAt !== null) {
+        yield* engine.dispatch({
+          type: "game-run.stop",
+          commandId: CommandId.make(`server:game-run-chat-deleted:${run.id}`),
+          threadId,
+          runId: run.id,
+        });
+        return;
+      }
       if (run.inFlight === null) return;
       const step = records.gameRunSteps.find(
         (each) => each.runId === run.id && each.seq === run.inFlight,
