@@ -1371,7 +1371,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
    * endings. So: a path HEAD has gets HEAD's entry back unless the kept entry is
    * unchanged on disk (then it was hashed over HEAD's entry, as `add` would);
    * a path HEAD lacks keeps its entry only while it is unchanged on disk, not
-   * ignored, not a nested repository and, on a case-insensitive disk, spelled
+   * ignored, not a nested repository nor inside one and, on a case-insensitive disk, spelled
    * as on disk and nowhere else in the index. `add -A` meets every dropped path
    * as new, as after a seed.
    */
@@ -1481,6 +1481,26 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             return false;
           });
       }
+      // A folder that became a repository since its files were added (a
+      // `.git` file or folder, as in a worktree or a submodule) is a gitlink or
+      // left out after a seed, never its files: one lstat per folder.
+      const repositories = new Map<string, boolean>();
+      const isRepository = (folder: string) =>
+        repositories.has(folder)
+          ? Effect.succeed(repositories.get(folder)!)
+          : Effect.promise(() =>
+              NodeFSP.lstat(path.join(place.top, folder, ".git")).then(
+                () => true,
+                () => false,
+              ),
+            ).pipe(Effect.tap((found) => Effect.sync(() => repositories.set(folder, found))));
+      const insideRepository = (file: string) =>
+        Effect.gen(function* () {
+          const parts = file.split("/");
+          for (let depth = 1; depth < parts.length; depth += 1)
+            if (yield* isRepository(parts.slice(0, depth).join("/"))) return true;
+          return false;
+        });
       const lines: string[] = realign.map(
         (record) => `${record.srcMode} ${record.srcOid}\t${record.path}`,
       );
@@ -1489,6 +1509,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           record.dstMode === "160000" ||
           dirty.has(record.path) ||
           ignored.has(record.path) ||
+          (yield* insideRepository(record.path)) ||
           (yield* foreignCase(record.path));
         if (drop) lines.push(`0 ${"0".repeat(record.srcOid.length)}\t${record.path}`);
       }

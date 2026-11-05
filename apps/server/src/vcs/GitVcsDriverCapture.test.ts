@@ -385,6 +385,34 @@ const cases: ReadonlyArray<Case> = [
     ],
   },
   {
+    name: "folders become nested repositories",
+    setup: (root) => {
+      initRepo(root);
+      write(NodePath.join(root, "main.gd"), "main\n");
+      commitAll(root, "game");
+      write(NodePath.join(root, "sub/a.txt"), "a\n");
+      write(NodePath.join(root, "bare/c.txt"), "c\n");
+      return root;
+    },
+    steps: [
+      { name: "cold", seeds: true },
+      {
+        name: "a captured folder becomes a repository with a commit",
+        seeds: false,
+        act: (cwd) => {
+          write(NodePath.join(cwd, "sub/b.txt"), "b\n");
+          initRepo(NodePath.join(cwd, "sub"));
+          commitAll(NodePath.join(cwd, "sub"), "sub");
+        },
+      },
+      {
+        name: "a captured folder becomes a repository without one",
+        seeds: false,
+        act: (cwd) => git(NodePath.join(cwd, "bare"), ["init", "-q"]),
+      },
+    ],
+  },
+  {
     name: "sparse checkout",
     setup: (root) => {
       initRepo(root);
