@@ -496,6 +496,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-run.step.complete":
     case "game-run.step.fail":
     case "game-run.decision.expire":
+    case "game-run.finished":
+    case "game-run.restore":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -6589,7 +6591,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...existing,
         ...decided.success.effects.map(
           ({ request, availableAt }): PendingOrchestrationEffectV2 => ({
-            id: `effect:${command.commandId}:${request.type}:${request.stepId}`,
+            id: `effect:${command.commandId}:${request.type}:${"stepId" in request ? request.stepId : request.runId}`,
             commandId: command.commandId,
             threadId,
             request,
@@ -10758,6 +10760,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "game-run.step.complete":
       case "game-run.step.fail":
       case "game-run.decision.expire":
+      case "game-run.finished":
+      case "game-run.restore":
         cancelUnsettledEffects = yield* dispatchGameRun(command, events, effects);
         break;
       default:

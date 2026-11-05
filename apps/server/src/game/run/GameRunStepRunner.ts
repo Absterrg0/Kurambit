@@ -12,12 +12,12 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type GameRun,
-  GameRunId,
   type GameRunRoleBefore,
   type GameRunStep,
   type GameRunStepId,
   type GameRunStepResult,
   type OrchestrationV2DomainEvent,
+  type ThreadId,
   gameRunStepCommandId,
   gameRunStepId,
 } from "@kurambit/contracts";
@@ -35,7 +35,11 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
-import { roleThreadId, roleTurnMessageId } from "../../orchestration-v2/gameRun/ids.ts";
+import {
+  roleCapCommandId,
+  roleThreadId,
+  roleTurnMessageId,
+} from "../../orchestration-v2/gameRun/ids.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
@@ -75,6 +79,8 @@ export class GameRunStepRunner extends Context.Service<
   {
     /** Gives GameRunJobs its work and follows the runs' records for their ends and the Game panel. */
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+    /** One step's job, run to its end in the caller's fiber. */
+    readonly execute: (job: GameRunJobs.GameRunStepJob) => Effect.Effect<void>;
     readonly handle: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
   }
 >()("kurambit/game/run/GameRunStepRunner") {}
@@ -240,10 +246,12 @@ const make = Effect.gen(function* () {
 
   /**
    * One role turn of the step: its thread is recorded (game-run.step.start)
-   * before the role's first turn, so its submission finds the step. A thread
-   * the step already has is reattached: a turn of this attempt that ended
-   * lands now, one still running gets its cap watched, and a thread with no
-   * turn of this attempt continues where an earlier try left off.
+   * before the role's first turn, so its submission finds the step, and
+   * nothing is launched or sent when the run refuses that (it ended, the step
+   * moved on). A thread the step already has is reattached: a turn of this
+   * attempt that ended lands now, one still running gets its cap watched, and
+   * a thread with no turn of this attempt continues where an earlier try left
+   * off. A thread that is gone is replaced by the attempt's own.
    */
   const roleHalf = (
     job: GameRunJobs.GameRunStepJob,
@@ -257,43 +265,170 @@ const make = Effect.gen(function* () {
       const stepId = record.step.kind === "pair" ? gameRunStepId(run.id, role.id) : record.id;
       const half = { ...job, stepId };
       const entry = record.roles.find((r) => r.seq === role.id);
-      const own = roleThreadId(stepId);
+      const own = roleThreadId(stepId, job.attempt);
       const threadId = entry?.threadId ?? role.thread ?? own;
-      const startStep = (before: GameRunRoleBefore) =>
-        refused(
-          engine.dispatch({
+      const before = () =>
+        entry?.before === undefined ? measure(role, root, run.lane) : Effect.succeed(entry.before);
+      const startStep = (target: ThreadId, measured: GameRunRoleBefore, replaces?: ThreadId) =>
+        engine
+          .dispatch({
             type: "game-run.step.start",
-            commandId: gameRunStepCommandId(stepId, job.attempt, "start"),
+            // A start per thread: a replacement is a start of its own, not a replay.
+            commandId: CommandId.make(
+              `${gameRunStepCommandId(stepId, job.attempt, "start")}:${target}`,
+            ),
             threadId: job.threadId,
             runId: run.id,
             stepId,
-            roleThreadId: threadId,
-            before,
-          }),
-        );
-      const limitInput =
-        role.inputCapMs > 0 ? game.limitExploreInput(threadId, role.inputCapMs) : Effect.void;
+            roleThreadId: target,
+            before: measured,
+            ...(replaces === undefined ? {} : { replaces }),
+          })
+          .pipe(
+            Effect.as(true),
+            Effect.catch((error) =>
+              log(`${role.role}: the run did not take the step's start (${error.message})`).pipe(
+                Effect.as(false),
+              ),
+            ),
+          );
+      const limitInput = (target: ThreadId) =>
+        role.inputCapMs > 0 ? game.limitExploreInput(target, role.inputCapMs) : Effect.void;
+
+      const launchThread = (target: ThreadId, replaces: ThreadId | undefined, text: string) =>
+        Effect.gen(function* () {
+          const measured = yield* before();
+          const ctx = roleContext(run, root, log);
+          // An engine whose first editor open imports the whole project (minutes;
+          // later opens take seconds) pays it here, before any role's clock.
+          const engineProfile = laneProfile(run.lane);
+          if (engineProfile.run.warmEditor && role.at === null) {
+            const from = Date.now();
+            yield* waitOutLowMemory(
+              game.warmEditor(root),
+              `${engineProfile.displayName} warm-up`,
+              log,
+            ).pipe(
+              Effect.matchEffect({
+                onSuccess: (warmed) =>
+                  warmed
+                    ? log(
+                        `${engineProfile.displayName} warm-up: first import took ${Math.round((Date.now() - from) / 1000)} s, before ${role.role}'s clock`,
+                      )
+                    : Effect.void,
+                onFailure: (error) =>
+                  log(
+                    `${engineProfile.displayName} warm-up skipped (${(error.detail ?? error.reason).slice(0, 200)}); the role opens the editor itself`,
+                  ),
+              }),
+            );
+          }
+          const blank = role.at === BLANK ? yield* blankWorktree(deps, ctx, role) : null;
+          if (role.at === BLANK && blank === null)
+            return yield* fail(half, stepId, `${role.role}: no worktree of its own`);
+          if (blank === null && replaces === undefined)
+            for (const file of role.clear)
+              yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, file), { force: true }));
+          // A blind sample plays a neutral commit of its build: the same game, but
+          // no round notes, bots or round-named HEAD that would tell the builds apart.
+          const baseRef =
+            blank === null && role.at !== null
+              ? ((yield* neutralBuild(root, role.at)) ?? role.at)
+              : role.at;
+          if (blank === null && role.at !== null && baseRef === role.at)
+            yield* log(
+              `${role.role}: no neutral commit for ${role.at.slice(0, 12)}; playing the build's own`,
+            );
+          const sample =
+            blank === null && role.at !== null && engineProfile.play === "player"
+              ? yield* playerSampleWorktree(deps, ctx, role, baseRef ?? role.at)
+              : null;
+          const workspace = blank ?? sample;
+          const dropWorkspace =
+            workspace === null ? Effect.void : removeBlank(deps, ctx, workspace);
+          // A deleted creator chat cannot be a parent; the role then stands alone rather than failing.
+          const creatorLive = yield* threads.getThreadShell(run.threadId).pipe(
+            Effect.map((s) => s !== null && s.deletedAt === null),
+            Effect.orElseSucceed(() => false),
+          );
+          if (!(yield* startStep(target, measured, replaces))) return yield* dropWorkspace;
+          yield* limitInput(target);
+          const launched = yield* launches
+            .launch({
+              commandId: CommandId.make(
+                `server:game-run-role:${stepId}:attempt:${job.attempt}:launch:${target}`,
+              ),
+              threadId: target,
+              projectId: run.projectId,
+              title: role.title,
+              modelSelection: run.modelSelection,
+              runtimeMode: run.runtimeMode,
+              // Roles must edit files whatever mode the creator chats in.
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              workspaceStrategy:
+                workspace !== null
+                  ? {
+                      type: "existing_worktree",
+                      worktreePath: workspace.path,
+                      branch: workspace.branch,
+                    }
+                  : role.at === null
+                    ? { type: "root" }
+                    : {
+                        type: "worktree",
+                        baseRef: baseRef ?? role.at,
+                        // A thread launched again for the step gets a branch of its own.
+                        branch: `studio-wt/${run.id}-${role.id}${target === roleThreadId(stepId, 1) ? "" : `-${target.slice(0, 8)}`}`,
+                      },
+              initialMessage: {
+                messageId: roleTurnMessageId(stepId, job.attempt, "turn", 1),
+                text,
+                attachments: [],
+              },
+              createdBy: "user",
+              creationSource: "server",
+              launchedBy: "game_run",
+              ...(creatorLive ? { parentThreadId: run.threadId } : {}),
+            })
+            .pipe(Effect.option);
+          if (Option.isNone(launched)) {
+            // No thread owns a checkout made here until a launch succeeds.
+            yield* dropWorkspace;
+            return yield* fail(half, stepId, `${role.role}: thread launch failed`);
+          }
+          yield* log(`${role.role}: launched thread ${target}`);
+        });
+
       const shell = yield* threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null));
-      if (shell !== null) {
-        if (shell.deletedAt !== null)
-          return yield* fail(half, stepId, `${role.role}: its thread was deleted`);
+      if (shell !== null && shell.deletedAt === null) {
         if (shell.projectId !== run.projectId)
           return yield* fail(half, stepId, `${role.role}: its thread belongs to another project`);
         const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
         const turns = GameRunRoleReactor.stepTurns(runs, stepId);
-        const mine = turns.filter((t) => t.turn.attempt === job.attempt);
-        const latest = mine.at(-1);
+        const latest = turns.findLast((t) => t.turn.attempt === job.attempt);
         if (latest !== undefined) {
-          yield* limitInput;
-          if (GameRunRoleReactor.isSettledRun(latest.run))
-            return yield* roles.settle(threadId, latest.run);
-          yield* log(`${role.role}: reattaching to thread ${threadId}`);
-          return yield* jobs.deadline(half);
+          yield* limitInput(threadId);
+          if (!GameRunRoleReactor.isSettledRun(latest.run)) {
+            yield* log(`${role.role}: reattaching to thread ${threadId}`);
+            return yield* jobs.deadline(half);
+          }
+          if ((yield* roles.settle(threadId, latest.run)) !== "fresh") return;
+          // Its own provider session refuses the reused thread: the work is in the
+          // files, so the role continues once in a thread of its own.
+          const prompt = yield* promptOf(run, role, root);
+          return yield* launchThread(
+            roleThreadId(stepId, job.attempt, "fresh"),
+            threadId,
+            `${CONTINUE}\n\n${prompt}`,
+          );
         }
-        if (role.at !== null && shell.worktreePath === null)
-          return yield* fail(half, stepId, `${role.role}: its worktree is gone`);
-        yield* startStep(entry?.before ?? (yield* measure(role, root, run.lane)));
-        yield* limitInput;
+        if (role.at !== null && shell.worktreePath === null) {
+          if (threadId === own)
+            return yield* fail(half, stepId, `${role.role}: its worktree is gone`);
+          return yield* launchThread(own, threadId, yield* promptOf(run, role, root));
+        }
+        if (!(yield* startStep(threadId, yield* before()))) return;
+        yield* limitInput(threadId);
         // A turn an earlier try started and a restart or an ending cut off continues.
         const resumed = turns.length > 0;
         const prompt = yield* promptOf(run, role, root);
@@ -307,103 +442,15 @@ const make = Effect.gen(function* () {
           text: resumed ? `${CONTINUE}\n\n${prompt}` : prompt,
         });
       }
-      if (threadId !== own) return yield* fail(half, stepId, `${role.role}: its thread is gone`);
-      const before = entry?.before ?? (yield* measure(role, root, run.lane));
       const prompt = yield* promptOf(run, role, root);
-      const ctx = roleContext(run, root, log);
-      // An engine whose first editor open imports the whole project (minutes;
-      // later opens take seconds) pays it here, before any role's clock.
-      const engineProfile = laneProfile(run.lane);
-      if (engineProfile.run.warmEditor && role.at === null) {
-        const from = Date.now();
-        yield* waitOutLowMemory(
-          game.warmEditor(root),
-          `${engineProfile.displayName} warm-up`,
-          log,
-        ).pipe(
-          Effect.matchEffect({
-            onSuccess: (warmed) =>
-              warmed
-                ? log(
-                    `${engineProfile.displayName} warm-up: first import took ${Math.round((Date.now() - from) / 1000)} s, before ${role.role}'s clock`,
-                  )
-                : Effect.void,
-            onFailure: (error) =>
-              log(
-                `${engineProfile.displayName} warm-up skipped (${(error.detail ?? error.reason).slice(0, 200)}); the role opens the editor itself`,
-              ),
-          }),
-        );
+      if (threadId === own) {
+        if (shell !== null)
+          return yield* fail(half, stepId, `${role.role}: its thread was deleted`);
+        return yield* launchThread(own, undefined, prompt);
       }
-      const blank = role.at === BLANK ? yield* blankWorktree(deps, ctx, role) : null;
-      if (role.at === BLANK && blank === null)
-        return yield* fail(half, stepId, `${role.role}: no worktree of its own`);
-      if (blank === null)
-        for (const file of role.clear)
-          yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, file), { force: true }));
-      // A blind sample plays a neutral commit of its build: the same game, but
-      // no round notes, bots or round-named HEAD that would tell the builds apart.
-      const baseRef =
-        blank === null && role.at !== null
-          ? ((yield* neutralBuild(root, role.at)) ?? role.at)
-          : role.at;
-      if (blank === null && role.at !== null && baseRef === role.at)
-        yield* log(
-          `${role.role}: no neutral commit for ${role.at.slice(0, 12)}; playing the build's own`,
-        );
-      const sample =
-        blank === null && role.at !== null && engineProfile.play === "player"
-          ? yield* playerSampleWorktree(deps, ctx, role, baseRef ?? role.at)
-          : null;
-      const workspace = blank ?? sample;
-      // A deleted creator chat cannot be a parent; the role then stands alone rather than failing.
-      const creatorLive = yield* threads.getThreadShell(run.threadId).pipe(
-        Effect.map((s) => s !== null && s.deletedAt === null),
-        Effect.orElseSucceed(() => false),
-      );
-      yield* startStep(before);
-      yield* limitInput;
-      const launched = yield* launches
-        .launch({
-          commandId: CommandId.make(`server:game-run-role:${stepId}:attempt:${job.attempt}:launch`),
-          threadId: own,
-          projectId: run.projectId,
-          title: role.title,
-          modelSelection: run.modelSelection,
-          runtimeMode: run.runtimeMode,
-          // Roles must edit files whatever mode the creator chats in.
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          workspaceStrategy:
-            workspace !== null
-              ? {
-                  type: "existing_worktree",
-                  worktreePath: workspace.path,
-                  branch: workspace.branch,
-                }
-              : role.at === null
-                ? { type: "root" }
-                : {
-                    type: "worktree",
-                    baseRef: baseRef ?? role.at,
-                    branch: `studio-wt/${run.id}-${role.id}`,
-                  },
-          initialMessage: {
-            messageId: roleTurnMessageId(stepId, job.attempt, "turn", 1),
-            text: prompt,
-            attachments: [],
-          },
-          createdBy: "user",
-          creationSource: "server",
-          launchedBy: "game_run",
-          ...(creatorLive ? { parentThreadId: run.threadId } : {}),
-        })
-        .pipe(Effect.option);
-      if (Option.isNone(launched)) {
-        // No thread owns a checkout made here until a launch succeeds.
-        if (workspace !== null) yield* removeBlank(deps, ctx, workspace);
-        return yield* fail(half, stepId, `${role.role}: thread launch failed`);
-      }
-      yield* log(`${role.role}: launched thread ${own}`);
+      // A thread the creator deleted is replaced, never waited on.
+      yield* log(`${role.role}: thread ${threadId} is gone; launching the step again`);
+      return yield* launchThread(own, entry?.threadId ?? undefined, prompt);
     });
 
   const botHalf = (
@@ -577,9 +624,7 @@ const make = Effect.gen(function* () {
         yield* threads
           .interruptThread({
             projectId: at.run.projectId,
-            commandId: CommandId.make(
-              `server:game-run-role-cap:${job.stepId}:attempt:${job.attempt}:${live.run.id}`,
-            ),
+            commandId: roleCapCommandId(job.stepId, job.attempt, live.run.id),
             threadId,
             runId: live.run.id,
             reason: "Studio role cap reached.",
@@ -589,28 +634,33 @@ const make = Effect.gen(function* () {
       }
     });
 
-  // ── A run's end: its jobs stop, live role turns stop, and the game folder
-  // gets what the old loop did after its last step. ─────────────────────────
-  const lastStatus = new Map<string, GameRun["status"]>();
-
-  const finish = (run: GameRun) =>
+  // ── A run's end, from the game-run.finish effect its ending committed: its
+  // jobs and live role turns stop, and the game folder gets what the old loop
+  // did after its last step. Every part is safe to repeat, so a finish a
+  // restart cut short runs again whole; game-run.finished records it done.
+  const finish = (job: GameRunJobs.GameRunFinishJob) =>
     Effect.gen(function* () {
+      const records = yield* projections.getGameRunRecords(job.threadId);
+      const run = records.gameRuns.at(-1);
+      if (
+        run === undefined ||
+        run.id !== job.runId ||
+        run.status !== "ended" ||
+        run.endedAt !== job.endedAt ||
+        run.finished === job.endedAt
+      )
+        return;
       yield* jobs.stopRun(run.id);
-      const records = yield* projections.getGameRunRecords(run.threadId);
       const root = yield* projects.resolve(run.threadId);
       const log = (line: string) => logLine(root, line);
       const held = records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight);
       for (const role of held?.roles ?? []) {
         if (role.threadId === null) continue;
-        const shell = yield* threads
-          .getThreadShell(role.threadId)
-          .pipe(Effect.orElseSucceed(() => null));
-        if (shell?.activeRunId == null) continue;
         yield* threads
           .interruptThread({
             projectId: run.projectId,
             commandId: CommandId.make(
-              `server:game-run-ended:${run.id}:${run.updatedAt}:${role.threadId}`,
+              `server:game-run-ended:${run.id}:${job.endedAt}:${role.threadId}`,
             ),
             threadId: role.threadId,
             reason: `The production run ended (${run.ending ?? "unknown"}).`,
@@ -638,6 +688,15 @@ const make = Effect.gen(function* () {
         }
         yield* finishExports(root, run.threadId, game, log).pipe(Effect.ignore);
       }
+      yield* refused(
+        engine.dispatch({
+          type: "game-run.finished",
+          commandId: CommandId.make(`server:game-run-finished:${run.id}:${job.endedAt}`),
+          threadId: run.threadId,
+          runId: run.id,
+          endedAt: job.endedAt,
+        }),
+      );
     });
 
   // The Game panel's live run line: the step label, refreshed as the run moves.
@@ -657,43 +716,41 @@ const make = Effect.gen(function* () {
     });
 
   const handle: GameRunStepRunner["Service"]["handle"] = (event) =>
-    Effect.gen(function* () {
-      if (event.type !== "game-run.created" && event.type !== "game-run.updated") return;
-      const run = event.payload;
-      const before = event.type === "game-run.created" ? "created" : lastStatus.get(run.id);
-      lastStatus.set(run.id, run.status);
-      yield* showLive(run).pipe(Effect.ignore);
-      // Only the move into an ending finishes a run: a note on a stopped run updates it too.
-      if (run.status === "ended" && before !== undefined && before !== "ended")
-        // Kept apart from the run's own jobs, which the finish stops first.
-        yield* jobs.fork(
-          `finish:${run.id}:${run.updatedAt}`,
-          GameRunId.make(`${run.id}:finish`),
-          finish(run).pipe(Effect.ignore),
-        );
-    }).pipe(
+    event.type === "game-run.created" || event.type === "game-run.updated"
+      ? showLive(event.payload).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("game run live line failed", { threadId: event.threadId, cause }),
+          ),
+        )
+      : Effect.void;
+
+  const executeJob = (job: GameRunJobs.GameRunStepJob) =>
+    execute(job).pipe(
       Effect.catchCause((cause) =>
-        Effect.logWarning("game run step runner event failed", { threadId: event.threadId, cause }),
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.interrupt
+          : Effect.logWarning("game run step job failed", { stepId: job.stepId, cause }),
       ),
     );
 
   const start: GameRunStepRunner["Service"]["start"] = () =>
     Effect.gen(function* () {
       yield* jobs.attach({
-        execute: (job) =>
-          execute(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run step job failed", { stepId: job.stepId, cause }),
-            ),
-          ),
+        execute: executeJob,
         deadline: (job) =>
           deadline(job).pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause)
                 ? Effect.interrupt
                 : Effect.logWarning("game run cap watch failed", { stepId: job.stepId, cause }),
+            ),
+          ),
+        finish: (job) =>
+          finish(job).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : Effect.logWarning("game run finish failed", { runId: job.runId, cause }),
             ),
           ),
       });
@@ -706,7 +763,7 @@ const make = Effect.gen(function* () {
       );
     });
 
-  return GameRunStepRunner.of({ start, handle });
+  return GameRunStepRunner.of({ start, execute: executeJob, handle });
 });
 
 export const layer = Layer.effect(GameRunStepRunner, make);

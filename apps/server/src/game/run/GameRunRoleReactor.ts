@@ -15,6 +15,7 @@ import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2Run,
   type ProjectId,
+  type RunId,
   type ThreadId,
   gameRunStepCommandId,
   gameRunStepId,
@@ -35,6 +36,8 @@ import {
   type RoleTurn,
   type RoleTurnKind,
   parseRoleTurn,
+  roleCapCommandId,
+  roleThreadId as ownThreadIdOf,
   roleTurnCommandId,
   roleTurnMessageId,
 } from "../../orchestration-v2/gameRun/ids.ts";
@@ -74,14 +77,41 @@ export const roleAt = (step: Step, seq: number): RoleStep | null => {
   return half?.kind === "role" ? half : null;
 };
 
-/** The step's turns on one role thread, oldest first, each with what its message id says. */
-export const stepTurns = (runs: ReadonlyArray<OrchestrationV2Run>, stepId: GameRunStepId) =>
-  runs
+export interface AttributedTurn {
+  readonly run: OrchestrationV2Run;
+  readonly turn: RoleTurn;
+  /** False for a server restart's continuation of the turn, which carries on its work. */
+  readonly sent: boolean;
+}
+
+/**
+ * Every role turn on one thread, oldest first, each with what its message id
+ * says. A restart cancels a running turn and continues it in a run of its own
+ * (restartContinuationOfRunId): that run is the same turn, still at work.
+ */
+export const roleTurns = (runs: ReadonlyArray<OrchestrationV2Run>): AttributedTurn[] => {
+  const byId = new Map(runs.map((run) => [run.id, run]));
+  const sourceOf = (run: OrchestrationV2Run): RoleTurn | null => {
+    let current: OrchestrationV2Run | undefined = run;
+    for (let hops = 0; current !== undefined && hops <= runs.length; hops += 1) {
+      const turn = parseRoleTurn(current.userMessageId);
+      if (turn !== null) return turn;
+      const from: RunId | undefined = current.restartContinuationOfRunId;
+      current = from === undefined ? undefined : byId.get(from);
+    }
+    return null;
+  };
+  return runs
     .flatMap((run) => {
-      const turn = parseRoleTurn(run.userMessageId);
-      return turn !== null && turn.stepId === stepId ? [{ run, turn }] : [];
+      const turn = sourceOf(run);
+      return turn === null ? [] : [{ run, turn, sent: parseRoleTurn(run.userMessageId) !== null }];
     })
     .toSorted((a, b) => a.run.ordinal - b.run.ordinal);
+};
+
+/** The step's turns on one role thread, continuations included, oldest first. */
+export const stepTurns = (runs: ReadonlyArray<OrchestrationV2Run>, stepId: GameRunStepId) =>
+  roleTurns(runs).filter((t) => t.turn.stepId === stepId);
 
 const millis = (value: DateTime.Utc | null | undefined) =>
   value == null ? null : DateTime.toEpochMillis(value);
@@ -118,8 +148,15 @@ const locateIn = (
 export class GameRunRoleReactor extends Context.Service<
   GameRunRoleReactor,
   {
-    /** Lands a role turn that settled, by the rule the event stream applies. */
-    readonly settle: (roleThreadId: ThreadId, turnRun: OrchestrationV2Run) => Effect.Effect<void>;
+    /**
+     * Lands a role turn that settled, by the rule the event stream applies.
+     * "fresh": the step's game-folder role moves to a fresh thread, which the
+     * step's job launches.
+     */
+    readonly settle: (
+      roleThreadId: ThreadId,
+      turnRun: OrchestrationV2Run,
+    ) => Effect.Effect<"fresh" | null>;
     /** Sends a role step's turn on its thread, once per message id. */
     readonly sendTurn: (input: {
       readonly projectId: ProjectId;
@@ -260,6 +297,15 @@ const make = Effect.gen(function* () {
           n: input.n,
           text: input.text,
         }).pipe(
+          // A turn sent again is capped like the first.
+          Effect.andThen(
+            jobs.deadline({
+              threadId: input.creator,
+              runId: input.at.run.id,
+              stepId: input.stepId,
+              attempt: input.at.record.attempt,
+            }),
+          ),
           Effect.catchCause((cause) =>
             Effect.logWarning("game run role turn could not be sent again", {
               stepId: input.stepId,
@@ -270,25 +316,29 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const settleLocked = (roleThreadId: ThreadId, turnRun: OrchestrationV2Run, turn: RoleTurn) =>
+  const settleLocked = (roleThreadId: ThreadId, turnRun: OrchestrationV2Run) =>
     Effect.gen(function* () {
       const { thread, runs } = yield* threads.getThreadRecords(roleThreadId, ["runs"]);
+      const turn = roleTurns(runs).find((t) => t.run.id === turnRun.id)?.turn;
+      if (turn === undefined) return null;
       const creator = thread.lineage.parentThreadId;
-      if (creator === null || thread.launchedBy !== "game_run") return;
+      if (creator === null || thread.launchedBy !== "game_run") return null;
       const at = yield* locate(creator, turn.stepId, turn.attempt);
-      if (at === null || at.role === null) return;
+      if (at === null || at.role === null) return null;
       // The step record says which thread runs it; a thread of another project is never its.
       const entry = at.record.roles.find((r) => r.seq === at.seq);
-      if (entry?.threadId !== roleThreadId || thread.projectId !== at.run.projectId) return;
+      if (entry?.threadId !== roleThreadId || thread.projectId !== at.run.projectId) return null;
       const turns = stepTurns(runs, turn.stepId).filter((t) => t.turn.attempt === turn.attempt);
+      // The latest run of the turn decides: a restart's continuation still at work is the turn.
       const latest = turns.at(-1);
-      if (latest === undefined || latest.run.id !== turnRun.id || !isSettledRun(latest.run)) return;
+      if (latest === undefined || latest.run.id !== turnRun.id || !isSettledRun(latest.run))
+        return null;
       if (
         (yield* threads.getCommandReceipt(
           gameRunStepCommandId(turn.stepId, turn.attempt, "complete"),
         )) !== null
       )
-        return;
+        return null;
       const role = at.role;
       const root = yield* projects.resolve(creator);
       const log = (line: string) => logLine(root, line);
@@ -326,7 +376,23 @@ const make = Effect.gen(function* () {
             failure === null
               ? "run failed with no provider message"
               : `${failure.class}: ${failure.message}`;
-          const retries = turns.filter((t) => t.turn.kind === "retry").length;
+          const retries = turns.filter((t) => t.sent && t.turn.kind === "retry").length;
+          // A thread that had turns before this step can be refused by its own
+          // provider session (reasoning under an earlier quota or key), and every
+          // resend fails the same way: a game-folder role continues once in a
+          // fresh thread, since its work is in the files.
+          const fresh = ownThreadIdOf(turn.stepId, turn.attempt, "fresh");
+          if (
+            retries === 0 &&
+            at.role.at === null &&
+            roleThreadId !== fresh &&
+            roleThreadId !== ownThreadIdOf(turn.stepId, turn.attempt)
+          ) {
+            yield* log(
+              `${role.role}: thread ${roleThreadId} fails at once; continuing in a fresh thread`,
+            );
+            return "fresh" as const;
+          }
           if (retries >= RETRIES) return yield* end("provider-down", reason);
           yield* log(`${role.role}: instant-failed turn (${reason}) [${retries + 1}/${RETRIES}]`);
           return yield* again("retry", role.prompt, Duration.seconds(15 * 2 ** retries));
@@ -342,7 +408,7 @@ const make = Effect.gen(function* () {
           .pipe(Effect.orElseSucceed(() => null));
         const atStart = { refusals: 0, refused: false, executedInputSteps: 0 };
         if (mark !== null && replayRefusedTurn(atStart, mark)) {
-          const waits = turns.filter((t) => t.turn.kind === "memory").length;
+          const waits = turns.filter((t) => t.sent && t.turn.kind === "memory").length;
           if (waits >= MEMORY_WAITS)
             return yield* end("low-memory", `${role.role}: explore start refused, memory short`);
           yield* log(
@@ -357,7 +423,11 @@ const make = Effect.gen(function* () {
       const first = turns[0]?.run ?? run;
       const startedMs = millis(first.startedAt) ?? millis(first.requestedAt) ?? Date.now();
       const now = Date.now();
-      const timedOut = run.status === "interrupted";
+      // Capped only by the cap's own interrupt; any other interrupt is the turn's end.
+      const timedOut =
+        run.status === "interrupted" &&
+        (yield* threads.getCommandReceipt(roleCapCommandId(turn.stepId, turn.attempt, run.id)))
+          ?.status === "accepted";
       const budgetCut = timedOut && at.run.budgetEndsAt !== null && now >= at.run.budgetEndsAt;
       // Evidence is cumulative per thread; closing here also releases the
       // thread's explorer so nothing stays open between roles.
@@ -420,19 +490,43 @@ const make = Effect.gen(function* () {
     });
 
   const settle: GameRunRoleReactor["Service"]["settle"] = (roleThreadId, turnRun) => {
-    const turn = parseRoleTurn(turnRun.userMessageId);
-    if (turn === null || !isSettledRun(turnRun)) return Effect.void;
+    const candidate =
+      parseRoleTurn(turnRun.userMessageId) !== null ||
+      turnRun.restartContinuationOfRunId !== undefined;
+    if (!candidate || !isSettledRun(turnRun)) return Effect.succeed(null);
     return lock
-      .withPermits(1)(settleLocked(roleThreadId, turnRun, turn))
+      .withPermits(1)(settleLocked(roleThreadId, turnRun))
       .pipe(
+        Effect.map((outcome) => (outcome === "fresh" ? ("fresh" as const) : null)),
         Effect.catchCause((cause) =>
-          Effect.logWarning("game run role result failed", { threadId: roleThreadId, cause }),
+          Effect.logWarning("game run role result failed", { threadId: roleThreadId, cause }).pipe(
+            Effect.as(null),
+          ),
         ),
       );
   };
 
+  // A move to a fresh thread is the step job's: it launches the role's threads.
   const handle: GameRunRoleReactor["Service"]["handle"] = (event) =>
-    event.type === "run.updated" ? settle(event.threadId, event.payload) : Effect.void;
+    event.type !== "run.updated"
+      ? Effect.void
+      : settle(event.threadId, event.payload).pipe(
+          Effect.flatMap((outcome) => {
+            const turn = parseRoleTurn(event.payload.userMessageId);
+            return outcome === "fresh" && turn !== null
+              ? Effect.flatMap(threads.getThreadRecords(event.threadId, []), ({ thread }) =>
+                  thread.lineage.parentThreadId === null
+                    ? Effect.void
+                    : jobs.execute({
+                        threadId: thread.lineage.parentThreadId,
+                        runId: turn.runId,
+                        stepId: turn.stepId,
+                        attempt: turn.attempt,
+                      }),
+                ).pipe(Effect.ignore)
+              : Effect.void;
+          }),
+        );
 
   const start: GameRunRoleReactor["Service"]["start"] = () =>
     forkParked(

@@ -3,7 +3,8 @@
 // repeat, and the job itself finds what an earlier try left (a role's thread,
 // its finished turn) before doing anything. A decision needs no job: its
 // deadline is a durable effect, and only a presentation that ended while the
-// server was down is caught up. An ended or stopped run is never touched.
+// server was down is caught up. An ended or stopped run is never continued;
+// only its finish, if a restart cut it short, runs again.
 import type { ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -27,7 +28,14 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
       const run = records.gameRuns.at(-1);
-      if (run === undefined || run.status === "ended" || run.inFlight === null) return;
+      if (run === undefined) return;
+      // An ending whose finish never completed (a death mid-finish, a lost job) finishes again.
+      if (run.status === "ended") {
+        if (run.endedAt !== null && run.finished !== run.endedAt)
+          yield* jobs.finish({ threadId, runId: run.id, endedAt: run.endedAt });
+        return;
+      }
+      if (run.inFlight === null) return;
       const step = records.gameRunSteps.find(
         (each) => each.runId === run.id && each.seq === run.inFlight,
       );
@@ -41,7 +49,7 @@ const make = Effect.gen(function* () {
     );
 
   const recover = () =>
-    projections.listLiveGameRunThreads().pipe(
+    projections.listGameRunThreadsToRecover().pipe(
       Effect.flatMap((threads) => Effect.forEach(threads, recoverThread, { discard: true })),
       Effect.catchCause((cause) => Effect.logWarning("game run recovery failed", { cause })),
     );

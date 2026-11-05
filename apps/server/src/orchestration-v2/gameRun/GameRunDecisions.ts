@@ -99,7 +99,7 @@ const make = Effect.gen(function* () {
       const { run, step } = yield* current(effect.threadId, effect.runId).pipe(Effect.orDie);
       if (!isWaitingOn(run, step, effect.decisionId) || step?.step.kind !== "decide") return;
       const decision = step.step.decision;
-      const { commandId, messageId } = decisionWakeIds(effect.runId, decision.id);
+      const { commandId, messageId } = decisionWakeIds(effect.runId, decision.id, step.attempt);
       // The wake starts a turn on the creator's chat, so it takes the same
       // admission as any other message turn before it reaches the orchestrator.
       const thread = yield* projections.getThread(effect.threadId).pipe(Effect.orDie);
@@ -149,7 +149,11 @@ const make = Effect.gen(function* () {
     runs: ReadonlyArray<OrchestrationV2Run>,
     runId: GameRunId,
     decisionId: string,
-  ) => runs.find((each) => each.userMessageId === decisionWakeIds(runId, decisionId).messageId);
+    attempt: number,
+  ) =>
+    runs.find(
+      (each) => each.userMessageId === decisionWakeIds(runId, decisionId, attempt).messageId,
+    );
 
   // The user can answer only once the agent finished presenting: its turn
   // reading the decision and building the visual takes a minute or two, so the
@@ -163,7 +167,7 @@ const make = Effect.gen(function* () {
       if (run === undefined || step === undefined || step.step.kind !== "decide") return;
       if (!isWaitingOn(run, step, step.step.decision.id) || step.step.deadline !== null) return;
       const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
-      const woke = wakeRunOf(runs, run.id, step.step.decision.id);
+      const woke = wakeRunOf(runs, run.id, step.step.decision.id, step.attempt);
       if (woke === undefined || PRESENTING.has(woke.status)) return;
       yield* settledByRefusal(
         engine.dispatch({
@@ -180,7 +184,11 @@ const make = Effect.gen(function* () {
   const dropQueuedWake = (threadId: ThreadId, step: GameRunStep) =>
     Effect.gen(function* () {
       if (step.step.kind !== "decide") return;
-      const { messageId, commandId } = decisionWakeIds(step.runId, step.step.decision.id);
+      const { messageId, commandId } = decisionWakeIds(
+        step.runId,
+        step.step.decision.id,
+        step.attempt,
+      );
       const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
       const queued = runs.find((run) => run.status === "queued" && run.userMessageId === messageId);
       if (queued === undefined) return;

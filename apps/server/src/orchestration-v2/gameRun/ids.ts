@@ -48,20 +48,34 @@ export const parseRoleTurn = (messageId: string): RoleTurn | null => {
 };
 
 // Thread ids reach file names (explore evidence, worktrees), so a role's own is
-// uuid-shaped: the same for every try of the step, safe on every OS.
-export const roleThreadId = (stepId: GameRunStepId): ThreadId => {
-  const hex = NodeCrypto.createHash("sha256").update(`game-run-role:${stepId}`).digest("hex");
+// uuid-shaped and safe on every OS. Each attempt of a step has its own, and a
+// game-folder role that its reused thread fails at once moves once to a fresh one.
+export const roleThreadId = (
+  stepId: GameRunStepId,
+  attempt: number,
+  variant: "own" | "fresh" = "own",
+): ThreadId => {
+  const hex = NodeCrypto.createHash("sha256")
+    .update(`game-run-role:${stepId}:attempt:${attempt}:${variant}`)
+    .digest("hex");
   return ThreadId.make(
     `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`,
   );
 };
 
+/** The interrupt a role turn's cap sends: its receipt is how the turn's end reads as capped. */
+export const roleCapCommandId = (stepId: GameRunStepId, attempt: number, runId: string) =>
+  CommandId.make(`server:game-run-role-cap:${stepId}:attempt:${attempt}:${runId}`);
+
 const DECISION_WAKE = "message:game-run-decision:";
 
-/** The creator chat's wake for one decision of one run: one message, however often it is sent. */
-export const decisionWakeIds = (runId: GameRunId, decisionId: string) => ({
-  commandId: CommandId.make(`server:game-run-decision:${runId}:${decisionId}`),
-  messageId: MessageId.make(`${DECISION_WAKE}${runId}:${decisionId}`),
+/**
+ * The creator chat's wake for one decision of one step attempt: one message,
+ * however often it is sent, and a new one when a resume asks the question again.
+ */
+export const decisionWakeIds = (runId: GameRunId, decisionId: string, attempt: number) => ({
+  commandId: CommandId.make(`server:game-run-decision:${runId}:${decisionId}:attempt:${attempt}`),
+  messageId: MessageId.make(`${DECISION_WAKE}${runId}:${decisionId}:attempt:${attempt}`),
 });
 
 export const isDecisionWake = (messageId: string): boolean => messageId.startsWith(DECISION_WAKE);

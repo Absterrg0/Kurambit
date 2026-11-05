@@ -364,7 +364,13 @@ const settle = (
   effects: ReadonlyArray<GameRunEffect>,
   created = false,
 ): GameRunDecision => {
-  const record = fromState(run, state, work.at);
+  const settled = fromState(run, state, work.at);
+  // The commit that ends a run owes its finish: an effect, so a restart cannot lose it.
+  const ends = settled.status === "ended" && (created || run.status !== "ended");
+  const record: GameRun = ends ? { ...settled, endedAt: work.at, finished: null } : settled;
+  const finish = ends
+    ? [effectFor({ type: "game-run.finish", runId: run.id, endedAt: work.at })]
+    : [];
   const rounds = state.rounds.slice(before.rounds.length).map((round): GameRunRound => ({
     id: gameRunRoundId(run.id, round.round),
     runId: run.id,
@@ -378,7 +384,7 @@ const settle = (
       ...rounds.map((round) => roundEvent(work, round)),
       runEvent(work, created, record),
     ],
-    effects,
+    effects: [...effects, ...finish],
     cancelEffects: false,
   };
 };
@@ -506,6 +512,8 @@ const start = (work: Work, command: Command<"game-run.start">) => {
         task: state.task,
         seq: 0,
         inFlight: null,
+        endedAt: null,
+        finished: null,
         startedAt: work.at,
         updatedAt: work.at,
       },
@@ -791,6 +799,28 @@ const submit = (work: Work, command: Command<"game-run.submit">) =>
     }),
   );
 
+/** The ending's finish completed: recovery owes it no more. */
+const finished = (work: Work, command: Command<"game-run.finished">) =>
+  Result.flatMap(current(work, command.runId), (run) => {
+    if (run.status !== "ended" || run.endedAt !== command.endedAt)
+      return refuse("stale-run", `Run ${run.id} no longer holds the ending of ${command.endedAt}.`);
+    const state = toState(run, work.records.rounds, inFlightOf(work, run));
+    return Result.succeed(
+      settle(work, { ...run, finished: command.endedAt }, state, state, [], []),
+    );
+  });
+
+/** A creator's restore made a kept round's build the game's again: the run judges against it. */
+const restore = (work: Work, command: Command<"game-run.restore">) =>
+  Result.flatMap(current(work, command.runId), (run) => {
+    if (run.status !== "ended")
+      return refuse("run-live", `Run ${run.id} is still going; stop it before restoring a round.`);
+    const state = toState(run, work.records.rounds, inFlightOf(work, run));
+    return Result.succeed(
+      settle(work, run, state, { ...state, best: command.best, pending: null }, [], []),
+    );
+  });
+
 const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(currentStep(work, run, command.stepId), ({ record, seq }) => {
@@ -828,11 +858,13 @@ const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
       if (role === null) return Result.succeed(settle(work, run, state, state, [started], []));
       const entry = record.roles.find((r) => r.seq === seq);
       const thread = command.roleThreadId ?? entry?.threadId ?? null;
-      if (
+      // A thread is replaced only by naming it: a deleted or broken thread
+      // gives way to a fresh one, and the submission it made goes with it.
+      const replacing =
         entry?.threadId != null &&
         command.roleThreadId !== undefined &&
-        entry.threadId !== command.roleThreadId
-      )
+        entry.threadId !== command.roleThreadId;
+      if (replacing && command.replaces !== entry?.threadId)
         return refuse("wrong-thread", `Step ${command.stepId} already runs on another thread.`);
       // The first measure of a role's starting point stands: a re-run of the
       // launch after a restart measures a build the role has already changed.
@@ -843,6 +875,7 @@ const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
             ? {
                 ...r,
                 threadId: thread,
+                ...(replacing ? { submission: null } : {}),
                 ...(r.before === undefined && command.before !== undefined
                   ? { before: command.before }
                   : {}),
@@ -995,5 +1028,9 @@ export const decide = (
       });
     case "game-run.decision.expire":
       return expire(work, command);
+    case "game-run.finished":
+      return finished(work, command);
+    case "game-run.restore":
+      return restore(work, command);
   }
 };

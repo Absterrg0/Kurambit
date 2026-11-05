@@ -3088,6 +3088,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     stepId: GameRunStepId,
     roleThreadId: Schema.optional(ThreadId),
     before: Schema.optional(GameRunRoleBefore),
+    /** The thread the role ran on before: a deleted or broken one is replaced by a fresh one. */
+    replaces: Schema.optional(ThreadId),
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.step.complete"),
@@ -3113,6 +3115,18 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     type: Schema.Literal("game-run.decision.expire"),
     ...GameRunCommandFields,
     decisionId: TrimmedNonEmptyString,
+  }),
+  /** An ending's finish (stops, outputs, exports) completed; recovery owes it no more. */
+  Schema.Struct({
+    type: Schema.Literal("game-run.finished"),
+    ...GameRunCommandFields,
+    endedAt: IsoDateTime,
+  }),
+  /** The creator restored a kept round's build: it becomes the ended run's judged best. */
+  Schema.Struct({
+    type: Schema.Literal("game-run.restore"),
+    ...GameRunCommandFields,
+    best: TrimmedNonEmptyString,
   }),
 ]);
 export type OrchestrationV2GameRunCommand = typeof OrchestrationV2GameRunCommand.Type;

@@ -38,7 +38,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import { toState } from "../orchestration-v2/gameRun/decide.ts";
-import { parseRoleTurn } from "../orchestration-v2/gameRun/ids.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -48,7 +47,7 @@ import * as GameService from "./GameService.ts";
 import { runStateChecks } from "./run/checkRunner.ts";
 import { presentable } from "./run/decideStep.ts";
 import { makeGit, restoredPaths } from "./run/git.ts";
-import { roleAt } from "./run/GameRunRoleReactor.ts";
+import { roleAt, roleTurns } from "./run/GameRunRoleReactor.ts";
 import * as Policy from "./run/policy.ts";
 import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
 import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
@@ -117,6 +116,8 @@ const domainControl = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* GameProjectService.GameProjectService;
   const game = yield* GameService.GameService;
+  // Games whose tree a restore is moving; a run cannot start or resume under one.
+  const restoring = new Set<string>();
 
   const resolveGame = Effect.fn("GameRunControl.resolveGame")(function* (threadId: ThreadId) {
     const root = yield* projects
@@ -173,6 +174,13 @@ const domainControl = Effect.gen(function* () {
     input: GameRunStartInput,
   ) {
     const { root } = yield* resolveGame(input.threadId);
+    if (restoring.has(root))
+      return yield* runError(
+        "run-start",
+        root,
+        "restoring",
+        "A round is being restored for this game. Start the run once it finishes.",
+      );
     const { run } = yield* latestOf(input.threadId);
     if (run !== null && run.status !== "ended")
       return { runId: run.id, root, stage: run.stage, resumed: true } satisfies GameRunStartResult;
@@ -569,9 +577,28 @@ const domainControl = Effect.gen(function* () {
     return evidence;
   });
 
-  // The loop's restore, against the run's records. The run's judged best stays
-  // what it was: a resumed run compares its next round with that build.
-  const restoreRound: Service["restoreRound"] = Effect.fn("GameRunControl.restoreRound")(
+  // The loop's restore, against the run's records; the restored build becomes
+  // the run's judged best, so a resumed run compares its next round with it.
+  const restoreRound: Service["restoreRound"] = (threadId, round) =>
+    Effect.flatMap(resolveGame(threadId), ({ root }) =>
+      // Checked and claimed with no yield between, like a run's start.
+      restoring.has(root)
+        ? Effect.fail(
+            runError(
+              "run-restore",
+              root,
+              "restoring",
+              "A round is being restored for this game already.",
+            ),
+          )
+        : Effect.suspend(() => {
+            restoring.add(root);
+            return restoreClaimed(threadId, round).pipe(
+              Effect.ensuring(Effect.sync(() => restoring.delete(root))),
+            );
+          }),
+    );
+  const restoreClaimed = Effect.fn("GameRunControl.restoreRound")(
     function* (threadId: ThreadId, round: number) {
       const found = yield* findRound("run-restore", threadId, round);
       const { root, run, state, record, trunk, lane } = found;
@@ -632,6 +659,13 @@ const domainControl = Effect.gen(function* () {
           "restore-incomplete",
           `Restoring round ${round} did not reproduce its build; see .studio/run.log and the game's git status.`,
         );
+      yield* dispatch("run-restore", {
+        type: "game-run.restore",
+        commandId: commandId(),
+        threadId,
+        runId: run.id,
+        best: restored,
+      });
       yield* log(
         `creator restored round ${round} (${sha.slice(0, 8)}) as ${restored.slice(0, 8)} on ${trunk}: ${what}`,
       );
@@ -689,11 +723,8 @@ const domainControl = Effect.gen(function* () {
     if (thread.launchedBy !== "game_run" || creator === null)
       return yield* not("This thread is not a role of a production run.");
     // The turn this submission belongs to names its step.
-    const turn = runs
-      .toSorted((a, b) => b.ordinal - a.ordinal)
-      .map((run) => parseRoleTurn(run.userMessageId))
-      .find((parsed) => parsed !== null);
-    if (turn === undefined || turn === null)
+    const turn = roleTurns(runs).at(-1)?.turn;
+    if (turn === undefined)
       return yield* not("This thread has no turn of a production run's step.");
     yield* dispatch("run-submit", {
       type: "game-run.submit",

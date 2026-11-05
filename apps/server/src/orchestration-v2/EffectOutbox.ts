@@ -4,6 +4,7 @@ import {
   CommandId,
   GameRunId,
   GameRunStepId,
+  IsoDateTime,
   PositiveInt,
   MessageId,
   NodeId,
@@ -145,6 +146,13 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     stepId: GameRunStepId,
     attempt: PositiveInt,
   }),
+  // A run's ending, committed with it: live role turns and jobs stop, the
+  // game folder gets its last outputs and exports; game-run.finished records it.
+  Schema.Struct({
+    type: Schema.Literal("game-run.finish"),
+    runId: GameRunId,
+    endedAt: IsoDateTime,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -163,6 +171,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.decision.wake",
   "game-run.decision.deadline",
   "game-run.step.deadline",
+  "game-run.finish",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [
@@ -371,6 +380,11 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               OR (
                 active.status = 'pending'
                 AND active.rowid < candidate.rowid
+                -- A game run's timer waits for its time without holding the
+                -- thread: the creator's chat, the next step and an ending's
+                -- finish are queued behind it, and the timer checks the run
+                -- again whenever it fires.
+                AND active.effect_type NOT IN ('game-run.step.deadline', 'game-run.decision.deadline')
                 AND ${
                   excludeRestartContinuations
                     ? sql`active.effect_type != 'provider-runtime.continue'`

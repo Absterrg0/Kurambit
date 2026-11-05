@@ -3,7 +3,12 @@
 // hands its job over and returns at once; the job reports back with commands.
 // Jobs are in-process only, so a restart loses them and GameRunRecovery
 // starts again what a lost job left unfinished (every step is safe to repeat).
-import type { GameRunId, GameRunStepId, ThreadId } from "@kurambit/contracts";
+import {
+  GameRunId as GameRunIdSchema,
+  type GameRunId,
+  type GameRunStepId,
+  type ThreadId,
+} from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -20,12 +25,21 @@ export interface GameRunStepJob {
   readonly attempt: number;
 }
 
+export interface GameRunFinishJob {
+  readonly threadId: ThreadId;
+  readonly runId: GameRunId;
+  /** The ending this finish is for: a run that ends again owes a finish of its own. */
+  readonly endedAt: string;
+}
+
 /** What a step's job does; the game layer supplies it once its services exist. */
 export interface GameRunJobRunner {
   /** A step's work, reported with game-run.step.complete or game-run.step.fail. */
   readonly execute: (job: GameRunStepJob) => Effect.Effect<void>;
   /** A role turn's cap: interrupts its run once the cap is due. */
   readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
+  /** A run's ending: stops its turns and jobs, does its last outputs and exports, records it. */
+  readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
 }
 
 // Heavy work inside a step takes the game layer's own locks and memory guards;
@@ -39,6 +53,8 @@ export class GameRunJobs extends Context.Service<
     readonly execute: (job: GameRunStepJob) => Effect.Effect<void>;
     /** Watches a role turn's cap unless a watch for that attempt is live; returns at once. */
     readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
+    /** Finishes an ending unless its finish is live; returns at once. Finishing twice is safe. */
+    readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
     /** Any other work of a run's (a role turn sent again after a pause), once per key. */
     readonly fork: (
       key: string,
@@ -51,6 +67,8 @@ export class GameRunJobs extends Context.Service<
     readonly attach: (runner: GameRunJobRunner) => Effect.Effect<void>;
   }
 >()("kurambit/orchestration-v2/gameRun/GameRunJobs") {}
+
+const finishOwner = (runId: GameRunId) => GameRunIdSchema.make(`${runId}:finish`);
 
 export const stepJobKey = (job: GameRunStepJob, kind: "execute" | "deadline"): string =>
   `${kind}:${job.stepId}:attempt:${job.attempt}`;
@@ -100,6 +118,14 @@ export const make = Effect.gen(function* () {
       Deferred.await(runner).pipe(Effect.flatMap((each) => each.deadline(job))),
     );
 
+  // Kept apart from the run's own jobs, which the finish stops first.
+  const finish = (job: GameRunFinishJob) =>
+    fork(
+      `finish:${job.runId}:${job.endedAt}`,
+      finishOwner(job.runId),
+      Deferred.await(runner).pipe(Effect.flatMap((each) => each.finish(job))),
+    );
+
   const stopRun = (runId: GameRunId) =>
     Effect.suspend(() =>
       Fiber.interruptAll(
@@ -112,6 +138,7 @@ export const make = Effect.gen(function* () {
   return GameRunJobs.of({
     execute,
     deadline,
+    finish,
     fork,
     stopRun,
     isLive: (key) => Effect.sync(() => live.has(key)),

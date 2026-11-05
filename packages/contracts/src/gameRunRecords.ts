@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
@@ -665,6 +666,10 @@ export const GameRun = Schema.Struct({
   seq: NonNegativeInt,
   /** The number of the step the run holds in flight; null between steps and once ended. */
   inFlight: Schema.NullOr(Schema.Number),
+  /** When the run last ended; its finish (stops, exports) is owed until `finished` names it. */
+  endedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  /** The `endedAt` whose finish completed. */
+  finished: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
