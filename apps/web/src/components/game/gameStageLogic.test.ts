@@ -29,11 +29,13 @@ const running = (): GameStageInput["operation"] => ({
   state: "running",
   message: "Building the web preview is running.",
   at: STARTED_AT,
+  revision: 1,
 });
 const failed = (message: string): GameStageInput["operation"] => ({
   name: "preview",
   state: "failed",
   message,
+  revision: 2,
   at: STARTED_AT,
 });
 const PLAYING: GameStageInput = {

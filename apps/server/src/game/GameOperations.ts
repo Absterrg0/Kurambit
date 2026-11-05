@@ -28,7 +28,7 @@ export class GameOperations extends Context.Service<
      */
     readonly record: (
       root: string,
-      operation: GameOperation,
+      operation: Omit<GameOperation, "revision">,
       eventState: GameOperationEventState,
     ) => Effect.Effect<void>;
     readonly changed: (root: string, message: string) => Effect.Effect<void>;
@@ -77,13 +77,20 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const operations = new Map<string, GameOperation>();
     const events = yield* PubSub.unbounded<GameOperationEvent>();
-    let revision = 0;
-    const record = (root: string, operation: GameOperation, eventState: GameOperationEventState) =>
+    // Starts at the server's clock so a restarted server's revisions stay above
+    // the ones a client still holds from before.
+    let revision = DateTime.toEpochMillis(yield* DateTime.now);
+    const record = (
+      root: string,
+      operation: Omit<GameOperation, "revision">,
+      eventState: GameOperationEventState,
+    ) =>
       Effect.gen(function* () {
-        operations.set(root, operation);
+        revision += 1;
+        operations.set(root, { ...operation, revision });
         yield* PubSub.publish(events, {
           root,
-          revision: ++revision,
+          revision,
           name: operation.name,
           state: eventState,
           message: operation.message,

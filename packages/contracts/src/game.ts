@@ -434,6 +434,8 @@ export const GameStatus = Schema.Struct({
       message: Schema.String,
       /** When the operation started, so clients can show elapsed time honestly. */
       at: Schema.String,
+      /** The revision of the push that last changed it: later news has a higher one. */
+      revision: Schema.Number,
     }),
   ),
 });
