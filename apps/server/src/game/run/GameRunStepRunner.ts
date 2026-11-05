@@ -647,7 +647,7 @@ const make = Effect.gen(function* () {
               Effect.catchTags({
                 GameRunGameBusy: (busy) => waitForMemory(job, record, record.id, busy, log),
                 GameOperationError: (error) =>
-                  isContention(error, "build")
+                  isContention(error)
                     ? fail(job, record.id, busyEnded(`build ${step.op._tag}`, error).reason)
                     : Effect.fail(error),
               }),

@@ -9,17 +9,21 @@ import { bootStep } from "./steps.ts";
 const boot = (
   check: () => Effect.Effect<{ ok: boolean }, GameOperationError>,
   busyWaitsLeft = true,
+  player: {
+    readonly lane: string;
+    readonly prepare: () => Effect.Effect<never, GameOperationError>;
+  } = { lane: "three", prepare: () => Effect.die("a three.js game builds no player") },
 ) =>
   bootStep(
     {
       check: () => Effect.suspend(check),
-      preparePlayer: () => Effect.die("a three.js game builds no player"),
+      preparePlayer: () => Effect.suspend(player.prepare),
     } as unknown as GameService.GameService["Service"],
     {
       creator: ThreadId.make("creator"),
       owner: "run",
       root: "/g",
-      lane: "three",
+      lane: player.lane,
       log: () => Effect.void,
       memoryWaitsLeft: true,
       busyWaitsLeft,
@@ -64,4 +68,25 @@ it.effect(
       const ended = yield* boot(() => Effect.fail(refusal("busy")), false);
       expect(ended.kind).toBe("failed");
     }),
+);
+
+// A Unity build the source snapshot cannot read (a link in the project) is the build's fault:
+// handed back, it would wait out every resume as "busy" and never be judged.
+it.effect("a player build refused for its own sources is a boot verdict, not a hand-back", () =>
+  Effect.gen(function* () {
+    const result = yield* boot(() => Effect.succeed({ ok: true, errors: [] }), true, {
+      lane: "unity",
+      prepare: () =>
+        Effect.fail(
+          new GameOperationError({
+            operation: "Explore session",
+            path: "/g",
+            reason: "invalid-input",
+            detail:
+              "The game sources could not be identified before the Unity session ran; the result would not be current.",
+          }),
+        ),
+    });
+    expect(result).toMatchObject({ kind: "boot", ok: false });
+  }),
 );

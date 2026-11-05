@@ -69,7 +69,7 @@ export const bootStep = (
       Effect.map((r) => ({ kind: "boot", ...r }) as const),
       Effect.catchTags({
         GameOperationError: (error) => {
-          if (isContention(error, what)) return Effect.succeed(busyEnded(what, error));
+          if (isContention(error)) return Effect.succeed(busyEnded(what, error));
           if (error.reason === "low-memory") return Effect.succeed(memoryEnded(error));
           // The ending shows its first 300 characters: the detail says what to
           // fix on this machine, where the error's message opens with advice

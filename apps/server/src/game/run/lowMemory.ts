@@ -54,14 +54,14 @@ export class GameRunGameBusy extends Data.TaggedError("GameRunGameBusy")<{
 }> {}
 
 /**
- * The refusals that say the game was not free for this work: busy, a
- * cancel that was not the run's, and a player build whose sources moved
- * under it.
+ * The refusals that say the game was not free for this work: busy, and a
+ * cancel that was not the run's. Nothing about the build itself is one: a
+ * player build refused for its sources (a link in the project, too many
+ * files, sources that moved while only the run writes the folder) is the
+ * build's own verdict, so it never hides behind waits a resume would reset.
  */
-export const isContention = (error: GameOperationError, what: string) =>
-  error.reason === "busy" ||
-  error.reason === "cancelled" ||
-  (what === "boot player build" && error.reason === "invalid-input");
+export const isContention = (error: GameOperationError) =>
+  error.reason === "busy" || error.reason === "cancelled";
 
 /** Hands the step back while the game is not free and it has waits left; past them the refusal fails through. */
 export const handBackOnBusy = <A, E, R>(
@@ -73,7 +73,7 @@ export const handBackOnBusy = <A, E, R>(
     ? attempt.pipe(
         Effect.catchIf(
           (error): error is GameOperationError =>
-            isGameOperationError(error) && isContention(error, what),
+            isGameOperationError(error) && isContention(error),
           (error) => Effect.fail(new GameRunGameBusy({ what, error })),
         ),
       )
