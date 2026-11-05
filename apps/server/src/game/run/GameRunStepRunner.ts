@@ -54,6 +54,7 @@ import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { runBotFact } from "./botFacts.ts";
 import { runStateChecks } from "./checkRunner.ts";
 import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
+import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { makeGit, neutralBuild } from "./git.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
@@ -746,6 +747,13 @@ const make = Effect.gen(function* () {
   const start: GameRunStepRunner["Service"]["start"] = () =>
     Effect.gen(function* () {
       yield* jobs.attach({
+        // A folder that cannot be read is no reason to skip the question.
+        showable: (threadId, lane, decision) =>
+          projects.resolve(threadId).pipe(
+            Effect.flatMap((root) => Effect.promise(() => presentable(root, lane, decision))),
+            Effect.map((evidence) => evidence.length > 0),
+            Effect.orElseSucceed(() => true),
+          ),
         execute: executeJob,
         deadline: (job) =>
           deadline(job).pipe(

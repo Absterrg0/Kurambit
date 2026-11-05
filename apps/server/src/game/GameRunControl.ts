@@ -246,7 +246,8 @@ const make = Effect.gen(function* () {
       } satisfies GameRunStartResult;
     }
     // A game an earlier Kurambit ran keeps its files and git history, but its
-    // run record is not this run's: the run starts fresh from a brief.
+    // run record is not this run's. The one fact taken from it is that the game
+    // was built already: the new run continues from the game as it is.
     const earlier =
       run === null &&
       (yield* Effect.promise(() =>
@@ -262,7 +263,7 @@ const make = Effect.gen(function* () {
         root,
         "brief-required",
         earlier
-          ? "This game's earlier run is from an older Kurambit and cannot be resumed: its state was not carried over. Start a new run with a brief; the game's files and git history stay as they are."
+          ? "This game's earlier run is from an older Kurambit and cannot be resumed: its state was not carried over. Start a new run with a brief: it continues from the game as it is now (a plan and ladder, then rounds), and the earlier history stays in git."
           : "A new run needs a brief.",
       );
     const runId = GameRunId.make(
@@ -281,6 +282,7 @@ const make = Effect.gen(function* () {
       ...(input.profile === undefined ? {} : { profile: input.profile }),
       modelSelection: selectionFor(current, chosen),
       runtimeMode: projection.thread.runtimeMode,
+      ...(earlier ? { stage: "build" as const } : {}),
     });
     const started = (yield* latestOf(input.threadId)).run;
     yield* logLine(
@@ -295,7 +297,7 @@ const make = Effect.gen(function* () {
       stage: started?.stage ?? "starting",
       resumed: false,
       message: earlier
-        ? "A new run started from the brief. This game's earlier run is from an older Kurambit: its state (stage, rounds, ladder, decisions) was not carried over, so the run starts from the beginning; the game's files and git history stay as they are."
+        ? "A new run started from the brief and continues from the game as it is now: no new vision or prototypes; the plan writes a ladder for this game, then rounds build it. This game's earlier run is from an older Kurambit: its rounds, ladder and decisions were not carried over, and its history stays in git."
         : "The run started; watch it on the Run tab.",
     } satisfies GameRunStartResult;
   });

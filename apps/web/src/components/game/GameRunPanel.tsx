@@ -72,6 +72,8 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const [startProfile, setStartProfile] = useState<GameRunProfile | null>(null);
   const [note, setNote] = useState("");
   const [steerMessage, setSteerMessage] = useState<string | null>(null);
+  // What the last start did, in one line (a resume, a fresh run, an earlier run not carried over).
+  const [startMessage, setStartMessage] = useState<string | null>(null);
   const [brief, setBrief] = useState("");
   const [budgetMinutes, setBudgetMinutes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -115,8 +117,13 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       },
     });
     setBusy(false);
-    if (result._tag === "Failure") setError(String(squashAtomCommandFailure(result)));
-    else statusQuery.refresh();
+    if (result._tag === "Failure") {
+      setStartMessage(null);
+      setError(String(squashAtomCommandFailure(result)));
+      return;
+    }
+    setStartMessage(result.value.message);
+    statusQuery.refresh();
   };
   const stop = async () => {
     if (busy) return;
@@ -251,6 +258,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             {error}
           </p>
         ) : null}
+        {startMessage ? <p className="text-2xs text-muted-foreground">{startMessage}</p> : null}
         {!active ? (
           <div className="space-y-2">
             <Textarea

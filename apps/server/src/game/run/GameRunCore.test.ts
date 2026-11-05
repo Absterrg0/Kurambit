@@ -22,6 +22,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  MessageId,
   RunId,
   ThreadId,
   gameRunStepCommandId,
@@ -219,6 +220,7 @@ const countingRunner = Effect.gen(function* () {
       ),
     deadline: () => Effect.void,
     finish: () => Effect.void,
+    showable: () => Effect.succeed(true),
   };
   yield* (yield* GameRunJobs.GameRunJobs).attach(runner);
   const jobs = yield* GameRunJobs.GameRunJobs;
@@ -302,6 +304,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       yield* createCreator;
+      // The runner only says the decision has something to show; nothing holds the wait.
+      yield* countingRunner;
       yield* startRun("guided");
       // Through the creator's style decision, step by step, as the jobs would report.
       const planner = ThreadId.make("thread:vision");
@@ -398,6 +402,7 @@ const layerAdmitting = GameRunRecovery.layer.pipe(
 it.effect("a decision asked again after a resume wakes the creator's chat again", () =>
   Effect.gen(function* () {
     yield* createCreator;
+    yield* countingRunner;
     yield* startRun("guided");
     yield* completeStep((yield* inFlight).step!, gitOk);
     yield* completeStep((yield* inFlight).step!, roleDone(ThreadId.make("thread:vision")));
@@ -968,12 +973,119 @@ it.effect("a game an earlier run left a run.json in starts fresh, and says so", 
       assert.include(resume.message, "was not carried over");
       const started = yield* control.runStart({ threadId: creator, brief: "A small arena game." });
       assert.isFalse(started.resumed);
-      assert.equal(started.stage, "starting");
-      assert.include(started.message, "was not carried over");
-      // Nothing of the old record became the new run's.
-      const { run } = yield* inFlight;
-      assert.equal(run.stage, "starting");
+      assert.include(started.message, "not carried over");
+      assert.include(started.message, "continues from the game as it is now");
+      // The one fact taken over: the game was built, so no vision or prototypes go over it.
+      assert.equal(started.stage, "build");
+      const { run, step } = yield* inFlight;
+      assert.equal(run.stage, "build");
       assert.notEqual(run.id, "run_old");
+      assert.deepEqual(run.decided, []);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "game-run.step.complete",
+        commandId: gameRunStepCommandId(step!.id, step!.attempt, "complete"),
+        threadId: creator,
+        runId: run.id,
+        stepId: step!.id,
+        attempt: step!.attempt,
+        result: gitOk,
+      });
+      const next = (yield* inFlight).step!;
+      assert.equal(next.step.kind === "role" ? next.step.role : next.kind, "plan");
+      assert.equal(next.step.kind === "role" ? next.step.title : "", "studio ladder");
     }),
   ),
+);
+
+it.effect("a decision with nothing on disk to show takes its default without asking", () =>
+  withGame(() =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("guided");
+      yield* startRunner;
+      yield* completeStep((yield* inFlight).step!, gitOk);
+      yield* completeStep((yield* inFlight).step!, roleDone(ThreadId.make("thread:vision")));
+      yield* completeStep((yield* inFlight).step!, { ...gitOk, git: { ...gitOk.git, sha: "s2" } });
+      yield* completeStep((yield* inFlight).step!, {
+        kind: "boot",
+        ok: true,
+        detail: "boot clean",
+      });
+      assert.equal((yield* inFlight).run.status, "waiting");
+      // The game folder has no VISION.md and no key art: the wake takes the default at once.
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      const after = yield* inFlight;
+      assert.deepEqual(
+        after.run.decided.map((d) => [d.kind, d.by]),
+        [["style", "default"]],
+      );
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const { messages } = yield* projections.getThreadRecords(creator, ["messages"]);
+      assert.lengthOf(
+        messages.filter((m) => m.id.startsWith("message:game-run-decision:")),
+        0,
+      );
+    }),
+  ),
+);
+
+it.effect("startup stops a role turn no step record names, and leaves a named one", () =>
+  Effect.gen(function* () {
+    yield* createCreator;
+    yield* startRun("autopilot");
+    yield* countingRunner;
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    yield* completeStep((yield* inFlight).step!, gitOk);
+    const vision = (yield* inFlight).step!;
+    const named = roleThreadId(vision.id, 1);
+    const unnamed = ThreadId.make("thread:loop-era-role");
+    for (const threadId of [named, unnamed])
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: nextId(),
+        threadId,
+        projectId,
+        title: "studio role",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "server",
+        parentThreadId: creator,
+        launchedBy: "game_run",
+      });
+    yield* orchestrator.dispatch({
+      type: "game-run.step.start",
+      commandId: nextId(),
+      threadId: creator,
+      runId,
+      stepId: vision.id,
+      roleThreadId: named,
+    });
+    for (const threadId of [named, unnamed])
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: nextId(),
+        threadId,
+        messageId: MessageId.make(`message:${threadId}`),
+        text: "Keep building.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "server",
+      });
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const live = (yield* projections.listLiveGameRunRoleTurns()).map((t) => t.threadId);
+    assert.sameMembers(live, [named, unnamed]);
+    yield* (yield* GameRunRecovery.GameRunRecovery).recover();
+    const runsOf = (threadId: ThreadId) =>
+      Effect.map(projections.getThreadRecords(threadId, ["runs"]), (r) => r.runs);
+    const stopped = (yield* runsOf(unnamed)).at(-1);
+    const kept = (yield* runsOf(named)).at(-1);
+    assert.notInclude(["preparing", "starting", "running", "waiting"], stopped?.status);
+    assert.include(["preparing", "starting", "running", "waiting"], kept?.status);
+  }).pipe(Effect.provide(layerWithRecovery)),
 );

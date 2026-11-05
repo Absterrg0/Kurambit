@@ -25,6 +25,7 @@ import { forkParked } from "../../serverActivation.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as TurnAdmission from "../TurnAdmission.ts";
+import * as GameRunJobs from "./GameRunJobs.ts";
 import { decisionWakeIds, isDecisionWake } from "./ids.ts";
 
 interface DecisionEffect {
@@ -82,6 +83,7 @@ const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const turnAdmission = yield* TurnAdmission.TurnAdmission;
+  const jobs = yield* GameRunJobs.GameRunJobs;
 
   const current = (threadId: ThreadId, runId: GameRunId) =>
     projections.getGameRunRecords(threadId, { steps: "in-flight" }).pipe(
@@ -99,6 +101,23 @@ const make = Effect.gen(function* () {
       const { run, step } = yield* current(effect.threadId, effect.runId).pipe(Effect.orDie);
       if (!isWaitingOn(run, step, effect.decisionId) || step?.step.kind !== "decide") return;
       const decision = step.step.decision;
+      // A question with nothing on disk to show is not asked: it takes its
+      // default at once. The ladder's decision shows its own text.
+      if (
+        decision.kind !== "ladder" &&
+        run !== undefined &&
+        !(yield* jobs.showable(effect.threadId, run.lane, decision))
+      )
+        return yield* settledByRefusal(
+          engine.dispatch({
+            type: "game-run.decision.expire",
+            commandId: CommandId.make(`server:game-run-expire:${effect.effectId}:nothing-to-show`),
+            threadId: effect.threadId,
+            runId: effect.runId,
+            decisionId: decision.id,
+            nothingToShow: true,
+          }),
+        );
       const { commandId, messageId } = decisionWakeIds(effect.runId, decision.id, step.attempt);
       // The wake starts a turn on the creator's chat, so it takes the same
       // admission as any other message turn before it reaches the orchestrator.

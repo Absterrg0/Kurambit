@@ -425,6 +425,15 @@ export interface ProjectionStoreV2Shape {
     ReadonlyArray<ThreadId>,
     ProjectionStoreV2Error
   >;
+  /** Live runs on threads a game run launched, with the thread each was launched under. */
+  readonly listLiveGameRunRoleTurns: () => Effect.Effect<
+    ReadonlyArray<{
+      readonly threadId: ThreadId;
+      readonly parentThreadId: ThreadId | null;
+      readonly runId: RunId;
+    }>,
+    ProjectionStoreV2Error
+  >;
 
   readonly apply: (
     event: OrchestrationV2DomainEvent,
@@ -5091,6 +5100,32 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           Effect.mapError(controlReadError(threadId)),
         );
 
+    const listLiveGameRunRoleTurns: ProjectionStoreV2Shape["listLiveGameRunRoleTurns"] = () =>
+      sql<{
+        readonly thread_id: string;
+        readonly parent_thread_id: string | null;
+        readonly run_id: string;
+      }>`
+        SELECT thread.thread_id,
+          json_extract(thread.payload_json, '$.lineage.parentThreadId') AS parent_thread_id,
+          run.run_id
+        FROM orchestration_v2_projection_threads AS thread
+        JOIN orchestration_v2_projection_runs AS run ON run.thread_id = thread.thread_id
+        WHERE thread.deleted_at IS NULL
+          AND json_extract(thread.payload_json, '$.launchedBy') = 'game_run'
+          AND run.status IN ('preparing', 'starting', 'running', 'waiting')
+      `.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            threadId: ThreadId.make(row.thread_id),
+            parentThreadId:
+              row.parent_thread_id === null ? null : ThreadId.make(row.parent_thread_id),
+            runId: RunId.make(row.run_id),
+          })),
+        ),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const listGameRunThreadsToRecover: ProjectionStoreV2Shape["listGameRunThreadsToRecover"] = () =>
       sql<{ readonly thread_id: string }>`
         SELECT DISTINCT thread_id FROM orchestration_v2_projection_game_runs
@@ -6326,6 +6361,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThreadRecords,
       getGameRunRecords,
       listGameRunThreadsToRecover,
+      listLiveGameRunRoleTurns,
       getRuntimeRequest,
       getPlan,
       getProviderControlContext,
@@ -6698,6 +6734,26 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ),
           };
         }),
+      listLiveGameRunRoleTurns: () =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.projections.values()].flatMap((projection) =>
+              projection.thread.deletedAt !== null || projection.thread.launchedBy !== "game_run"
+                ? []
+                : projection.runs.flatMap((run) =>
+                    ["preparing", "starting", "running", "waiting"].includes(run.status)
+                      ? [
+                          {
+                            threadId: projection.thread.id,
+                            parentThreadId: projection.thread.lineage.parentThreadId,
+                            runId: run.id,
+                          },
+                        ]
+                      : [],
+                  ),
+            ),
+          ),
+        ),
       listGameRunThreadsToRecover: () =>
         Ref.get(replayState).pipe(
           Effect.map((state) =>

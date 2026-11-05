@@ -463,7 +463,9 @@ const start = (work: Work, command: Command<"game-run.start">) => {
   const state: State.RunState = {
     ...fresh,
     rounds: fresh.rounds.toSorted((a, b) => a.round - b.round),
-    stage: prior?.stage ?? fresh.stage,
+    // A game an earlier run built continues from what it is; stages a run on
+    // this thread finished are not redone either.
+    stage: command.stage ?? prior?.stage ?? fresh.stage,
     pickNotes: prior?.pickNotes ?? "",
     picked: prior?.picked ?? null,
     lastDirection: prior?.lastDirection ?? "",
@@ -693,7 +695,7 @@ const decideCommand = (work: Work, command: Command<"game-run.decide">) =>
 const expire = (work: Work, command: Command<"game-run.decision.expire">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(waitingDecision(work, run, command.decisionId), ({ record, step }) =>
-      Policy.decisionWait(step, work.now).kind !== "default"
+      command.nothingToShow !== true && Policy.decisionWait(step, work.now).kind !== "default"
         ? refuse("not-due", `Decision ${step.decision.id} is not due yet.`)
         : Result.succeed(
             takeDecision(work, run, record, {

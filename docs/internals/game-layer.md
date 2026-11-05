@@ -242,8 +242,9 @@ stream; the Run tab and `game_run_status` read the records.
 
 Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups,
 run.log) are written for people and later roles; nothing the run decides reads them. A game
-whose `.studio/run.json` comes from the run's earlier file-based form starts fresh from a brief;
-that state is not imported.
+whose `.studio/run.json` comes from the run's earlier file-based form imports nothing of it but
+the fact that the game was built: its new run starts at the rounds (`stage: "build"`), where the
+plan writes a ladder for the game as it is, so no placeholder prototypes go over a finished game.
 
 `game_blender_render_sprites` exists because weak models cannot write sprite framing: their
 renders cropped heads, drifted across a walk cycle and came out near-black. It fits one fixed

@@ -96,8 +96,10 @@ and the reviewer's direction. Your agent can read the same with `game_run_round`
 what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
 the work. **Stop run** ends it; rejected work stays on its branch. Starting the run again without
 a new brief continues it where it stopped, and if Kurambit restarts during a run, the run picks up
-where it was on its own. A game whose run was made by an earlier version of Kurambit starts a new
-run from your brief: its files and git history stay, but that run's progress is not carried over.
+where it was on its own. A game whose run was made by an earlier version of Kurambit needs a new
+run from your brief, which continues from the game as it is: no new vision or prototypes, a plan
+writes a ladder for the game, then rounds build it. The earlier run's rounds, ladder and decisions
+are not carried over; its history stays in git.
 
 A run is **Guided** (the default) or on **Autopilot**. A Guided run asks you at the moments that
 shape the game: once the vision and its key art exist, once both prototypes are built, and once
