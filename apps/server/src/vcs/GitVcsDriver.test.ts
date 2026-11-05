@@ -1166,7 +1166,7 @@ it.effect("GitVcsDriver flushes checkpoint objects and refs to disk before publi
     assert.strictEqual(writes.length, 4);
     for (const args of writes) {
       const command = args.findIndex((arg) => writeCommands.includes(arg));
-      for (const setting of ["core.fsync=objects,reference", "core.fsyncMethod=fsync"]) {
+      for (const setting of ["core.fsync=objects,reference,index", "core.fsyncMethod=fsync"]) {
         const index = args.indexOf(setting);
         assert.strictEqual(args[index - 1], "-c", args.join(" "));
         assert.isBelow(index, command);
@@ -1176,7 +1176,7 @@ it.effect("GitVcsDriver flushes checkpoint objects and refs to disk before publi
       "-C",
       "/repo",
       "-c",
-      "core.fsync=objects,reference",
+      "core.fsync=objects,reference,index",
       "-c",
       "core.fsyncMethod=fsync",
       "update-ref",

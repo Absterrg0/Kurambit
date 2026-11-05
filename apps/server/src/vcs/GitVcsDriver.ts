@@ -1173,11 +1173,16 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
   // power loss after update-ref could leave a ref to missing objects. Linux
   // keeps fsync per object: durability over speed, though many new small files
   // pay for it there (20k new files took 26 s per-object, 0.9 s batched).
+  // The index a capture writes is flushed too, since it becomes the kept index.
   const hostPlatform = yield* HostProcess.Platform;
-  const captureWrite =
+  const captureWrite = [
+    "-c",
+    "core.fsync=objects,reference,index",
+    "-c",
     hostPlatform === "darwin" || hostPlatform === "win32"
-      ? (["-c", "core.fsync=objects,reference", "-c", "core.fsyncMethod=batch"] as const)
-      : durableWrite;
+      ? "core.fsyncMethod=batch"
+      : "core.fsyncMethod=fsync",
+  ] as const;
 
   const captureFileError = (file: string) => (cause: PlatformError.PlatformError) =>
     new VcsProcessExitError({
@@ -1678,6 +1683,11 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         cwd,
         args: [...captureWrite, "update-ref", place.ref, commitOid],
       });
+      // Flushed before it is renamed into place: a capture that changed nothing
+      // may leave the copy unwritten by git, and so unflushed by core.fsync.
+      yield* Effect.scoped(
+        fileSystem.open(tempIndexPath, { flag: "r+" }).pipe(Effect.flatMap((file) => file.sync)),
+      );
       // A replace-rename; on Windows a scanner holding the old file can refuse it for a moment.
       yield* fileSystem
         .rename(tempIndexPath, place.file)
@@ -1784,7 +1794,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       const captureConfig: ReadonlyArray<readonly [string, string]> = [
         ["core.splitIndex", "false"],
         ["core.untrackedCache", "false"],
-        // A checksum on every index write, so a torn kept index reads as corrupt.
+        // Git still writes the index's checksum, though it does not check it on
+        // a normal read. What guards a torn kept index is the flush before its
+        // rename, then git refusing to parse it or write-tree failing on it,
+        // either of which reseeds.
         ["index.skipHash", "false"],
         ...(sparseCheckout ? [] : ([["index.sparse", "false"]] as const)),
       ];
