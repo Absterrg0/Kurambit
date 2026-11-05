@@ -293,7 +293,7 @@ export const reviewerWrite = (n: number, move: string, verdicts: string, facts: 
 
 // Ladder rounds: next.md is a ledger the builder clears beside the next rung, never a goal.
 const LEDGER_READ = (n: number, comparison: string) =>
-  `This round's tester and blind players already played this build: do not play it again. Read PLAN.md, the tester's notes .studio/tester-${n}.md, ${comparison === "" ? "" : `this round's comparison ${comparison} (the blind players' reports and frame sheets), `}.studio/bot-results.jsonl and the code. Write .studio/reviewer-${n}.md with what their play shows and what you see in the code.`;
+  `This round's tester and blind players already played this build: do not play it again. Read PLAN.md, the tester's notes .studio/tester-${n}.md, ${comparison === "" ? "" : `this round's comparison ${comparison} (the blind players' reports and frame sheets), `}and the code. Write .studio/reviewer-${n}.md with what their play shows and what you see in the code.`;
 const LEDGER_BODY = (built: string, ladder: string) =>
   `The ledger is what the builder clears alongside the next rung, never instead of it: the bugs and rough edges their play shows, most important first, each with where it shows; how to raise the feel and look; a DO NOT REGRESS list of what works now; the furthest state reached and what blocked further progress. Name no next move: the ladder sets each round's goal. This round: ${built} The ladder now:\n${ladder}\n`;
 
