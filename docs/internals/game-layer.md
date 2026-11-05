@@ -211,14 +211,27 @@ reach none of its controls.
   every thread's provider work shares. A step's effect (`game-run.step.execute`) hands its work to
   `GameRunJobs` (in-process, bounded, scoped fibers) and settles at once; the job reports with
   `game-run.step.complete` or `game-run.step.fail`. A role step's job only launches the role.
+  The step's timers are short (a role's cap is a read and an interrupt or a reschedule; a turn sent
+  again is a read and a dispatch), so they run inside their effects, as the decisions do: the
+  effect stays unsettled until its act is committed, and the outbox runs it again after a failure
+  or a server death. A timer that only forked a job would be done before its work, and a death in
+  between would leave the step running with no job and no timer.
+- **No failure is an answer.** A read or write the run decides by, or that moves it on, never
+  turns into null, false or a log line: it fails up to `retrying` (game/run/retrying.ts) and, when
+  every try fails, to a recorded ending (`game-run.step.fail`, a stop) or a log that recovery
+  owes it at startup. Only best-effort work for people (sheets, notes, log lines) and reads whose
+  unknown has a safe reading (a check with nothing to show is asked anyway) may swallow.
 - **Attempts.** A step planned again (a resume) is a new attempt. Every report carries its attempt
   and a command id derived from step, attempt and action (`gameRunStepCommandId`), so a late report
   of an earlier try is refused and a retried one is a no-op. Each attempt has its own role thread
   id; `game-run.step.start` records a role's thread before its first turn, and replaces a thread
   only when it names the one it replaces.
+- **A landing's outputs are an effect of its commit.** The records a step's result writes (the
+  ladder, notes, comparisons) and the copies it frees go in a `game-run.outputs` effect committed
+  with the landing, ahead of the next step's effect, so the outbox's order writes them before the
+  next step and a stop never cancels them. No later job does an earlier step's work.
 - **Finish is an effect.** The commit that ends a run emits `game-run.finish`; its job stops the
-  run's jobs and live role turns, does the last outputs, exports the best build, then records
-  `game-run.finished`. A finish is safe to run twice: an ending mid-round keeps the folder's
+  run's jobs and live role turns, exports the best build, then records `game-run.finished`. A finish is safe to run twice: an ending mid-round keeps the folder's
   unfinished work as a build once per ending, restores the best for the exports and puts the work
   back, so a resume goes on from it.
 - **Restore is a command first.** `game-run.restore.request` records the pending restore, a job does
@@ -229,9 +242,13 @@ reach none of its controls.
   lands (`Policy.abandonRound`), never at the request: a refused restore leaves it resumable, and a
   job a restart cut short sees the same round and makes the same choice.
 - **Recovery** (`GameRunRecovery`, at startup): a live run's unfinished step gets its job again,
-  and an ending whose finish is not recorded finishes again. Every step is safe to repeat because
+  and an ending whose finish is not recorded finishes again. Recovery never jumps the outbox's
+  order: a step whose `game-run.step.execute`, `.wake` or `.resend` is still owed, and an ending whose
+  `game-run.finish` is, are left to those effects, which run behind the outputs before them; any
+  other step is woken with a `game-run.step.schedule` of kind `recover`. Only a finish or restore
+  whose effect was already taken (so everything before it ran) gets its job straight back. Every step is safe to repeat because
   its job first finds what an earlier try left: a role's thread, a turn of this attempt that ended
-  (landed now), one still running (its cap watched again). A stopped run is never continued except
+  (landed now), one still running (its cap set again as a timer). A stopped run is never continued except
   by `game-run.resume`.
 - **The role reactor's rule.** A role turn's message id names its step and attempt; a restart's
   continuation of a turn (`restartContinuationOfRunId`) is the same turn. `GameRunRoleReactor`
@@ -369,7 +386,14 @@ write-ups once all verdicts are in. The copies live in a folder of the run's own
 Kurambit's worktrees folder, never in the game repository. A home inside some repository would
 otherwise lend every copy that repository's git, so the server puts the copies' folder in
 `GIT_CEILING_DIRECTORIES` for itself and everything it starts ([config.ts](../../apps/server/src/config.ts)):
-T3 then treats a copy as the non-repository it is. The game folder stays reachable by
+T3 then treats a copy as the non-repository it is. A copy goes with the commit that frees it, as a
+`game-run.outputs` effect: the landing of a role with no turn left, or the restore that abandons
+its round. An ending nothing can resume (its ending, a deleted chat or project) frees every copy of
+the run in its finish; a resumable one keeps its roles' copies until they are spent (`copiesSpent`,
+under the game-logs period). Storage cleanup never removes a named run's copies itself: it asks the
+run (`game-run.copies.spend`), whose decider frees them with a `game-run.copies.release` effect on
+the run's own thread, so a resume either refuses the ask or queues behind the release and makes
+fresh copies. The game folder stays reachable by
 path, and what is blind by construction is the player's or comparator's folder and prompt. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
 renders against the vision and may ask for one bounded redo before the art is

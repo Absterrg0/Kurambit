@@ -43,6 +43,7 @@ import type * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAd
 import * as ServerSettings from "../../serverSettings.ts";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import * as EffectOutbox from "../../orchestration-v2/EffectOutbox.ts";
 import * as EffectWorker from "../../orchestration-v2/EffectWorker.ts";
 import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import * as GameRunDecisions from "../../orchestration-v2/gameRun/GameRunDecisions.ts";
@@ -69,6 +70,7 @@ import * as GameService from "../GameService.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import * as GameRunStepRunner from "./GameRunStepRunner.ts";
 import * as Policy from "./policy.ts";
+import { runCopies } from "./roleWorkspace.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 const modelSelection = { instanceId, model: "gpt-5.1-codex" };
@@ -91,6 +93,7 @@ const refuseTurns = Layer.succeed(TurnAdmission.TurnAdmission, {
 const layerDatabase = SqlitePersistence.layerMemory;
 const layerCore = Layer.mergeAll(
   ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
+  EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
   ProviderReplayHarness.layerWithRegistry(
     { name: "game-run-core" },
     ProviderAdapterRegistry.layerFromAdapters([adapter]),
@@ -212,6 +215,7 @@ const awaitStep = (stepId: string, status: GameRunStep["status"]) =>
 /** A runner standing in for the game layer: it counts each step it is handed and lands git steps. */
 const countingRunner = Effect.gen(function* () {
   const handed: string[] = [];
+  const finishes: string[] = [];
   const arrivals = yield* Queue.unbounded<string>();
   const hold = yield* Deferred.make<void>();
   const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -231,15 +235,19 @@ const countingRunner = Effect.gen(function* () {
         Effect.orDie,
       ),
     deadline: () => Effect.void,
-    finish: () => Effect.void,
+    finish: (job) => Effect.sync(() => void finishes.push(job.endedAt)),
     restore: () => Effect.void,
     resend: () => Effect.void,
+    outputs: () => Effect.void,
+    releaseCopies: () => Effect.void,
     showable: () => Effect.succeed(true),
   };
   yield* (yield* GameRunJobs.GameRunJobs).attach(runner);
   const jobs = yield* GameRunJobs.GameRunJobs;
   return {
     handed,
+    /** Each ending a finish job was handed for. */
+    finishes,
     /** The next job the runner was handed. */
     next: Queue.take(arrivals),
     live: (stepId: string, attempt: number) => jobs.isLive(`execute:${stepId}:attempt:${attempt}`),
@@ -248,20 +256,25 @@ const countingRunner = Effect.gen(function* () {
 });
 
 it.effect(
-  "a job a restart lost runs again, and a step that finished lands nothing more",
+  "recovery leaves an owed step to the outbox, wakes a lost job through it, and a finished step lands nothing more",
   () =>
     Effect.gen(function* () {
       yield* createCreator;
       yield* startRun("autopilot");
       const { handed, next, release } = yield* countingRunner;
       const recovery = yield* GameRunRecovery.GameRunRecovery;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       const first = (yield* inFlight).step!;
-      // The step's effect never ran: the server stopped before the worker claimed it.
+      // The step's effect never ran: the server stopped before the worker
+      // claimed it. Recovery leaves the step to that effect, in its order.
       yield* recovery.recover();
+      assert.deepEqual(handed, []);
+      yield* worker.drain();
       assert.equal(yield* next, `${first.id}#1`);
-      // A second pass while the job is live starts nothing alongside it: it asks
-      // for one run after, which reads the records afresh.
+      // The effect is spent and the job lost to a restart: recovery wakes the
+      // step through the outbox. The job still live here asks for one run after.
       yield* recovery.recover();
+      yield* worker.drain();
       assert.deepEqual(handed, [`${first.id}#1`]);
 
       const landed = yield* awaitStep(first.id, "completed");
@@ -272,15 +285,32 @@ it.effect(
       const second = (yield* inFlight).step!;
       assert.notEqual(second.id, first.id);
       yield* recovery.recover();
+      yield* worker.drain();
       assert.equal(yield* next, `${second.id}#1`);
       assert.deepEqual(handed, [`${first.id}#1`, `${first.id}#1`, `${second.id}#1`]);
       // The outbox's own effects for the finished step change nothing either.
-      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       yield* worker.drain();
       assert.deepEqual(handed.filter((h) => h === `${first.id}#1`).length, 2);
       assert.equal((yield* inFlight).steps.find((s) => s.id === first.id)?.status, "completed");
     }).pipe(Effect.provide(layerWithRecovery)),
   20_000,
+);
+
+it.effect("recovery leaves an ending to its finish effect while the outbox still owes it", () =>
+  Effect.gen(function* () {
+    yield* createCreator;
+    yield* startRun("autopilot");
+    const { finishes } = yield* countingRunner;
+    yield* stopRun;
+    const recovery = yield* GameRunRecovery.GameRunRecovery;
+    // The finish effect never ran: whatever the thread owes before it runs first.
+    yield* recovery.recover();
+    assert.deepEqual(finishes, []);
+    yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+    // The effect hands the finish to a job of its own.
+    for (let turn = 0; turn < 100 && finishes.length === 0; turn += 1) yield* Effect.yieldNow;
+    assert.deepEqual(finishes, [(yield* inFlight).run.endedAt]);
+  }).pipe(Effect.provide(layerWithRecovery)),
 );
 
 it.effect("a stopped run stays stopped across recovery, until a resume", () =>
@@ -313,6 +343,7 @@ it.effect("a stopped run stays stopped across recovery, until a resume", () =>
       runId,
     });
     yield* recovery.recover();
+    yield* worker.drain();
     assert.equal(yield* next, `${(yield* inFlight).step!.id}#2`);
   }).pipe(Effect.provide(layerWithRecovery)),
 );
@@ -511,6 +542,7 @@ const layerAdmitting = GameRunRecovery.layer.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
+      EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
       ProviderReplayHarness.layerWithRegistry(
         { name: "game-run-core-admitting" },
         ProviderAdapterRegistry.layerFromAdapters([adapter]),
@@ -595,6 +627,22 @@ interface World {
   onCreatorShell: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
   onSend: ((threadId: ThreadId, messageId: string) => void) | null;
+  /** Runs, once, as a role turn is being sent, before it reaches the thread. */
+  duringSend: Effect.Effect<void> | null;
+  /** This many sends break before reaching the thread, as a server dying mid-send would. */
+  sendBreaks: number;
+  /** This many interrupts break before reaching the thread. */
+  interruptBreaks: number;
+  /** This many of the role reactor's reads of the run's records break. */
+  recordsBreaks: number;
+  /** This many of the runner's game-run.finished and game-run.restore dispatches break. */
+  endRecordBreaks: number;
+  /** Breaks a read of the run's records by the runner or the reactor when it answers true. */
+  breakRead: ((who: "runner" | "reactor", steps: unknown) => boolean) | null;
+  /** Breaks a command the runner or the reactor sends when it answers true. */
+  breakDispatch: ((who: "runner" | "reactor", commandId: string, type: string) => boolean) | null;
+  /** Every command the runner or the reactor sent that went through, by id. */
+  readonly dispatched: string[];
   /** Resolved once a role's cap watch reads its turn's memory waits. */
   readonly capWatched: Deferred.Deferred<void>;
   /** Resolved with each role thread launched. */
@@ -621,6 +669,14 @@ const newWorld = Effect.gen(function* () {
     folderGone: false,
     onCreatorShell: null,
     onSend: null,
+    duringSend: null,
+    sendBreaks: 0,
+    interruptBreaks: 0,
+    recordsBreaks: 0,
+    endRecordBreaks: 0,
+    breakRead: null,
+    breakDispatch: null,
+    dispatched: [],
     capWatched: yield* Deferred.make<void>(),
     launched: yield* Queue.unbounded<ThreadId>(),
     interrupted: yield* Queue.unbounded<string>(),
@@ -710,19 +766,37 @@ const roleThreadsOf = (world: World) =>
               : null,
           ),
         interruptThread: (input) =>
-          Effect.sync(() => {
-            world.interrupts.push({ threadId: input.threadId, commandId: input.commandId });
-            world.receipts.add(input.commandId);
-          }).pipe(
+          Effect.suspend(() =>
+            world.interruptBreaks-- > 0 ? Effect.die("interrupt broke") : Effect.void,
+          ).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                world.interrupts.push({ threadId: input.threadId, commandId: input.commandId });
+                world.receipts.add(input.commandId);
+              }),
+            ),
             Effect.andThen(Queue.offer(world.interrupted, input.commandId)),
             Effect.as({ type: "no_active_run" as const }),
           ),
         sendToThread: (input) =>
-          Effect.sync(() => {
-            world.sends.push({ threadId: input.threadId, messageId: input.messageId });
-            world.onSend?.(input.threadId, input.messageId);
-            return {} as never;
-          }),
+          Effect.suspend(() =>
+            world.sendBreaks-- > 0 ? Effect.die("send broke") : Effect.void,
+          ).pipe(
+            Effect.andThen(
+              Effect.suspend(() => {
+                const during = world.duringSend ?? Effect.void;
+                world.duringSend = null;
+                return during;
+              }),
+            ),
+            Effect.andThen(
+              Effect.sync(() => {
+                world.sends.push({ threadId: input.threadId, messageId: input.messageId });
+                world.onSend?.(input.threadId, input.messageId);
+                return {} as never;
+              }),
+            ),
+          ),
       });
     }),
   );
@@ -739,14 +813,63 @@ const gameRoot = () => {
   return root;
 };
 
-const layerGame = (root: string, world: World) =>
-  Layer.mergeAll(GameRunStepRunner.layer, GameRunControl.layer).pipe(
-    Layer.provideMerge(GameRunRoleReactor.layer),
+const layerGame = (root: string, world: World) => {
+  // One config for the runner and the test, which looks in the run's copies folder.
+  const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+    prefix: "game-run-core-config-",
+  }).pipe(Layer.provide(NodeServices.layer));
+  // The runner and the role reactor read the run's records, and send their
+  // commands, through a store and an orchestrator that can break on demand.
+  const projectionsOf = (who: "runner" | "reactor") =>
+    Layer.effect(
+      ProjectionStore.ProjectionStoreV2,
+      Effect.map(ProjectionStore.ProjectionStoreV2, (real) => ({
+        ...real,
+        getGameRunRecords: (threadId, filter) =>
+          Effect.suspend(() =>
+            (who === "reactor" && world.recordsBreaks-- > 0) ||
+            world.breakRead?.(who, filter?.steps) === true
+              ? Effect.fail(new ProjectionStore.ProjectionStoreReadError({ threadId }))
+              : real.getGameRunRecords(threadId, filter),
+          ),
+      })),
+    );
+  const orchestratorOf = (who: "runner" | "reactor") =>
+    Layer.effect(
+      Orchestrator.OrchestratorV2,
+      Effect.map(Orchestrator.OrchestratorV2, (real) => {
+        const dispatch = (command: Parameters<typeof real.dispatch>[0]) =>
+          Effect.suspend(() =>
+            (who === "runner" &&
+              (command.type === "game-run.finished" || command.type === "game-run.restore") &&
+              world.endRecordBreaks-- > 0) ||
+            world.breakDispatch?.(who, command.commandId, command.type) === true
+              ? Effect.fail(
+                  new Orchestrator.OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                    cause: "the event store is busy",
+                  }),
+                )
+              : real
+                  .dispatch(command)
+                  .pipe(
+                    Effect.tap(() => Effect.sync(() => world.dispatched.push(command.commandId))),
+                  ),
+          );
+        return { ...real, dispatch: dispatch as typeof real.dispatch };
+      }),
+    );
+  const runnerOrchestrator = Layer.mergeAll(orchestratorOf("runner"), projectionsOf("runner"));
+  const reactorProjections = Layer.mergeAll(orchestratorOf("reactor"), projectionsOf("reactor"));
+  return Layer.mergeAll(
+    GameRunStepRunner.layer.pipe(Layer.provide(runnerOrchestrator)),
+    GameRunControl.layer,
+  ).pipe(
+    Layer.provideMerge(GameRunRoleReactor.layer.pipe(Layer.provide(reactorProjections))),
     Layer.provide(
       Layer.mergeAll(
-        ServerConfig.ServerConfig.layerTest(process.cwd(), {
-          prefix: "game-run-core-config-",
-        }).pipe(Layer.provide(NodeServices.layer)),
+        layerConfig,
         // The run's builds are real checkpoints of the temp game repository.
         CheckpointStore.layer.pipe(
           Layer.provide(
@@ -797,10 +920,7 @@ const layerGame = (root: string, world: World) =>
                   }),
                 )
               : Effect.succeed(root),
-          read: () =>
-            Effect.fail(
-              new GameOperationError({ operation: "read", path: root, reason: "invalid-input" }),
-            ),
+          read: () => Effect.succeed({ godotProject: "godot" } as never),
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
@@ -820,8 +940,10 @@ const layerGame = (root: string, world: World) =>
         Layer.mock(ServerSettings.ServerSettingsService)({}),
       ),
     ),
+    Layer.provideMerge(layerConfig),
     Layer.provideMerge(layerWithRecovery),
   );
+};
 
 /** A test against a git game folder of its own, removed after. */
 const withGame = <A, E, R>(body: (world: World) => Effect.Effect<A, E, R>) =>
@@ -876,7 +998,18 @@ const awaitRun = (ok: (run: GameRunRecord) => boolean) =>
   });
 
 const startRunner = Effect.flatMap(GameRunStepRunner.GameRunStepRunner, (runner) => runner.start());
-const recover = Effect.flatMap(GameRunRecovery.GameRunRecovery, (recovery) => recovery.recover());
+/** A restart's recovery, and the outbox that carries out what it leaves or asks for. */
+const recover = Effect.gen(function* () {
+  yield* (yield* GameRunRecovery.GameRunRecovery).recover();
+  yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+});
+/** Recovery, with the cap the step's job sets as a timer for the turn it finds or sends, fired. */
+const recoverAndCap = Effect.gen(function* () {
+  const scheduled = yield* awaitRun(() => true);
+  yield* recover;
+  yield* Fiber.join(scheduled);
+  yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+});
 
 it.effect("a role step whose turn ended while the server was down lands from its thread", () =>
   withGame((world) =>
@@ -908,7 +1041,7 @@ it.effect("a turn a server restart cut off lands only when its continuation ends
       });
       world.runs.set(thread, [cut, going]);
       yield* startRunner;
-      yield* recover;
+      yield* recoverAndCap;
       // The step's job reattached and watches the continuation's cap.
       yield* Deferred.await(world.capWatched);
       const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
@@ -943,7 +1076,7 @@ it.effect(
         // The reactor hands a cut-off turn to its step instead of landing it.
         assert.equal(yield* roles.settle(thread, cut), "continue");
         yield* startRunner;
-        yield* recover;
+        yield* recoverAndCap;
         // The step's job continued the turn with its own prompt and watches its cap.
         yield* Deferred.await(world.capWatched);
         assert.deepEqual(
@@ -987,7 +1120,7 @@ it.effect("a continued turn's cap runs from where the cut turn's work began", ()
       // The cap is checked on the run's clock.
       yield* TestClock.setTime(Date.now());
       yield* startRunner;
-      yield* recover;
+      yield* recoverAndCap;
       assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
     }),
   ),
@@ -999,7 +1132,7 @@ it.effect("a stop interrupts the live role turn and stops its jobs, from its out
       const { vision, thread } = yield* atVision(world);
       world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
       yield* startRunner;
-      yield* recover;
+      yield* recoverAndCap;
       // The cap is checked and set again as a durable timer at its due time.
       yield* Deferred.await(world.capWatched);
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -1099,6 +1232,124 @@ it.effect("deleting the creator chat stops its run, which holds the game until i
         [thread],
       );
       assert.isNull(yield* projections.getProjectGameRun(projectId));
+    }),
+  ),
+);
+
+it.effect("a run whose chat is deleted keeps none of its copies, though it ended stopped", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision } = yield* atVision(world);
+      // A blind player's copy the stopped step held: a resume would play on in it.
+      const config = yield* ServerConfig.ServerConfig;
+      const copies = runCopies(config.worktreesDir, runId);
+      const copy = NodePath.join(copies, `step-${vision.seq}`);
+      NodeFS.mkdirSync(copy, { recursive: true });
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: nextId(),
+        threadId: creator,
+      });
+      assert.equal((yield* inFlight).run.ending, "stopped");
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
+      // Nothing can resume a run on a deleted chat, so its finish removed the copy.
+      assert.isFalse(NodeFS.existsSync(copy));
+    }),
+  ),
+);
+
+it.effect("a spent run frees every copy from its own thread's effect", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision } = yield* atVision(world);
+      const config = yield* ServerConfig.ServerConfig;
+      const copies = runCopies(config.worktreesDir, runId);
+      const copy = NodePath.join(copies, `step-${vision.seq}`);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      // A run whose chat is gone: nothing resumes it.
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: nextId(),
+        threadId: creator,
+      });
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      yield* Fiber.join(finished);
+      // A copy left by a role still at work when the finish ran.
+      NodeFS.mkdirSync(copy, { recursive: true });
+      yield* orchestrator.dispatch({
+        type: "game-run.copies.spend",
+        commandId: nextId(),
+        threadId: creator,
+        runId,
+        keepMs: 0,
+      });
+      assert.isTrue(NodeFS.existsSync(copy));
+      yield* worker.drain();
+      assert.isFalse(NodeFS.existsSync(copy));
+    }),
+  ),
+);
+
+it.effect(
+  "a finish whose record breaks for a moment is still recorded, so the run can resume",
+  () =>
+    withGame((world) =>
+      Effect.gen(function* () {
+        const { vision } = yield* atVision(world);
+        yield* completeStep(vision, { kind: "ended", ending: "usage-limit", reason: "limit" });
+        world.endRecordBreaks = 2;
+        yield* startRunner;
+        yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+        const recorded = () =>
+          Effect.map(inFlight, ({ run }) => run.finished !== null && run.finished === run.endedAt);
+        yield* withClockRunning(
+          Effect.gen(function* () {
+            for (let second = 0; second < 60 && !(yield* recorded()); second += 1)
+              yield* Effect.sleep("1 second");
+          }),
+        );
+        assert.isTrue(yield* recorded());
+        yield* resume;
+        assert.equal((yield* inFlight).run.status, "running");
+      }),
+    ),
+);
+
+it.effect("a restore whose outcome breaks for a moment still lands", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* stopRun;
+      yield* finishEnding;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "game-run.restore.request",
+        commandId: nextId(),
+        threadId: creator,
+        runId,
+        requestId: "r1",
+        round: 7,
+      });
+      world.endRecordBreaks = 2;
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      const landed = () => Effect.map(inFlight, ({ run }) => run.restore?.outcome ?? null);
+      yield* withClockRunning(
+        Effect.gen(function* () {
+          for (let second = 0; second < 60 && (yield* landed()) === null; second += 1)
+            yield* Effect.sleep("1 second");
+        }),
+      );
+      // Round 7 was never recorded: the outcome says so, and the run is free again.
+      assert.equal((yield* landed())?.kind, "refused");
     }),
   ),
 );
@@ -1262,6 +1513,406 @@ it.effect("a turn sent again after an instant failure is capped like the first",
       yield* worker.drain();
       assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
       assert.lengthOf(world.sends, 1);
+    }),
+  ),
+);
+
+it.effect("a turn sent again is sent by its timer even when the first try breaks", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.settle(thread, world.runs.get(thread)![0]!);
+      // The send breaks once the timer is due, as a server dying before the turn is queued would.
+      world.sendBreaks = 1;
+      yield* TestClock.setTime(Date.now() + 20_000);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      assert.lengthOf(world.sends, 0);
+      // The timer's effect was never done, so it runs again and the turn goes.
+      yield* TestClock.adjust("1 second");
+      yield* worker.drain();
+      assert.deepEqual(
+        world.sends.map((send) => send.messageId),
+        [roleTurnMessageId(vision.id, 1, "retry", 2)],
+      );
+    }),
+  ),
+);
+
+it.effect("a turn sent again is never interrupted because a read after it broke", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.settle(thread, world.runs.get(thread)![0]!);
+      // The look at the run right after the send breaks: the step is still its.
+      world.onSend = () => {
+        world.recordsBreaks = 1;
+      };
+      yield* TestClock.setTime(Date.now() + 20_000);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      for (let round = 0; round < 3; round += 1) {
+        yield* worker.drain();
+        yield* TestClock.adjust("1 second");
+      }
+      assert.isFalse(world.interrupts.some((i) => i.commandId.includes("resend-late")));
+      assert.isAtLeast(world.sends.length, 1);
+    }),
+  ),
+);
+
+it.effect("a turn sent after a stop is interrupted, even when the first interrupt breaks", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.settle(thread, world.runs.get(thread)![0]!);
+      // The run stops while the turn goes out, and the turn's own interrupt breaks once.
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      world.duringSend = orchestrator
+        .dispatch({ type: "game-run.stop", commandId: nextId(), threadId: creator, runId })
+        .pipe(Effect.asVoid, Effect.orDie);
+      world.interruptBreaks = 1;
+      yield* TestClock.setTime(Date.now() + 20_000);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* withClockRunning(worker.drain());
+      // Its retries run inside the act a stop cannot cut, well within a minute.
+      const late = () => world.interrupts.some((i) => i.commandId.includes("resend-late"));
+      yield* withClockRunning(
+        Effect.gen(function* () {
+          for (let second = 0; second < 60 && !late(); second += 1) yield* Effect.sleep("1 second");
+        }),
+      );
+      assert.isTrue(late());
+    }),
+  ),
+);
+
+it.effect("a role's cap whose interrupt breaks is sent again by its timer", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      yield* startRunner;
+      // Past the cap its timers fire (the step.start's, and the job's for the
+      // turn it reattached to), and the interrupt breaks more often than both try once.
+      world.interruptBreaks = 3;
+      yield* TestClock.setTime(Date.now() + 11 * 60_000);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      for (let round = 0; round < 5; round += 1) {
+        yield* worker.drain();
+        yield* TestClock.adjust("1 second");
+      }
+      assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
+    }),
+  ),
+);
+
+/** Runs `effect` while the test clock moves on, so the backoff between its retries passes. */
+const withClockRunning = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const fiber = yield* Effect.forkScoped(effect);
+    // Real file and git work runs between the retries, so the clock moves on
+    // until the work is done rather than for a fixed time.
+    while (fiber.pollUnsafe() === undefined) {
+      yield* Effect.sleep("5 millis").pipe(TestClock.withLive);
+      yield* TestClock.adjust("1 second");
+    }
+    return yield* Fiber.join(fiber);
+  });
+
+/** A command of another thread already holds `commandId`, so a report under it can never be written. */
+const occupy = (commandId: string) =>
+  Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+    orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make(commandId),
+      threadId: ThreadId.make(`thread:occupier-${++commands}`),
+      projectId,
+      title: "Elsewhere",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    }),
+  );
+
+it.effect("a landing that never gets written fails its step, so the run ends resumably", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      const turn = turnRun({ stepId: vision.id, status: "completed" });
+      world.runs.set(thread, [turn]);
+      yield* occupy(gameRunStepCommandId(vision.id, 1, "complete"));
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* withClockRunning(roles.settle(thread, turn));
+      const { run } = yield* inFlight;
+      assert.equal(run.ending, "failed");
+      assert.match(run.lastFailure ?? "", /could not be landed/);
+    }),
+  ),
+);
+
+it.effect("a turn whose resend timer never gets written fails its step", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      const turn = turnRun({ stepId: vision.id, status: "failed", ranMs: 500 });
+      world.runs.set(thread, [turn]);
+      yield* occupy(`server:game-run-resend:${vision.id}:attempt:1:retry:2`);
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* withClockRunning(roles.settle(thread, turn));
+      const { run } = yield* inFlight;
+      assert.equal(run.ending, "failed");
+      assert.match(run.lastFailure ?? "", /could not be set to go again/);
+    }),
+  ),
+);
+
+it.effect("a step whose job cannot report is tried again, then fails", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* completeStep((yield* inFlight).step!, gitOk);
+      const vision = (yield* inFlight).step!;
+      const own = roleThreadId(vision.id, 1);
+      yield* occupy(`${gameRunStepCommandId(vision.id, 1, "start")}:${own}`);
+      const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      yield* withClockRunning(
+        runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 }),
+      );
+      assert.deepEqual(world.launches, []);
+      const { run } = yield* inFlight;
+      assert.equal(run.ending, "failed");
+      assert.match(run.lastFailure ?? "", /could not be reported after 4 tries/);
+    }),
+  ),
+);
+
+/** Drains the outbox while its clock moves on, so effects run every try they have. */
+const drainThroughRetries = Effect.gen(function* () {
+  const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+  for (let round = 0; round < 30; round += 1) {
+    yield* worker.drain();
+    yield* TestClock.adjust("2 seconds");
+  }
+});
+
+it.effect("a turn its timer cannot send by the last try fails its step", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.settle(thread, world.runs.get(thread)![0]!);
+      world.sendBreaks = 1_000;
+      yield* TestClock.setTime(Date.now() + 20_000);
+      yield* drainThroughRetries;
+      const { run } = yield* inFlight;
+      assert.equal(run.ending, "failed");
+      assert.match(run.lastFailure ?? "", /turn could not be sent/);
+    }),
+  ),
+);
+
+it.effect("a cap its timer cannot send by the last try is set again a minute on", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      yield* startRunner;
+      world.interruptBreaks = 1_000;
+      yield* TestClock.setTime(Date.now() + 11 * 60_000);
+      yield* drainThroughRetries;
+      assert.lengthOf(world.interrupts, 0);
+      // The interrupt works again: nothing is left to send it but the cap set
+      // again a minute on.
+      world.interruptBreaks = 0;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      assert.lengthOf(world.interrupts, 0);
+      yield* TestClock.adjust("61 seconds");
+      yield* worker.drain();
+      assert.isTrue(
+        world.interrupts.some((i) => i.commandId.startsWith("server:game-run-role-cap:")),
+      );
+    }),
+  ),
+);
+
+it.effect("records a landing cannot write by the last try stop the run before its next step", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* atVision(world);
+      yield* startRunner;
+      world.folderGone = true;
+      const jobs = yield* GameRunJobs.GameRunJobs;
+      yield* jobs.outputs({
+        threadId: creator,
+        runId,
+        files: [{ path: ".studio/next.md", text: "1. The jump clips.\n" }],
+        release: [],
+        effectId: "effect:outputs-test",
+        final: true,
+      });
+      assert.equal((yield* inFlight).run.ending, "stopped");
+      // The step the records were for never starts: the stop cancelled its effect.
+      world.folderGone = false;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      assert.deepEqual(world.launches, []);
+    }),
+  ),
+);
+
+/** Breaks the first `count` calls that `matches`, then lets every call through. */
+const firstOf = <A extends ReadonlyArray<unknown>>(
+  count: number,
+  matches: (...args: A) => boolean,
+) => {
+  let broken = 0;
+  return (...args: A) => matches(...args) && broken++ < count;
+};
+
+/** Waits, on the run's clock, until `done` holds or a minute passes. */
+const until = <E = never, R = never>(done: () => boolean | Effect.Effect<boolean, E, R>) =>
+  withClockRunning(
+    Effect.gen(function* () {
+      for (let second = 0; second < 60; second += 1) {
+        const value = done();
+        if (typeof value === "boolean" ? value : yield* value) return;
+        yield* Effect.sleep("1 second");
+      }
+    }),
+  );
+
+it.effect("a step whose records cannot be read for a moment still runs", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* completeStep((yield* inFlight).step!, gitOk);
+      const vision = (yield* inFlight).step!;
+      // The job's look at its step breaks twice: that is no step that moved on.
+      world.breakRead = firstOf(2, (who, steps) => who === "runner" && steps === undefined);
+      const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      yield* withClockRunning(
+        runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 }),
+      );
+      assert.deepEqual(world.launches, [roleThreadId(vision.id, 1)]);
+    }),
+  ),
+);
+
+it.effect("a cut-off turn whose handoff read breaks is still continued", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      const cut = turnRun({ stepId: vision.id, status: "cancelled" });
+      world.runs.set(thread, [cut]);
+      yield* startRunner;
+      // The reactor's second read (the handoff to the step's job) breaks once.
+      let reads = 0;
+      world.breakRead = (who) => who === "reactor" && ++reads === 2;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.handle({
+        type: "run.updated",
+        threadId: thread,
+        payload: cut,
+      } as unknown as OrchestrationV2DomainEvent);
+      yield* until(() => world.sends.length > 0);
+      assert.deepEqual(
+        world.sends.map((send) => send.messageId),
+        [roleTurnMessageId(vision.id, 1, "continue", 2)],
+      );
+    }),
+  ),
+);
+
+it.effect("a reattached turn whose cap could not be set has it set when the job runs again", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      world.breakDispatch = firstOf(
+        1,
+        (who, commandId) => who === "runner" && commandId.includes(":watch:"),
+      );
+      const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      yield* withClockRunning(
+        runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 }),
+      );
+      assert.isTrue(world.dispatched.some((id) => id.includes(":watch:")));
+    }),
+  ),
+);
+
+it.effect("a landing's last resort that breaks once still fails its step", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      const turn = turnRun({ stepId: vision.id, status: "completed" });
+      world.runs.set(thread, [turn]);
+      yield* occupy(gameRunStepCommandId(vision.id, 1, "complete"));
+      world.breakDispatch = firstOf(
+        1,
+        (who, _id, type) => who === "reactor" && type === "game-run.step.fail",
+      );
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* withClockRunning(roles.settle(thread, turn));
+      assert.equal((yield* inFlight).run.ending, "failed");
+    }),
+  ),
+);
+
+it.effect("a finish whose opening read breaks once still finishes", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision } = yield* atVision(world);
+      yield* startRunner;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      // The vision step's own job runs first and sends its turn.
+      yield* worker.drain();
+      yield* until(() => world.sends.length > 0);
+      yield* completeStep(vision, { kind: "ended", ending: "usage-limit", reason: "limit" });
+      world.breakRead = firstOf(1, (who, steps) => who === "runner" && steps === undefined);
+      yield* worker.drain();
+      yield* until(() => Effect.map(inFlight, ({ run }) => run.finished !== null));
+      const { run } = yield* inFlight;
+      assert.equal(run.finished, run.endedAt);
+    }),
+  ),
+);
+
+it.effect("a restart while a turn waits to be sent again leaves it to its resend", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const landings = () =>
+        (NodeFS.existsSync(NodePath.join(lastRoot, ".studio", "run.log"))
+          ? NodeFS.readFileSync(NodePath.join(lastRoot, ".studio", "run.log"), "utf8")
+          : ""
+        ).split("instant-failed turn").length - 1;
+      // The step's job lands the failed turn: its resend waits on a timer.
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* until(() => landings() === 1);
+      // A restart: the step's effect is spent, but its resend still owes it.
+      yield* recover;
+      yield* until(() => landings() > 1);
+      assert.equal(landings(), 1);
     }),
   ),
 );

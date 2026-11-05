@@ -175,6 +175,21 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     runId: GameRunId,
     requestId: Schema.String,
   }),
+  // What a step's landing asks of the game folder, committed with it so the
+  // outbox does it before the run's next step: records written, and role
+  // threads whose copies go. A stop never cancels it.
+  Schema.Struct({
+    type: Schema.Literal("game-run.outputs"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
+    release: Schema.Array(ThreadId),
+  }),
+  // A spent run's copies all go, from the commit that found them spent.
+  Schema.Struct({
+    type: Schema.Literal("game-run.copies.release"),
+    runId: GameRunId,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -197,6 +212,8 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.restore.execute",
   "game-run.step.resend",
   "game-run.step.wake",
+  "game-run.outputs",
+  "game-run.copies.release",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [
@@ -277,6 +294,11 @@ export interface EffectOutboxV2Shape {
   readonly listByCommandId: (
     commandId: CommandId,
   ) => Effect.Effect<ReadonlyArray<OrchestrationEffectV2>, EffectOutboxError>;
+  /** Whether the thread still owes an effect of these types (pending or running). */
+  readonly hasUnsettled: (input: {
+    readonly threadId: ThreadId;
+    readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
+  }) => Effect.Effect<boolean, EffectOutboxError>;
   readonly cancelUnsettled: (input: {
     readonly threadId: ThreadId;
     readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
@@ -513,6 +535,22 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               : new EffectOutboxError({ operation: "list", cause }),
           ),
         ),
+      hasUnsettled: ({ threadId, effectTypes }) =>
+        effectTypes.length === 0
+          ? Effect.succeed(false)
+          : sql<{ readonly found: number }>`
+              SELECT 1 AS found
+              FROM orchestration_v2_effect_outbox
+              WHERE thread_id = ${threadId}
+                AND status IN ('pending', 'running')
+                AND effect_type IN ${sql.in(effectTypes)}
+              LIMIT 1
+            `.pipe(
+              Effect.map((rows) => rows.length > 0),
+              Effect.mapError(
+                (cause) => new EffectOutboxError({ operation: "has-unsettled", cause }),
+              ),
+            ),
       cancelUnsettled: ({ threadId, effectTypes, reason }) =>
         Effect.gen(function* () {
           if (effectTypes.length === 0) return [];

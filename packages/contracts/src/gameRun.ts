@@ -548,6 +548,8 @@ export const GameRunRefusalReason = Schema.Literals([
   "finishing",
   /** A creator's restore of a kept round is moving the game folder. */
   "restoring",
+  /** The run may still use its copies: it is live, finishing, or resumable within the bound. */
+  "copies-in-use",
 ]);
 export type GameRunRefusalReason = typeof GameRunRefusalReason.Type;
 

@@ -68,6 +68,8 @@ const read = (records: Records): Decide.GameRunRecords => {
       run?.inFlight == null
         ? null
         : (records.steps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null),
+    chatDeleted: false,
+    steps: records.steps,
   };
 };
 
@@ -630,6 +632,111 @@ describe("game-run commands", () => {
     accept(launched, ledger());
   });
 
+  it("a landing's records and freed copies are an effect of its commit, before the next step", () => {
+    const base = complete(started(), gitOk());
+    const round = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    ).task;
+    if (round._tag !== "round") throw new Error("expected a round");
+    const reviewer = ThreadId.make("thread:reviewer");
+    const atReview = resumedAt(base, {
+      ladder,
+      task: { ...round, rung: ladder.rungs[0]!.id, phase: "review-write", branch: "round-1" },
+    });
+    const write = stepOf(atReview);
+    let records = accept(atReview, {
+      type: "game-run.step.start",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+    }).records;
+    records = accept(records, {
+      type: "game-run.submit",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+      submission: { _tag: "ledger", ledger: "1. The jump clips through ledges." },
+    }).records;
+    const landed = accept(records, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: write.id,
+      attempt: write.attempt,
+      result: roleDone(reviewer),
+    });
+    // The ledger's file is written by the effect the landing committed, ahead of what it planned next.
+    const [outputs, ...rest] = landed.decision.effects.map((e) => e.request);
+    expect(outputs).toMatchObject({ type: "game-run.outputs", stepId: write.id, release: [] });
+    expect(outputs?.type === "game-run.outputs" ? outputs.files.map((f) => f.path) : []).toContain(
+      ".studio/next.md",
+    );
+    expect(rest.length).toBeGreaterThan(0);
+    expect(rest.some((r) => r.type === "game-run.outputs")).toBe(false);
+
+    // A blind player the budget cut short gives its copy back with its own landing,
+    // while its partner still plays.
+    const atCompare = comparing();
+    const pair = stepOf(atCompare);
+    if (pair.step.kind !== "pair") throw new Error("expected a pair");
+    const half = accept(atCompare, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: gameRunStepId(runId, pair.step.halves[0]!.id),
+      attempt: pair.attempt,
+      result: roleDone(players[0], { timedOut: true, budgetCut: true }),
+    });
+    expect(half.decision.effects.map((e) => e.request)).toEqual([
+      {
+        type: "game-run.outputs",
+        runId,
+        stepId: pair.id,
+        files: [],
+        release: [players[0]],
+      },
+    ]);
+  });
+
+  it("a resume writes the records its run's last landing owes, ahead of its next step", () => {
+    const base = complete(started(), gitOk());
+    const round = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    ).task;
+    if (round._tag !== "round") throw new Error("expected a round");
+    const reviewer = ThreadId.make("thread:reviewer");
+    const atReview = resumedAt(base, {
+      ladder,
+      task: { ...round, rung: ladder.rungs[0]!.id, phase: "review-write", branch: "round-1" },
+    });
+    const write = stepOf(atReview);
+    let records = accept(atReview, {
+      type: "game-run.step.start",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+    }).records;
+    records = accept(records, {
+      type: "game-run.submit",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+      submission: { _tag: "ledger", ledger: "1. The jump clips through ledges." },
+    }).records;
+    records = complete(records, roleDone(reviewer));
+    // The run stops before the landing's records were written (its outputs effect gave up).
+    const stopped = finished(accept(records, { type: "game-run.stop", runId }).records);
+    const [first, ...rest] = accept(stopped, {
+      type: "game-run.resume",
+      runId,
+    }).decision.effects.map((e) => e.request);
+    expect(first).toMatchObject({ type: "game-run.outputs", stepId: write.id, release: [] });
+    expect(first?.type === "game-run.outputs" ? first.files.map((f) => f.path) : []).toContain(
+      ".studio/next.md",
+    );
+    expect(rest.map((r) => r.type)).toContain("game-run.step.execute");
+  });
+
   it("an unanswered decision takes its default only once it is due", () => {
     let records = complete(started("guided"), gitOk({ sha: "s1" }));
     records = complete(records, roleDone(planner));
@@ -746,12 +853,13 @@ describe("game-run commands", () => {
     }).records;
     // The round stays the run's until the restore lands: nothing else moves it meanwhile.
     expect(refusal(requested, { type: "game-run.resume", runId }).reason).toBe("restoring");
-    const restored = accept(requested, {
+    const landedRestore = accept(requested, {
       type: "game-run.restore",
       runId,
       requestId: "r1",
       outcome: { kind: "restored", sha: "beef", message: "" },
-    }).records;
+    });
+    const restored = landedRestore.records;
     expect(runOf(restored)).toMatchObject({
       best: "beef",
       pending: null,
@@ -767,12 +875,49 @@ describe("game-run commands", () => {
     const dropped = restored.steps.find((s) => s.id === held.id)!;
     expect(dropped.status).toBe("cancelled");
     expect(dropped.logs.join("\n")).toContain("abandoned");
-    expect(dropped.outputs.release.toSorted()).toEqual([...players].toSorted());
+    // The dropped round's copies go with the restore's own commit, never with a later job.
+    const [release] = landedRestore.decision.effects.map((e) => e.request);
+    expect(release).toMatchObject({ type: "game-run.outputs", stepId: held.id, files: [] });
+    expect(release?.type === "game-run.outputs" ? release.release.toSorted() : []).toEqual(
+      [...players].toSorted(),
+    );
 
     // A resume starts the next round from the restored build, not the abandoned one.
     const resumed = accept(restored, { type: "game-run.resume", runId }).records;
     expect(stepOf(resumed).seq).toBeGreaterThan(held.seq);
     expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: "beef" } });
+  });
+
+  it("a run's copies are spent once no way back reaches them", () => {
+    const keepMs = 14 * 24 * 60 * MIN;
+    const at = { latest: true, chatDeleted: false, now: T0 + MIN, keepMs };
+    const live = runOf(started());
+    const stopped = finished(accept(started(), { type: "game-run.stop", runId }).records);
+    const run = runOf(stopped);
+    expect(Decide.copiesSpent(live, at)).toBe(false);
+    // Its finish still works the folder.
+    expect(Decide.copiesSpent({ ...run, finished: null }, at)).toBe(false);
+    // A stopped run can resume: its copies stay, within the bound.
+    expect(Decide.copiesSpent(run, at)).toBe(false);
+    expect(Decide.copiesSpent(run, { ...at, now: T0 + keepMs + MIN })).toBe(true);
+    // Nothing resumes it: another run on its chat, its chat deleted, or an ending that is final.
+    expect(Decide.copiesSpent(run, { ...at, latest: false })).toBe(true);
+    expect(Decide.copiesSpent(run, { ...at, chatDeleted: true })).toBe(true);
+    expect(Decide.copiesSpent({ ...run, ending: "done" }, at)).toBe(true);
+  });
+
+  it("a run frees its copies on its own thread only when nothing can resume it", () => {
+    const keepMs = 14 * 24 * 60 * MIN;
+    const spend = { type: "game-run.copies.spend", runId, keepMs } as const;
+    expect(refusal(started(), spend).reason).toBe("copies-in-use");
+    const stopped = finished(accept(started(), { type: "game-run.stop", runId }).records);
+    // Within the bound a stopped run may still be resumed.
+    expect(refusal(stopped, spend, T0 + MIN).reason).toBe("copies-in-use");
+    const spent = accept(stopped, spend, T0 + keepMs + MIN).decision;
+    expect(spent.effects).toEqual([{ request: { type: "game-run.copies.release", runId } }]);
+    // A resume committed first makes the ask refused: its copies are in use again.
+    const resumed = accept(stopped, { type: "game-run.resume", runId }, T0 + keepMs).records;
+    expect(refusal(resumed, spend, T0 + keepMs + MIN).reason).toBe("copies-in-use");
   });
 
   it("a restore keeps the outcome of a round judged and waiting only on its review", () => {

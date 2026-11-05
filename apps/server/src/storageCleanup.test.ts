@@ -14,6 +14,7 @@ import { SCAN_CACHE_FILE_NAME } from "./usage/usageScanCache.ts";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
+  CommandId,
   DEFAULT_SERVER_SETTINGS,
   StorageCleanupReport,
   type WorktreeKeepWhen,
@@ -224,6 +225,10 @@ const cleanupFixture = (
     let fullStatusCalls = 0;
     let snapshotReads = 0;
     let events: Stream.Stream<OrchestrationV2DomainEvent> = Stream.empty;
+    // Production runs by id, with the chat each lives on; the commands the sweep sends.
+    const gameRuns = new Map<string, { readonly threadId: string; readonly run: unknown }>();
+    const dispatched: Array<{ readonly type: string }> = [];
+    let unbindsToBreak = 0;
     const activated = yield* Deferred.make<void>();
     const context = yield* Layer.build(StorageCleanup.layer).pipe(
       Effect.provideService(GitVcsDriver.GitVcsDriver, {
@@ -269,38 +274,70 @@ const cleanupFixture = (
           ),
         getThreadShell: (threadId: ThreadId) =>
           Effect.sync(() => threads.find((thread) => thread.id === threadId) ?? null),
+        getGameRunRecords: (threadId: ThreadId) =>
+          Effect.sync(() => ({
+            gameRuns: [...gameRuns.values()]
+              .filter((each) => each.threadId === threadId)
+              .map((each) => each.run),
+            gameRunSteps: [],
+            gameRunRounds: [],
+          })),
       } as unknown as ProjectionStore.ProjectionStoreV2["Service"]),
       Effect.provideService(ProviderSessionManager.ProviderSessionManagerV2, {
         isLive: () => Effect.sync(() => sessionLive),
       } as unknown as ProviderSessionManager.ProviderSessionManagerV2["Service"]),
       Effect.provideService(Orchestrator.OrchestratorV2, {
         streamDomainEvents: Stream.suspend(() => events),
+        dispatch: (command: { readonly type: string }) =>
+          command.type === "thread.metadata.update" && unbindsToBreak-- > 0
+            ? Effect.fail(
+                new Orchestrator.OrchestratorDispatchError({
+                  commandId: CommandId.make("unbind"),
+                  commandType: command.type,
+                  cause: "projection write failed",
+                }),
+              )
+            : Effect.sync(() => {
+                dispatched.push(command);
+                return {};
+              }),
       } as unknown as Orchestrator.OrchestratorV2["Service"]),
-      Effect.provideService(SqlClient.SqlClient, ((strings: TemplateStringsArray) =>
+      Effect.provideService(SqlClient.SqlClient, ((
+        strings: TemplateStringsArray,
+        ...values: ReadonlyArray<unknown>
+      ) =>
         Effect.sync(() =>
-          openSessionCwd !== null && strings.join("").includes("projection_provider_sessions")
-            ? [
-                {
-                  payload_json: JSON.stringify({
-                    id: "session-1",
-                    driver: "codex",
-                    providerInstanceId: "codex",
-                    status: "ready",
-                    cwd: openSessionCwd,
-                    model: null,
-                    capabilities: CodexProviderCapabilitiesV2,
-                    createdAt: "2026-06-01T12:00:00.000Z",
-                    updatedAt: "2026-06-01T12:00:00.000Z",
-                    lastError: null,
-                  }),
-                },
-              ]
-            : strings.join("").includes('AS "worktreePath"')
+          strings.join("").includes("FROM orchestration_v2_projection_game_runs")
+            ? [...gameRuns.entries()]
+                .filter(([id]) => id === values[0])
+                .map(([, each]) => ({ threadId: each.threadId, deletedAt: null }))
+            : openSessionCwd !== null && strings.join("").includes("projection_provider_sessions")
               ? [
-                  ...threads.flatMap((thread) => thread.worktreePath ?? []),
-                  ...storedWorktreePaths,
-                ].map((worktreePath) => ({ worktreePath }))
-              : [],
+                  {
+                    payload_json: JSON.stringify({
+                      id: "session-1",
+                      driver: "codex",
+                      providerInstanceId: "codex",
+                      status: "ready",
+                      cwd: openSessionCwd,
+                      model: null,
+                      capabilities: CodexProviderCapabilitiesV2,
+                      createdAt: "2026-06-01T12:00:00.000Z",
+                      updatedAt: "2026-06-01T12:00:00.000Z",
+                      lastError: null,
+                    }),
+                  },
+                ]
+              : strings.join("").includes('AS "worktreePath"')
+                ? [
+                    ...threads.flatMap((thread) =>
+                      thread.worktreePath === null
+                        ? []
+                        : [{ worktreePath: thread.worktreePath, threadId: thread.id }],
+                    ),
+                    ...storedWorktreePaths.map((worktreePath) => ({ worktreePath })),
+                  ]
+                : [],
         )) as unknown as SqlClient.SqlClient),
       Effect.provideService(GitManager.GitManager, {
         invalidateStatus: () => Effect.void,
@@ -357,6 +394,11 @@ const cleanupFixture = (
       },
       setProjectRoots: (roots: string[]) => {
         projectRoots = roots;
+      },
+      gameRuns,
+      dispatched,
+      breakUnbinds: (count: number) => {
+        unbindsToBreak = count;
       },
       setSessionLive: (live: boolean) => {
         sessionLive = live;
@@ -1607,6 +1649,84 @@ describe("storage cleanup reports and local file policies", () => {
         expect(yield* fs.exists(`${repo}/builds/logs/game-bot-run1`)).toBe(true);
         expect(yield* fs.exists(oldLog(repo))).toBe(false);
         expect(yield* fs.exists(oldLog(other))).toBe(false);
+      }),
+    ),
+  );
+  it.live("removes production-run copies no run names, never a fresh one or a link", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, config, disable } = yield* cleanupFixture();
+        disable();
+        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-outside-" });
+        const copies = `${config.worktreesDir}/game-runs`;
+        for (const run of ["run-gone", "run-fresh"]) {
+          yield* fs.makeDirectory(`${copies}/${run}/step-3`, { recursive: true });
+          yield* fs.writeFileString(`${copies}/${run}/step-3/project.godot`, "copy");
+        }
+        yield* fs.utimes(`${copies}/run-gone`, 1, 1);
+        yield* fs.symlink(outside, `${copies}/run-link`);
+        const report = yield* service.runNow;
+        expect(report.entries.find((entry) => entry.kind === "game-logs")).toMatchObject({
+          outcome: "removed",
+          reason: "No expired files; removed 1 production-run copy no run names",
+        });
+        expect((yield* fs.readDirectory(copies)).toSorted()).toEqual(["run-fresh", "run-link"]);
+        expect(yield* fs.exists(outside)).toBe(true);
+      }),
+    ),
+  );
+  it.live("a copy folder whose thread cannot be unbound is kept, and the others still go", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, config, disable, setThreads, breakUnbinds } = yield* cleanupFixture();
+        disable();
+        const copies = `${config.worktreesDir}/game-runs`;
+        const names = ["run-a", "run-b"];
+        for (const run of names) {
+          yield* fs.makeDirectory(`${copies}/${run}/step-1`, { recursive: true });
+          yield* fs.utimes(`${copies}/${run}`, 1, 1);
+        }
+        setThreads(
+          names.map((run) =>
+            shell({ id: ThreadId.make(`thread-${run}`), worktreePath: `${copies}/${run}/step-1` }),
+          ),
+        );
+        // The first thread's unbind breaks, whichever folder the sweep reads first.
+        breakUnbinds(1);
+        yield* service.runNow;
+        expect(yield* fs.readDirectory(copies)).toHaveLength(1);
+      }),
+    ),
+  );
+  it.live("asks a named run to spend its copies, and never removes them itself", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, config, disable, gameRuns, dispatched } = yield* cleanupFixture();
+        disable();
+        // A run stopped long ago, whose creator could still resume it at any moment.
+        gameRuns.set("run-stopped", {
+          threadId: "thread-creator",
+          run: {
+            id: "run-stopped",
+            status: "ended",
+            ending: "stopped",
+            endedAt: "2020-01-01T00:00:00.000Z",
+            finished: "2020-01-01T00:00:00.000Z",
+            restore: null,
+          },
+        });
+        const copy = `${config.worktreesDir}/game-runs/run-stopped/step-3`;
+        yield* fs.makeDirectory(copy, { recursive: true });
+        yield* fs.utimes(`${config.worktreesDir}/game-runs/run-stopped`, 1, 1);
+        const report = yield* service.runNow;
+        // The run decides, on its own thread, behind any resume: the folder is not the sweep's.
+        expect(yield* fs.exists(copy)).toBe(true);
+        expect(dispatched).toMatchObject([
+          { type: "game-run.copies.spend", runId: "run-stopped", threadId: "thread-creator" },
+        ]);
+        expect(report.entries.find((entry) => entry.kind === "game-logs")?.reason).toContain(
+          "freeing the copies of 1 spent production run",
+        );
       }),
     ),
   );

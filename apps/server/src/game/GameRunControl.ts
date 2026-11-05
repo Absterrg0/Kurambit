@@ -273,8 +273,19 @@ const make = Effect.gen(function* () {
         busy.failure.reason,
         busy.failure.message,
       );
-    const manifest = yield* projects.read(root).pipe(Effect.option);
-    const lane = Option.isSome(manifest) ? manifest.value.godotProject : "godot";
+    // The lane is the whole run's engine: a manifest that cannot be read is no Godot game.
+    const lane = (yield* projects
+      .read(root)
+      .pipe(
+        Effect.mapError((cause) =>
+          runError(
+            "run-start",
+            input.threadId,
+            "project-not-found",
+            `The game's manifest could not be read (${cause.detail ?? cause.reason}).`,
+          ),
+        ),
+      )).godotProject;
     const projection = yield* threads
       .getThreadProjection(input.threadId)
       .pipe(
@@ -626,7 +637,17 @@ const make = Effect.gen(function* () {
         results: [],
         message: "The run has no open rung to score.",
       } satisfies GameRunChecksResult;
-    const outcomes = yield* runStateChecks(game, root, rung);
+    // A check that cannot run now (memory short, the game held) is no score: the role is told to try again.
+    const outcomes = yield* runStateChecks(game, root, rung).pipe(
+      Effect.mapError((error) =>
+        runError(
+          "run-checks",
+          root,
+          "command-failed",
+          `The checks could not run now (${error.reason}: ${(error.detail ?? "").slice(0, 200)}); try again in a minute.`,
+        ),
+      ),
+    );
     const passed = outcomes.filter((o) => o.pass).length;
     return {
       rung: ladder.rungs.indexOf(rung) + 1,

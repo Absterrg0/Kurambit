@@ -107,7 +107,7 @@ export type Applied = {
   readonly state: RunState;
   readonly logs: ReadonlyArray<string>;
   readonly files: ReadonlyArray<{ readonly path: string; readonly text: string }>;
-  /** Role threads with no turn left, whose worktrees the driver now removes. */
+  /** Role threads with no turn left, whose copies the landing's outputs effect removes. */
   readonly release: ReadonlyArray<ThreadId>;
 };
 
@@ -1879,7 +1879,7 @@ export const applyPair = (state: RunState, pair: PairStep, input: Inputs): Appli
   const leave = (next: RunState): Applied => {
     for (const each of pair.halves) {
       const r = resultOf(each);
-      // A budget-cut half already gave its own checkout back in the role runner.
+      // A budget-cut half already gave its own checkout back with its own landing.
       if (
         each.kind === "role" &&
         each.at !== null &&

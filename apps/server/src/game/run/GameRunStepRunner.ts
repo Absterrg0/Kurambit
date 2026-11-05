@@ -24,6 +24,7 @@ import {
 } from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -93,6 +94,20 @@ import { currentStep, describe, summarize } from "./runView.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { BLANK, type BotStep, type RoleStep } from "./state.ts";
 import { bootStep } from "./steps.ts";
+import { RETRIES, retrying } from "./retrying.ts";
+
+/**
+ * A read or write a step's job needs that failed (its report, a record it
+ * decides by, a timer it sets): the job is tried again (executeJob), never
+ * reported as the step's own failure, and never read as an answer.
+ */
+class GameRunJobBroke extends Data.TaggedError("GameRunJobBroke")<{
+  readonly cause: unknown;
+}> {}
+const isJobBroke = (error: unknown): error is GameRunJobBroke => error instanceof GameRunJobBroke;
+/** A read or write the job's progress depends on: its failure breaks the job. */
+const needed = <A, E, R>(work: Effect.Effect<A, E, R>) =>
+  work.pipe(Effect.mapError((cause) => new GameRunJobBroke({ cause })));
 
 export class GameRunStepRunner extends Context.Service<
   GameRunStepRunner,
@@ -124,9 +139,19 @@ const make = Effect.gen(function* () {
   const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
   const deps: RoleDeps = { launches, threads, game, checkpoints };
 
-  // A report the run refuses (the step moved on, the run stopped) is the
-  // answer; one that could not be written leaves the step for recovery.
-  const refused = <A, R>(dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
+  /**
+   * The record that frees an ended run from "finishing" or "restoring": until it
+   * lands the run refuses every start, resume, steer and restore, so it is
+   * tried again with backoff. One that still cannot be written is left to
+   * recovery, which runs the finish or restore again at the next startup (its
+   * record still says it is owed); the finish's and restore's effects were
+   * spent when their jobs started, so nothing durable is left to retry sooner.
+   */
+  const recordEnd = <A, R>(
+    what: "finish" | "restore",
+    runId: GameRun["id"],
+    dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>,
+  ) =>
     dispatch.pipe(
       Effect.asVoid,
       Effect.catchTags({
@@ -134,7 +159,58 @@ const make = Effect.gen(function* () {
           Effect.logInfo("game run report not taken", { detail: error.detail }),
         OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
       }),
-      Effect.catch((error) => Effect.logWarning("game run report failed", { error })),
+      retrying,
+      Effect.catch((error) =>
+        Effect.logWarning(
+          `game run ${what} could not be recorded after ${RETRIES + 1} tries; the run stays ${what === "finish" ? "finishing" : "restoring"} until recovery runs it again at the next startup`,
+          { runId, error },
+        ),
+      ),
+    );
+
+  // A refusal is the timer's answer (the run moved on or stopped); any other
+  // failure is left to the timer's effect, which runs again.
+  const refusedOnly = <A, R>(dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
+    dispatch.pipe(
+      Effect.asVoid,
+      Effect.catchTags({
+        OrchestratorGameRunRefusedError: () => Effect.void,
+        OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+      }),
+    );
+
+  /**
+   * A role turn's cap as a durable timer due now, keyed by what the step just
+   * sent or found at work: its effect sets it again at the turn's due time, so
+   * every turn of the step is capped whatever became of an earlier timer.
+   */
+  const capTurn = (half: GameRunJobs.GameRunStepJob, key: string) =>
+    Effect.flatMap(DateTime.now, (now) =>
+      engine.dispatch({
+        type: "game-run.step.schedule",
+        commandId: CommandId.make(
+          `server:game-run-cap:${half.stepId}:attempt:${half.attempt}:watch:${key}`,
+        ),
+        threadId: half.threadId,
+        runId: half.runId,
+        stepId: half.stepId,
+        attempt: half.attempt,
+        at: DateTime.toEpochMillis(now),
+        timer: { kind: "cap" },
+      }),
+    );
+
+  // A report the run refuses is the answer; one that could not be written
+  // breaks the job, which is tried again (executeJob).
+  const reported = <A, R>(dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
+    dispatch.pipe(
+      Effect.asVoid,
+      Effect.catchTags({
+        OrchestratorGameRunRefusedError: (error) =>
+          Effect.logInfo("game run report not taken", { detail: error.detail }),
+        OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+      }),
+      Effect.mapError((cause) => new GameRunJobBroke({ cause })),
     );
 
   const complete = (
@@ -142,7 +218,7 @@ const make = Effect.gen(function* () {
     stepId: GameRunStepId,
     result: GameRunStepResult,
   ) =>
-    refused(
+    reported(
       engine.dispatch({
         type: "game-run.step.complete",
         commandId: gameRunStepCommandId(stepId, job.attempt, "complete"),
@@ -154,7 +230,7 @@ const make = Effect.gen(function* () {
       }),
     );
   const fail = (job: GameRunJobs.GameRunStepJob, stepId: GameRunStepId, reason: string) =>
-    refused(
+    reported(
       engine.dispatch({
         type: "game-run.step.fail",
         commandId: gameRunStepCommandId(stepId, job.attempt, "fail"),
@@ -216,13 +292,9 @@ const make = Effect.gen(function* () {
               Effect.logInfo("game run wait not taken", { kind, detail: error.detail }),
             OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
           }),
-          Effect.catch((error) =>
-            fail(
-              { ...job, stepId },
-              stepId,
-              `${kind} wait could not be scheduled (${error.message})`,
-            ),
-          ),
+          // A wait that could not be set breaks the job, which is tried again:
+          // a step left running with neither job nor timer would wait for a restart.
+          Effect.mapError((cause) => new GameRunJobBroke({ cause })),
         );
     });
   const memoryWaitsLeft = (record: GameRunStep) => (record.memoryWaits ?? 0) < MEMORY_WAITS;
@@ -235,16 +307,21 @@ const make = Effect.gen(function* () {
   });
 
   // A step's work that broke reports it, so the run ends resumably with why;
-  // an interrupt is a stop and reports nothing.
+  // an interrupt is a stop and reports nothing, and a report that could not be
+  // written goes up to the job, which is tried again.
   const reporting = <E>(
     job: GameRunJobs.GameRunStepJob,
     stepId: GameRunStepId,
     work: Effect.Effect<void, E>,
-  ) =>
+  ): Effect.Effect<void, GameRunJobBroke> =>
     work.pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause) ? Effect.interrupt : fail(job, stepId, causeText(cause)),
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
+        const broke = Cause.findErrorOption(cause).pipe(Option.filter(isJobBroke));
+        return Option.isSome(broke)
+          ? Effect.fail(broke.value)
+          : fail(job, stepId, causeText(cause));
+      }),
     );
 
   /** The run and its step in flight, if this job's attempt still holds it. */
@@ -261,36 +338,99 @@ const make = Effect.gen(function* () {
         if (record.status !== "planned" && record.status !== "running") return null;
         return { run, record, records };
       }),
-      Effect.orElseSucceed(() => null),
+      // A read that fails is no answer: null would read as "the step moved on".
+      Effect.mapError((cause) => new GameRunJobBroke({ cause })),
     );
 
-  // What the steps landed since the last job asks of the game folder: a
-  // decision has no job of its own, so the walk back passes over decisions.
-  // Writing the same files and releasing the same copies again is harmless.
-  const performOutputs = (
-    run: GameRun,
-    steps: ReadonlyArray<GameRunStep>,
-    upTo: number,
-    root: string,
-    log: (line: string) => Effect.Effect<void>,
-  ) =>
+  /**
+   * What a landing asks of the game folder, from the effect its commit queued
+   * before the run's next step: the copies no role needs, then the records the
+   * next step may read. Releasing the same copies and writing the same files
+   * again is harmless, so a re-run after a death is too. Records that still
+   * cannot be written on the outbox's last try stop the run with why, which
+   * cancels the next step in the same commit: it must not run without them.
+   */
+  const outputs = (job: GameRunJobs.GameRunOutputs & GameRunJobs.GameRunEffectTry) =>
     Effect.gen(function* () {
-      const landed = steps
-        .filter((s) => s.runId === run.id && s.seq < upTo && s.completedAt !== null)
-        .toSorted((a, b) => b.seq - a.seq);
-      const owed: GameRunStep[] = [];
-      for (const step of landed) {
-        owed.unshift(step);
-        if (step.kind !== "decide") break;
-      }
-      for (const step of owed) {
-        for (const file of step.outputs.files)
+      const root = yield* projects
+        .resolve(job.threadId, { deleted: "allowed" })
+        .pipe(Effect.option);
+      const log = (line: string) =>
+        Option.isSome(root) ? logLine(root.value, line) : Effect.logInfo(line);
+      for (const thread of job.release)
+        yield* releaseCopy(deps, { copies: copiesOf(job.runId), log }, thread);
+      if (job.files.length === 0) return;
+      const writes = Effect.gen(function* () {
+        if (Option.isNone(root))
+          return yield* new GameRunJobs.GameRunEffectError({
+            cause: "the game folder could not be found",
+          });
+        for (const file of job.files)
           yield* Effect.tryPromise(() =>
-            writeAtomic(NodePath.join(root, file.path), file.text),
-          ).pipe(Effect.ignore);
-        for (const thread of step.outputs.release)
-          yield* releaseCopy(deps, { copies: copiesOf(run.id), log }, thread);
-      }
+            writeAtomic(NodePath.join(root.value, file.path), file.text),
+          );
+      });
+      const stop = <E>(cause: Cause.Cause<E>) =>
+        retrying(
+          refusedOnly(
+            engine.dispatch({
+              type: "game-run.stop",
+              commandId: CommandId.make(`server:game-run-outputs-failed:${job.effectId}`),
+              threadId: job.threadId,
+              runId: job.runId,
+              reason: `the run's records could not be written (${causeText(cause).slice(0, 200)})`,
+            }),
+          ),
+        );
+      yield* job.final
+        ? writes.pipe(Effect.catchCauseIf((cause) => !Cause.hasInterruptsOnly(cause), stop))
+        : writes;
+    });
+
+  /**
+   * A timer's work, given up its own way on the outbox's last try (`giveUp`),
+   * so the effect's end loses nothing; an interrupt (a stop) is never given up.
+   */
+  const lastTry = <E, E2>(
+    job: GameRunJobs.GameRunEffectTry,
+    work: Effect.Effect<void, E>,
+    giveUp: (cause: Cause.Cause<E>) => Effect.Effect<void, E2>,
+  ): Effect.Effect<void, GameRunJobs.GameRunEffectError> =>
+    (job.final
+      ? work.pipe(
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              // Giving up is a write too: tried again, and one that never gets
+              // through fails the effect, so recovery owes the step at startup.
+              Effect.logWarning("game run timer gave up on its last try", {
+                effectId: job.effectId,
+                cause,
+              }).pipe(Effect.andThen(retrying(giveUp(cause)))),
+          ),
+        )
+      : work
+    ).pipe(Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })));
+
+  /**
+   * A spent run's copies, from the effect the commit that found them spent
+   * queued on its thread: a resume committed after it runs its step behind
+   * this, and makes fresh copies.
+   */
+  const releaseCopies = (job: { readonly threadId: ThreadId; readonly runId: GameRun["id"] }) =>
+    Effect.gen(function* () {
+      const records = yield* projections.getGameRunRecords(job.threadId);
+      const roleThreads = new Set(
+        records.gameRunSteps
+          .filter((s) => s.runId === job.runId)
+          .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
+      );
+      const root = yield* projects
+        .resolve(job.threadId, { deleted: "allowed" })
+        .pipe(Effect.option);
+      const log = (line: string) =>
+        Option.isSome(root) ? logLine(root.value, line) : Effect.logInfo(line);
+      yield* dropRunCopies(deps, { copies: copiesOf(job.runId), log }, [...roleThreads], false);
     });
 
   // A source role's change is measured at its landing against the build its step names.
@@ -375,11 +515,14 @@ const make = Effect.gen(function* () {
           })
           .pipe(
             Effect.as(true),
-            Effect.catch((error) =>
-              log(`${role.role}: the run did not take the step's start (${error.message})`).pipe(
-                Effect.as(false),
-              ),
-            ),
+            Effect.catchTags({
+              OrchestratorGameRunRefusedError: (error) =>
+                log(`${role.role}: the run did not take the step's start (${error.detail})`).pipe(
+                  Effect.as(false),
+                ),
+              OrchestratorCommandPreviouslyRejectedError: () => Effect.succeed(false),
+            }),
+            Effect.mapError((cause) => new GameRunJobBroke({ cause })),
           );
       const limitInput = (target: ThreadId) =>
         role.inputCapMs > 0 ? game.limitExploreInput(target, role.inputCapMs) : Effect.void;
@@ -388,9 +531,8 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // A deleted project takes no new threads; a read that fails is no
           // proof it lives, so the step fails rather than launching blind.
-          const projectLive = yield* projectStore.getById(run.projectId).pipe(
+          const projectLive = yield* needed(projectStore.getById(run.projectId)).pipe(
             Effect.map(Option.isSome),
-            Effect.orElseSucceed(() => false),
           );
           if (!projectLive)
             return yield* fail(half, stepId, `${role.role}: its project was deleted`);
@@ -439,10 +581,11 @@ const make = Effect.gen(function* () {
           const workspace = blank ?? sample;
           const dropWorkspace =
             workspace === null ? Effect.void : removeBlank(deps, ctx, workspace);
-          // A deleted creator chat cannot be a parent; the role then stands alone rather than failing.
-          const creatorLive = yield* threads.getThreadShell(run.threadId).pipe(
+          // A deleted creator chat cannot be a parent; the role then stands alone
+          // rather than failing. A read that fails decides nothing: a role
+          // launched without its parent would never have its turns landed.
+          const creatorLive = yield* needed(threads.getThreadShell(run.threadId)).pipe(
             Effect.map((s) => s !== null && s.deletedAt === null),
-            Effect.orElseSucceed(() => false),
           );
           if (!(yield* startStep(target, measured, replaces))) return yield* dropWorkspace;
           yield* limitInput(target);
@@ -481,7 +624,8 @@ const make = Effect.gen(function* () {
           yield* log(`${role.role}: launched thread ${target}`);
         });
 
-      const shell = yield* threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null));
+      // A read that fails is not a thread that is gone: it would launch a replacement.
+      const shell = yield* needed(threads.getThreadShell(threadId));
       if (shell !== null && shell.deletedAt === null) {
         if (shell.projectId !== run.projectId)
           return yield* fail(half, stepId, `${role.role}: its thread belongs to another project`);
@@ -504,7 +648,7 @@ const make = Effect.gen(function* () {
           yield* limitInput(threadId);
           if (!GameRunRoleReactor.isSettledRun(latest.run)) {
             yield* log(`${role.role}: reattaching to thread ${threadId}`);
-            return yield* jobs.deadline(half);
+            return yield* reported(capTurn(half, latest.run.id));
           }
           if (GameRunRoleReactor.isCutOff(latest.run)) {
             const attemptTurns = turns.filter((t) => t.turn.attempt === job.attempt);
@@ -516,18 +660,19 @@ const make = Effect.gen(function* () {
             if (cut >= CUT_OFF_LIMIT)
               return yield* fail(half, stepId, `${role.role}: role turn cut off repeatedly`);
             yield* log(`${role.role}: turn on ${threadId} was cut off; continuing it`);
+            const n = Math.max(...attemptTurns.map((t) => t.turn.n)) + 1;
             yield* roles.sendTurn({
               projectId: run.projectId,
               threadId,
               stepId,
               attempt: job.attempt,
               kind: "continue",
-              n: Math.max(...attemptTurns.map((t) => t.turn.n)) + 1,
+              n,
               text: `${CONTINUE}\n\n${yield* promptOf(run, role, root)}`,
             });
-            return yield* jobs.deadline(half);
+            return yield* reported(capTurn(half, `continue:${n}`));
           }
-          if ((yield* roles.settle(threadId, latest.run)) !== "fresh") return;
+          if ((yield* needed(roles.settle(threadId, latest.run))) !== "fresh") return;
           // Its own provider session refuses the reused thread: the work is in the
           // files, so the role continues once in a thread of its own.
           const prompt = yield* promptOf(run, role, root);
@@ -615,10 +760,9 @@ const make = Effect.gen(function* () {
     found: NonNullable<Effect.Success<ReturnType<typeof current>>>,
   ) =>
     Effect.gen(function* () {
-      const { run, record, records } = found;
+      const { run, record } = found;
       const root = yield* projects.resolve(run.threadId);
       const log = (line: string) => logLine(root, line);
-      yield* performOutputs(run, records.gameRunSteps, record.seq, root, log);
       const step = record.step;
       yield* log(describe(step));
       const done = (result: GameRunStepResult) =>
@@ -695,8 +839,23 @@ const make = Effect.gen(function* () {
           return yield* reporting(
             job,
             record.id,
-            (rung === undefined ? Effect.succeed([]) : runStateChecks(game, root, rung)).pipe(
+            (rung === undefined
+              ? Effect.succeed([])
+              : handBackOnBusy(
+                  handBackOnLowMemory(
+                    runStateChecks(game, root, rung),
+                    "state checks",
+                    memoryWaitsLeft(record),
+                  ),
+                  "state checks",
+                  busyWaitsLeft(record),
+                )
+            ).pipe(
               Effect.flatMap((results) => done({ kind: "checks", results })),
+              Effect.catchTags({
+                GameRunMemoryShort: (short) => waitForMemory(job, record, record.id, short, log),
+                GameRunGameBusy: (busy) => waitForMemory(job, record, record.id, busy, log),
+              }),
             ),
           );
         }
@@ -750,8 +909,9 @@ const make = Effect.gen(function* () {
 
   /**
    * A role turn's cap, from its turn's start, plus the time its explore
-   * starts waited for memory, never past the run's budget. The effect that
-   * starts this fires at the plain cap, so this only ever waits longer.
+   * starts waited for memory, never past the run's budget. It runs inside its
+   * effect, which stays unsettled until the interrupt is sent or the timer is
+   * set again, so a server death in between runs it again.
    */
   const deadline = (job: GameRunJobs.GameRunStepJob) =>
     Effect.gen(function* () {
@@ -771,17 +931,17 @@ const make = Effect.gen(function* () {
       const fresh = (t: GameRunRoleReactor.AttributedTurn) => t.sent && t.turn.kind !== "continue";
       const anchor = attemptTurns.findLast(fresh) ?? attemptTurns[0] ?? live;
       const startedAt = anchor.run.startedAt ?? anchor.run.requestedAt;
-      const waited = yield* game.exploreMemoryWait(threadId).pipe(
-        Effect.map((mark) => mark.waitedMs),
-        Effect.orElseSucceed(() => 0),
-      );
+      // Unread, the cap could interrupt a turn early: the effect tries again.
+      const waited = yield* game
+        .exploreMemoryWait(threadId)
+        .pipe(Effect.map((mark) => mark.waitedMs));
       const cap = DateTime.toEpochMillis(startedAt) + at.role.capMs + waited;
       const due = at.run.budgetEndsAt === null ? cap : Math.min(cap, at.run.budgetEndsAt);
       // Not due yet (memory waits extend it, a later turn restarts it): the cap
       // is set again as a durable timer at its due time, never held by a fiber.
       // The outbox's clock decides when timers are due, so this one does too.
       if (DateTime.toEpochMillis(yield* DateTime.now) < due)
-        return yield* refused(
+        return yield* refusedOnly(
           engine.dispatch({
             type: "game-run.step.schedule",
             commandId: CommandId.make(
@@ -803,33 +963,57 @@ const make = Effect.gen(function* () {
           runId: live.run.id,
           reason: "Studio role cap reached.",
         })
-        .pipe(Effect.ignore);
+        .pipe(Effect.asVoid);
     });
 
-  /** A role turn sent again once its pause is over, if its step is still where it was. */
-  const resend = (job: GameRunJobs.GameRunResendJob) =>
+  /**
+   * A role turn sent again once its pause is over, if its step is still where
+   * it was, inside its effect: a server death before the turn is queued runs
+   * it again under the same ids. The send and the look after it are one act a
+   * stop cannot cut: the ending's finish then either finds the turn to
+   * interrupt, or the turn, sent after the ending, is interrupted here.
+   */
+  const resend = (job: GameRunJobs.GameRunResend) =>
     Effect.gen(function* () {
       const at = yield* roles.locate(job.threadId, job.stepId, job.attempt);
       if (at === null || at.role === null) return;
       const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
       if (threadId === null) return;
       const prompt = at.role.prompt;
-      yield* roles.sendTurn({
-        projectId: at.run.projectId,
-        threadId,
-        stepId: job.stepId,
-        attempt: job.attempt,
-        kind: job.turn,
-        n: job.n,
-        text: job.turn === "memory" ? `${MEMORY_RETRY}\n\n${prompt}` : prompt,
-      });
-      // A turn sent again is capped like the first.
-      yield* jobs.deadline(job);
+      const projectId = at.run.projectId;
+      yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          yield* roles.sendTurn({
+            projectId,
+            threadId,
+            stepId: job.stepId,
+            attempt: job.attempt,
+            kind: job.turn,
+            n: job.n,
+            text: job.turn === "memory" ? `${MEMORY_RETRY}\n\n${prompt}` : prompt,
+          });
+          // A stop has cancelled this effect by now, so the outbox never runs it
+          // again: the interrupt is tried again here.
+          if ((yield* roles.locate(job.threadId, job.stepId, job.attempt)) === null)
+            return yield* retrying(
+              threads.interruptThread({
+                projectId,
+                commandId: CommandId.make(
+                  `server:game-run-resend-late:${job.stepId}:attempt:${job.attempt}:${job.turn}:${job.n}`,
+                ),
+                threadId,
+                reason: "The production run moved on before this turn was sent.",
+              }),
+            );
+          // A turn sent again is capped like the first.
+          yield* refusedOnly(capTurn(job, `${job.turn}:${job.n}`));
+        }),
+      );
     });
 
   // ── A run's end, from the game-run.finish effect its ending committed: its
-  // jobs and live role turns stop, and the game folder gets its last outputs
-  // and exports. Every part is safe to repeat, so a finish a
+  // jobs and live role turns stop, and the game folder gets its exports (the
+  // ending's outputs effect ran before it). Every part is safe to repeat, so a finish a
   // restart cut short runs again whole; game-run.finished records it done.
   const finish = (job: GameRunJobs.GameRunFinishJob) =>
     Effect.gen(function* () {
@@ -863,7 +1047,9 @@ const make = Effect.gen(function* () {
               ),
         ),
       );
-      yield* refused(
+      yield* recordEnd(
+        "finish",
+        run.id,
         engine.dispatch({
           type: "game-run.finished",
           commandId: CommandId.make(`server:game-run-finished:${run.id}:${job.endedAt}`),
@@ -898,14 +1084,18 @@ const make = Effect.gen(function* () {
             reason: `The production run ended (${run.ending ?? "unknown"}).`,
           })
           .pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.void,
+            retrying,
+            // A role turn left running on an ended run is T3's to cancel at the next restart.
+            Effect.catch((error) =>
+              Effect.logWarning("an ended run's role turn could not be interrupted", {
+                threadId: role.threadId,
+                error,
+              }),
             ),
           );
       }
       const root = yield* projects.resolve(run.threadId, { deleted: "allowed" });
       const log = (line: string) => logLine(root, line);
-      yield* performOutputs(run, records.gameRunSteps, Number.MAX_SAFE_INTEGER, root, log);
       yield* log(
         `run ended: ${run.ending ?? "unknown"}${run.lastFailure ? ` (${run.lastFailure})` : ""}`,
       );
@@ -985,11 +1175,22 @@ const make = Effect.gen(function* () {
           .filter((s) => s.runId === run.id)
           .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
       );
+      // Only a run something can still resume keeps its roles' copies: one
+      // whose chat or project was deleted never runs again. A read that fails
+      // is no proof of either, so the copies stay for storage cleanup's bound.
+      const chatLive = yield* threads.getThreadShell(run.threadId).pipe(
+        Effect.map((shell) => shell !== null && shell.deletedAt === null),
+        Effect.orElseSucceed(() => true),
+      );
+      const projectLive = yield* projectStore.getById(run.projectId).pipe(
+        Effect.map(Option.isSome),
+        Effect.orElseSucceed(() => true),
+      );
       yield* dropRunCopies(
         deps,
         { copies: copiesOf(run.id), log },
         [...roleThreads],
-        RESUMABLE.has(run.ending ?? ""),
+        RESUMABLE.has(run.ending ?? "") && chatLive && projectLive,
       ).pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
@@ -1046,7 +1247,9 @@ const make = Effect.gen(function* () {
               }),
         ),
       );
-      yield* refused(
+      yield* recordEnd(
+        "restore",
+        run.id,
         engine.dispatch({
           type: "game-run.restore",
           commandId: CommandId.make(`server:game-run-restore:${job.requestId}`),
@@ -1105,12 +1308,46 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * A step's job whose report could not be written, or that broke outside its
+   * work, is tried again (every step is safe to repeat); one that never gets
+   * through fails the step, each owed half of a pair, so the run ends
+   * resumably instead of waiting for a restart.
+   */
   const executeJob = (job: GameRunJobs.GameRunStepJob) =>
-    execute(job).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.interrupt
-          : Effect.logWarning("game run step job failed", { stepId: job.stepId, cause }),
+    retrying(execute(job)).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          yield* Effect.logWarning("game run step job failed", { stepId: job.stepId, error });
+          const reason = `the step's work could not be reported after ${RETRIES + 1} tries (${causeText(Cause.fail(error))})`;
+          // The last resort is retried too. One that never gets through is
+          // logged, and recovery owes the step at startup: it wakes it again.
+          yield* retrying(
+            Effect.gen(function* () {
+              const found = yield* current(job);
+              if (found === null) return;
+              const step = found.record.step;
+              const owed =
+                step.kind === "pair"
+                  ? step.halves
+                      .filter(
+                        (h) =>
+                          !step.results.some((r) => r.id === h.id) &&
+                          !found.record.endedHalves.some((r) => r.seq === h.id),
+                      )
+                      .map((h) => gameRunStepId(job.runId, h.id))
+                  : [found.record.id];
+              for (const stepId of owed) yield* fail({ ...job, stepId }, stepId, reason);
+            }),
+          ).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("game run step could not be failed; recovery owes it", {
+                stepId: job.stepId,
+                cause,
+              }),
+            ),
+          );
+        }),
       ),
     );
 
@@ -1125,36 +1362,65 @@ const make = Effect.gen(function* () {
             Effect.orElseSucceed(() => true),
           ),
         execute: executeJob,
+        // On the outbox's last try a cap that could not be checked is set
+        // again a minute on, under a command id of its own, so no turn goes
+        // uncapped; the interrupt it sends keeps the cap's id, so a budget cut
+        // still reads as one.
         deadline: (job) =>
-          deadline(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run cap watch failed", { stepId: job.stepId, cause }),
+          lastTry(job, deadline(job), () =>
+            Effect.flatMap(DateTime.now, (now) =>
+              refusedOnly(
+                engine.dispatch({
+                  type: "game-run.step.schedule",
+                  commandId: CommandId.make(
+                    `server:game-run-cap:${job.stepId}:attempt:${job.attempt}:rearm:${job.effectId}`,
+                  ),
+                  threadId: job.threadId,
+                  runId: job.runId,
+                  stepId: job.stepId,
+                  attempt: job.attempt,
+                  at: DateTime.toEpochMillis(now) + 60_000,
+                  timer: { kind: "cap" },
+                }),
+              ),
             ),
           ),
+        // A turn that could not be sent again on the last try fails its step.
         resend: (job) =>
-          resend(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run resend failed", { stepId: job.stepId, cause }),
+          lastTry(job, resend(job), (cause) =>
+            fail(
+              job,
+              job.stepId,
+              `${job.turn === "memory" ? "a memory wait's" : "a retry's"} turn could not be sent (${causeText(cause)})`,
             ),
           ),
+        outputs: (job) =>
+          outputs(job).pipe(
+            Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
+          ),
+        releaseCopies: (job) =>
+          releaseCopies(job).pipe(
+            Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
+          ),
+        // A finish or restore is safe to run again whole, so one whose reads
+        // break is tried again; one that never gets through is logged, and
+        // recovery owes it at startup (the run still says it is owed).
         restore: (job) =>
-          restore(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run restore failed", { runId: job.runId, cause }),
+          retrying(restore(job)).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("game run restore failed; recovery owes it", {
+                runId: job.runId,
+                error,
+              }),
             ),
           ),
         finish: (job) =>
-          finish(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run finish failed", { runId: job.runId, cause }),
+          retrying(finish(job)).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("game run finish failed; recovery owes it", {
+                runId: job.runId,
+                error,
+              }),
             ),
           ),
       });

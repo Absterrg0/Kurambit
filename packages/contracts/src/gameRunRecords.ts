@@ -805,8 +805,9 @@ export const GameRunStep = Schema.Struct({
   /** A pair's halves that ended the run, held until every half is in: then the first one lands. */
   endedHalves: Schema.Array(Schema.Struct({ seq: PositiveInt, result: EndedResult })),
   /**
-   * What landing this step's result asks of the game folder: records to write
-   * and role threads whose worktrees go. Done before the run's next step.
+   * What landing this step's result asked of the game folder: records to write
+   * and role threads whose copies go. The game-run.outputs effect each landing
+   * commits does it, before the run's next step.
    */
   outputs: Schema.Struct({
     files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),

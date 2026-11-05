@@ -3,6 +3,10 @@
 // hands its job over and returns at once; the job reports back with commands.
 // Jobs are in-process only, so a restart loses them and GameRunRecovery
 // starts again what a lost job left unfinished (every step is safe to repeat).
+// A step's timers (a read and a dispatch or an interrupt) and a landing's
+// outputs (notes written, copies released) are short, so they run inside their
+// effects instead: the effect stays unsettled until its work is done, and the
+// outbox runs it again after a failure or a server death.
 import {
   GameRunId as GameRunIdSchema,
   type GameRunId,
@@ -12,6 +16,7 @@ import {
 } from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -33,11 +38,33 @@ export interface GameRunFinishJob {
   readonly endedAt: string;
 }
 
-export interface GameRunResendJob extends GameRunStepJob {
+export interface GameRunResend extends GameRunStepJob {
   /** Why the turn goes again: an instant failure, or an explore start refused for memory. */
   readonly turn: "retry" | "memory";
   readonly n: number;
 }
+
+/**
+ * Which try of its effect a timer or an outputs effect is: on the outbox's last
+ * try (`final`) the work gives up its own way, so nothing is lost with it.
+ */
+export interface GameRunEffectTry {
+  readonly effectId: string;
+  readonly final: boolean;
+}
+
+/** What a step's landing asks of the game folder; GameRunOutputs' effect does it. */
+export interface GameRunOutputs {
+  readonly threadId: ThreadId;
+  readonly runId: GameRunId;
+  readonly files: ReadonlyArray<{ readonly path: string; readonly text: string }>;
+  readonly release: ReadonlyArray<ThreadId>;
+}
+
+/** A timer's or an outputs effect's work that did not get done; its effect is tried again. */
+export class GameRunEffectError extends Data.TaggedError("GameRunEffectError")<{
+  readonly cause: unknown;
+}> {}
 
 export interface GameRunRestoreJob {
   readonly threadId: ThreadId;
@@ -49,14 +76,27 @@ export interface GameRunRestoreJob {
 export interface GameRunJobRunner {
   /** A step's work, reported with game-run.step.complete or game-run.step.fail. */
   readonly execute: (job: GameRunStepJob) => Effect.Effect<void>;
-  /** A role turn's cap: interrupts its run once the cap is due. */
-  readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
+  /** A role turn's cap: interrupts its run once due, else sets the timer again; inside its effect. */
+  readonly deadline: (
+    job: GameRunStepJob & GameRunEffectTry,
+  ) => Effect.Effect<void, GameRunEffectError>;
   /** A run's ending: stops its turns and jobs, does its last outputs and exports, records it. */
   readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
   /** A creator's restore of a kept round: moves the folder, lands with game-run.restore. */
   readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
-  /** A role turn sent again once its pause is over, then capped like the first. */
-  readonly resend: (job: GameRunResendJob) => Effect.Effect<void>;
+  /** A role turn sent again once its pause is over, then capped like the first; inside its effect. */
+  readonly resend: (
+    job: GameRunResend & GameRunEffectTry,
+  ) => Effect.Effect<void, GameRunEffectError>;
+  /** A landing's records written and copies released; inside its effect, and safe to repeat. */
+  readonly outputs: (
+    job: GameRunOutputs & GameRunEffectTry,
+  ) => Effect.Effect<void, GameRunEffectError>;
+  /** Every copy of a spent run removed; inside its effect, and safe to repeat. */
+  readonly releaseCopies: (job: {
+    readonly threadId: ThreadId;
+    readonly runId: GameRunId;
+  }) => Effect.Effect<void, GameRunEffectError>;
   /** Whether the game folder holds anything of a decision's evidence to show the creator. */
   readonly showable: (
     threadId: ThreadId,
@@ -74,15 +114,19 @@ export class GameRunJobs extends Context.Service<
   {
     /** Starts the step's work unless a job for that attempt is live; returns at once. */
     readonly execute: (job: GameRunStepJob) => Effect.Effect<void>;
-    /** Watches a role turn's cap unless a watch for that attempt is live; returns at once. */
-    readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
+    /** A role turn's cap, run in the caller's fiber: the step.deadline effect's own work. */
+    readonly deadline: GameRunJobRunner["deadline"];
     /** Finishes an ending unless its finish is live; returns at once. Finishing twice is safe. */
     readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
     /** Runs a restore unless one for that request is live; returns at once. */
     readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
-    /** Sends a role turn again unless that send is live; returns at once. */
-    readonly resend: (job: GameRunResendJob) => Effect.Effect<void>;
-    /** Any other work of a run's (a role turn sent again after a pause), once per key. */
+    /** A role turn sent again, run in the caller's fiber: the step.resend effect's own work. */
+    readonly resend: GameRunJobRunner["resend"];
+    /** A landing's outputs, run in the caller's fiber: the game-run.outputs effect's own work. */
+    readonly outputs: GameRunJobRunner["outputs"];
+    /** A spent run's copies removed, run in the caller's fiber: game-run.copies.release's work. */
+    readonly releaseCopies: GameRunJobRunner["releaseCopies"];
+    /** Any other work of a run's (a settled role turn's landing), once per key. */
     readonly fork: (
       key: string,
       runId: GameRunId,
@@ -99,8 +143,8 @@ export class GameRunJobs extends Context.Service<
 
 const finishOwner = (runId: GameRunId) => GameRunIdSchema.make(`${runId}:finish`);
 
-export const stepJobKey = (job: GameRunStepJob, kind: "execute" | "deadline"): string =>
-  `${kind}:${job.stepId}:attempt:${job.attempt}`;
+export const stepJobKey = (job: GameRunStepJob): string =>
+  `execute:${job.stepId}:attempt:${job.attempt}`;
 
 export const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
@@ -162,19 +206,12 @@ export const make = Effect.gen(function* () {
 
   const execute = (job: GameRunStepJob) =>
     fork(
-      stepJobKey(job, "execute"),
+      stepJobKey(job),
       job.runId,
       permits.withPermits(1)(
         Deferred.await(runner).pipe(Effect.flatMap((each) => each.execute(job))),
       ),
     );
-  const deadline = (job: GameRunStepJob) =>
-    fork(
-      stepJobKey(job, "deadline"),
-      job.runId,
-      Deferred.await(runner).pipe(Effect.flatMap((each) => each.deadline(job))),
-    );
-
   // Kept apart from the run's own jobs, which the finish stops first.
   const finish = (job: GameRunFinishJob) =>
     fork(
@@ -189,13 +226,6 @@ export const make = Effect.gen(function* () {
       `restore:${job.runId}:${job.requestId}`,
       GameRunIdSchema.make(`${job.runId}:restore`),
       Deferred.await(runner).pipe(Effect.flatMap((each) => each.restore(job))),
-    );
-
-  const resend = (job: GameRunResendJob) =>
-    fork(
-      `resend:${job.stepId}:attempt:${job.attempt}:${job.turn}:${job.n}`,
-      job.runId,
-      Deferred.await(runner).pipe(Effect.flatMap((each) => each.resend(job))),
     );
 
   // The game layer attaches the work when it builds; a server where it never
@@ -221,10 +251,13 @@ export const make = Effect.gen(function* () {
 
   return GameRunJobs.of({
     execute,
-    deadline,
+    deadline: (job) => Deferred.await(runner).pipe(Effect.flatMap((each) => each.deadline(job))),
     finish,
     restore,
-    resend,
+    resend: (job) => Deferred.await(runner).pipe(Effect.flatMap((each) => each.resend(job))),
+    outputs: (job) => Deferred.await(runner).pipe(Effect.flatMap((each) => each.outputs(job))),
+    releaseCopies: (job) =>
+      Deferred.await(runner).pipe(Effect.flatMap((each) => each.releaseCopies(job))),
     fork,
     stopRun,
     isLive: (key) => Effect.sync(() => live.has(key)),

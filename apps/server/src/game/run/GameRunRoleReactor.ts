@@ -22,6 +22,7 @@ import {
   gameRunStepId,
 } from "@kurambit/contracts";
 import { latestRootProviderFailure } from "@kurambit/shared/orchestrationV2ThreadError";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -32,7 +33,6 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
-import * as ServerConfig from "../../config.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   gameRunOperationOwner,
@@ -56,7 +56,9 @@ import { BuildName } from "./buildNames.ts";
 import { captureBuild, freeBy, isGameCode, measureChange } from "./builds.ts";
 import { botRunCount } from "./facts.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
-import { lastBotRun, releaseCopy, runCopies } from "./roleWorkspace.ts";
+import { causeText } from "../runSetup.ts";
+import { RETRIES as LANDING_RETRIES, retrying } from "./retrying.ts";
+import { lastBotRun } from "./roleWorkspace.ts";
 import type { RoleStep, Step } from "./state.ts";
 
 // An instantly failed turn never reached the model (provider or session
@@ -170,7 +172,7 @@ export class GameRunRoleReactor extends Context.Service<
     readonly settle: (
       roleThreadId: ThreadId,
       turnRun: OrchestrationV2Run,
-    ) => Effect.Effect<SettleOutcome>;
+    ) => Effect.Effect<SettleOutcome, Orchestrator.OrchestratorV2Error>;
     /** Sends a role step's turn on its thread, once per message id. */
     readonly sendTurn: (input: {
       readonly projectId: ProjectId;
@@ -184,11 +186,16 @@ export class GameRunRoleReactor extends Context.Service<
       void,
       ThreadManagement.ThreadManagementError | Orchestrator.OrchestratorV2Error
     >;
+    /**
+     * The step `stepId` names while its attempt is in flight, else null. A read
+     * that fails is an error, never null: a timer that took it for "the step
+     * moved on" would drop or interrupt a turn the step still runs.
+     */
     readonly locate: (
       creator: ThreadId,
       stepId: GameRunStepId,
       attempt: number,
-    ) => Effect.Effect<Located | null>;
+    ) => Effect.Effect<Located | null, ProjectionStore.ProjectionStoreV2Error>;
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly handle: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
   }
@@ -203,18 +210,15 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const jobs = yield* GameRunJobs.GameRunJobs;
-  const config = yield* ServerConfig.ServerConfig;
-  const deps = { threads, game };
   // One settle per step attempt at a time: a turn's run is updated more than
   // once after it ends, and its evidence is read (and reset) only once. Other
   // steps (a pair's other half) land meanwhile.
   const locks = yield* KeyedLock.make<string>();
 
   const locate: GameRunRoleReactor["Service"]["locate"] = (creator, stepId, attempt) =>
-    projections.getGameRunRecords(creator, { steps: "in-flight" }).pipe(
-      Effect.map((records) => locateIn(records, stepId, attempt)),
-      Effect.orElseSucceed(() => null),
-    );
+    projections
+      .getGameRunRecords(creator, { steps: "in-flight" })
+      .pipe(Effect.map((records) => locateIn(records, stepId, attempt)));
 
   const sendTurn: GameRunRoleReactor["Service"]["sendTurn"] = (input) => {
     const messageId = roleTurnMessageId(input.stepId, input.attempt, input.kind, input.n);
@@ -274,7 +278,6 @@ const make = Effect.gen(function* () {
             .join("\n")
             .trim(),
         ),
-        Effect.orElseSucceed(() => ""),
       );
 
   const failureOf = (threadId: ThreadId, run: OrchestrationV2Run) =>
@@ -283,9 +286,44 @@ const make = Effect.gen(function* () {
         turnItemRunId: run.id,
         turnItemTypes: ["error"],
       })
+      .pipe(Effect.map((records) => latestRootProviderFailure(run, records.turnItems)));
+
+  /**
+   * A step whose landing or timer could not be written however often it was
+   * tried fails, so the run ends resumably with why instead of holding a step
+   * nothing will move. A refusal means the step moved on already.
+   */
+  const failStep = (input: {
+    readonly creator: ThreadId;
+    readonly runId: GameRun["id"];
+    readonly stepId: GameRunStepId;
+    readonly attempt: number;
+    readonly reason: string;
+  }) =>
+    engine
+      .dispatch({
+        type: "game-run.step.fail",
+        commandId: gameRunStepCommandId(input.stepId, input.attempt, "fail"),
+        threadId: input.creator,
+        runId: input.runId,
+        stepId: input.stepId,
+        attempt: input.attempt,
+        reason: input.reason.slice(0, 300),
+      })
       .pipe(
-        Effect.map((records) => latestRootProviderFailure(run, records.turnItems)),
-        Effect.orElseSucceed(() => null),
+        Effect.asVoid,
+        Effect.catchTags({
+          OrchestratorGameRunRefusedError: () => Effect.void,
+          OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+        }),
+        retrying,
+        // Recovery owes a step whose failure never got through: it wakes it at startup.
+        Effect.catch((cause) =>
+          Effect.logWarning("game run step could not be failed; recovery owes it", {
+            stepId: input.stepId,
+            cause,
+          }),
+        ),
       );
 
   // A turn sent again after a pause: a durable timer of the step's, so a
@@ -315,16 +353,39 @@ const make = Effect.gen(function* () {
         })
         .pipe(
           Effect.asVoid,
-          Effect.catch((cause) =>
-            Effect.logWarning("game run role turn could not be scheduled again", {
+          Effect.catchTags({
+            OrchestratorGameRunRefusedError: () => Effect.void,
+            OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+          }),
+          retrying,
+          Effect.catch((error) =>
+            failStep({
+              creator: input.creator,
+              runId: input.at.run.id,
               stepId: input.stepId,
-              cause,
+              attempt: input.at.record.attempt,
+              reason: `its turn could not be set to go again (${causeText(Cause.fail(error))})`,
             }),
           ),
         ),
     );
 
-  const settleLocked = (roleThreadId: ThreadId, turnRun: OrchestrationV2Run) =>
+  /** What a landing reads only once, kept across its retries: closing the explorer resets it. */
+  interface Once {
+    evidence?: Effect.Success<ReturnType<typeof readEvidence>>;
+  }
+  const readEvidence = (roleThreadId: ThreadId) =>
+    game.finishExploration(roleThreadId).pipe(
+      Effect.map((e) => ({
+        sessions: e.sessions,
+        actions: e.actions,
+        executedInputSteps: e.executedInputSteps,
+        nominalMs: e.nominalMs,
+        images: e.images,
+      })),
+    );
+
+  const settleLocked = (roleThreadId: ThreadId, turnRun: OrchestrationV2Run, once: Once) =>
     Effect.gen(function* () {
       const { thread, runs } = yield* threads.getThreadRecords(roleThreadId, ["runs"]);
       const turn = roleTurns(runs).find((t) => t.run.id === turnRun.id)?.turn;
@@ -402,9 +463,7 @@ const make = Effect.gen(function* () {
       // frees ends the run resumably instead of voiding the sample. Only play
       // turns: the write-up does not play.
       if (role.inputCapMs > 0 && !role.release) {
-        const mark = yield* game
-          .exploreMemoryWait(roleThreadId)
-          .pipe(Effect.orElseSucceed(() => null));
+        const mark = yield* game.exploreMemoryWait(roleThreadId);
         const atStart = { refusals: 0, refused: false, executedInputSteps: 0 };
         if (mark !== null && replayRefusedTurn(atStart, mark)) {
           const waits = turns.filter((t) => t.sent && t.turn.kind === "memory").length;
@@ -414,7 +473,7 @@ const make = Effect.gen(function* () {
             `${role.role}: explore start refused, memory short; waiting ${MEMORY_PAUSE} (${waits + 1} of ${MEMORY_WAITS})`,
           );
           // The next turn's marks count from here.
-          yield* game.finishExploration(roleThreadId).pipe(Effect.ignore);
+          yield* game.finishExploration(roleThreadId);
           return yield* again("memory", MEMORY_PAUSE);
         }
       }
@@ -430,16 +489,8 @@ const make = Effect.gen(function* () {
       const budgetCut = timedOut && at.run.budgetEndsAt !== null && now >= at.run.budgetEndsAt;
       // Evidence is cumulative per thread; closing here also releases the
       // thread's explorer so nothing stays open between roles.
-      const evidence = yield* game.finishExploration(roleThreadId).pipe(
-        Effect.map((e) => ({
-          sessions: e.sessions,
-          actions: e.actions,
-          executedInputSteps: e.executedInputSteps,
-          nominalMs: e.nominalMs,
-          images: e.images,
-        })),
-        Effect.orElseSucceed(() => null),
-      );
+      once.evidence ??= yield* readEvidence(roleThreadId);
+      const evidence = once.evidence;
       // A missing sheet is no verdict: the comparators then see neither build's.
       const sheet =
         role.sheet === ""
@@ -458,14 +509,14 @@ const make = Effect.gen(function* () {
             );
       const before = entry.before ?? { source: "", bots: 0 };
       // A source role's work is a build of its own, measured against the build
-      // before it; a capture or a diff that fails reads as a change.
+      // before it; a diff that cannot be read counts as a change.
       const since = role.since ?? "";
       const sourceAfter = role.source
         ? yield* captureBuild(
             {
               checkpoints,
-              // The landing waits out another owner's operation: a capture
-              // that fails reads as a change, which would be a guess.
+              // The landing waits out another owner's operation rather than
+              // fail its capture on contention.
               lock: {
                 operations,
                 owner: gameRunOperationOwner(at.run.id),
@@ -474,13 +525,8 @@ const make = Effect.gen(function* () {
             },
             root,
             at.run.id,
+            // A turn not kept as a build has no build to judge: the landing is tried again.
             BuildName.turn(turn.stepId, turn.attempt),
-          ).pipe(
-            Effect.catch((error) =>
-              log(`${role.role}: its turn could not be kept as a build (${error.message})`).pipe(
-                Effect.as(""),
-              ),
-            ),
           )
         : "";
       const changed = role.source
@@ -489,12 +535,6 @@ const make = Effect.gen(function* () {
         : undefined;
       const botsAfter = role.bots ? yield* Effect.promise(() => botRunCount(root)) : 0;
       const bot = role.bots ? yield* Effect.promise(() => lastBotRun(root, before.bots)) : null;
-      if (role.at !== null && (role.release || budgetCut))
-        yield* releaseCopy(
-          deps,
-          { copies: runCopies(config.worktreesDir, at.run.id), log },
-          roleThreadId,
-        );
       yield* log(
         `  step ${at.seq}: ${role.role} done${timedOut ? " (capped)" : ""} on ${roleThreadId}`,
       );
@@ -523,10 +563,13 @@ const make = Effect.gen(function* () {
     if (!candidate || !isSettledRun(turnRun)) return Effect.succeed(null);
     const own = parseRoleTurn(turnRun.userMessageId);
     if (own !== null) return Effect.succeed(own);
-    return threads.getThreadRecords(roleThreadId, ["runs"]).pipe(
-      Effect.map(({ runs }) => roleTurns(runs).find((t) => t.run.id === turnRun.id)?.turn ?? null),
-      Effect.orElseSucceed(() => null),
-    );
+    return threads
+      .getThreadRecords(roleThreadId, ["runs"])
+      .pipe(
+        Effect.map(
+          ({ runs }) => roleTurns(runs).find((t) => t.run.id === turnRun.id)?.turn ?? null,
+        ),
+      );
   };
 
   const settle: GameRunRoleReactor["Service"]["settle"] = (roleThreadId, turnRun) =>
@@ -534,17 +577,41 @@ const make = Effect.gen(function* () {
       turn === null ? Effect.succeed(null) : settleTurn(roleThreadId, turnRun, turn),
     );
 
-  const settleTurn = (roleThreadId: ThreadId, turnRun: OrchestrationV2Run, turn: RoleTurn) =>
-    locks.withLock(`${turn.stepId}:${turn.attempt}`, settleLocked(roleThreadId, turnRun)).pipe(
-      Effect.map((outcome): SettleOutcome =>
-        outcome === "fresh" || outcome === "continue" ? outcome : null,
-      ),
-      Effect.catchCause((cause) =>
-        Effect.logWarning("game run role result failed", { threadId: roleThreadId, cause }).pipe(
-          Effect.as(null),
+  // A landing that breaks is tried again; one that never lands fails its step.
+  const settleTurn = (roleThreadId: ThreadId, turnRun: OrchestrationV2Run, turn: RoleTurn) => {
+    const once: Once = {};
+    return locks
+      .withLock(
+        `${turn.stepId}:${turn.attempt}`,
+        retrying(settleLocked(roleThreadId, turnRun, once)),
+      )
+      .pipe(
+        Effect.map((outcome): SettleOutcome =>
+          outcome === "fresh" || outcome === "continue" ? outcome : null,
         ),
-      ),
-    );
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            yield* Effect.logWarning("game run role result failed", {
+              threadId: roleThreadId,
+              error,
+            });
+            const shell = yield* retrying(threads.getThreadShell(roleThreadId)).pipe(
+              Effect.orElseSucceed(() => null),
+            );
+            const creator = shell?.lineage.parentThreadId ?? null;
+            if (creator === null) return null;
+            yield* failStep({
+              creator,
+              runId: turn.runId,
+              stepId: turn.stepId,
+              attempt: turn.attempt,
+              reason: `its turn could not be landed after ${LANDING_RETRIES + 1} tries (${causeText(Cause.fail(error))})`,
+            });
+            return null;
+          }),
+        ),
+      );
+  };
 
   // The event consumer only reads and hands over: landing a turn (closing its
   // explorer, drawing its sheet, hashing its sources) is a job of the run's.
@@ -553,34 +620,56 @@ const make = Effect.gen(function* () {
   const handle: GameRunRoleReactor["Service"]["handle"] = (event) =>
     event.type !== "run.updated"
       ? Effect.void
-      : Effect.flatMap(turnOf(event.threadId, event.payload), (turn) =>
-          turn === null
-            ? Effect.void
-            : jobs.fork(
-                `land:${turn.stepId}:attempt:${turn.attempt}:${event.payload.id}`,
-                turn.runId,
-                settleTurn(event.threadId, event.payload, turn).pipe(
-                  Effect.flatMap((outcome) =>
-                    outcome === null
-                      ? Effect.void
-                      : Effect.gen(function* () {
-                          const { thread } = yield* threads.getThreadRecords(event.threadId, []);
-                          const creator = thread.lineage.parentThreadId;
-                          if (creator === null) return;
-                          // The step's job runs the whole step record: a pair's half
-                          // hands over its pair, whose job carries on only the owed half.
-                          const at = yield* locate(creator, turn.stepId, turn.attempt);
-                          if (at === null) return;
-                          yield* jobs.execute({
-                            threadId: creator,
-                            runId: turn.runId,
-                            stepId: at.record.id,
-                            attempt: turn.attempt,
-                          });
-                        }).pipe(Effect.ignore),
+      : Effect.flatMap(
+          // A continuation names its turn only through the run it continues;
+          // a read that never gets through leaves it to recovery at startup.
+          retrying(turnOf(event.threadId, event.payload)).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("a role turn could not be read; recovery owes its step", {
+                threadId: event.threadId,
+                error,
+              }).pipe(Effect.as(null)),
+            ),
+          ),
+          (turn) =>
+            turn === null
+              ? Effect.void
+              : jobs.fork(
+                  `land:${turn.stepId}:attempt:${turn.attempt}:${event.payload.id}`,
+                  turn.runId,
+                  settleTurn(event.threadId, event.payload, turn).pipe(
+                    Effect.flatMap((outcome) =>
+                      outcome === null
+                        ? Effect.void
+                        : Effect.gen(function* () {
+                            const { thread } = yield* threads.getThreadRecords(event.threadId, []);
+                            const creator = thread.lineage.parentThreadId;
+                            if (creator === null) return;
+                            // The step's job runs the whole step record: a pair's half
+                            // hands over its pair, whose job carries on only the owed half.
+                            const at = yield* locate(creator, turn.stepId, turn.attempt);
+                            if (at === null) return;
+                            yield* jobs.execute({
+                              threadId: creator,
+                              runId: turn.runId,
+                              stepId: at.record.id,
+                              attempt: turn.attempt,
+                            });
+                          }).pipe(
+                            // Without the handoff nothing moves the step on: tried
+                            // again, and one that never gets through is logged for
+                            // recovery, which wakes the step at startup.
+                            retrying,
+                            Effect.catch((error) =>
+                              Effect.logWarning(
+                                "a role's move to its step job failed; recovery owes it",
+                                { threadId: event.threadId, error },
+                              ),
+                            ),
+                          ),
+                    ),
                   ),
                 ),
-              ),
         );
 
   const start: GameRunRoleReactor["Service"]["start"] = () =>

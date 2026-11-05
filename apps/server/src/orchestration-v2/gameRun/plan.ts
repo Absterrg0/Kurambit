@@ -46,16 +46,23 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
     const threadId = command.threadId;
     const thread = yield* projections.getThread(threadId);
     // A deleted chat's run keeps only its ways out: a stop (recovery stops a
-    // run an older server left live there), and the records of the finish and
-    // restore already under way, so nothing waits on it after a restart.
+    // run an older server left live there), the records of the finish and
+    // restore already under way, so nothing waits on it after a restart, and
+    // the release of its copies.
     if (
       thread.deletedAt !== null &&
       command.type !== "game-run.stop" &&
       command.type !== "game-run.finished" &&
-      command.type !== "game-run.restore"
+      command.type !== "game-run.restore" &&
+      command.type !== "game-run.copies.spend"
     )
       return Result.fail<GameRunPlanRefusal>({ kind: "deleted" });
-    const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
+    // A resume writes what the run's last landings owe, so it reads every step.
+    const resuming = command.type === "game-run.resume";
+    const records = yield* projections.getGameRunRecords(
+      threadId,
+      resuming ? undefined : { steps: "in-flight" },
+    );
     const latest = records.gameRuns.at(-1);
     const decided = GameRunDecide.decide(
       command,
@@ -68,6 +75,8 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
           records.gameRunSteps.find(
             (step) => step.runId === latest?.id && step.seq === latest.inFlight,
           ) ?? null,
+        chatDeleted: thread.deletedAt !== null,
+        steps: resuming ? records.gameRunSteps : [],
       },
       {
         at: yield* DateTime.now,

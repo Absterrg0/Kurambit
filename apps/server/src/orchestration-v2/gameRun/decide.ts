@@ -15,6 +15,7 @@ import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2GameRunCommand,
   type ProjectId,
+  type ThreadId,
   gameRunRoundId,
   gameRunStepId,
 } from "@kurambit/contracts";
@@ -37,6 +38,10 @@ export interface GameRunRecords {
   readonly rounds: ReadonlyArray<GameRunRound>;
   /** The latest run's step in flight, when it holds one. */
   readonly inFlight: GameRunStep | null;
+  /** The thread was deleted: nothing resumes its runs. */
+  readonly chatDeleted: boolean;
+  /** The thread's step records, for a resume only (it writes what they still owe); else empty. */
+  readonly steps: ReadonlyArray<GameRunStep>;
 }
 
 interface GameRunInputs {
@@ -251,6 +256,55 @@ interface Work {
 const effectFor = (request: GameRunEffectRequest, availableAt?: number): GameRunEffect =>
   availableAt === undefined ? { request } : { request, availableAt };
 
+/**
+ * What a landing asks of the game folder, as an effect of its own commit: the
+ * outbox runs it before the run's next step, which that commit plans after it.
+ */
+const outputsEffect = (
+  run: GameRun,
+  stepId: GameRunStepId,
+  files: ReadonlyArray<{ readonly path: string; readonly text: string }>,
+  release: ReadonlyArray<ThreadId>,
+): GameRunEffect[] =>
+  files.length === 0 && release.length === 0
+    ? []
+    : [effectFor({ type: "game-run.outputs", runId: run.id, stepId, files, release })];
+
+/**
+ * The records the landings since the run's last non-decision step wrote, in
+ * order, with the latest of those steps: before landings had an outputs effect
+ * of their own, the next step's job wrote them (walking back over decisions,
+ * which have no job). Writing them again is harmless.
+ */
+export const owedOutputs = (
+  run: GameRun,
+  steps: ReadonlyArray<GameRunStep>,
+): { readonly stepId: GameRunStepId; readonly files: GameRunStep["outputs"]["files"] } | null => {
+  const landed = steps
+    .filter(
+      (s) =>
+        s.runId === run.id &&
+        s.completedAt !== null &&
+        (run.inFlight === null || s.seq < run.inFlight),
+    )
+    .toSorted((a, b) => b.seq - a.seq);
+  const owed: GameRunStep[] = [];
+  for (const step of landed) {
+    owed.unshift(step);
+    if (step.kind !== "decide") break;
+  }
+  const latest = owed.at(-1);
+  return latest === undefined
+    ? null
+    : { stepId: latest.id, files: owed.flatMap((s) => s.outputs.files) };
+};
+
+/** A role that plays a copy gives it back once its turn is its last, or the budget cut it short. */
+const ownRelease = (role: State.RoleStep | null, result: GameRunStepResult | null): ThreadId[] =>
+  role !== null && role.at !== null && result?.kind === "done" && (role.release || result.budgetCut)
+    ? [result.threadId]
+    : [];
+
 const stepRecord = (
   work: Work,
   run: GameRun,
@@ -420,10 +474,12 @@ const land = (
   applied: Policy.Applied,
   result: GameRunStepResult | null,
   status: GameRunStep["status"],
+  own: ReadonlyArray<ThreadId> = [],
 ): GameRunDecision => {
   // An ending keeps the step in flight for a resume to run again; a pair cut
   // short keeps only the halves still owed, which may be one half of its own.
   const held = applied.state.inFlight;
+  const release = [...new Set([...own, ...applied.release])];
   const done: GameRunStep = {
     ...record,
     ...(held?.id === record.seq ? { step: held } : {}),
@@ -431,7 +487,7 @@ const land = (
     result,
     outputs: {
       files: [...record.outputs.files, ...applied.files],
-      release: [...record.outputs.release, ...applied.release],
+      release: [...record.outputs.release, ...release],
     },
     logs: [...record.logs, ...applied.logs],
     completedAt: work.at,
@@ -454,7 +510,7 @@ const land = (
     state,
     next.state,
     [done, ...owed, ...(next.step === null ? [] : [next.step])],
-    next.effects,
+    [...outputsEffect(run, record.id, applied.files, release), ...next.effects],
   );
 };
 
@@ -630,15 +686,15 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
       budgetEndsAt: budgetMinutes === null ? null : work.now + budgetMinutes * 60_000,
     };
     const next = advance(work, resumed, state, inFlight);
+    // The records the last landings wrote go again ahead of the next step: an
+    // ending that stopped the run before they were written (an outputs effect
+    // that gave up, the landing that ended it) would leave the step without them.
+    const owed = owedOutputs(run, work.records.steps);
     return Result.succeed(
-      settle(
-        work,
-        resumed,
-        before,
-        next.state,
-        next.step === null ? [] : [next.step],
-        next.effects,
-      ),
+      settle(work, resumed, before, next.state, next.step === null ? [] : [next.step], [
+        ...(owed === null ? [] : outputsEffect(resumed, owed.stepId, owed.files, [])),
+        ...next.effects,
+      ]),
     );
   });
 
@@ -739,6 +795,31 @@ const profileSet = (work: Work, command: Command<"game-run.profile.set">) =>
     const state = toState(switched, work.records.rounds, record);
     return Result.succeed(settle(work, switched, state, state, [], []));
   });
+
+/** A run whose copies nothing can use any more frees them, on its own thread's effects. */
+const copiesSpend = (work: Work, command: Command<"game-run.copies.spend">) => {
+  const run = work.records.runs.find((each) => each.id === command.runId);
+  if (run === undefined) return refuse("no-run", `Run ${command.runId} is not this thread's.`);
+  const spent = copiesSpent(run, {
+    latest: work.records.runs.at(-1)?.id === run.id,
+    chatDeleted: work.records.chatDeleted,
+    now: work.now,
+    keepMs: command.keepMs,
+  });
+  if (!spent) return refuse("copies-in-use", `Run ${run.id} may still use its copies.`);
+  const latest = work.records.runs.at(-1)?.id === run.id;
+  const state = toState(run, work.records.rounds, latest ? inFlightOf(work, run) : null);
+  return Result.succeed(
+    settle(
+      work,
+      run,
+      state,
+      state,
+      [],
+      [effectFor({ type: "game-run.copies.release", runId: run.id })],
+    ),
+  );
+};
 
 const decideCommand = (work: Work, command: Command<"game-run.decide">) =>
   Result.flatMap(live(work, command.runId), (run) =>
@@ -905,6 +986,26 @@ const restoreRequest = (work: Work, command: Command<"game-run.restore.request">
     );
   });
 
+/**
+ * Whether no way back reaches a run's copies any more, so they may go: its
+ * ending is finished, and the run cannot be resumed (its ending, a later run on
+ * its chat, its chat deleted) or ended `keepMs` ago. A resume after that makes
+ * its copies again.
+ */
+export const copiesSpent = (
+  run: GameRun,
+  input: {
+    readonly latest: boolean;
+    readonly chatDeleted: boolean;
+    readonly now: number;
+    readonly keepMs: number;
+  },
+): boolean => {
+  if (run.status !== "ended" || run.endedAt === null || settling(run) !== null) return false;
+  if (!input.latest || input.chatDeleted || !RESUMABLE.has(run.ending ?? "")) return true;
+  return DateTime.toEpochMillis(DateTime.makeUnsafe(run.endedAt)) < input.now - input.keepMs;
+};
+
 /** A restore on a stopped run abandons the round it holds; a resume would continue it otherwise. */
 export const abandonsRound = (run: GameRun, state: State.RunState): boolean =>
   run.ending !== null && RESUMABLE.has(run.ending) && Policy.holdsRound(state);
@@ -930,32 +1031,32 @@ const restore = (work: Work, command: Command<"game-run.restore">) =>
       `the creator restored round ${run.restore.round} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
       work.now,
     );
-    // The next step's job releases the dropped round's copies, as it does a
-    // landed step's: the comparison's threads, and the held step's own roles (a
-    // blind player still playing is in the step, not yet in the comparison).
-    const release =
-      held === null
-        ? []
-        : [
-            ...new Set([
-              ...held.outputs.release,
-              ...dropped.release,
-              ...held.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId])),
-            ]),
-          ];
-    const steps: GameRunStep[] =
-      held === null
-        ? []
-        : [
-            {
-              ...held,
-              status: "cancelled",
-              outputs: { ...held.outputs, release },
-              logs: [...held.logs, ...dropped.logs],
-              completedAt: held.completedAt ?? work.at,
-            },
-          ];
-    return Result.succeed(settle(work, landed, state, dropped.state, steps, []));
+    if (held === null) return Result.succeed(settle(work, landed, state, dropped.state, [], []));
+    // The dropped round's copies go with this commit, as a landing's do: the
+    // comparison's threads, and the held step's own roles (a blind player still
+    // playing is in the step, not yet in the comparison).
+    const release = [
+      ...new Set([
+        ...dropped.release,
+        ...held.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId])),
+      ]),
+    ];
+    const step: GameRunStep = {
+      ...held,
+      status: "cancelled",
+      logs: [...held.logs, ...dropped.logs],
+      completedAt: held.completedAt ?? work.at,
+    };
+    return Result.succeed(
+      settle(
+        work,
+        landed,
+        state,
+        dropped.state,
+        [step],
+        outputsEffect(landed, held.id, [], release),
+      ),
+    );
   });
 
 /** A step's own timer: a role's cap at a later due time, a turn sent again, or its work after a wait for memory or for the game. */
@@ -968,6 +1069,27 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
           `Attempt ${command.attempt} of step ${command.stepId} was superseded.`,
         );
       const state = toState(run, work.records.rounds, record);
+      if (command.timer.kind === "recover")
+        return Result.succeed(
+          settle(
+            work,
+            run,
+            state,
+            state,
+            [],
+            [
+              effectFor(
+                {
+                  type: "game-run.step.wake",
+                  runId: run.id,
+                  stepId: record.id,
+                  attempt: command.attempt,
+                },
+                command.at,
+              ),
+            ],
+          ),
+        );
       if (command.timer.kind === "memory" || command.timer.kind === "busy") {
         const waited: GameRunStep =
           command.timer.kind === "memory"
@@ -1125,6 +1247,7 @@ const stepResult = (
       const status = landed.kind === "failed" ? "failed" : "completed";
       const state = toState(run, work.records.rounds, record);
       const input = { now: work.now, coin: work.input.coin, id: work.input.id };
+      const own = ownRelease(roleAt(step, seq), landed);
       if (step.kind !== "pair")
         return Result.succeed(
           land(
@@ -1135,6 +1258,7 @@ const stepResult = (
             Policy.applyResult(state, step, landed, input),
             landed,
             status,
+            own,
           ),
         );
       if (landed.kind === "decided" || !["done", "failed", "bot", "ended"].includes(landed.kind))
@@ -1160,7 +1284,20 @@ const stepResult = (
         )
       )
         return Result.succeed(
-          settle(work, run, state, withPair, [{ ...held, status: "running" }], []),
+          settle(
+            work,
+            run,
+            state,
+            withPair,
+            [
+              {
+                ...held,
+                status: "running",
+                outputs: { ...held.outputs, release: [...held.outputs.release, ...own] },
+              },
+            ],
+            outputsEffect(run, record.id, [], own),
+          ),
         );
       const ended = endedHalves[0]?.result ?? null;
       return Result.succeed(
@@ -1174,6 +1311,7 @@ const stepResult = (
             : Policy.applyResult(withPair, pair, ended, input),
           ended,
           "completed",
+          own,
         ),
       );
     }),
@@ -1225,5 +1363,7 @@ export const decide = (
       return schedule(work, command);
     case "game-run.restore":
       return restore(work, command);
+    case "game-run.copies.spend":
+      return copiesSpend(work, command);
   }
 };

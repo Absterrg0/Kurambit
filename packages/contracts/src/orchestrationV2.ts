@@ -3153,6 +3153,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
       }),
       Schema.Struct({ kind: Schema.Literal("memory"), n: PositiveInt }),
       Schema.Struct({ kind: Schema.Literal("busy"), n: PositiveInt }),
+      /** Recovery runs the step again through the outbox, behind whatever its thread still owes. */
+      Schema.Struct({ kind: Schema.Literal("recover") }),
     ]),
   }),
   /** The creator asks for a kept round's build back on an ended run; a job moves the folder. */
@@ -3168,6 +3170,17 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     ...GameRunCommandFields,
     requestId: TrimmedNonEmptyString,
     outcome: GameRunRestoreOutcome,
+  }),
+  /**
+   * Storage cleanup asks an ended run to free its copies. The run takes it
+   * only when nothing can resume it any more or it ended `keepMs` ago, and
+   * frees them on its own thread's effects, so a resume either refuses it or
+   * queues behind the release.
+   */
+  Schema.Struct({
+    type: Schema.Literal("game-run.copies.spend"),
+    ...GameRunCommandFields,
+    keepMs: NonNegativeInt,
   }),
 ]);
 export type OrchestrationV2GameRunCommand = typeof OrchestrationV2GameRunCommand.Type;
