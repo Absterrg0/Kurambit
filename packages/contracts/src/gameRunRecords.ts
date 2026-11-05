@@ -113,6 +113,9 @@ export const GameRunRoundRecord = Schema.Struct({
   finish: Schema.optionalKey(Schema.Boolean),
   // The round's candidate build (checkpoint oid): a retry continues it, a kept one is restorable.
   build: Schema.optionalKey(Schema.String),
+  // Its comparison record's id ("" before or without one), since round labels
+  // repeat across a game's threads. Absent on rounds recorded before.
+  comparison: Schema.optionalKey(Schema.String),
 });
 export type GameRunRoundRecord = typeof GameRunRoundRecord.Type;
 

@@ -1185,6 +1185,7 @@ const comparisonFiles = (
     j.notes.length === 0 ? [] : [{ path: judgeFile(j), text: `${j.notes}\n` }],
   ),
 ];
+const comparisonPath = (tag: string, id: string) => `.studio/comparisons/${tag}-${id}.json`;
 const comparisonFile = (
   tag: string,
   id: string,
@@ -1197,7 +1198,7 @@ const comparisonFile = (
     [names.y]: pick(lastSample(c, "y")),
   });
   return {
-    path: `.studio/comparisons/${tag}-${id}.json`,
+    path: comparisonPath(tag, id),
     text: `${JSON.stringify(
       {
         [names.x]: c.x,
@@ -1274,6 +1275,7 @@ const newRound = (state: RunState, now: number): Round => {
       kept: false,
       durationMs: 0,
       linesChanged: 0,
+      comparison: "",
     },
   };
 };
@@ -1702,7 +1704,15 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         const built = `it built rung ${k} (${rung.is}); the tester's checks: ${checkLine(r.checks) || "none verified"}; ${r.record.kept ? "kept" : `not kept (${r.record.note ?? ""})`}; judging ${verdicts}.`;
         return act({
           role: `reviewer-${n}`,
-          prompt: Roles.reviewerLedger(n, built, ladderText(state.ladder, rung.id), r.facts),
+          prompt: Roles.reviewerLedger(
+            n,
+            (r.record.comparison ?? "") === ""
+              ? ""
+              : comparisonPath(r.branch, r.record.comparison ?? ""),
+            built,
+            ladderText(state.ladder, rung.id),
+            r.facts,
+          ),
           capMs: CAP.reviewer,
         });
       }
@@ -2421,7 +2431,8 @@ const applyRound = (
       files.push(
         ...comparisonFiles(r.branch, input.id, cmp, move.gate, { x: "candidate", y: "best" }),
       );
-      return classify(s, { ...r, cmp }, move.gate, logs);
+      const record = { ...r.record, comparison: input.id };
+      return classify(s, { ...r, cmp, record }, move.gate, logs);
     }
     case "outcome": {
       if (r.outcome === "merge" && g!.ok) {

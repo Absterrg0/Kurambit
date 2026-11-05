@@ -345,7 +345,8 @@ export const readRoundEvidence = async (
   const nextRound = state.rounds.find((r) => r.round === n + 1);
   const latest = state.rounds.at(-1)?.round === n;
   const botRuns = await botRunsOf(root, state, n);
-  const compared = await comparisonOf(root, record.branch);
+  // A round names its own record; one recorded before that finds its label's latest.
+  const compared = await comparisonOf(root, record.branch, record.comparison);
   let video: GameRunRoundDetail["video"] = null;
   let videoFile: string | null = null;
   for (const run of botRuns.toReversed()) {
