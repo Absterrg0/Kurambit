@@ -61,7 +61,7 @@ import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
-import { buildStep, captureBuild } from "./builds.ts";
+import { buildStep, captureBuild, pruneBuilds } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
 import { modelFacts } from "./modelFacts.ts";
@@ -801,6 +801,20 @@ const make = Effect.gen(function* () {
             ),
           );
       }
+      // Last, so every build the ending used is still there for a finish a
+      // restart repeats; a repeat finds fewer refs and removes nothing more.
+      if (!gitEra(run))
+        yield* pruneBuilds(
+          checkpoints,
+          root,
+          toState(run, records.gameRunRounds, held ?? null),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : log(`the run's spent builds could not be cleared: ${causeText(cause)}`),
+          ),
+        );
     });
 
   // A creator's restore, from the effect its request committed. Every check is

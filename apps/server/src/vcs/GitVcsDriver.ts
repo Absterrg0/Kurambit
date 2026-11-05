@@ -12,6 +12,7 @@ import { ChildProcessSpawner } from "effect/process";
 
 import {
   GitCommandError,
+  CheckpointRef,
   VcsProcessExitError,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
@@ -1561,6 +1562,30 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         );
       },
     ),
+    listCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.listCheckpointRefs")(function* (input) {
+      const listed = yield* execute({
+        operation: "GitVcsDriver.checkpoints.listCheckpointRefs",
+        cwd: input.cwd,
+        args: [
+          "for-each-ref",
+          "--format=%(refname)%00%(objectname)%00%(committerdate:unix)",
+          input.prefix,
+        ],
+        maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+        outputMode: "error",
+      });
+      return listed.stdout
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => {
+          const [ref = "", oid = "", at = "0"] = line.split("\0");
+          return {
+            checkpointRef: CheckpointRef.make(ref),
+            oid,
+            committedAt: Number.parseInt(at, 10) || 0,
+          };
+        });
+    }),
   };
 
   return {

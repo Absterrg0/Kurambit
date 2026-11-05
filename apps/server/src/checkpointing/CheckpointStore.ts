@@ -8,7 +8,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import type { CheckpointStoreError } from "./Errors.ts";
-import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
+import type {
+  VcsCheckpointOps,
+  VcsCheckpointRefEntry,
+  VcsListCheckpointRefsInput,
+} from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 export interface CaptureCheckpointInput {
@@ -100,6 +104,11 @@ export class CheckpointStore extends Context.Service<
     readonly deleteCheckpointRefs: (
       input: DeleteCheckpointRefsInput,
     ) => Effect.Effect<void, CheckpointStoreError>;
+
+    /** The checkpoint refs below a ref folder, each with its commit and commit time. */
+    readonly listCheckpointRefs: (
+      input: VcsListCheckpointRefsInput,
+    ) => Effect.Effect<ReadonlyArray<VcsCheckpointRefEntry>, CheckpointStoreError>;
 
     /** Points a ref at a commit an earlier capture returned; false when it is gone. */
     readonly updateCheckpointRef: (
@@ -194,6 +203,13 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.deleteCheckpointRefs(input);
   });
 
+  const listCheckpointRefs: CheckpointStore["Service"]["listCheckpointRefs"] = Effect.fn(
+    "listCheckpointRefs",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints("CheckpointStore.listCheckpointRefs", input.cwd);
+    return yield* checkpoints.listCheckpointRefs(input);
+  });
+
   const updateCheckpointRef: CheckpointStore["Service"]["updateCheckpointRef"] = Effect.fn(
     "updateCheckpointRef",
   )(function* (input) {
@@ -219,6 +235,7 @@ export const make = Effect.gen(function* () {
     diffCheckpoints,
     listAuthoredPaths,
     deleteCheckpointRefs,
+    listCheckpointRefs,
     updateCheckpointRef,
     materializeCheckpoint,
     // One folder reached through a symlink or a relative path is still one workspace.

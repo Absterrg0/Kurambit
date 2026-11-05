@@ -13,8 +13,12 @@ const GAME_RUN_REFS_PREFIX = "refs/kurambit/game-runs";
 
 /** A production run's build, by the name the run gives it (`best`, `round-3/candidate`). */
 export function checkpointRefForGameRun(runId: string, name: string): CheckpointRef {
-  return CheckpointRef.make(`${GAME_RUN_REFS_PREFIX}/${Base64Url.encode(runId)}/${name}`);
+  return CheckpointRef.make(`${gameRunRefsFolder(runId)}${name}`);
 }
+
+/** The ref folder holding every build of one production run. */
+export const gameRunRefsFolder = (runId: string) =>
+  `${GAME_RUN_REFS_PREFIX}/${Base64Url.encode(runId)}/`;
 
 function resolveThreadWorkspaceCwd(input: {
   readonly thread: {

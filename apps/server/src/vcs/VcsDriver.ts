@@ -72,6 +72,19 @@ export interface VcsDeleteCheckpointRefsInput {
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
 
+export interface VcsListCheckpointRefsInput {
+  readonly cwd: string;
+  /** A ref folder, such as one run's `refs/kurambit/game-runs/<id>/`. */
+  readonly prefix: string;
+}
+
+export interface VcsCheckpointRefEntry {
+  readonly checkpointRef: CheckpointRef;
+  readonly oid: string;
+  /** The commit's time, in unix seconds. */
+  readonly committedAt: number;
+}
+
 export interface VcsCheckpointOps {
   /** The commit oid of the checkpoint it wrote. */
   readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<string, VcsError>;
@@ -88,6 +101,9 @@ export interface VcsCheckpointOps {
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,
   ) => Effect.Effect<void, VcsError>;
+  readonly listCheckpointRefs: (
+    input: VcsListCheckpointRefsInput,
+  ) => Effect.Effect<ReadonlyArray<VcsCheckpointRefEntry>, VcsError>;
   readonly updateCheckpointRef: (
     input: VcsUpdateCheckpointRefInput,
   ) => Effect.Effect<boolean, VcsError>;
