@@ -719,6 +719,15 @@ describe("assetResponseHeaders", () => {
     );
   });
 
+  it("never lets a download be cached past its signed URL", () => {
+    expect(
+      assetResponseHeaders("/builds/game-web.zip", { download: true, fileName: "game-web.zip" }),
+    ).toMatchObject({
+      "Cache-Control": "private, no-store",
+      "Content-Disposition": 'attachment; filename="game-web.zip"',
+    });
+  });
+
   it("does not apply document policy to raster images", () => {
     expect(assetResponseHeaders("/attachments/user-image.png")).toEqual({
       "Cache-Control": "private, max-age=3600",

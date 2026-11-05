@@ -105,6 +105,8 @@ export function assetResponseHeaders(
     "X-Content-Type-Options": "nosniff",
     ...(options?.download
       ? {
+          // A download is saved once; a cached copy would outlive the signed URL that granted it.
+          "Cache-Control": "private, no-store",
           "Content-Disposition": downloadContentDisposition(options.fileName),
           "Content-Security-Policy": "default-src 'none'; sandbox",
           "Content-Type":
