@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off preferSchemaOverJson:off -- Streams pinned archives to disk with an AbortSignal and a stall timer like the toolchain downloader, unpacks them, and reads glTF JSON headers of any shape.
 // The pinned CC0 library's file boundary: pins, safe unpacking and cheap facts about the files.
-import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -126,16 +125,6 @@ export const loadableIn = (engine: LibraryEngine, format: string) => LOADABLE[en
 export const modelRank = (engine: LibraryEngine, format: string) => {
   const rank = MODEL_RANK[engine].indexOf(format);
   return rank === -1 ? MODEL_RANK[engine].length : rank;
-};
-
-export const fileSha256 = async (path: string) => {
-  const hash = NodeCrypto.createHash("sha256");
-  let bytes = 0;
-  for await (const chunk of NodeFS.createReadStream(path)) {
-    hash.update(chunk as Buffer);
-    bytes += (chunk as Buffer).byteLength;
-  }
-  return { sha256: hash.digest("hex"), bytes };
 };
 
 /** Null when the bytes are the pinned ones; otherwise what differs, for the error detail. */

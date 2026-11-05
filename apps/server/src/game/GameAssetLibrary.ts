@@ -16,11 +16,11 @@ import {
   type GameLibraryKind,
 } from "@kurambit/contracts";
 import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
+import { fileSha256 } from "./fileHash.ts";
 import {
   INDEX_VERSION,
   UNPACK_LIMITS,
   downloadPinned,
-  fileSha256,
   indexPack,
   loadableIn,
   matchScore,
