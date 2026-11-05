@@ -1279,8 +1279,8 @@ const make = Effect.gen(function* () {
       return ExploreEvidence.totals(record);
     }),
     // On the thread's evidence record, so a restart keeps a sample's budget.
-    // The cap holds in this process even when the write fails; the failure
-    // still goes to the caller, which must not start a sample on it.
+    // Cached only once on disk: a retry after a failed write must find the
+    // cap missing and write it again, not take the cache's word for it.
     limitInput: (threadId, totalMs) =>
       Effect.flatMap(projects.resolve(threadId), (root) =>
         evidenceLock.withPermits(1)(
@@ -1288,7 +1288,6 @@ const make = Effect.gen(function* () {
             const record = yield* loadEvidence(String(threadId), root);
             if (record.inputCapMs === totalMs) return;
             const next = { ...record, inputCapMs: totalMs };
-            rememberEvidence(next);
             yield* persistEvidence(next).pipe(
               Effect.mapError(
                 (cause) =>
@@ -1300,6 +1299,7 @@ const make = Effect.gen(function* () {
                   }),
               ),
             );
+            rememberEvidence(next);
           }),
         ),
       ),
