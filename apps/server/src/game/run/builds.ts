@@ -9,7 +9,7 @@ import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../../checkpointing/Utils.ts";
 import type * as GameService from "../GameService.ts";
 import { restoredPaths } from "./buildNames.ts";
-import type { BuildOutcome } from "./policy.ts";
+import { type BuildOutcome, classifyComparePair } from "./policy.ts";
 import type { BuildOp, RunState } from "./state.ts";
 
 type Checkpoints = CheckpointStore.CheckpointStore["Service"];
@@ -68,13 +68,16 @@ export const measureChange = (
         );
 
 /**
- * A finished run's transient builds go: every turn's, each candidate its
- * judging set aside, and all but the newest unfinished round and ending. A
- * build the run still holds (its best, a pending candidate, the round or block
- * a resume continues) stays whatever its name, as do the base, kept rounds,
- * stages, prototypes and everything a restore kept. Round records are history
- * (each names its candidate), so only the rest of the state counts as held; an
- * unjudged round's candidate stays, since the run log names it as kept.
+ * A finished run's transient builds go: every turn's, and the candidate of
+ * each round recorded as kept (its kept build holds it), abandoned by a
+ * restore (the restore's before build holds its work) or beaten in both
+ * orders. Every other build stays: the run log tells a person it keeps a
+ * round's candidate (unjudged, inconclusive, failed checks, a failed merge,
+ * a budget leave, a round never recorded), its unfinished work and the work
+ * each ending found, and gives the command that brings it back. A build the
+ * run still holds (its best, a pending candidate, the round or block a resume
+ * continues) stays whatever its name. Round records are history (each names
+ * its candidate), so only the rest of the state counts as held.
  */
 const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 // Every build the state names, wherever it names one: records hold builds by oid.
@@ -92,32 +95,28 @@ export const pruneBuilds = (checkpoints: Checkpoints, root: string, state: RunSt
     const entries = yield* checkpoints.listCheckpointRefs({ cwd: root, prefix: folder });
     const held = new Set<string>();
     oidsIn({ ...state, rounds: [] }, held);
-    const unjudged = new Set(
-      state.rounds
-        .filter((r) => r.unjudged === true || r.inconclusive === true)
-        .map((r) => r.branch),
-    );
-    const named = entries.map((entry) => ({
-      ...entry,
-      name: entry.checkpointRef.slice(folder.length),
-    }));
-    const newest = (match: (name: string) => boolean) =>
-      named
-        .filter((entry) => match(entry.name))
-        .toSorted((a, b) => b.committedAt - a.committedAt)
-        .at(0)?.name;
-    const isUnfinished = (name: string) => name.endsWith("/unfinished");
-    const isEnding = (name: string) => name.startsWith("endings/");
-    const keepUnfinished = newest(isUnfinished);
-    const keepEnding = newest(isEnding);
-    const transient = named.filter(
-      ({ name, oid }) =>
-        !held.has(oid) &&
-        (name.startsWith("turns/") ||
-          (name.endsWith("/candidate") && !unjudged.has(name.slice(0, -"/candidate".length))) ||
-          (isUnfinished(name) && name !== keepUnfinished) ||
-          (isEnding(name) && name !== keepEnding)),
-    );
+    // The latest record of each round label decides its candidate.
+    const recorded = new Map(state.rounds.map((r) => [r.branch, r]));
+    const spent = (label: string) => {
+      const r = recorded.get(label);
+      if (r === undefined) return false;
+      const [o1, o2] = r.verdicts;
+      return (
+        r.kept ||
+        r.abandoned === true ||
+        (r.unjudged !== true &&
+          r.inconclusive !== true &&
+          classifyComparePair(o1?.verdict ?? "NONE", o2?.verdict ?? "NONE") === "best-wins")
+      );
+    };
+    const transient = entries
+      .map((entry) => ({ ...entry, name: entry.checkpointRef.slice(folder.length) }))
+      .filter(
+        ({ name, oid }) =>
+          !held.has(oid) &&
+          (name.startsWith("turns/") ||
+            (name.endsWith("/candidate") && spent(name.slice(0, -"/candidate".length)))),
+      );
     if (transient.length > 0)
       yield* checkpoints.deleteCheckpointRefs({
         cwd: root,

@@ -1636,7 +1636,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "leave":
       // The round's work, whatever state it is in, is kept before the folder returns to the best.
       return t.phase === "capture"
-        ? run({ _tag: "capture", name: BuildName.unfinished(t.branch), base: state.best })
+        ? run({ _tag: "capture", name: BuildName.unfinished(t.branch, id), base: state.best })
         : toBest();
     case "decide": {
       if (state.profile === "guided")
@@ -2167,7 +2167,7 @@ export const applyResult = (
     case "leave":
       if (t.phase !== "trunk") {
         logs.push(
-          `${t.branch}: its unfinished work is kept as ${keptBuild(s.runId, BuildName.unfinished(t.branch), s.lane, g?.sha ?? "")}`,
+          `${t.branch}: its unfinished work is kept as ${keptBuild(s.runId, done.kind === "build" && done.op._tag === "capture" ? done.op.name : BuildName.unfinished(t.branch, done.id), s.lane, g?.sha ?? "")}`,
         );
         return out({ ...s, task: { ...t, phase: "trunk" } });
       }
@@ -2482,10 +2482,11 @@ const applyRound = (
       }
       // With a budget, judging starts only when both plays and both verdicts fit.
       if (remaining(s, now) < COMPARE_MIN_MS) {
+        // Kept as a left round's work: its candidate's name is the next round's.
         logs.push(
-          `round ${r.n}: budget leaves no time to judge; the candidate is kept as ${keptBuild(s.runId, BuildName.candidate(r.branch), s.lane, r.candidate)}`,
+          `round ${r.n}: budget leaves no time to judge; the round's work is kept as it is`,
         );
-        return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
+        return leaveRound(s, r);
       }
       const question =
         rung !== null

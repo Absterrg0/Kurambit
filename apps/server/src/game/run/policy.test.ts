@@ -1751,7 +1751,8 @@ describe("budget", () => {
     ).state;
     expect(drive(atRestore, roundResponder("A", "B"), () => false, T0).steps).toContain("sample");
     const late = drive(atRestore, roundResponder("A", "B"), () => false, T0 + 12 * MIN);
-    expect(late.steps).toEqual(["restore", "restore"]);
+    // The round's work is kept under a name of its own before the folder goes back to the best.
+    expect(late.steps).toEqual(["restore", "capture", "restore"]);
     expect(late.state.ending).toBe("budget");
     expect(late.state.best).toBe("best");
   });
