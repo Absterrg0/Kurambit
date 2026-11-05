@@ -60,6 +60,7 @@ import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as GameOperations from "../GameOperations.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import * as ServerConfig from "../../config.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as GameProjectService from "../GameProjectService.ts";
@@ -742,6 +743,9 @@ const layerGame = (root: string, world: World) =>
     Layer.provideMerge(GameRunRoleReactor.layer),
     Layer.provide(
       Layer.mergeAll(
+        ServerConfig.ServerConfig.layerTest(process.cwd(), {
+          prefix: "game-run-core-config-",
+        }).pipe(Layer.provide(NodeServices.layer)),
         // The run's builds are real checkpoints of the temp game repository.
         CheckpointStore.layer.pipe(
           Layer.provide(

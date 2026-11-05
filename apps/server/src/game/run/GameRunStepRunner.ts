@@ -33,8 +33,8 @@ import * as Stream from "effect/Stream";
 
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import * as ServerConfig from "../../config.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
-import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
@@ -61,15 +61,15 @@ import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
 import { buildStep, captureBuild } from "./builds.ts";
-import { neutralBuild } from "./git.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
 import { modelFacts } from "./modelFacts.ts";
 import {
   blankWorktree,
-  playerSampleWorktree,
   releaseWorktree,
   removeBlank,
+  runCopies,
+  sampleCopy,
   type RoleContext,
   type RoleDeps,
 } from "./roleWorkspace.ts";
@@ -101,13 +101,13 @@ const make = Effect.gen(function* () {
   const game = yield* GameService.GameService;
   const projects = yield* GameProjectService.GameProjectService;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
+  const config = yield* ServerConfig.ServerConfig;
   const projectStore = yield* ProjectService.ProjectService;
   const operations = yield* GameOperations.GameOperations;
-  const vcs = yield* GitWorkflow.GitWorkflowService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const jobs = yield* GameRunJobs.GameRunJobs;
   const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
-  const deps: RoleDeps = { launches, threads, game, vcs };
+  const deps: RoleDeps = { launches, threads, game, checkpoints };
 
   // A report the run refuses (the step moved on, the run stopped) is the
   // answer; one that could not be written leaves the step for recovery.
@@ -205,7 +205,7 @@ const make = Effect.gen(function* () {
             writeAtomic(NodePath.join(root, file.path), file.text),
           ).pipe(Effect.ignore);
         for (const thread of step.outputs.release)
-          yield* releaseWorktree(deps, { root, log }, thread);
+          yield* releaseWorktree(deps, { copies: copiesOf(run.id), log }, thread);
       }
     });
 
@@ -231,10 +231,12 @@ const make = Effect.gen(function* () {
         : `${role.prompt}${spriteBlock(sprites, true)}${modelBlock(models, true)}`;
     });
 
+  const copiesOf = (runId: string) => runCopies(config.worktreesDir, runId);
   const roleContext = (run: GameRun, root: string, log: RoleContext["log"]): RoleContext => ({
     root,
     lane: run.lane,
     runId: run.id,
+    copies: copiesOf(run.id),
     log,
   });
 
@@ -330,24 +332,18 @@ const make = Effect.gen(function* () {
           }
           const blank = role.at === BLANK ? yield* blankWorktree(deps, ctx, role) : null;
           if (role.at === BLANK && blank === null)
-            return yield* fail(half, stepId, `${role.role}: no worktree of its own`);
-          if (blank === null && replaces === undefined)
+            return yield* fail(half, stepId, `${role.role}: no folder of its own`);
+          if (role.at === null && replaces === undefined)
             for (const file of role.clear)
               yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, file), { force: true }));
-          // A blind sample plays a neutral commit of its build: the same game, but
-          // no round notes, bots or round-named HEAD that would tell the builds apart.
-          const baseRef =
-            blank === null && role.at !== null
-              ? ((yield* neutralBuild(root, role.at)) ?? role.at)
-              : role.at;
-          if (blank === null && role.at !== null && baseRef === role.at)
-            yield* log(
-              `${role.role}: no neutral commit for ${role.at.slice(0, 12)}; playing the build's own`,
-            );
+          // A blind sample plays a plain copy of its build: the same game, but no
+          // git, round notes or bots that would tell the builds apart.
           const sample =
-            blank === null && role.at !== null && engineProfile.play === "player"
-              ? yield* playerSampleWorktree(deps, ctx, role, baseRef ?? role.at)
+            role.at !== null && role.at !== BLANK
+              ? yield* sampleCopy(deps, ctx, role, role.at)
               : null;
+          if (role.at !== null && role.at !== BLANK && sample === null)
+            return yield* fail(half, stepId, `${role.role}: no copy of its build`);
           const workspace = blank ?? sample;
           const dropWorkspace =
             workspace === null ? Effect.void : removeBlank(deps, ctx, workspace);
@@ -372,19 +368,8 @@ const make = Effect.gen(function* () {
               interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
               workspaceStrategy:
                 workspace !== null
-                  ? {
-                      type: "existing_worktree",
-                      worktreePath: workspace.path,
-                      branch: workspace.branch,
-                    }
-                  : role.at === null
-                    ? { type: "root" }
-                    : {
-                        type: "worktree",
-                        baseRef: baseRef ?? role.at,
-                        // A thread launched again for the step gets a branch of its own.
-                        branch: `studio-wt/${run.id}-${role.id}${target === roleThreadId(stepId, 1) ? "" : `-${target.slice(0, 8)}`}`,
-                      },
+                  ? { type: "existing_worktree", worktreePath: workspace.path }
+                  : { type: "root" },
               initialMessage: {
                 messageId: roleTurnMessageId(stepId, job.attempt, "turn", 1),
                 text,
@@ -487,7 +472,7 @@ const make = Effect.gen(function* () {
     root: string,
     log: (line: string) => Effect.Effect<void>,
   ) =>
-    runBotFact(deps, { root, runId: run.id, log }, step).pipe(
+    runBotFact(deps, { root, runId: run.id, copies: copiesOf(run.id), log }, step).pipe(
       Effect.tap((result) => log(`  step ${step.id}: ${summarize(result)}`)),
       Effect.flatMap((result) => complete({ ...job, stepId }, stepId, result)),
     );
