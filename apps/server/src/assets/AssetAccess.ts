@@ -121,6 +121,13 @@ const AssetClaimsSchema = Schema.Union([
     download: Schema.optionalKey(Schema.Literal(true)),
     /** The attachment's file name when it differs from the file's own. */
     downloadName: Schema.optionalKey(Schema.String),
+    /**
+     * A download is also bound to its size and mtime: a file renamed away frees its
+     * inode, which a later file can be given. Previews omit them on purpose, so a
+     * file edited in place stays readable.
+     */
+    size: Schema.optionalKey(Schema.String),
+    mtimeMs: Schema.optionalKey(Schema.String),
     expiresAt: Schema.Number,
   }),
   Schema.Struct({
@@ -381,6 +388,7 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
                 : Effect.succeed(null),
               (dimensions) => ({
                 identity: { device: file.info.dev.toString(), inode: file.info.ino.toString() },
+                version: { size: file.info.size.toString(), mtimeMs: file.info.mtimeMs.toString() },
                 dimensions,
               }),
             ),
@@ -399,7 +407,7 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
         kind: "media-file-exact" as const,
         filePath: canonicalFile,
         ...opened.identity,
-        ...(input.download ? { download: true as const } : {}),
+        ...(input.download ? { download: true as const, ...opened.version } : {}),
         ...(input.download && input.downloadName !== undefined
           ? { downloadName: input.downloadName }
           : {}),
@@ -961,6 +969,12 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     );
     if (!file) return null;
     if (claims.download) {
+      if (
+        claims.size !== file.info.size.toString() ||
+        claims.mtimeMs !== file.info.mtimeMs.toString()
+      ) {
+        return null;
+      }
       return {
         kind: "file",
         path: canonicalFile,

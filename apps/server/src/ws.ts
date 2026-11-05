@@ -245,9 +245,10 @@ const signRunFile = (threadId: ThreadId, path: string) =>
   );
 
 // A package downloads through the same capability, served as an attachment.
-// Packaging publishes by rename, so the inode binding retires the URL when the
-// archive is re-packaged; a Web archive's path names its build, so its URL never
-// serves another build.
+// A download URL is bound to the archive's inode, size and mtime, so a
+// re-packaged archive retires it even when the filesystem hands the new archive
+// a freed inode; a Web archive's path names its build, so its URL never serves
+// another build.
 const signPackage = <P extends { readonly archivePath: string; readonly fileName: string }>(
   threadId: ThreadId,
   operation: string,

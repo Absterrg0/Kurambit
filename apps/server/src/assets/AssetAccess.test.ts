@@ -658,6 +658,30 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("retires a download URL when the file at its inode changes", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-media-download-version-",
+      });
+      const filePath = path.join(root, "game-windows.zip");
+      yield* fs.writeFileString(filePath, "first package");
+      const issued = yield* issueAssetUrl({
+        resource: { _tag: "media-file", threadId: ThreadId.make("thread-1"), path: filePath },
+        download: true,
+      });
+      const suffix = issued.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      const resolve = resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1));
+      expect(yield* resolve).toMatchObject({ kind: "file", download: true });
+
+      // The same inode with other bytes stands in for a freed inode handed to a new package.
+      yield* fs.writeFileString(filePath, "a later, longer package");
+      expect(yield* resolve).toBeNull();
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("names a download by its download name, not the file's own name", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
