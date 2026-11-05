@@ -35,7 +35,7 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
-import { toState } from "../../orchestration-v2/gameRun/decide.ts";
+import { gitEra, toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   gameRunOperationOwner,
@@ -761,10 +761,13 @@ const make = Effect.gen(function* () {
         // build, and the folder is left as the run left it, so a resume goes on
         // from that work. The work is kept once per ending: a finish a restart
         // cut after the best was restored must not keep the best as the work.
+        // A run from before checkpoints holds no builds to park or restore:
+        // its folder is exported as it is and left untouched.
         const ops = { game, checkpoints };
         const ctx = { root, runId: run.id, lane: run.lane };
         const name = BuildName.ending(job.endedAt);
         const parked = yield* Effect.gen(function* () {
+          if (gitEra(run)) return null;
           const ref = checkpointRefForGameRun(run.id, name);
           const kept = yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: ref });
           if (!kept) {
@@ -780,7 +783,7 @@ const make = Effect.gen(function* () {
             Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(null),
           ),
         );
-        if (parked === null)
+        if (parked === null && !gitEra(run))
           yield* log(
             "finishExports: the best build could not be restored; exporting the folder as it is",
           );
