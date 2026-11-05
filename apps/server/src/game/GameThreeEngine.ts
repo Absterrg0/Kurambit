@@ -1,7 +1,6 @@
 // @effect-diagnostics globalDate:off globalTimers:off globalDateInEffect:off nodeBuiltinImport:off -- This backend owns the headless-Chromium boundary for the three.js lane: wall-clock boot polling, real sleeps and loopback serving.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
-import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import {
@@ -15,20 +14,13 @@ import {
 } from "@kurambit/contracts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
-import {
-  READ_STUDIO_READY,
-  chromiumLaunchArgs,
-  requireChromium,
-  stackToGameFile,
-} from "./gameChromium.ts";
-import { chromiumChildEnv, serveGameDirectory } from "./gameWebServer.ts";
+import { requireChromium, stackToGameFile } from "./gameChromium.ts";
+import { serveGameDirectory } from "./gameWebServer.ts";
+import { openWebPlaySession, WebPageNotReady, type WebPageEvent } from "./webPlaySession.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
 
-// Playwright needs its files on disk; createRequire also resolves it from a Node SEA executable.
-const requirePlaywright = NodeModule.createRequire(import.meta.url);
-const loadPlaywright = () =>
-  requirePlaywright("playwright-core") as typeof import("playwright-core");
+const BOOT_TIMEOUT_MS = 60_000;
 
 const response = (
   process: GameProcessResult,
@@ -65,152 +57,100 @@ export const makeThreeBackend = (): GameEngineBackend => {
         lines.push(line);
       };
       const issues: GameCheckIssue[] = [];
-      let server: { url: string; close: () => Promise<void> } | null = null;
-      let browser: { close: () => Promise<void> } | null = null;
-      let booted = false;
-      let timedOut = false;
       const reached: string[] = [];
-      try {
-        yield* Effect.promise(() => NodeFSP.mkdir(temporary, { recursive: true }));
-        server = yield* Effect.promise(() => serveGameDirectory(ctx.root, ctx.projectName)).pipe(
-          Effect.mapError(
-            (cause) =>
-              new GameOperationError({
-                operation: "three-check",
-                path: NodePath.join(ctx.root, ctx.projectName),
-                reason: "io",
-                detail: "The static project could not be served.",
-                cause,
-              }),
-          ),
-        );
-        const served = server;
-        const origin = new URL(served.url).origin;
-        const executable = yield* requireChromium("three-check", ctx.projectDir);
-        const { chromium } = loadPlaywright();
-        const launched = yield* Effect.promise(() =>
-          chromium.launch({
-            executablePath: executable,
-            headless: true,
-            args: [...chromiumLaunchArgs()],
-            env: chromiumChildEnv(),
+      yield* Effect.promise(() => NodeFSP.mkdir(temporary, { recursive: true }));
+      const executable = yield* requireChromium("three-check", ctx.projectDir);
+      const server = yield* Effect.tryPromise({
+        try: () => serveGameDirectory(ctx.root, ctx.projectName),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "three-check",
+            path: NodePath.join(ctx.root, ctx.projectName),
+            reason: "io",
+            detail: "The static project could not be served.",
+            cause,
           }),
-        ).pipe(
-          Effect.mapError(
-            (cause) =>
-              new GameOperationError({
-                operation: "three-check",
-                path: ctx.projectDir,
-                reason: "command-failed",
-                detail: "Headless Chromium would not start.",
-                cause,
-              }),
-          ),
-        );
-        browser = launched;
-        // The page as the player opens it, then the gameplay entry the template
-        // names (the starter's shell boots straight into play with "?play"), so a
-        // failure in gameplay start cannot hide behind the title screen.
-        const entries: Array<readonly [string, string]> = [["boot", served.url]];
-        if (input.gameplayScene !== "")
-          entries.push(["gameplay", new URL(input.gameplayScene, served.url).href]);
-        for (const [entry, entryUrl] of entries) {
-          let entryBooted = false;
-          // A page error or a script that failed to load: either can stop the
-          // modules for good, so the bridge never appears.
-          let pageErrored = false;
-          const page = yield* Effect.promise(() =>
-            launched.newPage({ viewport: { ...THREE_VIEWPORT } }),
-          ).pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "three-check",
-                  path: ctx.projectDir,
-                  reason: "command-failed",
-                  detail: "Headless Chromium would not open a page.",
-                  cause,
-                }),
-            ),
-          );
-          page.on("console", (message) => {
-            const type = message.type();
-            if (type !== "error" && type !== "warning") return;
-            const text = message.text().slice(0, 500);
-            // The browser's own chrome, not the game: a missing favicon is not
-            // a game failure (the starter links a data-URI icon so it never fires).
-            if (/favicon\.ico/i.test(text)) return;
-            log(`console ${type}: ${text}`);
-            if (type === "error")
-              issues.push({
-                file: stackToGameFile(message.location()?.url, origin),
-                message: `Console error: ${text}`,
-              });
-          });
-          page.on("pageerror", (error) => {
-            const text = (error instanceof Error ? error.message : String(error)).slice(0, 500);
-            const stack = error instanceof Error ? error.stack : undefined;
-            log(`pageerror: ${text}`);
-            pageErrored = true;
-            issues.push({
-              file: stackToGameFile(stack, origin),
-              message: `Page error: ${text}`,
-            });
-          });
-          page.on("response", (response) => {
-            if (response.status() < 400 || response.request().resourceType() !== "script") return;
-            log(`script failed to load: ${response.url()} (${response.status()})`);
-            pageErrored = true;
-          });
-          const bootTimeoutMs = 60_000;
-          const started = Date.now();
-          yield* Effect.promise(() =>
-            page
-              .goto(entryUrl, { timeout: bootTimeoutMs, waitUntil: "load" })
-              .catch((cause: unknown) => {
-                log(`navigation failed: ${cause instanceof Error ? cause.message : String(cause)}`);
-              }),
-          );
-          for (;;) {
-            if (Date.now() - started > bootTimeoutMs) {
-              timedOut = true;
-              break;
-            }
-            try {
-              const ready = yield* Effect.promise(() => page.evaluate(READ_STUDIO_READY));
-              if (ready === true) {
-                entryBooted = true;
-                if (entry === "boot") booted = true;
-                break;
-              }
-              // Top-level await can delay the bridge past load, so only an error
-              // and no bridge together end the wait early.
-              if (pageErrored && ready === null) break;
-            } catch {
-              // Evaluations race the page navigation; keep polling until the deadline.
-            }
-            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 500)));
-          }
-          // One extra beat so late module errors still land in the listeners above.
-          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 2000)));
-          yield* Effect.promise(() => page.close().catch(() => undefined));
-          if (entryBooted) reached.push(entry);
-          else if (entry !== "boot")
-            issues.push({
-              file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
-              message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
-            });
-          if (timedOut) break;
+      });
+      const origin = new URL(server.url).origin;
+      const onPageEvent = (event: WebPageEvent): void => {
+        if (event.kind === "script-failed") {
+          log(`script failed to load: ${event.url} (${event.status})`);
+          return;
         }
-      } finally {
-        if (browser !== null) yield* Effect.promise(() => browser!.close().catch(() => undefined));
-        if (server !== null) yield* Effect.promise(() => server!.close().catch(() => undefined));
-      }
+        if (event.kind === "pageerror") {
+          const text = event.text.slice(0, 500);
+          log(`pageerror: ${text}`);
+          issues.push({
+            file: stackToGameFile(event.stack, origin),
+            message: `Page error: ${text}`,
+          });
+          return;
+        }
+        if (event.level !== "error" && event.level !== "warning") return;
+        const text = event.text.slice(0, 500);
+        // The browser's own chrome, not the game: a missing favicon is not
+        // a game failure (the starter links a data-URI icon so it never fires).
+        if (/favicon\.ico/i.test(text)) return;
+        log(`console ${event.level}: ${text}`);
+        if (event.level === "error")
+          issues.push({
+            file: stackToGameFile(event.url, origin),
+            message: `Console error: ${text}`,
+          });
+      };
+      // The page as the player opens it, then the gameplay entry the template
+      // names (the starter's shell boots straight into play with "?play"), so a
+      // failure in gameplay start cannot hide behind the title screen.
+      const entries: Array<readonly [string, string]> = [["boot", server.url]];
+      if (input.gameplayScene !== "")
+        entries.push(["gameplay", new URL(input.gameplayScene, server.url).href]);
+      const played = yield* Effect.tryPromise({
+        try: async (signal) => {
+          let timedOut = false;
+          for (const [entry, entryUrl] of entries) {
+            const session = await openWebPlaySession({
+              executable,
+              url: entryUrl,
+              ...THREE_VIEWPORT,
+              bootTimeoutMs: BOOT_TIMEOUT_MS,
+              signal,
+              onPageEvent,
+            }).catch((cause: unknown) => {
+              if (!(cause instanceof WebPageNotReady)) throw cause;
+              if (cause.navigation !== null) log(`navigation failed: ${cause.navigation}`);
+              timedOut = cause.timedOut;
+              return null;
+            });
+            if (session !== null) {
+              // One extra beat so late module errors still land in the listeners above.
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              await session.close();
+              reached.push(entry);
+            } else if (entry !== "boot")
+              issues.push({
+                file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
+                message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
+              });
+            if (timedOut) break;
+          }
+          return { timedOut };
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "three-check",
+            path: ctx.projectDir,
+            reason: "command-failed",
+            detail: "Headless Chromium would not start.",
+            cause,
+          }),
+      }).pipe(Effect.ensuring(Effect.promise(() => server.close().catch(() => undefined))));
+      const { timedOut } = played;
+      const booted = reached.includes("boot");
       if (!booted)
         issues.unshift({
           file: "web/index.html",
           message: timedOut
-            ? "The page never reported ready (window.__studio.ready stayed false past 60s)."
+            ? `The page never reported ready (window.__studio.ready stayed false past ${BOOT_TIMEOUT_MS / 1000}s).`
             : "The page did not boot: window.__studio had not appeared when the page errored. Fix the errors this check lists, and keep the studio bridge from the starter.",
         });
       yield* Effect.promise(() =>

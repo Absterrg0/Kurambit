@@ -84,6 +84,34 @@ const writeKeptStorage = async (path: string, entries: KeptEntries): Promise<voi
 
 export type WebPlaySession = PlaySession;
 
+export type WebPageEvent =
+  | {
+      readonly kind: "console";
+      readonly level: string;
+      readonly text: string;
+      readonly url: string;
+    }
+  | { readonly kind: "pageerror"; readonly text: string; readonly stack: string | undefined }
+  | { readonly kind: "script-failed"; readonly url: string; readonly status: number };
+
+/** The page never set `window.__studio.ready`: by the deadline, or because it errored first. */
+export class WebPageNotReady extends Error {
+  readonly timedOut: boolean;
+  /** Why the page could not be opened at all, when it could not. */
+  readonly navigation: string | null;
+  constructor(timedOut: boolean, bootTimeoutMs: number, navigation: string | null = null) {
+    super(
+      timedOut
+        ? `The page never reported ready (window.__studio.ready stayed false past ${Math.round(bootTimeoutMs / 1000)}s); no session was opened.`
+        : navigation !== null
+          ? `The page could not be opened (${navigation}); no session was opened.`
+          : "The page errored before window.__studio appeared; no session was opened.",
+    );
+    this.timedOut = timedOut;
+    this.navigation = navigation;
+  }
+}
+
 /**
  * Counts the page's animation frames: the engine-side frame counter of a
  * browser game, which stops when the page's main thread does.
@@ -119,6 +147,8 @@ export const openWebPlaySession = async (input: {
    * written back when the session closes. Omitted, the page starts with none.
    */
   readonly keptStorage?: string | null | undefined;
+  /** Sees each console message, page error and failed script as the page reports it. */
+  readonly onPageEvent?: ((event: WebPageEvent) => void) | undefined;
 }): Promise<WebPlaySession> => {
   input.signal?.throwIfAborted();
   const { chromium } = loadPlaywright();
@@ -172,8 +202,24 @@ export const openWebPlaySession = async (input: {
       if (pageErrors.length < MAX_PAGE_ERRORS)
         pageErrors.push({ message: message.slice(0, 500), where: (stack ?? "").slice(0, 200) });
     };
+    const notify = input.onPageEvent ?? (() => undefined);
+    // A page error or a script that failed to load: either can stop the
+    // modules for good, so the bridge never appears.
+    let pageErrored = false;
+    page.on("response", (response) => {
+      if (response.status() < 400 || response.request().resourceType() !== "script") return;
+      pageErrored = true;
+      record("error", `script failed to load: ${response.url()} (${response.status()})`);
+      notify({ kind: "script-failed", url: response.url(), status: response.status() });
+    });
     page.on("console", (message) => {
       const type = String(message.type() ?? "log");
+      notify({
+        kind: "console",
+        level: type,
+        text: message.text(),
+        url: message.location()?.url ?? "",
+      });
       record(
         type === "error"
           ? "error"
@@ -187,6 +233,12 @@ export const openWebPlaySession = async (input: {
       if (type === "error") pageError(message.text(), undefined);
     });
     page.on("pageerror", (error) => {
+      pageErrored = true;
+      notify({
+        kind: "pageerror",
+        text: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       record("error", error instanceof Error ? error.message : String(error));
       pageError(
         error instanceof Error ? error.message : String(error),
@@ -210,27 +262,40 @@ export const openWebPlaySession = async (input: {
       if (typeof raw[1] === "number") pageFrames = raw[1];
       return typeof raw[0] === "string" ? parseLine(raw[0]) : null;
     };
-    let booted = false;
     try {
-      await page.goto(input.url, { timeout: input.bootTimeoutMs, waitUntil: "load" });
       const bootDeadline = Date.now() + input.bootTimeoutMs;
-      while (!booted && Date.now() < bootDeadline) {
-        await sleep(500, input.signal);
+      const loaded = await page
+        .goto(input.url, { timeout: input.bootTimeoutMs, waitUntil: "load" })
+        .then(
+          () => true,
+          (cause: unknown) => {
+            if (input.signal?.aborted) throw cause;
+            if (cause instanceof Error && cause.name === "TimeoutError") return false;
+            throw new WebPageNotReady(
+              false,
+              input.bootTimeoutMs,
+              (cause instanceof Error ? cause.message : String(cause)).slice(0, 500),
+            );
+          },
+        );
+      for (;;) {
+        if (!loaded || Date.now() >= bootDeadline)
+          throw new WebPageNotReady(true, input.bootTimeoutMs);
+        let ready: unknown = null;
         try {
-          booted = (await page.evaluate(READ_STUDIO_READY)) === true;
+          ready = await page.evaluate(READ_STUDIO_READY);
         } catch {
           // Evaluations race the page navigation; keep polling until the deadline.
         }
+        if (ready === true) break;
+        // Top-level await can delay the bridge past load, so only an error
+        // and no bridge together end the wait early.
+        if (pageErrored && ready === null) throw new WebPageNotReady(false, input.bootTimeoutMs);
+        await sleep(500, input.signal);
       }
     } catch (cause) {
       await browser.close().catch(() => undefined);
       throw cause;
-    }
-    if (!booted) {
-      await browser.close().catch(() => undefined);
-      throw new Error(
-        "The three.js page never reported ready (window.__studio.ready stayed false); no session was opened.",
-      );
     }
     const bootProbe = sanitizeProbe(await readState());
     const bootConsole = drain();
