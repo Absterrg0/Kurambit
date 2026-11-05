@@ -312,6 +312,27 @@ const make = Effect.gen(function* () {
         yield* releaseCopy(deps, { copies: copiesOf(job.runId), log }, thread);
     });
 
+  /**
+   * A spent run's copies, from the effect the commit that found them spent
+   * queued on its thread: a resume committed after it runs its step behind
+   * this, and makes fresh copies.
+   */
+  const releaseCopies = (job: { readonly threadId: ThreadId; readonly runId: GameRun["id"] }) =>
+    Effect.gen(function* () {
+      const records = yield* projections.getGameRunRecords(job.threadId);
+      const roleThreads = new Set(
+        records.gameRunSteps
+          .filter((s) => s.runId === job.runId)
+          .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
+      );
+      const root = yield* projects
+        .resolve(job.threadId, { deleted: "allowed" })
+        .pipe(Effect.option);
+      const log = (line: string) =>
+        Option.isSome(root) ? logLine(root.value, line) : Effect.logInfo(line);
+      yield* dropRunCopies(deps, { copies: copiesOf(job.runId), log }, [...roleThreads], false);
+    });
+
   // A source role's change is measured at its landing against the build its step names.
   const measure = (role: RoleStep, root: string) =>
     Effect.promise(async (): Promise<GameRunRoleBefore> => ({
@@ -1185,6 +1206,10 @@ const make = Effect.gen(function* () {
           ),
         outputs: (job) =>
           outputs(job).pipe(
+            Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
+          ),
+        releaseCopies: (job) =>
+          releaseCopies(job).pipe(
             Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
           ),
         restore: (job) =>

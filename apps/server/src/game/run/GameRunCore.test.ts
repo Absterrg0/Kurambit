@@ -236,6 +236,7 @@ const countingRunner = Effect.gen(function* () {
     restore: () => Effect.void,
     resend: () => Effect.void,
     outputs: () => Effect.void,
+    releaseCopies: () => Effect.void,
     showable: () => Effect.succeed(true),
   };
   yield* (yield* GameRunJobs.GameRunJobs).attach(runner);
@@ -1150,6 +1151,41 @@ it.effect("a run whose chat is deleted keeps none of its copies, though it ended
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       yield* Fiber.join(finished);
       // Nothing can resume a run on a deleted chat, so its finish removed the copy.
+      assert.isFalse(NodeFS.existsSync(copy));
+    }),
+  ),
+);
+
+it.effect("a spent run frees every copy from its own thread's effect", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision } = yield* atVision(world);
+      const config = yield* ServerConfig.ServerConfig;
+      const copies = runCopies(config.worktreesDir, runId);
+      const copy = NodePath.join(copies, `step-${vision.seq}`);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      // A run whose chat is gone: nothing resumes it.
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: nextId(),
+        threadId: creator,
+      });
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      yield* Fiber.join(finished);
+      // A copy left by a role still at work when the finish ran.
+      NodeFS.mkdirSync(copy, { recursive: true });
+      yield* orchestrator.dispatch({
+        type: "game-run.copies.spend",
+        commandId: nextId(),
+        threadId: creator,
+        runId,
+        keepMs: 0,
+      });
+      assert.isTrue(NodeFS.existsSync(copy));
+      yield* worker.drain();
       assert.isFalse(NodeFS.existsSync(copy));
     }),
   ),

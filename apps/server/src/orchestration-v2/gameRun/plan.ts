@@ -46,13 +46,15 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
     const threadId = command.threadId;
     const thread = yield* projections.getThread(threadId);
     // A deleted chat's run keeps only its ways out: a stop (recovery stops a
-    // run an older server left live there), and the records of the finish and
-    // restore already under way, so nothing waits on it after a restart.
+    // run an older server left live there), the records of the finish and
+    // restore already under way, so nothing waits on it after a restart, and
+    // the release of its copies.
     if (
       thread.deletedAt !== null &&
       command.type !== "game-run.stop" &&
       command.type !== "game-run.finished" &&
-      command.type !== "game-run.restore"
+      command.type !== "game-run.restore" &&
+      command.type !== "game-run.copies.spend"
     )
       return Result.fail<GameRunPlanRefusal>({ kind: "deleted" });
     const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
@@ -68,6 +70,7 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
           records.gameRunSteps.find(
             (step) => step.runId === latest?.id && step.seq === latest.inFlight,
           ) ?? null,
+        chatDeleted: thread.deletedAt !== null,
       },
       {
         at: yield* DateTime.now,

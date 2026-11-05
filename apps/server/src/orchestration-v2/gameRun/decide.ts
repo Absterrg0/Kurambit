@@ -38,6 +38,8 @@ export interface GameRunRecords {
   readonly rounds: ReadonlyArray<GameRunRound>;
   /** The latest run's step in flight, when it holds one. */
   readonly inFlight: GameRunStep | null;
+  /** The thread was deleted: nothing resumes its runs. */
+  readonly chatDeleted: boolean;
 }
 
 interface GameRunInputs {
@@ -763,6 +765,31 @@ const profileSet = (work: Work, command: Command<"game-run.profile.set">) =>
     return Result.succeed(settle(work, switched, state, state, [], []));
   });
 
+/** A run whose copies nothing can use any more frees them, on its own thread's effects. */
+const copiesSpend = (work: Work, command: Command<"game-run.copies.spend">) => {
+  const run = work.records.runs.find((each) => each.id === command.runId);
+  if (run === undefined) return refuse("no-run", `Run ${command.runId} is not this thread's.`);
+  const spent = copiesSpent(run, {
+    latest: work.records.runs.at(-1)?.id === run.id,
+    chatDeleted: work.records.chatDeleted,
+    now: work.now,
+    keepMs: command.keepMs,
+  });
+  if (!spent) return refuse("copies-in-use", `Run ${run.id} may still use its copies.`);
+  const latest = work.records.runs.at(-1)?.id === run.id;
+  const state = toState(run, work.records.rounds, latest ? inFlightOf(work, run) : null);
+  return Result.succeed(
+    settle(
+      work,
+      run,
+      state,
+      state,
+      [],
+      [effectFor({ type: "game-run.copies.release", runId: run.id })],
+    ),
+  );
+};
+
 const decideCommand = (work: Work, command: Command<"game-run.decide">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(waitingDecision(work, run, command.decisionId), ({ record, step }) => {
@@ -929,10 +956,10 @@ const restoreRequest = (work: Work, command: Command<"game-run.restore.request">
   });
 
 /**
- * Whether no way back reaches a run's copies any more, so storage cleanup may
- * remove them: its ending is finished, and the run cannot be resumed (its
- * ending, a later run on its chat, its chat deleted) or ended `keepMs` ago. A
- * resume after that makes its copies again.
+ * Whether no way back reaches a run's copies any more, so they may go: its
+ * ending is finished, and the run cannot be resumed (its ending, a later run on
+ * its chat, its chat deleted) or ended `keepMs` ago. A resume after that makes
+ * its copies again.
  */
 export const copiesSpent = (
   run: GameRun,
@@ -1284,5 +1311,7 @@ export const decide = (
       return schedule(work, command);
     case "game-run.restore":
       return restore(work, command);
+    case "game-run.copies.spend":
+      return copiesSpend(work, command);
   }
 };

@@ -185,6 +185,11 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
     release: Schema.Array(ThreadId),
   }),
+  // A spent run's copies all go, from the commit that found them spent.
+  Schema.Struct({
+    type: Schema.Literal("game-run.copies.release"),
+    runId: GameRunId,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -208,6 +213,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.step.resend",
   "game-run.step.wake",
   "game-run.outputs",
+  "game-run.copies.release",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

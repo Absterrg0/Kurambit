@@ -68,6 +68,7 @@ const read = (records: Records): Decide.GameRunRecords => {
       run?.inFlight == null
         ? null
         : (records.steps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null),
+    chatDeleted: false,
   };
 };
 
@@ -862,6 +863,20 @@ describe("game-run commands", () => {
     expect(Decide.copiesSpent(run, { ...at, latest: false })).toBe(true);
     expect(Decide.copiesSpent(run, { ...at, chatDeleted: true })).toBe(true);
     expect(Decide.copiesSpent({ ...run, ending: "done" }, at)).toBe(true);
+  });
+
+  it("a run frees its copies on its own thread only when nothing can resume it", () => {
+    const keepMs = 14 * 24 * 60 * MIN;
+    const spend = { type: "game-run.copies.spend", runId, keepMs } as const;
+    expect(refusal(started(), spend).reason).toBe("copies-in-use");
+    const stopped = finished(accept(started(), { type: "game-run.stop", runId }).records);
+    // Within the bound a stopped run may still be resumed.
+    expect(refusal(stopped, spend, T0 + MIN).reason).toBe("copies-in-use");
+    const spent = accept(stopped, spend, T0 + keepMs + MIN).decision;
+    expect(spent.effects).toEqual([{ request: { type: "game-run.copies.release", runId } }]);
+    // A resume committed first makes the ask refused: its copies are in use again.
+    const resumed = accept(stopped, { type: "game-run.resume", runId }, T0 + keepMs).records;
+    expect(refusal(resumed, spend, T0 + keepMs + MIN).reason).toBe("copies-in-use");
   });
 
   it("a restore keeps the outcome of a round judged and waiting only on its review", () => {

@@ -380,9 +380,11 @@ otherwise lend every copy that repository's git, so the server puts the copies' 
 T3 then treats a copy as the non-repository it is. A copy goes with the commit that frees it, as a
 `game-run.outputs` effect: the landing of a role with no turn left, or the restore that abandons
 its round. An ending nothing can resume (its ending, a deleted chat or project) frees every copy of
-the run in its finish; a resumable one keeps its roles' copies until storage cleanup finds them
-spent (`copiesSpent`, under the game-logs period), and unbinds their threads first so a resume
-makes fresh ones. The game folder stays reachable by
+the run in its finish; a resumable one keeps its roles' copies until they are spent (`copiesSpent`,
+under the game-logs period). Storage cleanup never removes a named run's copies itself: it asks the
+run (`game-run.copies.spend`), whose decider frees them with a `game-run.copies.release` effect on
+the run's own thread, so a resume either refuses the ask or queues behind the release and makes
+fresh copies. The game folder stays reachable by
 path, and what is blind by construction is the player's or comparator's folder and prompt. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
 renders against the vision and may ask for one bounded redo before the art is

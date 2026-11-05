@@ -77,6 +77,11 @@ export interface GameRunJobRunner {
   readonly resend: (job: GameRunResend) => Effect.Effect<void, GameRunEffectError>;
   /** A landing's records written and copies released; inside its effect, and safe to repeat. */
   readonly outputs: (job: GameRunOutputs) => Effect.Effect<void, GameRunEffectError>;
+  /** Every copy of a spent run removed; inside its effect, and safe to repeat. */
+  readonly releaseCopies: (job: {
+    readonly threadId: ThreadId;
+    readonly runId: GameRunId;
+  }) => Effect.Effect<void, GameRunEffectError>;
   /** Whether the game folder holds anything of a decision's evidence to show the creator. */
   readonly showable: (
     threadId: ThreadId,
@@ -104,6 +109,8 @@ export class GameRunJobs extends Context.Service<
     readonly resend: GameRunJobRunner["resend"];
     /** A landing's outputs, run in the caller's fiber: the game-run.outputs effect's own work. */
     readonly outputs: GameRunJobRunner["outputs"];
+    /** A spent run's copies removed, run in the caller's fiber: game-run.copies.release's work. */
+    readonly releaseCopies: GameRunJobRunner["releaseCopies"];
     /** Any other work of a run's (a settled role turn's landing), once per key. */
     readonly fork: (
       key: string,
@@ -234,6 +241,8 @@ export const make = Effect.gen(function* () {
     restore,
     resend: (job) => Deferred.await(runner).pipe(Effect.flatMap((each) => each.resend(job))),
     outputs: (job) => Deferred.await(runner).pipe(Effect.flatMap((each) => each.outputs(job))),
+    releaseCopies: (job) =>
+      Deferred.await(runner).pipe(Effect.flatMap((each) => each.releaseCopies(job))),
     fork,
     stopRun,
     isLive: (key) => Effect.sync(() => live.has(key)),

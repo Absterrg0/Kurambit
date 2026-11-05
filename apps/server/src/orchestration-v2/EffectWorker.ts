@@ -587,6 +587,19 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          case "game-run.copies.release":
+            return gameRunJobs
+              .releaseCopies({ threadId: effect.threadId, runId: effect.request.runId })
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: effect.request.type,
+                      cause: error.cause,
+                    }),
+                ),
+              );
           case "game-run.restore.execute":
             return gameRunJobs.restore({
               threadId: effect.threadId,
