@@ -8,8 +8,7 @@ import * as NodePath from "node:path";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { GitOutcome } from "./policy.ts";
-import type { GitOp } from "./state.ts";
+import type { GameRunGitOp as GitOp, GameRunGitOutcome as GitOutcome } from "@kurambit/contracts";
 
 export class RunGitError extends Schema.TaggedError<RunGitError>()("RunGitError", {
   op: Schema.String,

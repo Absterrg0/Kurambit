@@ -33,6 +33,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -58,6 +59,9 @@ import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as GameOperations from "../GameOperations.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
+import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
+import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameRunControl from "../GameRunControl.ts";
 import * as GameService from "../GameService.ts";
@@ -183,17 +187,8 @@ const finishEnding = Effect.gen(function* () {
 });
 
 const gitOk: GameRunStepResult = {
-  kind: "git",
-  git: {
-    ok: true,
-    sha: "c0ffee",
-    branch: "main",
-    changed: true,
-    entered: false,
-    lines: 10,
-    detail: "",
-    same: false,
-  },
+  kind: "build",
+  build: { ok: true, sha: "c0ffee", changed: true, lines: 10, detail: "" },
 };
 
 /** Resolves once the step's record is committed with that status, counting from now. */
@@ -227,7 +222,7 @@ const countingRunner = Effect.gen(function* () {
         yield* Queue.offer(arrivals, `${job.stepId}#${job.attempt}`);
         yield* Deferred.await(hold);
         const { step } = yield* inFlight;
-        if (step?.id !== job.stepId || step.kind !== "git") return;
+        if (step?.id !== job.stepId || step.kind !== "build") return;
         yield* completeStep(step, gitOk);
       }).pipe(
         Effect.provideService(Orchestrator.OrchestratorV2, orchestrator),
@@ -346,7 +341,10 @@ it.effect(
         bot: null,
         sheet: "",
       });
-      yield* completeStep((yield* inFlight).step!, { ...gitOk, git: { ...gitOk.git, sha: "s2" } });
+      yield* completeStep((yield* inFlight).step!, {
+        ...gitOk,
+        build: { ...gitOk.build, sha: "s2" },
+      });
       yield* completeStep((yield* inFlight).step!, {
         kind: "boot",
         ok: true,
@@ -528,7 +526,10 @@ it.effect("a decision asked again after a resume wakes the creator's chat again"
     yield* startRun("guided");
     yield* completeStep((yield* inFlight).step!, gitOk);
     yield* completeStep((yield* inFlight).step!, roleDone(ThreadId.make("thread:vision")));
-    yield* completeStep((yield* inFlight).step!, { ...gitOk, git: { ...gitOk.git, sha: "s2" } });
+    yield* completeStep((yield* inFlight).step!, {
+      ...gitOk,
+      build: { ...gitOk.build, sha: "s2" },
+    });
     yield* completeStep((yield* inFlight).step!, { kind: "boot", ok: true, detail: "boot clean" });
     const decisions = yield* GameRunDecisions.GameRunDecisions;
     const wake = Effect.gen(function* () {
@@ -741,6 +742,15 @@ const layerGame = (root: string, world: World) =>
     Layer.provideMerge(GameRunRoleReactor.layer),
     Layer.provide(
       Layer.mergeAll(
+        // The run's builds are real checkpoints of the temp game repository.
+        CheckpointStore.layer.pipe(
+          Layer.provide(
+            VcsDriverRegistry.layer.pipe(
+              Layer.provide(VcsProcess.layer.pipe(Layer.provide(NodeServices.layer))),
+            ),
+          ),
+          Layer.provide(NodeServices.layer),
+        ),
         roleThreadsOf(world),
         Layer.mock(GameService.GameService)({
           finishExploration: () =>
@@ -1335,7 +1345,10 @@ it.effect("a decision with nothing on disk to show takes its default without ask
       yield* startRunner;
       yield* completeStep((yield* inFlight).step!, gitOk);
       yield* completeStep((yield* inFlight).step!, roleDone(ThreadId.make("thread:vision")));
-      yield* completeStep((yield* inFlight).step!, { ...gitOk, git: { ...gitOk.git, sha: "s2" } });
+      yield* completeStep((yield* inFlight).step!, {
+        ...gitOk,
+        build: { ...gitOk.build, sha: "s2" },
+      });
       yield* completeStep((yield* inFlight).step!, {
         kind: "boot",
         ok: true,

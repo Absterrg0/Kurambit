@@ -111,6 +111,8 @@ export const GameRunRoundRecord = Schema.Struct({
   rung: Schema.optionalKey(GameRunRungRecord),
   // A finish round: the old fix-the-flaw shape, after the ladder.
   finish: Schema.optionalKey(Schema.Boolean),
+  // The round's candidate build (checkpoint oid): a retry continues it, a kept one is restorable.
+  build: Schema.optionalKey(Schema.String),
 });
 export type GameRunRoundRecord = typeof GameRunRoundRecord.Type;
 
@@ -118,6 +120,8 @@ export type GameRunRoundRecord = typeof GameRunRoundRecord.Type;
 // judged best. Never merged without a decisive win.
 export const GameRunPending = Schema.Struct({
   branch: Schema.String,
+  // The pending candidate's build (checkpoint oid), which the next round continues.
+  sha: Schema.optionalKey(Schema.String),
   round: Schema.Number,
   verdicts: Schema.Array(GameRunVerdict),
   streak: Schema.Number,
@@ -144,7 +148,9 @@ export const GameRunRoleStep = Schema.Struct({
   title: Schema.String,
   // null launches a fresh thread; otherwise a follow-up turn on that thread.
   thread: Schema.NullOr(ThreadId),
-  // A sha plays a T3 worktree at that commit; "blank" an empty one of its own; null works in the game root.
+  // A build plays a plain copy of that build of its own (no git); "blank" an empty
+  // folder of its own; null works in the game root. A build is a checkpoint
+  // commit oid, or the name of one of the run's builds (`proto-1`).
   at: Schema.NullOr(Schema.String),
   prompt: Schema.String,
   // A duration, not a deadline: a resumed step gets a fresh cap after a pause.
@@ -160,9 +166,28 @@ export const GameRunRoleStep = Schema.Struct({
   sheet: Schema.String,
   // Total explore input this thread may use across its sessions; 0 sets none.
   inputCapMs: Schema.Number,
+  // A source role's build before this turn: its landing captures the folder
+  // and diffs the two for game-code change.
+  since: Schema.optionalKey(Schema.String),
 });
 export type GameRunRoleStep = typeof GameRunRoleStep.Type;
 
+/**
+ * The run's builds are T3 checkpoints under the run's refs; the run never
+ * commits, checks out, merges or writes the user's index. A build is a
+ * commit oid, or the name of one of the run's builds.
+ */
+export const GameRunBuildOp = Schema.Union([
+  /** The game folder as the build `name`; `changed` and `lines` count game code against `base`. */
+  Schema.TaggedStruct("capture", { name: Schema.String, base: Schema.String }),
+  /** The build's files back in the folder (engine project, art, ASSETS.md); `keep` names point at it too. */
+  Schema.TaggedStruct("restore", { sha: Schema.String, keep: Schema.Array(Schema.String) }),
+  /** The build is kept under these names; the folder already holds it. */
+  Schema.TaggedStruct("keep", { names: Schema.Array(Schema.String), sha: Schema.String }),
+]);
+export type GameRunBuildOp = typeof GameRunBuildOp.Type;
+
+/** Only a run that versioned on git branches planned these; its steps still decode. */
 export const GameRunGitOp = Schema.Union([
   Schema.TaggedStruct("init", {}),
   Schema.TaggedStruct("enter", { branch: Schema.String }),
@@ -243,8 +268,20 @@ export const GameRunRoleDone = Schema.Struct({
   bot: Schema.NullOr(Schema.Struct({ file: Schema.String, decider: GameBotDecider })),
   /** The step's sheet when the runner drew one, else "". */
   sheet: Schema.String,
+  /** For a source role: whether its turn changed game code (an unknown reads as changed). */
+  changed: Schema.optionalKey(Schema.Boolean),
 });
 export type GameRunRoleDone = typeof GameRunRoleDone.Type;
+
+export const GameRunBuildOutcome = Schema.Struct({
+  ok: Schema.Boolean,
+  /** The build's commit oid. */
+  sha: Schema.String,
+  changed: Schema.Boolean,
+  lines: Schema.Number,
+  detail: Schema.String,
+});
+export type GameRunBuildOutcome = typeof GameRunBuildOutcome.Type;
 
 /** One shape for every git op; each op fills the fields it knows. */
 export const GameRunGitOutcome = Schema.Struct({
@@ -291,6 +328,7 @@ export const GameRunStepResult = Schema.Union([
   GameRunRoleDone,
   EndedResult,
   FailedResult,
+  Schema.Struct({ kind: Schema.Literal("build"), build: GameRunBuildOutcome }),
   Schema.Struct({ kind: Schema.Literal("git"), git: GameRunGitOutcome }),
   Schema.Struct({ kind: Schema.Literal("boot"), ok: Schema.Boolean, detail: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("facts"), jev: Schema.Boolean, code: Schema.String }),
@@ -372,6 +410,7 @@ export type GameRunDecided = typeof GameRunDecided.Type;
 
 export const GameRunPlannedStep = Schema.Union([
   GameRunRoleStep,
+  Schema.Struct({ kind: Schema.Literal("build"), id: Schema.Number, op: GameRunBuildOp }),
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GameRunGitOp }),
   Schema.Struct({ kind: Schema.Literal("boot"), id: Schema.Number }),
   Schema.Struct({ kind: Schema.Literal("facts"), id: Schema.Number }),
@@ -556,6 +595,8 @@ export const GameRunTask = Schema.Union([
     i: Schema.Number,
     phase: Schema.Literals(["role", "commit", "boot", "keep", "reject"]),
     branch: Schema.String,
+    // The prototype's build (checkpoint oid), once captured.
+    sha: Schema.optionalKey(Schema.String),
     why: Schema.String,
     // The creator's notes for a retried pair.
     notes: Schema.String,
@@ -580,12 +621,13 @@ export const GameRunTask = Schema.Union([
     phase: Schema.Literals(["play", "write"]),
     thread: Schema.NullOr(ThreadId),
   }),
-  // A budget end inside a round: the candidate (when one exists) is put back
-  // and committed on its branch, then the tree returns to trunk.
+  // A budget end inside a round: the round's unfinished work is kept as a
+  // build ("capture"), then the folder returns to the best ("trunk").
+  // "restore" was a git-era phase.
   Schema.TaggedStruct("leave", {
     branch: Schema.String,
     candidate: Schema.String,
-    phase: Schema.Literals(["restore", "trunk"]),
+    phase: Schema.Literals(["capture", "restore", "trunk"]),
   }),
   // A Guided run waits for the creator here; the step carries the decision.
   Schema.TaggedStruct("decide", { decision: GameRunQuestion }),
@@ -651,7 +693,9 @@ export const GameRun = Schema.Struct({
   ending: Schema.NullOr(GameRunEnding),
   /** The last stage finished ("vision", "plan", "round-3"). */
   stage: Schema.String,
+  /** Git-era runs only: the branch their rounds merged into; "" for a run on checkpoints. */
   trunk: Schema.String,
+  /** The best build's checkpoint oid (a git-era run's: a commit on `trunk`). */
   best: Schema.String,
   /** Null until the plan wrote one. */
   ladder: Schema.NullOr(GameRunLadderState),
@@ -680,7 +724,13 @@ export const GameRun = Schema.Struct({
   pickNotes: Schema.String,
   /** The prototype the game became, once its adopt succeeded. */
   picked: Schema.NullOr(GameRunPicked),
-  protos: Schema.Array(Schema.Struct({ branch: Schema.String, booted: Schema.Boolean })),
+  protos: Schema.Array(
+    Schema.Struct({
+      branch: Schema.String,
+      booted: Schema.Boolean,
+      sha: Schema.optionalKey(Schema.String),
+    }),
+  ),
   played: Schema.NullOr(GameRunPlayed),
   pending: Schema.NullOr(GameRunPending),
   task: GameRunTask,
@@ -694,6 +744,12 @@ export const GameRun = Schema.Struct({
   finished: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   /** The creator's latest restore of a kept round: pending while its job moves the folder. */
   restore: Schema.NullOr(GameRunRestore).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  /**
+   * How the run keeps its builds: "checkpoints" under its own refs. Absent on a
+   * run from before, which versioned on git branches: such a run is history,
+   * read but never continued.
+   */
+  versions: Schema.optionalKey(Schema.Literal("checkpoints")),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -717,6 +773,7 @@ export const GameRunStep = Schema.Struct({
   attempt: PositiveInt,
   kind: Schema.Literals([
     "role",
+    "build",
     "git",
     "boot",
     "facts",

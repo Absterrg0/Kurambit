@@ -133,7 +133,7 @@ export const proto = (
   lane: string,
   guided: { readonly pitch: string; readonly notes: string } | null = null,
 ): string =>
-  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. ${laneProfile(lane).run.prompts.shell}Keep the boot clean. ${
+  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} with placeholder art only: something winnable and losable. ${laneProfile(lane).run.prompts.shell}Keep the boot clean. ${
     guided === null
       ? ""
       : `${guided.notes.length > 0 ? `The creator saw an earlier pair of prototypes and asked for this: ${guided.notes}\n` : ""}The creator chooses between this prototype and another one. Before you finish, play your build once with game_explore_start/act/close, so the creator sees its frames. Then write ${guided.pitch}: two lines in plain words, what this version tries and how it feels to play. `

@@ -118,19 +118,9 @@ const complete = (records: Records, result: GameRunStepResult, ms = T0) => {
     .records;
 };
 
-const gitOk = (patch: Partial<Policy.GitOutcome> = {}): GameRunStepResult => ({
-  kind: "git",
-  git: {
-    ok: true,
-    sha: "c0ffee",
-    branch: "main",
-    changed: true,
-    entered: false,
-    lines: 10,
-    detail: "",
-    same: false,
-    ...patch,
-  },
+const gitOk = (patch: Partial<Policy.BuildOutcome> = {}): GameRunStepResult => ({
+  kind: "build",
+  build: { ok: true, sha: "c0ffee", changed: true, lines: 10, detail: "", ...patch },
 });
 const roleDone = (thread: ThreadId, patch: Partial<Policy.RoleDone> = {}): GameRunStepResult => ({
   kind: "done",
@@ -242,8 +232,8 @@ describe("game-run commands", () => {
       "game-run.created",
     ]);
     expect(runOf(records)).toMatchObject({ status: "running", profile: "guided", inFlight: 1 });
-    expect(stepOf(records)).toMatchObject({ status: "planned", kind: "git" });
-    expect(stepOf(records).step).toMatchObject({ op: { _tag: "init" } });
+    expect(stepOf(records)).toMatchObject({ status: "planned", kind: "build" });
+    expect(stepOf(records).step).toMatchObject({ op: { _tag: "capture", name: "base" } });
     expect(decision.effects).toEqual([
       {
         request: {
@@ -269,10 +259,15 @@ describe("game-run commands", () => {
   it("a completed step lands through the policy and plans the next one", () => {
     const records = complete(started(), gitOk());
     const [init, vision] = records.steps;
-    expect(init).toMatchObject({ status: "completed", result: { kind: "git" } });
+    expect(init).toMatchObject({ status: "completed", result: { kind: "build" } });
     expect(vision).toMatchObject({ status: "planned", kind: "role", seq: 2 });
     expect(vision!.step).toMatchObject({ role: "vision" });
-    expect(runOf(records)).toMatchObject({ trunk: "main", best: "c0ffee", inFlight: 2 });
+    expect(runOf(records)).toMatchObject({
+      trunk: "",
+      best: "c0ffee",
+      versions: "checkpoints",
+      inFlight: 2,
+    });
     // A result for a step that already landed names no current step.
     expect(
       refusal(records, {
@@ -608,7 +603,7 @@ describe("game-run commands", () => {
   });
 
   it("an unanswered decision takes its default only once it is due", () => {
-    let records = complete(started("guided"), gitOk({ branch: "main", sha: "s1" }));
+    let records = complete(started("guided"), gitOk({ sha: "s1" }));
     records = complete(records, roleDone(planner));
     records = complete(records, gitOk({ sha: "s2", changed: true }));
     const asked = accept(records, {
@@ -731,7 +726,7 @@ describe("game-run commands", () => {
       ending: null,
       budgetEndsAt: T0 + 60 * MIN,
     });
-    expect(stepOf(records).step).toMatchObject({ op: { _tag: "start-round" } });
+    expect(stepOf(records).step).toMatchObject({ op: { _tag: "restore" } });
     expect(stepOf(records).logs.join("\n")).toContain("finish round");
   });
 });

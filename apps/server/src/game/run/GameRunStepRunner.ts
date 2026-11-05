@@ -32,6 +32,8 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
+import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
@@ -52,18 +54,17 @@ import * as ProjectService from "../../project/ProjectService.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameService from "../GameService.ts";
 import { causeText, logLine, refreshHarnessFiles, writeAtomic } from "../runSetup.ts";
-import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { runBotFact } from "./botFacts.ts";
 import { runStateChecks } from "./checkRunner.ts";
 import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
-import { makeGit, neutralBuild, repairGit } from "./git.ts";
+import { buildStep, captureBuild } from "./builds.ts";
+import { neutralBuild } from "./git.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
 import { modelFacts } from "./modelFacts.ts";
-import * as Policy from "./policy.ts";
 import {
   blankWorktree,
   playerSampleWorktree,
@@ -75,8 +76,8 @@ import {
 import { CONTINUE, MEMORY_RETRY, artFacts, modelBlock, spriteBlock } from "./roles.ts";
 import { currentStep, describe, summarize } from "./runView.ts";
 import { spriteFacts } from "./spriteFacts.ts";
-import { BLANK, type BotStep, type GitOp, type RoleStep } from "./state.ts";
-import { bootStep, gitStep as runGitStep } from "./steps.ts";
+import { BLANK, type BotStep, type RoleStep } from "./state.ts";
+import { bootStep } from "./steps.ts";
 
 export class GameRunStepRunner extends Context.Service<
   GameRunStepRunner,
@@ -99,6 +100,7 @@ const make = Effect.gen(function* () {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
   const game = yield* GameService.GameService;
   const projects = yield* GameProjectService.GameProjectService;
+  const checkpoints = yield* CheckpointStore.CheckpointStore;
   const projectStore = yield* ProjectService.ProjectService;
   const operations = yield* GameOperations.GameOperations;
   const vcs = yield* GitWorkflow.GitWorkflowService;
@@ -207,14 +209,10 @@ const make = Effect.gen(function* () {
       }
     });
 
-  const measure = (role: RoleStep, root: string, lane: string) =>
+  // A source role's change is measured at its landing against the build its step names.
+  const measure = (role: RoleStep, root: string) =>
     Effect.promise(async (): Promise<GameRunRoleBefore> => ({
-      source: role.source
-        ? await snapshotBuildSource(root, lane).then(
-            (s) => (s.kind === "known" ? s.sourceId : ""),
-            () => "",
-          )
-        : "",
+      source: "",
       bots: role.bots ? await botRunCount(root) : 0,
     }));
 
@@ -233,36 +231,11 @@ const make = Effect.gen(function* () {
         : `${role.prompt}${spriteBlock(sprites, true)}${modelBlock(models, true)}`;
     });
 
-  // Who of Kurambit's works in `dir` now: a live turn on a thread of the
-  // game's project there, whose provider CLI may run git; a thread with no
-  // worktree works in the game root. A read that fails counts as someone.
-  const workingIn = (run: GameRun, root: string, dir: string) =>
-    projections.getShellSnapshot().pipe(
-      Effect.flatMap((snapshot) =>
-        Effect.promise(async () => {
-          const real = (path: string) => NodeFSP.realpath(path).catch(() => NodePath.resolve(path));
-          const target = await real(dir);
-          const inRoot = await real(root);
-          for (const thread of [...snapshot.threads, ...snapshot.archivedThreads]) {
-            if (thread.projectId !== run.projectId || thread.activeRunId === null) continue;
-            const where = thread.worktreePath === null ? inRoot : await real(thread.worktreePath);
-            if (where === target) return `"${thread.title}" (${thread.id})`;
-          }
-          return null;
-        }),
-      ),
-      Effect.orElseSucceed(() => "a thread whose state could not be read"),
-    );
-  /** The repair before the run's own git moves the game root (see repairGit). */
-  const repairRoot = (run: GameRun, root: string, log: (line: string) => Effect.Effect<void>) =>
-    repairGit(root, workingIn(run, root, root), log);
-
   const roleContext = (run: GameRun, root: string, log: RoleContext["log"]): RoleContext => ({
     root,
     lane: run.lane,
     runId: run.id,
     log,
-    working: (dir) => workingIn(run, root, dir),
   });
 
   /**
@@ -292,7 +265,7 @@ const make = Effect.gen(function* () {
       const own = roleThreadId(stepId, job.attempt);
       const threadId = entry?.threadId ?? role.thread ?? own;
       const before = () =>
-        entry?.before === undefined ? measure(role, root, run.lane) : Effect.succeed(entry.before);
+        entry?.before === undefined ? measure(role, root) : Effect.succeed(entry.before);
       const startStep = (target: ThreadId, measured: GameRunRoleBefore, replaces?: ThreadId) =>
         engine
           .dispatch({
@@ -532,45 +505,30 @@ const make = Effect.gen(function* () {
       const { run, record, records } = found;
       const root = yield* projects.resolve(run.threadId);
       const log = (line: string) => logLine(root, line);
-      const git = makeGit(root, run.lane, log);
       yield* performOutputs(run, records.gameRunSteps, record.seq, root, log);
-      const state = toState(run, records.gameRunRounds, record);
       const step = record.step;
-      // The checkout follows the run: through gitStep, so live editors close before it moves.
-      const expected = Policy.expectedBranch(state);
-      if (expected !== null && step.kind !== "git" && (yield* git.current) !== expected) {
-        const repaired = yield* repairRoot(run, root, log).pipe(
-          Effect.as(true),
-          Effect.catch(() => Effect.succeed(false)),
-        );
-        const entered = repaired
-          ? yield* gitStep(git, root, { _tag: "enter", branch: expected }).pipe(Effect.option)
-          : Option.none();
-        if (Option.isNone(entered) || !entered.value.git.ok)
-          yield* log(`could not enter ${expected}; continuing where HEAD is`);
-      }
       yield* log(describe(step));
       const done = (result: GameRunStepResult) =>
         log(`  ${summarize(result)}`).pipe(Effect.andThen(complete(job, record.id, result)));
       switch (step.kind) {
-        case "git":
+        case "build":
           return yield* reporting(
             job,
             record.id,
-            repairRoot(run, root, log).pipe(
-              Effect.andThen(gitStep(git, root, step.op)),
-              Effect.flatMap((result) =>
-                step.op._tag !== "init" || !result.git.ok
-                  ? Effect.succeed(result)
-                  : refreshHarnessFiles(git, root, run.lane, log).pipe(
-                      Effect.map((sha) =>
-                        sha === null ? result : { ...result, git: { ...result.git, sha } },
-                      ),
-                    ),
+            // The base build includes the engine's harness files as this run ships them.
+            (step.op._tag === "capture" && step.op.name === "base"
+              ? refreshHarnessFiles(root, run.lane, log)
+              : Effect.void
+            ).pipe(
+              Effect.andThen(
+                buildStep({ game, checkpoints }, { root, runId: run.id, lane: run.lane }, step.op),
               ),
               Effect.flatMap(done),
             ),
           );
+        case "git":
+          // Only a run from before builds on checkpoints planned one; it is never continued.
+          return yield* fail(job, record.id, "this run versions on git branches and cannot go on");
         case "boot":
           return yield* reporting(
             job,
@@ -650,9 +608,6 @@ const make = Effect.gen(function* () {
           return;
       }
     });
-
-  const gitStep = (git: ReturnType<typeof makeGit>, root: string, op: GitOp) =>
-    runGitStep(game, git, root, op);
 
   /**
    * A role turn's cap, from its turn's start, plus the time its explore
@@ -817,31 +772,39 @@ const make = Effect.gen(function* () {
       );
       if (run.ending !== null && !NO_EXPORT.has(run.ending)) {
         // An ending mid-round (a usage limit, a provider outage) leaves the
-        // round's branch checked out with its unfinished work. The export is of
-        // the best build: that work is committed to its branch (a resume enters
-        // it again) and trunk is checked out first.
-        if (run.trunk.length > 0) {
-          const git = makeGit(root, run.lane, log);
-          // Any break here only means HEAD stays where it is; the export still runs.
-          const parked = yield* repairRoot(run, root, log).pipe(
-            Effect.andThen(
-              gitStep(git, root, {
-                _tag: "to-trunk",
-                trunk: run.trunk,
-                message: `unfinished: the run ended (${run.ending})`,
-              }),
-            ),
-            Effect.map((step) => step.git.ok),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(false),
-            ),
+        // round's unfinished work in the folder. The exports are of the best
+        // build, and the folder is left as the run left it, so a resume goes on
+        // from that work. The work is kept once per ending: a finish a restart
+        // cut after the best was restored must not keep the best as the work.
+        const ops = { game, checkpoints };
+        const ctx = { root, runId: run.id, lane: run.lane };
+        const name = `ending-${job.endedAt.replace(/[^0-9A-Za-z]/g, "")}/unfinished`;
+        const parked = yield* Effect.gen(function* () {
+          const ref = checkpointRefForGameRun(run.id, name);
+          const kept = yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: ref });
+          if (!kept) yield* captureBuild(checkpoints, root, run.id, name);
+          const best = yield* buildStep(ops, ctx, { _tag: "restore", sha: run.best, keep: [] });
+          return best.build.ok ? ref : null;
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(null),
+          ),
+        );
+        if (parked === null)
+          yield* log(
+            "finishExports: the best build could not be restored; exporting the folder as it is",
           );
-          if (!parked)
-            yield* log(`finishExports: could not return to ${run.trunk}; exporting where HEAD is`);
-        }
         yield* finishExports(root, run.threadId, game, log, gameRunOperationOwner(run.id)).pipe(
           Effect.ignore,
         );
+        if (parked !== null)
+          yield* buildStep(ops, ctx, { _tag: "restore", sha: parked, keep: [] }).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.failCause(cause)
+                : log(`the run's unfinished work could not be put back: ${causeText(cause)}`),
+            ),
+          );
       }
     });
 
@@ -870,11 +833,12 @@ const make = Effect.gen(function* () {
           : Effect.flatMap(projects.resolve(run.threadId, { deleted: "allowed" }), (root) =>
               restoreKeptRound({
                 game,
+                checkpoints,
                 root,
                 run,
                 state,
                 record,
-                repair: (log) => repairRoot(run, root, log),
+                requestId: job.requestId,
               }),
             )
       ).pipe(

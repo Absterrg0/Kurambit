@@ -11,7 +11,7 @@ import {
   GameRunDecided,
   GameRunDecideStep,
   GameRunEvidence,
-  GameRunGitOp,
+  GameRunBuildOp,
   type GameRunHalfResult,
   GameRunJudge,
   GameRunLadder,
@@ -137,7 +137,7 @@ export type Side = GameRunSide;
  */
 export const BLANK = "blank";
 
-export type GitOp = GameRunGitOp;
+export type BuildOp = GameRunBuildOp;
 export type RoleDone = GameRunRoleDone;
 export type StepResult = GameRunStepResult;
 export type HalfResult = GameRunHalfResult;
@@ -186,7 +186,13 @@ const RunState = Schema.Struct({
   lane: Schema.String,
   trunk: Schema.String,
   best: Schema.String,
-  protos: Schema.Array(Schema.Struct({ branch: Schema.String, booted: Schema.Boolean })),
+  protos: Schema.Array(
+    Schema.Struct({
+      branch: Schema.String,
+      booted: Schema.Boolean,
+      sha: Schema.optionalKey(Schema.String),
+    }),
+  ),
   pickNotes: Schema.String,
   picked: Schema.NullOr(GameRunPicked),
   // The last reviewer's ledger.

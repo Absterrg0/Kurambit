@@ -5,6 +5,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import {
+  CheckpointRef,
   CommandId,
   type GameCreateInput,
   type GameProjectResult,
@@ -39,7 +40,8 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 
-import { RESUMABLE, settling, toState } from "../orchestration-v2/gameRun/decide.ts";
+import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
+import { gitEra, RESUMABLE, settling, toState } from "../orchestration-v2/gameRun/decide.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -48,7 +50,6 @@ import { withRoleGroups } from "./run/roleGroup.ts";
 import * as GameService from "./GameService.ts";
 import { runStateChecks } from "./run/checkRunner.ts";
 import { presentable } from "./run/decisionEvidence.ts";
-import { makeGit } from "./run/git.ts";
 import { roleAt, roleTurns } from "./run/GameRunRoleReactor.ts";
 import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
 import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
@@ -148,6 +149,7 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* GameProjectService.GameProjectService;
+  const checkpoints = yield* CheckpointStore.CheckpointStore;
   const game = yield* GameService.GameService;
 
   /**
@@ -290,9 +292,8 @@ const make = Effect.gen(function* () {
     const overridden = input.provider !== undefined || input.model !== undefined;
     const budgetMinutes =
       input.budgetMinutes === undefined ? undefined : Math.max(1, Math.round(input.budgetMinutes));
-    const git = makeGit(root, lane, (line) => logLine(root, line));
-    if (run !== null && run.ending !== null && RESUMABLE.has(run.ending)) {
-      yield* ensureScaffold(root, lane, git.untrack, false);
+    if (run !== null && run.ending !== null && RESUMABLE.has(run.ending) && !gitEra(run)) {
+      yield* ensureScaffold(root, lane, false);
       yield* dispatch("run-start", {
         type: "game-run.resume",
         commandId: commandId("game-run.start", input.commandId, { thread: run.threadId, run }),
@@ -314,14 +315,16 @@ const make = Effect.gen(function* () {
     // A game an earlier Kurambit ran keeps its files and git history, but its
     // run record is not this run's. The one fact taken from it is that the game
     // was built already: the new run continues from the game as it is.
+    // So does a run that kept its builds on git branches.
     const earlier =
-      run === null &&
-      (yield* Effect.promise(() =>
-        NodeFSP.access(NodePath.join(root, ".studio", "run.json")).then(
-          () => true,
-          () => false,
-        ),
-      ));
+      (run !== null && gitEra(run)) ||
+      (run === null &&
+        (yield* Effect.promise(() =>
+          NodeFSP.access(NodePath.join(root, ".studio", "run.json")).then(
+            () => true,
+            () => false,
+          ),
+        )));
     const brief = input.brief.trim();
     if (brief.length === 0)
       return yield* runError(
@@ -335,7 +338,7 @@ const make = Effect.gen(function* () {
     const runId = GameRunId.make(
       `run_${Date.now().toString(36)}${NodeCrypto.randomBytes(3).toString("hex")}`,
     );
-    yield* ensureScaffold(root, lane, git.untrack, true);
+    yield* ensureScaffold(root, lane, true);
     yield* dispatch("run-start", {
       type: "game-run.start",
       commandId: commandId("game-run.start", input.commandId, { thread: runThread, run }),
@@ -660,8 +663,7 @@ const make = Effect.gen(function* () {
         "round-not-found",
         `Round ${round} is not recorded; the run has ${state.rounds.length} finished round${state.rounds.length === 1 ? "" : "s"}.`,
       );
-    const trunk = run.trunk.length > 0 ? run.trunk : "main";
-    return { ...target, run, state, record, lane: run.lane || "godot", trunk };
+    return { ...target, run, state, record, lane: run.lane || "godot" };
   });
 
   const roundDetail: Service["roundDetail"] = Effect.fn("GameRunControl.roundDetail")(function* (
@@ -672,14 +674,18 @@ const make = Effect.gen(function* () {
     const evidence = yield* Effect.promise(() =>
       readRoundEvidence(found.root, found.state, found.record),
     );
-    const git = makeGit(found.root, found.lane, () => Effect.void);
-    const sha = found.record.kept ? yield* git.keptCommit(found.record.branch, found.trunk) : null;
-    const now = sha === null ? false : yield* git.sameBuild(sha);
+    // A kept round's build, while it still exists; it is the current one when it is the best.
+    const build = found.record.kept ? (found.record.build ?? null) : null;
+    const restorable =
+      build !== null &&
+      (yield* checkpoints
+        .hasCheckpointRef({ cwd: found.root, checkpointRef: CheckpointRef.make(build) })
+        .pipe(Effect.orElseSucceed(() => false)));
     return {
       detail: {
         ...evidence.detail,
-        restorable: sha !== null,
-        current: now,
+        restorable,
+        current: restorable && build === found.run.best,
       } satisfies GameRunRoundDetail,
       videoFile: evidence.videoFile,
       sheetFiles: evidence.sheetFiles,

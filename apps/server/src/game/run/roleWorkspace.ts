@@ -12,7 +12,7 @@ import type * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.t
 import type * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import type * as GameService from "../GameService.ts";
 import { laneProfile } from "../engineProfile.ts";
-import { blankCommit, repairGit } from "./git.ts";
+import { blankCommit } from "./git.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
 import type { RoleDone, RoleStep } from "./state.ts";
 
@@ -27,8 +27,6 @@ export type RoleContext = {
   readonly lane: string;
   readonly runId: string;
   readonly log: (line: string) => Effect.Effect<void>;
-  /** Who of Kurambit's works in `dir` now (a live turn there), for repairGit. */
-  readonly working: (dir: string) => Effect.Effect<string | null>;
 };
 
 const BotRow = Schema.Struct({
@@ -83,9 +81,6 @@ const stepWorktree = (
     let path = found?.worktreePath ?? null;
     if (found !== undefined && path === null)
       yield* vcs.deleteLocalBranch({ cwd: ctx.root, refName: branch, force: true });
-    // A checkout an earlier attempt left may hold what its role's git was cut
-    // short in; its role turn ended, and the step's next role works in it.
-    if (path !== null) yield* repairGit(path, ctx.working(path), ctx.log);
     if (path === null) {
       const sha = yield* ref;
       if (sha === null) return null;

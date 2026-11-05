@@ -2,7 +2,7 @@
 // stalls, the pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
 import type {
   GameBotDecider,
-  GameRunGitOutcome,
+  GameRunBuildOutcome,
   GameRunSubmission,
   GameRunSubmissionKind,
   ThreadId,
@@ -18,8 +18,8 @@ import type {
   DecideStep,
   Decided,
   Decision,
+  BuildOp,
   Evidence,
-  GitOp,
   Half,
   Judge,
   Ladder,
@@ -85,7 +85,7 @@ const LADDER_MAX = 10;
 export type Inputs = { readonly now: number; readonly coin: number; readonly id: string };
 
 export type RoleDone = State.RoleDone;
-export type GitOutcome = GameRunGitOutcome;
+export type BuildOutcome = GameRunBuildOutcome;
 export type StepResult = State.StepResult;
 
 export type Planned =
@@ -157,9 +157,10 @@ export const advancePending = (
   branch: string,
   round: number,
   verdicts: ReadonlyArray<Verdict>,
+  sha = "",
 ): Pending | null => {
   const streak = (current?.streak ?? 0) + 1;
-  return streak >= 3 ? null : { branch, round, verdicts, streak };
+  return streak >= 3 ? null : { branch, round, verdicts, streak, sha };
 };
 
 /**
@@ -184,21 +185,6 @@ const remaining = (state: RunState, now: number): number =>
 
 const fit = (state: RunState, now: number, cap: number, reserve: number): number =>
   Math.min(cap, remaining(state, now) - reserve);
-
-/** The branch the tree must be on before the next non-git step, for resume. */
-export const expectedBranch = (state: RunState): string | null => {
-  const t = state.task;
-  if (state.trunk.length === 0 || t._tag === "init") return null;
-  if (t._tag === "proto" && t.phase !== "role" && t.phase !== "commit") return t.branch;
-  if (t._tag === "leave") return t.branch;
-  if (
-    t._tag === "round" &&
-    t.branch.length > 0 &&
-    !["start", "review-facts", "review", "review-write"].includes(t.phase)
-  )
-    return t.branch;
-  return state.trunk;
-};
 
 // ── The ladder. ───────────────────────────────────────────────────────────
 type RungPick =
@@ -245,14 +231,14 @@ const ladderText = (ladder: Ladder, current: number | null): string =>
 
 // Why the last round on this rung did not land it, for the next attempt's direction.
 // A retry right after a try that booted and passed some of its checks grows that
-// work instead of rebuilding from the best: trunk has not moved since, and the
+// work instead of rebuilding from the best: the best has not moved since, and the
 // blind gate still judges the result against the best.
 const retryFrom = (state: RunState, rung: Rung): string | null => {
   const last = state.rounds.at(-1);
   const result = last?.rung;
   if (last === undefined || result === undefined || result.rung !== rung.id) return null;
   if (result.outcome !== "failed" || !result.checks.some((c) => c.pass)) return null;
-  return last.branch.length > 0 ? last.branch : null;
+  return last.build !== undefined && last.build.length > 0 ? last.build : null;
 };
 
 // Fix turns a builder gets in one round when state checks fail, and how long each runs.
@@ -447,7 +433,7 @@ const prototypeDecision = (
     { label: `${protoName(p.i)}: its pitch`, path: protoFiles(p.i).pitch },
     { label: `${protoName(p.i)}: frames from its own play`, path: protoFiles(p.i).sheet },
   ]),
-  text: booted.map((p) => `${protoName(p.i)} is on branch ${p.branch}.`).join("\n"),
+  text: booted.map((p) => `${protoName(p.i)} is kept as build ${p.branch}.`).join("\n"),
   answers: [
     ...booted.map((p) => ({
       answer: `pick-${p.i + 1}`,
@@ -554,7 +540,7 @@ const startPick = (
     return pick(newCompare(Roles.PICK_QUESTION, a, b, bit(input.coin, 1), ["x"]), "", "compare");
   }
   if (booted.length === 1) return pick(newCompare("", "", "", true, []), booted[0]!, "adopt");
-  logs.push("pick: no prototype booted; building from trunk");
+  logs.push("pick: no prototype booted; building from the base");
   return proceed(s, "pick", input.now);
 };
 
@@ -651,7 +637,12 @@ const role = (id: number, spec: RoleSpec): RoleStep => ({
   inputCapMs: 0,
   ...spec,
 });
-const git = (id: number, op: GitOp): Step => ({ kind: "git", id, op });
+const build = (id: number, op: BuildOp): Step => ({ kind: "build", id, op });
+/** A round's candidate is kept under its label's name. */
+const candidateOf = (label: string) => `${label}/candidate`;
+/** A prototype's label names its build; anything else already is one (a checkpoint oid). */
+const buildOf = (state: RunState, name: string): string =>
+  state.protos.find((p) => p.branch === name)?.sha ?? name;
 const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
   t.phase === "write"
     ? {
@@ -669,14 +660,21 @@ const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
       };
 const bit = (coin: number, k: number) => Math.floor(coin * 2 ** (k + 1)) % 2 === 1;
 
-const newBlock = (tag: string, direction: string, whole: boolean, msLeft: number): Block => ({
+// `base`: the build the block starts from, which its first turn's change is measured against.
+const newBlock = (
+  tag: string,
+  direction: string,
+  whole: boolean,
+  msLeft: number,
+  base: string,
+): Block => ({
   tag,
   direction,
   whole,
   msLeft,
   thread: null,
   quiet: 0,
-  source: "",
+  source: base,
   turns: 0,
 });
 
@@ -691,12 +689,14 @@ const blockStep = (id: number, b: Block, lane: string): Step =>
         : Roles.builderMore(Math.max(1, Math.round(b.msLeft / MIN)), b.direction),
     capMs: b.msLeft,
     source: true,
+    // Each turn's landing captures the folder and measures it against the last.
+    since: b.source,
   });
 
 /** A finished turn may need follow-up, but a turn without a game-file change ends the block. */
 const advanceBlock = (b: Block, res: RoleDone): { block: Block; over: boolean } => {
-  const prev = b.turns === 0 ? res.sourceBefore : b.source;
-  const quiet = res.sourceAfter.length > 0 && res.sourceAfter === prev ? b.quiet + 1 : 0;
+  // A turn whose change could not be measured counts as a change.
+  const quiet = res.changed === false ? b.quiet + 1 : 0;
   const msLeft = b.msLeft - res.elapsedMs;
   const block = {
     ...b,
@@ -908,8 +908,9 @@ const sampleStep = (
   c: Compare,
   move: SampleMove,
   label: string,
+  resolve: (name: string) => string,
 ): { sample: Sample | null; step: RoleStep } => {
-  const at = move.side === "x" ? c.x : c.y;
+  const at = resolve(move.side === "x" ? c.x : c.y);
   if (move.current === null) {
     const s: Sample = {
       side: move.side,
@@ -998,7 +999,7 @@ const compareStep = (
     const halves = sides.map((side, i): Half => ({
       kind: "bot",
       id: id + i,
-      sha: side === "x" ? c.x : c.y,
+      sha: buildOf(state, side === "x" ? c.x : c.y),
       file: c.bot,
       decider: c.botDecider,
       seconds: BOT_SECONDS,
@@ -1009,7 +1010,13 @@ const compareStep = (
     // Ids and labels follow the play order, which is a coin, never x and y.
     let fresh = 0;
     const made = (parallel ? move.moves : move.moves.slice(0, 1)).map((m, i) =>
-      sampleStep(id + i, c, m, m.current === null && fresh++ > 0 ? `${input.id}b` : input.id),
+      sampleStep(
+        id + i,
+        c,
+        m,
+        m.current === null && fresh++ > 0 ? `${input.id}b` : input.id,
+        (name) => buildOf(state, name),
+      ),
     );
     const cmp = {
       ...c,
@@ -1330,6 +1337,7 @@ const proceed = (state: RunState, done: string, now: number): RunState => {
             Roles.firstDirection(state.lane, state.ladder?.rungs[0] ?? null, state.buildNotes),
             true,
             ms,
+            state.best,
           ),
         ),
       };
@@ -1440,16 +1448,15 @@ export const plan = (state: RunState, input: Inputs): Planned => {
   const lane = state.lane;
   const go = (s: Step, task: Task = t, logs: ReadonlyArray<string> = []) =>
     step(state, task, s, logs);
-  const run = (op: GitOp, task: Task = t) => go(git(id, op), task);
+  const run = (op: BuildOp, task: Task = t) => go(build(id, op), task);
   const act = (spec: RoleSpec) => go(role(id, spec));
-  const reject = (label: string, why: string) =>
-    run({ _tag: "reject", label, why, trunk: state.trunk, best: state.best });
-  const toTrunk = (message: string) => run({ _tag: "to-trunk", trunk: state.trunk, message });
+  // A rejected or set-aside build stays under its own name; the folder goes back to the best.
+  const toBest = () => run({ _tag: "restore", sha: state.best, keep: [] });
   const artCap = (cap: number) =>
     Math.max(FLOOR_MS, fit(state, input.now, cap, BUILD_RESERVE_MS + FLOOR_MS));
   switch (t._tag) {
     case "init":
-      return run({ _tag: "init" });
+      return run({ _tag: "capture", name: "base", base: "" });
     case "stage": {
       const name = t.name;
       if (t.phase === "review")
@@ -1489,8 +1496,9 @@ export const plan = (state: RunState, input: Inputs): Planned => {
               prompt: Roles.stage(name, lane),
               capMs: CAP[name],
             });
-      if (t.phase === "commit") return run({ _tag: "commit", message: t.name, base: state.best });
-      return t.phase === "boot" ? go({ kind: "boot", id }) : reject(t.name, t.why);
+      if (t.phase === "commit")
+        return run({ _tag: "capture", name: `stage-${t.name}`, base: state.best });
+      return t.phase === "boot" ? go({ kind: "boot", id }) : toBest();
     }
     case "proto": {
       const name = `proto-${t.i}`;
@@ -1506,13 +1514,14 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       }
       if (t.phase === "role")
         return act({ role: name, prompt: Roles.proto(lane), capMs: CAP.proto });
-      if (t.phase === "commit") return run({ _tag: "branch-commit", name, message: name });
+      if (t.phase === "commit") return run({ _tag: "capture", name, base: state.best });
       if (t.phase === "boot") return go({ kind: "boot", id });
-      return t.phase === "keep" ? toTrunk(name) : reject(t.branch, t.why);
+      // Each prototype starts from the same base: kept or not, it stays under its name.
+      return toBest();
     }
     case "pick": {
       if (t.phase === "adopt")
-        return run({ _tag: "adopt", trunk: state.trunk, sha: t.chosen, label: t.chosen });
+        return run({ _tag: "restore", sha: buildOf(state, t.chosen), keep: ["best"] });
       const j = finalJudge(t.cmp, "x");
       if (t.phase === "select")
         return act({
@@ -1543,9 +1552,10 @@ export const plan = (state: RunState, input: Inputs): Planned => {
             capMs: CAP.write,
           });
     case "leave":
-      return t.phase === "restore"
-        ? run({ _tag: "restore-commit", sha: t.candidate, message: t.branch })
-        : toTrunk(t.branch);
+      // The round's work, whatever state it is in, is kept before the folder returns to the best.
+      return t.phase === "capture"
+        ? run({ _tag: "capture", name: `${t.branch}/unfinished`, base: state.best })
+        : toBest();
     case "decide": {
       if (state.profile === "guided")
         return go({ kind: "decide", id, decision: t.decision, sent: null, deadline: null });
@@ -1572,12 +1582,11 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         ]);
       }
       const steer = state.steer.length === 0 ? {} : { steer: state.steer };
-      const start = (from: string | null): GitOp => ({
-        _tag: "start-round",
-        trunk: state.trunk,
-        key: `round-${n}`,
-        from,
-      });
+      // The round builds in the folder from its base: the best, or the
+      // candidate it continues (a pending line, a rung's retry).
+      const label = `round-${n}`;
+      const start = (from: string | null): Step =>
+        build(id, { _tag: "restore", sha: from ?? state.best, keep: [] });
       const pick = pickRung(state.ladder);
       // Polish is the creator's call: with no rung left (the ladder is done, or
       // the plan wrote none) a round runs only on their ask. A run without a
@@ -1589,14 +1598,18 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         const move = direction.slice(0, 300);
         const next: Round = {
           ...r,
+          branch: label,
           direction,
           repeating,
           move,
-          record: { ...r.record, move, finish: true, ...steer },
+          record: { ...r.record, branch: label, move, finish: true, ...steer },
         };
-        return go(git(id, start(state.pending?.branch ?? null)), next, [
-          `round ${n}: finish round (${pick.why})`,
-        ]);
+        const pendingBuild = state.pending?.sha;
+        return go(
+          start(pendingBuild === undefined || pendingBuild === "" ? null : pendingBuild),
+          next,
+          [`round ${n}: finish round (${pick.why})`],
+        );
       }
       const { ladder, rung } = pick;
       const k = positionOf(ladder, rung);
@@ -1615,33 +1628,34 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       const move = `Rung ${k} of ${total}: ${rung.is}`.slice(0, 300);
       const next: Round = {
         ...r,
+        branch: label,
         rung: rung.id,
         direction,
         repeating: false,
         move,
-        record: { ...r.record, move, ...steer },
+        record: { ...r.record, branch: label, move, ...steer },
       };
       const logs = [...pick.logs, `round ${n} builds rung ${k} of ${total}: ${rung.is}`];
       // A ladder round starts from the judged best (or the try it retries); an open
-      // pending line stays on its branch.
+      // pending line stays a build of its own.
       if (state.pending !== null)
-        logs.push(`round ${n}: pending ${state.pending.branch} stays on its branch`);
-      return step({ ...state, ladder, pending: null }, next, git(id, start(from)), logs);
+        logs.push(`round ${n}: pending ${state.pending.branch} stays a build of its own`);
+      return step({ ...state, ladder, pending: null }, next, start(from), logs);
     }
     case "block":
     case "retry":
       return go(blockStep(id, r.block!, lane));
     case "commit":
     case "retry-commit":
-      return run({ _tag: "commit", message: r.branch, base: state.best });
+      return run({ _tag: "capture", name: candidateOf(r.branch), base: state.best });
     case "stall":
-      return toTrunk(r.branch);
+      return toBest();
     case "boot":
       return go({ kind: "boot", id });
     case "checks":
       return go({ kind: "checks", id, rung: r.rung! });
     case "reject":
-      return reject(r.branch, r.record.note ?? "");
+      return toBest();
     case "tester-facts":
     case "review-facts":
       return go({ kind: "facts", id });
@@ -1655,20 +1669,19 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "tester-duty":
       return tester(Roles.BOT_DUTY, CAP.duty);
     case "restore":
-      return run({ _tag: "restore-commit", sha: r.candidate, message: r.branch });
+      // The tester played the candidate and may have touched its files: they
+      // go back to the candidate's before it is judged.
+      return run({ _tag: "restore", sha: r.candidate, keep: [] });
     case "compare": {
       const made = compareStep(id, r.cmp!, input, state);
       return go(made.step, { ...r, cmp: made.cmp }, made.logs);
     }
     case "outcome":
+      // A kept round is the best and keeps its own name for a creator's restore;
+      // the folder already holds it.
       return r.outcome === "merge"
-        ? run({
-            _tag: "ff-merge",
-            trunk: state.trunk,
-            branch: r.branch,
-            played: heldPlay(state, r)?.sha ?? "",
-          })
-        : toTrunk(r.branch);
+        ? run({ _tag: "keep", names: ["best", r.branch], sha: r.candidate })
+        : toBest();
     case "review":
       return act({
         role: `reviewer-${n}`,
@@ -1718,7 +1731,12 @@ const stallRound = (
   const settled = settleRung(
     state,
     r,
-    { ...r.record, note: noteOf(r, note), durationMs: now - r.startedAt },
+    {
+      ...r.record,
+      note: noteOf(r, note),
+      durationMs: now - r.startedAt,
+      ...(r.candidate.length > 0 ? { build: r.candidate } : {}),
+    },
     logs,
   );
   const next = {
@@ -1731,16 +1749,11 @@ const stallRound = (
   return { ...next, task: newRound(next, now) };
 };
 
-// A budget end inside a round puts the candidate back on its branch and
-// returns to trunk, so the exports are of the judged best.
+// A budget end inside a round keeps the round's work as a build of its own and
+// returns the folder to the best, so the exports are of the judged best.
 const leaveRound = (state: RunState, r: Round): RunState => ({
   ...state,
-  task: {
-    _tag: "leave",
-    branch: r.branch,
-    candidate: r.candidate,
-    phase: r.candidate.length > 0 ? "restore" : "trunk",
-  },
+  task: { _tag: "leave", branch: r.branch, candidate: r.candidate, phase: "capture" },
 });
 
 const inComparison = (s: RunState): boolean =>
@@ -1836,11 +1849,11 @@ export const applyResult = (
     if (t._tag === "round" && t.phase !== "start") return out(leaveRound(s, t));
     return out({ ...s, inFlight: done, ending: "budget" });
   }
-  const g = res.kind === "git" ? res.git : null;
+  const g = res.kind === "build" ? res.build : null;
   const now = input.now;
   switch (t._tag) {
     case "init":
-      return out(afterStage({ ...s, trunk: g!.branch, best: g!.sha }, s.stage, now));
+      return out(afterStage({ ...s, trunk: "", best: g!.sha }, s.stage, now));
     case "decide": {
       const next = decide(
         s,
@@ -1916,7 +1929,7 @@ export const applyResult = (
         });
       }
       if (t.phase === "commit") {
-        if (g!.sha === s.best) return out(afterStage(s, t.name, now));
+        // Documents only: the build moves on with them, nothing to boot.
         if (!g!.changed) return out(afterStage({ ...s, best: g!.sha }, t.name, now));
         return out({ ...s, task: { ...t, phase: "boot", sha: g!.sha } });
       }
@@ -1924,17 +1937,24 @@ export const applyResult = (
         if (res.ok) return out(afterStage({ ...s, best: t.sha }, t.name, now));
         return out({ ...s, task: { ...t, phase: "reject", why: res.detail } });
       }
-      logs.push(`${t.name}: boot failed, work saved on ${g?.branch ?? "a rejected branch"}`);
+      logs.push(`${t.name}: boot failed; its work stays as build stage-${t.name}`);
       return out(afterStage(s, t.name, now));
     }
     case "proto": {
       if (t.phase === "role") return out({ ...s, task: { ...t, phase: "commit" } });
       if (t.phase === "commit")
-        return out({ ...s, task: { ...t, phase: "boot", branch: g!.branch } });
+        return out({ ...s, task: { ...t, phase: "boot", branch: `proto-${t.i}`, sha: g!.sha } });
       if (t.phase === "boot" && res.kind === "boot")
         return out({ ...s, task: { ...t, phase: res.ok ? "keep" : "reject", why: res.detail } });
       // Only prototypes that booted compete or become the base.
-      const protos = [...s.protos, { branch: t.branch, booted: t.phase === "keep" }];
+      const protos = [
+        ...s.protos,
+        {
+          branch: t.branch,
+          booted: t.phase === "keep",
+          ...(t.sha === undefined ? {} : { sha: t.sha }),
+        },
+      ];
       if (t.i % 2 === 0)
         return out({ ...s, protos, task: { ...protoTask(t.i + 1), notes: t.notes } });
       const booted = protos.flatMap((p, k) =>
@@ -1986,7 +2006,7 @@ export const applyResult = (
         const select = submitted(res, "select");
         const chosen = select?.pick ?? null;
         if (chosen === null) {
-          logs.push("pick tie unresolved: building from trunk with the tie recorded");
+          logs.push("pick tie unresolved: building from the base with the tie recorded");
           return out(afterStage({ ...s, pickNotes: t.notes }, "pick", now));
         }
         const reasons = (select?.reasons ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
@@ -2055,7 +2075,7 @@ export const applyResult = (
       return out({ ...s, ladder: taken.ladder, task: newRound(s, now) });
     }
     case "leave":
-      if (t.phase === "restore") return out({ ...s, task: { ...t, phase: "trunk" } });
+      if (t.phase !== "trunk") return out({ ...s, task: { ...t, phase: "trunk" } });
       return out({ ...s, ending: "budget", task: newRound(s, now) });
     case "round":
       return out(applyRound(s, t, done, res, input, logs, files, release));
@@ -2074,7 +2094,7 @@ const applyRound = (
 ): RunState => {
   const now = input.now;
   const lane = s.lane;
-  const g = res.kind === "git" ? res.git : null;
+  const g = res.kind === "build" ? res.build : null;
   const at = (round: Partial<Round>): RunState => ({ ...s, task: { ...r, ...round } });
   switch (r.phase) {
     case "start": {
@@ -2082,7 +2102,7 @@ const applyRound = (
         return stallRound(
           s,
           r,
-          `stalled (cannot reach ${s.trunk}: ${g!.detail})`.slice(0, 300),
+          `stalled (its base build could not be restored: ${g!.detail})`.slice(0, 300),
           now,
           logs,
         );
@@ -2090,26 +2110,17 @@ const applyRound = (
         logs.push(
           `round ${r.n}: no next.md from the last review; repeating the previous direction`,
         );
-      let pending = s.pending;
-      if (pending !== null && !g!.entered) {
-        logs.push(
-          `round ${r.n}: pending ${pending.branch} unreachable; continuing from ${s.trunk}`,
-        );
-        pending = null;
-      } else if (pending !== null)
+      const pending = s.pending;
+      // Started from a round's candidate rather than the best: its work goes on.
+      const entered = done.kind === "build" && done.op._tag === "restore" && done.op.sha !== s.best;
+      if (pending !== null)
         logs.push(
           `round ${r.n}: refining pending ${pending.branch} against best ${s.best.slice(0, 8)}`,
         );
       const ms = fit(s, now, r.rung === null ? CAP.block : CAP.rung, ROUND_RESERVE_MS);
-      const continued = r.rung !== null && g!.entered === true;
+      const continued = r.rung !== null && entered;
       if (continued) logs.push(`round ${r.n}: continues the last try's work`);
-      const round = {
-        ...r,
-        branch: g!.branch,
-        base: g!.sha,
-        continued,
-        record: { ...r.record, branch: g!.branch },
-      };
+      const round = { ...r, base: g!.sha, continued };
       if (ms < FLOOR_MS) return leaveRound({ ...s, pending }, round);
       const direction = Roles.roundDirection(r.direction, r.repeating, lane);
       // Only the notes this round read are used up; later ones wait for the next.
@@ -2120,7 +2131,7 @@ const applyRound = (
         task: {
           ...round,
           phase: "block",
-          block: newBlock(`${r.n}`, direction, r.rung !== null, ms),
+          block: newBlock(`${r.n}`, direction, r.rung !== null, ms, g!.sha),
         },
       };
     }
@@ -2168,6 +2179,7 @@ const applyRound = (
             ),
             false,
             ms,
+            g!.sha,
           ),
         });
       return at({
@@ -2347,7 +2359,7 @@ const applyRound = (
       const rung = rungOf(s, r);
       if (rung !== null && !checksPassed(r, rung)) {
         const why = `rung checks failed (${checkLine(r.checks) || "none verified"})`;
-        logs.push(`round ${r.n}: ${why}; not judged, candidate stays on branch ${r.branch}`);
+        logs.push(`round ${r.n}: ${why}; not judged, candidate kept as build ${r.branch}`);
         return {
           ...s,
           lastFailure: `round ${r.n}: ${why}`,
@@ -2355,7 +2367,7 @@ const applyRound = (
             ...r,
             phase: "outcome",
             outcome: "drop",
-            reviewed: `the current best (this round's rung failed its checks; its candidate stays on branch ${r.branch} unmerged)`,
+            reviewed: `the current best (this round's rung failed its checks; its candidate is set aside as build ${r.branch})`,
             record: { ...r.record, note: noteOf(r, `${why}; not judged`) },
           },
         };
@@ -2376,7 +2388,7 @@ const applyRound = (
       // With a budget, judging starts only when both plays and both verdicts fit.
       if (remaining(s, now) < COMPARE_MIN_MS) {
         logs.push(
-          `round ${r.n}: budget leaves no time to judge; candidate stays on branch ${r.branch}`,
+          `round ${r.n}: budget leaves no time to judge; candidate kept as build ${r.branch}`,
         );
         return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
       }
@@ -2408,14 +2420,10 @@ const applyRound = (
     }
     case "outcome": {
       if (r.outcome === "merge" && g!.ok) {
-        logs.push(`round ${r.n}: kept, ${s.trunk} at ${g!.sha.slice(0, 8)}`);
+        logs.push(`round ${r.n}: kept, the best is ${g!.sha.slice(0, 8)}`);
         const held = heldPlay(s, r);
-        const carried =
-          held !== null &&
-          g!.same &&
-          done.kind === "git" &&
-          done.op._tag === "ff-merge" &&
-          done.op.played === held.sha;
+        // The kept build is the candidate itself, so a play of it carries over exactly.
+        const carried = held !== null && held.sha === g!.sha;
         return {
           ...s,
           best: g!.sha,
@@ -2429,36 +2437,30 @@ const applyRound = (
           },
         };
       }
-      if (r.outcome === "merge") {
-        const onTrunk = g!.branch === s.trunk;
+      if (r.outcome === "merge")
         return {
           ...s,
           pending: null,
           task: {
             ...r,
             phase: "review-facts",
-            reviewed: onTrunk
-              ? `the current best (merge failed; candidate stays on branch ${r.branch} unmerged)`
-              : `the unmerged candidate on branch ${r.branch} (merge skipped: cannot reach ${s.trunk})`,
+            reviewed: `the candidate in the folder (not kept: ${g!.detail})`.slice(0, 300),
             record: {
               ...r.record,
-              note: noteOf(r, `merge failed (${g!.detail}); kept on branch`.slice(0, 200)),
+              note: noteOf(r, `not kept (${g!.detail}); its build stays ${r.branch}`.slice(0, 200)),
             },
           },
         };
-      }
       const record = g!.ok
         ? r.record
         : {
             ...r.record,
-            note: noteOf(r, `cannot reach ${s.trunk}; review plays the round branch`),
+            note: noteOf(r, "the best build could not be restored; review plays the folder"),
           };
       return at({
         phase: "review-facts",
         record,
-        ...(g!.ok
-          ? {}
-          : { reviewed: `the candidate on branch ${r.branch} (cannot reach ${s.trunk})` }),
+        ...(g!.ok ? {} : { reviewed: "the build in the folder (the best could not be restored)" }),
       });
     }
     case "review-facts": {
@@ -2544,7 +2546,7 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
       ),
     };
   if (kind === "unjudged") {
-    logs.push(`round ${r.n}: no judge verdicts after retry; kept on branch ${r.branch}`);
+    logs.push(`round ${r.n}: no judge verdicts after retry; candidate kept as build ${r.branch}`);
     const why = verdicts[0]!.verdict === "NONE" ? verdicts[0]!.reason : verdicts[1]!.reason;
     return {
       ...s,
@@ -2553,20 +2555,25 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
       task: round(
         {
           outcome: "drop",
-          reviewed: `the current best (last round unjudged; its candidate stays on branch ${r.branch})`,
+          reviewed: `the current best (last round unjudged; its candidate is set aside as build ${r.branch})`,
         },
-        { unjudged: true, note: noteOf(r, "no judge verdicts after retry; kept on branch") },
+        {
+          unjudged: true,
+          note: noteOf(r, "no judge verdicts after retry; candidate kept as a build"),
+        },
       ),
     };
   }
   // A tie or split is an honest non-finding, never a keep: the best stands and
   // later rounds refine this candidate against the same judged best.
   const split = `${verdicts[0]!.verdict}/${verdicts[1]!.verdict}`;
-  const pending = advancePending(s.pending, r.branch, r.n, verdicts);
-  logs.push(`round ${r.n}: inconclusive ${split}; best stands, kept on branch ${r.branch}`);
+  const pending = advancePending(s.pending, r.branch, r.n, verdicts, r.candidate);
+  logs.push(
+    `round ${r.n}: inconclusive ${split}; best stands, candidate kept as build ${r.branch}`,
+  );
   const note = noteOf(
     r,
-    `inconclusive (${split}); best stands, kept on branch ${r.branch}${pending === null ? "; pending dropped after 3 inconclusive rounds" : ""}`,
+    `inconclusive (${split}); best stands, candidate kept as build ${r.branch}${pending === null ? "; pending dropped after 3 inconclusive rounds" : ""}`,
   );
   return {
     ...s,
@@ -2574,7 +2581,7 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
     task: round(
       {
         outcome: "hold",
-        reviewed: `the current best (last round inconclusive ${split}; its candidate stays on branch ${r.branch} unmerged; the top flaw below is still open)`,
+        reviewed: `the current best (last round inconclusive ${split}; its candidate is set aside as build ${r.branch}; the top flaw below is still open)`,
       },
       { inconclusive: true, note },
     ),
@@ -2600,7 +2607,12 @@ const finishRound = (
   const settled = settleRung(
     s,
     r,
-    { ...r.record, durationMs: now - r.startedAt, ...(note.length > 0 ? { note } : {}) },
+    {
+      ...r.record,
+      durationMs: now - r.startedAt,
+      ...(note.length > 0 ? { note } : {}),
+      ...(r.candidate.length > 0 ? { build: r.candidate } : {}),
+    },
     logs,
   );
   const ladder = settled.state.ladder;
