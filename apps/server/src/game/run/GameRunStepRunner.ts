@@ -750,9 +750,11 @@ const make = Effect.gen(function* () {
     records: ProjectionStore.GameRunThreadRecords,
   ) =>
     Effect.gen(function* () {
+      // The run's jobs, then its live role turns, before anything that can
+      // fail: a finish that breaks later is still recorded, so nothing of the
+      // run may be left working. Each interrupt needs no folder, and one that
+      // breaks never keeps the others from being sent.
       yield* jobs.stopRun(run.id);
-      const root = yield* projects.resolve(run.threadId, { deleted: "allowed" });
-      const log = (line: string) => logLine(root, line);
       const held = records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight);
       for (const role of held?.roles ?? []) {
         if (role.threadId === null) continue;
@@ -765,8 +767,14 @@ const make = Effect.gen(function* () {
             threadId: role.threadId,
             reason: `The production run ended (${run.ending ?? "unknown"}).`,
           })
-          .pipe(Effect.ignore);
+          .pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.void,
+            ),
+          );
       }
+      const root = yield* projects.resolve(run.threadId, { deleted: "allowed" });
+      const log = (line: string) => logLine(root, line);
       yield* performOutputs(run, records.gameRunSteps, Number.MAX_SAFE_INTEGER, root, log);
       yield* log(
         `run ended: ${run.ending ?? "unknown"}${run.lastFailure ? ` (${run.lastFailure})` : ""}`,

@@ -584,6 +584,8 @@ interface World {
   exportsBreak: boolean;
   /** The game's project was deleted under the run. */
   projectDeleted: boolean;
+  /** The game folder no longer resolves. */
+  folderGone: boolean;
   /** Runs when the runner reads the creator's shell, which it does just before a role's start. */
   onCreatorShell: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
@@ -611,6 +613,7 @@ const newWorld = Effect.gen(function* () {
     exportOwners: [],
     exportsBreak: false,
     projectDeleted: false,
+    folderGone: false,
     onCreatorShell: null,
     onSend: null,
     capWatched: yield* Deferred.make<void>(),
@@ -766,7 +769,16 @@ const layerGame = (root: string, world: World) =>
             ),
         }),
         Layer.mock(GameProjectService.GameProjectService)({
-          resolve: () => Effect.succeed(root),
+          resolve: () =>
+            world.folderGone
+              ? Effect.fail(
+                  new GameOperationError({
+                    operation: "resolve-thread",
+                    path: root,
+                    reason: "project-not-found",
+                  }),
+                )
+              : Effect.succeed(root),
           read: () =>
             Effect.fail(
               new GameOperationError({ operation: "read", path: root, reason: "invalid-input" }),
@@ -1046,6 +1058,29 @@ it.effect("deleting the creator chat stops its run, which holds the game until i
         [thread],
       );
       assert.isNull(yield* projections.getProjectGameRun(projectId));
+    }),
+  ),
+);
+
+it.effect("a finish that breaks before the folder still stops the run's role turns", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      yield* completeStep(vision, {
+        kind: "ended",
+        ending: "usage-limit",
+        reason: "usage limit until noon",
+      });
+      world.folderGone = true;
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
+      assert.deepEqual(
+        world.interrupts.map((i) => i.threadId),
+        [thread],
+      );
     }),
   ),
 );
