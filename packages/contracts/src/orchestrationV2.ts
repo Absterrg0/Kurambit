@@ -3153,6 +3153,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
       }),
       Schema.Struct({ kind: Schema.Literal("memory"), n: PositiveInt }),
       Schema.Struct({ kind: Schema.Literal("busy"), n: PositiveInt }),
+      /** Recovery runs the step again through the outbox, behind whatever its thread still owes. */
+      Schema.Struct({ kind: Schema.Literal("recover") }),
     ]),
   }),
   /** The creator asks for a kept round's build back on an ended run; a job moves the folder. */

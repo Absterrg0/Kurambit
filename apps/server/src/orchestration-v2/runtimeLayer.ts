@@ -317,6 +317,7 @@ const layerGameRunDecisionsProvided = GameRunDecisions.layer.pipe(
 const layerGameRunRecoveryProvided = GameRunRecovery.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
+      EffectOutbox.layer,
       layerGameRunJobsProvided,
       layerGameRunDecisionsProvided,
       layerOrchestratorProvided,

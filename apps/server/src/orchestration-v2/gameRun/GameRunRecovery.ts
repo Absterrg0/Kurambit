@@ -1,7 +1,8 @@
 // At startup, the ProviderRuntimeRecoveryService way: a running game run whose
-// step a restart cut off gets that step's job again. Every step is safe to
-// repeat, and the job itself finds what an earlier try left (a role's thread,
-// its finished turn) before doing anything. A decision needs no job: its
+// step a restart cut off gets that step's job again, always through the
+// outbox, so it runs behind whatever its thread still owes (a landing's
+// outputs). Every step is safe to repeat, and the job itself finds what an
+// earlier try left (a role's thread, its finished turn) before doing anything. A decision needs no job: its
 // deadline is a durable effect, and only a presentation that ended while the
 // server was down is caught up. An ended or stopped run is never continued;
 // only its finish, if a restart cut it short, runs again. A role turn no step
@@ -9,9 +10,11 @@
 // after the restart) is stopped, so nothing edits a game outside its run.
 import { CommandId, type ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import * as EffectOutbox from "../EffectOutbox.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecisions from "./GameRunDecisions.ts";
@@ -28,6 +31,11 @@ const make = Effect.gen(function* () {
   const jobs = yield* GameRunJobs.GameRunJobs;
   const decisions = yield* GameRunDecisions.GameRunDecisions;
   const engine = yield* Orchestrator.OrchestratorV2;
+  const outbox = yield* EffectOutbox.EffectOutboxV2;
+  const owes = (
+    threadId: ThreadId,
+    effectTypes: EffectOutbox.OrchestrationEffectRequestV2["type"][],
+  ) => outbox.hasUnsettled({ threadId, effectTypes });
 
   const stopUnnamedRoleTurns = Effect.gen(function* () {
     const turns = yield* projections.listLiveGameRunRoleTurns();
@@ -84,11 +92,23 @@ const make = Effect.gen(function* () {
       const run = records.gameRuns.at(-1);
       if (run === undefined) return;
       // An ending whose finish never completed (a death mid-finish, a lost job) finishes again.
+      // A finish or restore whose effect is still owed runs from it, behind
+      // the outputs before it: run here it could move the folder under their
+      // writes. One whose effect was already taken (so everything before it
+      // ran) lost only its job, which starts again here.
       if (run.status === "ended") {
-        if (run.endedAt !== null && run.finished !== run.endedAt)
+        if (
+          run.endedAt !== null &&
+          run.finished !== run.endedAt &&
+          !(yield* owes(threadId, ["game-run.finish"]))
+        )
           yield* jobs.finish({ threadId, runId: run.id, endedAt: run.endedAt });
         // A restore whose job a restart cut off runs again: it checks the folder first.
-        if (run.restore !== null && run.restore.outcome === null)
+        if (
+          run.restore !== null &&
+          run.restore.outcome === null &&
+          !(yield* owes(threadId, ["game-run.restore.execute"]))
+        )
           yield* jobs.restore({ threadId, runId: run.id, requestId: run.restore.requestId });
         return;
       }
@@ -127,7 +147,21 @@ const make = Effect.gen(function* () {
       );
       if (step === undefined || (step.status !== "planned" && step.status !== "running")) return;
       if (step.kind === "decide") return yield* decisions.presented(threadId);
-      yield* jobs.execute({ threadId, runId: run.id, stepId: step.id, attempt: step.attempt });
+      // An effect still owed drives the step; otherwise a durable wake does,
+      // in the outbox's order, never a job started from here.
+      if (yield* owes(threadId, ["game-run.step.execute", "game-run.step.wake"])) return;
+      yield* engine.dispatch({
+        type: "game-run.step.schedule",
+        commandId: CommandId.make(
+          `server:game-run-recover:${step.id}:attempt:${step.attempt}:${DateTime.toEpochMillis(yield* DateTime.now)}`,
+        ),
+        threadId,
+        runId: run.id,
+        stepId: step.id,
+        attempt: step.attempt,
+        at: DateTime.toEpochMillis(yield* DateTime.now),
+        timer: { kind: "recover" },
+      });
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("game run recovery failed for a thread", { threadId, cause }),

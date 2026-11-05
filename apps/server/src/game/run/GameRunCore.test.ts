@@ -43,6 +43,7 @@ import type * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAd
 import * as ServerSettings from "../../serverSettings.ts";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import * as EffectOutbox from "../../orchestration-v2/EffectOutbox.ts";
 import * as EffectWorker from "../../orchestration-v2/EffectWorker.ts";
 import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import * as GameRunDecisions from "../../orchestration-v2/gameRun/GameRunDecisions.ts";
@@ -92,6 +93,7 @@ const refuseTurns = Layer.succeed(TurnAdmission.TurnAdmission, {
 const layerDatabase = SqlitePersistence.layerMemory;
 const layerCore = Layer.mergeAll(
   ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
+  EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
   ProviderReplayHarness.layerWithRegistry(
     { name: "game-run-core" },
     ProviderAdapterRegistry.layerFromAdapters([adapter]),
@@ -213,6 +215,7 @@ const awaitStep = (stepId: string, status: GameRunStep["status"]) =>
 /** A runner standing in for the game layer: it counts each step it is handed and lands git steps. */
 const countingRunner = Effect.gen(function* () {
   const handed: string[] = [];
+  const finishes: string[] = [];
   const arrivals = yield* Queue.unbounded<string>();
   const hold = yield* Deferred.make<void>();
   const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -232,7 +235,7 @@ const countingRunner = Effect.gen(function* () {
         Effect.orDie,
       ),
     deadline: () => Effect.void,
-    finish: () => Effect.void,
+    finish: (job) => Effect.sync(() => void finishes.push(job.endedAt)),
     restore: () => Effect.void,
     resend: () => Effect.void,
     outputs: () => Effect.void,
@@ -243,6 +246,8 @@ const countingRunner = Effect.gen(function* () {
   const jobs = yield* GameRunJobs.GameRunJobs;
   return {
     handed,
+    /** Each ending a finish job was handed for. */
+    finishes,
     /** The next job the runner was handed. */
     next: Queue.take(arrivals),
     live: (stepId: string, attempt: number) => jobs.isLive(`execute:${stepId}:attempt:${attempt}`),
@@ -251,20 +256,25 @@ const countingRunner = Effect.gen(function* () {
 });
 
 it.effect(
-  "a job a restart lost runs again, and a step that finished lands nothing more",
+  "recovery leaves an owed step to the outbox, wakes a lost job through it, and a finished step lands nothing more",
   () =>
     Effect.gen(function* () {
       yield* createCreator;
       yield* startRun("autopilot");
       const { handed, next, release } = yield* countingRunner;
       const recovery = yield* GameRunRecovery.GameRunRecovery;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       const first = (yield* inFlight).step!;
-      // The step's effect never ran: the server stopped before the worker claimed it.
+      // The step's effect never ran: the server stopped before the worker
+      // claimed it. Recovery leaves the step to that effect, in its order.
       yield* recovery.recover();
+      assert.deepEqual(handed, []);
+      yield* worker.drain();
       assert.equal(yield* next, `${first.id}#1`);
-      // A second pass while the job is live starts nothing alongside it: it asks
-      // for one run after, which reads the records afresh.
+      // The effect is spent and the job lost to a restart: recovery wakes the
+      // step through the outbox. The job still live here asks for one run after.
       yield* recovery.recover();
+      yield* worker.drain();
       assert.deepEqual(handed, [`${first.id}#1`]);
 
       const landed = yield* awaitStep(first.id, "completed");
@@ -275,15 +285,32 @@ it.effect(
       const second = (yield* inFlight).step!;
       assert.notEqual(second.id, first.id);
       yield* recovery.recover();
+      yield* worker.drain();
       assert.equal(yield* next, `${second.id}#1`);
       assert.deepEqual(handed, [`${first.id}#1`, `${first.id}#1`, `${second.id}#1`]);
       // The outbox's own effects for the finished step change nothing either.
-      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       yield* worker.drain();
       assert.deepEqual(handed.filter((h) => h === `${first.id}#1`).length, 2);
       assert.equal((yield* inFlight).steps.find((s) => s.id === first.id)?.status, "completed");
     }).pipe(Effect.provide(layerWithRecovery)),
   20_000,
+);
+
+it.effect("recovery leaves an ending to its finish effect while the outbox still owes it", () =>
+  Effect.gen(function* () {
+    yield* createCreator;
+    yield* startRun("autopilot");
+    const { finishes } = yield* countingRunner;
+    yield* stopRun;
+    const recovery = yield* GameRunRecovery.GameRunRecovery;
+    // The finish effect never ran: whatever the thread owes before it runs first.
+    yield* recovery.recover();
+    assert.deepEqual(finishes, []);
+    yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+    // The effect hands the finish to a job of its own.
+    for (let turn = 0; turn < 100 && finishes.length === 0; turn += 1) yield* Effect.yieldNow;
+    assert.deepEqual(finishes, [(yield* inFlight).run.endedAt]);
+  }).pipe(Effect.provide(layerWithRecovery)),
 );
 
 it.effect("a stopped run stays stopped across recovery, until a resume", () =>
@@ -316,6 +343,7 @@ it.effect("a stopped run stays stopped across recovery, until a resume", () =>
       runId,
     });
     yield* recovery.recover();
+    yield* worker.drain();
     assert.equal(yield* next, `${(yield* inFlight).step!.id}#2`);
   }).pipe(Effect.provide(layerWithRecovery)),
 );
@@ -514,6 +542,7 @@ const layerAdmitting = GameRunRecovery.layer.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
+      EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
       ProviderReplayHarness.layerWithRegistry(
         { name: "game-run-core-admitting" },
         ProviderAdapterRegistry.layerFromAdapters([adapter]),
@@ -924,7 +953,11 @@ const awaitRun = (ok: (run: GameRunRecord) => boolean) =>
   });
 
 const startRunner = Effect.flatMap(GameRunStepRunner.GameRunStepRunner, (runner) => runner.start());
-const recover = Effect.flatMap(GameRunRecovery.GameRunRecovery, (recovery) => recovery.recover());
+/** A restart's recovery, and the outbox that carries out what it leaves or asks for. */
+const recover = Effect.gen(function* () {
+  yield* (yield* GameRunRecovery.GameRunRecovery).recover();
+  yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+});
 /** Recovery, with the cap the step's job sets as a timer for the turn it finds or sends, fired. */
 const recoverAndCap = Effect.gen(function* () {
   const scheduled = yield* awaitRun(() => true);

@@ -1038,6 +1038,27 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
           `Attempt ${command.attempt} of step ${command.stepId} was superseded.`,
         );
       const state = toState(run, work.records.rounds, record);
+      if (command.timer.kind === "recover")
+        return Result.succeed(
+          settle(
+            work,
+            run,
+            state,
+            state,
+            [],
+            [
+              effectFor(
+                {
+                  type: "game-run.step.wake",
+                  runId: run.id,
+                  stepId: record.id,
+                  attempt: command.attempt,
+                },
+                command.at,
+              ),
+            ],
+          ),
+        );
       if (command.timer.kind === "memory" || command.timer.kind === "busy") {
         const waited: GameRunStep =
           command.timer.kind === "memory"

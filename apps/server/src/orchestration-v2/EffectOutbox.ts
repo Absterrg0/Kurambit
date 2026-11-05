@@ -294,6 +294,11 @@ export interface EffectOutboxV2Shape {
   readonly listByCommandId: (
     commandId: CommandId,
   ) => Effect.Effect<ReadonlyArray<OrchestrationEffectV2>, EffectOutboxError>;
+  /** Whether the thread still owes an effect of these types (pending or running). */
+  readonly hasUnsettled: (input: {
+    readonly threadId: ThreadId;
+    readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
+  }) => Effect.Effect<boolean, EffectOutboxError>;
   readonly cancelUnsettled: (input: {
     readonly threadId: ThreadId;
     readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
@@ -530,6 +535,22 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               : new EffectOutboxError({ operation: "list", cause }),
           ),
         ),
+      hasUnsettled: ({ threadId, effectTypes }) =>
+        effectTypes.length === 0
+          ? Effect.succeed(false)
+          : sql<{ readonly found: number }>`
+              SELECT 1 AS found
+              FROM orchestration_v2_effect_outbox
+              WHERE thread_id = ${threadId}
+                AND status IN ('pending', 'running')
+                AND effect_type IN ${sql.in(effectTypes)}
+              LIMIT 1
+            `.pipe(
+              Effect.map((rows) => rows.length > 0),
+              Effect.mapError(
+                (cause) => new EffectOutboxError({ operation: "has-unsettled", cause }),
+              ),
+            ),
       cancelUnsettled: ({ threadId, effectTypes, reason }) =>
         Effect.gen(function* () {
           if (effectTypes.length === 0) return [];
