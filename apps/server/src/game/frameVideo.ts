@@ -9,6 +9,10 @@ import { spawnOwned, type OwnedProcess } from "./processHost.ts";
 export const VIDEO_FPS = 12;
 /** Frames are downscaled in the engine to at most this width before they cross the socket. */
 export const VIDEO_WIDTH = 960;
+/** The video's fixed height; frames of another shape are letterboxed. */
+const VIDEO_HEIGHT = 540;
+/** An encoder this far behind gets no more frames until it catches up; the drops are counted. */
+const MAX_PENDING_BYTES = 16 * 1024 * 1024;
 
 /** What the video's sidecar says about its frames, so a stalled renderer reads as stalled. */
 export interface FrameVideoFacts {
@@ -18,6 +22,8 @@ export interface FrameVideoFacts {
   readonly received: number;
   /** Video frames written, including repeats that keep wall-clock timing. */
   readonly written: number;
+  /** Frames skipped because the encoder fell behind. */
+  readonly dropped: number;
   /** Distinct engine frame counters among the received frames. */
   readonly distinctFrames: number;
   /** The longest wall time, in ms, the engine's frame counter did not advance. */
@@ -41,6 +47,7 @@ export const openFrameVideo = (input: {
   let ffmpeg: OwnedProcess | null = null;
   let started = 0;
   let written = 0;
+  let dropped = 0;
   let last: PlayFrame | null = null;
   let finished = false;
   const received: Array<readonly [frame: number, t: number, wallMs: number]> = [];
@@ -61,9 +68,10 @@ export const openFrameVideo = (input: {
         "mjpeg",
         "-i",
         "-",
-        // libx264 with yuv420p needs even sides; engines downscale to any size.
+        // One output size for the whole run: a game that resizes its window
+        // mid-run changes the frames' size, which libx264 cannot follow.
         "-vf",
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT}:force_original_aspect_ratio=decrease,pad=${VIDEO_WIDTH}:${VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
         "-c:v",
         "libx264",
         "-preset",
@@ -79,7 +87,11 @@ export const openFrameVideo = (input: {
     return owned;
   };
   const write = (frame: PlayFrame): void => {
-    ffmpeg?.child.stdin?.write(frame.jpeg);
+    const stdin = ffmpeg?.child.stdin;
+    // The slot still counts, so wall-clock timing holds; only the picture is skipped.
+    if (stdin !== undefined && stdin !== null && stdin.writableLength > MAX_PENDING_BYTES)
+      dropped += 1;
+    else stdin?.write(frame.jpeg);
     written += 1;
   };
   /** Fills every slot up to `slot` with the last picture. */
@@ -119,21 +131,28 @@ export const openFrameVideo = (input: {
       const now = Date.now();
       fillTo(Math.floor((now - started) / interval) + 1);
       longestStallMs = Math.max(longestStallMs, now - lastAdvance);
+      let timedOut = false;
       await new Promise<void>((resolve) => {
         if (!owned.running()) return resolve();
         // An encoder that never finishes would hold the run; its partial file still plays.
-        const timer = setTimeout(() => void owned.stop().then(resolve), 60_000);
+        const timer = setTimeout(() => {
+          timedOut = true;
+          void owned.stop().then(resolve);
+        }, 60_000);
         owned.child.once("exit", () => {
           clearTimeout(timer);
           resolve();
         });
         owned.child.stdin?.end();
       });
+      // A failed encoder leaves no video to claim (a stopped slow one leaves a playable partial).
+      if (!timedOut && owned.child.exitCode !== 0) return null;
       const facts: FrameVideoFacts = {
         route: "engine-frames",
         fps: VIDEO_FPS,
         received: received.length,
         written,
+        dropped,
         distinctFrames: new Set(received.map(([frame]) => frame)).size,
         longestStallMs,
       };

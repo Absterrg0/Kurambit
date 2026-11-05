@@ -117,8 +117,15 @@ export const nativeUserLayout = (
 /** This OS's isolation under dir, created when missing; nothing is removed. */
 export const nativeUserIsolationAt = async (dir: string): Promise<NativeUserIsolation> => {
   const layout = nativeUserLayout(dir, HOST_OS);
-  for (const path of new Set([layout.dataDir, layout.configDir, layout.cacheDir]))
+  await NodeFSP.mkdir(dir, { recursive: true });
+  const root = await NodeFSP.realpath(dir).catch(() => null);
+  for (const path of new Set([layout.dataDir, layout.configDir, layout.cacheDir])) {
     await NodeFSP.mkdir(path, { recursive: true });
+    // A link planted inside the folder must not point the game at real user data.
+    const real = await NodeFSP.realpath(path);
+    if (root === null || !isPathInside(real, root))
+      throw new Error(`The save folder ${path} resolves to ${real}, outside ${dir}; refused.`);
+  }
   return { dir, ...layout };
 };
 

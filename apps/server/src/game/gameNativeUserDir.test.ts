@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import {
   isPathInside,
   nativeUserEnv,
+  nativeUserIsolationAt,
   nativeUserLayout,
   prepareNativeUserIsolation,
   userDirConfigIssues,
@@ -84,4 +85,15 @@ it("points each OS's Godot data root into the isolation", () => {
   const windows = nativeUserLayout("C:\\r", "win32");
   expect(windows.env).toEqual({ APPDATA: "C:\\r\\data", LOCALAPPDATA: "C:\\r\\cache" });
   expect(windows.dataDir).toBe("C:\\r\\data");
+});
+
+it("refuses a save folder whose game data dir is a link to somewhere else", async () => {
+  const base = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "userdir-link-"));
+  const outside = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "userdir-outside-"));
+  const kept = NodePath.join(base, "kept");
+  const { dataDir } = nativeUserLayout(kept, process.platform);
+  await NodeFSP.mkdir(NodePath.dirname(dataDir), { recursive: true });
+  await NodeFSP.symlink(outside, dataDir);
+  await expect(nativeUserIsolationAt(kept)).rejects.toThrow(/outside/);
+  expect(await NodeFSP.readdir(outside)).toEqual([]);
 });

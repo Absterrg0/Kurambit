@@ -191,10 +191,13 @@ export const makeGodotBackend = (
         const scriptPath = NodePath.join(temporary, "check.gd");
         const resultPath = NodePath.join(temporary, "result.json");
         return yield* Effect.gen(function* () {
-          yield* Effect.tryPromise({
+          // The check runs the gameplay scene, and a game that saves on start
+          // would write the user's real user:// otherwise; this one is scratch.
+          const isolation = yield* Effect.tryPromise({
             try: async () => {
               await NodeFSP.mkdir(temporary, { recursive: true });
               await NodeFSP.writeFile(scriptPath, GODOT_CHECK_SCRIPT);
+              return prepareNativeUserIsolation(temporary);
             },
             catch: (cause) =>
               new GameOperationError({
@@ -219,7 +222,7 @@ export const makeGodotBackend = (
             ],
             operation: "godot-check",
             timeoutMs: 120_000,
-            env: GameProcesses.engineChildEnv(),
+            env: GameProcesses.engineChildEnv(isolation.env),
             envMode: "replace",
           });
           // Read before the scratch directory is removed below.
