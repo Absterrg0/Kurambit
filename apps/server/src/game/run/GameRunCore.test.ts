@@ -955,6 +955,29 @@ it.effect(
     ),
 );
 
+it.effect("a continued turn's cap runs from where the cut turn's work began", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      // The cut turn had worked past the vision cap before the restart.
+      world.runs.set(thread, [
+        turnRun({ stepId: vision.id, status: "cancelled", ago: 11 * 60_000 }),
+      ]);
+      world.onSend = (threadId, messageId) => {
+        world.runs.set(threadId, [
+          ...(world.runs.get(threadId) ?? []),
+          turnRun({ stepId: vision.id, status: "running", userMessageId: messageId, ago: 1_000 }),
+        ]);
+      };
+      // The cap is checked on the run's clock.
+      yield* TestClock.setTime(Date.now());
+      yield* startRunner;
+      yield* recover;
+      assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
+    }),
+  ),
+);
+
 it.effect("a stop interrupts the live role turn and stops its jobs, from its outbox effect", () =>
   withGame((world) =>
     Effect.gen(function* () {

@@ -636,11 +636,17 @@ const make = Effect.gen(function* () {
       const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
       if (threadId === null) return;
       const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
-      const live = GameRunRoleReactor.stepTurns(runs, job.stepId).findLast(
+      const attemptTurns = GameRunRoleReactor.stepTurns(runs, job.stepId).filter(
         (t) => t.turn.attempt === job.attempt,
       );
+      const live = attemptTurns.at(-1);
       if (live === undefined || GameRunRoleReactor.isSettledRun(live.run)) return;
-      const startedAt = live.run.startedAt ?? live.run.requestedAt;
+      // A continued turn (a restart cut the one before) carries on that turn's
+      // work, so its cap runs from where the work began, as the step's elapsed
+      // time does; a turn sent afresh (a retry, a memory wait) has its own.
+      const fresh = (t: GameRunRoleReactor.AttributedTurn) => t.sent && t.turn.kind !== "continue";
+      const anchor = attemptTurns.findLast(fresh) ?? attemptTurns[0] ?? live;
+      const startedAt = anchor.run.startedAt ?? anchor.run.requestedAt;
       const waited = yield* game.exploreMemoryWait(threadId).pipe(
         Effect.map((mark) => mark.waitedMs),
         Effect.orElseSucceed(() => 0),
