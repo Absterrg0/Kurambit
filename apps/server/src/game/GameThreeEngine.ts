@@ -122,6 +122,7 @@ export const makeThreeBackend = (
               bootTimeoutMs: BOOT_TIMEOUT_MS,
               signal,
               onPageEvent,
+              stopOnPageError: true,
             }).catch((cause: unknown) => {
               if (!(cause instanceof WebPageNotReady)) throw cause;
               if (cause.navigation !== null) log(`navigation failed: ${cause.navigation}`);

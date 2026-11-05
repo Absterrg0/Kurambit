@@ -157,6 +157,12 @@ export const openWebPlaySession = async (input: {
   readonly keptStorage?: string | null | undefined;
   /** Sees each console message, page error and failed script as the page reports it. */
   readonly onPageEvent?: ((event: WebPageEvent) => void) | undefined;
+  /**
+   * Ends the boot wait once a page error or a failed script came before the
+   * bridge: the check reports that page as broken. A player's page (explore,
+   * bots) waits for ready or the deadline, as a page that recovers would.
+   */
+  readonly stopOnPageError?: boolean | undefined;
 }): Promise<WebPlaySession> => {
   input.signal?.throwIfAborted();
   const { chromium } = loadPlaywright();
@@ -301,8 +307,8 @@ export const openWebPlaySession = async (input: {
         }
         if (ready === true) break;
         // Top-level await can delay the bridge past load, so only an error
-        // and no bridge together end the wait early.
-        if (pageErrored && ready === null)
+        // and no bridge together end the wait early, and only for the check.
+        if (input.stopOnPageError === true && pageErrored && ready === null)
           throw new WebPageNotReady(false, input.bootTimeoutMs, navigation);
         await sleep(500, input.signal);
       }
