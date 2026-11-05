@@ -4,23 +4,16 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
+import * as Mime from "effect/http/Mime";
+import * as Option from "effect/Option";
 import { engineChildEnv } from "./GameProcesses.ts";
 
-const mime: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "application/javascript",
-  ".mjs": "application/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".wav": "audio/wav",
-  ".ogg": "audio/ogg",
-  ".mp3": "audio/mpeg",
-  ".glb": "model/gltf-binary",
-  ".gltf": "model/gltf+json",
-};
+/** Text types carry their charset so a page without a meta tag still decodes as UTF-8. */
+const contentType = (path: string): string =>
+  Option.match(Mime.getType(path), {
+    onNone: () => "application/octet-stream",
+    onSome: (type) => (type.startsWith("text/") ? `${type}; charset=utf-8` : type),
+  });
 
 export interface WebStaticServer {
   /** Loopback origin serving the directory, e.g. http://127.0.0.1:PORT/. */
@@ -29,9 +22,11 @@ export interface WebStaticServer {
 }
 
 /**
- * Serves a game-relative directory over loopback for check/explore/bot runs
- * on three.js sources. Never touches GamePreview state: Play keeps serving
- * whatever build it had, and this server closes with the run.
+ * Serves a game-relative directory over loopback, for Play and for
+ * check/explore/bot runs. It is its own origin on purpose: the game is
+ * agent-written JS and must never run on the app origin beside the session
+ * cookie. Requests resolve through realpath, so a symlink cannot reach outside
+ * the directory.
  */
 export const serveGameDirectory = async (
   root: string,
@@ -68,7 +63,7 @@ export const serveGameDirectory = async (
         return;
       }
       response.writeHead(200, {
-        "Content-Type": mime[NodePath.extname(real)] ?? "application/octet-stream",
+        "Content-Type": contentType(real),
         "Content-Length": stat.size,
         "Cache-Control": "no-store",
       });
