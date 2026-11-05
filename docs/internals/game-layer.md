@@ -377,7 +377,12 @@ write-ups once all verdicts are in. The copies live in a folder of the run's own
 Kurambit's worktrees folder, never in the game repository. A home inside some repository would
 otherwise lend every copy that repository's git, so the server puts the copies' folder in
 `GIT_CEILING_DIRECTORIES` for itself and everything it starts ([config.ts](../../apps/server/src/config.ts)):
-T3 then treats a copy as the non-repository it is. The game folder stays reachable by
+T3 then treats a copy as the non-repository it is. A copy goes with the commit that frees it, as a
+`game-run.outputs` effect: the landing of a role with no turn left, or the restore that abandons
+its round. An ending nothing can resume (its ending, a deleted chat or project) frees every copy of
+the run in its finish; a resumable one keeps its roles' copies until storage cleanup finds them
+spent (`copiesSpent`, under the game-logs period), and unbinds their threads first so a resume
+makes fresh ones. The game folder stays reachable by
 path, and what is blind by construction is the player's or comparator's folder and prompt. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
 renders against the vision and may ask for one bounded redo before the art is

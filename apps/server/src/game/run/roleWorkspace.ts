@@ -188,9 +188,10 @@ export const removeBlank = (_deps: RoleDeps, _ctx: RoleContext, blank: { readonl
  * An ended run's copies go: each role's copy through releaseCopy, so a role
  * still running keeps its folder and a released thread loses its binding;
  * then whatever no role thread is bound to (bot copies, half-made copies,
- * folders whose thread is gone). An ending a resume continues from keeps its
- * roles' copies (`step-*`), since the resumed step plays on in them. Only
- * folders inside the run's own copies folder are ever removed.
+ * folders whose thread is gone). An ending a resume can continue from keeps its
+ * roles' copies (`step-*`), since the resumed step plays on in them, until
+ * storage cleanup finds them spent (`copiesSpent`). Only folders inside the
+ * run's own copies folder are ever removed.
  */
 export const dropRunCopies = (
   deps: Pick<RoleDeps, "threads" | "game">,

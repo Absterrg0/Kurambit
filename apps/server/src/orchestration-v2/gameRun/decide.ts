@@ -928,6 +928,26 @@ const restoreRequest = (work: Work, command: Command<"game-run.restore.request">
     );
   });
 
+/**
+ * Whether no way back reaches a run's copies any more, so storage cleanup may
+ * remove them: its ending is finished, and the run cannot be resumed (its
+ * ending, a later run on its chat, its chat deleted) or ended `keepMs` ago. A
+ * resume after that makes its copies again.
+ */
+export const copiesSpent = (
+  run: GameRun,
+  input: {
+    readonly latest: boolean;
+    readonly chatDeleted: boolean;
+    readonly now: number;
+    readonly keepMs: number;
+  },
+): boolean => {
+  if (run.status !== "ended" || run.endedAt === null || settling(run) !== null) return false;
+  if (!input.latest || input.chatDeleted || !RESUMABLE.has(run.ending ?? "")) return true;
+  return DateTime.toEpochMillis(DateTime.makeUnsafe(run.endedAt)) < input.now - input.keepMs;
+};
+
 /** A restore on a stopped run abandons the round it holds; a resume would continue it otherwise. */
 export const abandonsRound = (run: GameRun, state: State.RunState): boolean =>
   run.ending !== null && RESUMABLE.has(run.ending) && Policy.holdsRound(state);
@@ -953,32 +973,32 @@ const restore = (work: Work, command: Command<"game-run.restore">) =>
       `the creator restored round ${run.restore.round} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
       work.now,
     );
-    // The next step's job releases the dropped round's copies, as it does a
-    // landed step's: the comparison's threads, and the held step's own roles (a
-    // blind player still playing is in the step, not yet in the comparison).
-    const release =
-      held === null
-        ? []
-        : [
-            ...new Set([
-              ...held.outputs.release,
-              ...dropped.release,
-              ...held.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId])),
-            ]),
-          ];
-    const steps: GameRunStep[] =
-      held === null
-        ? []
-        : [
-            {
-              ...held,
-              status: "cancelled",
-              outputs: { ...held.outputs, release },
-              logs: [...held.logs, ...dropped.logs],
-              completedAt: held.completedAt ?? work.at,
-            },
-          ];
-    return Result.succeed(settle(work, landed, state, dropped.state, steps, []));
+    if (held === null) return Result.succeed(settle(work, landed, state, dropped.state, [], []));
+    // The dropped round's copies go with this commit, as a landing's do: the
+    // comparison's threads, and the held step's own roles (a blind player still
+    // playing is in the step, not yet in the comparison).
+    const release = [
+      ...new Set([
+        ...dropped.release,
+        ...held.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId])),
+      ]),
+    ];
+    const step: GameRunStep = {
+      ...held,
+      status: "cancelled",
+      logs: [...held.logs, ...dropped.logs],
+      completedAt: held.completedAt ?? work.at,
+    };
+    return Result.succeed(
+      settle(
+        work,
+        landed,
+        state,
+        dropped.state,
+        [step],
+        outputsEffect(landed, held.id, [], release),
+      ),
+    );
   });
 
 /** A step's own timer: a role's cap at a later due time, a turn sent again, or its work after a wait for memory or for the game. */

@@ -1610,6 +1610,29 @@ describe("storage cleanup reports and local file policies", () => {
       }),
     ),
   );
+  it.live("removes production-run copies no run names, never a fresh one or a link", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, config, disable } = yield* cleanupFixture();
+        disable();
+        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-outside-" });
+        const copies = `${config.worktreesDir}/game-runs`;
+        for (const run of ["run-gone", "run-fresh"]) {
+          yield* fs.makeDirectory(`${copies}/${run}/step-3`, { recursive: true });
+          yield* fs.writeFileString(`${copies}/${run}/step-3/project.godot`, "copy");
+        }
+        yield* fs.utimes(`${copies}/run-gone`, 1, 1);
+        yield* fs.symlink(outside, `${copies}/run-link`);
+        const report = yield* service.runNow;
+        expect(report.entries.find((entry) => entry.kind === "game-logs")).toMatchObject({
+          outcome: "removed",
+          reason: "No expired files; removed 1 spent production-run copy",
+        });
+        expect((yield* fs.readDirectory(copies)).toSorted()).toEqual(["run-fresh", "run-link"]);
+        expect(yield* fs.exists(outside)).toBe(true);
+      }),
+    ),
+  );
   it.live("removes only a game's own expired logs, never editor homes, players or links", () =>
     runCleanupTest(
       Effect.gen(function* () {

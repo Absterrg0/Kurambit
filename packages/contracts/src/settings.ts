@@ -1046,7 +1046,7 @@ export const StorageCleanupSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-  /** Tool logs and bot, explore and check runs under each game's builds/logs; on by default, since they grow fast. */
+  /** Tool logs and bot, explore and check runs under each game's builds/logs, and a stopped production run's copies; on by default, since they grow fast. */
   gameLogsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;

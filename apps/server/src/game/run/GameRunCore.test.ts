@@ -69,6 +69,7 @@ import * as GameService from "../GameService.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import * as GameRunStepRunner from "./GameRunStepRunner.ts";
 import * as Policy from "./policy.ts";
+import { runCopies } from "./roleWorkspace.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 const modelSelection = { instanceId, model: "gpt-5.1-codex" };
@@ -753,14 +754,16 @@ const gameRoot = () => {
   return root;
 };
 
-const layerGame = (root: string, world: World) =>
-  Layer.mergeAll(GameRunStepRunner.layer, GameRunControl.layer).pipe(
+const layerGame = (root: string, world: World) => {
+  // One config for the runner and the test, which looks in the run's copies folder.
+  const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+    prefix: "game-run-core-config-",
+  }).pipe(Layer.provide(NodeServices.layer));
+  return Layer.mergeAll(GameRunStepRunner.layer, GameRunControl.layer).pipe(
     Layer.provideMerge(GameRunRoleReactor.layer),
     Layer.provide(
       Layer.mergeAll(
-        ServerConfig.ServerConfig.layerTest(process.cwd(), {
-          prefix: "game-run-core-config-",
-        }).pipe(Layer.provide(NodeServices.layer)),
+        layerConfig,
         // The run's builds are real checkpoints of the temp game repository.
         CheckpointStore.layer.pipe(
           Layer.provide(
@@ -834,8 +837,10 @@ const layerGame = (root: string, world: World) =>
         Layer.mock(ServerSettings.ServerSettingsService)({}),
       ),
     ),
+    Layer.provideMerge(layerConfig),
     Layer.provideMerge(layerWithRecovery),
   );
+};
 
 /** A test against a git game folder of its own, removed after. */
 const withGame = <A, E, R>(body: (world: World) => Effect.Effect<A, E, R>) =>
@@ -1120,6 +1125,32 @@ it.effect("deleting the creator chat stops its run, which holds the game until i
         [thread],
       );
       assert.isNull(yield* projections.getProjectGameRun(projectId));
+    }),
+  ),
+);
+
+it.effect("a run whose chat is deleted keeps none of its copies, though it ended stopped", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision } = yield* atVision(world);
+      // A blind player's copy the stopped step held: a resume would play on in it.
+      const config = yield* ServerConfig.ServerConfig;
+      const copies = runCopies(config.worktreesDir, runId);
+      const copy = NodePath.join(copies, `step-${vision.seq}`);
+      NodeFS.mkdirSync(copy, { recursive: true });
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: nextId(),
+        threadId: creator,
+      });
+      assert.equal((yield* inFlight).run.ending, "stopped");
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
+      // Nothing can resume a run on a deleted chat, so its finish removed the copy.
+      assert.isFalse(NodeFS.existsSync(copy));
     }),
   ),
 );

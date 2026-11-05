@@ -1024,11 +1024,22 @@ const make = Effect.gen(function* () {
           .filter((s) => s.runId === run.id)
           .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
       );
+      // Only a run something can still resume keeps its roles' copies: one
+      // whose chat or project was deleted never runs again. A read that fails
+      // is no proof of either, so the copies stay for storage cleanup's bound.
+      const chatLive = yield* threads.getThreadShell(run.threadId).pipe(
+        Effect.map((shell) => shell !== null && shell.deletedAt === null),
+        Effect.orElseSucceed(() => true),
+      );
+      const projectLive = yield* projectStore.getById(run.projectId).pipe(
+        Effect.map(Option.isSome),
+        Effect.orElseSucceed(() => true),
+      );
       yield* dropRunCopies(
         deps,
         { copies: copiesOf(run.id), log },
         [...roleThreads],
-        RESUMABLE.has(run.ending ?? ""),
+        RESUMABLE.has(run.ending ?? "") && chatLive && projectLive,
       ).pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)

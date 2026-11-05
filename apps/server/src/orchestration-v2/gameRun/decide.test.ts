@@ -811,12 +811,13 @@ describe("game-run commands", () => {
     }).records;
     // The round stays the run's until the restore lands: nothing else moves it meanwhile.
     expect(refusal(requested, { type: "game-run.resume", runId }).reason).toBe("restoring");
-    const restored = accept(requested, {
+    const landedRestore = accept(requested, {
       type: "game-run.restore",
       runId,
       requestId: "r1",
       outcome: { kind: "restored", sha: "beef", message: "" },
-    }).records;
+    });
+    const restored = landedRestore.records;
     expect(runOf(restored)).toMatchObject({
       best: "beef",
       pending: null,
@@ -832,12 +833,35 @@ describe("game-run commands", () => {
     const dropped = restored.steps.find((s) => s.id === held.id)!;
     expect(dropped.status).toBe("cancelled");
     expect(dropped.logs.join("\n")).toContain("abandoned");
-    expect(dropped.outputs.release.toSorted()).toEqual([...players].toSorted());
+    // The dropped round's copies go with the restore's own commit, never with a later job.
+    const [release] = landedRestore.decision.effects.map((e) => e.request);
+    expect(release).toMatchObject({ type: "game-run.outputs", stepId: held.id, files: [] });
+    expect(release?.type === "game-run.outputs" ? release.release.toSorted() : []).toEqual(
+      [...players].toSorted(),
+    );
 
     // A resume starts the next round from the restored build, not the abandoned one.
     const resumed = accept(restored, { type: "game-run.resume", runId }).records;
     expect(stepOf(resumed).seq).toBeGreaterThan(held.seq);
     expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: "beef" } });
+  });
+
+  it("a run's copies are spent once no way back reaches them", () => {
+    const keepMs = 14 * 24 * 60 * MIN;
+    const at = { latest: true, chatDeleted: false, now: T0 + MIN, keepMs };
+    const live = runOf(started());
+    const stopped = finished(accept(started(), { type: "game-run.stop", runId }).records);
+    const run = runOf(stopped);
+    expect(Decide.copiesSpent(live, at)).toBe(false);
+    // Its finish still works the folder.
+    expect(Decide.copiesSpent({ ...run, finished: null }, at)).toBe(false);
+    // A stopped run can resume: its copies stay, within the bound.
+    expect(Decide.copiesSpent(run, at)).toBe(false);
+    expect(Decide.copiesSpent(run, { ...at, now: T0 + keepMs + MIN })).toBe(true);
+    // Nothing resumes it: another run on its chat, its chat deleted, or an ending that is final.
+    expect(Decide.copiesSpent(run, { ...at, latest: false })).toBe(true);
+    expect(Decide.copiesSpent(run, { ...at, chatDeleted: true })).toBe(true);
+    expect(Decide.copiesSpent({ ...run, ending: "done" }, at)).toBe(true);
   });
 
   it("a restore keeps the outcome of a round judged and waiting only on its review", () => {
