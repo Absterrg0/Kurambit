@@ -903,15 +903,19 @@ const make = Effect.gen(function* () {
             n: job.n,
             text: job.turn === "memory" ? `${MEMORY_RETRY}\n\n${prompt}` : prompt,
           });
+          // A stop has cancelled this effect by now, so the outbox never runs it
+          // again: the interrupt is tried again here.
           if ((yield* roles.locate(job.threadId, job.stepId, job.attempt)) === null)
-            return yield* threads.interruptThread({
-              projectId,
-              commandId: CommandId.make(
-                `server:game-run-resend-late:${job.stepId}:attempt:${job.attempt}:${job.turn}:${job.n}`,
-              ),
-              threadId,
-              reason: "The production run moved on before this turn was sent.",
-            });
+            return yield* retrying(
+              threads.interruptThread({
+                projectId,
+                commandId: CommandId.make(
+                  `server:game-run-resend-late:${job.stepId}:attempt:${job.attempt}:${job.turn}:${job.n}`,
+                ),
+                threadId,
+                reason: "The production run moved on before this turn was sent.",
+              }),
+            );
           // A turn sent again is capped like the first.
           yield* refusedOnly(capTurn(job, `${job.turn}:${job.n}`));
         }),

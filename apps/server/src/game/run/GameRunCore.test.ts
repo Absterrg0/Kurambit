@@ -598,6 +598,8 @@ interface World {
   onCreatorShell: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
   onSend: ((threadId: ThreadId, messageId: string) => void) | null;
+  /** Runs, once, as a role turn is being sent, before it reaches the thread. */
+  duringSend: Effect.Effect<void> | null;
   /** This many sends break before reaching the thread, as a server dying mid-send would. */
   sendBreaks: number;
   /** This many interrupts break before reaching the thread. */
@@ -630,6 +632,7 @@ const newWorld = Effect.gen(function* () {
     folderGone: false,
     onCreatorShell: null,
     onSend: null,
+    duringSend: null,
     sendBreaks: 0,
     interruptBreaks: 0,
     recordsBreaks: 0,
@@ -722,7 +725,9 @@ const roleThreadsOf = (world: World) =>
               : null,
           ),
         interruptThread: (input) =>
-          (world.interruptBreaks-- > 0 ? Effect.die("interrupt broke") : Effect.void).pipe(
+          Effect.suspend(() =>
+            world.interruptBreaks-- > 0 ? Effect.die("interrupt broke") : Effect.void,
+          ).pipe(
             Effect.andThen(
               Effect.sync(() => {
                 world.interrupts.push({ threadId: input.threadId, commandId: input.commandId });
@@ -733,7 +738,16 @@ const roleThreadsOf = (world: World) =>
             Effect.as({ type: "no_active_run" as const }),
           ),
         sendToThread: (input) =>
-          (world.sendBreaks-- > 0 ? Effect.die("send broke") : Effect.void).pipe(
+          Effect.suspend(() =>
+            world.sendBreaks-- > 0 ? Effect.die("send broke") : Effect.void,
+          ).pipe(
+            Effect.andThen(
+              Effect.suspend(() => {
+                const during = world.duringSend ?? Effect.void;
+                world.duringSend = null;
+                return during;
+              }),
+            ),
             Effect.andThen(
               Effect.sync(() => {
                 world.sends.push({ threadId: input.threadId, messageId: input.messageId });
@@ -1413,6 +1427,35 @@ it.effect("a turn sent again is never interrupted because a read after it broke"
       }
       assert.isFalse(world.interrupts.some((i) => i.commandId.includes("resend-late")));
       assert.isAtLeast(world.sends.length, 1);
+    }),
+  ),
+);
+
+it.effect("a turn sent after a stop is interrupted, even when the first interrupt breaks", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.settle(thread, world.runs.get(thread)![0]!);
+      // The run stops while the turn goes out, and the turn's own interrupt breaks once.
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      world.duringSend = orchestrator
+        .dispatch({ type: "game-run.stop", commandId: nextId(), threadId: creator, runId })
+        .pipe(Effect.asVoid, Effect.orDie);
+      world.interruptBreaks = 1;
+      yield* TestClock.setTime(Date.now() + 20_000);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* withClockRunning(worker.drain());
+      // Its retries run inside the act a stop cannot cut, well within a minute.
+      const late = () => world.interrupts.some((i) => i.commandId.includes("resend-late"));
+      yield* withClockRunning(
+        Effect.gen(function* () {
+          for (let second = 0; second < 60 && !late(); second += 1) yield* Effect.sleep("1 second");
+        }),
+      );
+      assert.isTrue(late());
     }),
   ),
 );
