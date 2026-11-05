@@ -988,58 +988,86 @@ const make = Effect.gen(function* () {
       FROM orchestration_v2_projection_threads
       WHERE json_extract(payload_json, '$.worktreePath') IS NOT NULL
     `.pipe(NodeSqliteClient.readOnly);
+    // One folder that cannot be judged or released is left for the next
+    // sweep; it never keeps the others from going.
     for (const name of yield* fs.readDirectory(realRoot)) {
-      const folder = path.join(realRoot, name);
-      if ((yield* fs.realPath(folder).pipe(Effect.orElseSucceed(() => ""))) !== folder) continue;
-      const owner = yield* sql<{ readonly threadId: string }>`
-        SELECT thread_id AS "threadId"
-        FROM orchestration_v2_projection_game_runs
-        WHERE game_run_id = ${name}
-      `;
-      if (owner[0] !== undefined) {
-        if ((yield* settingsService.getSettings).storageCleanup.gameLogsAfterDays !== days) return;
-        const asked = yield* engine
-          .dispatch({
-            type: "game-run.copies.spend",
-            commandId: CommandId.make(`server:game-run-copies-spend:${name}:${now}`),
-            threadId: ThreadId.make(owner[0].threadId),
-            runId: GameRunId.make(name),
-            keepMs: days * DAY_MS,
-          })
-          .pipe(
-            Effect.as(true),
-            Effect.catchTags({ OrchestratorGameRunRefusedError: () => Effect.succeed(false) }),
-          );
-        if (asked) removed.spent++;
-        continue;
-      }
-      const modified = Option.getOrNull((yield* fs.stat(folder)).mtime)?.getTime() ?? now;
-      if (modified >= now - GAME_LOG_LIVE_MS) continue;
-      const threads = bound.filter((row) => inside(folder, path.resolve(row.worktreePath)));
-      const live = (yield* Effect.forEach(threads, (row) =>
-        projections
-          .getThreadShell(ThreadId.make(row.threadId))
-          .pipe(Effect.map((shell) => ({ row, shell }))),
-      )).filter(({ shell }) => shell !== null && shell.deletedAt === null);
-      if (
-        live.some(({ shell }) => shell?.activeRunId != null) ||
-        threads.some((row) => hasTerminal(row.worktreePath))
-      )
-        continue;
-      if ((yield* settingsService.getSettings).storageCleanup.gameLogsAfterDays !== days) return;
-      for (const { row } of live)
-        yield* engine.dispatch({
-          type: "thread.metadata.update",
-          commandId: CommandId.make(`server:game-run-release:${row.threadId}:${row.worktreePath}`),
-          threadId: ThreadId.make(row.threadId),
-          worktreePath: null,
-          branch: null,
-        });
-      const measured = yield* measureEntry(folder).pipe(Effect.orElseSucceed(() => ({ bytes: 0 })));
-      yield* fs.remove(folder, { recursive: true });
-      removed.copies++;
-      removed.bytes += measured.bytes;
+      const settingChanged = yield* cleanRunCopiesFolder(
+        name,
+        days,
+        now,
+        removed,
+        realRoot,
+        bound,
+      ).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("a production-run copy folder was kept", { name, error }).pipe(
+            Effect.as(false),
+          ),
+        ),
+      );
+      if (settingChanged) return;
     }
+  });
+
+  /** One folder of run copies; true when the setting changed and the sweep must stop. */
+  const cleanRunCopiesFolder = Effect.fn("StorageCleanup.cleanRunCopiesFolder")(function* (
+    name: string,
+    days: number,
+    now: number,
+    removed: { copies: number; spent: number; bytes: number },
+    realRoot: string,
+    bound: ReadonlyArray<{ readonly threadId: string; readonly worktreePath: string }>,
+  ) {
+    const folder = path.join(realRoot, name);
+    if ((yield* fs.realPath(folder).pipe(Effect.orElseSucceed(() => ""))) !== folder) return false;
+    const owner = yield* sql<{ readonly threadId: string }>`
+      SELECT thread_id AS "threadId"
+      FROM orchestration_v2_projection_game_runs
+      WHERE game_run_id = ${name}
+    `;
+    if ((yield* settingsService.getSettings).storageCleanup.gameLogsAfterDays !== days) return true;
+    if (owner[0] !== undefined) {
+      const asked = yield* engine
+        .dispatch({
+          type: "game-run.copies.spend",
+          commandId: CommandId.make(`server:game-run-copies-spend:${name}:${now}`),
+          threadId: ThreadId.make(owner[0].threadId),
+          runId: GameRunId.make(name),
+          keepMs: days * DAY_MS,
+        })
+        .pipe(
+          Effect.as(true),
+          Effect.catchTags({ OrchestratorGameRunRefusedError: () => Effect.succeed(false) }),
+        );
+      if (asked) removed.spent++;
+      return false;
+    }
+    const modified = Option.getOrNull((yield* fs.stat(folder)).mtime)?.getTime() ?? now;
+    if (modified >= now - GAME_LOG_LIVE_MS) return false;
+    const threads = bound.filter((row) => inside(folder, path.resolve(row.worktreePath)));
+    const live = (yield* Effect.forEach(threads, (row) =>
+      projections
+        .getThreadShell(ThreadId.make(row.threadId))
+        .pipe(Effect.map((shell) => ({ row, shell }))),
+    )).filter(({ shell }) => shell !== null && shell.deletedAt === null);
+    if (
+      live.some(({ shell }) => shell?.activeRunId != null) ||
+      threads.some((row) => hasTerminal(row.worktreePath))
+    )
+      return false;
+    for (const { row } of live)
+      yield* engine.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make(`server:game-run-release:${row.threadId}:${row.worktreePath}`),
+        threadId: ThreadId.make(row.threadId),
+        worktreePath: null,
+        branch: null,
+      });
+    const measured = yield* measureEntry(folder).pipe(Effect.orElseSucceed(() => ({ bytes: 0 })));
+    yield* fs.remove(folder, { recursive: true });
+    removed.copies++;
+    removed.bytes += measured.bytes;
+    return false;
   });
 
   const reportRef = yield* SubscriptionRef.make<StorageCleanupReport | null>(null);

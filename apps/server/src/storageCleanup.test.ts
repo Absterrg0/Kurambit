@@ -14,6 +14,7 @@ import { SCAN_CACHE_FILE_NAME } from "./usage/usageScanCache.ts";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
+  CommandId,
   DEFAULT_SERVER_SETTINGS,
   StorageCleanupReport,
   type WorktreeKeepWhen,
@@ -227,6 +228,7 @@ const cleanupFixture = (
     // Production runs by id, with the chat each lives on; the commands the sweep sends.
     const gameRuns = new Map<string, { readonly threadId: string; readonly run: unknown }>();
     const dispatched: Array<{ readonly type: string }> = [];
+    let unbindsToBreak = 0;
     const activated = yield* Deferred.make<void>();
     const context = yield* Layer.build(StorageCleanup.layer).pipe(
       Effect.provideService(GitVcsDriver.GitVcsDriver, {
@@ -287,10 +289,18 @@ const cleanupFixture = (
       Effect.provideService(Orchestrator.OrchestratorV2, {
         streamDomainEvents: Stream.suspend(() => events),
         dispatch: (command: { readonly type: string }) =>
-          Effect.sync(() => {
-            dispatched.push(command);
-            return {};
-          }),
+          command.type === "thread.metadata.update" && unbindsToBreak-- > 0
+            ? Effect.fail(
+                new Orchestrator.OrchestratorDispatchError({
+                  commandId: CommandId.make("unbind"),
+                  commandType: command.type,
+                  cause: "projection write failed",
+                }),
+              )
+            : Effect.sync(() => {
+                dispatched.push(command);
+                return {};
+              }),
       } as unknown as Orchestrator.OrchestratorV2["Service"]),
       Effect.provideService(SqlClient.SqlClient, ((
         strings: TemplateStringsArray,
@@ -320,9 +330,13 @@ const cleanupFixture = (
                 ]
               : strings.join("").includes('AS "worktreePath"')
                 ? [
-                    ...threads.flatMap((thread) => thread.worktreePath ?? []),
-                    ...storedWorktreePaths,
-                  ].map((worktreePath) => ({ worktreePath }))
+                    ...threads.flatMap((thread) =>
+                      thread.worktreePath === null
+                        ? []
+                        : [{ worktreePath: thread.worktreePath, threadId: thread.id }],
+                    ),
+                    ...storedWorktreePaths.map((worktreePath) => ({ worktreePath })),
+                  ]
                 : [],
         )) as unknown as SqlClient.SqlClient),
       Effect.provideService(GitManager.GitManager, {
@@ -383,6 +397,9 @@ const cleanupFixture = (
       },
       gameRuns,
       dispatched,
+      breakUnbinds: (count: number) => {
+        unbindsToBreak = count;
+      },
       setSessionLive: (live: boolean) => {
         sessionLive = live;
       },
@@ -1655,6 +1672,29 @@ describe("storage cleanup reports and local file policies", () => {
         });
         expect((yield* fs.readDirectory(copies)).toSorted()).toEqual(["run-fresh", "run-link"]);
         expect(yield* fs.exists(outside)).toBe(true);
+      }),
+    ),
+  );
+  it.live("a copy folder whose thread cannot be unbound is kept, and the others still go", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, config, disable, setThreads, breakUnbinds } = yield* cleanupFixture();
+        disable();
+        const copies = `${config.worktreesDir}/game-runs`;
+        const names = ["run-a", "run-b"];
+        for (const run of names) {
+          yield* fs.makeDirectory(`${copies}/${run}/step-1`, { recursive: true });
+          yield* fs.utimes(`${copies}/${run}`, 1, 1);
+        }
+        setThreads(
+          names.map((run) =>
+            shell({ id: ThreadId.make(`thread-${run}`), worktreePath: `${copies}/${run}/step-1` }),
+          ),
+        );
+        // The first thread's unbind breaks, whichever folder the sweep reads first.
+        breakUnbinds(1);
+        yield* service.runNow;
+        expect(yield* fs.readDirectory(copies)).toHaveLength(1);
       }),
     ),
   );
