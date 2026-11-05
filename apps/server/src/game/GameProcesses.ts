@@ -185,10 +185,15 @@ const make = Effect.gen(function* () {
       stderr = "",
       timedOut = false;
     let stopping: Promise<void> | null = null;
+    // Once the child closed, its pid and group may belong to another process:
+    // the close handler's own stop is the last one that signals anything.
+    let closed = false;
     const stop = () =>
-      (stopping ??= (hosted?.stop() ?? owned.stop()).finally(() => {
-        stopping = null;
-      }));
+      closed
+        ? (stopping ?? Promise.resolve())
+        : (stopping ??= (hosted?.stop() ?? owned.stop()).finally(() => {
+            stopping = null;
+          }));
     const abort = () => void stop();
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) void stop();
@@ -217,6 +222,7 @@ const make = Effect.gen(function* () {
         // and the close removes this entry from the tracked map, so a later
         // stop() could not reach them.
         if (hosted !== null || owned.alive()) void stop();
+        closed = true;
         signal?.removeEventListener("abort", abort);
         if (child.pid !== undefined) running.delete(child.pid);
         log.end(() => {
