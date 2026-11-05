@@ -33,6 +33,12 @@ export interface GameRunFinishJob {
   readonly endedAt: string;
 }
 
+export interface GameRunResendJob extends GameRunStepJob {
+  /** Why the turn goes again: an instant failure, or an explore start refused for memory. */
+  readonly turn: "retry" | "memory";
+  readonly n: number;
+}
+
 export interface GameRunRestoreJob {
   readonly threadId: ThreadId;
   readonly runId: GameRunId;
@@ -49,6 +55,8 @@ export interface GameRunJobRunner {
   readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
   /** A creator's restore of a kept round: moves the folder, lands with game-run.restore. */
   readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
+  /** A role turn sent again once its pause is over, then capped like the first. */
+  readonly resend: (job: GameRunResendJob) => Effect.Effect<void>;
   /** Whether the game folder holds anything of a decision's evidence to show the creator. */
   readonly showable: (
     threadId: ThreadId,
@@ -72,6 +80,8 @@ export class GameRunJobs extends Context.Service<
     readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
     /** Runs a restore unless one for that request is live; returns at once. */
     readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
+    /** Sends a role turn again unless that send is live; returns at once. */
+    readonly resend: (job: GameRunResendJob) => Effect.Effect<void>;
     /** Any other work of a run's (a role turn sent again after a pause), once per key. */
     readonly fork: (
       key: string,
@@ -153,6 +163,13 @@ export const make = Effect.gen(function* () {
       Deferred.await(runner).pipe(Effect.flatMap((each) => each.restore(job))),
     );
 
+  const resend = (job: GameRunResendJob) =>
+    fork(
+      `resend:${job.stepId}:attempt:${job.attempt}:${job.turn}:${job.n}`,
+      job.runId,
+      Deferred.await(runner).pipe(Effect.flatMap((each) => each.resend(job))),
+    );
+
   // The game layer attaches the work when it builds; a server where it never
   // does would hold every run's effects forever without a word.
   yield* Deferred.await(runner).pipe(
@@ -179,6 +196,7 @@ export const make = Effect.gen(function* () {
     deadline,
     finish,
     restore,
+    resend,
     fork,
     stopRun,
     isLive: (key) => Effect.sync(() => live.has(key)),

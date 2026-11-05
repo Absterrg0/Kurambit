@@ -3130,6 +3130,27 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     ...GameRunCommandFields,
     endedAt: IsoDateTime,
   }),
+  /**
+   * A role step's timer, set by its own work: its cap again at a later due time
+   * (memory waits extend it), or a turn sent again after a pause. Durable, so a
+   * restart keeps it.
+   */
+  Schema.Struct({
+    type: Schema.Literal("game-run.step.schedule"),
+    ...GameRunCommandFields,
+    stepId: GameRunStepId,
+    attempt: PositiveInt,
+    /** Epoch ms the timer fires. */
+    at: NonNegativeInt,
+    timer: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("cap") }),
+      Schema.Struct({
+        kind: Schema.Literal("resend"),
+        turn: Schema.Literals(["retry", "memory"]),
+        n: PositiveInt,
+      }),
+    ]),
+  }),
   /** The creator asks for a kept round's build back on an ended run; a job moves the folder. */
   Schema.Struct({
     type: Schema.Literal("game-run.restore.request"),

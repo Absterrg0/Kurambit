@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- The role tests' game folder is a real git checkout on disk, and their turns are timed against the runner's wall clock.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off -- The role tests' game folder is a real git checkout on disk, and their turns are timed against the runner's wall clock.
 // A production run on the orchestration core survives what a restart does to
 // it: no job is lost for good, nothing that finished runs again, a stopped run
 // stays stopped, a decision's default needs no fiber, a role's finished turn
@@ -234,6 +234,7 @@ const countingRunner = Effect.gen(function* () {
     deadline: () => Effect.void,
     finish: () => Effect.void,
     restore: () => Effect.void,
+    resend: () => Effect.void,
     showable: () => Effect.succeed(true),
   };
   yield* (yield* GameRunJobs.GameRunJobs).attach(runner);
@@ -582,6 +583,8 @@ interface World {
   readonly capWatched: Deferred.Deferred<void>;
   /** Resolved with each role thread launched. */
   readonly launched: Queue.Queue<ThreadId>;
+  /** Each interrupt's command id, as it is sent. */
+  readonly interrupted: Queue.Queue<string>;
 }
 const newWorld = Effect.gen(function* () {
   const world: World = {
@@ -598,6 +601,7 @@ const newWorld = Effect.gen(function* () {
     onSend: null,
     capWatched: yield* Deferred.make<void>(),
     launched: yield* Queue.unbounded<ThreadId>(),
+    interrupted: yield* Queue.unbounded<string>(),
   };
   return world;
 });
@@ -685,8 +689,10 @@ const roleThreadsOf = (world: World) =>
           Effect.sync(() => {
             world.interrupts.push({ threadId: input.threadId, commandId: input.commandId });
             world.receipts.add(input.commandId);
-            return { type: "no_active_run" as const };
-          }),
+          }).pipe(
+            Effect.andThen(Queue.offer(world.interrupted, input.commandId)),
+            Effect.as({ type: "no_active_run" as const }),
+          ),
         sendToThread: (input) =>
           Effect.sync(() => {
             world.sends.push({ threadId: input.threadId, messageId: input.messageId });
@@ -857,8 +863,6 @@ it.effect("a turn a server restart cut off lands only when its continuation ends
       // The cancelled turn's own settling lands nothing while its continuation works.
       assert.isNull(yield* roles.settle(thread, cut));
       assert.equal((yield* inFlight).step?.id, vision.id);
-      const jobs = yield* GameRunJobs.GameRunJobs;
-      assert.isTrue(yield* jobs.isLive(`deadline:${vision.id}:attempt:1`));
 
       const ended = { ...going, status: "completed" } as OrchestrationV2Run;
       world.runs.set(thread, [cut, ended]);
@@ -876,10 +880,8 @@ it.effect("a stop interrupts the live role turn and stops its jobs, from its out
       world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
       yield* startRunner;
       yield* recover;
+      // The cap is checked and set again as a durable timer at its due time.
       yield* Deferred.await(world.capWatched);
-      const jobs = yield* GameRunJobs.GameRunJobs;
-      const capKey = `deadline:${vision.id}:attempt:1`;
-      assert.isTrue(yield* jobs.isLive(capKey));
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       yield* orchestrator.dispatch({
         type: "game-run.stop",
@@ -891,7 +893,12 @@ it.effect("a stop interrupts the live role turn and stops its jobs, from its out
       const finished = yield* awaitRun((run) => run.finished !== null);
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       yield* Fiber.join(finished);
-      assert.isFalse(yield* jobs.isLive(capKey));
+      // The stop cancelled the cap's timer: past the cap, nothing caps the turn again.
+      yield* TestClock.setTime(Date.now() + 11 * 60_000);
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      assert.isFalse(
+        world.interrupts.some((i) => i.commandId.startsWith("server:game-run-role-cap:")),
+      );
       assert.deepEqual(
         world.interrupts.map((i) => i.threadId),
         [thread],
@@ -1018,7 +1025,6 @@ it.effect("a turn sent again after an instant failure is capped like the first",
     Effect.gen(function* () {
       const { vision, thread } = yield* atVision(world);
       world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
-      const capped = yield* Deferred.make<void>();
       // The resent turn has been running past the vision cap.
       world.onSend = (threadId, messageId) => {
         world.runs.set(threadId, [
@@ -1034,14 +1040,13 @@ it.effect("a turn sent again after an instant failure is capped like the first",
       yield* startRunner;
       const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
       yield* roles.settle(thread, world.runs.get(thread)![0]!);
-      const watch = Effect.gen(function* () {
-        while (!world.interrupts.some((i) => i.commandId.startsWith("server:game-run-role-cap:")))
-          yield* Effect.yieldNow;
-        yield* Deferred.succeed(capped, undefined);
-      }).pipe(Effect.forkScoped);
-      yield* watch;
-      yield* TestClock.adjust("16 seconds");
-      yield* Deferred.await(capped);
+      // The resend is a durable timer: nothing is sent until it is due.
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      assert.lengthOf(world.sends, 0);
+      yield* TestClock.setTime(Date.now() + 20_000);
+      yield* worker.drain();
+      assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
       assert.lengthOf(world.sends, 1);
     }),
   ),
@@ -1251,6 +1256,26 @@ it.effect("every chat of a game reaches its one run, and a role thread none of i
       // The run's own role thread reaches none of its controls.
       const refused = yield* control.runStatus(thread).pipe(Effect.flip);
       assert.equal(refused.reason, "role-thread");
+    }),
+  ),
+);
+
+it.effect("a role's cap not yet due fires later from its timer, with no fiber holding it", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      yield* startRunner;
+      // The watch checks once and sets the cap again at its due time: that commit is all it does.
+      const scheduled = yield* awaitRun(() => true);
+      yield* recover;
+      yield* Fiber.join(scheduled);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      assert.lengthOf(world.interrupts, 0);
+      yield* TestClock.setTime(Date.now() + 11 * 60_000);
+      yield* worker.drain();
+      assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
     }),
   ),
 );

@@ -12,7 +12,6 @@ import {
 import { GameBotDecider, GameBotPerf } from "./gameBot.ts";
 import {
   GameRunDecisionKind,
-  GameRunRefusalReason,
   GameRunRestoreRefusal,
   GameRunProfile,
   GameRunRungFields,

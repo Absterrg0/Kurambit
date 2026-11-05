@@ -499,6 +499,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-run.finished":
     case "game-run.restore.request":
     case "game-run.restore":
+    case "game-run.step.schedule":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -10767,6 +10768,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "game-run.finished":
       case "game-run.restore.request":
       case "game-run.restore":
+      case "game-run.step.schedule":
         cancelUnsettledEffects = yield* dispatchGameRun(command, events, effects);
         break;
       default:

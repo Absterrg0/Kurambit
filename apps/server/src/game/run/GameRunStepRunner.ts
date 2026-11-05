@@ -25,7 +25,6 @@ import {
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -71,7 +70,7 @@ import {
   type RoleContext,
   type RoleDeps,
 } from "./roleWorkspace.ts";
-import { CONTINUE, artFacts, modelBlock, spriteBlock } from "./roles.ts";
+import { CONTINUE, MEMORY_RETRY, artFacts, modelBlock, spriteBlock } from "./roles.ts";
 import { currentStep, describe, summarize } from "./runView.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { BLANK, type BotStep, type GitOp, type RoleStep } from "./state.ts";
@@ -88,9 +87,6 @@ export class GameRunStepRunner extends Context.Service<
   }
 >()("kurambit/game/run/GameRunStepRunner") {}
 
-// A pause between checks of a role's cap, so a turn that ends early is noticed
-// by its own run's end, not by this watch.
-const CAP_CHECK = Duration.minutes(1);
 // Endings that leave nothing to export: a stop, a failure, or memory too short for the exports.
 const NO_EXPORT: ReadonlySet<string> = new Set(["stopped", "failed", "low-memory"]);
 
@@ -596,39 +592,70 @@ const make = Effect.gen(function* () {
    */
   const deadline = (job: GameRunJobs.GameRunStepJob) =>
     Effect.gen(function* () {
-      for (;;) {
-        const at = yield* roles.locate(job.threadId, job.stepId, job.attempt);
-        if (at === null || at.role === null) return;
-        const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
-        if (threadId === null) return;
-        const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
-        const live = GameRunRoleReactor.stepTurns(runs, job.stepId).findLast(
-          (t) => t.turn.attempt === job.attempt,
+      const at = yield* roles.locate(job.threadId, job.stepId, job.attempt);
+      if (at === null || at.role === null) return;
+      const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
+      if (threadId === null) return;
+      const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
+      const live = GameRunRoleReactor.stepTurns(runs, job.stepId).findLast(
+        (t) => t.turn.attempt === job.attempt,
+      );
+      if (live === undefined || GameRunRoleReactor.isSettledRun(live.run)) return;
+      const startedAt = live.run.startedAt ?? live.run.requestedAt;
+      const waited = yield* game.exploreMemoryWait(threadId).pipe(
+        Effect.map((mark) => mark.waitedMs),
+        Effect.orElseSucceed(() => 0),
+      );
+      const cap = DateTime.toEpochMillis(startedAt) + at.role.capMs + waited;
+      const due = at.run.budgetEndsAt === null ? cap : Math.min(cap, at.run.budgetEndsAt);
+      // Not due yet (memory waits extend it, a later turn restarts it): the cap
+      // is set again as a durable timer at its due time, never held by a fiber.
+      // The outbox's clock decides when timers are due, so this one does too.
+      if (DateTime.toEpochMillis(yield* DateTime.now) < due)
+        return yield* refused(
+          engine.dispatch({
+            type: "game-run.step.schedule",
+            commandId: CommandId.make(
+              `server:game-run-cap:${job.stepId}:attempt:${job.attempt}:${live.run.id}:${due}`,
+            ),
+            threadId: job.threadId,
+            runId: job.runId,
+            stepId: job.stepId,
+            attempt: job.attempt,
+            at: due,
+            timer: { kind: "cap" },
+          }),
         );
-        if (live === undefined || GameRunRoleReactor.isSettledRun(live.run)) return;
-        const startedAt = live.run.startedAt ?? live.run.requestedAt;
-        const waited = yield* game.exploreMemoryWait(threadId).pipe(
-          Effect.map((mark) => mark.waitedMs),
-          Effect.orElseSucceed(() => 0),
-        );
-        const cap = DateTime.toEpochMillis(startedAt) + at.role.capMs + waited;
-        const due = at.run.budgetEndsAt === null ? cap : Math.min(cap, at.run.budgetEndsAt);
-        const now = Date.now();
-        if (now < due) {
-          yield* Effect.sleep(Duration.min(Duration.millis(due - now), CAP_CHECK));
-          continue;
-        }
-        yield* threads
-          .interruptThread({
-            projectId: at.run.projectId,
-            commandId: roleCapCommandId(job.stepId, job.attempt, live.run.id),
-            threadId,
-            runId: live.run.id,
-            reason: "Studio role cap reached.",
-          })
-          .pipe(Effect.ignore);
-        return;
-      }
+      yield* threads
+        .interruptThread({
+          projectId: at.run.projectId,
+          commandId: roleCapCommandId(job.stepId, job.attempt, live.run.id),
+          threadId,
+          runId: live.run.id,
+          reason: "Studio role cap reached.",
+        })
+        .pipe(Effect.ignore);
+    });
+
+  /** A role turn sent again once its pause is over, if its step is still where it was. */
+  const resend = (job: GameRunJobs.GameRunResendJob) =>
+    Effect.gen(function* () {
+      const at = yield* roles.locate(job.threadId, job.stepId, job.attempt);
+      if (at === null || at.role === null) return;
+      const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
+      if (threadId === null) return;
+      const prompt = at.role.prompt;
+      yield* roles.sendTurn({
+        projectId: at.run.projectId,
+        threadId,
+        stepId: job.stepId,
+        attempt: job.attempt,
+        kind: job.turn,
+        n: job.n,
+        text: job.turn === "memory" ? `${MEMORY_RETRY}\n\n${prompt}` : prompt,
+      });
+      // A turn sent again is capped like the first.
+      yield* jobs.deadline(job);
     });
 
   // ── A run's end, from the game-run.finish effect its ending committed: its
@@ -748,12 +775,20 @@ const make = Effect.gen(function* () {
 
   // The run log is for people: each step's decisions, written once it settles.
   // Nothing reads it back; the step records are the run's history.
-  const logged = new Set<string>();
+  // Steps in flight, by id, with the attempt that is: a landed step is written
+  // once and dropped, so the set holds only what the runs are doing now.
+  const inFlightSteps = new Map<string, number>();
   const logStep = (step: GameRunStep) =>
     Effect.gen(function* () {
-      const key = `${step.id}:${step.attempt}:${step.status}`;
-      if (step.status === "planned" || step.status === "running" || logged.has(key)) return;
-      logged.add(key);
+      if (step.status === "planned" || step.status === "running") {
+        inFlightSteps.set(step.id, step.attempt);
+        return;
+      }
+      // A step seen only landed (a restart in between) is written too.
+      const held = inFlightSteps.get(step.id);
+      if (held !== undefined && held !== step.attempt) return;
+      if (held === undefined && step.completedAt === null) return;
+      inFlightSteps.delete(step.id);
       const root = yield* projects.resolve(step.threadId);
       yield* logLine(root, `${describe(step.step)} (${step.status})`);
       for (const line of step.logs) yield* logLine(root, `  ${line}`);
@@ -797,6 +832,14 @@ const make = Effect.gen(function* () {
               Cause.hasInterruptsOnly(cause)
                 ? Effect.interrupt
                 : Effect.logWarning("game run cap watch failed", { stepId: job.stepId, cause }),
+            ),
+          ),
+        resend: (job) =>
+          resend(job).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : Effect.logWarning("game run resend failed", { stepId: job.stepId, cause }),
             ),
           ),
         restore: (job) =>

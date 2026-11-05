@@ -67,6 +67,7 @@ export const GAME_RUN_EFFECT_TYPES = [
   "game-run.decision.wake",
   "game-run.decision.deadline",
   "game-run.step.deadline",
+  "game-run.step.resend",
 ] as const satisfies ReadonlyArray<GameRunEffectRequest["type"]>;
 
 interface GameRunEffect {
@@ -885,6 +886,42 @@ const restore = (work: Work, command: Command<"game-run.restore">) =>
     return Result.succeed(settle(work, landed, state, next, [], []));
   });
 
+/** A role step's own timer: its cap at a later due time, or a turn sent again after a pause. */
+const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
+  Result.flatMap(live(work, command.runId), (run) =>
+    Result.flatMap(currentStep(work, run, command.stepId), ({ record }) => {
+      if (command.attempt !== record.attempt)
+        return refuse(
+          "stale-attempt",
+          `Attempt ${command.attempt} of step ${command.stepId} was superseded.`,
+        );
+      const state = toState(run, work.records.rounds, record);
+      const timer =
+        command.timer.kind === "cap"
+          ? effectFor(
+              {
+                type: "game-run.step.deadline",
+                runId: run.id,
+                stepId: command.stepId,
+                attempt: command.attempt,
+              },
+              command.at,
+            )
+          : effectFor(
+              {
+                type: "game-run.step.resend",
+                runId: run.id,
+                stepId: command.stepId,
+                attempt: command.attempt,
+                turn: command.timer.turn,
+                n: command.timer.n,
+              },
+              command.at,
+            );
+      return Result.succeed(settle(work, run, state, state, [], [timer]));
+    }),
+  );
+
 const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(currentStep(work, run, command.stepId), ({ record, seq }) => {
@@ -1096,6 +1133,8 @@ export const decide = (
       return finished(work, command);
     case "game-run.restore.request":
       return restoreRequest(work, command);
+    case "game-run.step.schedule":
+      return schedule(work, command);
     case "game-run.restore":
       return restore(work, command);
   }
