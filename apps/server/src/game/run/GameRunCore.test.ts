@@ -602,6 +602,8 @@ interface World {
   sendBreaks: number;
   /** This many interrupts break before reaching the thread. */
   interruptBreaks: number;
+  /** This many of the role reactor's reads of the run's records break. */
+  recordsBreaks: number;
   /** Resolved once a role's cap watch reads its turn's memory waits. */
   readonly capWatched: Deferred.Deferred<void>;
   /** Resolved with each role thread launched. */
@@ -630,6 +632,7 @@ const newWorld = Effect.gen(function* () {
     onSend: null,
     sendBreaks: 0,
     interruptBreaks: 0,
+    recordsBreaks: 0,
     capWatched: yield* Deferred.make<void>(),
     launched: yield* Queue.unbounded<ThreadId>(),
     interrupted: yield* Queue.unbounded<string>(),
@@ -760,8 +763,19 @@ const layerGame = (root: string, world: World) => {
   const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
     prefix: "game-run-core-config-",
   }).pipe(Layer.provide(NodeServices.layer));
+  // The role reactor reads the run's records through a store whose reads can break.
+  const reactorProjections = Layer.effect(
+    ProjectionStore.ProjectionStoreV2,
+    Effect.map(ProjectionStore.ProjectionStoreV2, (real) => ({
+      ...real,
+      getGameRunRecords: (threadId, filter) =>
+        world.recordsBreaks-- > 0
+          ? Effect.fail(new ProjectionStore.ProjectionStoreReadError({ threadId }))
+          : real.getGameRunRecords(threadId, filter),
+    })),
+  );
   return Layer.mergeAll(GameRunStepRunner.layer, GameRunControl.layer).pipe(
-    Layer.provideMerge(GameRunRoleReactor.layer),
+    Layer.provideMerge(GameRunRoleReactor.layer.pipe(Layer.provide(reactorProjections))),
     Layer.provide(
       Layer.mergeAll(
         layerConfig,
@@ -1375,6 +1389,30 @@ it.effect("a turn sent again is sent by its timer even when the first try breaks
         world.sends.map((send) => send.messageId),
         [roleTurnMessageId(vision.id, 1, "retry", 2)],
       );
+    }),
+  ),
+);
+
+it.effect("a turn sent again is never interrupted because a read after it broke", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
+      yield* startRunner;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.settle(thread, world.runs.get(thread)![0]!);
+      // The look at the run right after the send breaks: the step is still its.
+      world.onSend = () => {
+        world.recordsBreaks = 1;
+      };
+      yield* TestClock.setTime(Date.now() + 20_000);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      for (let round = 0; round < 3; round += 1) {
+        yield* worker.drain();
+        yield* TestClock.adjust("1 second");
+      }
+      assert.isFalse(world.interrupts.some((i) => i.commandId.includes("resend-late")));
+      assert.isAtLeast(world.sends.length, 1);
     }),
   ),
 );

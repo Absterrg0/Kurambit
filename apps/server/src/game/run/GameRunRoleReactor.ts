@@ -186,11 +186,16 @@ export class GameRunRoleReactor extends Context.Service<
       void,
       ThreadManagement.ThreadManagementError | Orchestrator.OrchestratorV2Error
     >;
+    /**
+     * The step `stepId` names while its attempt is in flight, else null. A read
+     * that fails is an error, never null: a timer that took it for "the step
+     * moved on" would drop or interrupt a turn the step still runs.
+     */
     readonly locate: (
       creator: ThreadId,
       stepId: GameRunStepId,
       attempt: number,
-    ) => Effect.Effect<Located | null>;
+    ) => Effect.Effect<Located | null, ProjectionStore.ProjectionStoreV2Error>;
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly handle: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
   }
@@ -211,10 +216,9 @@ const make = Effect.gen(function* () {
   const locks = yield* KeyedLock.make<string>();
 
   const locate: GameRunRoleReactor["Service"]["locate"] = (creator, stepId, attempt) =>
-    projections.getGameRunRecords(creator, { steps: "in-flight" }).pipe(
-      Effect.map((records) => locateIn(records, stepId, attempt)),
-      Effect.orElseSucceed(() => null),
-    );
+    projections
+      .getGameRunRecords(creator, { steps: "in-flight" })
+      .pipe(Effect.map((records) => locateIn(records, stepId, attempt)));
 
   const sendTurn: GameRunRoleReactor["Service"]["sendTurn"] = (input) => {
     const messageId = roleTurnMessageId(input.stepId, input.attempt, input.kind, input.n);
