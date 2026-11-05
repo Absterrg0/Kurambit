@@ -545,6 +545,24 @@ const make = Effect.gen(function* () {
     yield* projects.admitWrite(threadId, root, name, owner);
     return yield* operations.exclusive(root, name, work(root), owner);
   });
+  // A busy game while a run holds it is the run's own work: the refusal says
+  // so, rather than suggesting Stop game, which stops only the caller's work.
+  const heldBusy = (threadId: ThreadId) => (error: GameOperationError) =>
+    error.runReason !== undefined
+      ? Effect.fail(error)
+      : Effect.flatMap(projects.runHold(threadId), (hold) =>
+          Effect.fail(
+            hold === null
+              ? error
+              : new GameOperationError({
+                  operation: error.operation,
+                  path: error.path,
+                  reason: "busy",
+                  runReason: "run-live",
+                  ...(error.detail === undefined ? {} : { detail: error.detail }),
+                }),
+          ),
+        );
   // Reads only, so a production run never refuses it.
   const readRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
@@ -917,21 +935,32 @@ const make = Effect.gen(function* () {
           process: null,
         };
       }
-      const admit = projects.admitWrite(threadId, root, action, String(threadId));
-      return yield* operations.exclusive(
-        root,
-        action,
-        action === "export-linux"
-          ? admit.pipe(Effect.andThen(exporter.export(root, "Linux")))
-          : action === "export-windows"
-            ? admit.pipe(Effect.andThen(exporter.export(root, "Windows")))
-            : // Rebuild forces a new export and publishes it.
-              action === "rebuild"
-              ? admit.pipe(Effect.andThen(exporter.publishWeb(root)))
-              : // Play of a build already exported only reads; one it must export first is a write.
-                exporter.play(root, admit),
-        String(threadId),
-      );
+      // Play of a build already exported only reads, so it never takes the
+      // lock a run's capture or check may hold; one it must export is a write.
+      if (action === "preview") {
+        const served = yield* exporter.serve(root);
+        if (served !== null) return served;
+      }
+      // Admitted before the lock, so a refused click never makes the run's own work wait.
+      yield* projects.admitWrite(threadId, root, action, String(threadId));
+      return yield* operations
+        .exclusive(
+          root,
+          action,
+          action === "export-linux"
+            ? exporter.export(root, "Linux")
+            : action === "export-windows"
+              ? exporter.export(root, "Windows")
+              : // Rebuild forces a new export and publishes it.
+                action === "rebuild"
+                ? exporter.publishWeb(root)
+                : // Another Play may have exported meanwhile.
+                  Effect.flatMap(exporter.serve(root), (served) =>
+                    served === null ? exporter.publishWeb(root) : Effect.succeed(served),
+                  ),
+          String(threadId),
+        )
+        .pipe(Effect.catchIf((error) => error.reason === "busy", heldBusy(threadId)));
     }),
   });
 });
