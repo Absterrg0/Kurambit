@@ -584,8 +584,10 @@ const make = Effect.gen(function* () {
   const runChecks: Service["runChecks"] = Effect.fn("GameRunControl.runChecks")(function* (
     threadId: ThreadId,
   ) {
-    const { root } = yield* resolveGame(threadId);
-    const { state } = yield* latestOf(threadId);
+    // The run's builder scores its rung in its own folder (its worktree, when it
+    // has one), against the rung the run's records hold open.
+    const { root, runThread } = yield* resolveGame(threadId, { role: "allowed" });
+    const { state } = yield* recordsOf(runThread).pipe(Effect.flatMap(recordsView));
     const ladder = state?.ladder ?? null;
     // The rung the round in progress builds, else the next open one.
     const building =

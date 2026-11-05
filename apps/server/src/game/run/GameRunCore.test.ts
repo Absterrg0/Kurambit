@@ -1268,7 +1268,7 @@ it.effect("startup stops a role turn no step record names, and leaves a named on
   }).pipe(Effect.provide(layerWithRecovery)),
 );
 
-it.effect("every chat of a game reaches its one run, and a role thread none of its controls", () =>
+it.effect("every chat of a game reaches its one run, and a role thread only its checks", () =>
   withGame((world) =>
     Effect.gen(function* () {
       const { thread } = yield* atVision(world);
@@ -1304,6 +1304,8 @@ it.effect("every chat of a game reaches its one run, and a role thread none of i
       // The run's own role thread reaches none of its controls.
       const refused = yield* control.runStatus(thread).pipe(Effect.flip);
       assert.equal(refused.reason, "role-thread");
+      // Except its builder's checks, scored against the run's open rung (none yet).
+      assert.isNull((yield* control.runChecks(thread)).rung);
     }),
   ),
 );
