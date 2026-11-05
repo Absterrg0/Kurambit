@@ -79,7 +79,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameUnity from "./GameUnity.ts";
 import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
-import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
+import { comparedSource, type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
 import { WEB_BUILD_DIRECTORY } from "./webBuild.ts";
 
 /**
@@ -408,6 +408,18 @@ const make = Effect.gen(function* () {
   const players = yield* GamePlayer.GamePlayer;
   const snapshot = (root: string, project: string) =>
     Effect.promise((signal) => snapshotBuildSource(root, project, { signal }));
+  // Status is read on every push for the thread, so its freshness answer reuses
+  // hashes of files whose stat identity is unchanged. An explicit check rereads
+  // every byte and refreshes the cache.
+  const statusHashes = new Map<string, SourceHashCache>();
+  const statusSnapshot = (root: string, project: string, reread: boolean) =>
+    Effect.promise((signal) => {
+      const key = `${root}\0${project}`;
+      const cache = statusHashes.get(key) ?? new Map();
+      statusHashes.set(key, cache);
+      if (reread) cache.clear();
+      return snapshotBuildSource(root, project, { signal, cache });
+    });
   // No exclusive() here: a real-time run takes minutes and must not hold the
   // game's operation lock. The bot service refuses a second concurrent run
   // per checkout as busy.
@@ -614,7 +626,11 @@ const make = Effect.gen(function* () {
       // Freshness is a byte question against the snapshot the export recorded.
       // An unreadable tree cannot be shown to match, but it is also not proven
       // to differ.
-      const current = yield* snapshot(root, manifest.godotProject).pipe(Effect.option);
+      const current = yield* statusSnapshot(
+        root,
+        manifest.godotProject,
+        statusOptions?.checkSources === true,
+      ).pipe(Effect.option);
       const currentId =
         current._tag === "Some" && current.value.kind === "known" ? current.value.sourceId : null;
       const matchesSelected =

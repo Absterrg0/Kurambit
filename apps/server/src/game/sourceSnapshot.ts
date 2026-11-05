@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- This helper reads the game's source tree on the native filesystem.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- This helper reads the game's source tree on the native filesystem and compares file mtimes to the wall clock.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
@@ -81,6 +81,23 @@ const hashFileContent = async (
 const MAX_DERIVED_ASSET_BYTES = 1 << 20;
 
 /**
+ * Hashes from earlier reads of the same tree, by absolute path. An entry is
+ * reused only while the file's device, inode, size, mtime and ctime are all
+ * unchanged, the way git's index skips unchanged files.
+ */
+export type SourceHashCache = Map<
+  string,
+  { readonly identity: string; readonly size: number; readonly sha256: string }
+>;
+
+/**
+ * Git's racy-clean rule: a file written in the same timestamp tick as its hash
+ * can change again without moving its mtime, so it is only cached once its
+ * mtime is safely older than the read. Two seconds covers coarse filesystems.
+ */
+const RACY_WINDOW_NS = 2_000_000_000n;
+
+/**
  * URP keeps a list of the settings a player needs in `m_RuntimeSettings`. A
  * player build fills it from the rest of the file and an editor save empties
  * it again, so it flips on every warm-up and build without any source edit.
@@ -128,10 +145,13 @@ export const snapshotBuildSource = async (
   options: {
     readonly maxEntries?: number | undefined;
     readonly signal?: AbortSignal | undefined;
+    readonly cache?: SourceHashCache | undefined;
   } = {},
 ): Promise<SourceSnapshot> => {
   const limit = options.maxEntries ?? DEFAULT_MAX_SOURCE_ENTRIES;
   const signal = options.signal;
+  const cache = options.cache;
+  const seen = new Set<string>();
   const engineRoot = NodePath.join(root, godotProject);
   // A Unity project's own caches sit at its root beside Assets/ and are
   // rewritten by every editor start; they are output, never build input.
@@ -158,10 +178,10 @@ export const snapshotBuildSource = async (
         if (visited > limit) return { kind: "unknown", reason: "entry-limit" };
         const absolute = NodePath.join(directory, name);
         const relative = NodePath.relative(engineRoot, absolute).split(NodePath.sep).join("/");
-        let entry: NodeFS.Stats;
+        let entry: NodeFS.BigIntStats;
         try {
           // Recheck the path rather than trusting earlier directory metadata.
-          entry = await NodeFSP.lstat(absolute);
+          entry = await NodeFSP.lstat(absolute, { bigint: true });
         } catch (cause) {
           if (signal?.aborted) signal.throwIfAborted();
           throw cause;
@@ -189,12 +209,27 @@ export const snapshotBuildSource = async (
             name.startsWith("mono_crash."))
         )
           continue;
+        const derived =
+          unityProject && name.endsWith(".asset") && entry.size <= MAX_DERIVED_ASSET_BYTES;
+        const identity = `${derived}:${entry.dev}:${entry.ino}:${entry.size}:${entry.mtimeNs}:${entry.ctimeNs}`;
         let hashed: { readonly size: number; readonly sha256: string };
         try {
+          const cached = cache?.get(absolute);
           hashed =
-            unityProject && name.endsWith(".asset") && entry.size <= MAX_DERIVED_ASSET_BYTES
-              ? await hashUnityAsset(absolute)
-              : await hashFileContent(absolute, signal);
+            cached !== undefined && cached.identity === identity
+              ? cached
+              : derived
+                ? await hashUnityAsset(absolute)
+                : await hashFileContent(absolute, signal);
+          seen.add(absolute);
+          // Bytes that changed after this lstat move the mtime away from the
+          // cached identity, unless they land in the same tick: hence the window.
+          if (
+            cache !== undefined &&
+            hashed !== cached &&
+            entry.mtimeNs < BigInt(Date.now()) * 1_000_000n - RACY_WINDOW_NS
+          )
+            cache.set(absolute, { identity, ...hashed });
         } catch (cause) {
           if (signal?.aborted) signal.throwIfAborted();
           // A link swapped in between lstat and open fails on O_NOFOLLOW: that
@@ -212,6 +247,7 @@ export const snapshotBuildSource = async (
     if (signal?.aborted) signal.throwIfAborted();
     return { kind: "unknown", reason: "io" };
   }
+  if (cache !== undefined) for (const path of cache.keys()) if (!seen.has(path)) cache.delete(path);
   lines.sort();
   const hash = NodeCrypto.createHash("sha256");
   for (const line of lines) hash.update(line);
