@@ -96,12 +96,18 @@ import { BLANK, type BotStep, type RoleStep } from "./state.ts";
 import { bootStep } from "./steps.ts";
 import { RETRIES, retrying } from "./retrying.ts";
 
-/** A step's report that could not be written: its job is tried again, never reported as a failed step. */
-class GameRunReportBroke extends Data.TaggedError("GameRunReportBroke")<{
+/**
+ * A read or write a step's job needs that failed (its report, a record it
+ * decides by, a timer it sets): the job is tried again (executeJob), never
+ * reported as the step's own failure, and never read as an answer.
+ */
+class GameRunJobBroke extends Data.TaggedError("GameRunJobBroke")<{
   readonly cause: unknown;
 }> {}
-const isReportBroke = (error: unknown): error is GameRunReportBroke =>
-  error instanceof GameRunReportBroke;
+const isJobBroke = (error: unknown): error is GameRunJobBroke => error instanceof GameRunJobBroke;
+/** A read or write the job's progress depends on: its failure breaks the job. */
+const needed = <A, E, R>(work: Effect.Effect<A, E, R>) =>
+  work.pipe(Effect.mapError((cause) => new GameRunJobBroke({ cause })));
 
 export class GameRunStepRunner extends Context.Service<
   GameRunStepRunner,
@@ -132,19 +138,6 @@ const make = Effect.gen(function* () {
   const jobs = yield* GameRunJobs.GameRunJobs;
   const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
   const deps: RoleDeps = { launches, threads, game, checkpoints };
-
-  // A report the run refuses (the step moved on, the run stopped) is the
-  // answer; one that could not be written leaves the step for recovery.
-  const refused = <A, R>(dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
-    dispatch.pipe(
-      Effect.asVoid,
-      Effect.catchTags({
-        OrchestratorGameRunRefusedError: (error) =>
-          Effect.logInfo("game run report not taken", { detail: error.detail }),
-        OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
-      }),
-      Effect.catch((error) => Effect.logWarning("game run report failed", { error })),
-    );
 
   /**
    * The record that frees an ended run from "finishing" or "restoring": until it
@@ -217,7 +210,7 @@ const make = Effect.gen(function* () {
           Effect.logInfo("game run report not taken", { detail: error.detail }),
         OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
       }),
-      Effect.mapError((cause) => new GameRunReportBroke({ cause })),
+      Effect.mapError((cause) => new GameRunJobBroke({ cause })),
     );
 
   const complete = (
@@ -299,13 +292,9 @@ const make = Effect.gen(function* () {
               Effect.logInfo("game run wait not taken", { kind, detail: error.detail }),
             OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
           }),
-          Effect.catch((error) =>
-            fail(
-              { ...job, stepId },
-              stepId,
-              `${kind} wait could not be scheduled (${error.message})`,
-            ),
-          ),
+          // A wait that could not be set breaks the job, which is tried again:
+          // a step left running with neither job nor timer would wait for a restart.
+          Effect.mapError((cause) => new GameRunJobBroke({ cause })),
         );
     });
   const memoryWaitsLeft = (record: GameRunStep) => (record.memoryWaits ?? 0) < MEMORY_WAITS;
@@ -324,11 +313,11 @@ const make = Effect.gen(function* () {
     job: GameRunJobs.GameRunStepJob,
     stepId: GameRunStepId,
     work: Effect.Effect<void, E>,
-  ): Effect.Effect<void, GameRunReportBroke> =>
+  ): Effect.Effect<void, GameRunJobBroke> =>
     work.pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
-        const broke = Cause.findErrorOption(cause).pipe(Option.filter(isReportBroke));
+        const broke = Cause.findErrorOption(cause).pipe(Option.filter(isJobBroke));
         return Option.isSome(broke)
           ? Effect.fail(broke.value)
           : fail(job, stepId, causeText(cause));
@@ -349,7 +338,8 @@ const make = Effect.gen(function* () {
         if (record.status !== "planned" && record.status !== "running") return null;
         return { run, record, records };
       }),
-      Effect.orElseSucceed(() => null),
+      // A read that fails is no answer: null would read as "the step moved on".
+      Effect.mapError((cause) => new GameRunJobBroke({ cause })),
     );
 
   /**
@@ -381,14 +371,16 @@ const make = Effect.gen(function* () {
           );
       });
       const stop = <E>(cause: Cause.Cause<E>) =>
-        refusedOnly(
-          engine.dispatch({
-            type: "game-run.stop",
-            commandId: CommandId.make(`server:game-run-outputs-failed:${job.effectId}`),
-            threadId: job.threadId,
-            runId: job.runId,
-            reason: `the run's records could not be written (${causeText(cause).slice(0, 200)})`,
-          }),
+        retrying(
+          refusedOnly(
+            engine.dispatch({
+              type: "game-run.stop",
+              commandId: CommandId.make(`server:game-run-outputs-failed:${job.effectId}`),
+              threadId: job.threadId,
+              runId: job.runId,
+              reason: `the run's records could not be written (${causeText(cause).slice(0, 200)})`,
+            }),
+          ),
         );
       yield* job.final
         ? writes.pipe(Effect.catchCauseIf((cause) => !Cause.hasInterruptsOnly(cause), stop))
@@ -409,10 +401,12 @@ const make = Effect.gen(function* () {
           Effect.catchCauseIf(
             (cause) => !Cause.hasInterruptsOnly(cause),
             (cause) =>
+              // Giving up is a write too: tried again, and one that never gets
+              // through fails the effect, so recovery owes the step at startup.
               Effect.logWarning("game run timer gave up on its last try", {
                 effectId: job.effectId,
                 cause,
-              }).pipe(Effect.andThen(giveUp(cause))),
+              }).pipe(Effect.andThen(retrying(giveUp(cause)))),
           ),
         )
       : work
@@ -528,7 +522,7 @@ const make = Effect.gen(function* () {
                 ),
               OrchestratorCommandPreviouslyRejectedError: () => Effect.succeed(false),
             }),
-            Effect.mapError((cause) => new GameRunReportBroke({ cause })),
+            Effect.mapError((cause) => new GameRunJobBroke({ cause })),
           );
       const limitInput = (target: ThreadId) =>
         role.inputCapMs > 0 ? game.limitExploreInput(target, role.inputCapMs) : Effect.void;
@@ -537,9 +531,8 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // A deleted project takes no new threads; a read that fails is no
           // proof it lives, so the step fails rather than launching blind.
-          const projectLive = yield* projectStore.getById(run.projectId).pipe(
+          const projectLive = yield* needed(projectStore.getById(run.projectId)).pipe(
             Effect.map(Option.isSome),
-            Effect.orElseSucceed(() => false),
           );
           if (!projectLive)
             return yield* fail(half, stepId, `${role.role}: its project was deleted`);
@@ -588,10 +581,11 @@ const make = Effect.gen(function* () {
           const workspace = blank ?? sample;
           const dropWorkspace =
             workspace === null ? Effect.void : removeBlank(deps, ctx, workspace);
-          // A deleted creator chat cannot be a parent; the role then stands alone rather than failing.
-          const creatorLive = yield* threads.getThreadShell(run.threadId).pipe(
+          // A deleted creator chat cannot be a parent; the role then stands alone
+          // rather than failing. A read that fails decides nothing: a role
+          // launched without its parent would never have its turns landed.
+          const creatorLive = yield* needed(threads.getThreadShell(run.threadId)).pipe(
             Effect.map((s) => s !== null && s.deletedAt === null),
-            Effect.orElseSucceed(() => false),
           );
           if (!(yield* startStep(target, measured, replaces))) return yield* dropWorkspace;
           yield* limitInput(target);
@@ -630,7 +624,8 @@ const make = Effect.gen(function* () {
           yield* log(`${role.role}: launched thread ${target}`);
         });
 
-      const shell = yield* threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null));
+      // A read that fails is not a thread that is gone: it would launch a replacement.
+      const shell = yield* needed(threads.getThreadShell(threadId));
       if (shell !== null && shell.deletedAt === null) {
         if (shell.projectId !== run.projectId)
           return yield* fail(half, stepId, `${role.role}: its thread belongs to another project`);
@@ -653,7 +648,7 @@ const make = Effect.gen(function* () {
           yield* limitInput(threadId);
           if (!GameRunRoleReactor.isSettledRun(latest.run)) {
             yield* log(`${role.role}: reattaching to thread ${threadId}`);
-            return yield* refused(capTurn(half, latest.run.id));
+            return yield* reported(capTurn(half, latest.run.id));
           }
           if (GameRunRoleReactor.isCutOff(latest.run)) {
             const attemptTurns = turns.filter((t) => t.turn.attempt === job.attempt);
@@ -675,9 +670,9 @@ const make = Effect.gen(function* () {
               n,
               text: `${CONTINUE}\n\n${yield* promptOf(run, role, root)}`,
             });
-            return yield* refused(capTurn(half, `continue:${n}`));
+            return yield* reported(capTurn(half, `continue:${n}`));
           }
-          if ((yield* roles.settle(threadId, latest.run)) !== "fresh") return;
+          if ((yield* needed(roles.settle(threadId, latest.run))) !== "fresh") return;
           // Its own provider session refuses the reused thread: the work is in the
           // files, so the role continues once in a thread of its own.
           const prompt = yield* promptOf(run, role, root);
@@ -844,8 +839,23 @@ const make = Effect.gen(function* () {
           return yield* reporting(
             job,
             record.id,
-            (rung === undefined ? Effect.succeed([]) : runStateChecks(game, root, rung)).pipe(
+            (rung === undefined
+              ? Effect.succeed([])
+              : handBackOnBusy(
+                  handBackOnLowMemory(
+                    runStateChecks(game, root, rung),
+                    "state checks",
+                    memoryWaitsLeft(record),
+                  ),
+                  "state checks",
+                  busyWaitsLeft(record),
+                )
+            ).pipe(
               Effect.flatMap((results) => done({ kind: "checks", results })),
+              Effect.catchTags({
+                GameRunMemoryShort: (short) => waitForMemory(job, record, record.id, short, log),
+                GameRunGameBusy: (busy) => waitForMemory(job, record, record.id, busy, log),
+              }),
             ),
           );
         }
@@ -921,10 +931,10 @@ const make = Effect.gen(function* () {
       const fresh = (t: GameRunRoleReactor.AttributedTurn) => t.sent && t.turn.kind !== "continue";
       const anchor = attemptTurns.findLast(fresh) ?? attemptTurns[0] ?? live;
       const startedAt = anchor.run.startedAt ?? anchor.run.requestedAt;
-      const waited = yield* game.exploreMemoryWait(threadId).pipe(
-        Effect.map((mark) => mark.waitedMs),
-        Effect.orElseSucceed(() => 0),
-      );
+      // Unread, the cap could interrupt a turn early: the effect tries again.
+      const waited = yield* game
+        .exploreMemoryWait(threadId)
+        .pipe(Effect.map((mark) => mark.waitedMs));
       const cap = DateTime.toEpochMillis(startedAt) + at.role.capMs + waited;
       const due = at.run.budgetEndsAt === null ? cap : Math.min(cap, at.run.budgetEndsAt);
       // Not due yet (memory waits extend it, a later turn restarts it): the cap
@@ -1074,8 +1084,13 @@ const make = Effect.gen(function* () {
             reason: `The production run ended (${run.ending ?? "unknown"}).`,
           })
           .pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.void,
+            retrying,
+            // A role turn left running on an ended run is T3's to cancel at the next restart.
+            Effect.catch((error) =>
+              Effect.logWarning("an ended run's role turn could not be interrupted", {
+                threadId: role.threadId,
+                error,
+              }),
             ),
           );
       }
@@ -1304,29 +1319,34 @@ const make = Effect.gen(function* () {
       Effect.catch((error) =>
         Effect.gen(function* () {
           yield* Effect.logWarning("game run step job failed", { stepId: job.stepId, error });
-          const found = yield* current(job);
-          if (found === null) return;
-          const step = found.record.step;
-          const owed =
-            step.kind === "pair"
-              ? step.halves
-                  .filter(
-                    (h) =>
-                      !step.results.some((r) => r.id === h.id) &&
-                      !found.record.endedHalves.some((r) => r.seq === h.id),
-                  )
-                  .map((h) => gameRunStepId(job.runId, h.id))
-              : [found.record.id];
           const reason = `the step's work could not be reported after ${RETRIES + 1} tries (${causeText(Cause.fail(error))})`;
-          for (const stepId of owed)
-            yield* fail({ ...job, stepId }, stepId, reason).pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("game run step could not be failed; recovery owes it", {
-                  stepId,
-                  cause,
-                }),
-              ),
-            );
+          // The last resort is retried too. One that never gets through is
+          // logged, and recovery owes the step at startup: it wakes it again.
+          yield* retrying(
+            Effect.gen(function* () {
+              const found = yield* current(job);
+              if (found === null) return;
+              const step = found.record.step;
+              const owed =
+                step.kind === "pair"
+                  ? step.halves
+                      .filter(
+                        (h) =>
+                          !step.results.some((r) => r.id === h.id) &&
+                          !found.record.endedHalves.some((r) => r.seq === h.id),
+                      )
+                      .map((h) => gameRunStepId(job.runId, h.id))
+                  : [found.record.id];
+              for (const stepId of owed) yield* fail({ ...job, stepId }, stepId, reason);
+            }),
+          ).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("game run step could not be failed; recovery owes it", {
+                stepId: job.stepId,
+                cause,
+              }),
+            ),
+          );
         }),
       ),
     );
@@ -1382,20 +1402,25 @@ const make = Effect.gen(function* () {
           releaseCopies(job).pipe(
             Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
           ),
+        // A finish or restore is safe to run again whole, so one whose reads
+        // break is tried again; one that never gets through is logged, and
+        // recovery owes it at startup (the run still says it is owed).
         restore: (job) =>
-          restore(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run restore failed", { runId: job.runId, cause }),
+          retrying(restore(job)).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("game run restore failed; recovery owes it", {
+                runId: job.runId,
+                error,
+              }),
             ),
           ),
         finish: (job) =>
-          finish(job).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logWarning("game run finish failed", { runId: job.runId, cause }),
+          retrying(finish(job)).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("game run finish failed; recovery owes it", {
+                runId: job.runId,
+                error,
+              }),
             ),
           ),
       });

@@ -18,6 +18,7 @@ import * as EffectOutbox from "../EffectOutbox.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecisions from "./GameRunDecisions.ts";
+import { retrying } from "../../game/run/retrying.ts";
 import { gitEra } from "./decide.ts";
 import * as GameRunJobs from "./GameRunJobs.ts";
 
@@ -61,17 +62,18 @@ const make = Effect.gen(function* () {
   ) => outbox.hasUnsettled({ threadId, effectTypes });
 
   const stopUnnamedRoleTurns = Effect.gen(function* () {
-    const turns = yield* projections.listLiveGameRunRoleTurns();
+    const turns = yield* retrying(projections.listLiveGameRunRoleTurns());
     const named = new Map<ThreadId, ReadonlySet<ThreadId>>();
     const namedUnder = (parent: ThreadId) =>
       Effect.gen(function* () {
         const known = named.get(parent);
         if (known !== undefined) return known;
-        const records = yield* projections
-          .getGameRunRecords(parent)
-          .pipe(
-            Effect.orElseSucceed(() => ({ gameRuns: [], gameRunSteps: [], gameRunRounds: [] })),
-          );
+        // Records that cannot be read name nothing for sure: no turn under
+        // that parent is stopped on a guess (null), since it may be the run's.
+        const records = yield* retrying(projections.getGameRunRecords(parent)).pipe(
+          Effect.orElseSucceed(() => null),
+        );
+        if (records === null) return null;
         const threads = new Set(
           records.gameRunSteps.flatMap((step) =>
             step.roles.flatMap((role) => (role.threadId === null ? [] : [role.threadId])),
@@ -81,11 +83,9 @@ const make = Effect.gen(function* () {
         return threads;
       });
     for (const turn of turns) {
-      if (
-        turn.parentThreadId !== null &&
-        (yield* namedUnder(turn.parentThreadId)).has(turn.threadId)
-      )
-        continue;
+      const named =
+        turn.parentThreadId === null ? new Set() : yield* namedUnder(turn.parentThreadId);
+      if (named === null || named.has(turn.threadId)) continue;
       yield* engine
         .dispatch({
           type: "run.interrupt",
@@ -95,6 +95,7 @@ const make = Effect.gen(function* () {
           reason: "No production run holds this role turn.",
         })
         .pipe(
+          retrying,
           Effect.catchCause((cause) =>
             Effect.logWarning("an unnamed game run role turn could not be stopped", {
               threadId: turn.threadId,
@@ -206,14 +207,18 @@ const make = Effect.gen(function* () {
         timer: { kind: "recover" },
       });
     }).pipe(
+      // Every part of it is safe to repeat; a thread whose reads never get
+      // through is logged and recovered at the next startup.
+      retrying,
       Effect.catchCause((cause) =>
         Effect.logWarning("game run recovery failed for a thread", { threadId, cause }),
       ),
     );
 
+  // A thread whose reads keep failing is logged and waits for the next startup.
   const recover = () =>
     stopUnnamedRoleTurns.pipe(
-      Effect.andThen(projections.listGameRunThreadsToRecover()),
+      Effect.andThen(retrying(projections.listGameRunThreadsToRecover())),
       Effect.flatMap((threads) => Effect.forEach(threads, recoverThread, { discard: true })),
       Effect.catchCause((cause) => Effect.logWarning("game run recovery failed", { cause })),
     );

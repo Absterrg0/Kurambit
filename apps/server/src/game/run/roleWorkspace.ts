@@ -15,6 +15,7 @@ import type * as GameService from "../GameService.ts";
 import { laneProfile } from "../engineProfile.ts";
 import { COPY_OF } from "../unityPlayerCache.ts";
 import { NOT_IN_SAMPLE } from "./builds.ts";
+import { readRows } from "./facts.ts";
 import { handBackOnLowMemory } from "./lowMemory.ts";
 import type { RoleDone, RoleStep } from "./state.ts";
 
@@ -46,10 +47,7 @@ const decodeBotRow = Schema.decodeUnknownOption(Schema.fromJsonString(BotRow));
 // this turn added, with the decider it used. An exploration bot wanders on
 // purpose and says nothing about how far scripted play gets, so it gives none.
 export const lastBotRun = async (root: string, after: number): Promise<RoleDone["bot"]> => {
-  const text = await NodeFSP.readFile(
-    NodePath.join(root, ".studio", "bot-results.jsonl"),
-    "utf8",
-  ).catch(() => "");
+  const text = await readRows(NodePath.join(root, ".studio", "bot-results.jsonl"));
   const row = text
     .split("\n")
     .filter(Boolean)

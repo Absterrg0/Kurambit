@@ -216,6 +216,11 @@ reach none of its controls.
   effect stays unsettled until its act is committed, and the outbox runs it again after a failure
   or a server death. A timer that only forked a job would be done before its work, and a death in
   between would leave the step running with no job and no timer.
+- **No failure is an answer.** A read or write the run decides by, or that moves it on, never
+  turns into null, false or a log line: it fails up to `retrying` (game/run/retrying.ts) and, when
+  every try fails, to a recorded ending (`game-run.step.fail`, a stop) or a log that recovery
+  owes it at startup. Only best-effort work for people (sheets, notes, log lines) and reads whose
+  unknown has a safe reading (a check with nothing to show is asked anyway) may swallow.
 - **Attempts.** A step planned again (a resume) is a new attempt. Every report carries its attempt
   and a command id derived from step, attempt and action (`gameRunStepCommandId`), so a late report
   of an earlier try is refused and a retried one is a no-op. Each attempt has its own role thread

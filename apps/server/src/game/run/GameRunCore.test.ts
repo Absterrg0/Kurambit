@@ -637,6 +637,12 @@ interface World {
   recordsBreaks: number;
   /** This many of the runner's game-run.finished and game-run.restore dispatches break. */
   endRecordBreaks: number;
+  /** Breaks a read of the run's records by the runner or the reactor when it answers true. */
+  breakRead: ((who: "runner" | "reactor", steps: unknown) => boolean) | null;
+  /** Breaks a command the runner or the reactor sends when it answers true. */
+  breakDispatch: ((who: "runner" | "reactor", commandId: string, type: string) => boolean) | null;
+  /** Every command the runner or the reactor sent that went through, by id. */
+  readonly dispatched: string[];
   /** Resolved once a role's cap watch reads its turn's memory waits. */
   readonly capWatched: Deferred.Deferred<void>;
   /** Resolved with each role thread launched. */
@@ -668,6 +674,9 @@ const newWorld = Effect.gen(function* () {
     interruptBreaks: 0,
     recordsBreaks: 0,
     endRecordBreaks: 0,
+    breakRead: null,
+    breakDispatch: null,
+    dispatched: [],
     capWatched: yield* Deferred.make<void>(),
     launched: yield* Queue.unbounded<ThreadId>(),
     interrupted: yield* Queue.unbounded<string>(),
@@ -809,37 +818,50 @@ const layerGame = (root: string, world: World) => {
   const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
     prefix: "game-run-core-config-",
   }).pipe(Layer.provide(NodeServices.layer));
-  // The role reactor reads the run's records through a store whose reads can break.
-  const reactorProjections = Layer.effect(
-    ProjectionStore.ProjectionStoreV2,
-    Effect.map(ProjectionStore.ProjectionStoreV2, (real) => ({
-      ...real,
-      getGameRunRecords: (threadId, filter) =>
-        world.recordsBreaks-- > 0
-          ? Effect.fail(new ProjectionStore.ProjectionStoreReadError({ threadId }))
-          : real.getGameRunRecords(threadId, filter),
-    })),
-  );
-  // The runner dispatches through an orchestrator whose ending records can break.
-  const runnerOrchestrator = Layer.effect(
-    Orchestrator.OrchestratorV2,
-    Effect.map(Orchestrator.OrchestratorV2, (real) => {
-      const dispatch = (command: Parameters<typeof real.dispatch>[0]) =>
-        Effect.suspend(() =>
-          (command.type === "game-run.finished" || command.type === "game-run.restore") &&
-          world.endRecordBreaks-- > 0
-            ? Effect.fail(
-                new Orchestrator.OrchestratorDispatchError({
-                  commandId: command.commandId,
-                  commandType: command.type,
-                  cause: "the event store is busy",
-                }),
-              )
-            : real.dispatch(command),
-        );
-      return { ...real, dispatch: dispatch as typeof real.dispatch };
-    }),
-  );
+  // The runner and the role reactor read the run's records, and send their
+  // commands, through a store and an orchestrator that can break on demand.
+  const projectionsOf = (who: "runner" | "reactor") =>
+    Layer.effect(
+      ProjectionStore.ProjectionStoreV2,
+      Effect.map(ProjectionStore.ProjectionStoreV2, (real) => ({
+        ...real,
+        getGameRunRecords: (threadId, filter) =>
+          Effect.suspend(() =>
+            (who === "reactor" && world.recordsBreaks-- > 0) ||
+            world.breakRead?.(who, filter?.steps) === true
+              ? Effect.fail(new ProjectionStore.ProjectionStoreReadError({ threadId }))
+              : real.getGameRunRecords(threadId, filter),
+          ),
+      })),
+    );
+  const orchestratorOf = (who: "runner" | "reactor") =>
+    Layer.effect(
+      Orchestrator.OrchestratorV2,
+      Effect.map(Orchestrator.OrchestratorV2, (real) => {
+        const dispatch = (command: Parameters<typeof real.dispatch>[0]) =>
+          Effect.suspend(() =>
+            (who === "runner" &&
+              (command.type === "game-run.finished" || command.type === "game-run.restore") &&
+              world.endRecordBreaks-- > 0) ||
+            world.breakDispatch?.(who, command.commandId, command.type) === true
+              ? Effect.fail(
+                  new Orchestrator.OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                    cause: "the event store is busy",
+                  }),
+                )
+              : real
+                  .dispatch(command)
+                  .pipe(
+                    Effect.tap(() => Effect.sync(() => world.dispatched.push(command.commandId))),
+                  ),
+          );
+        return { ...real, dispatch: dispatch as typeof real.dispatch };
+      }),
+    );
+  const runnerOrchestrator = Layer.mergeAll(orchestratorOf("runner"), projectionsOf("runner"));
+  const reactorProjections = Layer.mergeAll(orchestratorOf("reactor"), projectionsOf("reactor"));
   return Layer.mergeAll(
     GameRunStepRunner.layer.pipe(Layer.provide(runnerOrchestrator)),
     GameRunControl.layer,
@@ -898,10 +920,7 @@ const layerGame = (root: string, world: World) => {
                   }),
                 )
               : Effect.succeed(root),
-          read: () =>
-            Effect.fail(
-              new GameOperationError({ operation: "read", path: root, reason: "invalid-input" }),
-            ),
+          read: () => Effect.succeed({ godotProject: "godot" } as never),
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
@@ -1753,6 +1772,125 @@ it.effect("records a landing cannot write by the last try stop the run before it
       world.folderGone = false;
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       assert.deepEqual(world.launches, []);
+    }),
+  ),
+);
+
+/** Breaks the first `count` calls that `matches`, then lets every call through. */
+const firstOf = <A extends ReadonlyArray<unknown>>(
+  count: number,
+  matches: (...args: A) => boolean,
+) => {
+  let broken = 0;
+  return (...args: A) => matches(...args) && broken++ < count;
+};
+
+/** Waits, on the run's clock, until `done` holds or a minute passes. */
+const until = <E = never, R = never>(done: () => boolean | Effect.Effect<boolean, E, R>) =>
+  withClockRunning(
+    Effect.gen(function* () {
+      for (let second = 0; second < 60; second += 1) {
+        const value = done();
+        if (typeof value === "boolean" ? value : yield* value) return;
+        yield* Effect.sleep("1 second");
+      }
+    }),
+  );
+
+it.effect("a step whose records cannot be read for a moment still runs", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* completeStep((yield* inFlight).step!, gitOk);
+      const vision = (yield* inFlight).step!;
+      // The job's look at its step breaks twice: that is no step that moved on.
+      world.breakRead = firstOf(2, (who, steps) => who === "runner" && steps === undefined);
+      const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      yield* withClockRunning(
+        runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 }),
+      );
+      assert.deepEqual(world.launches, [roleThreadId(vision.id, 1)]);
+    }),
+  ),
+);
+
+it.effect("a cut-off turn whose handoff read breaks is still continued", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      const cut = turnRun({ stepId: vision.id, status: "cancelled" });
+      world.runs.set(thread, [cut]);
+      yield* startRunner;
+      // The reactor's second read (the handoff to the step's job) breaks once.
+      let reads = 0;
+      world.breakRead = (who) => who === "reactor" && ++reads === 2;
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* roles.handle({
+        type: "run.updated",
+        threadId: thread,
+        payload: cut,
+      } as unknown as OrchestrationV2DomainEvent);
+      yield* until(() => world.sends.length > 0);
+      assert.deepEqual(
+        world.sends.map((send) => send.messageId),
+        [roleTurnMessageId(vision.id, 1, "continue", 2)],
+      );
+    }),
+  ),
+);
+
+it.effect("a reattached turn whose cap could not be set has it set when the job runs again", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      world.breakDispatch = firstOf(
+        1,
+        (who, commandId) => who === "runner" && commandId.includes(":watch:"),
+      );
+      const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      yield* withClockRunning(
+        runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 }),
+      );
+      assert.isTrue(world.dispatched.some((id) => id.includes(":watch:")));
+    }),
+  ),
+);
+
+it.effect("a landing's last resort that breaks once still fails its step", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      const turn = turnRun({ stepId: vision.id, status: "completed" });
+      world.runs.set(thread, [turn]);
+      yield* occupy(gameRunStepCommandId(vision.id, 1, "complete"));
+      world.breakDispatch = firstOf(
+        1,
+        (who, _id, type) => who === "reactor" && type === "game-run.step.fail",
+      );
+      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+      yield* withClockRunning(roles.settle(thread, turn));
+      assert.equal((yield* inFlight).run.ending, "failed");
+    }),
+  ),
+);
+
+it.effect("a finish whose opening read breaks once still finishes", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision } = yield* atVision(world);
+      yield* startRunner;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      // The vision step's own job runs first and sends its turn.
+      yield* worker.drain();
+      yield* until(() => world.sends.length > 0);
+      yield* completeStep(vision, { kind: "ended", ending: "usage-limit", reason: "limit" });
+      world.breakRead = firstOf(1, (who, steps) => who === "runner" && steps === undefined);
+      yield* worker.drain();
+      yield* until(() => Effect.map(inFlight, ({ run }) => run.finished !== null));
+      const { run } = yield* inFlight;
+      assert.equal(run.finished, run.endedAt);
     }),
   ),
 );

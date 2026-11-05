@@ -17,17 +17,21 @@ import {
   readReport,
 } from "./checks.ts";
 import type { Rung } from "./state.ts";
+import { isContention } from "./lowMemory.ts";
 
 /** Generated check bots: run state, ignored by git and rewritten each time. */
 export const CHECK_BOT_DIR = ".studio/bot/checks";
 
 export type CheckOutcome = GameRunCheckOutcome;
 
+// A check that could not run for memory or for another operation on the game
+// says nothing about the build: it fails through, and the step waits. Writing
+// its bot is the run's own work: a failure there fails the step.
 export const runStateChecks = (
   game: GameService.GameService["Service"],
   root: string,
   rung: Pick<Rung, "id" | "checks">,
-): Effect.Effect<ReadonlyArray<CheckOutcome>> =>
+) =>
   Effect.forEach(
     rung.checks.flatMap((c, k) => (c.kind === "state" ? [{ c, k }] : [])),
     ({ c, k }) =>
@@ -52,16 +56,18 @@ export const runStateChecks = (
           keys: keysOf(parsed.terms),
           needles: needlesOf(parsed.terms),
         });
-        const written = yield* Effect.tryPromise(async () => {
+        yield* Effect.promise(async () => {
           await NodeFSP.mkdir(NodePath.join(root, CHECK_BOT_DIR), { recursive: true });
           await NodeFSP.writeFile(NodePath.join(root, file), source);
-        }).pipe(Effect.result);
-        if (written._tag === "Failure") return fail("the check bot could not be written");
+        });
         // Boot, leaving the title, the scenario and its settle, with room to spare.
         const seconds = Math.ceil(inputMs(input) / 1000) + 30;
         const ran = yield* game.botRunIn(root, { file, seconds, mode: "play" }).pipe(Effect.result);
-        if (ran._tag === "Failure")
+        if (ran._tag === "Failure") {
+          if (ran.failure.reason === "low-memory" || isContention(ran.failure))
+            return yield* Effect.fail(ran.failure);
           return fail(`the check could not run: ${String(ran.failure.message).slice(0, 300)}`);
+        }
         const result = ran.success;
         const seen = readReport(result.status.note);
         if (seen === null)
