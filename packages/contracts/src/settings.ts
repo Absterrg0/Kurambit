@@ -997,7 +997,7 @@ export function shouldRecommendDatabaseCompaction(status: DatabaseStorageStatus)
 }
 
 export const StorageCleanupReportEntry = Schema.Struct({
-  kind: Schema.Literals(["worktree", "browser-artifacts", "logs"]),
+  kind: Schema.Literals(["worktree", "browser-artifacts", "logs", "game-logs"]),
   outcome: Schema.Literals(["removed", "kept", "failed"]),
   reason: Schema.String,
   path: Schema.NullOr(Schema.String),
@@ -1033,6 +1033,8 @@ export const StorageCleanupSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  /** Tool logs and bot, explore and check runs under each game's builds/logs; on by default, since they grow fast. */
+  gameLogsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
@@ -1378,6 +1380,7 @@ export const ServerSettingsPatch = Schema.Struct({
       worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
       browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+      gameLogsAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),
   ),
   worktreesDirectory: Schema.optionalKey(TrimmedString),

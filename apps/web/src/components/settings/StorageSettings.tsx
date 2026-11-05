@@ -204,7 +204,9 @@ function CleanupResults({
                 : entry.path?.split(/[\\/]/).findLast(Boolean)) ?? "Worktrees")
             : entry.kind === "logs"
               ? "Rotated logs"
-              : "Browser artifacts";
+              : entry.kind === "game-logs"
+                ? "Game logs"
+                : "Browser artifacts";
         return (
           <SettingsRow
             key={`${entry.path ?? entry.kind}:${entry.threadId ?? index}`}
@@ -291,6 +293,7 @@ function CleanupSection() {
     return (
       settings.storageCleanup.browserArtifactsAfterDays !== null ||
       settings.storageCleanup.logsAfterDays !== null ||
+      settings.storageCleanup.gameLogsAfterDays !== null ||
       enabled(resolveWorktreeCleanup(settings, null)) ||
       Object.values(settings.projectSettingsOverrides).some(
         (override) =>
@@ -671,6 +674,19 @@ export function StorageSettingsPanel() {
                 label="Delete old rotated logs"
                 value={settings.logsAfterDays}
                 onChange={(logsAfterDays) => update({ logsAfterDays })}
+              />
+            }
+          />
+          <SettingsRow
+            title="Delete old game logs"
+            status={ruleStatus("gameLogsAfterDays")}
+            description="Delete each game's tool logs and bot, explore and check runs after this many days. A game's oldest go first once they pass 2 GB."
+            serverScoped
+            control={
+              <RetentionControl
+                label="Delete old game logs"
+                value={settings.gameLogsAfterDays}
+                onChange={(gameLogsAfterDays) => update({ gameLogsAfterDays })}
               />
             }
           />
