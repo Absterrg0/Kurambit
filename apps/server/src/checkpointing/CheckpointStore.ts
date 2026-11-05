@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off -- The workspace lock keys a folder by its real path on disk.
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import { VcsUnsupportedOperationError, type CheckpointRef } from "@kurambit/contracts";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as Context from "effect/Context";
@@ -215,7 +218,11 @@ export const make = Effect.gen(function* () {
     deleteCheckpointRefs,
     updateCheckpointRef,
     materializeCheckpoint,
-    withWorkspaceLock: (cwd, effect) => workspaceLocks.withLock(cwd, effect),
+    // One folder reached through a symlink or a relative path is still one workspace.
+    withWorkspaceLock: (cwd, effect) =>
+      Effect.promise(() => NodeFSP.realpath(cwd).catch(() => NodePath.resolve(cwd))).pipe(
+        Effect.flatMap((key) => workspaceLocks.withLock(key, effect)),
+      ),
   });
 });
 
