@@ -10,17 +10,6 @@ import { walkFiles } from "../walkFiles.ts";
 
 const readText = (path: string) => NodeFSP.readFile(path, "utf8").catch(() => "");
 
-/** A file the run decides by: only a missing one reads as empty; any other failure is thrown. */
-export const readRows = (path: string) =>
-  NodeFSP.readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return "";
-    throw error;
-  });
-
-export const botRunCount = async (root: string): Promise<number> =>
-  (await readRows(NodePath.join(root, ".studio", "bot-results.jsonl"))).split("\n").filter(Boolean)
-    .length;
-
 // The bot's fastest finish is a plain fact with no length target beside it;
 // the reviewer decides what it means.
 const botLine = async (root: string): Promise<string> => {

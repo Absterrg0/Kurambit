@@ -198,8 +198,8 @@ export const builderFirst = (whole: boolean, lane: string, direction: string): s
 export const builderMore = (minutes: number, direction: string): string =>
   `${minutes} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nIf it is all done, say so and stop without changing anything: a tester plays the build next, so do not play it to check. Do not redo what works. No subagents. No commits.`;
 
-// The service records every bot run itself in .studio/bot-results.jsonl, so
-// the tester never appends there. With a Jev key the tester also explores.
+// The bot service records every bot run itself, on the server; the run counts
+// those, never a file. With a Jev key the tester also explores.
 export const testerPlay = (
   n: number,
   jev: boolean,
@@ -207,8 +207,8 @@ export const testerPlay = (
   lastTry = "",
 ): string => {
   const bots = jev
-    ? "Write TWO bots under .studio/bot/: a win bot (goal: win or reach the ending; decider jev when the game suits fast decisions, else policy; run it with game_bot_run, seconds 60) and an exploration bot (goal: try everything; options covering the mechanics broadly, preferring what has not been tried, edge cases and limits; no goal of winning; see the run types in .studio/bot/kit/KIT-GUIDE.md; run it with game_bot_run mode explore, decider jev, seconds 40, runs 3). The service records every run and writes .studio/player-report.md; do not append to .studio/bot-results.jsonl yourself. A note without bot runs does not count."
-    : "You must also write or update a bot file under .studio/bot/ for this game and run it at least once with game_bot_run (decider policy unless the game needs jev). The service records every run in .studio/bot-results.jsonl; do not append there yourself. A note without a bot run does not count.";
+    ? "Write TWO bots under .studio/bot/: a win bot (goal: win or reach the ending; decider jev when the game suits fast decisions, else policy; run it with game_bot_run, seconds 60) and an exploration bot (goal: try everything; options covering the mechanics broadly, preferring what has not been tried, edge cases and limits; no goal of winning; see the run types in .studio/bot/kit/KIT-GUIDE.md; run it with game_bot_run mode explore, decider jev, seconds 40, runs 3). The service records every run and writes .studio/player-report.md. A note without bot runs does not count."
+    : "You must also write or update a bot file under .studio/bot/ for this game and run it at least once with game_bot_run (decider policy unless the game needs jev). The service records every run. A note without a bot run does not count.";
   const checks =
     rung === null
       ? ""
