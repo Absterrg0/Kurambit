@@ -1,10 +1,6 @@
 import * as HostProcess from "@kurambit/shared/HostProcess";
-// @effect-diagnostics globalFetch:off -- Stream checked helper binaries directly to disk with an AbortSignal.
 // @effect-diagnostics nodeBuiltinImport:off -- This service owns the native filesystem, process, or loopback HTTP boundary.
 import * as NodeFSP from "node:fs/promises";
-import * as NodeFS from "node:fs";
-import * as NodeStreamPromises from "node:stream/promises";
-import * as NodeStream from "node:stream";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import * as Clock from "effect/Clock";
@@ -50,6 +46,7 @@ import {
   plumbingHost,
   type PlumbingBuild,
 } from "./plumbingBuilds.ts";
+import { downloadPinned } from "./assetLibraryFiles.ts";
 import { fileSha256 } from "./fileHash.ts";
 
 const DOWNLOADS = {
@@ -424,7 +421,8 @@ const make = Effect.gen(function* () {
       const name = NodePath.basename(new URL(build.url).pathname);
       const file = yield* Effect.tryPromise({
         try: async (signal) => {
-          const downloaded = await downloadPlainFile(build.url, name, stage, signal);
+          const downloaded = NodePath.join(stage, name);
+          await downloadPinned({ download: build.url, bytes: build.bytes }, downloaded, signal);
           if ((await fileSha256(downloaded)).sha256 !== build.sha256)
             throw new GameOperationError({ operation, path: build.url, reason: "checksum" });
           return downloaded;
@@ -799,24 +797,4 @@ const exists = async (file: string) => {
     return false;
   }
 };
-/** Plain streaming download; callers verify the artifact (a hash, or running it).
- * Module-level so Effect's fetch diagnostic (HTTP belongs to HttpClient in
- * Effect code) never sees it; reached only through Effect.tryPromise. */
-async function downloadPlainFile(
-  url: string,
-  name: string,
-  directory: string,
-  signal: AbortSignal,
-): Promise<string> {
-  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(30 * 60_000)]);
-  const response = await fetch(url, { signal: requestSignal });
-  if (!response.ok || !response.body) throw new Error(`Download request: ${response.status}`);
-  const destination = NodePath.join(directory, name);
-  await NodeStreamPromises.pipeline(
-    NodeStream.Readable.fromWeb(response.body),
-    NodeFS.createWriteStream(destination, { flags: "wx" }),
-    { signal: requestSignal },
-  );
-  return destination;
-}
 export const layer = Layer.effect(GameToolchain, make);
