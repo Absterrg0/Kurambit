@@ -630,6 +630,71 @@ describe("game-run commands", () => {
     accept(launched, ledger());
   });
 
+  it("a landing's records and freed copies are an effect of its commit, before the next step", () => {
+    const base = complete(started(), gitOk());
+    const round = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    ).task;
+    if (round._tag !== "round") throw new Error("expected a round");
+    const reviewer = ThreadId.make("thread:reviewer");
+    const atReview = resumedAt(base, {
+      ladder,
+      task: { ...round, rung: ladder.rungs[0]!.id, phase: "review-write", branch: "round-1" },
+    });
+    const write = stepOf(atReview);
+    let records = accept(atReview, {
+      type: "game-run.step.start",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+    }).records;
+    records = accept(records, {
+      type: "game-run.submit",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+      submission: { _tag: "ledger", ledger: "1. The jump clips through ledges." },
+    }).records;
+    const landed = accept(records, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: write.id,
+      attempt: write.attempt,
+      result: roleDone(reviewer),
+    });
+    // The ledger's file is written by the effect the landing committed, ahead of what it planned next.
+    const [outputs, ...rest] = landed.decision.effects.map((e) => e.request);
+    expect(outputs).toMatchObject({ type: "game-run.outputs", stepId: write.id, release: [] });
+    expect(outputs?.type === "game-run.outputs" ? outputs.files.map((f) => f.path) : []).toContain(
+      ".studio/next.md",
+    );
+    expect(rest.length).toBeGreaterThan(0);
+    expect(rest.some((r) => r.type === "game-run.outputs")).toBe(false);
+
+    // A blind player the budget cut short gives its copy back with its own landing,
+    // while its partner still plays.
+    const atCompare = comparing();
+    const pair = stepOf(atCompare);
+    if (pair.step.kind !== "pair") throw new Error("expected a pair");
+    const half = accept(atCompare, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: gameRunStepId(runId, pair.step.halves[0]!.id),
+      attempt: pair.attempt,
+      result: roleDone(players[0], { timedOut: true, budgetCut: true }),
+    });
+    expect(half.decision.effects.map((e) => e.request)).toEqual([
+      {
+        type: "game-run.outputs",
+        runId,
+        stepId: pair.id,
+        files: [],
+        release: [players[0]],
+      },
+    ]);
+  });
+
   it("an unanswered decision takes its default only once it is due", () => {
     let records = complete(started("guided"), gitOk({ sha: "s1" }));
     records = complete(records, roleDone(planner));

@@ -234,6 +234,7 @@ const countingRunner = Effect.gen(function* () {
     finish: () => Effect.void,
     restore: () => Effect.void,
     resend: () => Effect.void,
+    outputs: () => Effect.void,
     showable: () => Effect.succeed(true),
   };
   yield* (yield* GameRunJobs.GameRunJobs).attach(runner);

@@ -175,6 +175,16 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     runId: GameRunId,
     requestId: Schema.String,
   }),
+  // What a step's landing asks of the game folder, committed with it so the
+  // outbox does it before the run's next step: records written, and role
+  // threads whose copies go. A stop never cancels it.
+  Schema.Struct({
+    type: Schema.Literal("game-run.outputs"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
+    release: Schema.Array(ThreadId),
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -197,6 +207,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.restore.execute",
   "game-run.step.resend",
   "game-run.step.wake",
+  "game-run.outputs",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

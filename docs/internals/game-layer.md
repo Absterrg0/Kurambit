@@ -221,9 +221,12 @@ reach none of its controls.
   of an earlier try is refused and a retried one is a no-op. Each attempt has its own role thread
   id; `game-run.step.start` records a role's thread before its first turn, and replaces a thread
   only when it names the one it replaces.
+- **A landing's outputs are an effect of its commit.** The records a step's result writes (the
+  ladder, notes, comparisons) and the copies it frees go in a `game-run.outputs` effect committed
+  with the landing, ahead of the next step's effect, so the outbox's order writes them before the
+  next step and a stop never cancels them. No later job does an earlier step's work.
 - **Finish is an effect.** The commit that ends a run emits `game-run.finish`; its job stops the
-  run's jobs and live role turns, does the last outputs, exports the best build, then records
-  `game-run.finished`. A finish is safe to run twice: an ending mid-round keeps the folder's
+  run's jobs and live role turns, exports the best build, then records `game-run.finished`. A finish is safe to run twice: an ending mid-round keeps the folder's
   unfinished work as a build once per ending, restores the best for the exports and puts the work
   back, so a resume goes on from it.
 - **Restore is a command first.** `game-run.restore.request` records the pending restore, a job does

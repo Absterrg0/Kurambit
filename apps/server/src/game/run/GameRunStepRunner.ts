@@ -296,33 +296,20 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
-  // What the steps landed since the last job asks of the game folder: a
-  // decision has no job of its own, so the walk back passes over decisions.
-  // Writing the same files and releasing the same copies again is harmless.
-  const performOutputs = (
-    run: GameRun,
-    steps: ReadonlyArray<GameRunStep>,
-    upTo: number,
-    root: string,
-    log: (line: string) => Effect.Effect<void>,
-  ) =>
+  /**
+   * What a landing asks of the game folder, from the effect its commit queued
+   * before the run's next step: the records first (the next step may read
+   * them), then the copies no role needs. Writing the same files and releasing
+   * the same copies again is harmless, so a re-run after a death is too.
+   */
+  const outputs = (job: GameRunJobs.GameRunOutputs) =>
     Effect.gen(function* () {
-      const landed = steps
-        .filter((s) => s.runId === run.id && s.seq < upTo && s.completedAt !== null)
-        .toSorted((a, b) => b.seq - a.seq);
-      const owed: GameRunStep[] = [];
-      for (const step of landed) {
-        owed.unshift(step);
-        if (step.kind !== "decide") break;
-      }
-      for (const step of owed) {
-        for (const file of step.outputs.files)
-          yield* Effect.tryPromise(() =>
-            writeAtomic(NodePath.join(root, file.path), file.text),
-          ).pipe(Effect.ignore);
-        for (const thread of step.outputs.release)
-          yield* releaseCopy(deps, { copies: copiesOf(run.id), log }, thread);
-      }
+      const root = yield* projects.resolve(job.threadId, { deleted: "allowed" });
+      for (const file of job.files)
+        yield* Effect.tryPromise(() => writeAtomic(NodePath.join(root, file.path), file.text));
+      const log = (line: string) => logLine(root, line);
+      for (const thread of job.release)
+        yield* releaseCopy(deps, { copies: copiesOf(job.runId), log }, thread);
     });
 
   // A source role's change is measured at its landing against the build its step names.
@@ -648,10 +635,9 @@ const make = Effect.gen(function* () {
     found: NonNullable<Effect.Success<ReturnType<typeof current>>>,
   ) =>
     Effect.gen(function* () {
-      const { run, record, records } = found;
+      const { run, record } = found;
       const root = yield* projects.resolve(run.threadId);
       const log = (line: string) => logLine(root, line);
-      yield* performOutputs(run, records.gameRunSteps, record.seq, root, log);
       const step = record.step;
       yield* log(describe(step));
       const done = (result: GameRunStepResult) =>
@@ -882,8 +868,8 @@ const make = Effect.gen(function* () {
     });
 
   // ── A run's end, from the game-run.finish effect its ending committed: its
-  // jobs and live role turns stop, and the game folder gets its last outputs
-  // and exports. Every part is safe to repeat, so a finish a
+  // jobs and live role turns stop, and the game folder gets its exports (the
+  // ending's outputs effect ran before it). Every part is safe to repeat, so a finish a
   // restart cut short runs again whole; game-run.finished records it done.
   const finish = (job: GameRunJobs.GameRunFinishJob) =>
     Effect.gen(function* () {
@@ -959,7 +945,6 @@ const make = Effect.gen(function* () {
       }
       const root = yield* projects.resolve(run.threadId, { deleted: "allowed" });
       const log = (line: string) => logLine(root, line);
-      yield* performOutputs(run, records.gameRunSteps, Number.MAX_SAFE_INTEGER, root, log);
       yield* log(
         `run ended: ${run.ending ?? "unknown"}${run.lastFailure ? ` (${run.lastFailure})` : ""}`,
       );
@@ -1185,6 +1170,10 @@ const make = Effect.gen(function* () {
           ),
         resend: (job) =>
           resend(job).pipe(
+            Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
+          ),
+        outputs: (job) =>
+          outputs(job).pipe(
             Effect.mapError((cause) => new GameRunJobs.GameRunEffectError({ cause })),
           ),
         restore: (job) =>

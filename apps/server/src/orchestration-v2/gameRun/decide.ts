@@ -15,6 +15,7 @@ import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2GameRunCommand,
   type ProjectId,
+  type ThreadId,
   gameRunRoundId,
   gameRunStepId,
 } from "@kurambit/contracts";
@@ -251,6 +252,26 @@ interface Work {
 const effectFor = (request: GameRunEffectRequest, availableAt?: number): GameRunEffect =>
   availableAt === undefined ? { request } : { request, availableAt };
 
+/**
+ * What a landing asks of the game folder, as an effect of its own commit: the
+ * outbox runs it before the run's next step, which that commit plans after it.
+ */
+const outputsEffect = (
+  run: GameRun,
+  stepId: GameRunStepId,
+  files: ReadonlyArray<{ readonly path: string; readonly text: string }>,
+  release: ReadonlyArray<ThreadId>,
+): GameRunEffect[] =>
+  files.length === 0 && release.length === 0
+    ? []
+    : [effectFor({ type: "game-run.outputs", runId: run.id, stepId, files, release })];
+
+/** A role that plays a copy gives it back once its turn is its last, or the budget cut it short. */
+const ownRelease = (role: State.RoleStep | null, result: GameRunStepResult | null): ThreadId[] =>
+  role !== null && role.at !== null && result?.kind === "done" && (role.release || result.budgetCut)
+    ? [result.threadId]
+    : [];
+
 const stepRecord = (
   work: Work,
   run: GameRun,
@@ -420,10 +441,12 @@ const land = (
   applied: Policy.Applied,
   result: GameRunStepResult | null,
   status: GameRunStep["status"],
+  own: ReadonlyArray<ThreadId> = [],
 ): GameRunDecision => {
   // An ending keeps the step in flight for a resume to run again; a pair cut
   // short keeps only the halves still owed, which may be one half of its own.
   const held = applied.state.inFlight;
+  const release = [...new Set([...own, ...applied.release])];
   const done: GameRunStep = {
     ...record,
     ...(held?.id === record.seq ? { step: held } : {}),
@@ -431,7 +454,7 @@ const land = (
     result,
     outputs: {
       files: [...record.outputs.files, ...applied.files],
-      release: [...record.outputs.release, ...applied.release],
+      release: [...record.outputs.release, ...release],
     },
     logs: [...record.logs, ...applied.logs],
     completedAt: work.at,
@@ -454,7 +477,7 @@ const land = (
     state,
     next.state,
     [done, ...owed, ...(next.step === null ? [] : [next.step])],
-    next.effects,
+    [...outputsEffect(run, record.id, applied.files, release), ...next.effects],
   );
 };
 
@@ -1125,6 +1148,7 @@ const stepResult = (
       const status = landed.kind === "failed" ? "failed" : "completed";
       const state = toState(run, work.records.rounds, record);
       const input = { now: work.now, coin: work.input.coin, id: work.input.id };
+      const own = ownRelease(roleAt(step, seq), landed);
       if (step.kind !== "pair")
         return Result.succeed(
           land(
@@ -1135,6 +1159,7 @@ const stepResult = (
             Policy.applyResult(state, step, landed, input),
             landed,
             status,
+            own,
           ),
         );
       if (landed.kind === "decided" || !["done", "failed", "bot", "ended"].includes(landed.kind))
@@ -1160,7 +1185,20 @@ const stepResult = (
         )
       )
         return Result.succeed(
-          settle(work, run, state, withPair, [{ ...held, status: "running" }], []),
+          settle(
+            work,
+            run,
+            state,
+            withPair,
+            [
+              {
+                ...held,
+                status: "running",
+                outputs: { ...held.outputs, release: [...held.outputs.release, ...own] },
+              },
+            ],
+            outputsEffect(run, record.id, [], own),
+          ),
         );
       const ended = endedHalves[0]?.result ?? null;
       return Result.succeed(
@@ -1174,6 +1212,7 @@ const stepResult = (
             : Policy.applyResult(withPair, pair, ended, input),
           ended,
           "completed",
+          own,
         ),
       );
     }),

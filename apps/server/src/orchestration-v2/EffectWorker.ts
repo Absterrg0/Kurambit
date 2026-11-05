@@ -568,6 +568,25 @@ export const layerExecutor: Layer.Layer<
               ),
             );
           }
+          // Before the run's next step, which its commit queued behind it.
+          case "game-run.outputs":
+            return gameRunJobs
+              .outputs({
+                threadId: effect.threadId,
+                runId: effect.request.runId,
+                files: effect.request.files,
+                release: effect.request.release,
+              })
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: effect.request.type,
+                      cause: error.cause,
+                    }),
+                ),
+              );
           case "game-run.restore.execute":
             return gameRunJobs.restore({
               threadId: effect.threadId,
