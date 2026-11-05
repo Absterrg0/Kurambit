@@ -1000,7 +1000,16 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
             outputMode: "error",
           });
-          for (const file of splitNullSeparatedGitStdoutPaths(extra))
+          const extraPaths = splitNullSeparatedGitStdoutPaths(extra);
+          // git lists a nested repository it will not look into as "dir/". It is
+          // someone's own repository, not a file the checkpoint lacks: it stays.
+          const nested = extraPaths.filter((file) => file.endsWith("/"));
+          if (nested.length > 0)
+            yield* Effect.logWarning("A scoped restore left nested repositories in place", {
+              cwd,
+              nested,
+            });
+          for (const file of extraPaths.filter((entry) => !entry.endsWith("/")))
             yield* fileSystem.remove(path.join(top, file), { force: true }).pipe(
               Effect.mapError(
                 (cause) =>

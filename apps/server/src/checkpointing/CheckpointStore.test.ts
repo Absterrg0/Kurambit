@@ -668,6 +668,10 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           yield* fileSystem.makeDirectory(at("game/.cache"), { recursive: true });
           yield* writeTextFile(at("game/.cache/import.bin"), "cache\n");
           yield* writeTextFile(at("NOTES.md"), "notes v2\n");
+          // Someone's own repository inside the game, which no build holds.
+          yield* fileSystem.makeDirectory(at("game/addon"), { recursive: true });
+          yield* writeTextFile(at("game/addon/plugin.gd"), "addon\n");
+          yield* git(at("game/addon"), ["init"]);
           yield* writeTextFile(at("README.md"), "# staged by the user\n");
           yield* git(tmp, ["add", "README.md"]);
           const head = yield* git(tmp, ["rev-parse", "HEAD"]);
@@ -689,6 +693,8 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           expect(yield* fileSystem.readFileString(at("game/scenes/level.txt"))).toBe("level 1\n");
           expect(yield* fileSystem.exists(at("game/new.txt"))).toBe(false);
           expect(yield* fileSystem.readFileString(at("game/.cache/import.bin"))).toBe("cache\n");
+          expect(yield* fileSystem.readFileString(at("game/addon/plugin.gd"))).toBe("addon\n");
+          expect(yield* fileSystem.exists(at("game/addon/.git"))).toBe(true);
           const kept = yield* fileSystem.stat(at("game/kept.txt"));
           expect(Option.getOrThrow(kept.mtime).getTime()).toBe(old * 1000);
           // Outside it, and the user's git, nothing changed.
