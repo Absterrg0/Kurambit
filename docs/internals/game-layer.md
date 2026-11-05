@@ -302,8 +302,8 @@ blind compare in both orders, keep or revert, reviewer notes for the next round.
 Rounds climb a ladder. The plan submits it, 4 to 7 rungs from the picked
 prototype to a game with the shape of a Steam demo, each a sentence of what the game is after it
 plus 2 to 4 checks with how to observe them; `game-run.submit` refuses a wrong shape in the plan's
-turn, and a plan that submits none gets one fix turn, else the run has an empty ladder and only
-finish rounds. The run's record is the one truth for which rung landed; `.studio/ladder.json` is a
+turn, and a plan that submits none gets one fix turn, else the run ends "no-ladder": a creator's
+note still gets a finish round, and a resume plans the ladder again. The run's record is the one truth for which rung landed; `.studio/ladder.json` is a
 copy for people and roles. A round builds the first open rung, and the tester submits pass or
 fail per look check. An earlier run measured why this matters: when every round's goal was the last review's top flaw and judges asked
 which build handled that flaw better, a run spent five hours on one flaw while the game never
@@ -331,8 +331,12 @@ judged on that flaw) runs only as finish rounds, and only on the creator's ask. 
 point is its goal, not a round count: the ladder bounds the building (two tries per rung, one
 comeback), a finished ladder gets one ship check, and the run ends ("ready" or "done"). Polish past
 that is the creator's call: a game_run_steer note resumes an ended run for one round on it, so no
-tokens go to rounds nobody asked for. A run whose plan never wrote a ladder keeps finish rounds as
-its only work.
+tokens go to rounds nobody asked for. Three rounds in a row that land nothing, for any reason (a
+regression, an unjudged or inconclusive gate, failed checks, a failed merge, a boot failure, no
+change), end the run "stalled", resumably, with the last round's reason: otherwise a game whose
+checks can never pass (a broken state hook) works through every rung, its retry and its comeback,
+30 rounds on a full ladder, for nothing. A kept round resets the count, a round counts once where
+it ends (`finishRound` or `stallRound`), and a resume or a note's round starts it fresh.
 
 Before the
 comparators run, the tester's last play bot plays both builds in fresh worktrees for the same real

@@ -457,7 +457,7 @@ const commandId = Schema.optionalKey(
 );
 const RunSteerTool = Tool.make("game_run_steer", {
   description:
-    "Pass the creator's request to this game's production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. A run that reached its goal (its ladder done or shipped) comes back for one round on the note, then stops again: this is how the creator asks for polish after the run's goal is met. A stopped or interrupted run keeps the note for when it is resumed with game_run_start. Fails plainly when the game never had a run: then work on the game directly. Say the creator's request in their words, one request per call.",
+    "Pass the creator's request to this game's production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. A run that reached its goal (its ladder done or shipped), or whose plan wrote no ladder, comes back for one round on the note, then stops again: this is how the creator asks for polish after the run's goal is met. A stopped or interrupted run keeps the note for when it is resumed with game_run_start. Fails plainly when the game never had a run: then work on the game directly. Say the creator's request in their words, one request per call.",
   parameters: Schema.Struct({
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
     commandId,

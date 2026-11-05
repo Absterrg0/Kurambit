@@ -6,6 +6,7 @@ import * as Policy from "./policy.ts";
 import * as State from "./state.ts";
 
 const T0 = 1_000_000_000_000;
+const POLISH = "polish the game";
 const MIN = 60_000;
 const goodEvidence = {
   sessions: 1,
@@ -98,6 +99,8 @@ const applyStep = (
     ? Policy.applyPair(state, answerPair(step, state, respond), input)
     : Policy.applyResult(state, step, respond(step, state), input);
 
+const asked = (state: State.RunState): State.RunState => ({ ...state, steer: [POLISH] });
+
 // Plans and applies until `until` holds or the run ends; returns the steps taken.
 const drive = (
   start: State.RunState,
@@ -111,7 +114,16 @@ const drive = (
   const released: string[] = [];
   const written: Record<string, string> = {};
   const pairs: string[][] = [];
+  // A creator who keeps asking for polish: finish rounds run only on an ask.
+  const polishing = start.steer.includes(POLISH);
   for (let guard = 0; guard < 200 && !until(state) && state.ending === null; guard += 1) {
+    if (
+      polishing &&
+      state.steer.length === 0 &&
+      state.task._tag === "round" &&
+      state.task.phase === "start"
+    )
+      state = asked(state);
     const planned = Policy.plan(state, { now, coin: 0.3, id: `id${guard}` });
     if (planned.kind === "end")
       return {
@@ -241,13 +253,15 @@ const plainSubmission = (state: State.RunState, step: State.RoleStep): Partial<P
       : {};
 };
 
-// An empty ladder: these rounds are finish rounds, the fix-the-flaw shape.
+// An empty ladder: these rounds are finish rounds, the fix-the-flaw shape, and
+// each runs on a creator's ask (drive keeps asking).
 const atRound = (patch: Partial<State.RunState> = {}) =>
   base({
     trunk: "main",
     best: "best",
     stage: "build",
     ladder: { rungs: [], note: "finish rounds only" },
+    steer: [POLISH],
     task: Policy.applyResult(
       base({ stage: "build" }),
       { kind: "git", id: 1, op: { _tag: "init" } },
@@ -345,7 +359,8 @@ describe("rounds", () => {
   it("opens a pending line on a split and drops it after three", () => {
     const one = drive(atRound(), roundResponder("A", "A"), (s) => s.rounds.length === 1).state;
     expect(one.pending?.branch).toBe("round-1");
-    expect(one.stallStreak).toBe(0);
+    // It landed nothing, so it is a stall like any other round that did not.
+    expect(one.stallStreak).toBe(1);
     expect(one.rounds[0]?.inconclusive).toBe(true);
     const dropped = Policy.advancePending(
       { branch: "r", round: 2, verdicts: [], streak: 2 },
@@ -353,7 +368,12 @@ describe("rounds", () => {
       3,
       [],
     );
-    expect(dropped).toEqual({ pending: null, dropStall: true });
+    expect(dropped).toBeNull();
+    // The third inconclusive round in a row is the third stall: counted once.
+    const three = drive(atRound(), roundResponder("A", "A"), () => false).state;
+    expect(three.rounds).toHaveLength(3);
+    expect(three.stallStreak).toBe(3);
+    expect(three.ending).toBe("stalled");
   });
 
   it("rejects a boot failure and ends the run on the third stall", () => {
@@ -1069,7 +1089,9 @@ describe("ladder", () => {
     if (!("ladder" in parsed)) throw new Error(parsed.error);
     return parsed.ladder;
   };
-  const atLadder = (patch: Partial<State.RunState> = {}) => atRound({ ladder: fresh(), ...patch });
+  // Ladder rounds build rungs on their own: no creator ask.
+  const atLadder = (patch: Partial<State.RunState> = {}) =>
+    atRound({ ladder: fresh(), steer: [], ...patch });
   // The tester declares each check; `pass` says which of the two pass.
   const ladderResponder =
     (
@@ -1346,13 +1368,31 @@ describe("ladder", () => {
     expect(one.state.rounds[0]?.rung?.outcome).toBe("failed");
     expect(one.state.rounds[0]?.rung?.why).toContain("part 1 ends");
     expect(one.state.best).toBe("best");
-    expect(one.state.stallStreak).toBe(0);
+    // A rung that failed its checks landed nothing: one stall, with why.
+    expect(one.state.stallStreak).toBe(1);
+    expect(one.state.lastFailure).toContain("rung checks failed");
     const two = oneRound(one.state, respond);
     expect(two.state.rounds[1]?.rung?.outcome).toBe("set-aside");
     expect(two.state.ladder?.rungs[0]?.status).toBe("set-aside");
     expect(two.logs.some((line) => line.includes("rung 1 set aside after 2 rounds"))).toBe(true);
     const three = oneRound(two.state, respond);
     expect(three.logs).toContain("round 3 builds rung 2 of 4: the game has part 2");
+    // A third round in a row that lands nothing ends the run, resumably, before
+    // it works through every rung's tries; its reason is the last round's.
+    expect(three.state.stallStreak).toBe(3);
+    const ended = Policy.plan(three.state, { now: T0, coin: 0, id: "x" });
+    expect(ended).toEqual({ kind: "end", reason: "stalled" });
+    expect(three.state.lastFailure).toMatch(/^round 3: rung checks failed/);
+    const resumed = Policy.plan(Policy.resume(three.state), { now: T0, coin: 0, id: "y" });
+    expect(resumed.kind === "step" && resumed.logs).toContain(
+      "round 4 builds rung 2 of 4: the game has part 2",
+    );
+  });
+
+  it("counts a kept round as progress: the stall count starts again", () => {
+    const kept = oneRound(atLadder({ stallStreak: 2 }), ladderResponder("A", "B"));
+    expect(kept.state.rounds[0]?.kept).toBe(true);
+    expect(kept.state.stallStreak).toBe(0);
   });
 
   it("tells a second attempt at a rung why the first did not land", () => {
@@ -1386,6 +1426,27 @@ describe("ladder", () => {
     expect(again.state.ladder?.rungs[1]?.status).toBe("set-aside");
     // Every rung has had its tries: the ladder is done and the ship check plays it.
     expect(again.state.task._tag).toBe("ship");
+  });
+
+  it("ends a run whose plan wrote no valid ladder unless the creator asks, and re-plans on resume", () => {
+    const at = { now: T0, coin: 0, id: "x" };
+    const none = atLadder({
+      ladder: { rungs: [], note: "the plan wrote no valid ladder: rung 2 has no checks" },
+    });
+    // Polish is the creator's call: no rung to build and no ask ends the run, saying why.
+    expect(Policy.plan(none, at)).toEqual({
+      kind: "end",
+      reason: "no-ladder",
+      why: "the plan wrote no valid ladder: rung 2 has no checks",
+    });
+    // An ask still runs one finish round on it.
+    const asked = Policy.plan({ ...none, steer: ["fix the jump"] }, at);
+    expect(asked.kind === "step" && asked.logs).toContain(
+      "round 1: finish round (the plan wrote no valid ladder: rung 2 has no checks)",
+    );
+    // A resume gives the plan another go instead of ending on the same empty ladder.
+    const resumed = Policy.plan(Policy.resume(none), at);
+    expect(resumed.kind === "step" && resumed.state.task._tag).toBe("ladder");
   });
 
   it("runs past a finished ladder only on the creator's ask; a late budget keeps building rungs", () => {
@@ -1530,7 +1591,7 @@ describe("ladder", () => {
       const respond = merging(true);
       const held = oneRound(atLadder(), respond).state;
       const finish = oneRound(
-        { ...held, ladder: { rungs: [], note: "finish rounds only" } },
+        { ...held, ladder: { rungs: [], note: "finish rounds only" }, steer: [POLISH] },
         respond,
       );
       expect(finish.state.rounds[1]?.finish).toBe(true);
