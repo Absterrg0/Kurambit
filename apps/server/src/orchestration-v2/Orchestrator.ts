@@ -4201,6 +4201,28 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             cause: "This thread can no longer be resumed from that run.",
           });
         }
+        // A role's cut-off turn is its run's to continue while the run holds the game.
+        if (threadTurnsOwnedByRun(projection.thread)) {
+          const gameRun = yield* projectionStore
+            .getProjectGameRun(projection.thread.projectId)
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                    cause,
+                  }),
+              ),
+            );
+          if (gameRunHold(gameRun) !== null)
+            return yield* new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause:
+                "This thread is one of a production run's roles, and the run is still working on the game: the run continues its roles itself. Steer it from the game's chat, or stop the run and wait for it to finish before resuming this thread.",
+            });
+        }
       }
       if (command.usageLimitContinuationOfRunId !== undefined) {
         const run = usageLimitBlockedRun(projection.runs, projection.turnItems, null);
