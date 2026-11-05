@@ -197,9 +197,9 @@ const make = Effect.gen(function* () {
       }
       for (const step of owed) {
         for (const file of step.outputs.files)
-          yield* Effect.promise(() => writeAtomic(NodePath.join(root, file.path), file.text)).pipe(
-            Effect.ignore,
-          );
+          yield* Effect.tryPromise(() =>
+            writeAtomic(NodePath.join(root, file.path), file.text),
+          ).pipe(Effect.ignore);
         for (const thread of step.outputs.release)
           yield* releaseWorktree(deps, { root, log }, thread);
       }
@@ -703,6 +703,43 @@ const make = Effect.gen(function* () {
         run.finished === job.endedAt
       )
         return;
+      // The ending is recorded however its work went: a run left unfinished
+      // refuses every resume, steer and restore until a restart. Only an
+      // interrupt (a shutdown) leaves it to recovery, which finishes it again.
+      yield* finishWork(job, run, records).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : projects.resolve(run.threadId).pipe(
+                Effect.flatMap((root) =>
+                  logLine(
+                    root,
+                    `run finish broke (${causeText(cause)}); the ending is recorded anyway`,
+                  ),
+                ),
+                Effect.catchCause(() =>
+                  Effect.logWarning("game run finish broke", { runId: run.id, cause }),
+                ),
+              ),
+        ),
+      );
+      yield* refused(
+        engine.dispatch({
+          type: "game-run.finished",
+          commandId: CommandId.make(`server:game-run-finished:${run.id}:${job.endedAt}`),
+          threadId: run.threadId,
+          runId: run.id,
+          endedAt: job.endedAt,
+        }),
+      );
+    });
+
+  const finishWork = (
+    job: GameRunJobs.GameRunFinishJob,
+    run: GameRun,
+    records: ProjectionStore.GameRunThreadRecords,
+  ) =>
+    Effect.gen(function* () {
       yield* jobs.stopRun(run.id);
       const root = yield* projects.resolve(run.threadId);
       const log = (line: string) => logLine(root, line);
@@ -731,27 +768,24 @@ const make = Effect.gen(function* () {
         // it again) and trunk is checked out first.
         if (run.trunk.length > 0) {
           const git = makeGit(root, run.lane, log);
+          // Any break here only means HEAD stays where it is; the export still runs.
           const parked = yield* gitStep(git, root, {
             _tag: "to-trunk",
             trunk: run.trunk,
             message: `unfinished: the run ended (${run.ending})`,
-          }).pipe(Effect.option);
-          if (Option.isNone(parked) || !parked.value.git.ok)
+          }).pipe(
+            Effect.map((step) => step.git.ok),
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(false),
+            ),
+          );
+          if (!parked)
             yield* log(`finishExports: could not return to ${run.trunk}; exporting where HEAD is`);
         }
         yield* finishExports(root, run.threadId, game, log, gameRunOperationOwner(run.id)).pipe(
           Effect.ignore,
         );
       }
-      yield* refused(
-        engine.dispatch({
-          type: "game-run.finished",
-          commandId: CommandId.make(`server:game-run-finished:${run.id}:${job.endedAt}`),
-          threadId: run.threadId,
-          runId: run.id,
-          endedAt: job.endedAt,
-        }),
-      );
     });
 
   // A creator's restore, from the effect its request committed. Every check is
@@ -767,15 +801,29 @@ const make = Effect.gen(function* () {
         records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
       const state = toState(run, records.gameRunRounds, held);
       const record = state.rounds.find((r) => r.round === pending.round);
-      const root = yield* projects.resolve(run.threadId);
-      const outcome: GameRunRestoreOutcome =
+      // A restore that broke is still answered: the run would otherwise stay
+      // "restoring" until a restart. An interrupt leaves it to recovery.
+      const outcome: GameRunRestoreOutcome = yield* (
         record === undefined
-          ? {
+          ? Effect.succeed<GameRunRestoreOutcome>({
               kind: "refused",
               reason: "round-not-found",
               message: `Round ${pending.round} is not recorded.`,
-            }
-          : yield* restoreKeptRound({ game, root, run, state, record });
+            })
+          : Effect.flatMap(projects.resolve(run.threadId), (root) =>
+              restoreKeptRound({ game, root, run, state, record }),
+            )
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.succeed<GameRunRestoreOutcome>({
+                kind: "refused",
+                reason: "git-failed",
+                message: `The restore broke (${causeText(cause)}); see .studio/run.log and the game's git status.`,
+              }),
+        ),
+      );
       yield* refused(
         engine.dispatch({
           type: "game-run.restore",
@@ -848,7 +896,7 @@ const make = Effect.gen(function* () {
         // A folder that cannot be read is no reason to skip the question.
         showable: (threadId, lane, decision) =>
           projects.resolve(threadId).pipe(
-            Effect.flatMap((root) => Effect.promise(() => presentable(root, lane, decision))),
+            Effect.flatMap((root) => Effect.tryPromise(() => presentable(root, lane, decision))),
             Effect.map((evidence) => evidence.length > 0),
             Effect.orElseSucceed(() => true),
           ),

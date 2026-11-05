@@ -578,6 +578,8 @@ interface World {
   exportsAsked: number;
   /** Whose work each export was, as the run named it. */
   readonly exportOwners: Array<string | undefined>;
+  /** The export breaks with a defect, as a rejected promise does. */
+  exportsBreak: boolean;
   /** Runs when the runner reads the creator's shell, which it does just before a role's start. */
   onCreatorShell: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
@@ -603,6 +605,7 @@ const newWorld = Effect.gen(function* () {
     sends: [],
     exportsAsked: 0,
     exportOwners: [],
+    exportsBreak: false,
     onCreatorShell: null,
     onSend: null,
     capWatched: yield* Deferred.make<void>(),
@@ -747,6 +750,7 @@ const layerGame = (root: string, world: World) =>
             Effect.sync(() => {
               world.exportsAsked += 1;
               world.exportOwners.push(owner);
+              if (world.exportsBreak) throw new Error("disk gone");
               return { targets: [], displayName: "Arena" };
             }),
         }),
@@ -980,6 +984,27 @@ it.effect("an ending returns to trunk and exports, from its outbox effect", () =
         world.interrupts.map((i) => i.threadId),
         [thread],
       );
+    }),
+  ),
+);
+
+it.effect("an ending whose finish breaks is still recorded, so the run can resume", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision } = yield* atVision(world);
+      world.exportsBreak = true;
+      yield* completeStep(vision, {
+        kind: "ended",
+        ending: "usage-limit",
+        reason: "usage limit until noon",
+      });
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
+      assert.equal(world.exportsAsked, 1);
+      const { run } = yield* inFlight;
+      assert.equal(run.finished, run.endedAt);
     }),
   ),
 );
