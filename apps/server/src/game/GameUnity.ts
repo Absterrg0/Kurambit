@@ -61,6 +61,14 @@ const EDITOR_WINDOW = { width: 1280, height: 720 } as const;
 /** A first open resolves packages and imports every asset; later opens reuse Library/. */
 const READY_TIMEOUT_S = 900;
 /**
+ * How long an open holds the shared memory gate into its ready wait. The
+ * editor commits most of its memory while it starts and loads the project; a
+ * cold import grows for minutes after, and the peak (a player build) comes
+ * later still, past any hold. Shorter than the gate's 75 s queue bound, so a
+ * start queued behind an open is never refused by the hold alone.
+ */
+const GATE_HOLD_S = 60;
+/**
  * The editor tools agents reach through `unity mcp` (its `--tools` filter).
  * Scene, object, component, prefab, material and settings editing plus C#
  * eval, play mode, capture and console. Builds, tests, packages, jobs and
@@ -786,10 +794,17 @@ const make = Effect.gen(function* () {
         const editorToken = launchToken();
         // The editor leads its own tree so a stop takes its asset-import
         // workers and shader compilers with it. It starts through the shared
-        // memory gate, held until the editor is ready, so its import is in
-        // the next start's memory check. Checked after the drops above, so an
-        // editor this server just closed counts as free.
-        const { hosted, editorProcess, editor, ready } = yield* gate.admit(
+        // memory gate, held through the launch and the first GATE_HOLD_S of
+        // its ready wait, so what it takes is in the next start's memory
+        // check. Checked after the drops above, so an editor this server just
+        // closed counts as free.
+        const {
+          hosted,
+          editorProcess,
+          editor,
+          ready: early,
+          waitReady,
+        } = yield* gate.admit(
           "unity-live",
           root,
           UNITY_ROOM,
@@ -842,25 +857,32 @@ const make = Effect.gen(function* () {
               editor.once("exit", done);
               return Effect.sync(() => editor.off("exit", done));
             });
-            const ready = yield* Effect.raceFirst(
-              runCli(
-                root,
-                unity.cli,
-                [
-                  "status",
-                  "--until-ready",
-                  "--project-path",
-                  projectDir,
-                  "--timeout",
-                  String(READY_TIMEOUT_S),
-                ],
-                { operation: "unity-ready", timeoutMs: (READY_TIMEOUT_S + 30) * 1000 },
-              ),
-              exited,
-            );
-            return { hosted, editorProcess, editor, ready };
+            const waitReady = (seconds: number) =>
+              Effect.raceFirst(
+                runCli(
+                  root,
+                  unity.cli,
+                  [
+                    "status",
+                    "--until-ready",
+                    "--project-path",
+                    projectDir,
+                    "--timeout",
+                    String(seconds),
+                  ],
+                  { operation: "unity-ready", timeoutMs: (seconds + 30) * 1000 },
+                ),
+                exited,
+              );
+            const ready = yield* waitReady(GATE_HOLD_S);
+            return { hosted, editorProcess, editor, ready, waitReady };
           }),
         );
+        // A cold import is still running: the rest of its wait is outside the gate.
+        const ready =
+          early !== null && !early.ok && editorProcess.running()
+            ? yield* waitReady(READY_TIMEOUT_S - GATE_HOLD_S)
+            : early;
         if (ready === null || !ready.ok || !editorProcess.running()) {
           const tail = yield* logTail(root);
           if (UNITY_LICENSE_FAILURE.test(tail))

@@ -352,8 +352,10 @@ and its two bot runs, run at once (Unity's one at a time, behind its one editor)
 because explore sessions, bot runs and game operations are keyed by checkout root, not by game.
 Two starts at once would both pass a free-memory check made before either allocates, so explore
 and bot starts and the live Unity and Blender editor opens hold one gate (`GameMemoryGate`) from
-that check through their import and boot. No gated start may open an editor: the gate is one
-permit and does not nest. A sample's time waiting there for memory is given back to its clock; a
+that check through their import and boot (a Unity open through its launch and its first minute,
+not its whole cold import). Time queued behind the gate counts against the same 75 s bound, after
+which the start is refused `low-memory`, never kept waiting unseen. No gated start may open an
+editor: the gate is one permit and does not nest. A sample's time waiting there for memory is given back to its clock; a
 play turn refused `low-memory` is played again after a pause. A step whose own work is refused
 `low-memory` ends its job and comes back on a durable `game-run.step.wake` timer, so a wait never
 holds one of the run jobs' shared step slots; the waits are counted on the step record, and memory
