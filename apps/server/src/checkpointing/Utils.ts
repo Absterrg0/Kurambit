@@ -9,6 +9,13 @@ export function checkpointRefForThreadTurn(threadId: ThreadId, turnCount: number
   );
 }
 
+const GAME_RUN_REFS_PREFIX = "refs/kurambit/game-runs";
+
+/** A production run's build, by the name the run gives it (`best`, `round-3/candidate`). */
+export function checkpointRefForGameRun(runId: string, name: string): CheckpointRef {
+  return CheckpointRef.make(`${GAME_RUN_REFS_PREFIX}/${Base64Url.encode(runId)}/${name}`);
+}
+
 function resolveThreadWorkspaceCwd(input: {
   readonly thread: {
     readonly projectId: ProjectId;

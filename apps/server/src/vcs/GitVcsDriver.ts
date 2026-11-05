@@ -790,6 +790,131 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     "core.fsyncMethod=fsync",
   ] as const;
 
+  // A private index for work on a checkpoint's tree: the user's index, HEAD and
+  // branches are never written, and its unique name never waits on another's lock.
+  const withTempIndex = <A, E, R>(
+    cwd: string,
+    work: (env: NodeJS.ProcessEnv) => Effect.Effect<A, E, R>,
+  ) =>
+    Effect.gen(function* () {
+      const gitCommonDir = yield* resolveGitCommonDir(cwd);
+      const indexId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+      const tempIndexPath = path.join(gitCommonDir, `kurambit-checkpoint-index-${indexId}`);
+      const cleanup = Effect.forEach(
+        [tempIndexPath, `${tempIndexPath}.lock`],
+        (indexFile) => fileSystem.remove(indexFile, { force: true }).pipe(Effect.ignore),
+        { discard: true },
+      );
+      return yield* work({ ...process.env, GIT_INDEX_FILE: tempIndexPath }).pipe(
+        Effect.ensuring(cleanup),
+      );
+    });
+
+  const resolveTopLevel = (cwd: string) =>
+    execute({
+      operation: "GitVcsDriver.checkpoints.resolveTopLevel",
+      cwd,
+      args: ["rev-parse", "--show-toplevel"],
+    }).pipe(Effect.map((result) => result.stdout.trim()));
+
+  // Large trees: these walk and write every file in scope.
+  const TREE_TIMEOUT_MS = 10 * 60_000;
+  const scopeSpecs = (filePaths: ReadonlyArray<string>) =>
+    filePaths.map((file) => `:(top,literal)${file}`);
+
+  /**
+   * The checkpoint's files under `filePaths`, back in the worktree: only files
+   * that differ are written (an unchanged file keeps its mtime, so an engine
+   * watching the folder sees nothing), files the checkpoint lacks that are not
+   * ignored go, and nothing outside the scope, nor the user's index, changes.
+   */
+  const restoreScoped = (cwd: string, commitOid: string, filePaths: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const operation = "GitVcsDriver.checkpoints.restoreCheckpoint";
+      if (filePaths.length === 0) return;
+      const top = yield* resolveTopLevel(cwd);
+      const specs = scopeSpecs(filePaths);
+      yield* withTempIndex(top, (env) =>
+        Effect.gen(function* () {
+          // A copy of the user's index carries its stat cache, so a single-tree
+          // read keeps it for every path whose content the checkpoint shares and
+          // only the files that differ are hashed below.
+          const indexPath = yield* execute({
+            operation,
+            cwd: top,
+            args: ["rev-parse", "--path-format=absolute", "--git-path", "index"],
+          });
+          const seeded = yield* fileSystem
+            .copyFile(indexPath.stdout.trim(), env.GIT_INDEX_FILE!)
+            .pipe(
+              Effect.as(true),
+              Effect.orElseSucceed(() => false),
+            );
+          const read = yield* execute({
+            operation,
+            cwd: top,
+            args: ["read-tree", ...(seeded ? ["-m"] : []), commitOid],
+            env,
+            allowNonZeroExit: true,
+          });
+          // An index the single-tree merge refuses (unmerged entries) is rebuilt plainly.
+          if (read.exitCode !== 0)
+            yield* execute({ operation, cwd: top, args: ["read-tree", commitOid], env });
+          yield* execute({
+            operation,
+            cwd: top,
+            args: ["update-index", "-q", "--refresh"],
+            env,
+            allowNonZeroExit: true,
+            timeoutMs: TREE_TIMEOUT_MS,
+            maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+            outputMode: "truncate",
+          });
+          const differing = yield* execute({
+            operation,
+            cwd: top,
+            args: ["diff-files", "--name-only", "-z", "--", ...specs],
+            env,
+            timeoutMs: TREE_TIMEOUT_MS,
+            maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+            outputMode: "error",
+          });
+          const extra = yield* execute({
+            operation,
+            cwd: top,
+            args: ["ls-files", "--others", "--exclude-standard", "-z", "--", ...specs],
+            env,
+            timeoutMs: TREE_TIMEOUT_MS,
+            maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+            outputMode: "error",
+          });
+          for (const file of splitNullSeparatedGitStdoutPaths(extra))
+            yield* fileSystem.remove(path.join(top, file), { force: true }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new VcsProcessExitError({
+                    operation,
+                    command: "rm",
+                    cwd: top,
+                    exitCode: 1,
+                    detail: `Could not remove ${file}: ${cause.message}`,
+                  }),
+              ),
+            );
+          const write = splitNullSeparatedGitStdoutPaths(differing);
+          if (write.length > 0)
+            yield* execute({
+              operation,
+              cwd: top,
+              args: ["-c", "core.longpaths=true", "checkout-index", "-f", "-z", "--stdin"],
+              stdin: `${write.join("\0")}\0`,
+              env,
+              timeoutMs: TREE_TIMEOUT_MS,
+            });
+        }),
+      );
+    });
+
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = VcsProcess.CHECKPOINT_CAPTURE_OPERATION;
@@ -817,7 +942,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         { discard: true },
       );
 
-      yield* Effect.gen(function* () {
+      return yield* Effect.gen(function* () {
         const headExists = yield* hasHeadCommit(input.cwd);
         const sparseConfig = yield* execute({
           operation,
@@ -1053,6 +1178,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           cwd: input.cwd,
           args: [...durableWrite, "update-ref", input.checkpointRef, commitOid],
         });
+        return commitOid;
       }).pipe(Effect.ensuring(cleanupTempIndex));
     }),
 
@@ -1072,6 +1198,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
 
       if (!commitOid) {
         return false;
+      }
+      if (input.filePaths !== undefined) {
+        yield* restoreScoped(input.cwd, commitOid, input.filePaths);
+        return true;
       }
 
       const tracked = yield* execute({
@@ -1258,6 +1388,74 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       );
       return new Set(pathLists.flat().filter((path) => path.length > 0));
     }),
+
+    updateCheckpointRef: Effect.fn("GitVcsDriver.checkpoints.updateCheckpointRef")(
+      function* (input) {
+        const operation = "GitVcsDriver.checkpoints.updateCheckpointRef";
+        const commitOid = yield* resolveCheckpointCommit(input.cwd, input.oid);
+        if (commitOid === null) return false;
+        yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: [...durableWrite, "update-ref", input.checkpointRef, commitOid],
+        });
+        return true;
+      },
+    ),
+
+    materializeCheckpoint: Effect.fn("GitVcsDriver.checkpoints.materializeCheckpoint")(
+      function* (input) {
+        const operation = "GitVcsDriver.checkpoints.materializeCheckpoint";
+        const commitOid = yield* resolveCheckpointCommit(input.cwd, input.checkpointRef);
+        if (commitOid === null) return false;
+        const top = yield* resolveTopLevel(input.cwd);
+        const fail = (detail: string) =>
+          new VcsProcessExitError({ operation, command: "mkdir", cwd: top, exitCode: 1, detail });
+        // A fresh folder every time, so a repeat writes the same copy and nothing older survives.
+        yield* fileSystem
+          .remove(input.destination, { recursive: true, force: true })
+          .pipe(Effect.mapError((cause) => fail(cause.message)));
+        yield* fileSystem
+          .makeDirectory(input.destination, { recursive: true })
+          .pipe(Effect.mapError((cause) => fail(cause.message)));
+        yield* withTempIndex(top, (env) =>
+          Effect.gen(function* () {
+            yield* execute({ operation, cwd: top, args: ["read-tree", commitOid], env });
+            const excluded = input.excludePaths ?? [];
+            if (excluded.length > 0)
+              yield* execute({
+                operation,
+                cwd: top,
+                args: [
+                  "rm",
+                  "-r",
+                  "-q",
+                  "--cached",
+                  "--ignore-unmatch",
+                  "--",
+                  ...scopeSpecs(excluded),
+                ],
+                env,
+              });
+            yield* execute({
+              operation,
+              cwd: top,
+              args: [
+                "-c",
+                "core.longpaths=true",
+                "checkout-index",
+                "-a",
+                "-f",
+                `--prefix=${input.destination.replace(/[\\/]*$/, "")}/`,
+              ],
+              env,
+              timeoutMs: TREE_TIMEOUT_MS,
+            });
+          }),
+        );
+        return true;
+      },
+    ),
 
     deleteCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.deleteCheckpointRefs")(
       function* (input) {

@@ -55,7 +55,8 @@ it.effect.each([false, true, "interrupt"] as const)(
           Layer.mock(CheckpointStore.CheckpointStore)({
             isGitRepository: () => Effect.succeed(true),
             hasCheckpointRef,
-            captureCheckpoint: () => Effect.void,
+            captureCheckpoint: () => Effect.succeed("0".repeat(40)),
+            withWorkspaceLock: (_cwd, effect) => effect,
           }),
         ),
       ),

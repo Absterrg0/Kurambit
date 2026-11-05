@@ -3,16 +3,17 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { ThreadId, type VcsError } from "@kurambit/contracts";
+import { CheckpointRef, ThreadId, type VcsError } from "@kurambit/contracts";
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 import { describe, expect } from "vite-plus/test";
 
-import { checkpointRefForThreadTurn } from "./Utils.ts";
+import { checkpointRefForGameRun, checkpointRefForThreadTurn } from "./Utils.ts";
 import { parseTurnDiffFilesFromNumstat } from "./Diffs.ts";
 import * as CheckpointStore from "./CheckpointStore.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -563,6 +564,89 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
 
         expect(yield* checkpointStore.listAuthoredPaths(refs)).toEqual(new Set(["feature.txt"]));
       }),
+    );
+  });
+
+  describe("a path-scoped restore", () => {
+    it.effect(
+      "changes only differing files in its scope, never the user's HEAD, branch or index",
+      () =>
+        Effect.gen(function* () {
+          const tmp = yield* makeTmpDir();
+          const fileSystem = yield* FileSystem.FileSystem;
+          const checkpointStore = yield* CheckpointStore.CheckpointStore;
+          const at = (file: string) => NodePath.join(tmp, file);
+          yield* initRepoWithCommit(tmp);
+          yield* fileSystem.makeDirectory(at("game/scenes"), { recursive: true });
+          yield* writeTextFile(at(".gitignore"), "game/.cache/\n");
+          yield* writeTextFile(at("game/kept.txt"), "kept\n");
+          yield* writeTextFile(at("game/scenes/level.txt"), "level 1\n");
+          yield* writeTextFile(at("NOTES.md"), "notes v1\n");
+          yield* git(tmp, ["add", "."]);
+          yield* git(tmp, ["commit", "-m", "game"]);
+          const build = checkpointRefForGameRun("run_1", "best");
+          const oid = yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: build });
+          expect(oid).toBe(yield* git(tmp, ["rev-parse", `${build}^{commit}`]));
+
+          // The work a rejected round leaves, beside the user's own staged change.
+          yield* writeTextFile(at("game/scenes/level.txt"), "level 2\n");
+          yield* writeTextFile(at("game/new.txt"), "new\n");
+          yield* fileSystem.makeDirectory(at("game/.cache"), { recursive: true });
+          yield* writeTextFile(at("game/.cache/import.bin"), "cache\n");
+          yield* writeTextFile(at("NOTES.md"), "notes v2\n");
+          yield* writeTextFile(at("README.md"), "# staged by the user\n");
+          yield* git(tmp, ["add", "README.md"]);
+          const head = yield* git(tmp, ["rev-parse", "HEAD"]);
+          const branch = yield* git(tmp, ["symbolic-ref", "HEAD"]);
+          const index = yield* fileSystem.readFile(at(".git/index"));
+          const old = 1_577_836_800;
+          yield* fileSystem.utimes(at("game/kept.txt"), old, old);
+
+          expect(
+            yield* checkpointStore.restoreCheckpoint({
+              cwd: tmp,
+              checkpointRef: CheckpointRef.make(oid),
+              filePaths: ["game"],
+            }),
+          ).toBe(true);
+
+          // In scope: differing files come back, new files go, ignored files and
+          // an unchanged file (its mtime too) stay as they are.
+          expect(yield* fileSystem.readFileString(at("game/scenes/level.txt"))).toBe("level 1\n");
+          expect(yield* fileSystem.exists(at("game/new.txt"))).toBe(false);
+          expect(yield* fileSystem.readFileString(at("game/.cache/import.bin"))).toBe("cache\n");
+          const kept = yield* fileSystem.stat(at("game/kept.txt"));
+          expect(Option.getOrThrow(kept.mtime).getTime()).toBe(old * 1000);
+          // Outside it, and the user's git, nothing changed.
+          expect(yield* fileSystem.readFileString(at("NOTES.md"))).toBe("notes v2\n");
+          expect(yield* fileSystem.readFileString(at("README.md"))).toBe("# staged by the user\n");
+          expect(yield* git(tmp, ["rev-parse", "HEAD"])).toBe(head);
+          expect(yield* git(tmp, ["symbolic-ref", "HEAD"])).toBe(branch);
+          expect(yield* fileSystem.readFile(at(".git/index"))).toEqual(index);
+          expect(yield* git(tmp, ["diff", "--cached", "--name-only"])).toBe("README.md");
+
+          // A run ref points at a recorded build; a copy of it has no git at all.
+          const kept2 = checkpointRefForGameRun("run_1", "round-1");
+          expect(
+            yield* checkpointStore.updateCheckpointRef({ cwd: tmp, checkpointRef: kept2, oid }),
+          ).toBe(true);
+          expect(yield* git(tmp, ["rev-parse", kept2])).toBe(oid);
+          const copy = yield* makeTmpDir("checkpoint-copy-");
+          expect(
+            yield* checkpointStore.materializeCheckpoint({
+              cwd: tmp,
+              checkpointRef: CheckpointRef.make(oid),
+              destination: copy,
+              excludePaths: ["NOTES.md"],
+            }),
+          ).toBe(true);
+          expect(
+            yield* fileSystem.readFileString(NodePath.join(copy, "game/scenes/level.txt")),
+          ).toBe("level 1\n");
+          expect(yield* fileSystem.exists(NodePath.join(copy, "NOTES.md"))).toBe(false);
+          expect(yield* fileSystem.exists(NodePath.join(copy, ".git"))).toBe(false);
+          expect(yield* fileSystem.readFile(at(".git/index"))).toEqual(index);
+        }),
     );
   });
 });

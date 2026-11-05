@@ -23,6 +23,28 @@ export interface VcsRestoreCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
   readonly fallbackToHead?: boolean;
+  /**
+   * Restores only these repository paths (a directory covers its contents),
+   * writing only the files that differ and never the index. Without it the
+   * whole workspace is restored and its index reset.
+   */
+  readonly filePaths?: ReadonlyArray<string>;
+}
+
+export interface VcsUpdateCheckpointRefInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+  /** A commit an earlier capture returned; false when it no longer exists. */
+  readonly oid: string;
+}
+
+export interface VcsMaterializeCheckpointInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+  /** A folder outside the repository; it is replaced, and gets no git metadata. */
+  readonly destination: string;
+  /** Repository paths left out of the copy. */
+  readonly excludePaths?: ReadonlyArray<string>;
 }
 
 export interface VcsDiffCheckpointsInput {
@@ -48,7 +70,8 @@ export interface VcsDeleteCheckpointRefsInput {
 }
 
 export interface VcsCheckpointOps {
-  readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<void, VcsError>;
+  /** The commit oid of the checkpoint it wrote. */
+  readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<string, VcsError>;
   readonly hasCheckpointRef: (
     input: Omit<VcsRestoreCheckpointInput, "fallbackToHead">,
   ) => Effect.Effect<boolean, VcsError>;
@@ -62,6 +85,12 @@ export interface VcsCheckpointOps {
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,
   ) => Effect.Effect<void, VcsError>;
+  readonly updateCheckpointRef: (
+    input: VcsUpdateCheckpointRefInput,
+  ) => Effect.Effect<boolean, VcsError>;
+  readonly materializeCheckpoint: (
+    input: VcsMaterializeCheckpointInput,
+  ) => Effect.Effect<boolean, VcsError>;
 }
 
 export class VcsDriver extends Context.Service<
