@@ -715,6 +715,7 @@ const make = Effect.gen(function* () {
                 mode,
                 decider,
                 won: one.status.state === "done",
+                ending: botEnding(one.status.state),
                 seconds: one.gameSeconds,
                 findings: one.findings.length,
                 at,

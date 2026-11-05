@@ -28,7 +28,7 @@ import {
   type GameRunSubmitResult,
   type GameRunThreadRef,
   type OrchestrationV2GameRunCommand,
-  type ThreadId,
+  ThreadId,
   GameOperationError,
   GameRunErrorReason,
 } from "@kurambit/contracts";
@@ -52,7 +52,12 @@ import { runStateChecks } from "./run/checkRunner.ts";
 import { presentable } from "./run/decisionEvidence.ts";
 import { roleAt, roleTurns } from "./run/GameRunRoleReactor.ts";
 import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
-import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
+import {
+  readPickEvidence,
+  readRoundEvidence,
+  roundBotThreads,
+  roundOutcome,
+} from "./run/roundDetail.ts";
 import { DECISION_LABEL, currentStep, decisionOf, selectionFor, steerWhen } from "./run/runView.ts";
 import { ensureScaffold, logLine } from "./runSetup.ts";
 
@@ -691,8 +696,22 @@ const make = Effect.gen(function* () {
     round: number,
   ) {
     const found = yield* findRound("run-round", threadId, round);
+    // A record that cannot be read leaves its runs off the round, and says so in the log.
+    const records = yield* Effect.forEach(
+      roundBotThreads(found.state, found.record.round),
+      (roleThread) =>
+        game.botRuns(ThreadId.make(roleThread)).pipe(
+          Effect.map((bots) => (bots.root === found.root ? bots.runs : [])),
+          Effect.catch((error) =>
+            Effect.logWarning("A round's bot runs could not be read.", {
+              threadId: roleThread,
+              error,
+            }).pipe(Effect.as([])),
+          ),
+        ),
+    );
     const evidence = yield* Effect.promise(() =>
-      readRoundEvidence(found.root, found.state, found.record),
+      readRoundEvidence(found.root, found.state, found.record, records.flat()),
     );
     // A kept round's build, while it still exists; it is the current one when it is the best.
     const build = found.record.kept ? (found.record.build ?? null) : null;

@@ -15,6 +15,8 @@ const BotRun = Schema.Struct({
   mode: Schema.String,
   decider: Schema.String,
   won: Schema.Boolean,
+  /** How the run ended, in the bot's words (a timeout, an error); absent on runs recorded before. */
+  ending: Schema.optionalKey(Schema.String),
   seconds: Schema.Number,
   findings: Schema.Number,
   at: Schema.String,
