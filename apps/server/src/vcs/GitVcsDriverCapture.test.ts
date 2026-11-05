@@ -369,6 +369,14 @@ const cases: ReadonlyArray<Case> = [
         },
       },
       {
+        name: "a moved submodule's checkout goes",
+        seeds: false,
+        act: (cwd) => {
+          NodeFS.rmSync(NodePath.join(cwd, "sub"), { recursive: true, force: true });
+          NodeFS.mkdirSync(NodePath.join(cwd, "sub"));
+        },
+      },
+      {
         name: "nested repo re-made without a commit",
         seeds: false,
         act: (cwd) => {

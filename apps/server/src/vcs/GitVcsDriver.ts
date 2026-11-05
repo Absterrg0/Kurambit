@@ -1436,11 +1436,15 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           exitCode: 0,
           detail: "Unexpected diff-index output.",
         });
+      // A gitlink always gets HEAD's entry back: when the submodule's checkout
+      // is gone, diff-files cannot resolve it and calls it unchanged, so the
+      // kept commit would stand where a seed records HEAD's. It costs no hashing.
       const realign = records.filter(
         (record) =>
           record.status === "D" ||
           record.status === "T" ||
-          (record.status === "M" && dirty.has(record.path)),
+          (record.status === "M" &&
+            (dirty.has(record.path) || record.srcMode === "160000" || record.dstMode === "160000")),
       );
       const added = records.filter((record) => record.status === "A");
       let foreignCase = (_file: string): Effect.Effect<boolean> => Effect.succeed(false);
