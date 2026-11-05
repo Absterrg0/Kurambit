@@ -10,6 +10,7 @@ import * as GameRunRecovery from "./orchestration-v2/gameRun/GameRunRecovery.ts"
 import { forkParked } from "./serverActivation.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
+import * as ProcessHost from "./game/processHost.ts";
 import * as GamePreview from "./game/GamePreview.ts";
 import * as GitRepositoryService from "./project/GitRepositoryService.ts";
 import * as ProviderEventLoggers from "@kurambit/provider-core/server/ProviderEventLoggers";
@@ -516,11 +517,13 @@ const layerGameServices = GameRunControl.layer.pipe(
   Layer.provideMerge(layerGameRunWork),
   Layer.provide(ProjectionStoreV2.layer),
   Layer.provideMerge(GameService.layer),
-  Layer.provideMerge(GameProjectService.layer),
+  Layer.provideMerge(GameProjectService.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
   Layer.provideMerge(GamePreview.layer),
-  Layer.provide(GameProcesses.layer),
+  // One process host for the server's life: every game launch joins its
+  // Windows job and claims its private displays from it.
+  Layer.provide(GameProcesses.layer.pipe(Layer.provideMerge(ProcessHost.layer))),
 );
 
 const layerGame = layerGameServices;

@@ -7,46 +7,15 @@ export interface RoleThreadGroup {
   readonly threads: ReadonlyArray<GameRunThreadRef>;
 }
 
-// The stage a role belongs to; blind samples and comparators belong to the
-// stage they run in, so they take the group before them.
-const groupOf = (role: string, previous: string | null): string | null => {
-  const [head = role, ...rest] = role.split("-");
-  const tail = rest.join("-");
-  const round = /^(\d+)b?$/.exec(tail)?.[1];
-  switch (head) {
-    case "vision":
-      return "Vision";
-    case "proto":
-      return "Prototypes";
-    case "sample":
-    case "compare":
-      return previous === "Prototypes" ? "Blind pick" : previous;
-    case "plan":
-      return "Plan";
-    case "art":
-      return "Art";
-    case "builder":
-      if (tail === "build") return "First build";
-      return round === undefined ? previous : `Round ${round}`;
-    case "tester":
-    case "reviewer":
-    case "ship":
-      return round === undefined ? previous : `Round ${round}`;
-    default:
-      return previous;
-  }
-};
-
-/** Role threads in launch order, grouped by the run stage or round each ran in. */
+/** Role threads in launch order, grouped by the run stage or round the server says each ran in. */
 export const groupRoleThreads = (
   threads: ReadonlyArray<GameRunThreadRef>,
 ): ReadonlyArray<RoleThreadGroup> => {
   const groups: Array<{ label: string; threads: GameRunThreadRef[] }> = [];
   for (const thread of threads) {
     const last = groups.at(-1);
-    const label = groupOf(thread.role, last?.label ?? null) ?? "Run";
-    if (last?.label === label) last.threads.push(thread);
-    else groups.push({ label, threads: [thread] });
+    if (last?.label === thread.group) last.threads.push(thread);
+    else groups.push({ label: thread.group, threads: [thread] });
   }
   return groups;
 };

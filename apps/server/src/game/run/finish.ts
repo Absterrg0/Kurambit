@@ -67,16 +67,17 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   creatorThreadId: ThreadId,
   game: GameService.GameService["Service"],
   log: (line: string) => Effect.Effect<void>,
+  owner: string,
 ) {
   // Ask only targets the backend declares; anything else is recorded skipped.
   const targets = yield* game
-    .exportTargets(creatorThreadId)
+    .exportTargets(creatorThreadId, owner)
     .pipe(
       Effect.orElseSucceed(() => ({ targets: ["Web", "Linux"] as const, displayName: "Game" })),
     );
   const runTarget = (target: "Web" | "Linux"): Effect.Effect<Row> =>
     targets.targets.includes(target)
-      ? game.export(creatorThreadId, target).pipe(
+      ? game.export(creatorThreadId, target, owner).pipe(
           Effect.map((r): Row => ({
             ok: r.success,
             skipped: null,
@@ -98,7 +99,7 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
         });
   const web = yield* runTarget("Web");
   const linux = yield* runTarget("Linux");
-  const verified = yield* Effect.promise(async () => {
+  const verified = yield* Effect.tryPromise(async () => {
     const selected = await NodeFSP.readFile(NodePath.join(root, "builds/web-selected.json"), "utf8")
       .then((text) => (JSON.parse(text) as { directory?: unknown }).directory)
       .catch(() => undefined);
@@ -111,7 +112,14 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
       ((await fileOver(webIndex, 4096)) || (await dirBytes(NodePath.dirname(webIndex))) > 4096);
     const linuxBin = NodePath.join(root, "builds/linux/game.x86_64");
     return { webIndex, webOk, linuxBin, linuxOk: linux.ok && (await fileOver(linuxBin, 4096)) };
-  });
+  }).pipe(
+    Effect.orElseSucceed(() => ({
+      webIndex: null,
+      webOk: false,
+      linuxBin: NodePath.join(root, "builds/linux/game.x86_64"),
+      linuxOk: false,
+    })),
+  );
   yield* log(
     `finishExports web ok=${verified.webOk} index=${verified.webIndex ?? "none"} msg=${web.message.slice(0, 200)}`,
   );
@@ -120,7 +128,7 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   );
   // Best real run: fastest win first; otherwise the longest run with a real
   // video (a short clean run can be a bot stuck at the menu).
-  yield* Effect.promise(async () => {
+  yield* Effect.tryPromise(async () => {
     await NodeFSP.writeFile(
       NodePath.join(root, ".studio", "exports.json"),
       `${JSON.stringify({ at: new Date().toISOString(), web: { ...web, index: verified.webIndex, verified: verified.webOk }, linux: { ...linux, bin: verified.linuxBin, verified: verified.linuxOk } }, null, 2)}\n`,
@@ -147,5 +155,8 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
       return `final video from run ${row.runId} (${reason})`;
     }
     return "no bot run video for the final video";
-  }).pipe(Effect.flatMap((line) => log(`finishExports: ${line}`)));
+  }).pipe(
+    Effect.orElseSucceed(() => "the final video could not be chosen"),
+    Effect.flatMap((line) => log(`finishExports: ${line}`)),
+  );
 });

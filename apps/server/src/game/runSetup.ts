@@ -89,8 +89,10 @@ export const writeAtomic = async (file: string, text: string): Promise<void> => 
 };
 
 /** The run log is for people: nothing reads it back. */
+// A rejected append (the folder gone, a full disk) must not break the work it
+// logs: Effect.promise would turn it into a defect that Effect.ignore lets through.
 export const logLine = (root: string, line: string): Effect.Effect<void> =>
-  Effect.promise(() =>
+  Effect.tryPromise(() =>
     NodeFSP.mkdir(NodePath.join(root, ".studio"), { recursive: true }).then(() =>
       NodeFSP.appendFile(
         NodePath.join(root, ".studio", "run.log"),

@@ -58,7 +58,7 @@ A run is Guided or on Autopilot. A Guided run asks the creator at its decision p
 
 Record the answer with game_run_decide: choose the answer that fits what they said and put their words in notes. A refused answer comes back with the reason; fix it and call again. Do not answer for the creator; if nobody answers, the run takes its default by itself.
 
-The creator can ask at any time to start or resume the run (game_run_start), stop it (game_run_stop), switch it between Guided and Autopilot (game_run_profile) or steer it (game_run_steer).
+The creator can ask at any time to start or resume the run (game_run_start), stop it (game_run_stop), switch it between Guided and Autopilot (game_run_profile), steer it (game_run_steer) or put the game back to a kept round (game_run_restore).
 `;
 
 /**

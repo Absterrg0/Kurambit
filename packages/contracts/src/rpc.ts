@@ -61,7 +61,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   CodexAuthCallbackInput,
   CodexAuthCallbackState,
@@ -1502,7 +1502,8 @@ const WsGameRunRestoreRpc = Rpc.make(WS_METHODS.gameRunRestore, {
   error: gameError,
 });
 const WsSubscribeGameEventsRpc = Rpc.make(WS_METHODS.subscribeGameEvents, {
-  payload: Schema.Struct({}),
+  /** With a thread, only that thread's game's pushes. */
+  payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
   success: GameOperationEvent,
   error: EnvironmentAuthorizationError,
   stream: true,

@@ -142,6 +142,8 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameStatus, GameOperationError>;
     /** Operation pushes for every game this server runs. */
     readonly events: Stream.Stream<GameOperationEvent>;
+    /** The pushes for one thread's game; empty when the thread has no game. */
+    readonly threadEvents: (threadId: ThreadId) => Stream.Stream<GameOperationEvent>;
     readonly action: (
       threadId: ThreadId,
       action: GameAction,
@@ -227,16 +229,21 @@ export class GameService extends Context.Service<
       input: GameAssetsAddInput,
     ) => Effect.Effect<GameAssetsAddResult, GameOperationError>;
     readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
+    /** `owner` names whose work the export is, for owner-scoped cancels; the thread by default. */
     readonly export: (
       threadId: ThreadId,
       target: "Web" | "Linux" | "Windows",
+      owner?: string,
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
      * Which export targets the game's engine backend declares, with its display
      * name. Internal loop fact resolved through the existing engine path; not
      * an MCP tool. Runs no processes.
      */
-    readonly exportTargets: (threadId: ThreadId) => Effect.Effect<
+    readonly exportTargets: (
+      threadId: ThreadId,
+      owner?: string,
+    ) => Effect.Effect<
       {
         targets: ReadonlyArray<"Web" | "Linux" | "Windows">;
         displayName: string;
@@ -343,7 +350,10 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBotViewInput,
     ) => Effect.Effect<GameBotViewResult, GameOperationError>;
-    readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
+    readonly check: (
+      threadId: ThreadId,
+      owner?: string,
+    ) => Effect.Effect<GameCheckResult, GameOperationError>;
     /** Live Unity editor: the editing tools game_unity_edit may call, with input schemas. */
     readonly unityTools: (
       threadId: ThreadId,
@@ -529,12 +539,22 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     name: string,
     work: (root: string) => Effect.Effect<A, GameOperationError>,
+    owner: string = String(threadId),
   ) {
     const root = yield* projects.resolve(threadId);
-    return yield* operations.exclusive(root, name, work(root), String(threadId));
+    return yield* operations.exclusive(root, name, work(root), owner);
   });
   return GameService.of({
     events: operations.events,
+    threadEvents: (threadId) =>
+      Stream.unwrap(
+        projects.resolve(threadId).pipe(
+          Effect.map((root) =>
+            operations.events.pipe(Stream.filter((event) => event.root === root)),
+          ),
+          Effect.orElseSucceed(() => Stream.empty),
+        ),
+      ),
     finishExploration: explore.finish,
     limitExploreInput: explore.limitInput,
     exploreMemoryWait: explore.memoryWait,
@@ -635,14 +655,18 @@ const make = Effect.gen(function* () {
       };
     }),
     import: (threadId) => withRoot(threadId, "Import", engines.importProject),
-    export: (threadId, target) =>
-      withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target)),
-    exportTargets: (threadId) =>
-      withRoot(threadId, "Export targets", (root) =>
-        Effect.gen(function* () {
-          const { profile } = (yield* engines.context(root)).backend;
-          return { targets: profile.exportTargets, displayName: profile.displayName };
-        }),
+    export: (threadId, target, owner) =>
+      withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target), owner),
+    exportTargets: (threadId, owner) =>
+      withRoot(
+        threadId,
+        "Export targets",
+        (root) =>
+          Effect.gen(function* () {
+            const { profile } = (yield* engines.context(root)).backend;
+            return { targets: profile.exportTargets, displayName: profile.displayName };
+          }),
+        owner,
       ),
     packageWindows: (threadId) =>
       withRoot(threadId, "Package Windows build", exporter.packageWindows),
@@ -715,12 +739,12 @@ const make = Effect.gen(function* () {
         );
         return { name: input.name, set: true } satisfies GameSetSecretResult;
       }),
-    check: (threadId) =>
+    check: (threadId, owner) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         const manifest = yield* projects.read(root);
         const label = `${engineProfile(manifest.engine.name).displayName} check`;
-        return yield* withRoot(threadId, label, checkGame);
+        return yield* withRoot(threadId, label, checkGame, owner);
       }),
     unityTools: (threadId) =>
       withRoot(threadId, "Unity tools", (root) =>
@@ -843,6 +867,24 @@ const make = Effect.gen(function* () {
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);
       if (action === "stop") {
+        // The production run's builds, bots and editors are its own: Stop game
+        // cancels only the caller's work while a run holds the game.
+        const hold = yield* projects.runHold(threadId);
+        if (hold !== null) {
+          yield* operations.cancel(root, String(threadId));
+          return {
+            success: true,
+            message:
+              hold === "finishing"
+                ? "Stopped your work on this game. The production run is finishing; its exports end on their own."
+                : hold === "restoring"
+                  ? "Stopped your work on this game. A round of the production run is being restored; the restore ends on its own."
+                  : "Stopped your work on this game. The production run's builds, bots and editors keep running; stop the run to stop them.",
+            path: null,
+            url: null,
+            process: null,
+          };
+        }
         yield* operations.cancel(root);
         yield* processes.stop(root);
         yield* liveBlender.stop(root).pipe(Effect.ignore);

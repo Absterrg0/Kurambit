@@ -12,6 +12,7 @@ import {
 import { GameBotDecider, GameBotPerf } from "./gameBot.ts";
 import {
   GameRunDecisionKind,
+  GameRunRestoreRefusal,
   GameRunProfile,
   GameRunRungFields,
   GameRunSubmission,
@@ -591,6 +592,25 @@ export const GameRunTask = Schema.Union([
 ]);
 export type GameRunTask = typeof GameRunTask.Type;
 
+// ── A creator's restore of a kept round. ────────────────────────────────────
+export const GameRunRestoreOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("restored"), sha: Schema.String, message: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: GameRunRestoreRefusal,
+    message: Schema.String,
+  }),
+]);
+export type GameRunRestoreOutcome = typeof GameRunRestoreOutcome.Type;
+export const GameRunRestore = Schema.Struct({
+  requestId: Schema.String,
+  round: Schema.Number,
+  requestedAt: IsoDateTime,
+  /** Null while the job is moving the folder. */
+  outcome: Schema.NullOr(GameRunRestoreOutcome),
+});
+export type GameRunRestore = typeof GameRunRestore.Type;
+
 // ── The three records. ─────────────────────────────────────────────────────
 /** `waiting`: the step in flight is a creator decision. */
 const GameRunStatus = Schema.Literals(["running", "waiting", "ended"]);
@@ -670,6 +690,8 @@ export const GameRun = Schema.Struct({
   endedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   /** The `endedAt` whose finish completed. */
   finished: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  /** The creator's latest restore of a kept round: pending while its job moves the folder. */
+  restore: Schema.NullOr(GameRunRestore).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -744,21 +766,3 @@ export const GameRunRound = Schema.Struct({
 export type GameRunRound = typeof GameRunRound.Type;
 
 // ── Refusals. ──────────────────────────────────────────────────────────────
-/** Why a game-run command was refused; a tool hands the message back in-turn. */
-export const GameRunRefusalReason = Schema.Literals([
-  "no-run",
-  "run-live",
-  "run-ended",
-  "not-resumable",
-  "stale-run",
-  "stale-step",
-  "wrong-thread",
-  "wrong-kind",
-  "invalid-submission",
-  "stale-attempt",
-  "no-decision",
-  "stale-decision",
-  "invalid-answer",
-  "not-due",
-]);
-export type GameRunRefusalReason = typeof GameRunRefusalReason.Type;

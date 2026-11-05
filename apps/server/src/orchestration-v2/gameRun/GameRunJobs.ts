@@ -33,6 +33,18 @@ export interface GameRunFinishJob {
   readonly endedAt: string;
 }
 
+export interface GameRunResendJob extends GameRunStepJob {
+  /** Why the turn goes again: an instant failure, or an explore start refused for memory. */
+  readonly turn: "retry" | "memory";
+  readonly n: number;
+}
+
+export interface GameRunRestoreJob {
+  readonly threadId: ThreadId;
+  readonly runId: GameRunId;
+  readonly requestId: string;
+}
+
 /** What a step's job does; the game layer supplies it once its services exist. */
 export interface GameRunJobRunner {
   /** A step's work, reported with game-run.step.complete or game-run.step.fail. */
@@ -41,6 +53,10 @@ export interface GameRunJobRunner {
   readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
   /** A run's ending: stops its turns and jobs, does its last outputs and exports, records it. */
   readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
+  /** A creator's restore of a kept round: moves the folder, lands with game-run.restore. */
+  readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
+  /** A role turn sent again once its pause is over, then capped like the first. */
+  readonly resend: (job: GameRunResendJob) => Effect.Effect<void>;
   /** Whether the game folder holds anything of a decision's evidence to show the creator. */
   readonly showable: (
     threadId: ThreadId,
@@ -62,6 +78,10 @@ export class GameRunJobs extends Context.Service<
     readonly deadline: (job: GameRunStepJob) => Effect.Effect<void>;
     /** Finishes an ending unless its finish is live; returns at once. Finishing twice is safe. */
     readonly finish: (job: GameRunFinishJob) => Effect.Effect<void>;
+    /** Runs a restore unless one for that request is live; returns at once. */
+    readonly restore: (job: GameRunRestoreJob) => Effect.Effect<void>;
+    /** Sends a role turn again unless that send is live; returns at once. */
+    readonly resend: (job: GameRunResendJob) => Effect.Effect<void>;
     /** Any other work of a run's (a role turn sent again after a pause), once per key. */
     readonly fork: (
       key: string,
@@ -86,25 +106,53 @@ export const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const runner = yield* Deferred.make<GameRunJobRunner>();
   const permits = yield* Semaphore.make(STEP_CONCURRENCY);
-  const live = new Map<string, { readonly runId: GameRunId; fiber: Fiber.Fiber<void> | null }>();
 
   // Registered before the fork and removed only once the work ends, so a job
-  // whose last act was a committed report is never started twice meanwhile.
+  // whose last act was a committed report is never started twice meanwhile. A
+  // job asked for while it runs (a pair half handed back while its sibling is
+  // still preparing) runs once more when it ends, reading the records afresh:
+  // at most one re-run is pending, a request during the re-run is kept for
+  // the next, and an interrupt (a stop) drops whatever is pending.
+  interface LiveJob {
+    readonly runId: GameRunId;
+    fiber: Fiber.Fiber<void> | null;
+    again: boolean;
+  }
+  const live = new Map<string, LiveJob>();
   const fork = (key: string, runId: GameRunId, work: Effect.Effect<void>) =>
     Effect.suspend(() => {
-      if (live.has(key)) return Effect.void;
-      const entry: { readonly runId: GameRunId; fiber: Fiber.Fiber<void> | null } = {
-        runId,
-        fiber: null,
-      };
+      const running = live.get(key);
+      if (running !== undefined) {
+        running.again = true;
+        return Effect.void;
+      }
+      const entry: LiveJob = { runId, fiber: null, again: false };
       live.set(key, entry);
-      return work.pipe(
+      // The check for a pending re-run and the job's removal are one step, so
+      // a request can never land between them and be lost.
+      const settle = Effect.suspend((): Effect.Effect<void> => {
+        if (entry.again) {
+          entry.again = false;
+          return runOnce;
+        }
+        if (live.get(key) === entry) live.delete(key);
+        return Effect.void;
+      });
+      const runOnce: Effect.Effect<void> = work.pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
-            ? Effect.void
+            ? Effect.failCause(cause)
             : Effect.logWarning("game run job failed", { key, cause }),
         ),
-        Effect.ensuring(Effect.sync(() => live.get(key) === entry && live.delete(key))),
+        Effect.andThen(settle),
+      );
+      return runOnce.pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            entry.again = false;
+            if (live.get(key) === entry) live.delete(key);
+          }),
+        ),
         Effect.forkIn(scope),
         Effect.tap((fiber) => Effect.sync(() => void (entry.fiber = fiber))),
         Effect.uninterruptible,
@@ -135,6 +183,33 @@ export const make = Effect.gen(function* () {
       Deferred.await(runner).pipe(Effect.flatMap((each) => each.finish(job))),
     );
 
+  // Its own owner too: a finish's stop must not cut a restore that already holds the folder.
+  const restore = (job: GameRunRestoreJob) =>
+    fork(
+      `restore:${job.runId}:${job.requestId}`,
+      GameRunIdSchema.make(`${job.runId}:restore`),
+      Deferred.await(runner).pipe(Effect.flatMap((each) => each.restore(job))),
+    );
+
+  const resend = (job: GameRunResendJob) =>
+    fork(
+      `resend:${job.stepId}:attempt:${job.attempt}:${job.turn}:${job.n}`,
+      job.runId,
+      Deferred.await(runner).pipe(Effect.flatMap((each) => each.resend(job))),
+    );
+
+  // The game layer attaches the work when it builds; a server where it never
+  // does would hold every run's effects forever without a word.
+  yield* Deferred.await(runner).pipe(
+    Effect.timeoutOption("2 minutes"),
+    Effect.flatMap((attached) =>
+      attached._tag === "None"
+        ? Effect.logWarning("no game run job runner attached; game run steps are waiting")
+        : Effect.void,
+    ),
+    Effect.forkIn(scope),
+  );
+
   const stopRun = (runId: GameRunId) =>
     Effect.suspend(() =>
       Fiber.interruptAll(
@@ -148,6 +223,8 @@ export const make = Effect.gen(function* () {
     execute,
     deadline,
     finish,
+    restore,
+    resend,
     fork,
     stopRun,
     isLive: (key) => Effect.sync(() => live.has(key)),

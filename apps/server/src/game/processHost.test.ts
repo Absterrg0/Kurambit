@@ -5,6 +5,7 @@ import {
   parseVmStat,
   launchToken,
   processFacts,
+  makeProcessHost,
   spawnOwned,
   stopRecorded,
   type ProcessFacts,
@@ -44,7 +45,11 @@ it("owns a launch only when pid, start time and token all match", () => {
 it.skipIf(HOST_OS !== "linux")(
   "never signals a live process whose record does not verify",
   async () => {
-    const owned = spawnOwned("sleep", ["30"], { env: process.env, stdio: "ignore", tree: true });
+    const owned = spawnOwned(makeProcessHost().host, "sleep", ["30"], {
+      env: process.env,
+      stdio: "ignore",
+      tree: true,
+    });
     const record = await owned.record;
     expect(record).not.toBeNull();
     try {
@@ -61,7 +66,7 @@ it.skipIf(HOST_OS !== "linux")(
 );
 
 it.skipIf(HOST_OS !== "linux")("a tree stop ends what the child started", async () => {
-  const owned = spawnOwned("sh", ["-c", "sleep 30 & echo $!; wait"], {
+  const owned = spawnOwned(makeProcessHost().host, "sh", ["-c", "sleep 30 & echo $!; wait"], {
     env: process.env,
     stdio: ["ignore", "pipe", "ignore"],
     tree: true,

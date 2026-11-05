@@ -204,6 +204,11 @@ has the guarantees every thread has: a retried command changes nothing, a restar
 decision, and nothing outside the event log is the run's truth. Its events stay off the chat's
 stream; the Run tab and `game_run_status` read the records.
 
+A game has one run, not one per chat: the records sit on the thread that started the run, and every
+chat of the game's project reaches that run through `getProjectGameRun`. A start from another chat
+resumes or reports the live run instead of opening a second one, and the run's own role threads
+reach none of its controls.
+
 - **Long work runs in jobs, never in effects.** An effect claim is a short lease on a worker pool
   every thread's provider work shares. A step's effect (`game-run.step.execute`) hands its work to
   `GameRunJobs` (in-process, bounded, scoped fibers) and settles at once; the job reports with
@@ -216,6 +221,11 @@ stream; the Run tab and `game_run_status` read the records.
 - **Finish is an effect.** The commit that ends a run emits `game-run.finish`; its job stops the
   run's jobs and live role turns, does the last outputs, returns to trunk and exports, then records
   `game-run.finished`. A finish is safe to run twice.
+- **Restore is a command first.** `game-run.restore.request` records the pending restore, a job does
+  the git work, and `game-run.restore` lands its outcome. The git work and a run's next move would
+  race on the game folder, so the decider refuses resume, steer and another restore while an ending
+  is unfinished (`finishing`) or a restore is pending (`restoring`), and refuses start and resume
+  during a restore.
 - **Recovery** (`GameRunRecovery`, at startup): a live run's unfinished step gets its job again,
   and an ending whose finish is not recorded finishes again. Every step is safe to repeat because
   its job first finds what an earlier try left: a role's thread, a turn of this attempt that ended
@@ -234,11 +244,12 @@ stream; the Run tab and `game_run_status` read the records.
   fiber holding it, and an answer cancels a wake still queued.
 - **The outbox timer exception.** The outbox runs a thread's effects in order, and an earlier
   pending effect holds later ones. The run's timers (a role's cap, a decision's deadline) wait
-  minutes on the creator thread, so a pending `game-run.step.deadline` or
+  minutes on the creator thread, so a pending `game-run.step.deadline`, `game-run.step.resend` or
   `game-run.decision.deadline` holds nothing back
   ([EffectOutbox.ts](../../apps/server/src/orchestration-v2/EffectOutbox.ts)); otherwise the next
   step, the finish and the creator's own turns would wait out every cap and every default. Each
-  timer checks the run again when it fires.
+  timer checks the run again when it fires; a cap extended meanwhile schedules itself again at the
+  new due time (`game-run.step.schedule`) instead of polling.
 
 Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups,
 run.log) are written for people and later roles; nothing the run decides reads them. A game

@@ -28,6 +28,8 @@ import type { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
 
 export interface GameRunRecords {
   readonly projectId: ProjectId;
+  /** The game's latest run on any of its project's threads: the folder is the project's. */
+  readonly projectRun: GameRun | null;
   /** The thread's runs, oldest first. */
   readonly runs: ReadonlyArray<GameRun>;
   /** The thread's rounds across its runs: a game's round numbers continue from run to run. */
@@ -65,6 +67,7 @@ export const GAME_RUN_EFFECT_TYPES = [
   "game-run.decision.wake",
   "game-run.decision.deadline",
   "game-run.step.deadline",
+  "game-run.step.resend",
 ] as const satisfies ReadonlyArray<GameRunEffectRequest["type"]>;
 
 interface GameRunEffect {
@@ -85,7 +88,8 @@ interface GameRunRefusal {
   readonly message: string;
 }
 
-const RESUMABLE: ReadonlySet<string> = new Set([
+/** Endings a run continues from with game-run.resume; the run's status says so to clients. */
+export const RESUMABLE: ReadonlySet<string> = new Set([
   "budget",
   "usage-limit",
   "provider-down",
@@ -441,10 +445,28 @@ type Command<T extends OrchestrationV2GameRunCommand["type"]> = Extract<
   { readonly type: T }
 >;
 
+/**
+ * Why an ended run cannot be moved on yet: its ending's finish (stops, outputs,
+ * exports) or a creator's restore is still working the game folder.
+ */
+/** Refuses a move while the run's ending or a restore still owns the game folder. */
+export const settling = (run: GameRun) =>
+  run.endedAt !== null && run.finished !== run.endedAt
+    ? refuse("finishing", `Run ${run.id} is still finishing its ending; try again in a moment.`)
+    : run.restore !== null && run.restore.outcome === null
+      ? refuse("restoring", `A round of run ${run.id} is being restored; try again once it is.`)
+      : null;
+
 const start = (work: Work, command: Command<"game-run.start">) => {
   const prior = work.records.runs.at(-1) ?? null;
   if (prior !== null && prior.status !== "ended")
     return refuse("run-live", `Run ${prior.id} is still going on this thread; stop it first.`);
+  // One run per game: another chat of the same project may hold it.
+  const elsewhere = work.records.projectRun;
+  if (elsewhere !== null && elsewhere.status !== "ended")
+    return refuse("run-live", `Run ${elsewhere.id} is live in another chat of this game.`);
+  const busy = prior === null ? null : settling(prior);
+  if (busy !== null) return busy;
   if (work.records.runs.some((r) => r.id === command.runId))
     return refuse("stale-run", `Run ${command.runId} already exists on this thread.`);
   const fresh = State.freshState(
@@ -515,6 +537,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
         inFlight: null,
         endedAt: null,
         finished: null,
+        restore: null,
         startedAt: work.at,
         updatedAt: work.at,
       },
@@ -552,6 +575,8 @@ const inFlightOf = (work: Work, run: GameRun) =>
 const resume = (work: Work, command: Command<"game-run.resume">) =>
   Result.flatMap(current(work, command.runId), (run) => {
     if (run.status !== "ended") return refuse("run-live", `Run ${run.id} is still going.`);
+    const busy = settling(run);
+    if (busy !== null) return busy;
     if (run.ending === null || !RESUMABLE.has(run.ending))
       return refuse(
         "not-resumable",
@@ -614,6 +639,8 @@ const stop = (work: Work, command: Command<"game-run.stop">) =>
 
 const steer = (work: Work, command: Command<"game-run.steer">) =>
   Result.flatMap(current(work, command.runId), (run) => {
+    const busy = run.status === "ended" ? settling(run) : null;
+    if (busy !== null) return busy;
     const inFlight = inFlightOf(work, run);
     const before = toState(run, work.records.rounds, inFlight);
     const noted = { ...before, steer: [...before.steer, command.note.trim()] };
@@ -811,16 +838,90 @@ const finished = (work: Work, command: Command<"game-run.finished">) =>
     );
   });
 
-/** A creator's restore made a kept round's build the game's again: the run judges against it. */
-const restore = (work: Work, command: Command<"game-run.restore">) =>
+/** A creator asks for a kept round's build back: the run records it, a job moves the folder. */
+const restoreRequest = (work: Work, command: Command<"game-run.restore.request">) =>
   Result.flatMap(current(work, command.runId), (run) => {
     if (run.status !== "ended")
       return refuse("run-live", `Run ${run.id} is still going; stop it before restoring a round.`);
+    const busy = settling(run);
+    if (busy !== null) return busy;
     const state = toState(run, work.records.rounds, inFlightOf(work, run));
+    const pending: GameRun = {
+      ...run,
+      restore: {
+        requestId: command.requestId,
+        round: command.round,
+        requestedAt: work.at,
+        outcome: null,
+      },
+    };
     return Result.succeed(
-      settle(work, run, state, { ...state, best: command.best, pending: null }, [], []),
+      settle(
+        work,
+        pending,
+        state,
+        state,
+        [],
+        [
+          effectFor({
+            type: "game-run.restore.execute",
+            runId: run.id,
+            requestId: command.requestId,
+          }),
+        ],
+      ),
     );
   });
+
+/** The restore job's outcome; a restored build becomes the run's judged best. */
+const restore = (work: Work, command: Command<"game-run.restore">) =>
+  Result.flatMap(current(work, command.runId), (run) => {
+    if (run.restore?.requestId !== command.requestId || run.restore.outcome !== null)
+      return refuse("stale-step", `Restore ${command.requestId} is not the one pending.`);
+    const landed: GameRun = { ...run, restore: { ...run.restore, outcome: command.outcome } };
+    const state = toState(run, work.records.rounds, inFlightOf(work, run));
+    const next =
+      command.outcome.kind === "restored"
+        ? { ...state, best: command.outcome.sha, pending: null }
+        : state;
+    return Result.succeed(settle(work, landed, state, next, [], []));
+  });
+
+/** A role step's own timer: its cap at a later due time, or a turn sent again after a pause. */
+const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
+  Result.flatMap(live(work, command.runId), (run) =>
+    Result.flatMap(currentStep(work, run, command.stepId), ({ record }) => {
+      if (command.attempt !== record.attempt)
+        return refuse(
+          "stale-attempt",
+          `Attempt ${command.attempt} of step ${command.stepId} was superseded.`,
+        );
+      const state = toState(run, work.records.rounds, record);
+      const timer =
+        command.timer.kind === "cap"
+          ? effectFor(
+              {
+                type: "game-run.step.deadline",
+                runId: run.id,
+                stepId: command.stepId,
+                attempt: command.attempt,
+              },
+              command.at,
+            )
+          : effectFor(
+              {
+                type: "game-run.step.resend",
+                runId: run.id,
+                stepId: command.stepId,
+                attempt: command.attempt,
+                turn: command.timer.turn,
+                n: command.timer.n,
+              },
+              command.at,
+            );
+      return Result.succeed(settle(work, run, state, state, [], [timer]));
+    }),
+  );
 
 const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
   Result.flatMap(live(work, command.runId), (run) =>
@@ -1031,6 +1132,10 @@ export const decide = (
       return expire(work, command);
     case "game-run.finished":
       return finished(work, command);
+    case "game-run.restore.request":
+      return restoreRequest(work, command);
+    case "game-run.step.schedule":
+      return schedule(work, command);
     case "game-run.restore":
       return restore(work, command);
   }

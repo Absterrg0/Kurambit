@@ -42,6 +42,10 @@ function restartContinuationBlocked(
   settled: boolean,
 ): boolean {
   const { thread } = projection;
+  // A production run's role turn is its run's to continue, with the step's own
+  // prompt and cap: a generic "continue" here would run uncapped, and the run
+  // would read the cut turn as the role's finished work.
+  if (thread.launchedBy === "game_run") return true;
   if (
     thread.archivedAt !== null ||
     thread.deletedAt !== null ||

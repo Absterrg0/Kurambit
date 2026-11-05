@@ -10,6 +10,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import {
@@ -29,6 +30,9 @@ import * as GameOperations from "./GameOperations.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import { settling, toState } from "../orchestration-v2/gameRun/decide.ts";
+import { currentStep } from "./run/runView.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
@@ -63,7 +67,22 @@ export class GameProjectService extends Context.Service<
      * asking for game status per project.
      */
     readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
-    readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
+    /**
+     * The game folder a thread works in. `deleted: "allowed"` resolves a deleted
+     * chat's too, for a run's finish and restore, which outlive the chat.
+     */
+    readonly resolve: (
+      threadId: ThreadId,
+      options?: { readonly deleted?: "allowed" },
+    ) => Effect.Effect<string, GameOperationError>;
+    /**
+     * How a production run holds this thread's game now: "live", or while its
+     * ending's exports ("finishing") or a restore ("restoring") still work the
+     * folder; null when no run does.
+     */
+    readonly runHold: (
+      threadId: ThreadId,
+    ) => Effect.Effect<"live" | "finishing" | "restoring" | null>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /** Expensive reads (asset usage, viewport, builds). */
     readonly inventory: (root: string) => Effect.Effect<
@@ -77,16 +96,28 @@ export class GameProjectService extends Context.Service<
   }
 >()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
-// The library carries only what a card shows of a live run.
-const liveRun = (run: GameOperations.GameRunLive | null): GameSummary["run"] =>
-  run === null ? null : { step: run.step, startedAt: run.startedAt };
+
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const launches = yield* ThreadLaunchService.ThreadLaunchService;
   const processes = yield* GameProcesses.GameProcesses;
   const operations = yield* GameOperations.GameOperations;
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
   const fileSystem = yield* FileSystem.FileSystem;
+  // The game's run as its records hold it: a card says what a live run is doing.
+  const liveRun = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const run = yield* projections.getProjectGameRun(projectId);
+      if (run === null || run.status === "ended") return null;
+      const records = yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" });
+      const held =
+        records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
+      return {
+        step: currentStep(toState(run, records.gameRunRounds, held)),
+        startedAt: run.startedAt,
+      } satisfies GameSummary["run"];
+    }).pipe(Effect.orElseSucceed(() => null));
   const path = yield* Path.Path;
   /**
    * Every record, lock and cache is keyed by this path, so registration and
@@ -339,19 +370,26 @@ const make = Effect.gen(function* () {
       );
     },
   );
-  const resolve = Effect.fn("GameProjectService.resolve")(function* (threadId: ThreadId) {
-    const thread = yield* threads.getThreadShell(threadId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GameOperationError({
-            operation: "resolve-thread",
-            path: threadId,
-            reason: "project-not-found",
-            cause,
-          }),
-      ),
-    );
-    if (!thread || thread.deletedAt !== null)
+  const resolve = Effect.fn("GameProjectService.resolve")(function* (
+    threadId: ThreadId,
+    options: { readonly deleted?: "allowed" } = {},
+  ) {
+    const unresolved = (cause: unknown) =>
+      new GameOperationError({
+        operation: "resolve-thread",
+        path: threadId,
+        reason: "project-not-found",
+        cause,
+      });
+    // A deleted thread has no shell; its record still names its project and checkout.
+    const thread =
+      options.deleted === "allowed"
+        ? yield* threads.getThreadRecords(threadId, []).pipe(
+            Effect.map(({ thread: record }) => record),
+            Effect.mapError(unresolved),
+          )
+        : yield* threads.getThreadShell(threadId).pipe(Effect.mapError(unresolved));
+    if (!thread || (thread.deletedAt !== null && options.deleted !== "allowed"))
       return yield* new GameOperationError({
         operation: "resolve-thread",
         path: threadId,
@@ -383,6 +421,23 @@ const make = Effect.gen(function* () {
   });
 
   return GameProjectService.of({
+    runHold: (threadId) =>
+      threads.getThreadShell(threadId).pipe(
+        Effect.flatMap((shell) =>
+          shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
+        ),
+        Effect.map((run) => {
+          if (run === null) return null;
+          if (run.status !== "ended") return "live" as const;
+          const busy = settling(run);
+          if (busy === null || !Result.isFailure(busy)) return null;
+          return busy.failure.reason === "restoring"
+            ? ("restoring" as const)
+            : ("finishing" as const);
+        }),
+        // Unknown is held: a read that fails never lets a Stop game reach the run's work.
+        Effect.orElseSucceed(() => "live" as const),
+      ),
     create,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
@@ -445,7 +500,7 @@ const make = Effect.gen(function* () {
                 currentOperation === null
                   ? null
                   : { name: currentOperation.name, state: currentOperation.state },
-              run: liveRun(operations.run(root)),
+              run: yield* liveRun(project.id),
               keyArt,
               updatedAt: latestGameActivity(
                 project.updatedAt,

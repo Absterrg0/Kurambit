@@ -3,7 +3,7 @@ import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
-import { GameRunProfile } from "./gameRun.ts";
+import { GameRunErrorReason, GameRunProfile } from "./gameRun.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -194,8 +194,12 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "source-changed",
       "unsafe-archive",
       "symlink",
+      /** The operation was cancelled: a turn ended, a stop, a newer request. */
+      "cancelled",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+    /** A production run's own reason, when the failure was the run's. */
+    runReason: Schema.optionalKey(GameRunErrorReason),
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
@@ -237,6 +241,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The source changed: this library pack no longer matches the SHA-256 it was pinned with, so its bytes were not used. Pick another pack.",
       "unsafe-archive":
         "This library pack names an unsafe path or link, or unpacks past the size limits, so nothing from it was kept. Pick another pack.",
+      cancelled:
+        "The operation was cancelled before it finished (a turn ended, a stop, or a newer request). Retry it if it is still wanted.",
     };
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
@@ -248,6 +254,7 @@ export const GameOperationFailure = Schema.Struct({
   path: GameOperationError.fields.path,
   reason: GameOperationError.fields.reason,
   detail: GameOperationError.fields.detail,
+  runReason: GameOperationError.fields.runReason,
   message: Schema.String,
 });
 /** Where a game tool was found, in detection order. `kurambit` is a copy an earlier Kurambit installed. */
@@ -427,6 +434,8 @@ export const GameStatus = Schema.Struct({
       message: Schema.String,
       /** When the operation started, so clients can show elapsed time honestly. */
       at: Schema.String,
+      /** The revision of the push that last changed it: later news has a higher one. */
+      revision: Schema.Number,
     }),
   ),
 });

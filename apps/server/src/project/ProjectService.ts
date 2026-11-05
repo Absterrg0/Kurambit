@@ -29,6 +29,7 @@ import {
 } from "../orchestration-v2/ProjectCommands.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
+import { planDeletedChatRunStop } from "../orchestration-v2/gameRun/plan.ts";
 import { planThreadDeletion } from "../orchestration-v2/ThreadDeletion.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
@@ -412,6 +413,12 @@ export const make = Effect.gen(function* () {
       commandId: CommandId.make(`${input.commandId}:delete-thread:${threadId}`),
       threadId,
     };
+    // The thread.delete command's own stop: a chat's run stops in the commit
+    // that deletes it, whether the chat or its whole project is deleted.
+    const runStop = yield* planDeletedChatRunStop(
+      { projections: threadProjections, idAllocator },
+      command,
+    );
     const now = yield* DateTime.now;
     const plan = yield* planThreadDeletion({
       command,
@@ -425,8 +432,11 @@ export const make = Effect.gen(function* () {
       commandType: command.type,
       threadId,
       acceptedAt: now,
-      events: plan.events,
-      effects: plan.effects,
+      events: [...runStop.events, ...plan.events],
+      effects: [...runStop.effects, ...plan.effects],
+      ...(runStop.cancelUnsettledEffects === undefined
+        ? {}
+        : { cancelUnsettledEffects: runStop.cancelUnsettledEffects }),
     });
     if (
       committed.receipt.threadId !== command.threadId ||

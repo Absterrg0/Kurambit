@@ -711,6 +711,16 @@ function OpenCommandPaletteDialog(props: {
   // commands where the workspace has a game.
   const isGameThread = useIsGameThread(activeThreadRef);
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
+  const runStart = useAtomCommand(gameEnvironment.runStart, { reportFailure: false });
+  const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
+  const gameRun = useEnvironmentQuery(
+    isGameThread && activeThreadRef !== null
+      ? gameEnvironment.runStatus({
+          environmentId: activeThreadRef.environmentId,
+          input: { threadId: activeThreadRef.threadId },
+        })
+      : null,
+  ).data;
 
   const activeThreadReferenceCopyTarget =
     activeThread === null
@@ -1513,6 +1523,49 @@ function OpenCommandPaletteDialog(props: {
         },
       },
     );
+    if (gameRun?.active === true)
+      actionItems.push({
+        kind: "action",
+        value: "action:game-run-stop",
+        title: "Stop production run",
+        searchTerms: ["stop", "run", "production", "game"],
+        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          const result = await runStop({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        },
+      });
+    else {
+      if (gameRun?.resumable === true)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-run-resume",
+          title: "Resume production run",
+          searchTerms: ["resume", "continue", "run", "production", "game"],
+          icon: <PlayIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            const result = await runStart({
+              environmentId: threadRef.environmentId,
+              input: { threadId: threadRef.threadId, brief: "" },
+            });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          },
+        });
+      // A new run needs the creator's brief, which the Run tab takes.
+      actionItems.push({
+        kind: "action",
+        value: "action:game-run-start",
+        title: "Start production run…",
+        searchTerms: ["start", "new", "run", "production", "brief", "game"],
+        icon: <PlayIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          useGameWorkspaceStore.getState().showStageTab("run");
+        },
+      });
+    }
   }
   for (const [mode, title] of [
     ["create", "New game"],

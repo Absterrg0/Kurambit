@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
+import * as Schema from "effect/Schema";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -12,6 +13,7 @@ import {
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import {
   GAME_RUN_STAGES,
+  GameOperationError,
   gameRunRoleLabel,
   type GameRunDecision,
   type GameRunProfile,
@@ -36,7 +38,7 @@ import { useEnvironmentProviders } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { cn } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -50,6 +52,8 @@ import { GameRunPickRow, GameRunRoundRow } from "./GameRunRounds";
 import { GAME_RUN_PROFILE_HINT, GameRunProfileToggle } from "./GameRunProfileToggle";
 import { formatRunDuration, groupRoleThreads } from "./gameRunView.logic";
 import { useGameLibrary } from "./useGameLibrary";
+
+const isGameOperationError = Schema.is(GameOperationError);
 
 /** The smallest working surface for a production run: start, status, steer, stop. */
 export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
@@ -71,6 +75,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const runProfile = useAtomCommand(gameEnvironment.runProfile, { reportFailure: false });
   const [startProfile, setStartProfile] = useState<GameRunProfile | null>(null);
   const [note, setNote] = useState("");
+  const steerKey = useRef<{ readonly text: string; readonly id: string } | null>(null);
   const [steerMessage, setSteerMessage] = useState<string | null>(null);
   // What the last start did, in one line (a resume, a fresh run, an earlier run not carried over).
   const [startMessage, setStartMessage] = useState<string | null>(null);
@@ -95,8 +100,8 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const game = useGameLibrary().games.find((entry) => entry.projectId === shell?.projectId) ?? null;
   const startedAt = status?.startedAt == null ? Number.NaN : Date.parse(status.startedAt);
 
-  // A run record that is not live can be resumed without a new brief.
-  const resumable = status !== null && status.runId !== null && status.ending !== "ready";
+  // The server says whether the run continues without a new brief.
+  const resumable = status?.resumable === true;
   // A resume keeps the run's own profile unless the creator picks another; a new run is Guided.
   const profile = startProfile ?? (resumable ? status.profile : null) ?? "guided";
   const start = async () => {
@@ -138,18 +143,27 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     else statusQuery.refresh();
   };
   const steer = async () => {
-    if (busy || note.trim().length === 0) return;
+    const text = note.trim();
+    if (busy || text.length === 0) return;
+    // Sending the same note again after a failure is a retry of the same
+    // command, so a note that did land is not added twice.
+    if (steerKey.current?.text !== text) steerKey.current = { text, id: randomUUID() };
     setBusy(true);
     setError(null);
     const result = await runSteer({
       environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, text: note.trim() },
+      input: { threadId: threadRef.threadId, text, commandId: steerKey.current.id },
     });
     setBusy(false);
     if (result._tag === "Failure") {
-      setError(String(squashAtomCommandFailure(result)));
+      const failure = squashAtomCommandFailure(result);
+      // The run refused the note ("finishing… try again"): that answer is its
+      // receipt, so a retry must be a new command to be taken at all.
+      if (isGameOperationError(failure) && failure.runReason !== undefined) steerKey.current = null;
+      setError(String(failure));
       return;
     }
+    steerKey.current = null;
     setNote("");
     setSteerMessage(result.value.message);
     statusQuery.refresh();

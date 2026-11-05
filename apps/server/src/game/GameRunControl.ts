@@ -9,6 +9,7 @@ import {
   type GameCreateInput,
   type GameProjectResult,
   type GameRunChecksResult,
+  type GameRun,
   type GameRunDecideInput,
   type GameRunDecideResult,
   GameRunId,
@@ -28,24 +29,27 @@ import {
   type OrchestrationV2GameRunCommand,
   type ThreadId,
   GameOperationError,
+  GameRunErrorReason,
 } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as Stream from "effect/Stream";
 
-import { toState } from "../orchestration-v2/gameRun/decide.ts";
+import { RESUMABLE, settling, toState } from "../orchestration-v2/gameRun/decide.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { withRoleGroups } from "./run/roleGroup.ts";
 import * as GameService from "./GameService.ts";
 import { runStateChecks } from "./run/checkRunner.ts";
 import { presentable } from "./run/decisionEvidence.ts";
-import { makeGit, restoredPaths } from "./run/git.ts";
+import { makeGit } from "./run/git.ts";
 import { roleAt, roleTurns } from "./run/GameRunRoleReactor.ts";
-import * as Policy from "./run/policy.ts";
 import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
 import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { DECISION_LABEL, currentStep, decisionOf, selectionFor, steerWhen } from "./run/runView.ts";
@@ -54,12 +58,27 @@ import { ensureScaffold, logLine } from "./runSetup.ts";
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
   operation: Schema.String,
   path: Schema.String,
-  reason: Schema.String,
+  reason: GameRunErrorReason,
   detail: Schema.optionalKey(Schema.String),
   cause: Schema.optionalKey(Schema.Defect()),
 }) {
   override get message(): string {
     return this.detail ?? `Game run ${this.operation} failed (${this.reason}).`;
+  }
+
+  /** The one way a run failure reaches agents and the UI: the game error, with the run's reason. */
+  static toOperationError(operation: string, cause: GameRunError): GameOperationError {
+    return new GameOperationError({
+      operation,
+      path: cause.path,
+      reason:
+        cause.reason === "brief-required" || cause.reason === "empty-note"
+          ? "invalid-input"
+          : "command-failed",
+      detail: cause.message,
+      runReason: cause.reason,
+      cause,
+    });
   }
 }
 
@@ -73,12 +92,20 @@ type Service = {
     input: GameCreateInput,
   ) => Effect.Effect<typeof GameProjectResult.Type, GameOperationError>;
   readonly runStatus: (threadId: ThreadId) => Fails<GameRunStatusResult>;
-  readonly runStop: (threadId: ThreadId) => Fails<GameRunStopResult>;
+  readonly runStop: (threadId: ThreadId, commandId?: string) => Fails<GameRunStopResult>;
   /** The creator's answer to the decision the live run waits on; refused when it does not fit. */
   readonly runDecide: (input: GameRunDecideInput) => Fails<GameRunDecideResult>;
-  readonly runProfile: (threadId: ThreadId, profile: GameRunProfile) => Fails<GameRunProfileResult>;
+  readonly runProfile: (
+    threadId: ThreadId,
+    profile: GameRunProfile,
+    commandId?: string,
+  ) => Fails<GameRunProfileResult>;
   /** A creator note for the run's next round; on a finished run it buys one round. */
-  readonly runSteer: (threadId: ThreadId, text: string) => Fails<GameRunSteerResult>;
+  readonly runSteer: (
+    threadId: ThreadId,
+    text: string,
+    commandId?: string,
+  ) => Fails<GameRunSteerResult>;
   /** Scores the open rung's state checks on the build in the game root now. */
   readonly runChecks: (threadId: ThreadId) => Fails<GameRunChecksResult>;
   /** One round's evidence; `videoFile` and `sheetFiles` are files the transport may sign. */
@@ -110,17 +137,11 @@ export class GameRunControl extends Context.Service<GameRunControl, Service>()(
   "kurambit/game/GameRunControl",
 ) {}
 
-const RESUMABLE: ReadonlySet<string> = new Set([
-  "budget",
-  "usage-limit",
-  "provider-down",
-  "low-memory",
-  "stopped",
-  "failed",
-]);
-
-const runError = (operation: string, path: string, reason: string, detail: string) =>
+const runError = (operation: string, path: string, reason: GameRunErrorReason, detail: string) =>
   new GameRunError({ operation, path, reason, detail });
+
+// A restore moves files and may build nothing; past this the caller reads the run's status.
+const RESTORE_WAIT = "5 minutes";
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
@@ -128,10 +149,16 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* GameProjectService.GameProjectService;
   const game = yield* GameService.GameService;
-  // Games whose tree a restore is moving; a run cannot start or resume under one.
-  const restoring = new Set<string>();
 
-  const resolveGame = Effect.fn("GameRunControl.resolveGame")(function* (threadId: ThreadId) {
+  /**
+   * The caller's game: its folder, and the thread its run lives on. The folder
+   * is the project's, so every chat of the game reaches the same run; a thread
+   * the run launched for a role reaches none of the run's controls.
+   */
+  const resolveGame = Effect.fn("GameRunControl.resolveGame")(function* (
+    threadId: ThreadId,
+    options: { readonly role?: "allowed" } = {},
+  ) {
     const root = yield* projects
       .resolve(threadId)
       .pipe(
@@ -142,7 +169,26 @@ const make = Effect.gen(function* () {
     const shell = yield* threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null));
     if (shell === null || shell.deletedAt !== null)
       return yield* runError("resolve-game", threadId, "project-not-found", "The thread is gone.");
-    return { root, projectId: shell.projectId };
+    if (options.role !== "allowed") {
+      // Fails closed: a thread whose record cannot be read reaches no run control.
+      const launched = yield* threads.getThreadRecords(threadId, []).pipe(
+        Effect.map(({ thread }) => thread.launchedBy === "game_run"),
+        Effect.mapError((cause) =>
+          runError("resolve-game", threadId, "thread-read", String(cause.message)),
+        ),
+      );
+      if (launched)
+        return yield* runError(
+          "resolve-game",
+          threadId,
+          "role-thread",
+          "This thread is one of the production run's roles; the run's controls belong to the game's chat.",
+        );
+    }
+    const projectRun = yield* projections
+      .getProjectGameRun(shell.projectId)
+      .pipe(Effect.orElseSucceed(() => null));
+    return { root, projectId: shell.projectId, runThread: projectRun?.threadId ?? threadId };
   });
 
   const recordsOf = (threadId: ThreadId) =>
@@ -154,9 +200,13 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  /** The thread's latest run as the policy sees it, with its step in flight. */
-  const latestOf = (threadId: ThreadId) =>
-    Effect.map(recordsOf(threadId), (records) => {
+  /** The game's latest run as the policy sees it, with its step in flight. */
+  const latestOf = (callerThreadId: ThreadId) =>
+    Effect.flatMap(resolveGame(callerThreadId), ({ runThread }) => recordsOf(runThread)).pipe(
+      Effect.flatMap((records) => recordsView(records)),
+    );
+  const recordsView = (records: ProjectionStore.GameRunThreadRecords) =>
+    Effect.sync(() => {
       const run = records.gameRuns.at(-1) ?? null;
       const inFlight =
         run === null
@@ -183,19 +233,25 @@ const make = Effect.gen(function* () {
           : runError(operation, command.threadId, "command-failed", cause.message),
       ),
     );
-  const commandId = () => CommandId.make(`server:game-run:${NodeCrypto.randomUUID()}`);
+  // A caller's own id makes its retry the same command; the orchestrator's
+  // receipt answers it without applying it again. Receipts are global, so the
+  // id is scoped to the run it acts on: the same id from another game or a
+  // later run is a command of its own, never an earlier receipt's answer.
+  const commandId = (
+    kind?: string,
+    given?: string,
+    scope?: { readonly thread: ThreadId; readonly run: GameRun | null },
+  ) =>
+    CommandId.make(
+      given === undefined || kind === undefined || scope === undefined
+        ? `server:game-run:${NodeCrypto.randomUUID()}`
+        : `client:${kind}:${scope.thread}:${scope.run?.id ?? "new"}:${given}`,
+    );
 
   const runStart: Service["runStart"] = Effect.fn("GameRunControl.runStart")(function* (
     input: GameRunStartInput,
   ) {
-    const { root } = yield* resolveGame(input.threadId);
-    if (restoring.has(root))
-      return yield* runError(
-        "run-start",
-        root,
-        "restoring",
-        "A round is being restored for this game. Start the run once it finishes.",
-      );
+    const { root, runThread } = yield* resolveGame(input.threadId);
     const { run } = yield* latestOf(input.threadId);
     if (run !== null && run.status !== "ended")
       return {
@@ -205,6 +261,16 @@ const make = Effect.gen(function* () {
         resumed: true,
         message: `The run is already going (${run.stage}); watch it on the Run tab.`,
       } satisfies GameRunStartResult;
+    // An ending still exporting or a restore still moving the folder owns it:
+    // refuse before the scaffold below writes there, not after, at the decider.
+    const busy = run === null ? null : settling(run);
+    if (busy !== null && Result.isFailure(busy))
+      return yield* runError(
+        "run-start",
+        input.threadId,
+        busy.failure.reason,
+        busy.failure.message,
+      );
     const manifest = yield* projects.read(root).pipe(Effect.option);
     const lane = Option.isSome(manifest) ? manifest.value.godotProject : "godot";
     const projection = yield* threads
@@ -229,8 +295,8 @@ const make = Effect.gen(function* () {
       yield* ensureScaffold(root, lane, git.untrack, false);
       yield* dispatch("run-start", {
         type: "game-run.resume",
-        commandId: commandId(),
-        threadId: input.threadId,
+        commandId: commandId("game-run.start", input.commandId, { thread: run.threadId, run }),
+        threadId: run.threadId,
         runId: run.id,
         ...(budgetMinutes === undefined ? {} : { budgetMinutes }),
         ...(input.profile === undefined ? {} : { profile: input.profile }),
@@ -272,8 +338,8 @@ const make = Effect.gen(function* () {
     yield* ensureScaffold(root, lane, git.untrack, true);
     yield* dispatch("run-start", {
       type: "game-run.start",
-      commandId: commandId(),
-      threadId: input.threadId,
+      commandId: commandId("game-run.start", input.commandId, { thread: runThread, run }),
+      threadId: runThread,
       runId,
       lane,
       brief,
@@ -308,7 +374,7 @@ const make = Effect.gen(function* () {
     runId: string,
   ): GameRunThreadRef[] => {
     const seen = new Set<string>();
-    return records.gameRunSteps.flatMap((step) =>
+    const refs = records.gameRunSteps.flatMap((step) =>
       step.runId !== runId
         ? []
         : step.roles.flatMap((entry) => {
@@ -323,6 +389,7 @@ const make = Effect.gen(function* () {
             ];
           }),
     );
+    return withRoleGroups(refs);
   };
 
   const runStatus: Service["runStatus"] = Effect.fn("GameRunControl.runStatus")(function* (
@@ -347,6 +414,7 @@ const make = Effect.gen(function* () {
         steer: [],
         threads: [],
         message: "No run recorded for this game.",
+        resumable: false,
       } satisfies GameRunStatusResult;
     const running = run.status !== "ended";
     const shown = running ? decisionOf(root, state) : null;
@@ -402,11 +470,13 @@ const make = Effect.gen(function* () {
         : run.status === "waiting" && state.inFlight?.kind === "decide"
           ? `Waiting for the creator's answer on ${DECISION_LABEL[state.inFlight.decision.kind]}; answer in the game's chat.`
           : `${step ?? run.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`,
+      resumable: !running && run.ending !== null && RESUMABLE.has(run.ending),
     } satisfies GameRunStatusResult;
   });
 
   const runStop: Service["runStop"] = Effect.fn("GameRunControl.runStop")(function* (
     threadId: ThreadId,
+    given?: string,
   ) {
     yield* resolveGame(threadId);
     const { run } = yield* latestOf(threadId);
@@ -414,8 +484,8 @@ const make = Effect.gen(function* () {
       return { stopped: false, message: "No live run for this game." } satisfies GameRunStopResult;
     yield* dispatch("run-stop", {
       type: "game-run.stop",
-      commandId: commandId(),
-      threadId,
+      commandId: commandId("game-run.stop", given, { thread: run.threadId, run }),
+      threadId: run.threadId,
       runId: run.id,
       reason: "stopped by the creator",
     });
@@ -443,8 +513,8 @@ const make = Effect.gen(function* () {
     );
     yield* dispatch("run-decide", {
       type: "game-run.decide",
-      commandId: commandId(),
-      threadId: input.threadId,
+      commandId: commandId("game-run.decide", input.commandId, { thread: run.threadId, run }),
+      threadId: run.threadId,
       runId: run.id,
       decisionId: input.decisionId,
       answer: input.answer,
@@ -469,6 +539,7 @@ const make = Effect.gen(function* () {
   const runProfile: Service["runProfile"] = Effect.fn("GameRunControl.runProfile")(function* (
     threadId: ThreadId,
     profile: GameRunProfile,
+    given?: string,
   ) {
     const run = yield* liveRun(
       "run-profile",
@@ -477,8 +548,8 @@ const make = Effect.gen(function* () {
     );
     yield* dispatch("run-profile", {
       type: "game-run.profile.set",
-      commandId: commandId(),
-      threadId,
+      commandId: commandId("game-run.profile.set", given, { thread: run.threadId, run }),
+      threadId: run.threadId,
       runId: run.id,
       profile,
     });
@@ -494,6 +565,7 @@ const make = Effect.gen(function* () {
   const runSteer: Service["runSteer"] = Effect.fn("GameRunControl.runSteer")(function* (
     threadId: ThreadId,
     text: string,
+    given?: string,
   ) {
     const { root } = yield* resolveGame(threadId);
     const note = text.trim().slice(0, 4000);
@@ -509,8 +581,8 @@ const make = Effect.gen(function* () {
       );
     yield* dispatch("run-steer", {
       type: "game-run.steer",
-      commandId: commandId(),
-      threadId,
+      commandId: commandId("game-run.steer", given, { thread: run.threadId, run }),
+      threadId: run.threadId,
       runId: run.id,
       note,
     });
@@ -533,8 +605,10 @@ const make = Effect.gen(function* () {
   const runChecks: Service["runChecks"] = Effect.fn("GameRunControl.runChecks")(function* (
     threadId: ThreadId,
   ) {
-    const { root } = yield* resolveGame(threadId);
-    const { state } = yield* latestOf(threadId);
+    // The run's builder scores its rung in its own folder (its worktree, when it
+    // has one), against the rung the run's records hold open.
+    const { root, runThread } = yield* resolveGame(threadId, { role: "allowed" });
+    const { state } = yield* recordsOf(runThread).pipe(Effect.flatMap(recordsView));
     const ladder = state?.ladder ?? null;
     // The rung the round in progress builds, else the next open one.
     const building =
@@ -626,120 +700,72 @@ const make = Effect.gen(function* () {
     return evidence;
   });
 
-  // A kept round's restore; the restored build becomes
-  // the run's judged best, so a resumed run compares its next round with it.
-  const restoreRound: Service["restoreRound"] = (threadId, round) =>
-    Effect.flatMap(resolveGame(threadId), ({ root }) =>
-      // Checked and claimed with no yield between, like a run's start.
-      restoring.has(root)
-        ? Effect.fail(
-            runError(
-              "run-restore",
-              root,
-              "restoring",
-              "A round is being restored for this game already.",
-            ),
-          )
-        : Effect.suspend(() => {
-            restoring.add(root);
-            return restoreClaimed(threadId, round).pipe(
-              Effect.ensuring(Effect.sync(() => restoring.delete(root))),
-            );
-          }),
-    );
-  const restoreClaimed = Effect.fn("GameRunControl.restoreRound")(
-    function* (threadId: ThreadId, round: number) {
-      const found = yield* findRound("run-restore", threadId, round);
-      const { root, run, state, record, trunk, lane } = found;
-      const no = (reason: string, detail: string) => runError("run-restore", root, reason, detail);
-      if (run.status !== "ended")
-        return yield* no(
-          "run-live",
-          "A production run is live for this game. Stop it before restoring a round.",
-        );
-      if (!record.kept)
-        return yield* no(
-          "not-kept",
-          `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. Its work stays on branch ${record.branch}.`,
-        );
-      const resumable = run.ending !== null && RESUMABLE.has(run.ending);
-      if (state.inFlight?.kind === "git" && resumable)
-        return yield* no(
-          "mid-step",
-          "The stopped run saved an unfinished git step and would replay it on resume. Resume the run and let that step finish, then restore.",
-        );
-      const log = (line: string) => logLine(root, line);
-      const git = makeGit(root, lane, log);
-      const on = yield* git.current;
-      if (on !== trunk)
-        return yield* no(
-          "off-trunk",
-          `The game is on ${on === "HEAD" || on === "" ? "a detached commit" : `branch ${on}`}, not ${trunk}. Resume the run to let it return to ${trunk}, or switch back yourself, then restore.`,
-        );
-      const expected = Policy.expectedBranch(state);
-      if (expected !== null && expected !== trunk && resumable)
-        return yield* no(
-          "mid-round",
-          `The stopped run is in the middle of its work on ${expected}. Resume it and let the round finish, then restore.`,
-        );
-      const dirty = yield* git.uncommitted;
-      if (dirty.length > 0)
-        return yield* no(
-          "uncommitted-work",
-          `The game has uncommitted changes, so nothing was restored: ${git.summary(dirty.join("\n"))}. Commit or discard them first.`,
-        );
-      const sha = yield* git.keptCommit(record.branch, trunk);
-      if (sha === null)
-        return yield* no(
-          "commit-missing",
-          `Round ${round}'s commit (branch ${record.branch}) is no longer on ${trunk}.`,
-        );
-      const what = restoredPaths(lane).join(", ");
-      if (yield* git.sameBuild(sha))
-        return {
-          sha,
-          message: `Round ${round}'s build (${what}) is already the game's current build.`,
-        } satisfies GameRunRestoreResult;
-      // Closed first, so no live editor saves its in-memory scene over the restored files.
-      yield* game.closeLiveEditors(root);
-      const restored = yield* git.restoreBuild(sha, `restore round ${round} (creator)`);
-      if (!(yield* git.sameBuild(sha)))
-        return yield* no(
-          "restore-incomplete",
-          `Restoring round ${round} did not reproduce its build; see .studio/run.log and the game's git status.`,
-        );
-      yield* dispatch("run-restore", {
-        type: "game-run.restore",
-        commandId: commandId(),
-        threadId,
-        runId: run.id,
-        best: restored,
-      });
-      yield* log(
-        `creator restored round ${round} (${sha.slice(0, 8)}) as ${restored.slice(0, 8)} on ${trunk}: ${what}`,
+  // A kept round's restore, command first: the run records the request and
+  // holds every start, resume and steer until its job lands the outcome, so
+  // the folder is never moved under a run. The caller waits for that outcome.
+  const restoreRound: Service["restoreRound"] = Effect.fn("GameRunControl.restoreRound")(function* (
+    threadId: ThreadId,
+    round: number,
+  ) {
+    const found = yield* findRound("run-restore", threadId, round);
+    const { root, run, record } = found;
+    if (!record.kept)
+      return yield* runError(
+        "run-restore",
+        root,
+        "not-kept",
+        `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. Its work stays on branch ${record.branch}.`,
       );
-      return {
-        sha: restored,
-        message: `Round ${round}'s ${what} are back as commit ${restored.slice(0, 8)} on ${trunk}; notes, PLAN.md, VISION.md, bots and run records were left as they are. Later commits stay in git history, and restoring a later kept round goes forward again.`,
-      } satisfies GameRunRestoreResult;
-    },
-    (effect, threadId) =>
-      effect.pipe(
-        Effect.catchTags({
-          RunGitError: (cause) =>
-            Effect.fail(
-              runError(
-                "run-restore",
-                threadId,
-                cause.op === "restore-apply" ? "local-changes" : "git-failed",
-                cause.op === "restore-apply"
-                  ? `Nothing was restored: git refused to apply it (${cause.reason}). Usually a change made meanwhile touches a restored file, or another git command is running; commit or discard the change, then restore again.`
-                  : `${cause.message} See .studio/run.log and the game's git status.`,
-              ),
-            ),
-        }),
-      ),
-  );
+    const requestId = NodeCrypto.randomUUID();
+    const unreadable = (cause: { readonly message: string }) =>
+      runError("run-restore", root, "records-unreadable", cause.message);
+    // Taken before the request, so its outcome cannot land unseen.
+    const after = yield* engine
+      .getThreadEventSequence(run.threadId)
+      .pipe(Effect.mapError(unreadable));
+    yield* dispatch("run-restore", {
+      type: "game-run.restore.request",
+      commandId: commandId(),
+      threadId: run.threadId,
+      runId: run.id,
+      requestId,
+      round,
+    });
+    const landed = yield* engine
+      .streamStoredEventsFrom({
+        threadId: run.threadId,
+        afterSequence: after,
+        eventType: "game-run.updated",
+      })
+      .pipe(
+        Stream.map(({ event }) =>
+          event.type === "game-run.updated" && event.payload.restore?.requestId === requestId
+            ? event.payload.restore.outcome
+            : null,
+        ),
+        Stream.filter((outcome) => outcome !== null),
+        Stream.runHead,
+        Effect.timeoutOption(RESTORE_WAIT),
+        Effect.map(Option.flatten),
+        Effect.mapError(unreadable),
+      );
+    if (Option.isNone(landed))
+      return yield* runError(
+        "run-restore",
+        root,
+        "restoring",
+        "The restore is still moving the game folder; game_run_status shows when it is done.",
+      );
+    const outcome = landed.value;
+    if (outcome === null || outcome.kind === "refused")
+      return yield* runError(
+        "run-restore",
+        root,
+        outcome?.reason ?? "restore-incomplete",
+        outcome?.message ?? "The restore left no outcome.",
+      );
+    return { sha: outcome.sha, message: outcome.message } satisfies GameRunRestoreResult;
+  });
 
   const createGame: Service["createGame"] = Effect.fn("GameRunControl.createGame")(function* (
     input: GameCreateInput,
@@ -807,13 +833,3 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(GameRunControl, make);
-
-/** The submission tool's failure, in the toolkit's error shape. */
-export const submitFailure = (cause: GameRunError) =>
-  new GameOperationError({
-    operation: "game-run-submit",
-    path: cause.path,
-    reason: "invalid-input",
-    detail: cause.message,
-    cause,
-  });

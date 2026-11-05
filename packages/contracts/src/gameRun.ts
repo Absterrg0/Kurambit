@@ -14,8 +14,14 @@ export type GameRunProfile = typeof GameRunProfile.Type;
 export const GameRunDecisionKind = Schema.Literals(["style", "prototype", "ladder"]);
 export type GameRunDecisionKind = typeof GameRunDecisionKind.Type;
 
+/** The caller's id for one request: a retry with the same id is the same command, applied once. */
+export const GameRunCommandKey = Schema.optionalKey(
+  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+);
+
 export const GameRunStartInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   /** Required for a new run; empty resumes a stopped run with its own brief. */
   brief: Schema.String.check(Schema.isMaxLength(8000)),
   artDirection: Schema.optionalKey(Schema.String),
@@ -45,6 +51,8 @@ export type GameRunStatusInput = typeof GameRunStatusInput.Type;
 
 export const GameRunThreadRef = Schema.Struct({
   role: Schema.String,
+  /** The run stage or round the role ran in ("Vision", "Blind pick", "Round 2"), for grouping. */
+  group: Schema.String,
   threadId: Schema.String,
   startedAt: Schema.String,
 });
@@ -161,6 +169,8 @@ export type GameRunDecision = typeof GameRunDecision.Type;
 
 export const GameRunStatusResult = Schema.Struct({
   active: Schema.Boolean,
+  /** The run ended where game-run.resume continues it: a start without a new brief resumes it. */
+  resumable: Schema.Boolean,
   runId: Schema.NullOr(Schema.String),
   /** Null when no run is recorded. */
   profile: Schema.NullOr(GameRunProfile),
@@ -315,7 +325,7 @@ export const GameRunRestoreResult = Schema.Struct({
 });
 export type GameRunRestoreResult = typeof GameRunRestoreResult.Type;
 
-export const GameRunStopInput = Schema.Struct({ threadId: ThreadId });
+export const GameRunStopInput = Schema.Struct({ threadId: ThreadId, commandId: GameRunCommandKey });
 export type GameRunStopInput = typeof GameRunStopInput.Type;
 
 export const GameRunStopResult = Schema.Struct({
@@ -326,6 +336,7 @@ export type GameRunStopResult = typeof GameRunStopResult.Type;
 
 export const GameRunSteerInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
 });
 export type GameRunSteerInput = typeof GameRunSteerInput.Type;
@@ -358,6 +369,7 @@ export type GameRunChecksResult = typeof GameRunChecksResult.Type;
 
 export const GameRunDecideInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   decisionId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   answer: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   notes: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20_000))),
@@ -369,6 +381,7 @@ export type GameRunDecideResult = typeof GameRunDecideResult.Type;
 
 export const GameRunProfileInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   profile: GameRunProfile,
 });
 export type GameRunProfileInput = typeof GameRunProfileInput.Type;
@@ -510,3 +523,62 @@ export const GameRunSubmitInput = Schema.Struct({ submission: GameRunSubmission 
 export type GameRunSubmitInput = typeof GameRunSubmitInput.Type;
 export const GameRunSubmitResult = Schema.Struct({ message: Schema.String });
 export type GameRunSubmitResult = typeof GameRunSubmitResult.Type;
+
+/** Why a game-run command was refused; a tool hands the message back in-turn. */
+export const GameRunRefusalReason = Schema.Literals([
+  "no-run",
+  "run-live",
+  "run-ended",
+  "not-resumable",
+  "stale-run",
+  "stale-step",
+  "wrong-thread",
+  "wrong-kind",
+  "invalid-submission",
+  "stale-attempt",
+  "no-decision",
+  "stale-decision",
+  "invalid-answer",
+  "not-due",
+  /** The run's ending is still being finished (stops, outputs, exports). */
+  "finishing",
+  /** A creator's restore of a kept round is moving the game folder. */
+  "restoring",
+]);
+export type GameRunRefusalReason = typeof GameRunRefusalReason.Type;
+
+/** Why a restore left the game folder as it was. */
+export const GameRunRestoreRefusal = Schema.Literals([
+  "round-not-found",
+  "not-kept",
+  "mid-step",
+  "off-trunk",
+  "mid-round",
+  "uncommitted-work",
+  "commit-missing",
+  "restore-incomplete",
+  "local-changes",
+  "git-failed",
+]);
+export type GameRunRestoreRefusal = typeof GameRunRestoreRefusal.Type;
+
+/**
+ * Why a run tool or RPC failed, typed for agents and the UI: the run's own
+ * refusal, a restore's, or what the transport found before the run was asked.
+ */
+export const GameRunErrorReason = Schema.Union([
+  GameRunRefusalReason,
+  GameRunRestoreRefusal,
+  Schema.Literals([
+    "project-not-found",
+    "role-thread",
+    "brief-required",
+    "no-live-run",
+    "empty-note",
+    "records-unreadable",
+    "thread-read",
+    "not-a-role",
+    "command-failed",
+  ]),
+]);
+export type GameRunErrorReason = typeof GameRunErrorReason.Type;

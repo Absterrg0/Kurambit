@@ -26,6 +26,7 @@ import { insideGame } from "./GameProjectService.ts";
 import { findExecutable } from "./GameProcesses.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
 import { requireChromium } from "./gameChromium.ts";
+import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
 import { launchPageBot, launchProcessBot } from "./gameBotLaunch.ts";
 import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
@@ -371,6 +372,7 @@ const buildPlayerReport = async (
 };
 
 const make = Effect.gen(function* () {
+  const processHost = yield* ProcessHost;
   const engines = yield* GameEngine.GameEngine;
   const players = yield* GamePlayer.GamePlayer;
   const projects = yield* GameProjectService.GameProjectService;
@@ -469,7 +471,7 @@ const make = Effect.gen(function* () {
           "tool-missing",
           "ffmpeg is needed for the run video.",
         );
-      const host = isWeb ? null : yield* Effect.promise(() => findWindowHost());
+      const host = isWeb ? null : yield* Effect.promise(() => findWindowHost(processHost));
       if (host === null && !isWeb)
         return yield* opError(
           "Bot run",
@@ -627,6 +629,7 @@ const make = Effect.gen(function* () {
               Effect.tryPromise({
                 try: (signal) =>
                   playBot(jevApi, opened, {
+                    host: processHost,
                     root,
                     runId,
                     runDir,

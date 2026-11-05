@@ -548,6 +548,21 @@ export const layerExecutor: Layer.Layer<
               stepId: effect.request.stepId,
               attempt: effect.request.attempt,
             });
+          case "game-run.step.resend":
+            return gameRunJobs.resend({
+              threadId: effect.threadId,
+              runId: effect.request.runId,
+              stepId: effect.request.stepId,
+              attempt: effect.request.attempt,
+              turn: effect.request.turn,
+              n: effect.request.n,
+            });
+          case "game-run.restore.execute":
+            return gameRunJobs.restore({
+              threadId: effect.threadId,
+              runId: effect.request.runId,
+              requestId: effect.request.requestId,
+            });
           case "game-run.finish":
             return gameRunJobs.finish({
               threadId: effect.threadId,

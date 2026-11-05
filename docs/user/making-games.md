@@ -126,7 +126,7 @@ round on it. The **Ladder** list on the Run tab shows which steps landed, which 
 which were set aside and why; each round shows how many of its checks passed.
 
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this
-round**. The engine project, the art sources under `art/` and `ASSETS.md` return to that build as
+round**, or ask your agent to restore it. The engine project, the art sources under `art/` and `ASSETS.md` return to that build as
 a new commit, so later commits stay in git history, and restoring a later kept round goes forward
 again. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`, bots and the run's records stay as they are. A resumed run judges its next
 round against the restored build. Restore refuses while a run is live, while a stopped run is in
@@ -138,6 +138,11 @@ the run. The round in progress finishes as planned; the next round starts with y
 its ladder step or the reviewer's direction, and the rounds list shows what you asked. A stopped
 run keeps your note for when it continues. When no run is live, your agent works on the game
 directly.
+
+A game has one run at a time: every chat of the game sees and steers the same run, and starting a
+run from another chat continues the one already there. While a run is live, **Stop game** stops
+only your own work on the game; stop the run to stop its builds and players. The command palette
+can also start, resume and stop a game's run.
 
 ## Play and revise
 

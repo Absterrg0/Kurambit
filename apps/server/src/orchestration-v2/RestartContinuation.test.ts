@@ -96,6 +96,8 @@ it("requires matching saved native state for an unfinished root run", () => {
   for (const invalid of [
     { ...projection, thread: { ...projection.thread, archivedAt: {} } },
     { ...projection, thread: { ...projection.thread, deletedAt: {} } },
+    // A production run's role turn is its run's to continue.
+    { ...projection, thread: { ...projection.thread, launchedBy: "game_run" } },
     {
       ...projection,
       thread: { ...projection.thread, providerInstanceId: ProviderInstanceId.make("other") },

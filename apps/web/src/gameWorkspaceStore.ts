@@ -30,6 +30,8 @@ export const clampGameChatWidth = (width: number, workspaceWidth = Number.POSITI
     Math.max(GAME_CHAT_MIN_WIDTH, Math.round(width)),
   );
 
+export type GameStageTab = "play" | "run" | "builds";
+
 interface GameWorkspaceStoreState {
   /** Width of the docked chat column on game threads, in CSS pixels. */
   chatWidth: number;
@@ -39,6 +41,9 @@ interface GameWorkspaceStoreState {
   fitChatWidth: (workspaceWidth: number) => void;
   toggleChat: () => void;
   setChatCollapsed: (collapsed: boolean) => void;
+  /** A tab some other surface (the command palette) asked the game stage to show; not persisted. */
+  stageTabRequest: { readonly tab: GameStageTab; readonly n: number } | null;
+  showStageTab: (tab: GameStageTab) => void;
 }
 
 /**
@@ -62,6 +67,9 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
         }),
       toggleChat: () => set((state) => ({ chatCollapsed: !state.chatCollapsed })),
       setChatCollapsed: (collapsed) => set({ chatCollapsed: collapsed }),
+      stageTabRequest: null,
+      showStageTab: (tab) =>
+        set((state) => ({ stageTabRequest: { tab, n: (state.stageTabRequest?.n ?? 0) + 1 } })),
     }),
     {
       name: "kurambit:game-workspace:v2",

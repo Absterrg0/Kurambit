@@ -44,13 +44,14 @@ import {
   underIdleMemoryFloor,
 } from "./liveProcess.ts";
 import {
-  LAUNCH_ENV,
   adoptLaunch,
-  launchToken,
-  stopRecorded,
+  LAUNCH_ENV,
   type LaunchRecord,
+  launchToken,
   type OwnedProcess,
   type ProcessFacts,
+  ProcessHost,
+  stopRecorded,
 } from "./processHost.ts";
 import { OFFSCREEN_POSITION, findWindowHost, type HostedWindow } from "./windowHost.ts";
 
@@ -350,6 +351,7 @@ export class GameBlender extends Context.Service<
 >()("kurambit/game/GameBlender") {}
 
 const make = Effect.gen(function* () {
+  const processHost = yield* ProcessHost;
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
@@ -478,7 +480,7 @@ const make = Effect.gen(function* () {
       yield* drop(root);
       const uv = yield* resolveUv;
       const blender = yield* tools.executable("blender");
-      const host = yield* Effect.promise(findWindowHost);
+      const host = yield* Effect.promise(() => findWindowHost(processHost));
       if (host === null)
         return yield* opError(
           "blender-live",
@@ -713,7 +715,7 @@ const make = Effect.gen(function* () {
           "The pinned MCP server connected but reported no pid, so it could not be stopped later.",
         );
       }
-      const mcpLaunch = yield* Effect.promise(() => adoptLaunch(mcpPid, mcpToken));
+      const mcpLaunch = yield* Effect.promise(() => adoptLaunch(processHost, mcpPid, mcpToken));
       if (mcpLaunch !== null) yield* remember({ mcpLaunch });
       const startedAt = yield* Clock.currentTimeMillis;
       const session: Session = {

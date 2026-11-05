@@ -10,7 +10,7 @@ import {
   type GameBotPerf,
 } from "@kurambit/contracts";
 import { engineChildEnv } from "./GameProcesses.ts";
-import { runOwned, type OwnedProcess } from "./processHost.ts";
+import { runOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 
 const JEV_MODEL = "jev-latest";
 const JEV_TIMEOUT_MS = 4000;
@@ -370,6 +370,7 @@ export type Jev = ReturnType<typeof makeJev>;
  */
 export const END_FRAME = "frame-end.png";
 export const extractRunFrames = async (
+  host: ProcessHostState,
   ffmpeg: string,
   videoPath: string,
   runDir: string,
@@ -381,7 +382,7 @@ export const extractRunFrames = async (
   const framesDir = NodePath.join(runDir, "frames");
   await NodeFSP.mkdir(framesDir, { recursive: true });
   const runFfmpeg = (args: ReadonlyArray<string>) =>
-    runOwned(ffmpeg, args, { env: headlessEnv(), timeoutMs: 120_000 });
+    runOwned(host, ffmpeg, args, { env: headlessEnv(), timeoutMs: 120_000 });
   await runFfmpeg([
     "-y",
     "-i",

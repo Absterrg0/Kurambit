@@ -36,6 +36,7 @@ import {
   GameRunStatusResult,
   GameRunChecksResult,
   GameRunStartResult,
+  GameRunRestoreResult,
   GameRunStopResult,
   GameRunSteerResult,
   GameRunDecideInput,
@@ -448,11 +449,18 @@ const RunChecksTool = Tool.make("game_run_checks", {
   // The run's builder scores its rung with it; it names no build, so blind roles may see it too.
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 
+const commandId = Schema.optionalKey(
+  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)).annotate({
+    description:
+      "Any id of yours for this request. Pass the same one when you retry a call that may have gone through, so it applies once.",
+  }),
+);
 const RunSteerTool = Tool.make("game_run_steer", {
   description:
     "Pass the creator's request to this game's production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. A run that reached its goal (its ladder done or shipped) comes back for one round on the note, then stops again: this is how the creator asks for polish after the run's goal is met. A stopped or interrupted run keeps the note for when it is resumed with game_run_start. Fails plainly when the game never had a run: then work on the game directly. Say the creator's request in their words, one request per call.",
   parameters: Schema.Struct({
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
+    commandId,
   }),
   success: GameRunSteerResult,
   failure,
@@ -468,6 +476,7 @@ const RunDecideTool = Tool.make("game_run_decide", {
     decisionId: GameRunDecideInput.fields.decisionId,
     answer: GameRunDecideInput.fields.answer,
     notes: GameRunDecideInput.fields.notes,
+    commandId,
   }),
   success: GameRunDecideResult,
   failure,
@@ -483,6 +492,7 @@ const RunStartTool = Tool.make("game_run_start", {
     brief: Schema.String.check(Schema.isMaxLength(8000)),
     budgetMinutes: Schema.optionalKey(Schema.Number),
     profile: Schema.optionalKey(GameRunProfile),
+    commandId,
   }),
   success: GameRunStartResult,
   failure,
@@ -495,7 +505,22 @@ const RunStartTool = Tool.make("game_run_start", {
 const RunStopTool = Tool.make("game_run_stop", {
   description:
     "Stop this game's live production run when the creator asks. The run finishes saving its current step and can be resumed later with game_run_start and an empty brief.",
+  parameters: Schema.Struct({ commandId }),
   success: GameRunStopResult,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+
+const RunRestoreTool = Tool.make("game_run_restore", {
+  description:
+    "Put this game back to a kept round's build when the creator asks: the game folder returns to that round's commit and the run continues from it. Only a kept round, with the game on its main branch, no step or round in progress and no uncommitted work; a restore that does not fit is refused with the reason. game_run_status lists the rounds and which were kept.",
+  parameters: Schema.Struct({
+    round: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  }),
+  success: GameRunRestoreResult,
   failure,
   failureMode: "return",
   dependencies: runDependencies,
@@ -506,7 +531,7 @@ const RunStopTool = Tool.make("game_run_stop", {
 const RunProfileTool = Tool.make("game_run_profile", {
   description:
     "Switch this game's live production run between guided (it asks the creator in this chat at its decision points and takes a default when nobody answers in time) and autopilot (it decides everything itself; a question it is waiting on takes its default now). Only when the creator asks for it.",
-  parameters: Schema.Struct({ profile: GameRunProfile }),
+  parameters: Schema.Struct({ profile: GameRunProfile, commandId }),
   success: GameRunProfileResult,
   failure,
   failureMode: "return",
@@ -563,5 +588,6 @@ export const GameToolkit = Toolkit.make(
   RunStopTool,
   RunDecideTool,
   RunProfileTool,
+  RunRestoreTool,
   RunSubmitTool,
 );

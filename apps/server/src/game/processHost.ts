@@ -19,6 +19,9 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodeUtil from "node:util";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 /**
@@ -333,32 +336,72 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 }
 `;
 
-let jobHelper: NodeChildProcess.ChildProcess | null = null;
-const joinWindowsJob = (pid: number): void => {
-  if (jobHelper === null || jobHelper.exitCode !== null || jobHelper.stdin?.destroyed !== false) {
-    const helper = NodeChildProcess.spawn(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-EncodedCommand",
-        Buffer.from(JOB_HELPER, "utf16le").toString("base64"),
-      ],
-      { stdio: ["pipe", "ignore", "ignore"], windowsHide: true },
-    );
-    helper.on("error", () => undefined);
-    helper.stdin?.on("error", () => undefined);
-    // The helper must never keep the server alive; its pipe closing is its whole job.
-    helper.unref();
-    jobHelper = helper;
-  }
-  // FILETIME (100 ns since 1601) of now, just after the spawn returned, with a
-  // little slack for clock granularity.
-  const notAfter = (BigInt(Date.now() + 50) + 11_644_473_600_000n) * 10_000n;
-  jobHelper.stdin?.write(`${pid} ${notAfter}\n`);
+/**
+ * What one server's launches share: the Windows kill-on-close job its owned
+ * children join, and the private displays it claimed. The server holds one
+ * for its life; closing it ends the job helper, which takes the job's
+ * children with it.
+ */
+export interface ProcessHostState {
+  readonly joinJob: (pid: number) => void;
+  /**
+   * Displays this server picked and has not let go: two launches at once (a
+   * blind comparison's bots on both builds) both see a number free before
+   * either's Xvfb writes its lock, and the second would then share the first's.
+   */
+  readonly displays: Set<number>;
+}
+
+export const makeProcessHost = (): {
+  readonly host: ProcessHostState;
+  readonly close: () => void;
+} => {
+  let jobHelper: NodeChildProcess.ChildProcess | null = null;
+  const joinJob = (pid: number): void => {
+    if (!isWindows) return;
+    if (jobHelper === null || jobHelper.exitCode !== null || jobHelper.stdin?.destroyed !== false) {
+      const helper = NodeChildProcess.spawn(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-EncodedCommand",
+          Buffer.from(JOB_HELPER, "utf16le").toString("base64"),
+        ],
+        { stdio: ["pipe", "ignore", "ignore"], windowsHide: true },
+      );
+      helper.on("error", () => undefined);
+      helper.stdin?.on("error", () => undefined);
+      // The helper must never keep the server alive; its pipe closing is its whole job.
+      helper.unref();
+      jobHelper = helper;
+    }
+    // FILETIME (100 ns since 1601) of now, just after the spawn returned, with a
+    // little slack for clock granularity.
+    const notAfter = (BigInt(Date.now() + 50) + 11_644_473_600_000n) * 10_000n;
+    jobHelper.stdin?.write(`${pid} ${notAfter}\n`);
+  };
+  return {
+    host: { joinJob, displays: new Set() },
+    close: () => {
+      jobHelper?.stdin?.end();
+      jobHelper = null;
+    },
+  };
 };
+
+export class ProcessHost extends Context.Service<ProcessHost, ProcessHostState>()(
+  "kurambit/game/processHost",
+) {}
+
+export const layer = Layer.effect(
+  ProcessHost,
+  Effect.acquireRelease(Effect.sync(makeProcessHost), (made) => Effect.sync(made.close)).pipe(
+    Effect.map((made) => made.host),
+  ),
+);
 
 export interface SpawnOwnedOptions {
   /** The whole child environment; the launch token is added to it. */
@@ -404,6 +447,7 @@ export interface OwnedProcess {
 
 /** Starts a child this server owns. */
 export const spawnOwned = (
+  host: ProcessHostState,
   command: string,
   args: ReadonlyArray<string>,
   options: SpawnOwnedOptions,
@@ -429,7 +473,7 @@ export const spawnOwned = (
     child.once("spawn", () => {
       const pid = child.pid;
       if (pid === undefined) return resolve(null);
-      if (isWindows) joinWindowsJob(pid);
+      host.joinJob(pid);
       void processFacts(pid).then(
         (facts) => resolve(facts === null ? null : { pid, start: facts.start, token }),
         () => resolve(null),
@@ -465,10 +509,14 @@ export const spawnOwned = (
 };
 
 /** Records a child another library spawned (an MCP stdio client's) under the token its environment carries. */
-export const adoptLaunch = async (pid: number, token: string): Promise<LaunchRecord | null> => {
+export const adoptLaunch = async (
+  host: ProcessHostState,
+  pid: number,
+  token: string,
+): Promise<LaunchRecord | null> => {
   const facts = await processFacts(pid);
   if (facts === null) return null;
-  if (isWindows) joinWindowsJob(pid);
+  host.joinJob(pid);
   return { pid, start: facts.start, token };
 };
 
@@ -592,12 +640,17 @@ export const memoryAvailable = async (): Promise<number> => {
  * `timeoutMs`; resolves with its exit code, null when it never ran or was killed.
  */
 export const runOwned = (
+  host: ProcessHostState,
   command: string,
   args: ReadonlyArray<string>,
   options: { readonly env: NodeJS.ProcessEnv; readonly timeoutMs: number },
 ): Promise<number | null> =>
   new Promise((resolve) => {
-    const owned = spawnOwned(command, args, { env: options.env, stdio: "ignore", tree: false });
+    const owned = spawnOwned(host, command, args, {
+      env: options.env,
+      stdio: "ignore",
+      tree: false,
+    });
     const timer = setTimeout(() => {
       owned.signal("SIGKILL");
       resolve(null);

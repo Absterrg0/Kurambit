@@ -153,6 +153,21 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     runId: GameRunId,
     endedAt: IsoDateTime,
   }),
+  // A role turn sent again after a pause (an instant failure, memory short).
+  Schema.Struct({
+    type: Schema.Literal("game-run.step.resend"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    attempt: PositiveInt,
+    turn: Schema.Literals(["retry", "memory"]),
+    n: PositiveInt,
+  }),
+  // A creator's restore of a kept round: its job moves the folder and lands with game-run.restore.
+  Schema.Struct({
+    type: Schema.Literal("game-run.restore.execute"),
+    runId: GameRunId,
+    requestId: Schema.String,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -172,6 +187,8 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.decision.deadline",
   "game-run.step.deadline",
   "game-run.finish",
+  "game-run.restore.execute",
+  "game-run.step.resend",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [
@@ -384,7 +401,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
                 -- thread: the creator's chat, the next step and an ending's
                 -- finish are queued behind it, and the timer checks the run
                 -- again whenever it fires.
-                AND active.effect_type NOT IN ('game-run.step.deadline', 'game-run.decision.deadline')
+                AND active.effect_type NOT IN ('game-run.step.deadline', 'game-run.decision.deadline', 'game-run.step.resend')
                 AND ${
                   excludeRestartContinuations
                     ? sql`active.effect_type != 'provider-runtime.continue'`

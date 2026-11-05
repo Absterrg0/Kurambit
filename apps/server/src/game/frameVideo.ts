@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import { engineChildEnv } from "./GameProcesses.ts";
 import type { PlayFrame } from "./playSession.ts";
-import { spawnOwned, type OwnedProcess } from "./processHost.ts";
+import { spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 
 /** The run video's rate: what x11grab recorded before, enough to read motion. */
 export const VIDEO_FPS = 12;
@@ -38,6 +38,7 @@ export interface FrameVideoFacts {
  * when the server dies its stdin closes and it finalizes and exits on its own.
  */
 export const openFrameVideo = (input: {
+  readonly host: ProcessHostState;
   readonly ffmpeg: string;
   readonly videoPath: string;
   readonly sidecarPath: string;
@@ -57,6 +58,7 @@ export const openFrameVideo = (input: {
   const open = (): OwnedProcess => {
     const log = NodeFS.openSync(input.logPath, "w");
     const owned = spawnOwned(
+      input.host,
       input.ffmpeg,
       [
         "-y",

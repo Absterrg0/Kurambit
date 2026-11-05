@@ -67,7 +67,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -137,7 +136,7 @@ import {
   ThreadForkServiceV2,
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
-import * as GameRunDecide from "./gameRun/decide.ts";
+import * as GameRunPlan from "./gameRun/plan.ts";
 import type * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -497,7 +496,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-run.step.fail":
     case "game-run.decision.expire":
     case "game-run.finished":
+    case "game-run.restore.request":
     case "game-run.restore":
+    case "game-run.step.schedule":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -6541,70 +6542,43 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       effects,
     );
 
+  const gameRunPlanDeps = { projections: projectionStore, idAllocator };
+
   const dispatchGameRun = (
     command: OrchestrationV2GameRunCommand,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) =>
     Effect.gen(function* () {
-      const threadId = command.threadId;
-      const unreadable = (cause: unknown) => new OrchestratorProjectionError({ threadId, cause });
-      const thread = yield* projectionStore.getThread(threadId).pipe(Effect.mapError(unreadable));
-      if (thread.deletedAt !== null)
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause: `Thread ${threadId} was deleted.`,
-        });
-      const records = yield* projectionStore
-        .getGameRunRecords(threadId, { steps: "in-flight" })
-        .pipe(Effect.mapError(unreadable));
-      const latest = records.gameRuns.at(-1);
-      const decided = GameRunDecide.decide(
-        command,
-        {
-          projectId: thread.projectId,
-          runs: records.gameRuns,
-          rounds: records.gameRunRounds,
-          inFlight:
-            records.gameRunSteps.find(
-              (step) => step.runId === latest?.id && step.seq === latest.inFlight,
-            ) ?? null,
-        },
-        {
-          at: yield* DateTime.now,
-          coin: yield* Random.next,
-          id: (yield* Random.nextIntBetween(0, 2 ** 48)).toString(36),
-        },
-      );
-      if (Result.isFailure(decided))
-        return yield* new OrchestratorGameRunRefusedError({
-          commandId: command.commandId,
-          commandType: command.type,
-          reason: decided.failure.reason,
-          detail: decided.failure.message,
-        });
-      const emitEvent = emit(events, command);
-      for (const event of decided.success.events)
-        yield* emitEvent<GameRunDecide.GameRunDomainEvent>(event);
-      yield* Ref.update(effects, (existing) => [
-        ...existing,
-        ...decided.success.effects.map(
-          ({ request, availableAt }): PendingOrchestrationEffectV2 => ({
-            id: `effect:${command.commandId}:${request.type}:${"stepId" in request ? request.stepId : request.runId}`,
-            commandId: command.commandId,
-            threadId,
-            request,
-            ...(availableAt === undefined ? {} : { availableAt: DateTime.makeUnsafe(availableAt) }),
-          }),
+      const planned = yield* GameRunPlan.planGameRunCommand(gameRunPlanDeps, command).pipe(
+        Effect.mapError((cause) =>
+          cause._tag === "IdAllocatorV2AllocationError"
+            ? new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+                cause,
+              })
+            : new OrchestratorProjectionError({ threadId: command.threadId, cause }),
         ),
-      ]);
-      return decided.success.cancelEffects
-        ? {
-            effectTypes: GameRunDecide.GAME_RUN_EFFECT_TYPES,
-            reason: "The game run was stopped.",
-          }
-        : undefined;
+      );
+      if (Result.isFailure(planned)) {
+        const refusal = planned.failure;
+        return yield* refusal.kind === "deleted"
+          ? new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause: `Thread ${command.threadId} was deleted.`,
+            })
+          : new OrchestratorGameRunRefusedError({
+              commandId: command.commandId,
+              commandType: command.type,
+              reason: refusal.reason,
+              detail: refusal.message,
+            });
+      }
+      yield* Ref.update(events, (existing) => [...existing, ...planned.success.events]);
+      yield* Ref.update(effects, (existing) => [...existing, ...planned.success.effects]);
+      return planned.success.cancelUnsettledEffects;
     });
 
   const dispatchGameRoundTaskRequest = (
@@ -10532,6 +10506,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       }
       case "thread.delete": {
+        // A production run lives on its creator chat: deleting the chat stops
+        // the run in the same commit, so its finish stops its roles and no run
+        // stays live where no chat can reach it.
+        const runStop = yield* GameRunPlan.planDeletedChatRunStop(gameRunPlanDeps, command);
         const projection = yield* projectionStore
           .getThreadRecords(command.threadId, [
             "runs",
@@ -10546,7 +10524,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
             ),
           );
-        return yield* mapDispatchError(command)(
+        const deletion = yield* mapDispatchError(command)(
           planThreadDeletion({
             command,
             projection,
@@ -10557,6 +10535,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             idAllocator,
           }),
         );
+        return {
+          events: [...runStop.events, ...deletion.events],
+          effects: [...runStop.effects, ...deletion.effects],
+          ...(runStop.cancelUnsettledEffects === undefined
+            ? {}
+            : { cancelUnsettledEffects: runStop.cancelUnsettledEffects }),
+        };
       }
       case "thread.archive":
       case "thread.unarchive":
@@ -10761,7 +10746,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "game-run.step.fail":
       case "game-run.decision.expire":
       case "game-run.finished":
+      case "game-run.restore.request":
       case "game-run.restore":
+      case "game-run.step.schedule":
         cancelUnsettledEffects = yield* dispatchGameRun(command, events, effects);
         break;
       default:

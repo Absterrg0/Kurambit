@@ -10,12 +10,6 @@ import { GameOperationError, type GameOperationEvent, type GameStatus } from "@k
 /** The status-shaped operation the stage renders. */
 export type GameOperation = NonNullable<GameStatus["operation"]>;
 export type GameOperationEventState = GameOperationEvent["state"];
-export type GameRunLive = {
-  readonly step: string;
-  readonly startedAt: string;
-  /** Role threads launched so far: a new one is news even while the step label stays. */
-  readonly threads: number;
-};
 
 /**
  * The one in-memory record of what each game is doing, and the push clients
@@ -34,17 +28,16 @@ export class GameOperations extends Context.Service<
      */
     readonly record: (
       root: string,
-      operation: GameOperation,
+      operation: Omit<GameOperation, "revision">,
       eventState: GameOperationEventState,
     ) => Effect.Effect<void>;
     readonly changed: (root: string, message: string) => Effect.Effect<void>;
-    /** The production run live on this game, with its current step. */
-    readonly run: (root: string) => GameRunLive | null;
     /**
-     * Set by the run driver when its step changes and cleared when it ends; the
-     * push lets the library and the Run view follow a run without polling.
+     * The game's run moved (a step, a decision, its end): the push lets the
+     * library and the Run view reread the run's records without polling. The
+     * run itself lives in those records, never here.
      */
-    readonly recordRun: (root: string, run: GameRunLive | null) => Effect.Effect<void>;
+    readonly runChanged: (root: string, step: string | null) => Effect.Effect<void>;
     readonly events: Stream.Stream<GameOperationEvent>;
     /**
      * Runs `work` as the game's one operation, recorded and pushed as it runs
@@ -83,15 +76,21 @@ export const layer = Layer.effect(
   GameOperations,
   Effect.gen(function* () {
     const operations = new Map<string, GameOperation>();
-    const runs = new Map<string, GameRunLive>();
     const events = yield* PubSub.unbounded<GameOperationEvent>();
-    let revision = 0;
-    const record = (root: string, operation: GameOperation, eventState: GameOperationEventState) =>
+    // Starts at the server's clock so a restarted server's revisions stay above
+    // the ones a client still holds from before.
+    let revision = DateTime.toEpochMillis(yield* DateTime.now);
+    const record = (
+      root: string,
+      operation: Omit<GameOperation, "revision">,
+      eventState: GameOperationEventState,
+    ) =>
       Effect.gen(function* () {
-        operations.set(root, operation);
+        revision += 1;
+        operations.set(root, { ...operation, revision });
         yield* PubSub.publish(events, {
           root,
-          revision: ++revision,
+          revision,
           name: operation.name,
           state: eventState,
           message: operation.message,
@@ -140,7 +139,7 @@ export const layer = Layer.effect(
                   new GameOperationError({
                     operation: name,
                     path: root,
-                    reason: "command-failed",
+                    reason: "cancelled",
                     detail: "Operation cancelled.",
                   }),
                 ),
@@ -208,23 +207,14 @@ export const layer = Layer.effect(
           });
         }),
       current: (root) => operations.get(root) ?? null,
-      run: (root) => runs.get(root) ?? null,
-      recordRun: (root, run) =>
+      runChanged: (root, step) =>
         Effect.gen(function* () {
-          const before = runs.get(root);
-          const same =
-            run === null
-              ? before === undefined
-              : before?.step === run.step && before.threads === run.threads;
-          if (same) return;
-          if (run === null) runs.delete(root);
-          else runs.set(root, run);
           yield* PubSub.publish(events, {
             root,
             revision: ++revision,
             name: "run",
-            state: run === null ? "succeeded" : "running",
-            message: run?.step ?? "The production run ended.",
+            state: step === null ? "succeeded" : "running",
+            message: step ?? "The production run ended.",
             at: DateTime.formatIso(yield* DateTime.now),
           });
         }),

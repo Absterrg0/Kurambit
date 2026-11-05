@@ -26,7 +26,11 @@ import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
-import { clampGameChatWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import {
+  clampGameChatWidth,
+  type GameStageTab,
+  useGameWorkspaceStore,
+} from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import {
@@ -52,8 +56,6 @@ import {
   type GamePreviewServe,
   toolchainReadyFor,
 } from "./gameStageLogic";
-
-type GameStageTab = "play" | "run" | "builds";
 
 const BUSY_LABELS: Record<GameAction, string> = {
   preview: "Building the web preview",
@@ -104,6 +106,12 @@ export function GameStage({
   const setChatWidth = useGameWorkspaceStore((state) => state.setChatWidth);
   const setChatCollapsed = useGameWorkspaceStore((state) => state.setChatCollapsed);
   const [tab, setTab] = useState<GameStageTab | null>(null);
+  const tabRequest = useGameWorkspaceStore((state) => state.stageTabRequest);
+  const [seenTabRequest, setSeenTabRequest] = useState(tabRequest);
+  if (tabRequest !== seenTabRequest) {
+    setSeenTabRequest(tabRequest);
+    if (tabRequest !== null) setTab(tabRequest.tab);
+  }
   // A game being made by its production run opens on the run, not on an
   // empty stage; the creator's own choice of tab always wins.
   const runStatus = useEnvironmentQuery(
@@ -112,14 +120,15 @@ export function GameStage({
       input: { threadId: threadRef.threadId },
     }),
   );
-  // The server keeps the last operation per game for the whole session, so the
-  // stage treats an operation as news only when it happened after this stage
-  // mounted. Older ones would greet the user with a build they already know about.
-  const [mountedAt] = useState(() => Date.now());
   const [busy, setBusy] = useState<{ action: GameAction; startedAt: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dismissedOperationAt, setDismissedOperationAt] = useState<string | null>(null);
+  const [dismissedRevision, setDismissedRevision] = useState<number | null>(null);
+  // The server keeps the last operation per game for the whole session, so the
+  // stage treats an operation as news only when a push changed it after the
+  // stage's first read: an older one would greet the user with a build they
+  // already know about. Revisions are the server's, so no clock is compared.
+  const [seenRevision, setSeenRevision] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [dragging, setDragging] = useState(false);
   // The fold of what the play surface runs across status reads; state, so the
@@ -140,6 +149,7 @@ export function GameStage({
   const dragRef = useRef<{ x: number; width: number } | null>(null);
   const refresh = query.refresh;
   const data = query.data;
+  if (seenRevision === null && data) setSeenRevision(data.operation?.revision ?? 0);
   const operationState = data?.operation?.state ?? null;
   // Operation events invalidate the status query, so this is only a fallback
   // for a missed push while something is running. A whole-project status read
@@ -187,8 +197,9 @@ export function GameStage({
   const operation = data.operation;
   const operationVisible =
     operation !== null &&
-    operation.at !== dismissedOperationAt &&
-    Date.parse(operation.at) >= mountedAt;
+    operation.revision !== dismissedRevision &&
+    seenRevision !== null &&
+    operation.revision > seenRevision;
   const failureVisible =
     error ??
     (operation !== null && operationVisible && operation.state === "failed"
@@ -323,7 +334,7 @@ export function GameStage({
           onClick={() => {
             setError(null);
             setMessage(null);
-            setDismissedOperationAt(operation?.at ?? null);
+            setDismissedRevision(operation?.revision ?? null);
           }}
         >
           <XIcon className="size-3" aria-hidden="true" />

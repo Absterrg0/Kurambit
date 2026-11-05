@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- The role tests' game folder is a real git checkout on disk, and their turns are timed against the runner's wall clock.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off -- The role tests' game folder is a real git checkout on disk, and their turns are timed against the runner's wall clock.
 // A production run on the orchestration core survives what a restart does to
 // it: no job is lost for good, nothing that finished runs again, a stopped run
 // stays stopped, a decision's default needs no fiber, a role's finished turn
@@ -17,6 +17,7 @@ import {
   GameRunId,
   type GameRunStep,
   type GameRunStepResult,
+  type OrchestrationV2DomainEvent,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadShell,
   ProjectId,
@@ -32,6 +33,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
@@ -55,6 +57,7 @@ import * as ThreadManagement from "../../orchestration-v2/ThreadManagementServic
 import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as GameOperations from "../GameOperations.ts";
+import * as ProjectService from "../../project/ProjectService.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameRunControl from "../GameRunControl.ts";
 import * as GameService from "../GameService.ts";
@@ -166,6 +169,19 @@ const roleDone = (threadId: ThreadId): GameRunStepResult => ({
   sheet: "",
 });
 
+/** The ending's finish job reported (as a drained finish effect would): the run may move on. */
+const finishEnding = Effect.gen(function* () {
+  const orchestrator = yield* Orchestrator.OrchestratorV2;
+  const { run } = yield* inFlight;
+  yield* orchestrator.dispatch({
+    type: "game-run.finished",
+    commandId: nextId(),
+    threadId: creator,
+    runId: run.id,
+    endedAt: run.endedAt!,
+  });
+});
+
 const gitOk: GameRunStepResult = {
   kind: "git",
   git: {
@@ -220,6 +236,8 @@ const countingRunner = Effect.gen(function* () {
       ),
     deadline: () => Effect.void,
     finish: () => Effect.void,
+    restore: () => Effect.void,
+    resend: () => Effect.void,
     showable: () => Effect.succeed(true),
   };
   yield* (yield* GameRunJobs.GameRunJobs).attach(runner);
@@ -234,7 +252,7 @@ const countingRunner = Effect.gen(function* () {
 });
 
 it.effect(
-  "a job a restart lost runs again once, and a step that finished never does",
+  "a job a restart lost runs again, and a step that finished lands nothing more",
   () =>
     Effect.gen(function* () {
       yield* createCreator;
@@ -245,22 +263,25 @@ it.effect(
       // The step's effect never ran: the server stopped before the worker claimed it.
       yield* recovery.recover();
       assert.equal(yield* next, `${first.id}#1`);
-      // A second pass while the job is live hands nothing new.
+      // A second pass while the job is live starts nothing alongside it: it asks
+      // for one run after, which reads the records afresh.
       yield* recovery.recover();
       assert.deepEqual(handed, [`${first.id}#1`]);
 
       const landed = yield* awaitStep(first.id, "completed");
       yield* release;
       yield* Fiber.join(landed);
+      // That run after finds the step done and lands nothing more.
+      assert.equal(yield* next, `${first.id}#1`);
       const second = (yield* inFlight).step!;
       assert.notEqual(second.id, first.id);
       yield* recovery.recover();
       assert.equal(yield* next, `${second.id}#1`);
-      assert.deepEqual(handed, [`${first.id}#1`, `${second.id}#1`]);
+      assert.deepEqual(handed, [`${first.id}#1`, `${first.id}#1`, `${second.id}#1`]);
       // The outbox's own effects for the finished step change nothing either.
       const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       yield* worker.drain();
-      assert.deepEqual(handed.filter((h) => h === `${first.id}#1`).length, 1);
+      assert.deepEqual(handed.filter((h) => h === `${first.id}#1`).length, 2);
       assert.equal((yield* inFlight).steps.find((s) => s.id === first.id)?.status, "completed");
     }).pipe(Effect.provide(layerWithRecovery)),
   20_000,
@@ -288,6 +309,7 @@ it.effect("a stopped run stays stopped across recovery, until a resume", () =>
     assert.deepEqual(handed, []);
     assert.equal((yield* inFlight).run.ending, "stopped");
 
+    yield* finishEnding;
     yield* orchestrator.dispatch({
       type: "game-run.resume",
       commandId: nextId(),
@@ -349,39 +371,139 @@ it.effect(
     }).pipe(Effect.provide(layerWithRecovery)),
 );
 
-it.effect("a restore makes the build the ended run's judged best, and a live run refuses it", () =>
-  Effect.gen(function* () {
-    yield* createCreator;
-    yield* startRun("autopilot");
-    yield* completeStep((yield* inFlight).step!, gitOk);
-    const orchestrator = yield* Orchestrator.OrchestratorV2;
-    const restore = orchestrator
-      .dispatch({
-        type: "game-run.restore",
+const refusalOf = <A, R>(dispatched: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
+  dispatched.pipe(
+    Effect.flip,
+    Effect.map((error) =>
+      error._tag === "OrchestratorGameRunRefusedError" ? error.reason : error._tag,
+    ),
+  );
+const stopRun = Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+  orchestrator.dispatch({ type: "game-run.stop", commandId: nextId(), threadId: creator, runId }),
+);
+const resume = Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+  orchestrator.dispatch({ type: "game-run.resume", commandId: nextId(), threadId: creator, runId }),
+);
+
+it.effect(
+  "an ending still finishing holds a resume, a steer and a restore until it is finished",
+  () =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* stopRun;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const { run } = yield* inFlight;
+      assert.equal(run.status, "ended");
+      // Its finish effect has not run: the folder may still be moving to trunk.
+      assert.equal(yield* refusalOf(resume), "finishing");
+      assert.equal(
+        yield* refusalOf(
+          orchestrator.dispatch({
+            type: "game-run.steer",
+            commandId: nextId(),
+            threadId: creator,
+            runId,
+            note: "More enemies.",
+          }),
+        ),
+        "finishing",
+      );
+      assert.equal(
+        yield* refusalOf(
+          orchestrator.dispatch({
+            type: "game-run.restore.request",
+            commandId: nextId(),
+            threadId: creator,
+            runId,
+            requestId: "r1",
+            round: 1,
+          }),
+        ),
+        "finishing",
+      );
+      yield* orchestrator.dispatch({
+        type: "game-run.finished",
         commandId: nextId(),
         threadId: creator,
         runId,
-        best: "restored-sha",
-      })
-      .pipe(Effect.flip);
-    assert.equal((yield* restore)._tag, "OrchestratorGameRunRefusedError");
+        endedAt: run.endedAt!,
+      });
+      yield* resume;
+      assert.equal((yield* inFlight).run.status, "running");
+    }).pipe(Effect.provide(layerWithRecovery)),
+);
+
+it.effect("a restore is recorded first, holds a resume while pending, and lands as the best", () =>
+  Effect.gen(function* () {
+    yield* createCreator;
+    yield* startRun("autopilot");
+    yield* stopRun;
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
     yield* orchestrator.dispatch({
-      type: "game-run.stop",
+      type: "game-run.finished",
       commandId: nextId(),
       threadId: creator,
       runId,
+      endedAt: (yield* inFlight).run.endedAt!,
     });
+    yield* orchestrator.dispatch({
+      type: "game-run.restore.request",
+      commandId: nextId(),
+      threadId: creator,
+      runId,
+      requestId: "r1",
+      round: 1,
+    });
+    assert.deepEqual((yield* inFlight).run.restore?.outcome, null);
+    assert.equal(yield* refusalOf(resume), "restoring");
     yield* orchestrator.dispatch({
       type: "game-run.restore",
       commandId: nextId(),
       threadId: creator,
       runId,
-      best: "restored-sha",
+      requestId: "r1",
+      outcome: { kind: "restored", sha: "restored-sha", message: "back" },
     });
     const { run } = yield* inFlight;
     assert.equal(run.best, "restored-sha");
     assert.isNull(run.pending);
-    assert.equal(run.status, "ended");
+    yield* resume;
+    assert.equal((yield* inFlight).run.status, "running");
+  }).pipe(Effect.provide(layerWithRecovery)),
+);
+
+it.effect("a game has one run: another chat of its project cannot start a second", () =>
+  Effect.gen(function* () {
+    yield* createCreator;
+    yield* startRun("autopilot");
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const other = ThreadId.make("thread:second-chat");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: nextId(),
+      threadId: other,
+      projectId,
+      title: "Arena, again",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: "/games/arena",
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const second = orchestrator.dispatch({
+      type: "game-run.start",
+      commandId: nextId(),
+      threadId: other,
+      runId: GameRunId.make("run_second"),
+      lane: "godot",
+      brief: "Another game in the same folder.",
+      modelSelection,
+      runtimeMode: "full-access",
+    });
+    assert.equal(yield* refusalOf(second), "run-live");
   }).pipe(Effect.provide(layerWithRecovery)),
 );
 
@@ -428,6 +550,7 @@ it.effect("a decision asked again after a resume wakes the creator's chat again"
       threadId: creator,
       runId,
     });
+    yield* finishEnding;
     yield* orchestrator.dispatch({
       type: "game-run.resume",
       commandId: nextId(),
@@ -452,10 +575,20 @@ interface World {
   readonly existing: Set<ThreadId>;
   readonly deleted: Set<ThreadId>;
   readonly receipts: Set<string>;
+  /** Other chats of the game: T3 holds them as it holds the creator's. */
+  readonly chats: Set<ThreadId>;
   readonly interrupts: Array<{ readonly threadId: ThreadId; readonly commandId: string }>;
   readonly launches: ThreadId[];
   readonly sends: Array<{ readonly threadId: ThreadId; readonly messageId: string }>;
   exportsAsked: number;
+  /** Whose work each export was, as the run named it. */
+  readonly exportOwners: Array<string | undefined>;
+  /** The export breaks with a defect, as a rejected promise does. */
+  exportsBreak: boolean;
+  /** The game's project was deleted under the run. */
+  projectDeleted: boolean;
+  /** The game folder no longer resolves. */
+  folderGone: boolean;
   /** Runs when the runner reads the creator's shell, which it does just before a role's start. */
   onCreatorShell: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
@@ -464,6 +597,10 @@ interface World {
   readonly capWatched: Deferred.Deferred<void>;
   /** Resolved with each role thread launched. */
   readonly launched: Queue.Queue<ThreadId>;
+  /** Each interrupt's command id, as it is sent. */
+  readonly interrupted: Queue.Queue<string>;
+  /** Each push of the run's move to the library and the Run view (its step, null once ended). */
+  readonly pushes: Queue.Queue<string | null>;
 }
 const newWorld = Effect.gen(function* () {
   const world: World = {
@@ -471,14 +608,21 @@ const newWorld = Effect.gen(function* () {
     existing: new Set(),
     deleted: new Set(),
     receipts: new Set(),
+    chats: new Set(),
     interrupts: [],
     launches: [],
     sends: [],
     exportsAsked: 0,
+    exportOwners: [],
+    exportsBreak: false,
+    projectDeleted: false,
+    folderGone: false,
     onCreatorShell: null,
     onSend: null,
     capWatched: yield* Deferred.make<void>(),
     launched: yield* Queue.unbounded<ThreadId>(),
+    interrupted: yield* Queue.unbounded<string>(),
+    pushes: yield* Queue.unbounded<string | null>(),
   };
   return world;
 });
@@ -521,28 +665,33 @@ const roleThreadsOf = (world: World) =>
       const roleThread = (threadId: ThreadId) => ({
         id: threadId,
         projectId,
-        launchedBy: "game_run" as const,
+        // The game's chats are its own; every other thread here is a role's.
+        ...(threadId === creator || world.chats.has(threadId)
+          ? {}
+          : { launchedBy: "game_run" as const }),
         lineage: { parentThreadId: creator, relationshipToParent: "role", rootThreadId: creator },
       });
       return Layer.mock(ThreadManagement.ThreadManagementService)({
         dispatch: orchestrator.dispatch,
         getThreadShell: (threadId) =>
-          threadId === creator
-            ? (world.onCreatorShell ?? Effect.void).pipe(
-                Effect.andThen(orchestrator.getThreadShell(threadId)),
-              )
-            : Effect.succeed(
-                world.existing.has(threadId)
-                  ? ({
-                      ...roleThread(threadId),
-                      deletedAt: world.deleted.has(threadId)
-                        ? DateTime.makeUnsafe(Date.now())
-                        : null,
-                      worktreePath: null,
-                      activeRunId: null,
-                    } as unknown as OrchestrationV2ThreadShell)
-                  : null,
-              ),
+          world.chats.has(threadId)
+            ? orchestrator.getThreadShell(threadId)
+            : threadId === creator
+              ? (world.onCreatorShell ?? Effect.void).pipe(
+                  Effect.andThen(orchestrator.getThreadShell(threadId)),
+                )
+              : Effect.succeed(
+                  world.existing.has(threadId)
+                    ? ({
+                        ...roleThread(threadId),
+                        deletedAt: world.deleted.has(threadId)
+                          ? DateTime.makeUnsafe(Date.now())
+                          : null,
+                        worktreePath: null,
+                        activeRunId: null,
+                      } as unknown as OrchestrationV2ThreadShell)
+                    : null,
+                ),
         getThreadRecords: ((threadId: ThreadId) =>
           Effect.succeed({
             thread: roleThread(threadId),
@@ -561,8 +710,10 @@ const roleThreadsOf = (world: World) =>
           Effect.sync(() => {
             world.interrupts.push({ threadId: input.threadId, commandId: input.commandId });
             world.receipts.add(input.commandId);
-            return { type: "no_active_run" as const };
-          }),
+          }).pipe(
+            Effect.andThen(Queue.offer(world.interrupted, input.commandId)),
+            Effect.as({ type: "no_active_run" as const }),
+          ),
         sendToThread: (input) =>
           Effect.sync(() => {
             world.sends.push({ threadId: input.threadId, messageId: input.messageId });
@@ -606,14 +757,31 @@ const layerGame = (root: string, world: World) =>
             ),
           limitExploreInput: () => Effect.void,
           closeLiveEditors: () => Effect.void,
-          exportTargets: () =>
+          exportTargets: (_threadId, owner) =>
             Effect.sync(() => {
               world.exportsAsked += 1;
+              world.exportOwners.push(owner);
+              if (world.exportsBreak) throw new Error("disk gone");
               return { targets: [], displayName: "Arena" };
             }),
         }),
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () =>
+            Effect.succeed(
+              world.projectDeleted ? Option.none() : Option.some({ id: projectId } as never),
+            ),
+        }),
         Layer.mock(GameProjectService.GameProjectService)({
-          resolve: () => Effect.succeed(root),
+          resolve: () =>
+            world.folderGone
+              ? Effect.fail(
+                  new GameOperationError({
+                    operation: "resolve-thread",
+                    path: root,
+                    reason: "project-not-found",
+                  }),
+                )
+              : Effect.succeed(root),
           read: () =>
             Effect.fail(
               new GameOperationError({ operation: "read", path: root, reason: "invalid-input" }),
@@ -621,8 +789,7 @@ const layerGame = (root: string, world: World) =>
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
-          run: () => null,
-          recordRun: () => Effect.void,
+          runChanged: (_root, step) => Queue.offer(world.pushes, step).pipe(Effect.asVoid),
         }),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
         Layer.mock(ThreadLaunch.ThreadLaunchService)({
@@ -733,14 +900,80 @@ it.effect("a turn a server restart cut off lands only when its continuation ends
       // The cancelled turn's own settling lands nothing while its continuation works.
       assert.isNull(yield* roles.settle(thread, cut));
       assert.equal((yield* inFlight).step?.id, vision.id);
-      const jobs = yield* GameRunJobs.GameRunJobs;
-      assert.isTrue(yield* jobs.isLive(`deadline:${vision.id}:attempt:1`));
 
       const ended = { ...going, status: "completed" } as OrchestrationV2Run;
       world.runs.set(thread, [cut, ended]);
       const landed = yield* awaitStep(vision.id, "completed");
       yield* roles.settle(thread, ended);
       yield* Fiber.join(landed);
+    }),
+  ),
+);
+
+it.effect(
+  "a turn a restart cut off with no continuation is continued by its run, never landed",
+  () =>
+    withGame((world) =>
+      Effect.gen(function* () {
+        const { vision, thread } = yield* atVision(world);
+        const cut = turnRun({ stepId: vision.id, status: "cancelled" });
+        world.runs.set(thread, [cut]);
+        world.onSend = (threadId, messageId) => {
+          world.runs.set(threadId, [
+            ...(world.runs.get(threadId) ?? []),
+            turnRun({ stepId: vision.id, status: "running", userMessageId: messageId }),
+          ]);
+        };
+        const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+        // The reactor hands a cut-off turn to its step instead of landing it.
+        assert.equal(yield* roles.settle(thread, cut), "continue");
+        yield* startRunner;
+        yield* recover;
+        // The step's job continued the turn with its own prompt and watches its cap.
+        yield* Deferred.await(world.capWatched);
+        assert.deepEqual(
+          world.sends.map((send) => send.messageId),
+          [roleTurnMessageId(vision.id, 1, "continue", 2)],
+        );
+        const held = yield* inFlight;
+        assert.equal(held.step?.id, vision.id);
+        assert.isNull(held.step?.result ?? null);
+
+        // A turn every restart cuts off ends the run resumably instead of looping.
+        world.onSend = null;
+        world.runs.set(thread, [
+          cut,
+          turnRun({ stepId: vision.id, status: "cancelled", kind: "continue", n: 2 }),
+          turnRun({ stepId: vision.id, status: "cancelled", kind: "continue", n: 3 }),
+        ]);
+        const ended = yield* awaitRun((run) => run.ending !== null);
+        yield* recover;
+        yield* Fiber.join(ended);
+        assert.equal((yield* inFlight).run.ending, "failed");
+        assert.lengthOf(world.sends, 1);
+      }),
+    ),
+);
+
+it.effect("a continued turn's cap runs from where the cut turn's work began", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      // The cut turn had worked past the vision cap before the restart.
+      world.runs.set(thread, [
+        turnRun({ stepId: vision.id, status: "cancelled", ago: 11 * 60_000 }),
+      ]);
+      world.onSend = (threadId, messageId) => {
+        world.runs.set(threadId, [
+          ...(world.runs.get(threadId) ?? []),
+          turnRun({ stepId: vision.id, status: "running", userMessageId: messageId, ago: 1_000 }),
+        ]);
+      };
+      // The cap is checked on the run's clock.
+      yield* TestClock.setTime(Date.now());
+      yield* startRunner;
+      yield* recover;
+      assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
     }),
   ),
 );
@@ -752,10 +985,8 @@ it.effect("a stop interrupts the live role turn and stops its jobs, from its out
       world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
       yield* startRunner;
       yield* recover;
+      // The cap is checked and set again as a durable timer at its due time.
       yield* Deferred.await(world.capWatched);
-      const jobs = yield* GameRunJobs.GameRunJobs;
-      const capKey = `deadline:${vision.id}:attempt:1`;
-      assert.isTrue(yield* jobs.isLive(capKey));
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       yield* orchestrator.dispatch({
         type: "game-run.stop",
@@ -767,7 +998,12 @@ it.effect("a stop interrupts the live role turn and stops its jobs, from its out
       const finished = yield* awaitRun((run) => run.finished !== null);
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       yield* Fiber.join(finished);
-      assert.isFalse(yield* jobs.isLive(capKey));
+      // The stop cancelled the cap's timer: past the cap, nothing caps the turn again.
+      yield* TestClock.setTime(Date.now() + 11 * 60_000);
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      assert.isFalse(
+        world.interrupts.some((i) => i.commandId.startsWith("server:game-run-role-cap:")),
+      );
       assert.deepEqual(
         world.interrupts.map((i) => i.threadId),
         [thread],
@@ -791,6 +1027,82 @@ it.effect("an ending returns to trunk and exports, from its outbox effect", () =
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       yield* Fiber.join(finished);
       assert.equal(world.exportsAsked, 1);
+      // The run's own work: a Stop game from the creator's chat never cancels it.
+      assert.deepEqual(world.exportOwners, [`game-run:${runId}`]);
+      assert.deepEqual(
+        world.interrupts.map((i) => i.threadId),
+        [thread],
+      );
+    }),
+  ),
+);
+
+it.effect("an ending whose finish breaks is still recorded, so the run can resume", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision } = yield* atVision(world);
+      world.exportsBreak = true;
+      yield* completeStep(vision, {
+        kind: "ended",
+        ending: "usage-limit",
+        reason: "usage limit until noon",
+      });
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
+      assert.equal(world.exportsAsked, 1);
+      const { run } = yield* inFlight;
+      assert.equal(run.finished, run.endedAt);
+    }),
+  ),
+);
+
+it.effect("deleting the creator chat stops its run, which holds the game until it finished", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: (yield* inFlight).step!.id, status: "running" })]);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: nextId(),
+        threadId: creator,
+      });
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const stopped = (yield* projections.getGameRunRecords(creator)).gameRuns.at(-1)!;
+      assert.equal(stopped.ending, "stopped");
+      // Its finish still works the folder, so the game is still this run's.
+      assert.equal((yield* projections.getProjectGameRun(projectId))?.id, runId);
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
+      // The finish stopped the role and was recorded on the deleted chat; the game is free.
+      assert.deepEqual(
+        world.interrupts.map((i) => i.threadId),
+        [thread],
+      );
+      assert.isNull(yield* projections.getProjectGameRun(projectId));
+    }),
+  ),
+);
+
+it.effect("a finish that breaks before the folder still stops the run's role turns", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      yield* completeStep(vision, {
+        kind: "ended",
+        ending: "usage-limit",
+        reason: "usage limit until noon",
+      });
+      world.folderGone = true;
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
       assert.deepEqual(
         world.interrupts.map((i) => i.threadId),
         [thread],
@@ -837,12 +1149,31 @@ it.effect("a role launches nothing once the run refuses its start", () =>
   ),
 );
 
+it.effect("a role is never launched into a deleted project; its step fails instead", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* completeStep((yield* inFlight).step!, gitOk);
+      const vision = (yield* inFlight).step!;
+      world.projectDeleted = true;
+      const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      yield* runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 });
+      assert.deepEqual(world.launches, []);
+      const { run } = yield* inFlight;
+      assert.equal(run.ending, "failed");
+      assert.match(run.lastFailure ?? "", /its project was deleted/);
+    }),
+  ),
+);
+
 /** The vision step ended on a usage limit after its first turn, then resumed as attempt 2. */
 const resumedVision = (world: World) =>
   Effect.gen(function* () {
     const { vision, thread } = yield* atVision(world);
     world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed" })]);
     yield* completeStep(vision, { kind: "ended", ending: "usage-limit", reason: "limit" });
+    yield* finishEnding;
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     yield* orchestrator.dispatch({
       type: "game-run.resume",
@@ -893,7 +1224,6 @@ it.effect("a turn sent again after an instant failure is capped like the first",
     Effect.gen(function* () {
       const { vision, thread } = yield* atVision(world);
       world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
-      const capped = yield* Deferred.make<void>();
       // The resent turn has been running past the vision cap.
       world.onSend = (threadId, messageId) => {
         world.runs.set(threadId, [
@@ -909,14 +1239,13 @@ it.effect("a turn sent again after an instant failure is capped like the first",
       yield* startRunner;
       const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
       yield* roles.settle(thread, world.runs.get(thread)![0]!);
-      const watch = Effect.gen(function* () {
-        while (!world.interrupts.some((i) => i.commandId.startsWith("server:game-run-role-cap:")))
-          yield* Effect.yieldNow;
-        yield* Deferred.succeed(capped, undefined);
-      }).pipe(Effect.forkScoped);
-      yield* watch;
-      yield* TestClock.adjust("16 seconds");
-      yield* Deferred.await(capped);
+      // The resend is a durable timer: nothing is sent until it is due.
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      assert.lengthOf(world.sends, 0);
+      yield* TestClock.setTime(Date.now() + 20_000);
+      yield* worker.drain();
+      assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
       assert.lengthOf(world.sends, 1);
     }),
   ),
@@ -1088,4 +1417,128 @@ it.effect("startup stops a role turn no step record names, and leaves a named on
     assert.notInclude(["preparing", "starting", "running", "waiting"], stopped?.status);
     assert.include(["preparing", "starting", "running", "waiting"], kept?.status);
   }).pipe(Effect.provide(layerWithRecovery)),
+);
+
+it.effect("every chat of a game reaches its one run, and a role thread only its checks", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { thread } = yield* atVision(world);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const other = ThreadId.make("thread:second-chat");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: nextId(),
+        threadId: other,
+        projectId,
+        title: "Arena, again",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: "/games/arena",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      world.chats.add(other);
+      const control = yield* GameRunControl.GameRunControl;
+      const status = yield* control.runStatus(other);
+      assert.equal(status.runId, runId);
+      assert.isTrue(status.active);
+      const again = yield* control.runStart({ threadId: other, brief: "A second game here." });
+      assert.equal(again.runId, runId);
+      assert.isTrue(again.resumed);
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      assert.lengthOf((yield* projections.getGameRunRecords(other)).gameRuns, 0);
+      // A stop from the second chat stops the game's run.
+      yield* control.runStop(other);
+      assert.equal((yield* inFlight).run.ending, "stopped");
+      // The run's own role thread reaches none of its controls.
+      const refused = yield* control.runStatus(thread).pipe(Effect.flip);
+      assert.equal(refused.reason, "role-thread");
+      // Except its builder's checks, scored against the run's open rung (none yet).
+      assert.isNull((yield* control.runChecks(thread)).rung);
+    }),
+  ),
+);
+
+it.effect("a start while the ending still finishes is refused before it touches the folder", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* atVision(world);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "game-run.stop",
+        commandId: nextId(),
+        threadId: creator,
+        runId,
+      });
+      // The stop's finish has not run, so the folder is still the ending's.
+      const agents = NodePath.join(lastRoot, "AGENTS.md");
+      NodeFS.rmSync(agents, { force: true });
+      const control = yield* GameRunControl.GameRunControl;
+      const refused = yield* control.runStart({ threadId: creator, brief: "" }).pipe(Effect.flip);
+      assert.equal(refused.reason, "finishing");
+      assert.isFalse(NodeFS.existsSync(agents));
+    }),
+  ),
+);
+
+it.effect("a steer sent again under the same id is one note", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* atVision(world);
+      const control = yield* GameRunControl.GameRunControl;
+      const notes = Effect.map(inFlight, ({ run }) => run.steer ?? []);
+      const before = (yield* notes).length;
+      yield* control.runSteer(creator, "Make the arena bigger.", "steer-1");
+      yield* control.runSteer(creator, "Make the arena bigger.", "steer-1");
+      assert.lengthOf(yield* notes, before + 1);
+      yield* control.runSteer(creator, "Make the arena bigger.", "steer-2");
+      assert.lengthOf(yield* notes, before + 2);
+    }),
+  ),
+);
+
+it.effect("a role's cap not yet due fires later from its timer, with no fiber holding it", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      world.runs.set(thread, [turnRun({ stepId: vision.id, status: "running" })]);
+      yield* startRunner;
+      // The watch checks once and sets the cap again at its due time: that commit is all it does.
+      const scheduled = yield* awaitRun(() => true);
+      yield* recover;
+      yield* Fiber.join(scheduled);
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* worker.drain();
+      assert.lengthOf(world.interrupts, 0);
+      yield* TestClock.setTime(Date.now() + 11 * 60_000);
+      yield* worker.drain();
+      assert.match(yield* Queue.take(world.interrupted), /^server:game-run-role-cap:/);
+    }),
+  ),
+);
+
+it.effect(
+  "every move of the run is pushed, and the game's card reads the run from its records",
+  () =>
+    withGame((world) =>
+      Effect.gen(function* () {
+        const runner = yield* GameRunStepRunner.GameRunStepRunner;
+        const pushOf = (dispatched: {
+          readonly storedEvents: ReadonlyArray<{ readonly event: OrchestrationV2DomainEvent }>;
+        }) =>
+          Effect.forEach(dispatched.storedEvents, ({ event }) => runner.handle(event), {
+            discard: true,
+          });
+        yield* createCreator;
+        yield* pushOf(yield* startRun("autopilot"));
+        assert.isString(yield* Queue.take(world.pushes));
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        assert.equal((yield* projections.getProjectGameRun(projectId))?.id, runId);
+        yield* pushOf(yield* stopRun);
+        assert.isNull(yield* Queue.take(world.pushes));
+        assert.equal((yield* projections.getProjectGameRun(projectId))?.status, "ended");
+      }),
+    ),
 );

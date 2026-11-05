@@ -1,4 +1,4 @@
-import { WS_METHODS, type EnvironmentId } from "@kurambit/contracts";
+import { EnvironmentId, ThreadId, WS_METHODS } from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -17,18 +17,53 @@ const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRunt
 });
 
 /**
- * A value that changes on every game operation event. Queries read it through
- * `refreshTrigger`, so an idle Stage learns about a later agent build from the
- * push instead of polling the whole project on a timer.
+ * A value that changes on every push for one thread's game. Its queries read it
+ * through `refreshTrigger`, so an idle Stage learns about a later agent build
+ * from the push instead of polling, and another game's work never refetches it.
  */
-const gameEventSignal = Atom.family((environmentId: string) =>
-  Atom.make((get) => {
-    const result = get(gameEvents({ environmentId: environmentId as EnvironmentId, input: {} }));
+const threadGameSignal = Atom.family((key: string) => {
+  const [environmentId = "", threadId = ""] = key.split("\0");
+  return Atom.make((get) => {
+    const result = get(
+      gameEvents({
+        environmentId: EnvironmentId.make(environmentId),
+        input: { threadId: ThreadId.make(threadId) },
+      }),
+    );
     return AsyncResult.isSuccess(result)
-      ? `${result.value.root}\0${result.value.at}\0${result.value.revision ?? ""}`
+      ? `${result.value.at}\0${result.value.revision ?? ""}`
       : "";
-  }).pipe(Atom.withLabel(`game:event-signal:${environmentId}`)),
-);
+  }).pipe(Atom.withLabel(`game:thread-signal:${key}`));
+});
+
+const threadSignal = (target: {
+  readonly environmentId: EnvironmentId;
+  readonly input: { readonly threadId: ThreadId };
+}) => threadGameSignal(`${target.environmentId}\0${target.input.threadId}`);
+
+/**
+ * Changes only when a game's run or operation changes state, which is all a
+ * library card shows; progress messages within one state do not reread the list.
+ */
+const gameListSignal = Atom.family((environmentId: string) => {
+  const states = new Map<string, string>();
+  let changes = 0;
+  return Atom.make((get) => {
+    const result = get(gameEvents({ environmentId: EnvironmentId.make(environmentId), input: {} }));
+    if (!AsyncResult.isSuccess(result)) return changes;
+    const event = result.value;
+    // A run event's message is its current step, which the card shows.
+    const state =
+      event.name === "run"
+        ? `run\0${event.state}\0${event.message}`
+        : `${event.name}\0${event.state}`;
+    if (states.get(event.root) !== state) {
+      states.set(event.root, state);
+      changes += 1;
+    }
+    return changes;
+  }).pipe(Atom.withLabel(`game:list-signal:${environmentId}`));
+});
 
 // Bumped after a restore: every open round's "current build" may have changed.
 const runRestoredSignal = Atom.family((environmentId: string) =>
@@ -50,14 +85,14 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameStatus,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+    refreshTrigger: threadSignal,
   }),
   list: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:list",
     tag: WS_METHODS.gameList,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+    refreshTrigger: ({ environmentId }) => gameListSignal(environmentId),
   }),
   checkSources: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:checkSources",
@@ -72,7 +107,7 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameRunStatus,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+    refreshTrigger: threadSignal,
   }),
   // Read when a round row opens, never for every round; a finished round's
   // evidence does not change, so an open row is not polled, only reread after a restore.
@@ -89,7 +124,7 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameRunPick,
     staleTimeMs: 60_000,
     idleTtlMs: 60_000,
-    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+    refreshTrigger: threadSignal,
   }),
   runRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runRestore",

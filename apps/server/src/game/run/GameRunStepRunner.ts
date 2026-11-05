@@ -12,6 +12,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type GameRun,
+  type GameRunRestoreOutcome,
   type GameRunRoleBefore,
   type GameRunStep,
   type GameRunStepId,
@@ -24,7 +25,6 @@ import {
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -36,6 +36,7 @@ import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
+  gameRunOperationOwner,
   roleCapCommandId,
   roleThreadId,
   roleTurnMessageId,
@@ -47,6 +48,7 @@ import * as ThreadManagement from "../../orchestration-v2/ThreadManagementServic
 import { forkParked } from "../../serverActivation.ts";
 import { laneProfile } from "../engineProfile.ts";
 import * as GameOperations from "../GameOperations.ts";
+import * as ProjectService from "../../project/ProjectService.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameService from "../GameService.ts";
 import { causeText, logLine, refreshHarnessFiles, writeAtomic } from "../runSetup.ts";
@@ -56,6 +58,7 @@ import { runStateChecks } from "./checkRunner.ts";
 import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
+import { restoreKeptRound } from "./restoreRound.ts";
 import { makeGit, neutralBuild } from "./git.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
@@ -69,7 +72,7 @@ import {
   type RoleContext,
   type RoleDeps,
 } from "./roleWorkspace.ts";
-import { CONTINUE, artFacts, modelBlock, spriteBlock } from "./roles.ts";
+import { CONTINUE, MEMORY_RETRY, artFacts, modelBlock, spriteBlock } from "./roles.ts";
 import { currentStep, describe, summarize } from "./runView.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { BLANK, type BotStep, type GitOp, type RoleStep } from "./state.ts";
@@ -86,9 +89,6 @@ export class GameRunStepRunner extends Context.Service<
   }
 >()("kurambit/game/run/GameRunStepRunner") {}
 
-// A pause between checks of a role's cap, so a turn that ends early is noticed
-// by its own run's end, not by this watch.
-const CAP_CHECK = Duration.minutes(1);
 // Endings that leave nothing to export: a stop, a failure, or memory too short for the exports.
 const NO_EXPORT: ReadonlySet<string> = new Set(["stopped", "failed", "low-memory"]);
 
@@ -99,6 +99,7 @@ const make = Effect.gen(function* () {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
   const game = yield* GameService.GameService;
   const projects = yield* GameProjectService.GameProjectService;
+  const projectStore = yield* ProjectService.ProjectService;
   const operations = yield* GameOperations.GameOperations;
   const vcs = yield* GitWorkflow.GitWorkflowService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -198,9 +199,9 @@ const make = Effect.gen(function* () {
       }
       for (const step of owed) {
         for (const file of step.outputs.files)
-          yield* Effect.promise(() => writeAtomic(NodePath.join(root, file.path), file.text)).pipe(
-            Effect.ignore,
-          );
+          yield* Effect.tryPromise(() =>
+            writeAtomic(NodePath.join(root, file.path), file.text),
+          ).pipe(Effect.ignore);
         for (const thread of step.outputs.release)
           yield* releaseWorktree(deps, { root, log }, thread);
       }
@@ -248,6 +249,9 @@ const make = Effect.gen(function* () {
    * a thread with no turn of this attempt continues where an earlier try left
    * off. A thread that is gone is replaced by the attempt's own.
    */
+  // A role turn a server restart keeps cutting off would otherwise be
+  // continued forever; the run ends resumably instead.
+  const CUT_OFF_LIMIT = 3;
   const roleHalf = (
     job: GameRunJobs.GameRunStepJob,
     run: GameRun,
@@ -292,6 +296,14 @@ const make = Effect.gen(function* () {
 
       const launchThread = (target: ThreadId, replaces: ThreadId | undefined, text: string) =>
         Effect.gen(function* () {
+          // A deleted project takes no new threads; a read that fails is no
+          // proof it lives, so the step fails rather than launching blind.
+          const projectLive = yield* projectStore.getById(run.projectId).pipe(
+            Effect.map(Option.isSome),
+            Effect.orElseSucceed(() => false),
+          );
+          if (!projectLive)
+            return yield* fail(half, stepId, `${role.role}: its project was deleted`);
           const measured = yield* before();
           const ctx = roleContext(run, root, log);
           // An engine whose first editor open imports the whole project (minutes;
@@ -407,6 +419,27 @@ const make = Effect.gen(function* () {
             yield* log(`${role.role}: reattaching to thread ${threadId}`);
             return yield* jobs.deadline(half);
           }
+          if (GameRunRoleReactor.isCutOff(latest.run)) {
+            const attemptTurns = turns.filter((t) => t.turn.attempt === job.attempt);
+            // Only turns that ran count: a continuation a shutdown cancelled
+            // before it started cost the role nothing.
+            const cut = attemptTurns.filter(
+              (t) => GameRunRoleReactor.isCutOff(t.run) && t.run.startedAt !== null,
+            ).length;
+            if (cut >= CUT_OFF_LIMIT)
+              return yield* fail(half, stepId, `${role.role}: role turn cut off repeatedly`);
+            yield* log(`${role.role}: turn on ${threadId} was cut off; continuing it`);
+            yield* roles.sendTurn({
+              projectId: run.projectId,
+              threadId,
+              stepId,
+              attempt: job.attempt,
+              kind: "continue",
+              n: Math.max(...attemptTurns.map((t) => t.turn.n)) + 1,
+              text: `${CONTINUE}\n\n${yield* promptOf(run, role, root)}`,
+            });
+            return yield* jobs.deadline(half);
+          }
           if ((yield* roles.settle(threadId, latest.run)) !== "fresh") return;
           // Its own provider session refuses the reused thread: the work is in the
           // files, so the role continues once in a thread of its own.
@@ -512,9 +545,13 @@ const make = Effect.gen(function* () {
           return yield* reporting(
             job,
             record.id,
-            bootStep(game, { creator: run.threadId, root, lane: run.lane, log }).pipe(
-              Effect.flatMap(done),
-            ),
+            bootStep(game, {
+              creator: run.threadId,
+              owner: gameRunOperationOwner(run.id),
+              root,
+              lane: run.lane,
+              log,
+            }).pipe(Effect.flatMap(done)),
           );
         case "facts":
           return yield* reporting(
@@ -594,39 +631,76 @@ const make = Effect.gen(function* () {
    */
   const deadline = (job: GameRunJobs.GameRunStepJob) =>
     Effect.gen(function* () {
-      for (;;) {
-        const at = yield* roles.locate(job.threadId, job.stepId, job.attempt);
-        if (at === null || at.role === null) return;
-        const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
-        if (threadId === null) return;
-        const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
-        const live = GameRunRoleReactor.stepTurns(runs, job.stepId).findLast(
-          (t) => t.turn.attempt === job.attempt,
+      const at = yield* roles.locate(job.threadId, job.stepId, job.attempt);
+      if (at === null || at.role === null) return;
+      const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
+      if (threadId === null) return;
+      const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
+      const attemptTurns = GameRunRoleReactor.stepTurns(runs, job.stepId).filter(
+        (t) => t.turn.attempt === job.attempt,
+      );
+      const live = attemptTurns.at(-1);
+      if (live === undefined || GameRunRoleReactor.isSettledRun(live.run)) return;
+      // A continued turn (a restart cut the one before) carries on that turn's
+      // work, so its cap runs from where the work began, as the step's elapsed
+      // time does; a turn sent afresh (a retry, a memory wait) has its own.
+      const fresh = (t: GameRunRoleReactor.AttributedTurn) => t.sent && t.turn.kind !== "continue";
+      const anchor = attemptTurns.findLast(fresh) ?? attemptTurns[0] ?? live;
+      const startedAt = anchor.run.startedAt ?? anchor.run.requestedAt;
+      const waited = yield* game.exploreMemoryWait(threadId).pipe(
+        Effect.map((mark) => mark.waitedMs),
+        Effect.orElseSucceed(() => 0),
+      );
+      const cap = DateTime.toEpochMillis(startedAt) + at.role.capMs + waited;
+      const due = at.run.budgetEndsAt === null ? cap : Math.min(cap, at.run.budgetEndsAt);
+      // Not due yet (memory waits extend it, a later turn restarts it): the cap
+      // is set again as a durable timer at its due time, never held by a fiber.
+      // The outbox's clock decides when timers are due, so this one does too.
+      if (DateTime.toEpochMillis(yield* DateTime.now) < due)
+        return yield* refused(
+          engine.dispatch({
+            type: "game-run.step.schedule",
+            commandId: CommandId.make(
+              `server:game-run-cap:${job.stepId}:attempt:${job.attempt}:${live.run.id}:${due}`,
+            ),
+            threadId: job.threadId,
+            runId: job.runId,
+            stepId: job.stepId,
+            attempt: job.attempt,
+            at: due,
+            timer: { kind: "cap" },
+          }),
         );
-        if (live === undefined || GameRunRoleReactor.isSettledRun(live.run)) return;
-        const startedAt = live.run.startedAt ?? live.run.requestedAt;
-        const waited = yield* game.exploreMemoryWait(threadId).pipe(
-          Effect.map((mark) => mark.waitedMs),
-          Effect.orElseSucceed(() => 0),
-        );
-        const cap = DateTime.toEpochMillis(startedAt) + at.role.capMs + waited;
-        const due = at.run.budgetEndsAt === null ? cap : Math.min(cap, at.run.budgetEndsAt);
-        const now = Date.now();
-        if (now < due) {
-          yield* Effect.sleep(Duration.min(Duration.millis(due - now), CAP_CHECK));
-          continue;
-        }
-        yield* threads
-          .interruptThread({
-            projectId: at.run.projectId,
-            commandId: roleCapCommandId(job.stepId, job.attempt, live.run.id),
-            threadId,
-            runId: live.run.id,
-            reason: "Studio role cap reached.",
-          })
-          .pipe(Effect.ignore);
-        return;
-      }
+      yield* threads
+        .interruptThread({
+          projectId: at.run.projectId,
+          commandId: roleCapCommandId(job.stepId, job.attempt, live.run.id),
+          threadId,
+          runId: live.run.id,
+          reason: "Studio role cap reached.",
+        })
+        .pipe(Effect.ignore);
+    });
+
+  /** A role turn sent again once its pause is over, if its step is still where it was. */
+  const resend = (job: GameRunJobs.GameRunResendJob) =>
+    Effect.gen(function* () {
+      const at = yield* roles.locate(job.threadId, job.stepId, job.attempt);
+      if (at === null || at.role === null) return;
+      const threadId = at.record.roles.find((r) => r.seq === at.seq)?.threadId ?? null;
+      if (threadId === null) return;
+      const prompt = at.role.prompt;
+      yield* roles.sendTurn({
+        projectId: at.run.projectId,
+        threadId,
+        stepId: job.stepId,
+        attempt: job.attempt,
+        kind: job.turn,
+        n: job.n,
+        text: job.turn === "memory" ? `${MEMORY_RETRY}\n\n${prompt}` : prompt,
+      });
+      // A turn sent again is capped like the first.
+      yield* jobs.deadline(job);
     });
 
   // ── A run's end, from the game-run.finish effect its ending committed: its
@@ -645,9 +719,48 @@ const make = Effect.gen(function* () {
         run.finished === job.endedAt
       )
         return;
+      // The ending is recorded however its work went: a run left unfinished
+      // refuses every resume, steer and restore until a restart. Only an
+      // interrupt (a shutdown) leaves it to recovery, which finishes it again.
+      yield* finishWork(job, run, records).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : projects.resolve(run.threadId, { deleted: "allowed" }).pipe(
+                Effect.flatMap((root) =>
+                  logLine(
+                    root,
+                    `run finish broke (${causeText(cause)}); the ending is recorded anyway`,
+                  ),
+                ),
+                Effect.catchCause(() =>
+                  Effect.logWarning("game run finish broke", { runId: run.id, cause }),
+                ),
+              ),
+        ),
+      );
+      yield* refused(
+        engine.dispatch({
+          type: "game-run.finished",
+          commandId: CommandId.make(`server:game-run-finished:${run.id}:${job.endedAt}`),
+          threadId: run.threadId,
+          runId: run.id,
+          endedAt: job.endedAt,
+        }),
+      );
+    });
+
+  const finishWork = (
+    job: GameRunJobs.GameRunFinishJob,
+    run: GameRun,
+    records: ProjectionStore.GameRunThreadRecords,
+  ) =>
+    Effect.gen(function* () {
+      // The run's jobs, then its live role turns, before anything that can
+      // fail: a finish that breaks later is still recorded, so nothing of the
+      // run may be left working. Each interrupt needs no folder, and one that
+      // breaks never keeps the others from being sent.
       yield* jobs.stopRun(run.id);
-      const root = yield* projects.resolve(run.threadId);
-      const log = (line: string) => logLine(root, line);
       const held = records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight);
       for (const role of held?.roles ?? []) {
         if (role.threadId === null) continue;
@@ -660,8 +773,14 @@ const make = Effect.gen(function* () {
             threadId: role.threadId,
             reason: `The production run ended (${run.ending ?? "unknown"}).`,
           })
-          .pipe(Effect.ignore);
+          .pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.void,
+            ),
+          );
       }
+      const root = yield* projects.resolve(run.threadId, { deleted: "allowed" });
+      const log = (line: string) => logLine(root, line);
       yield* performOutputs(run, records.gameRunSteps, Number.MAX_SAFE_INTEGER, root, log);
       yield* log(
         `run ended: ${run.ending ?? "unknown"}${run.lastFailure ? ` (${run.lastFailure})` : ""}`,
@@ -673,51 +792,102 @@ const make = Effect.gen(function* () {
         // it again) and trunk is checked out first.
         if (run.trunk.length > 0) {
           const git = makeGit(root, run.lane, log);
+          // Any break here only means HEAD stays where it is; the export still runs.
           const parked = yield* gitStep(git, root, {
             _tag: "to-trunk",
             trunk: run.trunk,
             message: `unfinished: the run ended (${run.ending})`,
-          }).pipe(Effect.option);
-          if (Option.isNone(parked) || !parked.value.git.ok)
+          }).pipe(
+            Effect.map((step) => step.git.ok),
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(false),
+            ),
+          );
+          if (!parked)
             yield* log(`finishExports: could not return to ${run.trunk}; exporting where HEAD is`);
         }
-        yield* finishExports(root, run.threadId, game, log).pipe(Effect.ignore);
+        yield* finishExports(root, run.threadId, game, log, gameRunOperationOwner(run.id)).pipe(
+          Effect.ignore,
+        );
       }
+    });
+
+  // A creator's restore, from the effect its request committed. Every check is
+  // made against the folder now, so a restore a restart cut short runs again safely.
+  const restore = (job: GameRunJobs.GameRunRestoreJob) =>
+    Effect.gen(function* () {
+      const records = yield* projections.getGameRunRecords(job.threadId);
+      const run = records.gameRuns.at(-1);
+      const pending = run?.restore;
+      if (run === undefined || run.id !== job.runId || pending?.requestId !== job.requestId) return;
+      if (pending.outcome !== null) return;
+      const held =
+        records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
+      const state = toState(run, records.gameRunRounds, held);
+      const record = state.rounds.find((r) => r.round === pending.round);
+      // A restore that broke is still answered: the run would otherwise stay
+      // "restoring" until a restart. An interrupt leaves it to recovery.
+      const outcome: GameRunRestoreOutcome = yield* (
+        record === undefined
+          ? Effect.succeed<GameRunRestoreOutcome>({
+              kind: "refused",
+              reason: "round-not-found",
+              message: `Round ${pending.round} is not recorded.`,
+            })
+          : Effect.flatMap(projects.resolve(run.threadId, { deleted: "allowed" }), (root) =>
+              restoreKeptRound({ game, root, run, state, record }),
+            )
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.succeed<GameRunRestoreOutcome>({
+                kind: "refused",
+                reason: "git-failed",
+                message: `The restore broke (${causeText(cause)}); see .studio/run.log and the game's git status.`,
+              }),
+        ),
+      );
       yield* refused(
         engine.dispatch({
-          type: "game-run.finished",
-          commandId: CommandId.make(`server:game-run-finished:${run.id}:${job.endedAt}`),
+          type: "game-run.restore",
+          commandId: CommandId.make(`server:game-run-restore:${job.requestId}`),
           threadId: run.threadId,
           runId: run.id,
-          endedAt: job.endedAt,
+          requestId: job.requestId,
+          outcome,
         }),
       );
     });
 
-  // The Game panel's live run line: the step label, refreshed as the run moves.
+  // Every move of the run is news to the library and the Run view, which
+  // reread the run's records; the step label rides along for the push.
   const showLive = (run: GameRun) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(run.threadId);
-      if (run.status === "ended") return yield* operations.recordRun(root, null);
+      if (run.status === "ended") return yield* operations.runChanged(root, null);
       const records = yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" });
       const held =
         records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
-      yield* operations.recordRun(root, {
-        step: currentStep(toState(run, records.gameRunRounds, held)),
-        startedAt: run.startedAt,
-        // Any change is news to the panel; each step is one.
-        threads: run.seq,
-      });
+      yield* operations.runChanged(root, currentStep(toState(run, records.gameRunRounds, held)));
     });
 
   // The run log is for people: each step's decisions, written once it settles.
   // Nothing reads it back; the step records are the run's history.
-  const logged = new Set<string>();
+  // Steps in flight, by id, with the attempt that is: a landed step is written
+  // once and dropped, so the set holds only what the runs are doing now.
+  const inFlightSteps = new Map<string, number>();
   const logStep = (step: GameRunStep) =>
     Effect.gen(function* () {
-      const key = `${step.id}:${step.attempt}:${step.status}`;
-      if (step.status === "planned" || step.status === "running" || logged.has(key)) return;
-      logged.add(key);
+      if (step.status === "planned" || step.status === "running") {
+        inFlightSteps.set(step.id, step.attempt);
+        return;
+      }
+      // A step seen only landed (a restart in between) is written too.
+      const held = inFlightSteps.get(step.id);
+      if (held !== undefined && held !== step.attempt) return;
+      if (held === undefined && step.completedAt === null) return;
+      inFlightSteps.delete(step.id);
       const root = yield* projects.resolve(step.threadId);
       yield* logLine(root, `${describe(step.step)} (${step.status})`);
       for (const line of step.logs) yield* logLine(root, `  ${line}`);
@@ -750,7 +920,7 @@ const make = Effect.gen(function* () {
         // A folder that cannot be read is no reason to skip the question.
         showable: (threadId, lane, decision) =>
           projects.resolve(threadId).pipe(
-            Effect.flatMap((root) => Effect.promise(() => presentable(root, lane, decision))),
+            Effect.flatMap((root) => Effect.tryPromise(() => presentable(root, lane, decision))),
             Effect.map((evidence) => evidence.length > 0),
             Effect.orElseSucceed(() => true),
           ),
@@ -761,6 +931,22 @@ const make = Effect.gen(function* () {
               Cause.hasInterruptsOnly(cause)
                 ? Effect.interrupt
                 : Effect.logWarning("game run cap watch failed", { stepId: job.stepId, cause }),
+            ),
+          ),
+        resend: (job) =>
+          resend(job).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : Effect.logWarning("game run resend failed", { stepId: job.stepId, cause }),
+            ),
+          ),
+        restore: (job) =>
+          restore(job).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : Effect.logWarning("game run restore failed", { runId: job.runId, cause }),
             ),
           ),
         finish: (job) =>

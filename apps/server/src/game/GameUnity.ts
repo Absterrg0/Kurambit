@@ -24,15 +24,16 @@ import {
   underIdleMemoryFloor,
 } from "./liveProcess.ts";
 import {
-  LAUNCH_ENV,
   adoptLaunch,
+  LAUNCH_ENV,
+  type LaunchRecord,
   launchToken,
   listProcesses,
-  processCwd,
-  stopRecorded,
-  type LaunchRecord,
   type OwnedProcess,
+  processCwd,
   type ProcessFacts,
+  ProcessHost,
+  stopRecorded,
 } from "./processHost.ts";
 import { findWindowHost, findXvfb, type HostedWindow } from "./windowHost.ts";
 import {
@@ -505,6 +506,7 @@ export class GameUnity extends Context.Service<
 >()("kurambit/game/GameUnity") {}
 
 const make = Effect.gen(function* () {
+  const processHost = yield* ProcessHost;
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
@@ -715,7 +717,7 @@ const make = Effect.gen(function* () {
           }
         for (const otherRoot of Array.from(sessions.keys())) yield* drop(otherRoot);
         yield* drop(root);
-        const host = yield* Effect.promise(findWindowHost);
+        const host = yield* Effect.promise(() => findWindowHost(processHost));
         if (host === null)
           return yield* opError(
             "unity-live",
@@ -931,7 +933,7 @@ const make = Effect.gen(function* () {
             "io",
           );
         }
-        const mcpLaunch = yield* Effect.promise(() => adoptLaunch(mcpPid, mcpToken));
+        const mcpLaunch = yield* Effect.promise(() => adoptLaunch(processHost, mcpPid, mcpToken));
         if (mcpLaunch !== null) yield* remember({ mcpLaunch });
         const session: Session = {
           root,
