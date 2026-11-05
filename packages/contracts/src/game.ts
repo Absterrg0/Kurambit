@@ -594,6 +594,9 @@ export const GameSavedMedia = Schema.Struct({
   path: Schema.String,
   bytes: Schema.Number,
   savedAt: Schema.String,
+  /** The game-relative file it was saved from and the label it was saved with, when known. */
+  source: Schema.NullOr(Schema.String),
+  label: Schema.NullOr(Schema.String),
 });
 export type GameSavedMedia = typeof GameSavedMedia.Type;
 export const GameMediaSaveFields = {

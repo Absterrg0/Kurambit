@@ -22,6 +22,11 @@ it("copies a generated video under a dated name and never overwrites a saved one
     const source = "builds/logs/game-bot-1/run.mp4";
     const first = await saveMedia(root, source, "round 2 bot run", "2026-11-05");
     expect(first.name).toBe("2026-11-05 round 2 bot run.mp4");
+    // A Save button finds its file by what it was saved from, after a remount too.
+    expect((await listSaved(root)).find((m) => m.name === first.name)).toMatchObject({
+      source,
+      label: "round 2 bot run",
+    });
     await NodeFSP.writeFile(NodePath.join(root, source), "video-2");
     const second = await saveMedia(root, source, "round 2 bot run", "2026-11-05");
     expect(second.name).toBe("2026-11-05 round 2 bot run (2).mp4");
@@ -73,4 +78,7 @@ it("never writes through a linked saved/ and deletes only files directly in it",
       await expect(deleteSaved(root, name)).rejects.toThrow();
     await deleteSaved(root, saved.name);
     expect(await listSaved(root)).toEqual([]);
+    expect((await NodeFSP.readdir(NodePath.join(root, "saved"))).toSorted()).toEqual([
+      ".gitignore",
+    ]);
   }));

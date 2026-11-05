@@ -73,9 +73,24 @@ export function SaveMediaButton({
 }) {
   const canSave = useAtomValue(gameEnvironment.saveMedia.permissionAtom(threadRef.environmentId));
   const save = useAtomCommand(gameEnvironment.saveMedia, { reportFailure: false });
+  // One read of saved/ for every button of the game: a save is shown as saved
+  // once the folder holds it, after a remount, a delete or a save elsewhere too.
+  const list = useEnvironmentQuery(
+    gameEnvironment.savedList({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  );
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState<GameSavedMedia | null>(null);
+  // This button's save until the list is read again after it.
+  const [justSaved, setJustSaved] = useState<{
+    readonly media: GameSavedMedia;
+    readonly listAt: number | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const saved =
+    list.data?.find((media) => media.source === source && media.label === label) ??
+    (justSaved !== null && justSaved.listAt === list.dataUpdatedAt ? justSaved.media : null);
   const run = async () => {
     if (saving) return;
     setSaving(true);
@@ -89,7 +104,7 @@ export function SaveMediaButton({
       return;
     }
     setError(null);
-    setSaved(result.value);
+    setJustSaved({ media: result.value, listAt: list.dataUpdatedAt });
     noteSavedMediaChanged(threadRef.environmentId);
   };
   return (

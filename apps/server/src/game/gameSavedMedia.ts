@@ -8,6 +8,8 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeStreamPromises from "node:stream/promises";
 import type { GameSavedMedia } from "@kurambit/contracts";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { isPathInside } from "./gameNativeUserDir.ts";
 
 /** Game-relative; the scaffold's .gitignore ignores it, so saves stay out of commits and checkpoints. */
@@ -140,11 +142,30 @@ const defaultLabel = (root: string, real: string) => {
   return `${kind}${NodePath.basename(real, NodePath.extname(real))}`;
 };
 
-const savedEntry = (dir: string, name: string, info: { size: number; mtime: Date }) => ({
+// What a saved file was saved from, beside it, so a Save button knows its file is saved.
+const Provenance = Schema.Struct({
+  source: Schema.NullOr(Schema.String),
+  label: Schema.NullOr(Schema.String),
+});
+const decodeProvenance = Schema.decodeUnknownOption(Schema.fromJsonString(Provenance));
+const provenanceFile = (dir: string, name: string) => NodePath.join(dir, `.source-${name}.json`);
+const readProvenance = async (dir: string, name: string) =>
+  Option.getOrElse(
+    decodeProvenance(await NodeFSP.readFile(provenanceFile(dir, name), "utf8").catch(() => "")),
+    () => ({ source: null, label: null }),
+  );
+
+const savedEntry = (
+  dir: string,
+  name: string,
+  info: { size: number; mtime: Date },
+  from: typeof Provenance.Type,
+): GameSavedMedia => ({
   name,
   path: NodePath.join(dir, name),
   bytes: info.size,
   savedAt: info.mtime.toISOString(),
+  ...from,
 });
 
 /**
@@ -164,10 +185,8 @@ export const saveMedia = async (
   const dir = (await savedDir(root, true))!;
   const ext = NodePath.extname(real).toLowerCase();
   const given = label?.trim() ?? "";
-  const stem = savedStem(
-    given.length > 0 ? given : defaultLabel(await NodeFSP.realpath(root), real),
-    day,
-  );
+  const realRoot = await NodeFSP.realpath(root);
+  const stem = savedStem(given.length > 0 ? given : defaultLabel(realRoot, real), day);
   const temp = NodePath.join(dir, `.saving-${NodeCrypto.randomUUID()}${ext}`);
   try {
     await copyChecked(checked, source, temp);
@@ -188,7 +207,12 @@ export const saveMedia = async (
         await NodeFSP.rm(target, { force: true });
         throw error;
       }
-      return savedEntry(dir, name, await NodeFSP.stat(target));
+      const from = {
+        source: NodePath.relative(realRoot, real).split(NodePath.sep).join("/"),
+        label: given.length > 0 ? given : null,
+      };
+      await NodeFSP.writeFile(provenanceFile(dir, name), JSON.stringify(from));
+      return savedEntry(dir, name, await NodeFSP.stat(target), from);
     }
   } finally {
     await NodeFSP.rm(temp, { force: true });
@@ -203,7 +227,8 @@ export const listSaved = async (root: string): Promise<ReadonlyArray<GameSavedMe
   for (const name of await NodeFSP.readdir(dir)) {
     if (name.startsWith(".")) continue;
     const info = await NodeFSP.lstat(NodePath.join(dir, name)).catch(() => null);
-    if (info?.isFile() === true) rows.push(savedEntry(dir, name, info));
+    if (info?.isFile() === true)
+      rows.push(savedEntry(dir, name, info, await readProvenance(dir, name)));
   }
   return rows.toSorted((a, b) => b.savedAt.localeCompare(a.savedAt));
 };
@@ -224,4 +249,5 @@ export const deleteSaved = async (root: string, name: string): Promise<void> => 
   if (target === null || info?.isFile() !== true)
     throw new SavedMediaError("invalid-path", `saved/${name} is not a saved file.`);
   await NodeFSP.rm(target);
+  await NodeFSP.rm(provenanceFile(NodePath.dirname(target), name), { force: true });
 };
