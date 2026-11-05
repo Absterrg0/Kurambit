@@ -199,7 +199,9 @@ const make = Effect.gen(function* () {
       );
     });
 
-  // An answer that arrives first leaves a still-queued question with nothing to ask.
+  // A settled decision leaves nothing to ask: a still-queued question is dropped,
+  // and a question card the presenting agent opened is dismissed, or the stale
+  // card keeps its turn waiting and the creator's chat blocked behind it.
   const dropQueuedWake = (threadId: ThreadId, step: GameRunStep) =>
     Effect.gen(function* () {
       if (step.step.kind !== "decide") return;
@@ -208,17 +210,37 @@ const make = Effect.gen(function* () {
         step.step.decision.id,
         step.attempt,
       );
-      const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
-      const queued = runs.find((run) => run.status === "queued" && run.userMessageId === messageId);
-      if (queued === undefined) return;
-      yield* settledByRefusal(
-        engine.dispatch({
-          type: "queued-run.cancel",
-          commandId: CommandId.make(`${commandId}:cancel`),
-          threadId,
-          runId: queued.id,
-        }),
-      );
+      const { runs, nodes, runtimeRequests } = yield* projections.getThreadRecords(threadId, [
+        "runs",
+        "nodes",
+        "runtimeRequests",
+      ]);
+      const woke = runs.find((run) => run.userMessageId === messageId);
+      if (woke === undefined) return;
+      if (woke.status === "queued")
+        return yield* settledByRefusal(
+          engine.dispatch({
+            type: "queued-run.cancel",
+            commandId: CommandId.make(`${commandId}:cancel`),
+            threadId,
+            runId: woke.id,
+          }),
+        );
+      const wakeNodes = new Set(nodes.filter((node) => node.runId === woke.id).map((n) => n.id));
+      for (const request of runtimeRequests)
+        if (
+          request.status === "pending" &&
+          request.kind === "user_input" &&
+          wakeNodes.has(request.nodeId)
+        )
+          yield* settledByRefusal(
+            engine.dispatch({
+              type: "thread.user-input.dismiss",
+              commandId: CommandId.make(`${commandId}:dismiss:${request.id}`),
+              threadId,
+              requestId: request.id,
+            }),
+          );
     });
 
   const handle: GameRunDecisions["Service"]["handle"] = (event) =>
