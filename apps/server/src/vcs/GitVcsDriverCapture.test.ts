@@ -246,6 +246,12 @@ const cases: ReadonlyArray<Case> = [
       commitAll(root, "filter");
       write(NodePath.join(root, "new.dat"), "new data\n");
       write(NodePath.join(root, "plain.txt"), "plain text\n");
+      // Git applies an ignored .gitattributes from the working tree all the same.
+      write(NodePath.join(root, ".gitignore"), "d/.gitattributes\n");
+      write(NodePath.join(root, "d/.gitattributes"), "# nothing yet\n");
+      write(NodePath.join(root, "d/y.md"), "lower case\n");
+      // Old enough that git's racy check does not re-read it anyway.
+      NodeFS.utimesSync(NodePath.join(root, "d/y.md"), 1_700_000_000, 1_700_000_000);
       return root;
     },
     steps: [
@@ -262,6 +268,11 @@ const cases: ReadonlyArray<Case> = [
           write(NodePath.join(cwd, ".gitattributes"), "*.dat filter=up\n*.txt filter=up\n"),
       },
       { name: "no-op", seeds: false },
+      {
+        name: "an ignored attributes file changes",
+        seeds: true,
+        act: (cwd) => write(NodePath.join(cwd, "d/.gitattributes"), "*.md filter=up\n"),
+      },
     ],
   },
   {

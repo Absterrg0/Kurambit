@@ -1223,24 +1223,29 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       });
       if (config.exitCode !== 0) return null;
       const settings = parseGitConfigList(config.stdout);
-      const listed = yield* execute({
-        operation,
-        cwd,
-        args: [
-          ...WORKSPACE_GIT_HARDENED_CONFIG_ARGS,
-          "ls-files",
-          "-z",
-          "-c",
-          "-o",
-          "--exclude-standard",
-          "--full-name",
-          "--",
-          ":(glob)**/.gitattributes",
-        ],
-        timeoutMs: TREE_TIMEOUT_MS,
-        maxOutputBytes: CAPTURE_LISTING_MAX_BYTES,
-        outputMode: "error",
-      });
+      const listAttributes = (selection: ReadonlyArray<string>) =>
+        execute({
+          operation,
+          cwd,
+          args: [
+            ...WORKSPACE_GIT_HARDENED_CONFIG_ARGS,
+            "ls-files",
+            "-z",
+            ...selection,
+            "--exclude-standard",
+            "--full-name",
+            "--",
+            ":(glob)**/.gitattributes",
+          ],
+          timeoutMs: TREE_TIMEOUT_MS,
+          maxOutputBytes: CAPTURE_LISTING_MAX_BYTES,
+          outputMode: "error",
+        }).pipe(Effect.map((result) => splitNul(result.stdout)));
+      // Git applies a .gitattributes in the working tree even when it is ignored.
+      const listed = [
+        ...(yield* listAttributes(["-c", "-o"])),
+        ...(yield* listAttributes(["-o", "-i"])),
+      ];
       const home = process.env.HOME || NodeOS.homedir();
       const configured = settings.get("core.attributesfile");
       const globalAttributes =
@@ -1258,7 +1263,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         infoAttributes,
         globalAttributes,
         ...folders.map((_, depth) => path.join(top, ...folders.slice(0, depth), ".gitattributes")),
-        ...splitNul(listed.stdout).map((file) => path.join(top, file)),
+        ...listed.map((file) => path.join(top, file)),
       ];
       const encoder = new TextEncoder();
       const parts: Uint8Array[] = [encoder.encode(`v1\0${prefix}\0${head}\0${config.stdout}\0`)];
