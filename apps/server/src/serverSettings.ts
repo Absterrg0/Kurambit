@@ -888,6 +888,12 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
+  // Only a secret the current settings show as stored is ever removed. A field can read
+  // empty while its key is stored (an adoption read that failed, or a settings file that
+  // did not decode and fell back to defaults); saving another setting must not delete it.
+  const wasStored = (secret: SettingsSecret | undefined) =>
+    secret !== undefined && (secret.redacted || secret.value.length > 0);
+
   const persistSettingsSecrets = (current: ServerSettings, next: ServerSettings) =>
     Effect.sync(() => {
       const previous = new Map<string, SettingsSecret>();
@@ -920,7 +926,9 @@ const make = Effect.gen(function* () {
           return { value: "", redacted: true };
         }
         if (value.length === 0) {
-          changes.push({ ...metadata, kind: "remove", operation: "remove-secret" });
+          if (wasStored(old)) {
+            changes.push({ ...metadata, kind: "remove", operation: "remove-secret" });
+          }
           return { value: "", redacted: false };
         }
         nextSecretNames.add(secret.secretName);
@@ -928,7 +936,8 @@ const make = Effect.gen(function* () {
         return { value: "", redacted: true };
       });
       for (const secret of previous.values()) {
-        if (!secret.sensitive || nextSecretNames.has(secret.secretName)) continue;
+        if (!secret.sensitive || !wasStored(secret) || nextSecretNames.has(secret.secretName))
+          continue;
         if (changes.some((change) => change.secretName === secret.secretName)) continue;
         changes.push({
           kind: "remove",

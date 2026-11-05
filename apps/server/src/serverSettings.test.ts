@@ -1872,6 +1872,67 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
+  it.effect(
+    "keeps a stored game key when reading it failed at load and another setting saves",
+    () => {
+      const reads = { fail: true };
+      const layerSecret = Layer.effect(
+        ServerSecretStore.ServerSecretStore,
+        Effect.map(ServerSecretStore.ServerSecretStore, (store) => ({
+          ...store,
+          get: (name: string) =>
+            reads.fail
+              ? Effect.fail(
+                  new ServerSecretStore.SecretStoreReadError({
+                    resource: name,
+                    cause: new Error("Secret storage unavailable"),
+                  }),
+                )
+              : store.get(name),
+        })),
+      ).pipe(Layer.provide(ServerSecretStore.layer));
+      const layerSettings = ServerSettingsModule.layer.pipe(
+        Layer.provideMerge(layerSecret),
+        Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
+        Layer.provideMerge(
+          Layer.fresh(
+            ServerConfig.layerTest(process.cwd(), {
+              prefix: "kurambit-adoption-read-failure-test-",
+            }),
+          ),
+        ),
+      );
+      return Effect.gen(function* () {
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+        yield* secrets.set("game-bot-jev-api-key", new TextEncoder().encode("jev-saved"));
+
+        assert.strictEqual((yield* serverSettings.getSettings).gameJevApiKey, "");
+        reads.fail = false;
+        yield* serverSettings.updateSettings({ gameBlenderPath: "/opt/blender" });
+
+        assert.isTrue(Option.isSome(yield* secrets.get("game-bot-jev-api-key")));
+      }).pipe(Effect.provide(layerSettings));
+    },
+  );
+
+  it.effect("never removes a stored game key while settings.json does not decode", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* secrets.set("game-bot-jev-api-key", new TextEncoder().encode("jev-saved"));
+      yield* fileSystem.writeFileString(serverConfig.settingsPath, "{ not json");
+
+      assert.strictEqual((yield* serverSettings.getSettings).gameJevApiKey, "");
+      yield* serverSettings.updateSettings({ gameBlenderPath: "/opt/blender" });
+      yield* serverSettings.updateSettings({ gameJevApiKey: "" });
+
+      assert.isTrue(Option.isSome(yield* secrets.get("game-bot-jev-api-key")));
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
   it.effect("moves the retired bitbucket and github keys and their secrets on load", () =>
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig.ServerConfig;
