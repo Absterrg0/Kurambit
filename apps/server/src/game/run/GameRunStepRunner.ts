@@ -465,6 +465,18 @@ const make = Effect.gen(function* () {
       if (shell !== null && shell.deletedAt === null) {
         if (shell.projectId !== run.projectId)
           return yield* fail(half, stepId, `${role.role}: its thread belongs to another project`);
+        // An archived role thread refuses every turn, so each resume would fail
+        // the same way; the run owns its roles and brings the thread back.
+        if (shell.archivedAt !== null) {
+          yield* engine.dispatch({
+            type: "thread.unarchive",
+            commandId: CommandId.make(
+              `server:game-run-role-unarchive:${stepId}:attempt:${job.attempt}:${threadId}`,
+            ),
+            threadId,
+          });
+          yield* log(`${role.role}: thread ${threadId} was archived; brought it back for the run`);
+        }
         const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
         const turns = GameRunRoleReactor.stepTurns(runs, stepId);
         const latest = turns.findLast((t) => t.turn.attempt === job.attempt);
