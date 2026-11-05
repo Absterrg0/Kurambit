@@ -228,7 +228,10 @@ const make = Effect.gen(function* () {
         messageId,
         text: input.text,
         attachments: [],
-        mode: "auto",
+        // Always a run of its own, behind any run on the thread: "auto" would
+        // steer a turn into a run someone else started there, under that run's
+        // message id, and the step could no longer tell its turn apart.
+        mode: "queue",
         createdBy: "user",
         creationSource: "server",
       })
