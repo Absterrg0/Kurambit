@@ -20,14 +20,29 @@ export type Checkout =
   | { readonly kind: "other"; readonly detail: string };
 
 /**
- * Whose checkout a game folder is, read from git itself. A linked worktree
- * (the production run plays blind samples in these) names its main checkout,
- * the folder above the common git dir. Any other folder whose .git is a file
- * (a submodule, a separate git dir) has no game folder to share an import with.
+ * The file a production run's plain copy of a build carries, naming the game
+ * folder it was copied from (every copy of that game names the same one).
+ */
+export const COPY_OF = ".kurambit-copy-of";
+
+/**
+ * Whose checkout a game folder is. A production run's plain copy of a build
+ * (blind samples play these) names its game folder in COPY_OF; a linked
+ * worktree names its main checkout, the folder above the common git dir. Any
+ * other folder whose .git is a file (a submodule, a separate git dir) has no
+ * game folder to share an import with.
  */
 export const checkoutOf = async (root: string): Promise<Checkout> => {
   const dotGit = await NodeFSP.stat(NodePath.join(root, ".git")).catch(() => null);
-  if (dotGit === null || !dotGit.isFile()) return { kind: "own" };
+  if (dotGit === null) {
+    const main = (
+      await NodeFSP.readFile(NodePath.join(root, COPY_OF), "utf8").catch(() => "")
+    ).trim();
+    return main.length > 0 && (await NodeFSP.realpath(main).catch(() => null)) !== null
+      ? { kind: "linked", main: await NodeFSP.realpath(main) }
+      : { kind: "own" };
+  }
+  if (!dotGit.isFile()) return { kind: "own" };
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
   );

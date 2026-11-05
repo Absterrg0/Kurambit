@@ -4,7 +4,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { checkoutOf, reuseMainPlayer, unityPlayerDirectory } from "./unityPlayerCache.ts";
+import { COPY_OF, checkoutOf, reuseMainPlayer, unityPlayerDirectory } from "./unityPlayerCache.ts";
 
 const SOURCE = "a".repeat(64);
 
@@ -89,6 +89,11 @@ it("names a linked worktree's main checkout", async () => {
     const real = await NodeFSP.realpath(main);
     expect(await checkoutOf(main)).toEqual({ kind: "own" });
     expect(await checkoutOf(worktree)).toEqual({ kind: "linked", main: real });
+    // A run's plain copy of a build names its game folder instead.
+    const copy = NodePath.join(base, "copy");
+    await NodeFSP.mkdir(copy);
+    await NodeFSP.writeFile(NodePath.join(copy, COPY_OF), `${main}\n`);
+    expect(await checkoutOf(copy)).toEqual({ kind: "linked", main: real });
   } finally {
     await NodeFSP.rm(base, { recursive: true, force: true });
   }

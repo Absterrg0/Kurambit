@@ -12,6 +12,7 @@ import type * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.t
 import type * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import type * as GameService from "../GameService.ts";
 import { laneProfile } from "../engineProfile.ts";
+import { COPY_OF } from "../unityPlayerCache.ts";
 import { NOT_IN_SAMPLE } from "./builds.ts";
 import { waitOutLowMemory } from "./lowMemory.ts";
 import type { RoleDone, RoleStep } from "./state.ts";
@@ -90,7 +91,13 @@ const stepCopy = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, build: strin
       excludePaths: NOT_IN_SAMPLE,
     });
     if (!made) return null;
-    yield* Effect.tryPromise(() => NodeFSP.rename(staging, path));
+    // Its game folder, so a Unity copy shares that folder's import cache and
+    // player; every copy of the game names the same folder, so it tells
+    // nothing about which build it is.
+    yield* Effect.tryPromise(async () => {
+      await NodeFSP.writeFile(NodePath.join(staging, COPY_OF), `${ctx.root}\n`);
+      await NodeFSP.rename(staging, path);
+    });
     return path;
   });
 
