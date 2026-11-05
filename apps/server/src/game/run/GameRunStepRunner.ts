@@ -934,7 +934,17 @@ const make = Effect.gen(function* () {
               : log(`the run's spent builds could not be cleared: ${causeText(cause)}`),
           ),
         );
-      yield* dropRunCopies(deps, copiesOf(run.id), RESUMABLE.has(run.ending ?? "")).pipe(
+      const roleThreads = new Set(
+        records.gameRunSteps
+          .filter((s) => s.runId === run.id)
+          .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
+      );
+      yield* dropRunCopies(
+        deps,
+        { copies: copiesOf(run.id), log },
+        [...roleThreads],
+        RESUMABLE.has(run.ending ?? ""),
+      ).pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.failCause(cause)

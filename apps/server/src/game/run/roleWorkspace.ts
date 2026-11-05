@@ -185,27 +185,45 @@ export const removeBlank = (_deps: RoleDeps, _ctx: RoleContext, blank: { readonl
   Effect.promise(() => NodeFSP.rm(blank.path, { recursive: true, force: true }).catch(() => {}));
 
 /**
- * What is left of an ended run's copies goes, with any editor open on one
- * closed first. An ending a resume continues from keeps its roles' copies
- * (`step-*`), since the resumed step plays on in them.
+ * An ended run's copies go: each role's copy through releaseCopy, so a role
+ * still running keeps its folder and a released thread loses its binding;
+ * then whatever no role thread is bound to (bot copies, half-made copies,
+ * folders whose thread is gone). An ending a resume continues from keeps its
+ * roles' copies (`step-*`), since the resumed step plays on in them. Only
+ * folders inside the run's own copies folder are ever removed.
  */
 export const dropRunCopies = (
-  deps: Pick<RoleDeps, "game">,
-  copies: string,
+  deps: Pick<RoleDeps, "threads" | "game">,
+  ctx: Pick<RoleContext, "copies" | "log">,
+  roleThreads: ReadonlyArray<ThreadId>,
   keepRoleCopies: boolean,
 ) =>
   Effect.gen(function* () {
-    const names = yield* Effect.promise(() => NodeFSP.readdir(copies).catch(() => []));
-    const gone = names.filter(
-      (name) => !(keepRoleCopies && name.startsWith("step-") && !name.endsWith(".making")),
-    );
-    for (const name of gone) yield* deps.game.closeLiveEditors(NodePath.join(copies, name));
-    yield* Effect.promise(async () => {
-      if (gone.length === names.length) await NodeFSP.rm(copies, { recursive: true, force: true });
-      else
-        for (const name of gone)
-          await NodeFSP.rm(NodePath.join(copies, name), { recursive: true, force: true });
+    if (!keepRoleCopies)
+      for (const threadId of roleThreads) yield* releaseCopy(deps, ctx, threadId);
+    const bound = new Set<string>();
+    for (const threadId of roleThreads) {
+      const shell = yield* deps.threads
+        .getThreadShell(threadId)
+        .pipe(Effect.catchCause(() => Effect.succeed(undefined)));
+      // A thread that cannot be read may still be bound: its folder stays.
+      if (shell === undefined)
+        return yield* ctx.log("the run's copies kept: a role thread could not be read");
+      if (shell?.worktreePath) bound.add(NodePath.resolve(shell.worktreePath));
+    }
+    const names = yield* Effect.promise(() => NodeFSP.readdir(ctx.copies).catch(() => []));
+    const gone = names.filter((name) => {
+      const making = name.endsWith(".making");
+      if (keepRoleCopies && name.startsWith("step-") && !making) return false;
+      return making || !bound.has(NodePath.resolve(ctx.copies, name));
     });
+    for (const name of gone) {
+      const path = NodePath.join(ctx.copies, name);
+      yield* deps.game.closeLiveEditors(path);
+      yield* Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true }));
+    }
+    // Empty once nothing is kept; rmdir refuses a folder that still holds one.
+    yield* Effect.promise(() => NodeFSP.rmdir(ctx.copies).catch(() => undefined));
   });
 
 // A role's copy goes once its role has no turn left: the folder, then the
