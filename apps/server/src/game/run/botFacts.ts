@@ -4,12 +4,11 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
-import { CheckpointRef, GameOperationError } from "@kurambit/contracts";
+import { GameOperationError } from "@kurambit/contracts";
 import { botEnding, botFinalState } from "../gameBotRuntime.ts";
-import { NOT_IN_SAMPLE } from "./builds.ts";
 import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
-import type { RoleDeps } from "./roleWorkspace.ts";
+import { playCopy, type RoleDeps } from "./roleWorkspace.ts";
 import type { Step } from "./state.ts";
 
 type BotStep = Extract<Step, { kind: "bot" }>;
@@ -45,36 +44,29 @@ export const runBotFact = (
   // A fresh copy every time: a resumed step's earlier copy is replaced whole.
   const copy = NodePath.join(ctx.copies, `bot-${step.id}`);
   const play = Effect.acquireUseRelease(
-    deps.checkpoints
-      .materializeCheckpoint({
-        cwd: ctx.root,
-        checkpointRef: CheckpointRef.make(step.sha),
-        destination: copy,
-        excludePaths: NOT_IN_SAMPLE,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new GameOperationError({
-              operation: "Bot facts",
-              path: step.sha,
-              reason: "io",
-              detail: `could not copy the build (${cause.message})`,
-            }),
-        ),
-        Effect.flatMap((made) =>
-          made
-            ? Effect.succeed({ worktree: { path: copy } })
-            : Effect.fail(
-                new GameOperationError({
-                  operation: "Bot facts",
-                  path: step.sha,
-                  reason: "io",
-                  detail: "the build is gone",
-                }),
-              ),
-        ),
+    playCopy(deps, ctx.root, step.sha, copy).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GameOperationError({
+            operation: "Bot facts",
+            path: step.sha,
+            reason: "io",
+            detail: `could not copy the build (${cause.message})`,
+          }),
       ),
+      Effect.flatMap((made) =>
+        made
+          ? Effect.succeed({ worktree: { path: copy } })
+          : Effect.fail(
+              new GameOperationError({
+                operation: "Bot facts",
+                path: step.sha,
+                reason: "io",
+                detail: "the build is gone",
+              }),
+            ),
+      ),
+    ),
     ({ worktree }) =>
       Effect.gen(function* () {
         // The bot was written after the build was kept, so it lives only in

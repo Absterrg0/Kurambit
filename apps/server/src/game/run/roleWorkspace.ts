@@ -68,6 +68,27 @@ export const runCopies = (worktreesDir: string, runId: string) =>
 const copyPath = (ctx: RoleContext, step: RoleStep) => NodePath.join(ctx.copies, `step-${step.id}`);
 
 /**
+ * A blind player's copy of `build` at `destination`: the build without what
+ * differs by round, naming its game folder in COPY_OF so a Unity copy shares
+ * that folder's import cache and player. Every copy of the game names the same
+ * folder, so it tells nothing about which build it is. False when the build is gone.
+ */
+export const playCopy = (deps: RoleDeps, root: string, build: string, destination: string) =>
+  Effect.gen(function* () {
+    const made = yield* deps.checkpoints.materializeCheckpoint({
+      cwd: root,
+      checkpointRef: CheckpointRef.make(build),
+      destination,
+      excludePaths: NOT_IN_SAMPLE,
+    });
+    if (made)
+      yield* Effect.tryPromise(() =>
+        NodeFSP.writeFile(NodePath.join(destination, COPY_OF), `${root}\n`),
+      );
+    return made;
+  });
+
+/**
  * A plain copy of `build` with no git at all, so nothing in it (history,
  * dates, notes) tells a blind player which build it plays. It is written
  * beside its folder and moved in whole, so a folder that exists is a complete
@@ -84,20 +105,8 @@ const stepCopy = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, build: strin
     );
     if (exists) return path;
     const staging = `${path}.making`;
-    const made = yield* deps.checkpoints.materializeCheckpoint({
-      cwd: ctx.root,
-      checkpointRef: CheckpointRef.make(build),
-      destination: staging,
-      excludePaths: NOT_IN_SAMPLE,
-    });
-    if (!made) return null;
-    // Its game folder, so a Unity copy shares that folder's import cache and
-    // player; every copy of the game names the same folder, so it tells
-    // nothing about which build it is.
-    yield* Effect.tryPromise(async () => {
-      await NodeFSP.writeFile(NodePath.join(staging, COPY_OF), `${ctx.root}\n`);
-      await NodeFSP.rename(staging, path);
-    });
+    if (!(yield* playCopy(deps, ctx.root, build, staging))) return null;
+    yield* Effect.tryPromise(() => NodeFSP.rename(staging, path));
     return path;
   });
 
