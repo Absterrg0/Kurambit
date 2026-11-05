@@ -11,6 +11,7 @@ import {
   prepareNativeUserIsolation,
   userDirConfigIssues,
 } from "./gameNativeUserDir.ts";
+import { HOST_OS } from "./processHost.ts";
 
 it("keeps containment checks exact", () => {
   expect(isPathInside("/tmp/a/data/godot/app_userdata/x", "/tmp/a/data")).toBe(true);
@@ -91,7 +92,7 @@ it("refuses a save folder whose game data dir is a link to somewhere else", asyn
   const base = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "userdir-link-"));
   const outside = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "userdir-outside-"));
   const kept = NodePath.join(base, "kept");
-  const { dataDir } = nativeUserLayout(kept, process.platform);
+  const { dataDir } = nativeUserLayout(kept, HOST_OS);
   await NodeFSP.mkdir(NodePath.dirname(dataDir), { recursive: true });
   await NodeFSP.symlink(outside, dataDir);
   await expect(nativeUserIsolationAt(kept)).rejects.toThrow(/outside/);
