@@ -14,6 +14,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import { makeGodotBackend } from "./GameGodotEngine.ts";
 import { makeThreeBackend } from "./GameThreeEngine.ts";
+import { makeGameBrowser } from "./gameChromium.ts";
 import * as GameUnity from "./GameUnity.ts";
 import { makeUnityBackend } from "./GameUnityEngine.ts";
 import type { GameEngineProfile, GameExportTarget } from "./engineProfile.ts";
@@ -244,9 +245,10 @@ const make = Effect.gen(function* () {
   const tools = yield* GameToolchain.GameToolchain;
   const processes = yield* GameProcesses.GameProcesses;
   const unity = yield* GameUnity.GameUnity;
+  const gameBrowser = yield* makeGameBrowser;
   const backends = new Map<string, GameEngineBackend>([
     ["godot", makeGodotBackend(processes, tools)],
-    ["three", makeThreeBackend()],
+    ["three", makeThreeBackend(gameBrowser)],
     ["unity", makeUnityBackend(unity, tools)],
   ]);
   const backendFor = (engineName: string): Effect.Effect<GameEngineBackend, GameOperationError> => {

@@ -14,7 +14,7 @@ import {
 } from "@kurambit/contracts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
-import { requireChromium, stackToGameFile } from "./gameChromium.ts";
+import { stackToGameFile, type GameBrowser } from "./gameChromium.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 import { openWebPlaySession, WebPageNotReady, type WebPageEvent } from "./webPlaySession.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
@@ -43,7 +43,9 @@ const response = (
  * editor import and no compile. Check loads the page in headless Chromium
  * and reports console and page errors; export copies the static folder.
  */
-export const makeThreeBackend = (): GameEngineBackend => {
+export const makeThreeBackend = (
+  gameBrowser: (operation: string, path: string) => Effect.Effect<GameBrowser, GameOperationError>,
+): GameEngineBackend => {
   const runCheck: GameEngineBackend["runCheck"] = (ctx, input) =>
     Effect.gen(function* () {
       const temporary = NodePath.join(
@@ -59,7 +61,7 @@ export const makeThreeBackend = (): GameEngineBackend => {
       const issues: GameCheckIssue[] = [];
       const reached: string[] = [];
       yield* Effect.promise(() => NodeFSP.mkdir(temporary, { recursive: true }));
-      const executable = yield* requireChromium("three-check", ctx.projectDir);
+      const browser = yield* gameBrowser("three-check", ctx.projectDir);
       const server = yield* Effect.tryPromise({
         try: () => serveGameDirectory(ctx.root, ctx.projectName),
         catch: (cause) =>
@@ -109,7 +111,7 @@ export const makeThreeBackend = (): GameEngineBackend => {
           let timedOut = false;
           for (const [entry, entryUrl] of entries) {
             const session = await openWebPlaySession({
-              executable,
+              browser,
               url: entryUrl,
               ...THREE_VIEWPORT,
               bootTimeoutMs: BOOT_TIMEOUT_MS,

@@ -25,7 +25,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { findExecutable } from "./GameProcesses.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
-import { requireChromium } from "./gameChromium.ts";
+import { makeGameBrowser } from "./gameChromium.ts";
 import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -385,6 +385,7 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const processes = yield* GameProcesses.GameProcesses;
+  const gameBrowser = yield* makeGameBrowser;
   const sessions = new Map<string, Session>();
   const runs = new Map<string, { root: string; result: GameBotRunResult }>();
 
@@ -468,7 +469,7 @@ const make = Effect.gen(function* () {
             ),
           ),
         ).viewport;
-      const chrome = isWeb ? yield* requireChromium("Bot run", root) : null;
+      const browser = isWeb ? yield* gameBrowser("Bot run", root) : null;
       const ffmpeg = yield* Effect.promise(() =>
         findExecutable("ffmpeg", { pathEnv, override: process.env.KURAMBIT_FFMPEG }),
       );
@@ -558,7 +559,7 @@ const make = Effect.gen(function* () {
                 operation: "Bot run",
                 root,
                 projectDir,
-                executable: chrome!,
+                browser: browser!,
                 viewport,
                 bootTimeoutMs: BOOT_TIMEOUT_MS,
                 keptStorage: keptWebStorage(saves),

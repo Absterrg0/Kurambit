@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { GameOperationError, type GameViewport } from "@kurambit/contracts";
 import type { GameEngineBackend } from "./GameEngine.ts";
+import type { GameBrowser } from "./gameChromium.ts";
 import type * as GameProcesses from "./GameProcesses.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 import { listenForRunner, type PlaySession } from "./playSession.ts";
@@ -168,7 +169,7 @@ export const openPagePlay = (input: {
   readonly operation: string;
   readonly root: string;
   readonly projectDir: string;
-  readonly executable: string;
+  readonly browser: GameBrowser;
   readonly viewport: GameViewport;
   readonly bootTimeoutMs: number;
   readonly keptStorage: string | null;
@@ -184,7 +185,7 @@ export const openPagePlay = (input: {
     const play = yield* Effect.tryPromise({
       try: (signal) =>
         openWebPlaySession({
-          executable: input.executable,
+          browser: input.browser,
           url: served.url,
           width: input.viewport.width,
           height: input.viewport.height,

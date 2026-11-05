@@ -47,7 +47,7 @@ import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
 import { type PlayActObservation, type PlayObservation, type PlaySession } from "./playSession.ts";
 import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
-import { requireChromium } from "./gameChromium.ts";
+import { makeGameBrowser } from "./gameChromium.ts";
 import { openPagePlay, openRunnerPlay } from "./playLaunch.ts";
 import { snapshotBuildSource } from "./sourceSnapshot.ts";
 
@@ -157,6 +157,7 @@ const make = Effect.gen(function* () {
   const processHost = yield* ProcessHost;
   const projects = yield* GameProjectService.GameProjectService;
   const processes = yield* GameProcesses.GameProcesses;
+  const gameBrowser = yield* makeGameBrowser;
   const engines = yield* GameEngine.GameEngine;
   const gate = yield* GameMemoryGate.GameMemoryGate;
   const players = yield* GamePlayer.GamePlayer;
@@ -828,7 +829,7 @@ const make = Effect.gen(function* () {
           "The game sources could not be identified before the web session ran; the result would not be current.",
         );
       const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
-      const executable = yield* requireChromium("Explore session", root);
+      const browser = yield* gameBrowser("Explore session", root);
       const saves = yield* keptSavesFor({
         root,
         engine: manifest.engine.name,
@@ -846,7 +847,7 @@ const make = Effect.gen(function* () {
         operation: "Explore session",
         root,
         projectDir: ctx.projectDir,
-        executable,
+        browser,
         viewport,
         bootTimeoutMs,
         keptStorage: keptWebStorage(saves),

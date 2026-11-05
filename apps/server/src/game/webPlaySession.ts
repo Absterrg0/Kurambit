@@ -10,6 +10,7 @@ import {
   STUDIO_SET_STATE,
   chromiumLaunchArgs,
   toPlaywrightKey,
+  type GameBrowser,
 } from "./gameChromium.ts";
 import { asGameState } from "./gameBotRuntime.ts";
 import { chromiumChildEnv } from "./gameWebServer.ts";
@@ -136,7 +137,7 @@ const FRAME_COUNTER = `(() => {
  * session has no ui or inspect steps; the caller owns the served URL.
  */
 export const openWebPlaySession = async (input: {
-  readonly executable: string;
+  readonly browser: GameBrowser;
   readonly url: string;
   readonly width: number;
   readonly height: number;
@@ -154,14 +155,15 @@ export const openWebPlaySession = async (input: {
   const { chromium } = loadPlaywright();
   const browser = await chromium
     .launch({
-      executablePath: input.executable,
+      executablePath: input.browser.executable,
       headless: true,
+      chromiumSandbox: input.browser.sandbox,
       args: [...chromiumLaunchArgs()],
       env: chromiumChildEnv(),
     })
     .catch(async (cause: unknown) => {
       if (input.signal?.aborted) throw new Error("aborted");
-      throw cause;
+      throw (await input.browser.diagnose(cause)) ?? cause;
     });
   if (input.signal?.aborted) {
     await browser.close().catch(() => undefined);
