@@ -1164,14 +1164,19 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       );
     });
 
-  // Capture writes flush loose objects once per process (core.fsyncMethod=batch)
-  // instead of once per object; refs and everything else stay fully synced.
-  const captureWrite = [
-    "-c",
-    "core.fsync=objects,reference",
-    "-c",
-    "core.fsyncMethod=batch",
-  ] as const;
+  // On macOS and Windows capture writes flush loose objects once per process
+  // (core.fsyncMethod=batch) instead of once per object; refs stay fully
+  // synced. Git documents batch as durable only on APFS/HFS+ and NTFS/ReFS: on
+  // Linux it issues sync_file_range writeout for each object and one fsync of a
+  // dummy file, which btrfs and XFS do not extend to the other objects, so a
+  // power loss after update-ref could leave a ref to missing objects. Linux
+  // keeps fsync per object: durability over speed, though many new small files
+  // pay for it there (20k new files took 26 s per-object, 0.9 s batched).
+  const hostPlatform = yield* HostProcess.Platform;
+  const captureWrite =
+    hostPlatform === "darwin" || hostPlatform === "win32"
+      ? (["-c", "core.fsync=objects,reference", "-c", "core.fsyncMethod=batch"] as const)
+      : durableWrite;
 
   const captureFileError = (file: string) => (cause: PlatformError.PlatformError) =>
     new VcsProcessExitError({
@@ -1637,7 +1642,6 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       const operation = VcsProcess.CHECKPOINT_CAPTURE_OPERATION;
       const indexConfig = checkpointIndexConfig;
       const startedAt = yield* Clock.currentTimeMillis;
-      const platform = yield* HostProcess.Platform;
       const headExists = yield* hasHeadCommit(input.cwd);
       const sparseConfig = yield* execute({
         operation,
@@ -1695,7 +1699,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             GIT_COMMITTER_EMAIL: "kurambit@users.noreply.github.com",
           };
           for (const [key, value] of captureConfig)
-            Object.assign(commitEnv, VcsProcess.gitConfigEnv(commitEnv, key, value, platform));
+            Object.assign(commitEnv, VcsProcess.gitConfigEnv(commitEnv, key, value, hostPlatform));
           const cleanupTempIndex = Effect.forEach(
             [tempIndexPath, `${tempIndexPath}.lock`],
             (indexFile) => fileSystem.remove(indexFile, { force: true }).pipe(Effect.ignore),
