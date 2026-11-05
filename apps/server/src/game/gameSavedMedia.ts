@@ -115,8 +115,8 @@ const savedEntry = (dir: string, name: string, info: { size: number; mtime: Date
 
 /**
  * Copies one generated video or image into saved/. The copy is written beside
- * its final name and then linked into place, which fails rather than replace
- * a file already there; a taken name gets the next " (n)".
+ * its final name, which is reserved by creating it exclusively and then
+ * renamed over; a taken name gets the next " (n)", so nothing is replaced.
  */
 export const saveMedia = async (
   root: string,
@@ -139,15 +139,19 @@ export const saveMedia = async (
     for (let n = 1; ; n++) {
       const name = `${stem}${n === 1 ? "" : ` (${n})`}${ext}`;
       const target = NodePath.join(dir, name);
-      if (await exists(target)) continue;
+      // Creating the name exclusively reserves it on every OS and file system;
+      // the rename then replaces only this save's own empty placeholder.
+      const placeholder = await NodeFSP.open(target, "wx").catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") return null;
+        throw error;
+      });
+      if (placeholder === null) continue;
+      await placeholder.close();
       try {
-        await NodeFSP.link(temp, target);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code === "EEXIST") continue;
-        // A file system without hard links: the plain rename, checked free just above.
-        if (code !== "EPERM" && code !== "ENOTSUP" && code !== "EXDEV") throw error;
         await NodeFSP.rename(temp, target);
+      } catch (error) {
+        await NodeFSP.rm(target, { force: true });
+        throw error;
       }
       return savedEntry(dir, name, await NodeFSP.stat(target));
     }
