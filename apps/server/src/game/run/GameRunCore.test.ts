@@ -12,6 +12,7 @@ import * as NodePath from "node:path";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  GameOperationError,
   type GameRun as GameRunRecord,
   GameRunId,
   type GameRunStep,
@@ -544,6 +545,7 @@ const roleThreadsOf = (world: World) =>
             messages: [],
             turnItems: [],
           })) as unknown as ThreadManagement.ThreadManagementService["Service"]["getThreadRecords"],
+        getThreadProjection: orchestrator.getThreadProjection,
         getCommandReceipt: (commandId) =>
           Effect.succeed(
             world.receipts.has(commandId)
@@ -566,12 +568,15 @@ const roleThreadsOf = (world: World) =>
     }),
   );
 
+/** The game folder, kept for a test that adds files of its own. */
+let lastRoot = "";
 const gameRoot = () => {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "game-run-core-"));
   const git = (...args: string[]) =>
     NodeChildProcess.execFileSync("git", args, { cwd: root, stdio: "ignore" });
   git("init", "-q", "-b", "main");
   git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+  lastRoot = root;
   return root;
 };
 
@@ -602,7 +607,13 @@ const layerGame = (root: string, world: World) =>
               return { targets: [], displayName: "Arena" };
             }),
         }),
-        Layer.mock(GameProjectService.GameProjectService)({ resolve: () => Effect.succeed(root) }),
+        Layer.mock(GameProjectService.GameProjectService)({
+          resolve: () => Effect.succeed(root),
+          read: () =>
+            Effect.fail(
+              new GameOperationError({ operation: "read", path: root, reason: "invalid-input" }),
+            ),
+        }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
           run: () => null,
@@ -938,6 +949,31 @@ it.effect("a role's submission of the wrong kind is refused to it, with the reas
         .runSubmit(strangerThread, { _tag: "report", report: "r" })
         .pipe(Effect.flip);
       assert.equal(stranger.reason, "wrong-thread");
+    }),
+  ),
+);
+
+it.effect("a game an earlier run left a run.json in starts fresh, and says so", () =>
+  withGame(() =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      NodeFS.mkdirSync(NodePath.join(lastRoot, ".studio"), { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(lastRoot, ".studio", "run.json"),
+        JSON.stringify({ version: 3, runId: "run_old", stage: "round-4", rounds: [] }),
+      );
+      const control = yield* GameRunControl.GameRunControl;
+      const resume = yield* control.runStart({ threadId: creator, brief: "" }).pipe(Effect.flip);
+      assert.equal(resume.reason, "brief-required");
+      assert.include(resume.message, "was not carried over");
+      const started = yield* control.runStart({ threadId: creator, brief: "A small arena game." });
+      assert.isFalse(started.resumed);
+      assert.equal(started.stage, "starting");
+      assert.include(started.message, "was not carried over");
+      // Nothing of the old record became the new run's.
+      const { run } = yield* inFlight;
+      assert.equal(run.stage, "starting");
+      assert.notEqual(run.id, "run_old");
     }),
   ),
 );
