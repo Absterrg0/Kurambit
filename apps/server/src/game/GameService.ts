@@ -869,12 +869,17 @@ const make = Effect.gen(function* () {
       if (action === "stop") {
         // The production run's builds, bots and editors are its own: Stop game
         // cancels only the caller's work while a run holds the game.
-        if (yield* projects.runLive(threadId)) {
+        const hold = yield* projects.runHold(threadId);
+        if (hold !== null) {
           yield* operations.cancel(root, String(threadId));
           return {
             success: true,
             message:
-              "Stopped your work on this game. The production run's builds, bots and editors keep running; stop the run to stop them.",
+              hold === "finishing"
+                ? "Stopped your work on this game. The production run is finishing; its exports end on their own."
+                : hold === "restoring"
+                  ? "Stopped your work on this game. A round of the production run is being restored; the restore ends on its own."
+                  : "Stopped your work on this game. The production run's builds, bots and editors keep running; stop the run to stop them.",
             path: null,
             url: null,
             process: null,

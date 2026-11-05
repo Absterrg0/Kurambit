@@ -10,6 +10,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import {
@@ -74,8 +75,14 @@ export class GameProjectService extends Context.Service<
       threadId: ThreadId,
       options?: { readonly deleted?: "allowed" },
     ) => Effect.Effect<string, GameOperationError>;
-    /** Whether a production run holds this thread's game now, its ending's exports and a restore included. */
-    readonly runLive: (threadId: ThreadId) => Effect.Effect<boolean>;
+    /**
+     * How a production run holds this thread's game now: "live", or while its
+     * ending's exports ("finishing") or a restore ("restoring") still work the
+     * folder; null when no run does.
+     */
+    readonly runHold: (
+      threadId: ThreadId,
+    ) => Effect.Effect<"live" | "finishing" | "restoring" | null>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /** Expensive reads (asset usage, viewport, builds). */
     readonly inventory: (root: string) => Effect.Effect<
@@ -414,13 +421,22 @@ const make = Effect.gen(function* () {
   });
 
   return GameProjectService.of({
-    runLive: (threadId) =>
+    runHold: (threadId) =>
       threads.getThreadShell(threadId).pipe(
         Effect.flatMap((shell) =>
           shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
         ),
-        Effect.map((run) => run !== null && (run.status !== "ended" || settling(run) !== null)),
-        Effect.orElseSucceed(() => false),
+        Effect.map((run) => {
+          if (run === null) return null;
+          if (run.status !== "ended") return "live" as const;
+          const busy = settling(run);
+          if (busy === null || !Result.isFailure(busy)) return null;
+          return busy.failure.reason === "restoring"
+            ? ("restoring" as const)
+            : ("finishing" as const);
+        }),
+        // Unknown is held: a read that fails never lets a Stop game reach the run's work.
+        Effect.orElseSucceed(() => "live" as const),
       ),
     create,
     list: Effect.fn("GameProjectService.list")(function* () {
