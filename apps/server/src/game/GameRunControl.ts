@@ -734,7 +734,7 @@ type ControlDeps =
   | ThreadManagement.ThreadManagementService
   | GameProjectService.GameProjectService
   | GameService.GameService;
-const layerDomain: Layer.Layer<GameRunControl, never, ControlDeps> = Layer.effect(
+export const layerDomain: Layer.Layer<GameRunControl, never, ControlDeps> = Layer.effect(
   GameRunControl,
   domainControl,
 );

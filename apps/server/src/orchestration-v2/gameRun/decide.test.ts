@@ -392,6 +392,55 @@ describe("game-run commands", () => {
     expect(task._tag === "round" ? task.checks.map((c) => c.pass) : null).toEqual([true, false]);
   });
 
+  it("a tester's look pass counts only on play the run has on record", () => {
+    const base = complete(started(), gitOk());
+    const round = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    ).task;
+    if (round._tag !== "round") throw new Error("expected a round");
+    // The duty turn after a write-up with no bot run: no input, no new bot run.
+    const passes = (bot: string) => {
+      const atDuty = resumedAt(base, {
+        ladder,
+        task: {
+          ...round,
+          rung: ladder.rungs[0]!.id,
+          phase: "tester-duty",
+          thread: tester,
+          branch: "round-1",
+          candidate: "cafe",
+          botsBefore: 1,
+          bot,
+        },
+      });
+      const duty = stepOf(atDuty);
+      const scored = accept(atDuty, {
+        type: "game-run.submit",
+        runId,
+        stepId: duty.id,
+        roleThreadId: tester,
+        submission: {
+          _tag: "checks",
+          checks: [{ check: 1, pass: true, evidence: "jumped ten times, each landed" }],
+          notes: "Played the first level twice; the jump is crisp.",
+        },
+      }).records;
+      const landed = complete(
+        scored,
+        roleDone(tester, {
+          evidence: { sessions: 0, actions: 0, executedInputSteps: 0, nominalMs: 0, images: 0 },
+          botsBefore: 1,
+          botsAfter: 1,
+        }),
+      );
+      const task = runOf(landed).task;
+      return task._tag === "round" ? task.checks[0]?.pass : null;
+    };
+    expect(passes("")).toBe(false);
+    expect(passes(".studio/bot/win.gd")).toBe(true);
+  });
+
   it("a pair lands only once both halves are in, and a half never lands twice", () => {
     const atCompare = comparing();
     const pair = stepOf(atCompare);
