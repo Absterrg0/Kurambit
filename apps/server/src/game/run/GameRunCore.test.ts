@@ -689,6 +689,7 @@ const roleThreadsOf = (world: World) =>
                         deletedAt: world.deleted.has(threadId)
                           ? DateTime.makeUnsafe(Date.now())
                           : null,
+                        archivedAt: null,
                         worktreePath: null,
                         activeRunId: null,
                       } as unknown as OrchestrationV2ThreadShell)
