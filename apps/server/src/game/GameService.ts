@@ -142,6 +142,8 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameStatus, GameOperationError>;
     /** Operation pushes for every game this server runs. */
     readonly events: Stream.Stream<GameOperationEvent>;
+    /** The pushes for one thread's game; empty when the thread has no game. */
+    readonly threadEvents: (threadId: ThreadId) => Stream.Stream<GameOperationEvent>;
     readonly action: (
       threadId: ThreadId,
       action: GameAction,
@@ -535,6 +537,15 @@ const make = Effect.gen(function* () {
   });
   return GameService.of({
     events: operations.events,
+    threadEvents: (threadId) =>
+      Stream.unwrap(
+        projects.resolve(threadId).pipe(
+          Effect.map((root) =>
+            operations.events.pipe(Stream.filter((event) => event.root === root)),
+          ),
+          Effect.orElseSucceed(() => Stream.empty),
+        ),
+      ),
     finishExploration: explore.finish,
     limitExploreInput: explore.limitInput,
     exploreMemoryWait: explore.memoryWait,

@@ -1903,7 +1903,8 @@ const layerWsRpc = (
               expiresAt: DateTime.formatIso(DateTime.makeUnsafe(download.expiresAt)),
             };
           }),
-        [WS_METHODS.subscribeGameEvents]: () => game.events,
+        [WS_METHODS.subscribeGameEvents]: (input) =>
+          input.threadId === undefined ? game.events : game.threadEvents(input.threadId),
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status(),
         [WS_METHODS.gameSecretsStatus]: () => game.secretsStatus(),
         [WS_METHODS.gameSecretsSet]: (input) => game.setSecret(input),
