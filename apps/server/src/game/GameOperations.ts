@@ -1,6 +1,8 @@
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
@@ -42,15 +44,17 @@ export class GameOperations extends Context.Service<
     readonly events: Stream.Stream<GameOperationEvent>;
     /**
      * Runs `work` as the game's one operation, recorded and pushed as it runs
-     * and ends; a second one while it runs fails `busy`. `owner` is the thread
-     * whose call started it.
+     * and ends; a second one while it runs fails `busy`, or with `waitUntil`
+     * (epoch ms) queues behind it until then. `owner` is the thread whose
+     * call started it.
      */
-    readonly exclusive: <A>(
+    readonly exclusive: <A, E extends { readonly message: string } = GameOperationError>(
       root: string,
       name: string,
-      work: Effect.Effect<A, GameOperationError>,
+      work: Effect.Effect<A, E>,
       owner: string,
-    ) => Effect.Effect<A, GameOperationError>;
+      options?: { readonly waitUntil?: number },
+    ) => Effect.Effect<A, E | GameOperationError>;
     /** Cancels the game's running operation; with `owner`, only that thread's. */
     readonly cancel: (root: string, owner?: string) => Effect.Effect<void>;
   }
@@ -113,19 +117,36 @@ export const layer = Layer.effect(
       // The race interrupts work and awaits its finalizers, including native child exit.
       yield* Deferred.await(operation.done);
     });
-    const exclusive = <A>(
+    const exclusive = <A, E extends { readonly message: string } = GameOperationError>(
       root: string,
       name: string,
-      work: Effect.Effect<A, GameOperationError>,
+      work: Effect.Effect<A, E>,
       owner: string,
-    ) =>
+      options?: { readonly waitUntil?: number },
+    ): Effect.Effect<A, E | GameOperationError> =>
       Effect.gen(function* () {
-        if (active.has(root))
-          return yield* new GameOperationError({ operation: name, path: root, reason: "busy" });
         const cancelled = yield* Deferred.make<void>();
         const done = yield* Deferred.make<void>();
-        const at = DateTime.formatIso(yield* DateTime.now);
+        // A waiter wakes when the running operation ends and checks again:
+        // another waiter may have taken the game first.
+        for (;;) {
+          const running = active.get(root);
+          if (running === undefined) break;
+          const left =
+            options?.waitUntil === undefined
+              ? 0
+              : options.waitUntil - (yield* Clock.currentTimeMillis);
+          if (left <= 0)
+            return yield* new GameOperationError({
+              operation: name,
+              path: root,
+              reason: "busy",
+              detail: `${operations.get(root)?.name ?? "Another operation"} is running on this game.`,
+            });
+          yield* Deferred.await(running.done).pipe(Effect.timeoutOption(Duration.millis(left)));
+        }
         active.set(root, { cancelled, done, owner });
+        const at = DateTime.formatIso(yield* DateTime.now);
         yield* record(
           root,
           { name, state: "running", message: `${name} is running.`, at },

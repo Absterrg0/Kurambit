@@ -65,28 +65,37 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   game: GameService.GameService["Service"],
   log: (line: string) => Effect.Effect<void>,
   owner: string,
+  /** The finish's one deadline for waiting out another owner's operation. */
+  waitUntil: number,
 ) {
   // Ask only targets the backend declares; anything else is recorded skipped.
   const targets = yield* game
-    .exportTargets(creatorThreadId, owner)
+    .exportTargets(creatorThreadId, owner, waitUntil)
     .pipe(
       Effect.orElseSucceed(() => ({ targets: ["Web", "Linux"] as const, displayName: "Game" })),
     );
   const runTarget = (target: "Web" | "Linux"): Effect.Effect<Row> =>
     targets.targets.includes(target)
-      ? game.export(creatorThreadId, target, owner).pipe(
+      ? // Another owner's operation is waited out, and a failure says why in the log and exports.json.
+        game.export(creatorThreadId, target, owner, waitUntil).pipe(
           Effect.map((r): Row => ({
             ok: r.success,
             skipped: null,
             message: r.message,
             path: r.path,
           })),
-          Effect.orElseSucceed((): Row => ({
-            ok: false,
-            skipped: null,
-            message: `${target} export errored`,
-            path: null,
-          })),
+          Effect.catch((error) =>
+            Effect.succeed<Row>({
+              ok: false,
+              skipped: null,
+              message:
+                `${target} export failed: ${error.reason === "busy" ? "the game stayed busy with another operation" : error.reason}: ${error.detail ?? ""}`.slice(
+                  0,
+                  400,
+                ),
+              path: null,
+            }),
+          ),
         )
       : Effect.succeed({
           ok: false,

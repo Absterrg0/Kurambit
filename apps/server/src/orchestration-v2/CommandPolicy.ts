@@ -1,7 +1,9 @@
 import {
   type ChatAttachment,
   CommandId,
+  type GameRun,
   ModelSelection,
+  type OrchestrationV2AppThread,
   type OrchestrationV2Command,
   OrchestrationV2ProviderCapabilities,
   type OrchestrationV2Run,
@@ -116,6 +118,36 @@ type MessageDispatchMode = Extract<
   OrchestrationV2Command,
   { readonly type: "message.dispatch" }
 >["dispatchMode"];
+
+/**
+ * A production run's role thread takes turns only from its run, which sends
+ * each with the step's prompt and cap. A server-made "continue" would run
+ * uncapped, possibly after the run ended, and the run would read that work as
+ * the role's. Every automatic continuation honours this.
+ */
+export function threadTurnsOwnedByRun(thread: {
+  readonly launchedBy?: OrchestrationV2AppThread["launchedBy"];
+}): boolean {
+  return thread.launchedBy === "game_run";
+}
+
+/**
+ * How a production run holds its game's folder: while live, while its ending
+ * still exports, and while a creator's restore moves a round back. The run is
+ * then the folder's one writer; null when no run holds it.
+ */
+export function gameRunHold(
+  run: Pick<GameRun, "status" | "endedAt" | "finished" | "restore"> | null,
+): "live" | "finishing" | "restoring" | null {
+  if (run === null) return null;
+  if (run.status !== "ended") return "live";
+  if (run.endedAt !== null && run.finished !== run.endedAt) return "finishing";
+  if (run.restore !== null && run.restore.outcome === null) return "restoring";
+  return null;
+}
+
+export const GAME_RUN_HOLDS_FOLDER_MESSAGE =
+  "A production run is working on this game's folder, so files cannot be restored now. Steer it from the game's chat, or stop the run and wait for it to finish, then restore. Rewinding the conversation without restoring files still works.";
 
 export function isNativeMaintenanceCommand(message: {
   readonly text: string;

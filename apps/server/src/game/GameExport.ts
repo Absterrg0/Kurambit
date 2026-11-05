@@ -66,8 +66,11 @@ export class GameExport extends Context.Service<
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /** Builds and publishes the current sources, then serves that build. */
     readonly publishWeb: (root: string) => Effect.Effect<GameActionResult, GameOperationError>;
-    /** Serves the selected Web build, building one only when none was ever selected. */
-    readonly play: (root: string) => Effect.Effect<GameActionResult, GameOperationError>;
+    /**
+     * Serves the selected Web build, which only reads the folder. Null when
+     * none was ever selected, so Play must export one first.
+     */
+    readonly serve: (root: string) => Effect.Effect<GameActionResult | null, GameOperationError>;
     /** The Web build Play serves, as its export recorded it. */
     readonly selected: (root: string) => Effect.Effect<SelectedWebBuild | null>;
     /**
@@ -412,7 +415,7 @@ const make = Effect.gen(function* () {
   return GameExport.of({
     export: runExport,
     publishWeb,
-    play: (root) =>
+    serve: (root) =>
       Effect.gen(function* () {
         const selected = yield* readSelectedBuild(root);
         const served = yield* selectedPreview(root);
@@ -433,7 +436,7 @@ const make = Effect.gen(function* () {
             url: null,
             process: null,
           };
-        return yield* publishWeb(root);
+        return null;
       }),
     selected: readSelectedBuild,
     packageWindows: (root) =>

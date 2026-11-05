@@ -10,7 +10,6 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Result from "effect/Result";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import {
@@ -31,7 +30,9 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import { settling, toState } from "../orchestration-v2/gameRun/decide.ts";
+import { toState } from "../orchestration-v2/gameRun/decide.ts";
+import { isGameRunOperationOwner } from "../orchestration-v2/gameRun/ids.ts";
+import { gameRunHold } from "../orchestration-v2/CommandPolicy.ts";
 import { currentStep } from "./run/runView.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
@@ -83,6 +84,19 @@ export class GameProjectService extends Context.Service<
     readonly runHold: (
       threadId: ThreadId,
     ) => Effect.Effect<"live" | "finishing" | "restoring" | null>;
+    /**
+     * Refuses an operation that writes the game while a production run holds
+     * it, unless the run or one of its role threads asks: the run's builds,
+     * checks and exports read the folder as its own, and a creator's Rebuild
+     * or edit beside them would make a check fail for a cause that is not the
+     * build. `root` names the folder in the refusal.
+     */
+    readonly admitWrite: (
+      threadId: ThreadId,
+      root: string,
+      operation: string,
+      owner: string,
+    ) => Effect.Effect<void, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /** Expensive reads (asset usage, viewport, builds). */
     readonly inventory: (root: string) => Effect.Effect<
@@ -420,24 +434,67 @@ const make = Effect.gen(function* () {
     return root;
   });
 
-  return GameProjectService.of({
-    runHold: (threadId) =>
-      threads.getThreadShell(threadId).pipe(
+  const projectRun = (threadId: ThreadId) =>
+    threads
+      .getThreadShell(threadId)
+      .pipe(
         Effect.flatMap((shell) =>
           shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
         ),
-        Effect.map((run) => {
-          if (run === null) return null;
-          if (run.status !== "ended") return "live" as const;
-          const busy = settling(run);
-          if (busy === null || !Result.isFailure(busy)) return null;
-          return busy.failure.reason === "restoring"
-            ? ("restoring" as const)
-            : ("finishing" as const);
-        }),
-        // Unknown is held: a read that fails never lets a Stop game reach the run's work.
-        Effect.orElseSucceed(() => "live" as const),
-      ),
+      );
+  const holdOf = gameRunHold;
+  const runHold: GameProjectService["Service"]["runHold"] = (threadId) =>
+    projectRun(threadId).pipe(
+      Effect.map(holdOf),
+      // Unknown is held: a read that fails never lets a Stop game reach the run's work.
+      Effect.orElseSucceed(() => "live" as const),
+    );
+
+  const HELD: Record<"live" | "finishing" | "restoring", string> = {
+    live: "A production run is working on this game; this would change the folder its builds and checks read.",
+    finishing: "The production run is finishing: it is exporting the game's best build.",
+    restoring: "A round of the production run is being restored into this game's folder.",
+  };
+  const admitWrite: GameProjectService["Service"]["admitWrite"] = (
+    threadId,
+    root,
+    operation,
+    owner,
+  ) =>
+    Effect.gen(function* () {
+      if (isGameRunOperationOwner(owner)) return;
+      // Unknown is held, as for Stop game.
+      const run = yield* projectRun(threadId).pipe(Effect.option);
+      const hold = Option.isSome(run) ? holdOf(run.value) : "live";
+      if (hold === null) return;
+      // The run holds its game folder only: a copy or another checkout of the game is not it.
+      if (Option.isSome(run) && run.value !== null) {
+        const gameRoot = yield* resolve(run.value.threadId, { deleted: "allowed" }).pipe(
+          Effect.option,
+        );
+        if (Option.isSome(gameRoot) && gameRoot.value !== root) return;
+      }
+      // A role thread is the live run's own hand; an unreadable one is not
+      // taken for one, and an ended run's roles have no work left.
+      const role =
+        hold === "live" &&
+        (yield* threads.getThreadRecords(threadId, []).pipe(
+          Effect.map(({ thread }) => thread.launchedBy === "game_run"),
+          Effect.orElseSucceed(() => false),
+        ));
+      if (role) return;
+      return yield* new GameOperationError({
+        operation,
+        path: root,
+        reason: "busy",
+        runReason: "run-live",
+        detail: HELD[hold],
+      });
+    });
+
+  return GameProjectService.of({
+    runHold,
+    admitWrite,
     create,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(

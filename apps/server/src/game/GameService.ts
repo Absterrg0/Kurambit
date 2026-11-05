@@ -235,10 +235,12 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameAssetsAddResult, GameOperationError>;
     readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /** `owner` names whose work the export is, for owner-scoped cancels; the thread by default. */
+    /** `waitUntil` (epoch ms) queues behind another operation until then instead of failing busy. */
     readonly export: (
       threadId: ThreadId,
       target: "Web" | "Linux" | "Windows",
       owner?: string,
+      waitUntil?: number,
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
      * Which export targets the game's engine backend declares, with its display
@@ -248,6 +250,7 @@ export class GameService extends Context.Service<
     readonly exportTargets: (
       threadId: ThreadId,
       owner?: string,
+      waitUntil?: number,
     ) => Effect.Effect<
       {
         targets: ReadonlyArray<"Web" | "Linux" | "Windows">;
@@ -534,14 +537,58 @@ const make = Effect.gen(function* () {
             ),
       ),
     );
+  // An operation that may write the game: refused to other owners while a production run holds it.
   const withRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
     name: string,
     work: (root: string) => Effect.Effect<A, GameOperationError>,
     owner: string = String(threadId),
+    waitUntil?: number,
   ) {
     const root = yield* projects.resolve(threadId);
-    return yield* operations.exclusive(root, name, work(root), owner);
+    yield* projects.admitWrite(threadId, root, name, owner);
+    return yield* operations.exclusive(
+      root,
+      name,
+      work(root),
+      owner,
+      waitUntil === undefined ? undefined : { waitUntil },
+    );
+  });
+  // A busy game while a run holds it is the run's own work: the refusal says
+  // so, rather than suggesting Stop game, which stops only the caller's work.
+  const heldBusy = (threadId: ThreadId) => (error: GameOperationError) =>
+    error.runReason !== undefined
+      ? Effect.fail(error)
+      : Effect.flatMap(projects.runHold(threadId), (hold) =>
+          Effect.fail(
+            hold === null
+              ? error
+              : new GameOperationError({
+                  operation: error.operation,
+                  path: error.path,
+                  reason: "busy",
+                  runReason: "run-live",
+                  ...(error.detail === undefined ? {} : { detail: error.detail }),
+                }),
+          ),
+        );
+  // Reads only, so a production run never refuses it.
+  const readRoot = Effect.fnUntraced(function* <A>(
+    threadId: ThreadId,
+    name: string,
+    work: (root: string) => Effect.Effect<A, GameOperationError>,
+    owner: string = String(threadId),
+    waitUntil?: number,
+  ) {
+    const root = yield* projects.resolve(threadId);
+    return yield* operations.exclusive(
+      root,
+      name,
+      work(root),
+      owner,
+      waitUntil === undefined ? undefined : { waitUntil },
+    );
   });
   // No operation lock: a saved copy touches neither the engine nor the folder Kurambit works in.
   const savedMedia = <A>(
@@ -708,10 +755,16 @@ const make = Effect.gen(function* () {
       };
     }),
     import: (threadId) => withRoot(threadId, "Import", engines.importProject),
-    export: (threadId, target, owner) =>
-      withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target), owner),
-    exportTargets: (threadId, owner) =>
+    export: (threadId, target, owner, waitUntil) =>
       withRoot(
+        threadId,
+        `Export ${target}`,
+        (root) => exporter.export(root, target),
+        owner,
+        waitUntil,
+      ),
+    exportTargets: (threadId, owner, waitUntil) =>
+      readRoot(
         threadId,
         "Export targets",
         (root) =>
@@ -720,6 +773,7 @@ const make = Effect.gen(function* () {
             return { targets: profile.exportTargets, displayName: profile.displayName };
           }),
         owner,
+        waitUntil,
       ),
     packageWindows: (threadId) =>
       withRoot(threadId, "Package Windows build", exporter.packageWindows),
@@ -727,8 +781,13 @@ const make = Effect.gen(function* () {
     exploreStart: explore.start,
     exploreAct: explore.act,
     exploreClose: explore.close,
+    // Its results and video land in the game folder, where a run reads its own bots' evidence.
     botRun: (threadId, input) =>
-      Effect.flatMap(projects.resolve(threadId), (root) => botRunIn(root, input)),
+      Effect.flatMap(projects.resolve(threadId), (root) =>
+        projects
+          .admitWrite(threadId, root, "Bot run", String(threadId))
+          .pipe(Effect.andThen(botRunIn(root, input))),
+      ),
     botRunIn: (root, input) => botRunIn(root, input),
     botView: (threadId, input) =>
       Effect.gen(function* () {
@@ -845,11 +904,11 @@ const make = Effect.gen(function* () {
     blenderCode: (threadId, input) =>
       withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
     blenderLook: (threadId, input) =>
-      withRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
+      readRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
     blenderScene: (threadId, input) =>
-      withRoot(threadId, "Blender scene", (root) => liveBlender.scene(root, input)),
+      readRoot(threadId, "Blender scene", (root) => liveBlender.scene(root, input)),
     blenderAssetsSearch: (threadId, input) =>
-      withRoot(threadId, "Blender assets search", (root) => liveBlender.assetsSearch(root, input)),
+      readRoot(threadId, "Blender assets search", (root) => liveBlender.assetsSearch(root, input)),
     blenderAssetsImport: (threadId, input) =>
       withRoot(threadId, "Blender assets import", (root) => liveBlender.assetsImport(root, input)),
     blenderExport: (threadId, input) =>
@@ -900,19 +959,32 @@ const make = Effect.gen(function* () {
           process: null,
         };
       }
-      return yield* operations.exclusive(
-        root,
-        action,
-        action === "export-linux"
-          ? exporter.export(root, "Linux")
-          : action === "export-windows"
-            ? exporter.export(root, "Windows")
-            : // Rebuild forces a new export and publishes it.
-              action === "rebuild"
-              ? exporter.publishWeb(root)
-              : exporter.play(root),
-        String(threadId),
-      );
+      // Play of a build already exported only reads, so it never takes the
+      // lock a run's capture or check may hold; one it must export is a write.
+      if (action === "preview") {
+        const served = yield* exporter.serve(root);
+        if (served !== null) return served;
+      }
+      // Admitted before the lock, so a refused click never makes the run's own work wait.
+      yield* projects.admitWrite(threadId, root, action, String(threadId));
+      return yield* operations
+        .exclusive(
+          root,
+          action,
+          action === "export-linux"
+            ? exporter.export(root, "Linux")
+            : action === "export-windows"
+              ? exporter.export(root, "Windows")
+              : // Rebuild forces a new export and publishes it.
+                action === "rebuild"
+                ? exporter.publishWeb(root)
+                : // Another Play may have exported meanwhile.
+                  Effect.flatMap(exporter.serve(root), (served) =>
+                    served === null ? exporter.publishWeb(root) : Effect.succeed(served),
+                  ),
+          String(threadId),
+        )
+        .pipe(Effect.catchIf((error) => error.reason === "busy", heldBusy(threadId)));
     }),
   });
 });

@@ -269,6 +269,7 @@ const stepRecord = (
         logs: [...existing.logs, ...logs],
         // A new attempt (a resume after the waits ran out) waits afresh.
         memoryWaits: 0,
+        busyWaits: 0,
         completedAt: null,
       }
     : {
@@ -957,7 +958,7 @@ const restore = (work: Work, command: Command<"game-run.restore">) =>
     return Result.succeed(settle(work, landed, state, dropped.state, steps, []));
   });
 
-/** A step's own timer: a role's cap at a later due time, a turn sent again, or its work after a memory wait. */
+/** A step's own timer: a role's cap at a later due time, a turn sent again, or its work after a wait for memory or for the game. */
 const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(currentStep(work, run, command.stepId), ({ record }) => {
@@ -967,11 +968,11 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
           `Attempt ${command.attempt} of step ${command.stepId} was superseded.`,
         );
       const state = toState(run, work.records.rounds, record);
-      if (command.timer.kind === "memory") {
-        const waited: GameRunStep = {
-          ...record,
-          memoryWaits: Math.max(record.memoryWaits ?? 0, command.timer.n),
-        };
+      if (command.timer.kind === "memory" || command.timer.kind === "busy") {
+        const waited: GameRunStep =
+          command.timer.kind === "memory"
+            ? { ...record, memoryWaits: Math.max(record.memoryWaits ?? 0, command.timer.n) }
+            : { ...record, busyWaits: Math.max(record.busyWaits ?? 0, command.timer.n) };
         const wake = effectFor(
           {
             type: "game-run.step.wake",

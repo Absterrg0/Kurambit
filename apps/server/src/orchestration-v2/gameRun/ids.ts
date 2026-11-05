@@ -69,6 +69,7 @@ export const roleThreadId = (
  * and exports must never carry the creator chat's id.
  */
 export const gameRunOperationOwner = (runId: string) => `game-run:${runId}`;
+export const isGameRunOperationOwner = (owner: string) => owner.startsWith("game-run:");
 
 /** The interrupt a role turn's cap sends: its receipt is how the turn's end reads as capped. */
 export const roleCapCommandId = (stepId: GameRunStepId, attempt: number, runId: string) =>

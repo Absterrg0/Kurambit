@@ -816,6 +816,8 @@ export const GameRunStep = Schema.Struct({
   logs: Schema.Array(Schema.String),
   /** Times this attempt's work was handed back to wait for memory; bounds the waits across restarts. */
   memoryWaits: Schema.optionalKey(NonNegativeInt),
+  /** Times this attempt's work was handed back because another operation held the game. */
+  busyWaits: Schema.optionalKey(NonNegativeInt),
   plannedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),

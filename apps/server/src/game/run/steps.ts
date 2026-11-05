@@ -4,7 +4,15 @@ import * as Schema from "effect/Schema";
 import type { GameOperationError, ThreadId } from "@kurambit/contracts";
 import { PreviewBrowserInstallingError } from "../../preview/PreviewBrowser.ts";
 import type * as GameService from "../GameService.ts";
-import { type GameRunMemoryShort, handBackOnLowMemory, memoryEnded } from "./lowMemory.ts";
+import {
+  busyEnded,
+  type GameRunGameBusy,
+  type GameRunMemoryShort,
+  handBackOnBusy,
+  handBackOnLowMemory,
+  isContention,
+  memoryEnded,
+} from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
 import { laneProfile } from "../engineProfile.ts";
 
@@ -23,42 +31,45 @@ export const bootStep = (
     readonly log: (line: string) => Effect.Effect<void>;
     /** The step may still hand itself back to wait for memory. */
     readonly memoryWaitsLeft: boolean;
+    /** The step may still hand itself back to wait for the game to be free. */
+    readonly busyWaitsLeft: boolean;
   },
-): Effect.Effect<StepResult, GameOperationError | GameRunMemoryShort> => {
-  // A check that could not run is not a verdict on the build: a busy
-  // game or a cancelled check is retried; memory short hands the step back to wait;
-  // a missing tool, or memory still short after the waits, ends the
-  // run (resumable) rather than rejecting good work. Anything else
-  // the check reports is the build failing to boot.
+): Effect.Effect<StepResult, GameOperationError | GameRunMemoryShort | GameRunGameBusy> => {
+  // A check that could not run is not a verdict on the build: a game held by
+  // another operation, or memory short, hands the step back to wait; a
+  // missing tool, or a wait that never ends, ends the run (resumable) rather
+  // than rejecting good work. Anything else the check reports is the build
+  // failing to boot.
   type Verdict = { readonly ok: boolean; readonly detail: string };
+  // Kurambit's first browser install outlasts any number of tries on a slow
+  // line; each wait is bounded, and the install ends in a browser or in a
+  // tool-missing failure. It answers `busy` too, so it is waited out first.
+  const installed = (
+    what: string,
+    attempt: Effect.Effect<Verdict, GameOperationError>,
+  ): Effect.Effect<Verdict, GameOperationError> =>
+    attempt.pipe(
+      Effect.catchIf(
+        (error) => isBrowserInstalling(error.cause),
+        (error) =>
+          ctx
+            .log(`${what}: ${error.detail ?? error.reason}; waiting`)
+            .pipe(Effect.andThen(installed(what, attempt))),
+      ),
+    );
   const judged = (
     what: string,
     attempt: Effect.Effect<Verdict, GameOperationError>,
-    tries = 1,
-  ): Effect.Effect<StepResult, GameOperationError | GameRunMemoryShort> =>
-    handBackOnLowMemory(attempt, what, ctx.memoryWaitsLeft).pipe(
+  ): Effect.Effect<StepResult, GameOperationError | GameRunMemoryShort | GameRunGameBusy> =>
+    handBackOnBusy(
+      handBackOnLowMemory(installed(what, attempt), what, ctx.memoryWaitsLeft),
+      what,
+      ctx.busyWaitsLeft,
+    ).pipe(
       Effect.map((r) => ({ kind: "boot", ...r }) as const),
       Effect.catchTags({
         GameOperationError: (error) => {
-          // Kurambit's first browser install outlasts any number of tries on a
-          // slow line; each wait is bounded, and the install ends in a browser
-          // or in a tool-missing failure.
-          if (isBrowserInstalling(error.cause))
-            return ctx
-              .log(`${what}: ${error.detail ?? error.reason}; waiting`)
-              .pipe(Effect.andThen(judged(what, attempt, tries)));
-          // A player build whose sources moved under it says nothing about them.
-          const transient =
-            error.reason === "busy" ||
-            error.reason === "cancelled" ||
-            (what === "boot player build" && error.reason === "invalid-input");
-          if (transient && tries < 3)
-            return ctx
-              .log(`${what} ${error.detail ?? error.reason}; retrying`)
-              .pipe(
-                Effect.andThen(Effect.sleep("5 seconds")),
-                Effect.andThen(judged(what, attempt, tries + 1)),
-              );
+          if (isContention(error)) return Effect.succeed(busyEnded(what, error));
           if (error.reason === "low-memory") return Effect.succeed(memoryEnded(error));
           // The ending shows its first 300 characters: the detail says what to
           // fix on this machine, where the error's message opens with advice

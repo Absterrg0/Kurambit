@@ -98,7 +98,8 @@ the work. **Stop run** ends it; every build the run made, rejected ones too, sta
 commits, switches branches or touches your git: its builds are Kurambit checkpoints, and your
 game folder holds the current build as uncommitted work you commit when you like. Starting the run again without
 a new brief continues it where it stopped, and if Kurambit restarts during a run, the run picks up
-where it was on its own. A game whose run was made by an earlier version of Kurambit needs a new
+where it was on its own. A run that stops on a usage limit is never continued by **Auto-resume
+limited threads**; start it again once the limit resets. A game whose run was made by an earlier version of Kurambit needs a new
 run from your brief, which continues from the game as it is: no new vision or prototypes, a plan
 writes a ladder for the game, then rounds build it. The earlier run's rounds, ladder and decisions
 are not carried over; its history stays in git.
@@ -145,7 +146,8 @@ While a run is live, steer it instead of editing the game yourself: type what sh
 the run. The round in progress finishes as planned; the next round starts with your note, ahead of
 its ladder step or the reviewer's direction, and the rounds list shows what you asked. A stopped
 run keeps your note for when it continues. When no run is live, your agent works on the game
-directly.
+directly. While a run works on the game, including while it exports at its end, Rebuild, exports
+and your agent's editing tools are refused; Play still opens the last exported build.
 
 A game has one run at a time: every chat of the game sees and steers the same run, and starting a
 run from another chat continues the one already there. While a run is live, **Stop game** stops

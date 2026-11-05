@@ -244,7 +244,12 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       cancelled:
         "The operation was cancelled before it finished (a turn ended, a stop, or a newer request). Retry it if it is still wanted.",
     };
-    return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
+    // A run holding the game is not cleared by Stop game, which stops only the caller's work.
+    const fix =
+      this.reason === "busy" && this.runReason === "run-live"
+        ? "A production run is working on this game. Steer it from the game's chat, or stop the run; otherwise wait for it to end."
+        : fixes[this.reason];
+    return `${this.operation}: ${fix} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
 }
 // Tool failures are JSON objects, so include the computed recovery message explicitly.
