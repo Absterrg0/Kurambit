@@ -308,6 +308,8 @@ export const textOf = (result: McpContent): string =>
     .map((entry) => entry.text ?? "")
     .join("\n");
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 /**
  * The capture as an image: either MCP image content or a base64 PNG field in
  * the command's JSON text, whichever the Pipeline version returns.
@@ -333,7 +335,10 @@ export const screenshotOf = (
     }
   }
   if (data === undefined) return { text: text.slice(0, 4000) || "The editor returned no image." };
-  const size = readImageDimensions(Buffer.from(data, "base64"));
+  const bytes = Buffer.from(data, "base64");
+  // The result is labelled image/png, and a provider refuses a turn whose
+  // image bytes are another format; the shared reader accepts several.
+  const size = bytes.subarray(0, 8).equals(PNG_SIGNATURE) ? readImageDimensions(bytes) : null;
   if (size === null)
     return { text: `The editor returned an image that is not a PNG. ${text.slice(0, 2000)}` };
   return {
