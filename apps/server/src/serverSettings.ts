@@ -664,8 +664,11 @@ const make = Effect.gen(function* () {
       const adopted: Record<string, string> = {};
       for (const [field, secretName] of TOP_LEVEL_SETTINGS_SECRETS) {
         if ((settings as Readonly<Record<string, unknown>>)[field] !== "") continue;
+        // A blank key was never a key: the old status check reported it as unset.
         const stored = yield* secretStore.get(secretName).pipe(
-          Effect.map(Option.isSome),
+          Effect.map(
+            (found) => Option.isSome(found) && textDecoder.decode(found.value).trim() !== "",
+          ),
           Effect.catch(() =>
             Effect.logWarning("failed to read a stored settings secret", { secretName }).pipe(
               Effect.as(false),

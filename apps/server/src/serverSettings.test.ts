@@ -1842,6 +1842,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const secrets = yield* ServerSecretStore.ServerSecretStore;
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       yield* secrets.set("game-bot-jev-api-key", new TextEncoder().encode("jev-saved"));
+      yield* secrets.set("game-blender-polypizza-key", new TextEncoder().encode("  \n"));
       yield* fileSystem.writeFileString(
         serverConfig.settingsPath,
         JSON.stringify({ gameBlenderPath: "/opt/blender" }),
@@ -1850,6 +1851,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const loaded = yield* serverSettings.getSettings;
       assert.strictEqual(loaded.gameJevApiKey, "jev-saved");
       assert.strictEqual(loaded.gameSketchfabApiKey, "");
+      assert.strictEqual(loaded.gamePolyPizzaApiKey, "");
+      assert.strictEqual(
+        ServerSettingsModule.redactServerSettingsForClient(loaded).gamePolyPizzaApiKey,
+        "",
+      );
       const client = ServerSettingsModule.redactServerSettingsForClient(loaded);
       assert.isAbove(client.gameJevApiKey.length, 0);
       assert.strictEqual(client.gameSketchfabApiKey, "");
