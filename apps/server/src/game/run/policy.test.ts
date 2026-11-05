@@ -46,8 +46,7 @@ const done = (step: State.Step, patch: Partial<Policy.RoleDone> = {}): Policy.Ro
   elapsedMs: MIN,
   sourceBefore: "s0",
   sourceAfter: `s${step.id}`,
-  botsBefore: 0,
-  botsAfter: 1,
+  bots: 1,
   bot: null,
   sheet: "",
   ...patch,
@@ -414,8 +413,7 @@ describe("rounds", () => {
     const lazy: Responder = (step, state) =>
       step.kind === "role" && step.role.startsWith("tester")
         ? done(step, {
-            botsBefore: 3,
-            botsAfter: 3,
+            bots: 0,
             ...plainSubmission(state, step),
           })
         : roundResponder("A", "B")(step, state);

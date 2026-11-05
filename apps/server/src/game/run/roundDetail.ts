@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- One round's evidence is read from the run's own files in the game folder.
 // One round's evidence for the creator: the record, its blind comparison, the
-// tester and reviewer notes and the bot runs. Reads only files the run wrote.
+// tester and reviewer notes and the bot runs. Reads only files the run wrote,
+// and the bot service's records of the round's threads.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
@@ -9,6 +10,7 @@ import type {
   GameRunRoundDetail,
   GameRunRoundOutcome,
 } from "@kurambit/contracts";
+import type * as BotEvidence from "../botEvidence.ts";
 import type { Picked, RoundRecord, RunState } from "./state.ts";
 
 // Every text is bounded so one expanded round stays a few KB on the wire.
@@ -95,18 +97,6 @@ const ComparisonFile = Schema.Struct({
   ),
 });
 const decodeComparison = Schema.decodeUnknownOption(Schema.fromJsonString(ComparisonFile));
-
-const BotRow = Schema.Struct({
-  runId: Schema.String,
-  at: Schema.String,
-  seconds: Schema.optionalKey(Schema.Number),
-  won: Schema.optionalKey(Schema.Boolean),
-  ending: Schema.optionalKey(Schema.String),
-  findings: Schema.optionalKey(Schema.Number),
-  mode: Schema.optionalKey(Schema.String),
-  file: Schema.optionalKey(Schema.String),
-});
-const decodeBotRow = Schema.decodeUnknownOption(Schema.fromJsonString(BotRow));
 
 const UUID_JSON = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/;
 const SAFE_NAME = /^[A-Za-z0-9_-]{1,80}\.md$/;
@@ -272,43 +262,28 @@ export const readPickEvidence = async (root: string, state: RunState): Promise<P
   };
 };
 
-// Bot runs recorded in the game folder between this round's first builder or
-// tester turn and the next round's first turn. Comparison bots play in removed
-// checkouts and never land here.
-const botRunsOf = async (root: string, state: RunState, n: number) => {
-  const startedAt = (round: number) => {
-    const roles = new Set([`builder-${round}`, `builder-${round}b`, `tester-${round}`]);
-    return state.threads
-      .filter((thread) => roles.has(thread.role))
-      .map((thread) => Date.parse(thread.startedAt))
-      .filter(Number.isFinite);
-  };
-  const own = startedAt(n);
-  if (own.length === 0) return [];
-  const from = Math.min(...own);
-  const later = startedAt(n + 1);
-  const until = later.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...later);
-  const text = (await readStudio(root, "bot-results.jsonl")) ?? "";
-  return text
-    .split("\n")
-    .flatMap((line) => {
-      if (line.trim().length === 0) return [];
-      const decoded = decodeBotRow(line);
-      if (decoded._tag === "None") return [];
-      const at = Date.parse(decoded.value.at);
-      return at >= from && at < until ? [decoded.value] : [];
-    })
-    .slice(-BOT_RUNS_MAX)
-    .map((row) => ({
-      runId: row.runId,
-      file: row.file ?? "",
-      mode: row.mode ?? "play",
-      ending: row.ending ?? (row.won === true ? "done" : "ended"),
-      seconds: row.seconds ?? 0,
-      findings: row.findings ?? 0,
-      at: row.at,
-    }));
+/** The threads whose bot runs a round shows: its builders' and its tester's. */
+export const roundBotThreads = (state: RunState, n: number) => {
+  const roles = new Set([`builder-${n}`, `builder-${n}b`, `tester-${n}`]);
+  return state.threads.filter((thread) => roles.has(thread.role)).map((t) => t.threadId);
 };
+
+// The round's bot runs, from the bot service's records of its threads (never
+// the game folder's copy, which a role agent can write), latest last.
+// Comparison and check bots run on no thread and are not shown.
+const botRunsOf = (bots: ReadonlyArray<BotEvidence.BotRun>) =>
+  bots
+    .toSorted((a, b) => a.at.localeCompare(b.at))
+    .slice(-BOT_RUNS_MAX)
+    .map((run) => ({
+      runId: run.runId,
+      file: run.file,
+      mode: run.mode,
+      ending: run.ending ?? (run.won ? "done" : "ended"),
+      seconds: run.seconds,
+      findings: run.findings,
+      at: run.at,
+    }));
 
 /**
  * The run's own video for a bot run, resolved strictly inside the game's
@@ -341,12 +316,14 @@ export const readRoundEvidence = async (
   root: string,
   state: RunState,
   record: RoundRecord,
+  /** The bot runs of the round's threads in this game folder (see roundBotThreads). */
+  bots: ReadonlyArray<BotEvidence.BotRun>,
 ): Promise<RoundEvidence> => {
   const n = record.round;
   const studio = (name: string) => readStudio(root, name);
   const nextRound = state.rounds.find((r) => r.round === n + 1);
   const latest = state.rounds.at(-1)?.round === n;
-  const botRuns = await botRunsOf(root, state, n);
+  const botRuns = botRunsOf(bots);
   // A round names its own record; one recorded before that finds its label's latest.
   const compared = await comparisonOf(root, record.branch, record.comparison);
   let video: GameRunRoundDetail["video"] = null;

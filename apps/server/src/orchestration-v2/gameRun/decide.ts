@@ -1177,20 +1177,11 @@ const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
         entry.threadId !== command.roleThreadId;
       if (replacing && command.replaces !== entry?.threadId)
         return refuse("wrong-thread", `Step ${command.stepId} already runs on another thread.`);
-      // The first measure of a role's starting point stands: a re-run of the
-      // launch after a restart measures a build the role has already changed.
       const launched: GameRunStep = {
         ...started,
         roles: started.roles.map((r) =>
           r.seq === seq
-            ? {
-                ...r,
-                threadId: thread,
-                ...(replacing ? { submission: null } : {}),
-                ...(r.before === undefined && command.before !== undefined
-                  ? { before: command.before }
-                  : {}),
-              }
+            ? { ...r, threadId: thread, ...(replacing ? { submission: null } : {}) }
             : r,
         ),
       };

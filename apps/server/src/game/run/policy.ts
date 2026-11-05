@@ -1254,7 +1254,6 @@ const newRound = (state: RunState, now: number): Round => {
     block: null,
     jev: false,
     thread: null,
-    botsBefore: 0,
     bot: "",
     botDecider: "policy",
     testerNotes: "",
@@ -2371,12 +2370,7 @@ const applyRound = (
       return at({ phase: "tester", jev: res.kind === "facts" && res.jev });
     case "tester":
       return res.kind === "done"
-        ? at({
-            phase: "tester-write",
-            thread: res.threadId,
-            botsBefore: res.botsBefore,
-            ...testedBot(res, r),
-          })
+        ? at({ phase: "tester-write", thread: res.threadId, ...testedBot(res, r) })
         : at({ phase: "restore" });
     case "tester-write":
     case "tester-duty": {
@@ -2390,7 +2384,9 @@ const applyRound = (
       // A submission's checks are held over a follow-up turn that submits none.
       const submittedChecks =
         rung === null ? [] : sub !== null ? submittedChecksOf(sub, rung) : r.checks;
-      if (r.phase === "tester-write" && res.kind === "done" && res.botsAfter <= r.botsBefore) {
+      // The bot service's record of the tester's thread, which spans its
+      // play, write and duty turns; the game folder's copy decides nothing.
+      if (r.phase === "tester-write" && res.kind === "done" && res.bots === 0) {
         logs.push(`round ${r.n}: tester ran no bot; one follow-up turn asks for it`);
         return at({
           phase: "tester-duty",
@@ -2406,7 +2402,7 @@ const applyRound = (
       // and no bot run on record cannot have seen it, whatever it declares.
       const played =
         (res.kind === "done" && (res.evidence?.executedInputSteps ?? 0) > 0) ||
-        (res.kind === "done" && res.botsAfter > r.botsBefore) ||
+        (res.kind === "done" && res.bots > 0) ||
         r.bot !== "";
       // State checks were scored by the harness; the tester's lines count for look checks only.
       const isState = (k: number) => rung?.checks[k]?.kind === "state";
@@ -2587,7 +2583,7 @@ const applyRound = (
   }
 };
 
-// A tester turn's play bot replaces the round's; a turn that ran none keeps it.
+// The tester thread's latest play bot replaces the round's; a thread with none keeps it.
 const testedBot = (res: StepResult, r: Round): Pick<Round, "bot" | "botDecider"> =>
   res.kind === "done" && res.bot !== null
     ? { bot: res.bot.file, botDecider: res.bot.decider }

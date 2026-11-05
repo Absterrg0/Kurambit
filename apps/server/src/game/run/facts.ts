@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- Plain filesystem facts read from the game folder; bot-result rows are tolerant per line.
+// @effect-diagnostics nodeBuiltinImport:off -- Plain filesystem facts read from the game folder.
 // Plain facts for reviewers and testers. States numbers, never interprets them.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -6,55 +6,22 @@ import { assetListSummary, assetUseSummary, readAssetUse } from "./assetUse.ts";
 import { laneProfile } from "../engineProfile.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { modelFacts } from "./modelFacts.ts";
+import type * as BotEvidence from "../botEvidence.ts";
 import { walkFiles } from "../walkFiles.ts";
 
 const readText = (path: string) => NodeFSP.readFile(path, "utf8").catch(() => "");
 
-/** A file the run decides by: only a missing one reads as empty; any other failure is thrown. */
-export const readRows = (path: string) =>
-  NodeFSP.readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return "";
-    throw error;
-  });
-
-export const botRunCount = async (root: string): Promise<number> =>
-  (await readRows(NodePath.join(root, ".studio", "bot-results.jsonl"))).split("\n").filter(Boolean)
-    .length;
-
 // The bot's fastest finish is a plain fact with no length target beside it;
-// the reviewer decides what it means.
-const botLine = async (root: string): Promise<string> => {
-  const lines = (await readText(NodePath.join(root, ".studio", "bot-results.jsonl")))
-    .split("\n")
-    .filter(Boolean);
-  if (lines.length === 0) return "no bot runs recorded yet";
-  let wins = 0;
-  let explores = 0;
-  let findings = 0;
-  let fastest: number | null = null;
-  const deciders = new Set<string>();
-  for (const line of lines) {
-    try {
-      const row = JSON.parse(line) as {
-        won?: unknown;
-        seconds?: unknown;
-        findings?: unknown;
-        mode?: unknown;
-        decider?: unknown;
-      };
-      if (row.mode === "explore") explores += 1;
-      if (typeof row.decider === "string") deciders.add(row.decider);
-      if (typeof row.findings === "number") findings += row.findings;
-      if (row.won === true) {
-        wins += 1;
-        if (typeof row.seconds === "number" && (fastest === null || row.seconds < fastest))
-          fastest = row.seconds;
-      }
-    } catch {
-      // One bad line never breaks the facts.
-    }
-  }
-  return `${lines.length} bot runs (${explores} exploration, deciders: ${[...deciders].join("/") || "none"}), ${wins} reached the ending${fastest === null ? "" : `, fastest finish ${fastest.toFixed(1)}s`}, ${findings} detector findings`;
+// the reviewer decides what it means. The runs are the bot service's record,
+// never the game folder's copy, which a role agent can write.
+const botLine = (runs: ReadonlyArray<BotEvidence.BotRun>): string => {
+  if (runs.length === 0) return "no bot runs recorded yet";
+  const wins = runs.filter((run) => run.won);
+  const explores = runs.filter((run) => run.mode === "explore").length;
+  const findings = runs.reduce((sum, run) => sum + run.findings, 0);
+  const fastest = wins.length === 0 ? null : Math.min(...wins.map((run) => run.seconds));
+  const deciders = [...new Set(runs.map((run) => run.decider))];
+  return `${runs.length} bot runs (${explores} exploration, deciders: ${deciders.join("/") || "none"}), ${wins.length} reached the ending${fastest === null ? "" : `, fastest finish ${fastest.toFixed(1)}s`}, ${findings} detector findings`;
 };
 
 /** Which asset files the code loads and how much it draws itself, bounded for a prompt. */
@@ -66,7 +33,12 @@ export const artAssetFacts = async (root: string, lane: string): Promise<string>
   assetListSummary(await readAssetUse(root, lane), lane);
 
 /** Code facts plus the player report, as one sentence block for the reviewer. */
-export const reviewerFacts = async (root: string, lane: string): Promise<string> => {
+export const reviewerFacts = async (
+  root: string,
+  lane: string,
+  /** The run's bot runs in this game folder. */
+  bots: ReadonlyArray<BotEvidence.BotRun>,
+): Promise<string> => {
   const { extensions: ext, under } = laneProfile(lane).run.sources;
   const base = NodePath.join(root, lane, under);
   const sources: Array<{ f: string; n: number }> = [];
@@ -103,5 +75,5 @@ export const reviewerFacts = async (root: string, lane: string): Promise<string>
   // Only the notable image facts: the reviewer judges the whole game, not each file.
   const sprites = (await spriteFacts(root, lane)).notable;
   const modelNotes = (await modelFacts(root, lane)).notable;
-  return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. ${await assetFacts(root, lane)}${sprites.length > 0 ? ` ${sprites}` : ""}${modelNotes.length > 0 ? ` Models: ${modelNotes}.` : ""} Bots: ${await botLine(root)}.${report.length > 0 ? `\nPlayer report (facts from bot runs across the game, no interpretation):\n${report}` : "\nNo player report recorded yet."}`;
+  return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. ${await assetFacts(root, lane)}${sprites.length > 0 ? ` ${sprites}` : ""}${modelNotes.length > 0 ? ` Models: ${modelNotes}.` : ""} Bots: ${botLine(bots)}.${report.length > 0 ? `\nPlayer report (facts from bot runs across the game, no interpretation):\n${report}` : "\nNo player report recorded yet."}`;
 };

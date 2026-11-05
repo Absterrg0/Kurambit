@@ -6,8 +6,10 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import type { ThreadId } from "@kurambit/contracts";
+import type * as BotEvidence from "../botEvidence.ts";
 import type * as GameService from "../GameService.ts";
 import { walkFiles } from "../walkFiles.ts";
+import { botVideoFile } from "./roundDetail.ts";
 
 type Row = {
   ok: boolean;
@@ -30,34 +32,14 @@ const dirBytes = async (dir: string): Promise<number> => {
   return total;
 };
 
-type BotRow = { runId: string; seconds: number; won: boolean; video: string; findings: number };
-
-const botRows = async (root: string): Promise<BotRow[]> => {
-  const text = await NodeFSP.readFile(
-    NodePath.join(root, ".studio", "bot-results.jsonl"),
-    "utf8",
-  ).catch(() => "");
-  return text
-    .split("\n")
-    .filter(Boolean)
-    .flatMap((line) => {
-      try {
-        const row = JSON.parse(line) as Record<string, unknown>;
-        if (typeof row.runId !== "string" || typeof row.video !== "string") return [];
-        return [
-          {
-            runId: row.runId,
-            video: row.video,
-            seconds: typeof row.seconds === "number" ? row.seconds : Number.POSITIVE_INFINITY,
-            won: row.won === true,
-            findings: typeof row.findings === "number" ? row.findings : 999,
-          },
-        ];
-      } catch {
-        return [];
-      }
-    });
-};
+/**
+ * The run's bot runs in the game folder, from the bot service's records of
+ * its role threads: the folder's .studio/bot-results.jsonl is a role agent's
+ * to write, so it never picks the video. A role in a folder of its own played
+ * another game, and gives none.
+ */
+const botRuns = (root: string, records: ReadonlyArray<BotEvidence.ThreadBots>) =>
+  records.flatMap((record) => (record.root === root ? record.runs : []));
 
 export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   root: string,
@@ -67,6 +49,8 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   owner: string,
   /** The finish's one deadline for waiting out another owner's operation. */
   waitUntil: number,
+  /** The run's role threads, whose recorded bot runs the final video is chosen from. */
+  roleThreads: ReadonlyArray<ThreadId>,
 ) {
   // Ask only targets the backend declares; anything else is recorded skipped.
   const targets = yield* game
@@ -132,6 +116,17 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   yield* log(
     `finishExports linux ok=${verified.linuxOk} bin=${verified.linuxBin} msg=${linux.message.slice(0, 200)}`,
   );
+  // A record that cannot be read leaves its runs out; the video is a nicety.
+  const records = yield* Effect.forEach(roleThreads, (threadId) =>
+    game.botRuns(threadId).pipe(
+      Effect.map((record) => [record]),
+      Effect.catch((error) =>
+        log(
+          `finishExports: the bot runs of ${threadId} could not be read (${error.detail ?? error.reason})`,
+        ).pipe(Effect.as([])),
+      ),
+    ),
+  ).pipe(Effect.map((each) => each.flat()));
   // Best real run: fastest win first; otherwise the longest run with a real
   // video (a short clean run can be a bot stuck at the menu).
   yield* Effect.tryPromise(async () => {
@@ -139,7 +134,7 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
       NodePath.join(root, ".studio", "exports.json"),
       `${JSON.stringify({ at: new Date().toISOString(), web: { ...web, index: verified.webIndex, verified: verified.webOk }, linux: { ...linux, bin: verified.linuxBin, verified: verified.linuxOk } }, null, 2)}\n`,
     ).catch(() => undefined);
-    const rows = await botRows(root);
+    const rows = botRuns(root, records);
     const ordered = [
       ...rows.filter((r) => r.won).sort((a, b) => a.seconds - b.seconds),
       ...rows
@@ -147,16 +142,17 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
         .sort((a, b) => b.seconds - a.seconds || a.findings - b.findings),
     ];
     for (const row of ordered) {
-      if (!(await fileOver(row.video, 4096))) continue;
+      const video = await botVideoFile(root, row.runId);
+      if (video === null || !(await fileOver(video, 4096))) continue;
       const reason = row.won
         ? `fastest winning bot run (${row.seconds.toFixed(1)}s)`
         : `longest non-winning bot run (${row.seconds.toFixed(1)}s, ${row.findings} findings; no win recorded)`;
-      await NodeFSP.copyFile(row.video, NodePath.join(root, ".studio", "final.mp4")).catch(
+      await NodeFSP.copyFile(video, NodePath.join(root, ".studio", "final.mp4")).catch(
         () => undefined,
       );
       await NodeFSP.writeFile(
         NodePath.join(root, ".studio", "final-video.json"),
-        `${JSON.stringify({ runId: row.runId, video: row.video, reason, at: new Date().toISOString() }, null, 2)}\n`,
+        `${JSON.stringify({ runId: row.runId, video, reason, at: new Date().toISOString() }, null, 2)}\n`,
       ).catch(() => undefined);
       return `final video from run ${row.runId} (${reason})`;
     }

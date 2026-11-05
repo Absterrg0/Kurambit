@@ -251,10 +251,6 @@ export const GameRunBotFact = Schema.Struct({ side: GameRunSide, ...BotFactField
 export type GameRunBotFact = typeof GameRunBotFact.Type;
 
 // ── What a step's execution hands back. ────────────────────────────────────
-/** A role turn's starting point: the build's source id and the bot runs on record. */
-export const GameRunRoleBefore = Schema.Struct({ source: Schema.String, bots: Schema.Number });
-export type GameRunRoleBefore = typeof GameRunRoleBefore.Type;
-
 /** A role turn's end: the typed submission the role made, if any, and what the harness saw. */
 export const GameRunRoleDone = Schema.Struct({
   kind: Schema.Literal("done"),
@@ -267,9 +263,12 @@ export const GameRunRoleDone = Schema.Struct({
   elapsedMs: Schema.Number,
   sourceBefore: Schema.String,
   sourceAfter: Schema.String,
-  botsBefore: Schema.Number,
-  botsAfter: Schema.Number,
-  /** The play bot this turn last ran and its decider, null when it ran none. */
+  /**
+   * The bot runs the bot service recorded on this thread, never counted from
+   * a file in the game folder. Results landed before the record read as none.
+   */
+  bots: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
+  /** The thread's latest play bot and its decider, null when it ran none. */
   bot: Schema.NullOr(Schema.Struct({ file: Schema.String, decider: GameBotDecider })),
   /** The step's sheet when the runner drew one, else "". */
   sheet: Schema.String,
@@ -544,7 +543,6 @@ export const GameRunRoundTask = Schema.TaggedStruct("round", {
   block: Schema.NullOr(GameRunBlock),
   jev: Schema.Boolean,
   thread: Schema.NullOr(ThreadId),
-  botsBefore: Schema.Number,
   // The bot file the tester last ran this round.
   bot: Schema.String,
   botDecider: GameBotDecider,
@@ -796,8 +794,6 @@ export const GameRunStep = Schema.Struct({
       seq: PositiveInt,
       threadId: Schema.NullOr(ThreadId),
       submission: Schema.NullOr(GameRunSubmission),
-      /** What the harness measured before the role's first turn, kept for the turn's result. */
-      before: Schema.optionalKey(GameRunRoleBefore),
     }),
   ),
   /** A pair keeps its halves' results in `step`; this is a single step's result, or an ending. */

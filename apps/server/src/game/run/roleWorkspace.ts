@@ -1,11 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off -- A role's copy and evidence are files on disk; preparation is timed on the wall clock for the run log.
 // A role's workspace around its turns: the plain copy of a build a role that
-// plays one gets before its thread exists, the bot run its turn left on record,
-// and the copy's release once the role has no turn left.
+// plays one gets before its thread exists, and the copy's release once the
+// role has no turn left.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import { CheckpointRef, CommandId, type ThreadId } from "@kurambit/contracts";
 import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { GAME_RUN_COPIES } from "../../config.ts";
@@ -15,9 +14,8 @@ import type * as GameService from "../GameService.ts";
 import { laneProfile } from "../engineProfile.ts";
 import { COPY_OF } from "../unityPlayerCache.ts";
 import { NOT_IN_SAMPLE } from "./builds.ts";
-import { readRows } from "./facts.ts";
 import { handBackOnLowMemory } from "./lowMemory.ts";
-import type { RoleDone, RoleStep } from "./state.ts";
+import type { RoleStep } from "./state.ts";
 
 export type RoleDeps = {
   readonly launches: ThreadLaunch.ThreadLaunchService["Service"];
@@ -34,31 +32,6 @@ export type RoleContext = {
   readonly log: (line: string) => Effect.Effect<void>;
   /** The step may still hand itself back to wait for memory. */
   readonly memoryWaitsLeft: boolean;
-};
-
-const BotRow = Schema.Struct({
-  file: Schema.String,
-  mode: Schema.optionalKey(Schema.String),
-  decider: Schema.optionalKey(Schema.String),
-});
-const decodeBotRow = Schema.decodeUnknownOption(Schema.fromJsonString(BotRow));
-
-// The bot the blind comparison replays: the latest play-mode run among the rows
-// this turn added, with the decider it used. An exploration bot wanders on
-// purpose and says nothing about how far scripted play gets, so it gives none.
-export const lastBotRun = async (root: string, after: number): Promise<RoleDone["bot"]> => {
-  const text = await readRows(NodePath.join(root, ".studio", "bot-results.jsonl"));
-  const row = text
-    .split("\n")
-    .filter(Boolean)
-    .slice(after)
-    .flatMap((line) => {
-      const decoded = decodeBotRow(line);
-      return decoded._tag === "Some" ? [decoded.value] : [];
-    })
-    .findLast((each) => each.mode !== "explore");
-  if (row === undefined) return null;
-  return { file: row.file, decider: row.decider === "jev" ? "jev" : "policy" };
 };
 
 /** A run's copies: under Kurambit's own worktrees folder, never in the game repository. */

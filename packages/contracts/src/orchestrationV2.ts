@@ -62,7 +62,6 @@ import {
   GameRun,
   GameRunId,
   GameRunRestoreOutcome,
-  GameRunRoleBefore,
   GameRunRound,
   GameRunStep,
   GameRunStepId,
@@ -3093,7 +3092,6 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     ...GameRunCommandFields,
     stepId: GameRunStepId,
     roleThreadId: Schema.optional(ThreadId),
-    before: Schema.optional(GameRunRoleBefore),
     /** The thread the role ran on before: a deleted or broken one is replaced by a fresh one. */
     replaces: Schema.optional(ThreadId),
   }),

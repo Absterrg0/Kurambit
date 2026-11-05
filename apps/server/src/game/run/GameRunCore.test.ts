@@ -66,6 +66,7 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameRunControl from "../GameRunControl.ts";
+import * as BotEvidence from "../botEvidence.ts";
 import * as GameService from "../GameService.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import * as GameRunStepRunner from "./GameRunStepRunner.ts";
@@ -171,8 +172,7 @@ const roleDone = (threadId: ThreadId): GameRunStepResult => ({
   elapsedMs: 60_000,
   sourceBefore: "",
   sourceAfter: "",
-  botsBefore: 0,
-  botsAfter: 0,
+  bots: 0,
   bot: null,
   sheet: "",
 });
@@ -368,8 +368,7 @@ it.effect(
         elapsedMs: 60_000,
         sourceBefore: "",
         sourceAfter: "",
-        botsBefore: 0,
-        botsAfter: 0,
+        bots: 0,
         bot: null,
         sheet: "",
       });
@@ -619,6 +618,8 @@ interface World {
   readonly exportOwners: Array<string | undefined>;
   /** The export breaks with a defect, as a rejected promise does. */
   exportsBreak: boolean;
+  /** The bot runs the bot service recorded, by thread. */
+  readonly botRecords: Map<ThreadId, BotEvidence.ThreadBots>;
   /** The game's project was deleted under the run. */
   projectDeleted: boolean;
   /** The game folder no longer resolves. */
@@ -665,6 +666,7 @@ const newWorld = Effect.gen(function* () {
     exportsAsked: 0,
     exportOwners: [],
     exportsBreak: false,
+    botRecords: new Map(),
     projectDeleted: false,
     folderGone: false,
     onCreatorShell: null,
@@ -894,6 +896,8 @@ const layerGame = (root: string, world: World) => {
               Effect.as({ waitedMs: 0, refusals: 0, refused: false, executedInputSteps: 0 }),
             ),
           limitExploreInput: () => Effect.void,
+          botRuns: (threadId) =>
+            Effect.succeed(world.botRecords.get(threadId) ?? BotEvidence.empty(threadId, root)),
           closeLiveEditors: () => Effect.void,
           exportTargets: (_threadId, owner) =>
             Effect.sync(() => {
@@ -977,7 +981,6 @@ const recordThread = (stepId: GameRunStep["id"], attempt: number, thread: Thread
       runId,
       stepId,
       roleThreadId: thread,
-      before: { source: "", bots: 0 },
     }),
   );
 
@@ -1181,6 +1184,54 @@ it.effect("an ending returns to trunk and exports, from its outbox effect", () =
         world.interrupts.map((i) => i.threadId),
         [thread],
       );
+    }),
+  ),
+);
+
+it.effect("an ending's final video is a bot run on record, never one an agent wrote in", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      const { vision, thread } = yield* atVision(world);
+      const video = (runId: string) => {
+        const dir = NodePath.join(lastRoot, "builds", "logs", `game-bot-${runId}`);
+        NodeFS.mkdirSync(dir, { recursive: true });
+        NodeFS.writeFileSync(NodePath.join(dir, "run.mp4"), Buffer.alloc(8192, 1));
+        return NodePath.join(dir, "run.mp4");
+      };
+      video("recorded");
+      // A role that writes the readable copy: a faster win, with a video of its own.
+      NodeFS.mkdirSync(NodePath.join(lastRoot, ".studio"), { recursive: true });
+      NodeFS.writeFileSync(
+        NodePath.join(lastRoot, ".studio", "bot-results.jsonl"),
+        `${JSON.stringify({ runId: "forged", seconds: 3, won: true, video: video("forged"), findings: 0, mode: "play", decider: "policy", file: ".studio/bot/win.mjs" })}\n`,
+      );
+      NodeFS.writeFileSync(NodePath.join(lastRoot, ".gitignore"), "builds/\n.studio/\n");
+      world.botRecords.set(
+        thread,
+        BotEvidence.add(BotEvidence.empty(thread, lastRoot), lastRoot, {
+          runId: "recorded",
+          file: ".studio/bot/play.mjs",
+          mode: "play",
+          decider: "policy",
+          won: false,
+          seconds: 40,
+          findings: 1,
+          at: "2026-11-06T00:00:00.000Z",
+        }),
+      );
+      yield* completeStep(vision, {
+        kind: "ended",
+        ending: "usage-limit",
+        reason: "usage limit until noon",
+      });
+      const finished = yield* awaitRun((run) => run.finished !== null);
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      yield* Fiber.join(finished);
+      const chosen = JSON.parse(
+        NodeFS.readFileSync(NodePath.join(lastRoot, ".studio", "final-video.json"), "utf8"),
+      ) as { runId: string };
+      assert.equal(chosen.runId, "recorded");
     }),
   ),
 );

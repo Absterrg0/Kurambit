@@ -54,11 +54,10 @@ import * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
 import { BuildName } from "./buildNames.ts";
 import { captureBuild, freeBy, isGameCode, measureChange } from "./builds.ts";
-import { botRunCount } from "./facts.ts";
 import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
 import { causeText } from "../runSetup.ts";
 import { RETRIES as LANDING_RETRIES, retrying } from "./retrying.ts";
-import { lastBotRun } from "./roleWorkspace.ts";
+import { lastPlay } from "../botEvidence.ts";
 import type { RoleStep, Step } from "./state.ts";
 
 // An instantly failed turn never reached the model (provider or session
@@ -507,7 +506,6 @@ const make = Effect.gen(function* () {
                 ),
               ),
             );
-      const before = entry.before ?? { source: "", bots: 0 };
       // A source role's work is a build of its own, measured against the build
       // before it; a diff that cannot be read counts as a change.
       const since = role.since ?? "";
@@ -533,8 +531,9 @@ const make = Effect.gen(function* () {
         ? (yield* measureChange(checkpoints, root, isGameCode(at.run.lane), since, sourceAfter))
             .changed
         : undefined;
-      const botsAfter = role.bots ? yield* Effect.promise(() => botRunCount(root)) : 0;
-      const bot = role.bots ? yield* Effect.promise(() => lastBotRun(root, before.bots)) : null;
+      // The bot service's record of this thread's runs: a file in the folder
+      // the role works in could say anything.
+      const bots = role.bots ? yield* game.botRuns(roleThreadId) : null;
       yield* log(
         `  step ${at.seq}: ${role.role} done${timedOut ? " (capped)" : ""} on ${roleThreadId}`,
       );
@@ -548,9 +547,8 @@ const make = Effect.gen(function* () {
         sourceBefore: since,
         sourceAfter,
         ...(changed === undefined ? {} : { changed }),
-        botsBefore: before.bots,
-        botsAfter,
-        bot,
+        bots: bots?.count ?? 0,
+        bot: bots === null ? null : lastPlay(bots),
         sheet,
       });
     });

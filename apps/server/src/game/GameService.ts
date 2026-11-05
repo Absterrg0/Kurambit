@@ -62,6 +62,7 @@ import { engineProfile } from "./engineProfile.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameBlender from "./GameBlender.ts";
 import * as GameBot from "./GameBot.ts";
+import type * as BotEvidence from "./botEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameExplore from "./GameExplore.ts";
 import * as GameExport from "./GameExport.ts";
@@ -117,7 +118,10 @@ export class GameService extends Context.Service<
      * Caps the explore input this thread may use across all its sessions;
      * starts and acts past it are refused with the reason.
      */
-    readonly limitExploreInput: (threadId: ThreadId, totalMs: number) => Effect.Effect<void>;
+    readonly limitExploreInput: (
+      threadId: ThreadId,
+      totalMs: number,
+    ) => Effect.Effect<void, GameOperationError>;
     /**
      * Since this thread's last finishExploration: how long its explore starts
      * waited for memory, how many were refused `low-memory` and whether the
@@ -308,6 +312,14 @@ export class GameService extends Context.Service<
       root: string,
       input: GameBotRunInput,
     ) => Effect.Effect<GameBotRunResult, GameOperationError>;
+    /**
+     * The bot runs the bot service recorded for this thread's game_bot_run
+     * calls, kept on the server: a run decides by these, never by the game
+     * folder's .studio/bot-results.jsonl, which a role agent can write.
+     */
+    readonly botRuns: (
+      threadId: ThreadId,
+    ) => Effect.Effect<BotEvidence.ThreadBots, GameOperationError>;
     /** Rebuild the facts-only player report across this game's bot runs. */
     readonly botReport: (
       threadId: ThreadId,
@@ -413,7 +425,11 @@ const make = Effect.gen(function* () {
   // No exclusive() here: a real-time run takes minutes and must not hold the
   // game's operation lock. The bot service refuses a second concurrent run
   // per checkout as busy.
-  const botRunIn = Effect.fnUntraced(function* (root: string, input: GameBotRunInput) {
+  const botRunIn = Effect.fnUntraced(function* (
+    root: string,
+    input: GameBotRunInput,
+    owner?: ThreadId,
+  ) {
     const engine = engineProfile((yield* projects.read(root)).engine.name);
     yield* gate.admit(
       "Bot run",
@@ -437,7 +453,7 @@ const make = Effect.gen(function* () {
               });
           }),
     );
-    return yield* gameBot.run(root, input);
+    return yield* gameBot.run(root, input, owner);
   });
   /**
    * Imports first: a fresh game has no .godot cache, so .tres files and
@@ -781,14 +797,15 @@ const make = Effect.gen(function* () {
     exploreStart: explore.start,
     exploreAct: explore.act,
     exploreClose: explore.close,
-    // Its results and video land in the game folder, where a run reads its own bots' evidence.
+    // Its video lands in the game folder; the run is recorded on the thread.
     botRun: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) =>
         projects
           .admitWrite(threadId, root, "Bot run", String(threadId))
-          .pipe(Effect.andThen(botRunIn(root, input))),
+          .pipe(Effect.andThen(botRunIn(root, input, threadId))),
       ),
     botRunIn: (root, input) => botRunIn(root, input),
+    botRuns: (threadId) => gameBot.runs(threadId),
     botView: (threadId, input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);

@@ -13,7 +13,6 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type GameRun,
   type GameRunRestoreOutcome,
-  type GameRunRoleBefore,
   type GameRunStep,
   type GameRunStepId,
   type GameRunStepResult,
@@ -58,7 +57,7 @@ import * as GameService from "../GameService.ts";
 import { causeText, logLine, refreshHarnessFiles, writeAtomic } from "../runSetup.ts";
 import { runBotFact } from "./botFacts.ts";
 import { runStateChecks } from "./checkRunner.ts";
-import { artAssetFacts, botRunCount, reviewerFacts } from "./facts.ts";
+import { artAssetFacts, reviewerFacts } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreKeptRound } from "./restoreRound.ts";
@@ -108,6 +107,15 @@ const isJobBroke = (error: unknown): error is GameRunJobBroke => error instanceo
 /** A read or write the job's progress depends on: its failure breaks the job. */
 const needed = <A, E, R>(work: Effect.Effect<A, E, R>) =>
   work.pipe(Effect.mapError((cause) => new GameRunJobBroke({ cause })));
+
+/** Every thread the run's steps ran a role on, each once. */
+const runRoleThreads = (records: ProjectionStore.GameRunThreadRecords, runId: GameRun["id"]) => [
+  ...new Set(
+    records.gameRunSteps
+      .filter((s) => s.runId === runId)
+      .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
+  ),
+];
 
 export class GameRunStepRunner extends Context.Service<
   GameRunStepRunner,
@@ -420,25 +428,14 @@ const make = Effect.gen(function* () {
   const releaseCopies = (job: { readonly threadId: ThreadId; readonly runId: GameRun["id"] }) =>
     Effect.gen(function* () {
       const records = yield* projections.getGameRunRecords(job.threadId);
-      const roleThreads = new Set(
-        records.gameRunSteps
-          .filter((s) => s.runId === job.runId)
-          .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
-      );
+      const roleThreads = runRoleThreads(records, job.runId);
       const root = yield* projects
         .resolve(job.threadId, { deleted: "allowed" })
         .pipe(Effect.option);
       const log = (line: string) =>
         Option.isSome(root) ? logLine(root.value, line) : Effect.logInfo(line);
-      yield* dropRunCopies(deps, { copies: copiesOf(job.runId), log }, [...roleThreads], false);
+      yield* dropRunCopies(deps, { copies: copiesOf(job.runId), log }, roleThreads, false);
     });
-
-  // A source role's change is measured at its landing against the build its step names.
-  const measure = (role: RoleStep, root: string) =>
-    Effect.promise(async (): Promise<GameRunRoleBefore> => ({
-      source: "",
-      bots: role.bots ? await botRunCount(root) : 0,
-    }));
 
   // The art director judges files, so it gets the asset-list and measured
   // image facts; the redo that answers it sees the same measurements.
@@ -496,9 +493,7 @@ const make = Effect.gen(function* () {
       const entry = record.roles.find((r) => r.seq === role.id);
       const own = roleThreadId(stepId, job.attempt);
       const threadId = entry?.threadId ?? role.thread ?? own;
-      const before = () =>
-        entry?.before === undefined ? measure(role, root) : Effect.succeed(entry.before);
-      const startStep = (target: ThreadId, measured: GameRunRoleBefore, replaces?: ThreadId) =>
+      const startStep = (target: ThreadId, replaces?: ThreadId) =>
         engine
           .dispatch({
             type: "game-run.step.start",
@@ -510,7 +505,6 @@ const make = Effect.gen(function* () {
             runId: run.id,
             stepId,
             roleThreadId: target,
-            before: measured,
             ...(replaces === undefined ? {} : { replaces }),
           })
           .pipe(
@@ -524,8 +518,10 @@ const make = Effect.gen(function* () {
             }),
             Effect.mapError((cause) => new GameRunJobBroke({ cause })),
           );
+      // A sample's cap that cannot be kept breaks the job, which is tried
+      // again, then fails the step: no sample is sent a turn without it.
       const limitInput = (target: ThreadId) =>
-        role.inputCapMs > 0 ? game.limitExploreInput(target, role.inputCapMs) : Effect.void;
+        role.inputCapMs > 0 ? needed(game.limitExploreInput(target, role.inputCapMs)) : Effect.void;
 
       const launchThread = (target: ThreadId, replaces: ThreadId | undefined, text: string) =>
         Effect.gen(function* () {
@@ -536,7 +532,6 @@ const make = Effect.gen(function* () {
           );
           if (!projectLive)
             return yield* fail(half, stepId, `${role.role}: its project was deleted`);
-          const measured = yield* before();
           const ctx = roleContext(run, record, root, log);
           // An engine whose first editor open imports the whole project (minutes;
           // later opens take seconds) pays it here, before any role's clock.
@@ -587,7 +582,7 @@ const make = Effect.gen(function* () {
           const creatorLive = yield* needed(threads.getThreadShell(run.threadId)).pipe(
             Effect.map((s) => s !== null && s.deletedAt === null),
           );
-          if (!(yield* startStep(target, measured, replaces))) return yield* dropWorkspace;
+          if (!(yield* startStep(target, replaces))) return yield* dropWorkspace;
           yield* limitInput(target);
           const launched = yield* launches
             .launch({
@@ -686,7 +681,7 @@ const make = Effect.gen(function* () {
           if (threadId === own) return yield* fail(half, stepId, `${role.role}: its copy is gone`);
           return yield* launchThread(own, threadId, yield* promptOf(run, role, root));
         }
-        if (!(yield* startStep(threadId, yield* before()))) return;
+        if (!(yield* startStep(threadId))) return;
         yield* limitInput(threadId);
         // A turn an earlier try started and a restart or an ending cut off continues.
         const resumed = turns.length > 0;
@@ -830,7 +825,18 @@ const make = Effect.gen(function* () {
                 Effect.map(({ gameJevApiKey }) => gameJevApiKey !== ""),
                 Effect.orElseSucceed(() => false),
               );
-              const code = yield* Effect.promise(() => reviewerFacts(root, run.lane));
+              // A record that cannot be read breaks the job: the reviewer is
+              // never told no bot ran because a read failed.
+              const bots = yield* Effect.forEach(runRoleThreads(found.records, run.id), (thread) =>
+                needed(game.botRuns(thread)),
+              );
+              const code = yield* Effect.promise(() =>
+                reviewerFacts(
+                  root,
+                  run.lane,
+                  bots.flatMap((each) => (each.root === root ? each.runs : [])),
+                ),
+              );
               yield* done({ kind: "facts", jev, code });
             }),
           );
@@ -1099,6 +1105,7 @@ const make = Effect.gen(function* () {
       yield* log(
         `run ended: ${run.ending ?? "unknown"}${run.lastFailure ? ` (${run.lastFailure})` : ""}`,
       );
+      const roleThreads = runRoleThreads(records, run.id);
       if (run.ending !== null && !NO_EXPORT.has(run.ending)) {
         // An ending mid-round (a usage limit, a provider outage) leaves the
         // round's unfinished work in the folder. The exports are of the best
@@ -1144,6 +1151,7 @@ const make = Effect.gen(function* () {
           log,
           gameRunOperationOwner(run.id),
           waitUntil,
+          roleThreads,
         ).pipe(Effect.ignore);
         if (parked !== null)
           yield* buildStep(ops, ctx, { _tag: "restore", sha: parked, keep: [] }).pipe(
@@ -1170,11 +1178,6 @@ const make = Effect.gen(function* () {
               : log(`the run's spent builds could not be cleared: ${causeText(cause)}`),
           ),
         );
-      const roleThreads = new Set(
-        records.gameRunSteps
-          .filter((s) => s.runId === run.id)
-          .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
-      );
       // Only a run something can still resume keeps its roles' copies: one
       // whose chat or project was deleted never runs again. A read that fails
       // is no proof of either, so the copies stay for storage cleanup's bound.
@@ -1189,7 +1192,7 @@ const make = Effect.gen(function* () {
       yield* dropRunCopies(
         deps,
         { copies: copiesOf(run.id), log },
-        [...roleThreads],
+        roleThreads,
         RESUMABLE.has(run.ending ?? "") && chatLive && projectLive,
       ).pipe(
         Effect.catchCause((cause) =>

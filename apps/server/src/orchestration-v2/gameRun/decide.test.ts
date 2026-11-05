@@ -133,8 +133,7 @@ const roleDone = (thread: ThreadId, patch: Partial<Policy.RoleDone> = {}): GameR
   elapsedMs: MIN,
   sourceBefore: "s0",
   sourceAfter: "s1",
-  botsBefore: 0,
-  botsAfter: 1,
+  bots: 1,
   bot: null,
   sheet: "",
   ...patch,
@@ -388,7 +387,7 @@ describe("game-run commands", () => {
     expect(stateCheck.reason).toBe("invalid-submission");
     expect(stateCheck.message).toContain("score checks 1");
     const scored = accept(atTester, checks(1)).records;
-    const landed = complete(scored, roleDone(tester, { botsBefore: 0, botsAfter: 1 }));
+    const landed = complete(scored, roleDone(tester, { bots: 1 }));
     const task = runOf(landed).task;
     expect(task._tag === "round" ? task.checks.map((c) => c.pass) : null).toEqual([true, false]);
   });
@@ -400,7 +399,7 @@ describe("game-run commands", () => {
       T0,
     ).task;
     if (round._tag !== "round") throw new Error("expected a round");
-    // The duty turn after a write-up with no bot run: no input, no new bot run.
+    // The duty turn after a write-up with no bot run: no input, and none on record.
     const passes = (bot: string) => {
       const atDuty = resumedAt(base, {
         ladder,
@@ -411,7 +410,6 @@ describe("game-run commands", () => {
           thread: tester,
           branch: "round-1",
           candidate: "cafe",
-          botsBefore: 1,
           bot,
         },
       });
@@ -431,8 +429,7 @@ describe("game-run commands", () => {
         scored,
         roleDone(tester, {
           evidence: { sessions: 0, actions: 0, executedInputSteps: 0, nominalMs: 0, images: 0 },
-          botsBefore: 1,
-          botsAfter: 1,
+          bots: 0,
         }),
       );
       const task = runOf(landed).task;
