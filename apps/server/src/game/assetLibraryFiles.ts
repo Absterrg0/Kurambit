@@ -11,6 +11,7 @@ import { openZipArchive } from "../zipArchive.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 import { readGltfJson } from "./gltfJson.ts";
+import { walkFiles } from "./walkFiles.ts";
 
 export interface LibraryPack {
   readonly id: string;
@@ -436,23 +437,14 @@ export const modelPictures = (
   return { ofImage, byModel };
 };
 
-const walk = async (directory: string, prefix = ""): Promise<string[]> => {
-  const entries = await NodeFSP.readdir(NodePath.join(directory, prefix), { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
-    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-    if (entry.isDirectory()) files.push(...(await walk(directory, relative)));
-    else if (entry.isFile()) files.push(relative);
-  }
-  return files;
-};
-
 /** Facts about every usable file in an unpacked pack. Reads headers only, except glTF JSON. */
 export const indexPack = async (
   pack: Pick<LibraryPack, "id" | "sha256">,
   directory: string,
 ): Promise<LibraryIndex> => {
-  const paths = await walk(directory);
+  const paths = (await walkFiles(directory)).map((full) =>
+    NodePath.relative(directory, full).split(NodePath.sep).join("/"),
+  );
   const present = new Set(paths);
   const files: LibraryFile[] = [];
   for (const path of paths) {

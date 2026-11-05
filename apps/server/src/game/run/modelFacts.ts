@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 
 import { laneAssets, laneLibrary } from "../engineProfile.ts";
 import { readGltfJson } from "../gltfJson.ts";
+import { walkFiles } from "../walkFiles.ts";
 
 // Measured facts on the game's glTF models, read from their JSON alone (no
 // buffers): size, triangles, skeleton, clips and referenced files. The art
@@ -183,22 +184,18 @@ export const modelFacts = async (root: string, lane: string): Promise<ModelFacts
   const assetsDoc = await NodeFSP.readFile(NodePath.join(root, "ASSETS.md"), "utf8").catch(
     () => "",
   );
-  const found: string[] = [];
-  const visit = async (at: string) => {
-    for (const entry of await NodeFSP.readdir(at, { withFileTypes: true }).catch(() => [])) {
-      const full = NodePath.join(at, entry.name);
-      if (entry.isDirectory()) {
-        if (!entry.name.startsWith(".")) await visit(full);
-      } else if (entry.isFile() && MODEL.test(entry.name)) {
-        const inLibrary = full.startsWith(library + NodePath.sep);
-        const rel = NodePath.relative(root, full).split(NodePath.sep).join("/");
-        if (!inLibrary || assetsDoc.includes(rel) || assetsDoc.includes(NodePath.basename(full)))
-          found.push(full);
-      }
-    }
-  };
-  await visit(assets);
-  found.sort();
+  const found = (
+    await walkFiles(assets, {
+      enter: (_full, name) => !name.startsWith("."),
+      match: (name) => MODEL.test(name),
+    })
+  )
+    .filter((full) => {
+      const inLibrary = full.startsWith(library + NodePath.sep);
+      const rel = NodePath.relative(root, full).split(NodePath.sep).join("/");
+      return !inLibrary || assetsDoc.includes(rel) || assetsDoc.includes(NodePath.basename(full));
+    })
+    .sort();
   const lines: string[] = [];
   for (const full of found.slice(0, MAX_MODELS))
     lines.push(

@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import type { ThreadId } from "@kurambit/contracts";
 import type * as GameService from "../GameService.ts";
+import { walkFiles } from "../walkFiles.ts";
 
 type Row = {
   ok: boolean;
@@ -24,12 +25,8 @@ const fileOver = (path: string, bytes: number) =>
 // build is real is the whole directory's substance.
 const dirBytes = async (dir: string): Promise<number> => {
   let total = 0;
-  for (const entry of await NodeFSP.readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    const full = NodePath.join(dir, entry.name);
-    total += entry.isDirectory()
-      ? await dirBytes(full)
-      : ((await NodeFSP.stat(full).catch(() => null))?.size ?? 0);
-  }
+  for (const full of await walkFiles(dir))
+    total += (await NodeFSP.stat(full).catch(() => null))?.size ?? 0;
   return total;
 };
 

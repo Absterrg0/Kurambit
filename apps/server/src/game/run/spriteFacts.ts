@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import * as NodeZlib from "node:zlib";
 import { laneAssets, laneLibrary } from "../engineProfile.ts";
+import { walkFiles } from "../walkFiles.ts";
 
 const MAX_IMAGES = 160;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
@@ -370,19 +371,13 @@ const loader = (budget: number) => {
 const IMAGE = /\.(png|jpe?g|webp)$/i;
 
 // Regular files only: a link never takes the scan outside the game.
-const listImages = async (dir: string, skip: string | null): Promise<string[]> => {
-  const found: string[] = [];
-  const visit = async (at: string) => {
-    for (const entry of await NodeFSP.readdir(at, { withFileTypes: true }).catch(() => [])) {
-      const full = NodePath.join(at, entry.name);
-      if (entry.isDirectory()) {
-        if (full !== skip && !entry.name.startsWith(".")) await visit(full);
-      } else if (entry.isFile() && IMAGE.test(entry.name)) found.push(full);
-    }
-  };
-  await visit(dir);
-  return found.sort();
-};
+const listImages = async (dir: string, skip: string | null): Promise<string[]> =>
+  (
+    await walkFiles(dir, {
+      enter: (full, name) => full !== skip && !name.startsWith("."),
+      match: (name) => IMAGE.test(name),
+    })
+  ).sort();
 
 interface Shot {
   readonly path: string;
