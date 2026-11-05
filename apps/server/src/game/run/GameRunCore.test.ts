@@ -635,6 +635,8 @@ interface World {
   interruptBreaks: number;
   /** This many of the role reactor's reads of the run's records break. */
   recordsBreaks: number;
+  /** This many of the runner's game-run.finished and game-run.restore dispatches break. */
+  endRecordBreaks: number;
   /** Resolved once a role's cap watch reads its turn's memory waits. */
   readonly capWatched: Deferred.Deferred<void>;
   /** Resolved with each role thread launched. */
@@ -665,6 +667,7 @@ const newWorld = Effect.gen(function* () {
     sendBreaks: 0,
     interruptBreaks: 0,
     recordsBreaks: 0,
+    endRecordBreaks: 0,
     capWatched: yield* Deferred.make<void>(),
     launched: yield* Queue.unbounded<ThreadId>(),
     interrupted: yield* Queue.unbounded<string>(),
@@ -817,7 +820,30 @@ const layerGame = (root: string, world: World) => {
           : real.getGameRunRecords(threadId, filter),
     })),
   );
-  return Layer.mergeAll(GameRunStepRunner.layer, GameRunControl.layer).pipe(
+  // The runner dispatches through an orchestrator whose ending records can break.
+  const runnerOrchestrator = Layer.effect(
+    Orchestrator.OrchestratorV2,
+    Effect.map(Orchestrator.OrchestratorV2, (real) => {
+      const dispatch = (command: Parameters<typeof real.dispatch>[0]) =>
+        Effect.suspend(() =>
+          (command.type === "game-run.finished" || command.type === "game-run.restore") &&
+          world.endRecordBreaks-- > 0
+            ? Effect.fail(
+                new Orchestrator.OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  cause: "the event store is busy",
+                }),
+              )
+            : real.dispatch(command),
+        );
+      return { ...real, dispatch: dispatch as typeof real.dispatch };
+    }),
+  );
+  return Layer.mergeAll(
+    GameRunStepRunner.layer.pipe(Layer.provide(runnerOrchestrator)),
+    GameRunControl.layer,
+  ).pipe(
     Layer.provideMerge(GameRunRoleReactor.layer.pipe(Layer.provide(reactorProjections))),
     Layer.provide(
       Layer.mergeAll(
@@ -1248,6 +1274,63 @@ it.effect("a spent run frees every copy from its own thread's effect", () =>
       assert.isTrue(NodeFS.existsSync(copy));
       yield* worker.drain();
       assert.isFalse(NodeFS.existsSync(copy));
+    }),
+  ),
+);
+
+it.effect(
+  "a finish whose record breaks for a moment is still recorded, so the run can resume",
+  () =>
+    withGame((world) =>
+      Effect.gen(function* () {
+        const { vision } = yield* atVision(world);
+        yield* completeStep(vision, { kind: "ended", ending: "usage-limit", reason: "limit" });
+        world.endRecordBreaks = 2;
+        yield* startRunner;
+        yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+        const recorded = () =>
+          Effect.map(inFlight, ({ run }) => run.finished !== null && run.finished === run.endedAt);
+        yield* withClockRunning(
+          Effect.gen(function* () {
+            for (let second = 0; second < 60 && !(yield* recorded()); second += 1)
+              yield* Effect.sleep("1 second");
+          }),
+        );
+        assert.isTrue(yield* recorded());
+        yield* resume;
+        assert.equal((yield* inFlight).run.status, "running");
+      }),
+    ),
+);
+
+it.effect("a restore whose outcome breaks for a moment still lands", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* stopRun;
+      yield* finishEnding;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      yield* orchestrator.dispatch({
+        type: "game-run.restore.request",
+        commandId: nextId(),
+        threadId: creator,
+        runId,
+        requestId: "r1",
+        round: 7,
+      });
+      world.endRecordBreaks = 2;
+      yield* startRunner;
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      const landed = () => Effect.map(inFlight, ({ run }) => run.restore?.outcome ?? null);
+      yield* withClockRunning(
+        Effect.gen(function* () {
+          for (let second = 0; second < 60 && (yield* landed()) === null; second += 1)
+            yield* Effect.sleep("1 second");
+        }),
+      );
+      // Round 7 was never recorded: the outcome says so, and the run is free again.
+      assert.equal((yield* landed())?.kind, "refused");
     }),
   ),
 );

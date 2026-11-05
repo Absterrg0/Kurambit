@@ -146,6 +146,35 @@ const make = Effect.gen(function* () {
       Effect.catch((error) => Effect.logWarning("game run report failed", { error })),
     );
 
+  /**
+   * The record that frees an ended run from "finishing" or "restoring": until it
+   * lands the run refuses every start, resume, steer and restore, so it is
+   * tried again with backoff. One that still cannot be written is left to
+   * recovery, which runs the finish or restore again at the next startup (its
+   * record still says it is owed); the finish's and restore's effects were
+   * spent when their jobs started, so nothing durable is left to retry sooner.
+   */
+  const recordEnd = <A, R>(
+    what: "finish" | "restore",
+    runId: GameRun["id"],
+    dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>,
+  ) =>
+    dispatch.pipe(
+      Effect.asVoid,
+      Effect.catchTags({
+        OrchestratorGameRunRefusedError: (error) =>
+          Effect.logInfo("game run report not taken", { detail: error.detail }),
+        OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+      }),
+      retrying,
+      Effect.catch((error) =>
+        Effect.logWarning(
+          `game run ${what} could not be recorded after ${RETRIES + 1} tries; the run stays ${what === "finish" ? "finishing" : "restoring"} until recovery runs it again at the next startup`,
+          { runId, error },
+        ),
+      ),
+    );
+
   // A refusal is the timer's answer (the run moved on or stopped); any other
   // failure is left to the timer's effect, which runs again.
   const refusedOnly = <A, R>(dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>) =>
@@ -1008,7 +1037,9 @@ const make = Effect.gen(function* () {
               ),
         ),
       );
-      yield* refused(
+      yield* recordEnd(
+        "finish",
+        run.id,
         engine.dispatch({
           type: "game-run.finished",
           commandId: CommandId.make(`server:game-run-finished:${run.id}:${job.endedAt}`),
@@ -1201,7 +1232,9 @@ const make = Effect.gen(function* () {
               }),
         ),
       );
-      yield* refused(
+      yield* recordEnd(
+        "restore",
+        run.id,
         engine.dispatch({
           type: "game-run.restore",
           commandId: CommandId.make(`server:game-run-restore:${job.requestId}`),
