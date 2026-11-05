@@ -579,9 +579,21 @@ const cases: ReadonlyArray<Case> = [
         act: (cwd) => write(NodePath.join(cwd, "kept.log"), "back again\n"),
       },
       {
+        // Both are distinct files to git here; the spelling check drops both, add re-adds both.
+        name: "two spellings side by side without core.ignorecase",
+        seeds: false,
+        act: (cwd) => {
+          write(NodePath.join(cwd, "notes/Plan.md"), "upper\n");
+          write(NodePath.join(cwd, "notes/plan.md"), "lower\n");
+        },
+      },
+      { name: "no-op with two spellings", seeds: false },
+      {
         name: "case-only rename under core.ignorecase",
         seeds: true,
         act: (cwd) => {
+          // Two spellings under core.ignorecase are refused (covered in their own case).
+          NodeFS.rmSync(NodePath.join(cwd, "notes"), { recursive: true });
           git(cwd, ["config", "core.ignorecase", "true"]);
           NodeFS.renameSync(NodePath.join(cwd, "Player.gd"), NodePath.join(cwd, "player.gd"));
         },

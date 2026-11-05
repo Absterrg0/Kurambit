@@ -1466,12 +1466,13 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             (dirty.has(record.path) || record.srcMode === "160000" || record.dstMode === "160000")),
       );
       const added = records.filter((record) => record.status === "A");
-      // Under core.ignorecase an added entry must be spelled as on disk, and
-      // alone in its folder once names are folded (lowercase, NFC where git
-      // precomposes): on a case-sensitive disk (a project copied from a
-      // case-insensitive one) git would fold a second spelling into the kept
-      // one where a seed refuses it. Git also folds names spelled two ways in
-      // the index.
+      // An added entry must be spelled as on disk, and alone in its folder
+      // once names are folded (lowercase, NFC where git precomposes), whatever
+      // core.ignorecase says: a case-insensitive disk with core.ignorecase=false
+      // keeps the old spelling after a case-only rename, and core.ignorecase=true
+      // on a case-sensitive disk (a project copied from one) would fold a second
+      // spelling into the kept one where a seed refuses it. With
+      // core.ignorecase=true, git also folds names spelled two ways in the index.
       const fold = (name: string) =>
         (place.precomposeUnicode ? name.normalize("NFC") : name).toLowerCase();
       let conflicted: ReadonlySet<string> = new Set();
@@ -1491,7 +1492,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         ]);
       const listedFolders = [
         ...new Set(
-          (place.ignoreCase ? added : []).flatMap((record) => {
+          added.flatMap((record) => {
             const parts = record.path.split("/");
             return parts.map((_, depth) => parts.slice(0, depth).join("/"));
           }),
@@ -1568,7 +1569,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           dirty.has(record.path) ||
           ignored.has(record.path) ||
           insideRepository(record.path) ||
-          (place.ignoreCase && foreignCase(record.path));
+          foreignCase(record.path);
         if (drop) lines.push(`0 ${"0".repeat(record.srcOid.length)}\t${record.path}`);
       }
       if (lines.length > 0)
