@@ -101,7 +101,7 @@ describe("MCP app asset responses", () => {
 });
 
 describe("untraced requests", () => {
-  it.effect("drops the HTTP server span for browser trace exports, query string included", () => {
+  it.effect("drops the HTTP server span for trace exports and signed assets", () => {
     const spanNames: Array<string> = [];
     return Effect.gen(function* () {
       const layerRoutes = Layer.effectDiscard(
@@ -109,6 +109,7 @@ describe("untraced requests", () => {
           const router = yield* HttpRouter.HttpRouter;
           yield* router.add("POST", "/api/observability/v1/traces", HttpServerResponse.empty());
           yield* router.add("GET", "/api/environment", HttpServerResponse.empty());
+          yield* router.add("GET", "/api/assets/*", HttpServerResponse.empty());
         }),
       );
       const services = yield* Layer.build(
@@ -120,6 +121,7 @@ describe("untraced requests", () => {
 
       yield* client.post("/api/observability/v1/traces");
       yield* client.post("/api/observability/v1/traces?x=1");
+      yield* client.get("/api/assets/signed-token/game-web.zip");
       expect(spanNames).toEqual([]);
 
       yield* client.get("/api/environment");

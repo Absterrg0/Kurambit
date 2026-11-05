@@ -393,7 +393,9 @@ const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([OTLP_TRACES_PROXY_P
 const layerUntracedRequests = Layer.succeed(HttpMiddleware.TracerDisabledWhen)((request) => {
   const queryIndex = request.url.indexOf("?");
   const path = queryIndex === -1 ? request.url : request.url.slice(0, queryIndex);
-  return UNTRACED_REQUEST_PATHS.has(path);
+  // An asset URL carries its signed capability in the path, and the server span records
+  // the full URL, so no asset token reaches a trace file or the OTLP export.
+  return UNTRACED_REQUEST_PATHS.has(path) || path.startsWith(`${ASSET_ROUTE_PREFIX}/`);
 });
 
 export const withUntracedRequests = Layer.provide(layerUntracedRequests);
