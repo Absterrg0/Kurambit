@@ -7,38 +7,30 @@ One brief produces a game through a harness-run production run, and the harness 
 check that matters: it plays every build with a separate session, compares builds blind so a worse
 one never lands, and keeps working until a ship review says yes, it stalls, or the creator stops it.
 
-## Services
+## Decisions that span the services
 
-- `GameService` is the facade the RPC handlers and MCP tools call: status, import, check, bot
-  runs and the Unity editor tools. `GameExport` makes, publishes and packages releases (Web, Linux,
-  Windows), `GameExplore` runs exploration sessions, `GamePlayer` keeps built players per source
-  identity and warms a live editor. Operations are exclusive per game (`GameOperations.exclusive`)
-  and reported as events.
-- `GameProjectService` owns game records: create (blank scaffold), open, list, resolve, inventory.
-- The production run is an orchestration domain (below): `GameRunControl` is what the run tools
-  and RPCs call, `GameRunStepRunner` and `GameRunRoleReactor` do its work. Every role is a fresh
-  ordinary Kurambit thread on the game's project with a `role` lineage under the creator's chat.
-  `role` only groups: sidebars, game opens and session lists skip it, and it has none of the
-  subagent run takeover, controls or completion delivery, which would tie a role to the creator's
-  live turn. Code never interprets model prose: a role hands its result through
-  `game_run_submit`, typed by the kind its step asks for.
-- `GameBot` plays a model-written bot file in real time, on every engine, and records video plus
-  detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
-  private display. `GameUnity` does the same for Unity: one batchmode editor on a private display
-  (one per server, since an editor costs 2-3 GB), reached through the official `unity` CLI and its
-  `unity mcp` server, with the same session.json launch records, reaping and idle shutdown
-  (`liveProcess.ts` holds the shared display and record code). A record is acted on only while its
-  process still verifies as the launch (below) and its command line names the executables the live
-  toolchain would launch now, never paths from the record; of the editor's process tree only
-  processes running from a detected editor's directory, the CLI or Xvfb are signalled, and a Unity
-  Licensing Client never is. Unity also keeps a copy of
-  its record under the server state dir, reaped at startup, so a crashed server's editor dies
-  even if its game is never reopened. Every call or operation holds the editor; another game's
-  open closes it only while it is idle, and fails `busy` naming the holder otherwise.
-  `GameToolchain` detects the user's own Godot, Unity and Blender the way providers are
-  detected, and never installs them: they are other vendors' software with their own upkeep and
-  licences on every OS. It fetches only harness plumbing (uv, the Unity CLI) itself; `GamePreview` serves builds;
-  `GameProcesses` tracks child processes; `GameOperations` keeps the last operation per game.
+- Game operations are exclusive per game (`GameOperations.exclusive`) and reported as events, so
+  the Game panel and the agent tools see the same operation, and a second operation on a game
+  refuses as busy rather than racing the first.
+- Every role of a production run is a fresh ordinary Kurambit thread on the game's project with a
+  `role` lineage under the creator's chat. `role` only groups: sidebars, game opens and session
+  lists skip it, and it has none of the subagent run takeover, controls or completion delivery,
+  which would tie a role to the creator's live turn. Code never interprets model prose: a role
+  hands its result through `game_run_submit`, typed by the kind its step asks for.
+- The live editors (Blender with its pinned MCP addon per game; one batchmode Unity editor per
+  server, since one costs 2-3 GB, reached through the official `unity` CLI and its `unity mcp`
+  server) run on private displays with session.json launch records, reaping and idle shutdown
+  (`liveProcess.ts`). A record is acted on only while its process still verifies as the launch
+  (below) and its command line names the executables the live toolchain would launch now, never
+  paths from the record; of the editor's process tree only processes running from a detected
+  editor's directory, the CLI or Xvfb are signalled, and a Unity Licensing Client never is. Unity
+  also keeps a copy of its record under the server state dir, reaped at startup, so a crashed
+  server's editor dies even if its game is never reopened. Every call or operation holds the
+  editor; another game's open closes it only while it is idle, and fails `busy` naming the holder.
+- `GameToolchain` detects the user's own Godot, Unity and Blender the way providers are detected,
+  and never installs them: they are other vendors' software with their own upkeep and licences on
+  every OS. It fetches only harness plumbing (uv, the Unity CLI) itself, through `downloadPinned`
+  against vendor-published sizes and SHA-256s.
 - Every process the game layer starts goes through one process host
   ([processHost.ts](../../apps/server/src/game/processHost.ts)), the only per-OS process code. A
   child carries a fresh launch token in its environment (and on its command line where the program
@@ -86,11 +78,11 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   Blind samples play plain copies of a build, each a separate Unity project with no `Library/`.
   Before an editor opens on one, `GameUnity` gives it a copy-on-write copy
   (`cp -a --reflink=auto`) of its game folder's `Library/`, found through the folder the copy
-  names in `.kurambit-copy-of` (or a worktree's git common dir) and taken after the game folder's
+  names in `.kurambit-copy-of` and taken after the game folder's
   idle editor closed, so only what differs in that build is reimported (about a minute warm,
   against two cold). The compiled-script
   state (`Bee/`, `ScriptAssemblies/`, the player data caches) is left out: it is keyed by the main
-  checkout's path, a player built from it lost the scene's MonoBehaviours, and the worktree
+  checkout's path, a player built from it lost the scene's MonoBehaviours, and the copy
   recompiles its scripts anyway. The editor is
   needed there only to build the Linux player; the role runner closes it before removing the
   copy. Other checkouts whose `.git` is a file (submodules) are
@@ -374,7 +366,7 @@ T3 then treats a copy as the non-repository it is. The game folder stays reachab
 path, and what is blind by construction is the player's or comparator's folder and prompt. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
 renders against the vision and may ask for one bounded redo before the art is
-committed; a missing verdict keeps the art.
+kept; a missing verdict keeps the art.
 
 The Unity lane needs three things the run does nowhere else. A live editor holds the open scene in
 memory and saves it after every edit without reading the disk first, so every restore of the
