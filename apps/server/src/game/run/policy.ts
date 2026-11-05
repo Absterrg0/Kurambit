@@ -1454,10 +1454,10 @@ export const holdsRound = (state: RunState): boolean =>
 /**
  * A creator's restore drops the round in flight: the next round starts from
  * the restored best, never from this round's work (the restore kept the folder
- * as a build first). A round already kept, waiting only on its review, is
- * recorded as kept; any other is recorded as abandoned, which is no stall and
- * leaves its rung as it was, with the creator's notes it read back for the
- * next round. `release` names the role threads whose copies go.
+ * as a build first). A round already judged, waiting only on its review, is
+ * recorded with its outcome; one never judged is recorded as abandoned, which
+ * is no stall and leaves its rung as it was, with the creator's notes it read
+ * back for the next round. `release` names the role threads whose copies go.
  */
 export const abandonRound = (
   state: RunState,
@@ -1491,6 +1491,24 @@ export const abandonRound = (
       rounds: [...state.rounds, settled.record],
       stage: `round-${t.n}`,
       stallStreak: 0,
+    };
+    return { state: fresh(next), logs, release };
+  }
+  // Judged and not kept (rejected, inconclusive, unjudged, failed checks, a
+  // merge that failed): it keeps its outcome and its rung counts the try, but
+  // it is no stall, and it names no build a retry would continue over the
+  // restored best. A keep still waiting to be merged was never kept: abandoned.
+  const judged =
+    t.outcome === "drop" ||
+    t.outcome === "hold" ||
+    (t.outcome === "merge" && t.phase !== "outcome");
+  if (judged) {
+    const settled = settleRung(state, t, record, logs);
+    logs.push(`round ${t.n}: not kept; its review is skipped, ${why}`);
+    const next = {
+      ...settled.state,
+      rounds: [...state.rounds, settled.record],
+      stage: `round-${t.n}`,
     };
     return { state: fresh(next), logs, release };
   }

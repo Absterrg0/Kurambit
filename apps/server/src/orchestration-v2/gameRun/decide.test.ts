@@ -775,6 +775,38 @@ describe("game-run commands", () => {
     expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: "beef" } });
   });
 
+  it("a restore keeps the outcome of a round judged and waiting only on its review", () => {
+    const base = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    );
+    if (base.task._tag !== "round") throw new Error("expected a round");
+    const verdicts = [
+      { order: "A=candidate,B=best", verdict: "B", reason: "" },
+      { order: "A=best,B=candidate", verdict: "A", reason: "" },
+    ];
+    const reviewing: State.RunState = {
+      ...base,
+      stallStreak: 1,
+      task: {
+        ...base.task,
+        rung: ladder.rungs[0]!.id,
+        phase: "review",
+        outcome: "drop",
+        candidate: "cafe",
+        record: { ...base.task.record, verdicts, note: "rejected: best won both orders" },
+      },
+    };
+    const { state } = Policy.abandonRound(reviewing, "the creator restored round 0", T0 + MIN);
+    expect(state.rounds).toHaveLength(1);
+    expect(state.rounds[0]).toMatchObject({ kept: false, verdicts, rung: { outcome: "failed" } });
+    expect(state.rounds[0]!.abandoned).toBeUndefined();
+    expect(state.rounds[0]!.build).toBeUndefined();
+    expect(state.ladder?.rungs[0]).toMatchObject({ status: "todo", fails: 1 });
+    expect(state.stallStreak).toBe(1);
+    expect(state.task).toMatchObject({ _tag: "round", n: 2, phase: "start" });
+  });
+
   it("a note on a finished run buys one round", () => {
     const base = complete(started(), gitOk());
     const finished = {
