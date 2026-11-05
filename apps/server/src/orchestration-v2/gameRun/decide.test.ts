@@ -69,6 +69,7 @@ const read = (records: Records): Decide.GameRunRecords => {
         ? null
         : (records.steps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null),
     chatDeleted: false,
+    steps: records.steps,
   };
 };
 
@@ -694,6 +695,46 @@ describe("game-run commands", () => {
         release: [players[0]],
       },
     ]);
+  });
+
+  it("a resume writes the records its run's last landing owes, ahead of its next step", () => {
+    const base = complete(started(), gitOk());
+    const round = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    ).task;
+    if (round._tag !== "round") throw new Error("expected a round");
+    const reviewer = ThreadId.make("thread:reviewer");
+    const atReview = resumedAt(base, {
+      ladder,
+      task: { ...round, rung: ladder.rungs[0]!.id, phase: "review-write", branch: "round-1" },
+    });
+    const write = stepOf(atReview);
+    let records = accept(atReview, {
+      type: "game-run.step.start",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+    }).records;
+    records = accept(records, {
+      type: "game-run.submit",
+      runId,
+      stepId: write.id,
+      roleThreadId: reviewer,
+      submission: { _tag: "ledger", ledger: "1. The jump clips through ledges." },
+    }).records;
+    records = complete(records, roleDone(reviewer));
+    // The run stops before the landing's records were written (its outputs effect gave up).
+    const stopped = finished(accept(records, { type: "game-run.stop", runId }).records);
+    const [first, ...rest] = accept(stopped, {
+      type: "game-run.resume",
+      runId,
+    }).decision.effects.map((e) => e.request);
+    expect(first).toMatchObject({ type: "game-run.outputs", stepId: write.id, release: [] });
+    expect(first?.type === "game-run.outputs" ? first.files.map((f) => f.path) : []).toContain(
+      ".studio/next.md",
+    );
+    expect(rest.map((r) => r.type)).toContain("game-run.step.execute");
   });
 
   it("an unanswered decision takes its default only once it is due", () => {

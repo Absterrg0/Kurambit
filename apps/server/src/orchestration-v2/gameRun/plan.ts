@@ -57,7 +57,12 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
       command.type !== "game-run.copies.spend"
     )
       return Result.fail<GameRunPlanRefusal>({ kind: "deleted" });
-    const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
+    // A resume writes what the run's last landings owe, so it reads every step.
+    const resuming = command.type === "game-run.resume";
+    const records = yield* projections.getGameRunRecords(
+      threadId,
+      resuming ? undefined : { steps: "in-flight" },
+    );
     const latest = records.gameRuns.at(-1);
     const decided = GameRunDecide.decide(
       command,
@@ -71,6 +76,7 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
             (step) => step.runId === latest?.id && step.seq === latest.inFlight,
           ) ?? null,
         chatDeleted: thread.deletedAt !== null,
+        steps: resuming ? records.gameRunSteps : [],
       },
       {
         at: yield* DateTime.now,

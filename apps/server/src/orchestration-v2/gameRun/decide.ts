@@ -40,6 +40,8 @@ export interface GameRunRecords {
   readonly inFlight: GameRunStep | null;
   /** The thread was deleted: nothing resumes its runs. */
   readonly chatDeleted: boolean;
+  /** The thread's step records, for a resume only (it writes what they still owe); else empty. */
+  readonly steps: ReadonlyArray<GameRunStep>;
 }
 
 interface GameRunInputs {
@@ -267,6 +269,35 @@ const outputsEffect = (
   files.length === 0 && release.length === 0
     ? []
     : [effectFor({ type: "game-run.outputs", runId: run.id, stepId, files, release })];
+
+/**
+ * The records the landings since the run's last non-decision step wrote, in
+ * order, with the latest of those steps: before landings had an outputs effect
+ * of their own, the next step's job wrote them (walking back over decisions,
+ * which have no job). Writing them again is harmless.
+ */
+export const owedOutputs = (
+  run: GameRun,
+  steps: ReadonlyArray<GameRunStep>,
+): { readonly stepId: GameRunStepId; readonly files: GameRunStep["outputs"]["files"] } | null => {
+  const landed = steps
+    .filter(
+      (s) =>
+        s.runId === run.id &&
+        s.completedAt !== null &&
+        (run.inFlight === null || s.seq < run.inFlight),
+    )
+    .toSorted((a, b) => b.seq - a.seq);
+  const owed: GameRunStep[] = [];
+  for (const step of landed) {
+    owed.unshift(step);
+    if (step.kind !== "decide") break;
+  }
+  const latest = owed.at(-1);
+  return latest === undefined
+    ? null
+    : { stepId: latest.id, files: owed.flatMap((s) => s.outputs.files) };
+};
 
 /** A role that plays a copy gives it back once its turn is its last, or the budget cut it short. */
 const ownRelease = (role: State.RoleStep | null, result: GameRunStepResult | null): ThreadId[] =>
@@ -655,15 +686,15 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
       budgetEndsAt: budgetMinutes === null ? null : work.now + budgetMinutes * 60_000,
     };
     const next = advance(work, resumed, state, inFlight);
+    // The records the last landings wrote go again ahead of the next step: an
+    // ending that stopped the run before they were written (an outputs effect
+    // that gave up, the landing that ended it) would leave the step without them.
+    const owed = owedOutputs(run, work.records.steps);
     return Result.succeed(
-      settle(
-        work,
-        resumed,
-        before,
-        next.state,
-        next.step === null ? [] : [next.step],
-        next.effects,
-      ),
+      settle(work, resumed, before, next.state, next.step === null ? [] : [next.step], [
+        ...(owed === null ? [] : outputsEffect(resumed, owed.stepId, owed.files, [])),
+        ...next.effects,
+      ]),
     );
   });
 
