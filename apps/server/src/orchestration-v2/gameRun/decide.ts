@@ -929,7 +929,19 @@ const restore = (work: Work, command: Command<"game-run.restore">) =>
       `the creator restored round ${run.restore.round} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
       work.now,
     );
-    // The next step's job releases the dropped round's copies, as it does a landed step's.
+    // The next step's job releases the dropped round's copies, as it does a
+    // landed step's: the comparison's threads, and the held step's own roles (a
+    // blind player still playing is in the step, not yet in the comparison).
+    const release =
+      held === null
+        ? []
+        : [
+            ...new Set([
+              ...held.outputs.release,
+              ...dropped.release,
+              ...held.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId])),
+            ]),
+          ];
     const steps: GameRunStep[] =
       held === null
         ? []
@@ -937,7 +949,7 @@ const restore = (work: Work, command: Command<"game-run.restore">) =>
             {
               ...held,
               status: "cancelled",
-              outputs: { ...held.outputs, release: [...held.outputs.release, ...dropped.release] },
+              outputs: { ...held.outputs, release },
               logs: [...held.logs, ...dropped.logs],
               completedAt: held.completedAt ?? work.at,
             },

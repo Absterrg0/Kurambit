@@ -728,10 +728,16 @@ describe("game-run commands", () => {
   });
 
   it("a creator's restore on a run stopped mid-round abandons the round", () => {
-    const stopped = finished(
+    const playing = finished(
       accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
     );
-    const held = stepOf(stopped);
+    // Both blind players were playing in their own copies when the run stopped.
+    const pair = stepOf(playing);
+    const held = {
+      ...pair,
+      roles: pair.roles.map((r, i) => ({ ...r, threadId: players[i] ?? null })),
+    };
+    const stopped = { ...playing, steps: playing.steps.map((s) => (s.id === held.id ? held : s)) };
     const requested = accept(stopped, {
       type: "game-run.restore.request",
       runId,
@@ -761,6 +767,7 @@ describe("game-run commands", () => {
     const dropped = restored.steps.find((s) => s.id === held.id)!;
     expect(dropped.status).toBe("cancelled");
     expect(dropped.logs.join("\n")).toContain("abandoned");
+    expect(dropped.outputs.release.toSorted()).toEqual([...players].toSorted());
 
     // A resume starts the next round from the restored build, not the abandoned one.
     const resumed = accept(restored, { type: "game-run.resume", runId }).records;
