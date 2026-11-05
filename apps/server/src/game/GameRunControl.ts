@@ -170,9 +170,12 @@ const make = Effect.gen(function* () {
     if (shell === null || shell.deletedAt !== null)
       return yield* runError("resolve-game", threadId, "project-not-found", "The thread is gone.");
     if (options.role !== "allowed") {
+      // Fails closed: a thread whose record cannot be read reaches no run control.
       const launched = yield* threads.getThreadRecords(threadId, []).pipe(
         Effect.map(({ thread }) => thread.launchedBy === "game_run"),
-        Effect.orElseSucceed(() => false),
+        Effect.mapError((cause) =>
+          runError("resolve-game", threadId, "thread-read", String(cause.message)),
+        ),
       );
       if (launched)
         return yield* runError(
