@@ -1905,8 +1905,6 @@ const layerWsRpc = (
         [WS_METHODS.subscribeGameEvents]: (input) =>
           input.threadId === undefined ? game.events : game.threadEvents(input.threadId),
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status(),
-        [WS_METHODS.gameSecretsStatus]: () => game.secretsStatus(),
-        [WS_METHODS.gameSecretsSet]: (input) => game.setSecret(input),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

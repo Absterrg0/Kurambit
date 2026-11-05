@@ -8,7 +8,6 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -35,7 +34,7 @@ import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { renderSprites } from "./blenderSprites.ts";
 import { engineProfile } from "./engineProfile.ts";
 import {
@@ -102,13 +101,6 @@ const CALL_TIMEOUT_MS: Record<string, number> = {
 };
 const STILL_WORKING =
   "Blender may still be finishing this call. Inspect the scene with game_blender_scene or game_blender_look before retrying, so the work is not done twice.";
-
-/** Addon keys the service can pass straight through: the pinned addon's
- * config getter reads BLENDERMCP_SKETCHFAB_API_KEY /
- * BLENDERMCP_POLYPIZZA_API_KEY from the environment, so keys set in Game
- * Tools reach the addon via the Blender and MCP child environments. */
-export const GAME_BLENDER_SKETCHFAB_SECRET = "game-blender-sketchfab-key";
-export const GAME_BLENDER_POLYPIZZA_SECRET = "game-blender-polypizza-key";
 
 interface Session {
   readonly root: string;
@@ -334,7 +326,7 @@ const make = Effect.gen(function* () {
   const gate = yield* GameMemoryGate.GameMemoryGate;
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
-  const secrets = yield* ServerSecretStore.ServerSecretStore;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const sessions = new Map<string, Session>();
   /** Public operations running per game right now; a sweep never closes a held game's Blender. */
   const held = new Map<string, number>();
@@ -353,27 +345,16 @@ const make = Effect.gen(function* () {
         }),
     );
 
-  // Addon keys, when set, as env for Blender/MCP children. Values never
-  // leave the secret store except into the child environment; absence
-  // means the addon runs keyless, exactly as before.
-  const readAddonKeyEnv: Effect.Effect<NodeJS.ProcessEnv> = Effect.gen(function* () {
-    const read = (name: string, env: string): Effect.Effect<[string, string] | null> =>
-      secrets.get(name).pipe(
-        Effect.map((found) => {
-          if (Option.isNone(found)) return null;
-          const text = Buffer.from(found.value).toString("utf8").trim();
-          return text === "" ? null : ([env, text] as [string, string]);
-        }),
-        Effect.orElseSucceed(() => null),
-      );
-    const entries = yield* Effect.all([
-      read(GAME_BLENDER_SKETCHFAB_SECRET, "BLENDERMCP_SKETCHFAB_API_KEY"),
-      read(GAME_BLENDER_POLYPIZZA_SECRET, "BLENDERMCP_POLYPIZZA_API_KEY"),
-    ]);
-    const env: NodeJS.ProcessEnv = {};
-    for (const entry of entries) if (entry !== null) env[entry[0]] = entry[1];
-    return env;
-  });
+  // The pinned addon's config getter reads BLENDERMCP_SKETCHFAB_API_KEY and
+  // BLENDERMCP_POLYPIZZA_API_KEY, so the Game tools keys reach it only through
+  // the Blender and MCP child environments; without them the addon runs keyless.
+  const readAddonKeyEnv: Effect.Effect<NodeJS.ProcessEnv> = settings.getSettings.pipe(
+    Effect.map(({ gameSketchfabApiKey, gamePolyPizzaApiKey }) => ({
+      ...(gameSketchfabApiKey === "" ? {} : { BLENDERMCP_SKETCHFAB_API_KEY: gameSketchfabApiKey }),
+      ...(gamePolyPizzaApiKey === "" ? {} : { BLENDERMCP_POLYPIZZA_API_KEY: gamePolyPizzaApiKey }),
+    })),
+    Effect.orElseSucceed(() => ({})),
+  );
 
   const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/blender-live");
 

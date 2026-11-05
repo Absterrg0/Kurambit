@@ -50,7 +50,12 @@ import {
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { readSecretFieldValues, sourceControlHostSecretName } from "./sourceControlHostSecrets.ts";
 
-import { mapSettingsSecrets, SECRET_REDACTED, type SettingsSecret } from "./settingsSecrets.ts";
+import {
+  mapSettingsSecrets,
+  SECRET_REDACTED,
+  type SettingsSecret,
+  TOP_LEVEL_SETTINGS_SECRETS,
+} from "./settingsSecrets.ts";
 
 export {
   resolveReviewGuideModelSelection,
@@ -651,6 +656,27 @@ const make = Effect.gen(function* () {
       );
     });
 
+  // Game Tools keys were stored by their own RPC before they were settings fields. A key
+  // already under a field's store name marks the field stored, so it reads, redacts and
+  // clears like any settings secret; clearing removes the key, so this never revives one.
+  const adoptStoredSettingsSecrets = (settings: ServerSettings) =>
+    Effect.gen(function* () {
+      const adopted: Record<string, string> = {};
+      for (const [field, secretName] of TOP_LEVEL_SETTINGS_SECRETS) {
+        if ((settings as Readonly<Record<string, unknown>>)[field] !== "") continue;
+        const stored = yield* secretStore.get(secretName).pipe(
+          Effect.map(Option.isSome),
+          Effect.catch(() =>
+            Effect.logWarning("failed to read a stored settings secret", { secretName }).pipe(
+              Effect.as(false),
+            ),
+          ),
+        );
+        if (stored) adopted[field] = SECRET_REDACTED;
+      }
+      return Object.keys(adopted).length === 0 ? settings : { ...settings, ...adopted };
+    });
+
   const loadSettingsFromDisk = Effect.gen(function* () {
     let settings = DEFAULT_SERVER_SETTINGS;
     let legacyProviders: Readonly<Record<string, unknown>> | undefined;
@@ -772,7 +798,9 @@ const make = Effect.gen(function* () {
       ? migrateLegacySourceControlSettings(folded, legacySourceControl)
       : { settings: folded, secretMoves: [] };
     const migrated = settingsFileTrusted
-      ? yield* moveInlineSettingsSecrets(sourceControlMigration.settings)
+      ? yield* moveInlineSettingsSecrets(sourceControlMigration.settings).pipe(
+          Effect.flatMap(adoptStoredSettingsSecrets),
+        )
       : folded;
     if (
       migrated !== loaded ||

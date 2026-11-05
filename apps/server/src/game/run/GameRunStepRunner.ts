@@ -32,9 +32,9 @@ import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import { gitEra, RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
@@ -113,7 +113,7 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const projectStore = yield* ProjectService.ProjectService;
   const operations = yield* GameOperations.GameOperations;
-  const secrets = yield* ServerSecretStore.ServerSecretStore;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const jobs = yield* GameRunJobs.GameRunJobs;
   const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
   const deps: RoleDeps = { launches, threads, game, checkpoints };
@@ -646,10 +646,9 @@ const make = Effect.gen(function* () {
             job,
             record.id,
             Effect.gen(function* () {
-              const jev = Option.isSome(
-                yield* secrets
-                  .get("game-bot-jev-api-key")
-                  .pipe(Effect.orElseSucceed(() => Option.none())),
+              const jev = yield* settings.getSettings.pipe(
+                Effect.map(({ gameJevApiKey }) => gameJevApiKey !== ""),
+                Effect.orElseSucceed(() => false),
               );
               const code = yield* Effect.promise(() => reviewerFacts(root, run.lane));
               yield* done({ kind: "facts", jev, code });

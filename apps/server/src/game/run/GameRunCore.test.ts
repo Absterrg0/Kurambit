@@ -40,7 +40,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 
-import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import * as EffectWorker from "../../orchestration-v2/EffectWorker.ts";
@@ -817,7 +817,7 @@ const layerGame = (root: string, world: World) =>
               return { threadId } as never;
             }),
         }),
-        Layer.mock(ServerSecretStore.ServerSecretStore)({}),
+        Layer.mock(ServerSettings.ServerSettingsService)({}),
       ),
     ),
     Layer.provideMerge(layerWithRecovery),

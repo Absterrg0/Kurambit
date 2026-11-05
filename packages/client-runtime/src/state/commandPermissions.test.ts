@@ -71,7 +71,6 @@ describe("command permissions", () => {
           WS_METHODS.gameRunSteer,
           WS_METHODS.gameRunProfile,
           WS_METHODS.gameRunRestore,
-          WS_METHODS.gameSecretsSet,
         ] as const) {
           const command = createCommandPermissions(runtime, tag);
           registry.set(sessions(env), AsyncResult.success(grant(false)));
@@ -79,10 +78,7 @@ describe("command permissions", () => {
           expect((yield* command.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
             "EnvironmentAuthorizationError",
           );
-          const scope =
-            tag === WS_METHODS.gameSecretsSet
-              ? AuthSettingsWriteScope
-              : AuthOrchestrationOperateScope;
+          const scope = AuthOrchestrationOperateScope;
           registry.set(
             sessions(env),
             AsyncResult.success({ ...grant(false), scopes: [scope], permissions: [scope] }),

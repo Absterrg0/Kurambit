@@ -208,14 +208,4 @@ export const gameEnvironment = {
     label: "game:packageWeb",
     tag: WS_METHODS.gameWebPackage,
   }),
-  secretsStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:secretsStatus",
-    tag: WS_METHODS.gameSecretsStatus,
-    staleTimeMs: 5_000,
-    idleTtlMs: 60_000,
-  }),
-  setSecret: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:setSecret",
-    tag: WS_METHODS.gameSecretsSet,
-  }),
 };
