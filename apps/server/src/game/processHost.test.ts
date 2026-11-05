@@ -86,6 +86,7 @@ it("counts the memory macOS hands out on demand, not only free pages", () => {
     "Pages wired down:                        150000.",
     "Pages purgeable:                           2000.",
   ].join("\n");
-  expect(parseVmStat(vmStat)).toBe((10000 + 200000 + 5000 + 2000) * 16384);
+  // Purgeable pages sit inside the active and inactive queues: not counted twice.
+  expect(parseVmStat(vmStat)).toBe((10000 + 200000 + 5000) * 16384);
   expect(parseVmStat("not vm_stat")).toBeNull();
 });

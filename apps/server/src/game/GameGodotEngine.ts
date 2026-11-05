@@ -72,15 +72,34 @@ export const makeGodotBackend = (
 ): GameEngineBackend => {
   const importProject: GameEngineBackend["importProject"] = (ctx) =>
     Effect.gen(function* () {
-      const run = yield* processes.run({
-        root: ctx.root,
-        executable: ctx.binary.path,
-        args: ["--headless", "--path", ctx.projectDir, "--editor", "--import"],
-        operation: "godot-import",
-        timeoutMs: 180_000,
-        env: GameProcesses.engineChildEnv(),
-        envMode: "replace",
+      // The editor's import runs the project's tool scripts and keeps logs under
+      // user://: both go to scratch, never the user's real Godot data. The
+      // folder holds nothing the import result needs, so it goes afterwards.
+      const scratch = NodePath.join(
+        ctx.root,
+        "builds/logs",
+        `godot-import-${NodeCrypto.randomUUID()}`,
+      );
+      const isolation = yield* Effect.tryPromise({
+        try: () => prepareNativeUserIsolation(scratch),
+        catch: (cause) =>
+          new GameOperationError({ operation: "godot-import", path: scratch, reason: "io", cause }),
       });
+      const run = yield* processes
+        .run({
+          root: ctx.root,
+          executable: ctx.binary.path,
+          args: ["--headless", "--path", ctx.projectDir, "--editor", "--import"],
+          operation: "godot-import",
+          timeoutMs: 180_000,
+          env: GameProcesses.engineChildEnv(isolation.env),
+          envMode: "replace",
+        })
+        .pipe(
+          Effect.ensuring(
+            Effect.promise(() => NodeFSP.rm(scratch, { recursive: true, force: true })),
+          ),
+        );
       return {
         result: response(run),
         issues: parseGodotIssues(`${run.stdout}\n${run.stderr}`),
@@ -191,10 +210,13 @@ export const makeGodotBackend = (
         const scriptPath = NodePath.join(temporary, "check.gd");
         const resultPath = NodePath.join(temporary, "result.json");
         return yield* Effect.gen(function* () {
-          yield* Effect.tryPromise({
+          // The check runs the gameplay scene, and a game that saves on start
+          // would write the user's real user:// otherwise; this one is scratch.
+          const isolation = yield* Effect.tryPromise({
             try: async () => {
               await NodeFSP.mkdir(temporary, { recursive: true });
               await NodeFSP.writeFile(scriptPath, GODOT_CHECK_SCRIPT);
+              return prepareNativeUserIsolation(temporary);
             },
             catch: (cause) =>
               new GameOperationError({
@@ -219,7 +241,7 @@ export const makeGodotBackend = (
             ],
             operation: "godot-check",
             timeoutMs: 120_000,
-            env: GameProcesses.engineChildEnv(),
+            env: GameProcesses.engineChildEnv(isolation.env),
             envMode: "replace",
           });
           // Read before the scratch directory is removed below.

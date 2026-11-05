@@ -418,8 +418,12 @@ export const spawnOwned = (
   });
   const exited = () => child.exitCode !== null || child.signalCode !== null;
   const running = () => child.pid !== undefined && !exited();
+  // Once the leader has exited and its group is empty, the group's number is
+  // free to name someone else's group: never signal or probe it again.
+  let groupGone = false;
   const alive = () =>
-    child.pid !== undefined && (options.tree && !isWindows ? pidAlive(-child.pid) : !exited());
+    child.pid !== undefined &&
+    (options.tree && !isWindows ? !groupGone && pidAlive(-child.pid) : !exited());
   const record = new Promise<LaunchRecord | null>((resolve) => {
     child.once("error", () => resolve(null));
     child.once("spawn", () => {
@@ -440,7 +444,12 @@ export const spawnOwned = (
       taskkillTree(pid);
       return true;
     }
-    if (options.tree) return signalPid(-pid, name);
+    if (options.tree) {
+      if (groupGone) return false;
+      const sent = signalPid(-pid, name);
+      if (!sent && exited()) groupGone = true;
+      return sent;
+    }
     if (exited()) return false;
     return child.kill(name);
   };
@@ -546,14 +555,16 @@ export const stopRecorded = async (
 };
 
 /**
- * Pages macOS can hand to new work from `vm_stat` output: free, inactive,
- * speculative and purgeable. Null when the output is not vm_stat's.
+ * Pages macOS can hand to new work from `vm_stat` output: free, inactive and
+ * speculative. Purgeable pages already sit in the active and inactive queues,
+ * so counting them again would make every memory guard too lenient.
+ * Null when the output is not vm_stat's.
  */
 export const parseVmStat = (text: string): number | null => {
   const pageSize = /page size of (\d+) bytes/.exec(text)?.[1];
   if (pageSize === undefined) return null;
   let pages = 0;
-  for (const name of ["free", "inactive", "speculative", "purgeable"]) {
+  for (const name of ["free", "inactive", "speculative"]) {
     const count = new RegExp(`^Pages ${name}:\\s+(\\d+)\\.`, "m").exec(text)?.[1];
     if (count !== undefined) pages += Number(count);
   }

@@ -1,4 +1,5 @@
 // @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off preferSchemaOverJson:off -- This module owns headless Chromium for browser play sessions: wall-clock boot polling and real-time input.
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
@@ -69,8 +70,15 @@ const readKeptStorage = async (path: string): Promise<KeptEntries> => {
 
 /** Written whole then renamed, so a session killed mid-write keeps the last good saves. */
 const writeKeptStorage = async (path: string, entries: KeptEntries): Promise<void> => {
-  const partial = NodePath.join(NodePath.dirname(path), `.${NodePath.basename(path)}.partial`);
-  await NodeFSP.writeFile(partial, `${JSON.stringify({ localStorage: entries }, null, 2)}\n`);
+  // A name of its own, created exclusively: two sessions never share it, and a
+  // link planted under that name is refused rather than followed.
+  const partial = NodePath.join(
+    NodePath.dirname(path),
+    `.${NodePath.basename(path)}.${NodeCrypto.randomUUID()}.partial`,
+  );
+  await NodeFSP.writeFile(partial, `${JSON.stringify({ localStorage: entries }, null, 2)}\n`, {
+    flag: "wx",
+  });
   await NodeFSP.rename(partial, path);
 };
 
