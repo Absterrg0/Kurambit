@@ -45,6 +45,8 @@ export type GameRunStatusInput = typeof GameRunStatusInput.Type;
 
 export const GameRunThreadRef = Schema.Struct({
   role: Schema.String,
+  /** The run stage or round the role ran in ("Vision", "Blind pick", "Round 2"), for grouping. */
+  group: Schema.String,
   threadId: Schema.String,
   startedAt: Schema.String,
 });

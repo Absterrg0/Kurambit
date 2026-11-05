@@ -42,6 +42,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { withRoleGroups } from "./run/roleGroup.ts";
 import * as GameService from "./GameService.ts";
 import { runStateChecks } from "./run/checkRunner.ts";
 import { presentable } from "./run/decisionEvidence.ts";
@@ -337,7 +338,7 @@ const make = Effect.gen(function* () {
     runId: string,
   ): GameRunThreadRef[] => {
     const seen = new Set<string>();
-    return records.gameRunSteps.flatMap((step) =>
+    const refs = records.gameRunSteps.flatMap((step) =>
       step.runId !== runId
         ? []
         : step.roles.flatMap((entry) => {
@@ -352,6 +353,7 @@ const make = Effect.gen(function* () {
             ];
           }),
     );
+    return withRoleGroups(refs);
   };
 
   const runStatus: Service["runStatus"] = Effect.fn("GameRunControl.runStatus")(function* (
