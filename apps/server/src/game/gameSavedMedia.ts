@@ -55,7 +55,8 @@ const savedDir = async (root: string, create: boolean): Promise<string | null> =
 /** The source as a real file inside one of the game's generated folders, or a refusal. */
 const generatedSource = async (root: string, source: string): Promise<string> => {
   const realRoot = await NodeFSP.realpath(root);
-  const given = NodePath.resolve(realRoot, source);
+  // Relative to the root as the transports know it, which round evidence paths are relative to.
+  const given = NodePath.resolve(root, source);
   const real = await NodeFSP.realpath(given).catch(() => null);
   if (real === null) throw new SavedMediaError("invalid-path", `${source} does not exist.`);
   if (!MEDIA.test(real))

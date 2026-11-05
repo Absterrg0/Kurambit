@@ -13,6 +13,7 @@ import { useState } from "react";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { GameSavedList } from "./GameSavedMedia";
 import { gameSourceFreshnessLabel } from "./gameStageLogic";
 import { resolveAssetUrl } from "../../assets/assetUrls";
 import { usePreparedConnection } from "../../state/session";
@@ -297,6 +298,7 @@ export function GameBuildsPanel({
           </section>
         );
       })}
+      <GameSavedList threadRef={threadRef} />
       <p className="px-1 text-xs text-muted-foreground">
         Builds live in <span className="font-mono">builds/</span> and are not committed to the game
         repository. Every operation writes its output to{" "}

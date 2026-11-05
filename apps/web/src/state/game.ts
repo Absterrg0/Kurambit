@@ -73,6 +73,14 @@ const runRestoredSignal = Atom.family((environmentId: string) =>
 export const noteRunRestored = (environmentId: EnvironmentId): void =>
   appAtomRegistry.update(runRestoredSignal(environmentId), (n) => n + 1);
 
+// Bumped after a save or delete here; an agent's game_media_save shows the next time the list is read.
+const savedMediaSignal = Atom.family((environmentId: string) =>
+  Atom.make(0).pipe(Atom.keepAlive, Atom.withLabel(`game:saved-media:${environmentId}`)),
+);
+
+export const noteSavedMediaChanged = (environmentId: EnvironmentId): void =>
+  appAtomRegistry.update(savedMediaSignal(environmentId), (n) => n + 1);
+
 export const gameEnvironment = {
   toolchain: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:toolchain",
@@ -129,6 +137,21 @@ export const gameEnvironment = {
   runRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runRestore",
     tag: WS_METHODS.gameRunRestore,
+  }),
+  saveMedia: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:saveMedia",
+    tag: WS_METHODS.gameMediaSave,
+  }),
+  savedList: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:savedList",
+    tag: WS_METHODS.gameSavedList,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: ({ environmentId }) => savedMediaSignal(environmentId),
+  }),
+  deleteSaved: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:deleteSaved",
+    tag: WS_METHODS.gameSavedDelete,
   }),
   runStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runStop",
