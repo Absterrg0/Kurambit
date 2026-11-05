@@ -432,6 +432,7 @@ const CAPTURE_LISTING_MAX_BYTES = 128 * 1024 * 1024;
 // stages. Files below the floor are left to add, where they cost next to nothing.
 const PRE_WRITE_MIN_FILE_BYTES = 64 * 1024;
 const PRE_WRITE_MIN_TOTAL_BYTES = 64 * 1024 * 1024;
+const SLOW_CAPTURE_MS = 2_000;
 // Longer than any capture runs, so a temp file this old belongs to no running capture.
 const STRAY_CAPTURE_INDEX_MS = 2 * 60 * 60_000;
 const CAPTURE_INDEX_FILE = /^capture-index-[0-9a-f]{16}-[0-9a-f]{16}$/;
@@ -1163,6 +1164,15 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       );
     });
 
+  // Capture writes flush loose objects once per process (core.fsyncMethod=batch)
+  // instead of once per object; refs and everything else stay fully synced.
+  const captureWrite = [
+    "-c",
+    "core.fsync=objects,reference",
+    "-c",
+    "core.fsyncMethod=batch",
+  ] as const;
+
   const captureFileError = (file: string) => (cause: PlatformError.PlatformError) =>
     new VcsProcessExitError({
       operation: VcsProcess.CHECKPOINT_CAPTURE_OPERATION,
@@ -1227,6 +1237,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           "--",
           ":(glob)**/.gitattributes",
         ],
+        timeoutMs: TREE_TIMEOUT_MS,
         maxOutputBytes: CAPTURE_LISTING_MAX_BYTES,
         outputMode: "error",
       });
@@ -1497,7 +1508,12 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
    * `add -A` finds each object stored and makes every decision itself (modes,
    * symlinks, filters, line endings). A wrong guess leaves an orphan object.
    */
-  const preWriteChanged = (top: string, run: CaptureRun, lined: CaptureIndexLineUp | null) =>
+  const preWriteChanged = (
+    top: string,
+    run: CaptureRun,
+    lined: CaptureIndexLineUp | null,
+    report: { files: number; bytes: number; processes: number },
+  ) =>
     Effect.gen(function* () {
       const tracked =
         lined === null
@@ -1536,6 +1552,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         { concurrency: 64 },
       );
       const files = changed.filter((file) => file.size >= 0);
+      report.files = files.length;
+      report.bytes = files.reduce((sum, file) => sum + file.size, 0);
       // --stdin-paths reads lines and unquotes a leading quote: such names are left to add.
       const large = files.filter(
         (file) => file.size >= PRE_WRITE_MIN_FILE_BYTES && !/[\n\r]|^"/.test(file.path),
@@ -1547,11 +1565,12 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         Math.min(NodeOS.availableParallelism() - 1, VcsProcess.VCS_PROCESS_CONCURRENCY - 2),
       );
       const groups = balanceBySize(large, count);
+      report.processes = groups.length;
       yield* Effect.forEach(
         groups,
         (group) =>
           run(
-            ["-c", "core.longpaths=true", ...durableWrite, "hash-object", "-w", "--stdin-paths"],
+            ["-c", "core.longpaths=true", ...captureWrite, "hash-object", "-w", "--stdin-paths"],
             {
               cwd: top,
               stdin: `${group.map((file) => file.path).join("\n")}\n`,
@@ -1575,7 +1594,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       yield* execute({
         operation: VcsProcess.CHECKPOINT_CAPTURE_OPERATION,
         cwd,
-        args: [...durableWrite, "update-ref", place.ref, commitOid],
+        args: [...captureWrite, "update-ref", place.ref, commitOid],
       });
       // A replace-rename; on Windows a scanner holding the old file can refuse it for a moment.
       yield* fileSystem
@@ -1591,6 +1610,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = VcsProcess.CHECKPOINT_CAPTURE_OPERATION;
       const indexConfig = checkpointIndexConfig;
+      const startedAt = yield* Clock.currentTimeMillis;
       const platform = yield* HostProcess.Platform;
       const headExists = yield* hasHeadCommit(input.cwd);
       const sparseConfig = yield* execute({
@@ -1627,6 +1647,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         ["core.untrackedCache", "false"],
         ...(sparseCheckout ? [] : ([["index.sparse", "false"]] as const)),
       ];
+      const report = { files: 0, bytes: 0, processes: 0, reused: false };
 
       const attempt = (reuse: boolean): Effect.Effect<string, VcsError> => {
         let reusing = false;
@@ -1662,6 +1683,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               operation,
               cwd: input.cwd,
               env: commitEnv,
+              timeoutMs: TREE_TIMEOUT_MS,
               ...options,
               args,
             });
@@ -1674,6 +1696,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               lined = yield* reuseCaptureIndex(place, tempIndexPath, run);
               reusing = lined !== null;
             }
+            report.reused = lined !== null;
             if (lined === null && place !== null)
               yield* fileSystem
                 .makeDirectory(place.dir, { recursive: true })
@@ -1714,7 +1737,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               }
             }
 
-            yield* preWriteChanged(top, run, lined).pipe(
+            yield* preWriteChanged(top, run, lined, report).pipe(
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? Effect.failCause(cause)
@@ -1728,7 +1751,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             const stageFiles = (exclusions: ReadonlyArray<string>) =>
               run([
                 ...indexConfig,
-                ...durableWrite,
+                ...captureWrite,
                 "add",
                 ...(sparseCheckout ? ["--sparse"] : []),
                 "-A",
@@ -1788,7 +1811,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
 
             // write-tree refuses an entry whose object is gone (never --missing-ok),
             // so an index naming a pruned blob fails here and is reseeded.
-            const writeTreeResult = yield* run([...indexConfig, ...durableWrite, "write-tree"]);
+            const writeTreeResult = yield* run([...indexConfig, ...captureWrite, "write-tree"]);
             const treeOid = writeTreeResult.stdout.trim();
             if (treeOid.length === 0) {
               return yield* new VcsProcessExitError({
@@ -1804,7 +1827,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             const message = `kurambit checkpoint ref=${input.checkpointRef}`;
             // HEAD is the parent so listAuthoredPaths can see how HEAD moved between checkpoints.
             const commitTreeResult = yield* run([
-              ...durableWrite,
+              ...captureWrite,
               "commit-tree",
               treeOid,
               ...(headExists ? ["-p", "HEAD"] : []),
@@ -1825,7 +1848,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             yield* execute({
               operation,
               cwd: input.cwd,
-              args: [...durableWrite, "update-ref", input.checkpointRef, commitOid],
+              args: [...captureWrite, "update-ref", input.checkpointRef, commitOid],
             });
             if (place !== null) yield* keepCaptureIndex(place, input.cwd, tempIndexPath, commitOid);
             return commitOid;
@@ -1850,7 +1873,19 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         );
       };
 
-      return yield* attempt(true);
+      const commitOid = yield* attempt(true);
+      const elapsed = (yield* Clock.currentTimeMillis) - startedAt;
+      if (elapsed > SLOW_CAPTURE_MS)
+        yield* Effect.logInfo("checkpoint capture", {
+          cwd: input.cwd,
+          ms: elapsed,
+          changedFiles: report.files,
+          changedBytes: report.bytes,
+          preWrote: report.processes > 0,
+          processes: report.processes,
+          reusedIndex: report.reused,
+        });
+      return commitOid;
     }),
 
     hasCheckpointRef: (input) =>
