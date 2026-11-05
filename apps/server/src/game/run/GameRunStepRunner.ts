@@ -246,6 +246,9 @@ const make = Effect.gen(function* () {
    * a thread with no turn of this attempt continues where an earlier try left
    * off. A thread that is gone is replaced by the attempt's own.
    */
+  // A role turn a server restart keeps cutting off would otherwise be
+  // continued forever; the run ends resumably instead.
+  const CUT_OFF_LIMIT = 3;
   const roleHalf = (
     job: GameRunJobs.GameRunStepJob,
     run: GameRun,
@@ -403,6 +406,27 @@ const make = Effect.gen(function* () {
           yield* limitInput(threadId);
           if (!GameRunRoleReactor.isSettledRun(latest.run)) {
             yield* log(`${role.role}: reattaching to thread ${threadId}`);
+            return yield* jobs.deadline(half);
+          }
+          if (GameRunRoleReactor.isCutOff(latest.run)) {
+            const attemptTurns = turns.filter((t) => t.turn.attempt === job.attempt);
+            // Only turns that ran count: a continuation a shutdown cancelled
+            // before it started cost the role nothing.
+            const cut = attemptTurns.filter(
+              (t) => GameRunRoleReactor.isCutOff(t.run) && t.run.startedAt !== null,
+            ).length;
+            if (cut >= CUT_OFF_LIMIT)
+              return yield* fail(half, stepId, `${role.role}: role turn cut off repeatedly`);
+            yield* log(`${role.role}: turn on ${threadId} was cut off; continuing it`);
+            yield* roles.sendTurn({
+              projectId: run.projectId,
+              threadId,
+              stepId,
+              attempt: job.attempt,
+              kind: "continue",
+              n: Math.max(...attemptTurns.map((t) => t.turn.n)) + 1,
+              text: `${CONTINUE}\n\n${yield* promptOf(run, role, root)}`,
+            });
             return yield* jobs.deadline(half);
           }
           if ((yield* roles.settle(threadId, latest.run)) !== "fresh") return;

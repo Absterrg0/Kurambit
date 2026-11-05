@@ -145,18 +145,28 @@ const locateIn = (
   return { run, record, seq, role: roleAt(record.step, seq) };
 };
 
+/** What landing a settled turn leaves to the step's job; null when nothing does. */
+export type SettleOutcome = "fresh" | "continue" | null;
+
+/**
+ * A turn a server restart cut off: the recovery cancels a running turn, and
+ * the run, never the generic restart continuation, carries it on.
+ */
+export const isCutOff = (run: OrchestrationV2Run): boolean => run.status === "cancelled";
+
 export class GameRunRoleReactor extends Context.Service<
   GameRunRoleReactor,
   {
     /**
      * Lands a role turn that settled, by the rule the event stream applies.
      * "fresh": the step's game-folder role moves to a fresh thread, which the
-     * step's job launches.
+     * step's job launches. "continue": the turn was cut off (a server restart
+     * cancels a running turn), so it is no result; the step's job continues it.
      */
     readonly settle: (
       roleThreadId: ThreadId,
       turnRun: OrchestrationV2Run,
-    ) => Effect.Effect<"fresh" | null>;
+    ) => Effect.Effect<SettleOutcome>;
     /** Sends a role step's turn on its thread, once per message id. */
     readonly sendTurn: (input: {
       readonly projectId: ProjectId;
@@ -336,6 +346,7 @@ const make = Effect.gen(function* () {
         )) !== null
       )
         return null;
+      if (isCutOff(latest.run)) return "continue" as const;
       const role = at.role;
       const root = yield* projects.resolve(creator);
       const log = (line: string) => logLine(root, line);
@@ -499,7 +510,9 @@ const make = Effect.gen(function* () {
     lockOf(turn)
       .withPermits(1)(settleLocked(roleThreadId, turnRun))
       .pipe(
-        Effect.map((outcome) => (outcome === "fresh" ? ("fresh" as const) : null)),
+        Effect.map((outcome): SettleOutcome =>
+          outcome === "fresh" || outcome === "continue" ? outcome : null,
+        ),
         Effect.catchCause((cause) =>
           Effect.logWarning("game run role result failed", { threadId: roleThreadId, cause }).pipe(
             Effect.as(null),
@@ -509,7 +522,8 @@ const make = Effect.gen(function* () {
 
   // The event consumer only reads and hands over: landing a turn (closing its
   // explorer, drawing its sheet, hashing its sources) is a job of the run's.
-  // A move to a fresh thread is the step job's: it launches the role's threads.
+  // A move to a fresh thread and a cut-off turn's continuation are the step
+  // job's: it launches the role's threads and sends its turns.
   const handle: GameRunRoleReactor["Service"]["handle"] = (event) =>
     event.type !== "run.updated"
       ? Effect.void
@@ -521,20 +535,23 @@ const make = Effect.gen(function* () {
                 turn.runId,
                 settleTurn(event.threadId, event.payload, turn).pipe(
                   Effect.flatMap((outcome) =>
-                    outcome !== "fresh"
+                    outcome === null
                       ? Effect.void
-                      : Effect.flatMap(
-                          threads.getThreadRecords(event.threadId, []),
-                          ({ thread }) =>
-                            thread.lineage.parentThreadId === null
-                              ? Effect.void
-                              : jobs.execute({
-                                  threadId: thread.lineage.parentThreadId,
-                                  runId: turn.runId,
-                                  stepId: turn.stepId,
-                                  attempt: turn.attempt,
-                                }),
-                        ).pipe(Effect.ignore),
+                      : Effect.gen(function* () {
+                          const { thread } = yield* threads.getThreadRecords(event.threadId, []);
+                          const creator = thread.lineage.parentThreadId;
+                          if (creator === null) return;
+                          // The step's job runs the whole step record: a pair's half
+                          // hands over its pair, whose job carries on only the owed half.
+                          const at = yield* locate(creator, turn.stepId, turn.attempt);
+                          if (at === null) return;
+                          yield* jobs.execute({
+                            threadId: creator,
+                            runId: turn.runId,
+                            stepId: at.record.id,
+                            attempt: turn.attempt,
+                          });
+                        }).pipe(Effect.ignore),
                   ),
                 ),
               ),

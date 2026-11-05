@@ -876,6 +876,51 @@ it.effect("a turn a server restart cut off lands only when its continuation ends
   ),
 );
 
+it.effect(
+  "a turn a restart cut off with no continuation is continued by its run, never landed",
+  () =>
+    withGame((world) =>
+      Effect.gen(function* () {
+        const { vision, thread } = yield* atVision(world);
+        const cut = turnRun({ stepId: vision.id, status: "cancelled" });
+        world.runs.set(thread, [cut]);
+        world.onSend = (threadId, messageId) => {
+          world.runs.set(threadId, [
+            ...(world.runs.get(threadId) ?? []),
+            turnRun({ stepId: vision.id, status: "running", userMessageId: messageId }),
+          ]);
+        };
+        const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+        // The reactor hands a cut-off turn to its step instead of landing it.
+        assert.equal(yield* roles.settle(thread, cut), "continue");
+        yield* startRunner;
+        yield* recover;
+        // The step's job continued the turn with its own prompt and watches its cap.
+        yield* Deferred.await(world.capWatched);
+        assert.deepEqual(
+          world.sends.map((send) => send.messageId),
+          [roleTurnMessageId(vision.id, 1, "continue", 2)],
+        );
+        const held = yield* inFlight;
+        assert.equal(held.step?.id, vision.id);
+        assert.isNull(held.step?.result ?? null);
+
+        // A turn every restart cuts off ends the run resumably instead of looping.
+        world.onSend = null;
+        world.runs.set(thread, [
+          cut,
+          turnRun({ stepId: vision.id, status: "cancelled", kind: "continue", n: 2 }),
+          turnRun({ stepId: vision.id, status: "cancelled", kind: "continue", n: 3 }),
+        ]);
+        const ended = yield* awaitRun((run) => run.ending !== null);
+        yield* recover;
+        yield* Fiber.join(ended);
+        assert.equal((yield* inFlight).run.ending, "failed");
+        assert.lengthOf(world.sends, 1);
+      }),
+    ),
+);
+
 it.effect("a stop interrupts the live role turn and stops its jobs, from its outbox effect", () =>
   withGame((world) =>
     Effect.gen(function* () {
