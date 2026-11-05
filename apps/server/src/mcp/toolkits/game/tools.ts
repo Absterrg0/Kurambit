@@ -516,7 +516,7 @@ const RunStopTool = Tool.make("game_run_stop", {
 
 const RunRestoreTool = Tool.make("game_run_restore", {
   description:
-    "Put this game back to a kept round's build when the creator asks: the game folder returns to that round's commit and the run continues from it. Only a kept round, with the game on its main branch, no step or round in progress and no uncommitted work; a restore that does not fit is refused with the reason. game_run_status lists the rounds and which were kept.",
+    "Put this game back to a kept round's build when the creator asks: that build's engine project, art and ASSETS.md return to the game folder, and a resumed run judges its next round against them. What the folder held before is kept first, and the result names it with the command that brings it back. Only a kept round, with no run live and no round in progress; a restore that does not fit is refused with the reason. game_run_status lists the rounds and which were kept.",
   parameters: Schema.Struct({
     round: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   }),

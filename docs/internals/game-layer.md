@@ -256,7 +256,8 @@ reach none of its controls.
 The run's builds are T3 checkpoints under the run's own refs (`checkpointRefForGameRun`,
 [builds.ts](../../apps/server/src/game/run/builds.ts)), and the game folder is the live build: a
 build step captures the folder, restores a build's engine project, art and `ASSETS.md` (a path-scoped
-`restoreCheckpoint`), or keeps a build under names (`best`, `round-N`). The run never commits,
+`restoreCheckpoint`), or keeps a build under names (`best`, `round-N/kept`; [buildNames.ts](../../apps/server/src/game/run/buildNames.ts):
+git stores refs as files, so no name is both a build and a folder of builds). The run never commits,
 checks out, merges or writes the user's index, HEAD or branches, so the user's git and an agent's
 own git use are theirs, and a cut capture or restore leaves no lock or merge that could fail a
 resume: captures and restores work through private indexes, and a restore writes only the files
@@ -335,7 +336,7 @@ point is its goal, not a round count: the ladder bounds the building (two tries 
 comeback), a finished ladder gets one ship check, and the run ends ("ready" or "done"). Polish past
 that is the creator's call: a game_run_steer note resumes an ended run for one round on it, so no
 tokens go to rounds nobody asked for. Three rounds in a row that land nothing, for any reason (a
-regression, an unjudged or inconclusive gate, failed checks, a failed merge, a boot failure, no
+regression, an unjudged or inconclusive gate, failed checks, a build that could not be kept, a boot failure, no
 change), end the run "stalled", resumably, with the last round's reason: otherwise a game whose
 checks can never pass (a broken state hook) works through every rung, its retry and its comeback,
 30 rounds on a full ladder, for nothing. A kept round resets the count, a round counts once where

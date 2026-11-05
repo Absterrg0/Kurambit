@@ -122,9 +122,9 @@ type Service = {
     threadId: ThreadId,
   ) => Fails<{ detail: GameRunPickDetail; sheetFiles: FrameSheets }>;
   /**
-   * Makes a kept round's build the game's sources again with a new commit on
-   * trunk, and the ended run's judged best. Refused while a run is live,
-   * mid-round, off trunk or with uncommitted work.
+   * Puts a kept round's build back in the game folder as the stopped run's
+   * judged best, keeping what the folder held first. Refused while a run is
+   * live or mid-round.
    */
   readonly restoreRound: (threadId: ThreadId, round: number) => Fails<GameRunRestoreResult>;
   /** A run role's typed result; the refusal's reason comes back in-turn. */
@@ -494,8 +494,7 @@ const make = Effect.gen(function* () {
     });
     return {
       stopped: true,
-      message:
-        "The run was stopped. Rejected work stays on its branch; game_run_start with an empty brief resumes it.",
+      message: "The run was stopped; game_run_start with an empty brief resumes it.",
     } satisfies GameRunStopResult;
   });
 
@@ -720,7 +719,7 @@ const make = Effect.gen(function* () {
         "run-restore",
         root,
         "not-kept",
-        `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. Its work stays on branch ${record.branch}.`,
+        `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored.${gitEra(run) ? ` Its work stays on branch ${record.branch}.` : ""}`,
       );
     const requestId = NodeCrypto.randomUUID();
     const unreadable = (cause: { readonly message: string }) =>
