@@ -3,7 +3,7 @@ import { isOrchestrationV2WorkActive } from "@kurambit/contracts";
 import { deriveSubagentElapsedMs } from "@kurambit/shared/orchestrationTiming";
 import { useEffect, useRef } from "react";
 
-function formatElapsedSeconds(totalSeconds: number): string {
+export function formatElapsedSeconds(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds));
   const minutes = Math.floor(seconds / 60);
   if (minutes === 0) {
