@@ -8,7 +8,7 @@
 // only its finish, if a restart cut it short, runs again. A role turn no step
 // record names (a thread an older Kurambit's run launched, which T3 continued
 // after the restart) is stopped, so nothing edits a game outside its run.
-import { CommandId, type ThreadId } from "@kurambit/contracts";
+import { CommandId, type GameRun, type GameRunStep, type ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -20,6 +20,29 @@ import * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecisions from "./GameRunDecisions.ts";
 import { gitEra } from "./decide.ts";
 import * as GameRunJobs from "./GameRunJobs.ts";
+
+/**
+ * The records the landings since the run's last non-decision step wrote, in
+ * order: before landings had an outputs effect of their own, the next step's
+ * job wrote them (walking back over decisions, which have no job). An upgrade
+ * with a decision waiting, or with that job not yet started, would lose them.
+ */
+export const owedFiles = (run: GameRun, steps: ReadonlyArray<GameRunStep>) => {
+  const landed = steps
+    .filter(
+      (s) =>
+        s.runId === run.id &&
+        s.completedAt !== null &&
+        (run.inFlight === null || s.seq < run.inFlight),
+    )
+    .toSorted((a, b) => b.seq - a.seq);
+  const owed: GameRunStep[] = [];
+  for (const step of landed) {
+    owed.unshift(step);
+    if (step.kind !== "decide") break;
+  }
+  return owed.flatMap((step) => step.outputs.files);
+};
 
 export class GameRunRecovery extends Context.Service<
   GameRunRecovery,
@@ -141,6 +164,26 @@ const make = Effect.gen(function* () {
         });
         return;
       }
+      // Writing them again is harmless; this covers an upgrade from the walk-back.
+      const files = owedFiles(run, (yield* projections.getGameRunRecords(threadId)).gameRunSteps);
+      if (files.length > 0)
+        yield* jobs
+          .outputs({
+            threadId,
+            runId: run.id,
+            files,
+            release: [],
+            effectId: `recovery:${run.id}`,
+            final: false,
+          })
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("a game run's owed records could not be written", {
+                threadId,
+                error,
+              }),
+            ),
+          );
       if (run.inFlight === null) return;
       const step = records.gameRunSteps.find(
         (each) => each.runId === run.id && each.seq === run.inFlight,
