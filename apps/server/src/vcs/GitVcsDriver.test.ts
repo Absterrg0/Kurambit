@@ -324,7 +324,11 @@ it.effect.each([
               phase === "add" &&
               nestedRecovery &&
               !input.args.some((arg) => arg.startsWith(":(exclude,literal)"));
-            if (!input.args.includes(phase) || initialStage || ++racedAttempts !== 1) {
+            // The capture also moves its index's own ref; only the checkpoint's races here.
+            const raced =
+              input.args.includes(phase) &&
+              (phase !== "update-ref" || input.args.includes(checkpointRef));
+            if (!raced || initialStage || ++racedAttempts !== 1) {
               return liveRunner.run(input);
             }
             const lockPath = phase === "add" ? `${input.env!.GIT_INDEX_FILE!}.lock` : refLockPath;
