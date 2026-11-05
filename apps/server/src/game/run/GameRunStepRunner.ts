@@ -1027,6 +1027,8 @@ const make = Effect.gen(function* () {
       if (held !== undefined && held !== step.attempt) return;
       if (held === undefined && step.completedAt === null) return;
       inFlightSteps.delete(step.id);
+      // A step that completed with nothing to say only restates its record.
+      if (step.status === "completed" && step.logs.length === 0) return;
       const root = yield* projects.resolve(step.threadId);
       yield* logLine(root, `${describe(step.step)} (${step.status})`);
       for (const line of step.logs) yield* logLine(root, `  ${line}`);
