@@ -162,11 +162,15 @@ const make = Effect.gen(function* () {
    * Memory short: the step's job ends and a durable timer runs its work again,
    * so no job holds one of the shared step slots while it waits. The waits are
    * counted on the step's record, so a restart does not reset them; both
-   * halves of a pair refused at once make one wait (one command id).
+   * halves of a pair refused at once make one wait (one command id). The run
+   * finds a pair's step by a half's id, so the timer names the half refused.
+   * A timer that could not be written fails the step: a step left running
+   * with neither job nor timer would wait for a restart.
    */
   const waitForMemory = (
     job: GameRunJobs.GameRunStepJob,
     record: GameRunStep,
+    stepId: GameRunStepId,
     short: GameRunMemoryShort,
     log: (line: string) => Effect.Effect<void>,
   ) =>
@@ -178,20 +182,35 @@ const make = Effect.gen(function* () {
       const at =
         DateTime.toEpochMillis(yield* DateTime.now) +
         Duration.toMillis(Duration.fromInputUnsafe(MEMORY_PAUSE));
-      yield* refused(
-        engine.dispatch({
+      yield* engine
+        .dispatch({
           type: "game-run.step.schedule",
           commandId: CommandId.make(
             `server:game-run-memory:${record.id}:attempt:${job.attempt}:${n}`,
           ),
           threadId: job.threadId,
           runId: job.runId,
-          stepId: record.id,
+          stepId,
           attempt: job.attempt,
           at,
           timer: { kind: "memory", n },
-        }),
-      );
+        })
+        .pipe(
+          Effect.asVoid,
+          Effect.catchTags({
+            // The run moved on or stopped, or the other half's wait already holds this one.
+            OrchestratorGameRunRefusedError: (error) =>
+              Effect.logInfo("game run memory wait not taken", { detail: error.detail }),
+            OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+          }),
+          Effect.catch((error) =>
+            fail(
+              { ...job, stepId },
+              stepId,
+              `memory wait could not be scheduled (${error.message})`,
+            ),
+          ),
+        );
     });
   const memoryWaitsLeft = (record: GameRunStep) => (record.memoryWaits ?? 0) < MEMORY_WAITS;
 
@@ -515,7 +534,16 @@ const make = Effect.gen(function* () {
       yield* log(`${role.role}: thread ${threadId} is gone; launching the step again`);
       return yield* launchThread(own, entry?.threadId ?? undefined, prompt);
     }).pipe(
-      Effect.catchTags({ GameRunMemoryShort: (short) => waitForMemory(job, record, short, log) }),
+      Effect.catchTags({
+        GameRunMemoryShort: (short) =>
+          waitForMemory(
+            job,
+            record,
+            record.step.kind === "pair" ? gameRunStepId(run.id, role.id) : record.id,
+            short,
+            log,
+          ),
+      }),
     );
 
   const botHalf = (
@@ -540,7 +568,9 @@ const make = Effect.gen(function* () {
     ).pipe(
       Effect.tap((result) => log(`  step ${step.id}: ${summarize(result)}`)),
       Effect.flatMap((result) => complete({ ...job, stepId }, stepId, result)),
-      Effect.catchTags({ GameRunMemoryShort: (short) => waitForMemory(job, record, short, log) }),
+      Effect.catchTags({
+        GameRunMemoryShort: (short) => waitForMemory(job, record, stepId, short, log),
+      }),
     );
 
   const execute = (job: GameRunJobs.GameRunStepJob) =>
@@ -594,7 +624,7 @@ const make = Effect.gen(function* () {
             }).pipe(
               Effect.flatMap(done),
               Effect.catchTags({
-                GameRunMemoryShort: (short) => waitForMemory(job, record, short, log),
+                GameRunMemoryShort: (short) => waitForMemory(job, record, record.id, short, log),
               }),
             ),
           );
