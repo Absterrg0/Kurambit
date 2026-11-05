@@ -247,7 +247,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
     // A run holding the game is not cleared by Stop game, which stops only the caller's work.
     const fix =
       this.reason === "busy" && this.runReason === "run-live"
-        ? "A production run is working on this game. Steer it with game_run_steer from the game's chat, stop the run, or wait for it to end."
+        ? "A production run is working on this game. Steer it from the game's chat, or stop the run; otherwise wait for it to end."
         : fixes[this.reason];
     return `${this.operation}: ${fix} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
