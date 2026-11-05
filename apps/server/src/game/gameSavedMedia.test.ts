@@ -5,6 +5,9 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { deleteSaved, listSaved, saveMedia } from "./gameSavedMedia.ts";
 
+// Before any file's own time, so no temp copy a test writes looks stale.
+const NOW = 0;
+
 const withGame = async (test: (root: string, base: string) => Promise<void>) => {
   const base = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "saved-media-"));
   try {
@@ -20,24 +23,24 @@ const withGame = async (test: (root: string, base: string) => Promise<void>) => 
 it("copies a generated video under a dated name and never overwrites a saved one", () =>
   withGame(async (root) => {
     const source = "builds/logs/game-bot-1/run.mp4";
-    const first = await saveMedia(root, source, "round 2 bot run", "2026-11-05");
+    const first = await saveMedia(root, source, "round 2 bot run", "2026-11-05", NOW);
     expect(first.name).toBe("2026-11-05 round 2 bot run.mp4");
     // A Save button finds its file by what it was saved from, after a remount too.
-    expect((await listSaved(root)).find((m) => m.name === first.name)).toMatchObject({
+    expect((await listSaved(root, NOW)).find((m) => m.name === first.name)).toMatchObject({
       source,
       label: "round 2 bot run",
     });
     await NodeFSP.writeFile(NodePath.join(root, source), "video-2");
-    const second = await saveMedia(root, source, "round 2 bot run", "2026-11-05");
+    const second = await saveMedia(root, source, "round 2 bot run", "2026-11-05", NOW);
     expect(second.name).toBe("2026-11-05 round 2 bot run (2).mp4");
     expect(await NodeFSP.readFile(first.path, "utf8")).toBe("video-1");
     expect(await NodeFSP.readFile(NodePath.join(root, source), "utf8")).toBe("video-2");
     // Ignored inside saved/ itself, so a game with an older .gitignore keeps videos out of checkpoints.
     expect(await NodeFSP.readFile(NodePath.join(root, "saved/.gitignore"), "utf8")).toBe("*\n");
     await NodeFSP.rm(NodePath.join(root, "saved/.gitignore"));
-    await saveMedia(root, source, "again", "2026-11-05");
+    await saveMedia(root, source, "again", "2026-11-05", NOW);
     expect(await NodeFSP.readFile(NodePath.join(root, "saved/.gitignore"), "utf8")).toBe("*\n");
-    expect((await listSaved(root)).map((m) => m.name).toSorted()).toEqual(
+    expect((await listSaved(root, NOW)).map((m) => m.name).toSorted()).toEqual(
       [first.name, second.name, "2026-11-05 again.mp4"].toSorted(),
     );
   }));
@@ -56,8 +59,8 @@ it("refuses sources outside the game's generated media, through links too", () =
       NodePath.join(base, "secret.png"),
       "builds/logs/game-bot-1/leak.png",
     ])
-      await expect(saveMedia(root, source, undefined, "2026-11-05")).rejects.toThrow();
-    expect(await listSaved(root)).toEqual([]);
+      await expect(saveMedia(root, source, undefined, "2026-11-05", NOW)).rejects.toThrow();
+    expect(await listSaved(root, NOW)).toEqual([]);
   }));
 
 it("never writes through a linked saved/ and deletes only files directly in it", () =>
@@ -67,18 +70,38 @@ it("never writes through a linked saved/ and deletes only files directly in it",
     await NodeFSP.writeFile(NodePath.join(outside, "keep.mp4"), "x");
     await NodeFSP.symlink(outside, NodePath.join(root, "saved"));
     await expect(
-      saveMedia(root, "builds/logs/game-bot-1/run.mp4", undefined, "2026-11-05"),
+      saveMedia(root, "builds/logs/game-bot-1/run.mp4", undefined, "2026-11-05", NOW),
     ).rejects.toThrow(/link/);
-    await expect(deleteSaved(root, "keep.mp4")).rejects.toThrow();
+    await expect(deleteSaved(root, "keep.mp4", NOW)).rejects.toThrow();
     expect(await NodeFSP.readdir(outside)).toEqual(["keep.mp4"]);
     await NodeFSP.rm(NodePath.join(root, "saved"));
 
-    const saved = await saveMedia(root, "builds/logs/game-bot-1/run.mp4", "clip", "2026-11-05");
+    const saved = await saveMedia(
+      root,
+      "builds/logs/game-bot-1/run.mp4",
+      "clip",
+      "2026-11-05",
+      NOW,
+    );
     for (const name of ["../game.json", "..", ".gitignore", "sub/x.mp4"])
-      await expect(deleteSaved(root, name)).rejects.toThrow();
-    await deleteSaved(root, saved.name);
-    expect(await listSaved(root)).toEqual([]);
+      await expect(deleteSaved(root, name, NOW)).rejects.toThrow();
+    await deleteSaved(root, saved.name, NOW);
+    expect(await listSaved(root, NOW)).toEqual([]);
     expect((await NodeFSP.readdir(NodePath.join(root, "saved"))).toSorted()).toEqual([
       ".gitignore",
+    ]);
+
+    // A temp copy a killed save left goes once it is an hour old; a live save's stays.
+    const old = NodePath.join(root, "saved/.saving-old.mp4");
+    await NodeFSP.writeFile(old, "x");
+    await NodeFSP.writeFile(NodePath.join(root, "saved/.saving-live.mp4"), "x");
+    // The clock the service passes in: the live copy was just written.
+    const now = (await NodeFSP.stat(NodePath.join(root, "saved/.saving-live.mp4"))).mtimeMs;
+    const twoHoursBefore = (now - 2 * 60 * 60 * 1000) / 1000;
+    await NodeFSP.utimes(old, twoHoursBefore, twoHoursBefore);
+    await listSaved(root, now);
+    expect((await NodeFSP.readdir(NodePath.join(root, "saved"))).toSorted()).toEqual([
+      ".gitignore",
+      ".saving-live.mp4",
     ]);
   }));

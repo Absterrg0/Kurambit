@@ -24,6 +24,8 @@ export const SAVED_EVENT = GAME_SAVED_MEDIA_EVENT;
  */
 const GENERATED_DIRS = ["builds/logs", ".studio/comparisons"] as const;
 const GENERATED_STUDIO_FILE = /^(?:final\.mp4|proto-\d+-frames\.jpg)$/;
+const TEMP_PREFIX = ".saving-";
+const TEMP_STALE_MS = 60 * 60 * 1000;
 const MEDIA = /\.(?:mp4|webm|png|jpe?g|webp|gif)$/i;
 
 export class SavedMediaError extends Error {
@@ -41,7 +43,7 @@ const exists = (path: string) =>
   );
 
 /** The real saved/ folder, created when missing; one that is a link, or leads out of the game, is refused. */
-const savedDir = async (root: string, create: boolean): Promise<string | null> => {
+const savedDir = async (root: string, create: boolean, now: number): Promise<string | null> => {
   const realRoot = await NodeFSP.realpath(root);
   const dir = NodePath.join(realRoot, SAVED_DIR);
   if (!(await exists(dir))) {
@@ -58,6 +60,15 @@ const savedDir = async (root: string, create: boolean): Promise<string | null> =
   const ignore = NodePath.join(dir, ".gitignore");
   if (!(await exists(ignore)))
     await NodeFSP.writeFile(ignore, "*\n", { flag: "wx" }).catch(() => {});
+  // A save a crash or a kill cut short leaves its temp copy; one this old is no live save's.
+  const stale = now - TEMP_STALE_MS;
+  for (const name of await NodeFSP.readdir(dir)) {
+    if (!name.startsWith(TEMP_PREFIX)) continue;
+    const temp = NodePath.join(dir, name);
+    const info = await NodeFSP.lstat(temp).catch(() => null);
+    if (info?.isFile() === true && info.mtimeMs < stale)
+      await NodeFSP.rm(temp, { force: true }).catch(() => {});
+  }
   return dir;
 };
 
@@ -181,15 +192,16 @@ export const saveMedia = async (
   label: string | undefined,
   /** The creator's calendar day the name starts with ("2026-11-05"). */
   day: string,
+  now: number,
 ): Promise<GameSavedMedia> => {
   const checked = await generatedSource(root, source);
   const real = checked.real;
-  const dir = (await savedDir(root, true))!;
+  const dir = (await savedDir(root, true, now))!;
   const ext = NodePath.extname(real).toLowerCase();
   const given = label?.trim() ?? "";
   const realRoot = await NodeFSP.realpath(root);
   const stem = savedStem(given.length > 0 ? given : defaultLabel(realRoot, real), day);
-  const temp = NodePath.join(dir, `.saving-${NodeCrypto.randomUUID()}${ext}`);
+  const temp = NodePath.join(dir, `${TEMP_PREFIX}${NodeCrypto.randomUUID()}${ext}`);
   try {
     await copyChecked(checked, source, temp);
     for (let n = 1; ; n++) {
@@ -222,8 +234,11 @@ export const saveMedia = async (
 };
 
 /** What saved/ holds, newest first; links, folders and the save's own temp files are left out. */
-export const listSaved = async (root: string): Promise<ReadonlyArray<GameSavedMedia>> => {
-  const dir = await savedDir(root, false);
+export const listSaved = async (
+  root: string,
+  now: number,
+): Promise<ReadonlyArray<GameSavedMedia>> => {
+  const dir = await savedDir(root, false, now);
   if (dir === null) return [];
   const rows: GameSavedMedia[] = [];
   for (const name of await NodeFSP.readdir(dir)) {
@@ -236,7 +251,7 @@ export const listSaved = async (root: string): Promise<ReadonlyArray<GameSavedMe
 };
 
 /** Removes one file directly inside saved/; any other name is refused. */
-export const deleteSaved = async (root: string, name: string): Promise<void> => {
+export const deleteSaved = async (root: string, name: string, now: number): Promise<void> => {
   if (
     name.length === 0 ||
     name.startsWith(".") ||
@@ -245,7 +260,7 @@ export const deleteSaved = async (root: string, name: string): Promise<void> => 
     name.includes("\\")
   )
     throw new SavedMediaError("invalid-path", `${name} is not a saved file's name.`);
-  const dir = await savedDir(root, false);
+  const dir = await savedDir(root, false, now);
   const target = dir === null ? null : NodePath.join(dir, name);
   const info = target === null ? null : await NodeFSP.lstat(target).catch(() => null);
   if (target === null || info?.isFile() !== true)

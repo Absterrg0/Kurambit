@@ -617,7 +617,7 @@ const make = Effect.gen(function* () {
         );
         // Pushed to every client of the game, so a save an agent made shows in the Saved list.
         return savedMedia("Save media", threadId, (root) =>
-          saveMedia(root, source, label, day),
+          saveMedia(root, source, label, day, now),
         ).pipe(
           Effect.tap((saved) =>
             Effect.flatMap(projects.resolve(threadId), (root) =>
@@ -626,9 +626,14 @@ const make = Effect.gen(function* () {
           ),
         );
       }),
-    listSaved: (threadId) => savedMedia("List saved media", threadId, listSaved),
+    listSaved: (threadId) =>
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        savedMedia("List saved media", threadId, (root) => listSaved(root, now)),
+      ),
     deleteSaved: (threadId, name) =>
-      savedMedia("Delete saved media", threadId, (root) => deleteSaved(root, name)).pipe(
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        savedMedia("Delete saved media", threadId, (root) => deleteSaved(root, name, now)),
+      ).pipe(
         Effect.tap(() =>
           Effect.flatMap(projects.resolve(threadId), (root) =>
             operations.changed(root, SAVED_EVENT, `Deleted ${name}`),
