@@ -44,6 +44,7 @@ import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { insideGame } from "./GameProjectService.ts";
+import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
 import {
   listenForRunner,
@@ -162,6 +163,7 @@ export class GameExplore extends Context.Service<
 >()("kurambit/game/GameExplore") {}
 
 const make = Effect.gen(function* () {
+  const processHost = yield* ProcessHost;
   const projects = yield* GameProjectService.GameProjectService;
   const processes = yield* GameProcesses.GameProcesses;
   const engines = yield* GameEngine.GameEngine;
@@ -570,7 +572,7 @@ const make = Effect.gen(function* () {
           root,
           `${backend.profile.displayName} games play in the browser.`,
         );
-      const host = yield* Effect.promise(() => findWindowHost());
+      const host = yield* Effect.promise(() => findWindowHost(processHost));
       const scriptDir = NodePath.join(root, "builds/logs", `game-explore-${input.id}`);
       const requestPath = NodePath.join(input.traceDir, "request.json");
       yield* Effect.tryPromise({

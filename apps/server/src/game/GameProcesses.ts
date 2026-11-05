@@ -9,7 +9,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { GameOperationError, type GameProcessResult, type GameViewport } from "@kurambit/contracts";
-import { HOST_OS, spawnOwned } from "./processHost.ts";
+import { HOST_OS, ProcessHost, spawnOwned } from "./processHost.ts";
 import type { WindowCommand, WindowHost } from "./windowHost.ts";
 
 interface Running {
@@ -133,6 +133,7 @@ export class GameProcesses extends Context.Service<
 >()("kurambit/game/GameProcesses") {}
 
 const make = Effect.gen(function* () {
+  const host = yield* ProcessHost;
   const running = new Map<number, Running>();
   const startProcess = async (
     input: Parameters<GameProcesses["Service"]["run"]>[0],
@@ -172,7 +173,8 @@ const make = Effect.gen(function* () {
             throw error;
           });
     const owned =
-      hosted?.process ?? spawnOwned(command.executable, command.args, { ...command, tree: false });
+      hosted?.process ??
+      spawnOwned(host, command.executable, command.args, { ...command, tree: false });
     const { child } = owned;
     let stdout = "",
       stderr = "",

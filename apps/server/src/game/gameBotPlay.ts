@@ -30,7 +30,7 @@ import {
   type Session,
 } from "./gameBotRuntime.ts";
 import { parseLine, type PlaySession } from "./playSession.ts";
-import { spawnOwned, type OwnedProcess } from "./processHost.ts";
+import { spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 import { VIDEO_FPS, VIDEO_WIDTH, openFrameVideo, type FrameVideo } from "./frameVideo.ts";
 
 const END_SETTLE_MS = 1500;
@@ -43,6 +43,7 @@ export interface BotLaunch {
 }
 
 export interface BotRunArgs {
+  readonly host: ProcessHostState;
   readonly root: string;
   readonly runId: string;
   readonly runDir: string;
@@ -130,6 +131,7 @@ export const playBot = async (
     // route can reach it. Game data reaches it only through our messages.
     const childLog = NodeFS.openSync(NodePath.join(args.runDir, "child-stderr.log"), "w");
     const owned = spawnOwned(
+      args.host,
       process.execPath,
       [args.childPath, args.botFile, args.decider, args.mode, args.jevLive ? "jev-live" : "no-jev"],
       {
@@ -265,6 +267,7 @@ export const playBot = async (
     // before protocol 2 plays without one.
     if (can.has("frames")) {
       video = openFrameVideo({
+        host: args.host,
         ffmpeg: args.ffmpeg,
         videoPath: args.videoPath,
         sidecarPath: NodePath.join(args.runDir, "run.frames.json"),
@@ -602,7 +605,7 @@ export const playBot = async (
     await launch.stop();
     await waitExit(botChild, 3000);
     const usedSetState = setStates.length > 0;
-    const frames = await extractRunFrames(args.ffmpeg, args.videoPath, args.runDir);
+    const frames = await extractRunFrames(args.host, args.ffmpeg, args.videoPath, args.runDir);
     const frozen = await frozenScreenFinding(frames, lastT, lastPos);
     const allFindings = frozen === null ? findings : [...findings, frozen];
     const median = (xs: number[]): number | null => {

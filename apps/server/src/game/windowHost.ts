@@ -4,7 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
 import type { GameViewport } from "@kurambit/contracts";
 import { findExecutable } from "./GameProcesses.ts";
-import { HOST_OS, spawnOwned, type OwnedProcess } from "./processHost.ts";
+import { HOST_OS, spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 
 /**
  * What the harness needs from an OS to show a game: a window the game draws
@@ -56,11 +56,6 @@ export interface HostedWindow {
 export const findXvfb = (): Promise<string | null> =>
   findExecutable("Xvfb", { pathEnv: process.env.PATH, override: process.env.KURAMBIT_XVFB });
 
-// Displays this server picked and has not let go: two launches at once (a
-// blind comparison's bots on both builds) both see a number free before
-// either's Xvfb writes its lock, and the second would then share the first's.
-const claimed = new Set<number>();
-
 const displayTaken = async (n: number): Promise<boolean> => {
   try {
     await NodeFSP.access(`/tmp/.X${n}-lock`);
@@ -82,7 +77,7 @@ const displayTaken = async (n: number): Promise<boolean> => {
 };
 
 /** A free private display number, well above the user's own; the caller releases it. */
-const pickDisplay = async (): Promise<number | null> => {
+const pickDisplay = async (claimed: Set<number>): Promise<number | null> => {
   for (let n = 119; n < 400; n++) {
     if (claimed.has(n) || (await displayTaken(n)) || claimed.has(n)) continue;
     claimed.add(n);
@@ -122,13 +117,15 @@ kill "$x" 2>/dev/null
 wait "$x" 2>/dev/null
 exit $status`;
 
-const xvfbHost = (xvfb: string): WindowHost => ({
+const xvfbHost = (host: ProcessHostState, xvfb: string): WindowHost => ({
   kind: "private-display",
   launch: async (command, viewport) => {
-    const n = await pickDisplay();
+    const claimed = host.displays;
+    const n = await pickDisplay(claimed);
     if (n === null) throw new Error("No free private X display.");
     const label = `:${n}`;
     const owned = spawnOwned(
+      host,
       "/bin/sh",
       [
         "-c",
@@ -164,10 +161,10 @@ const xvfbHost = (xvfb: string): WindowHost => ({
 export const OFFSCREEN_POSITION = { x: -10_000, y: -10_000 } as const;
 
 /** The command itself, owning its tree; its arguments place its window. */
-const offscreenHost: WindowHost = {
+const offscreenHost = (host: ProcessHostState): WindowHost => ({
   kind: "offscreen",
   launch: async (command) => {
-    const owned = spawnOwned(command.executable, command.args, {
+    const owned = spawnOwned(host, command.executable, command.args, {
       env: command.env,
       cwd: command.cwd,
       stdio: command.stdio,
@@ -182,15 +179,15 @@ const offscreenHost: WindowHost = {
       stop: (options) => owned.stop({ graceMs: options?.graceMs ?? 3_000 }),
     };
   },
-};
+});
 
 /**
  * The window host this machine offers, or null when it has none (Linux
  * without Xvfb): then a native game runs headless where its engine can, or
  * the caller refuses plainly. Never the user's own display on Linux.
  */
-export const findWindowHost = async (): Promise<WindowHost | null> => {
-  if (HOST_OS === "win32" || HOST_OS === "darwin") return offscreenHost;
+export const findWindowHost = async (host: ProcessHostState): Promise<WindowHost | null> => {
+  if (HOST_OS === "win32" || HOST_OS === "darwin") return offscreenHost(host);
   const xvfb = await findXvfb();
-  return xvfb === null ? null : xvfbHost(xvfb);
+  return xvfb === null ? null : xvfbHost(host, xvfb);
 };
