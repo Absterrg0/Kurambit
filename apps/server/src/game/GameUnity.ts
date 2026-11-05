@@ -40,6 +40,7 @@ import {
   unityEditorEnv,
 } from "./unityToolchain.ts";
 import { checkoutOf, cloneTree } from "./unityPlayerCache.ts";
+import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 const IDLE_MS = 10 * 60_000;
 /**
@@ -299,12 +300,6 @@ export const textOf = (result: McpContent): string =>
     .map((entry) => entry.text ?? "")
     .join("\n");
 
-/** PNG IHDR dimensions without a decoder: width/height at bytes 16/20. */
-const pngSize = (bytes: Buffer): { width: number; height: number } | null =>
-  bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47
-    ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
-    : null;
-
 /**
  * The capture as an image: either MCP image content or a base64 PNG field in
  * the command's JSON text, whichever the Pipeline version returns.
@@ -330,7 +325,7 @@ export const screenshotOf = (
     }
   }
   if (data === undefined) return { text: text.slice(0, 4000) || "The editor returned no image." };
-  const size = pngSize(Buffer.from(data, "base64"));
+  const size = readImageDimensions(Buffer.from(data, "base64"));
   if (size === null)
     return { text: `The editor returned an image that is not a PNG. ${text.slice(0, 2000)}` };
   return {

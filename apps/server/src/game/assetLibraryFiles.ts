@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import { GameOperationError, type GameLibraryKind } from "@kurambit/contracts";
 import { openZipArchive } from "../zipArchive.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
+import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 export interface LibraryPack {
   readonly id: string;
@@ -330,13 +331,6 @@ const readHead = async (path: string, bytes: number, position = 0) => {
   }
 };
 
-const pngSize = (head: Buffer) =>
-  head.length >= 24 &&
-  head.readUInt32BE(0) === 0x89504e47 &&
-  head.toString("latin1", 12, 16) === "IHDR"
-    ? { width: head.readUInt32BE(16), height: head.readUInt32BE(20) }
-    : undefined;
-
 const wavSeconds = (head: Buffer) => {
   if (head.length < 12 || head.toString("latin1", 0, 4) !== "RIFF") return undefined;
   let offset = 12;
@@ -492,7 +486,7 @@ export const indexPack = async (
     const absolute = NodePath.join(directory, path);
     const { size } = await NodeFSP.stat(absolute);
     let file: LibraryFile = { path, bytes: size, media, format };
-    if (format === "png") file = { ...file, ...pngSize(await readHead(absolute, 24)) };
+    if (format === "png") file = { ...file, ...readImageDimensions(await readHead(absolute, 24)) };
     if (format === "wav") {
       const seconds = wavSeconds(await readHead(absolute, 65_536));
       if (seconds !== undefined) file = { ...file, seconds: Math.round(seconds * 100) / 100 };

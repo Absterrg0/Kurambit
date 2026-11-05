@@ -2,6 +2,7 @@
 // One contact sheet of the frames a blind player's explore sessions kept, so a
 // comparator judges looks from pixels in the same format for both builds.
 import * as NodeFSP from "node:fs/promises";
+import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 /** A frame an explore session kept, in play order across the thread's sessions. */
 export interface ExploreFrame {
@@ -34,19 +35,15 @@ export const pngSize = async (path: string): Promise<{ w: number; h: number } | 
   try {
     const head = Buffer.alloc(24);
     const { bytesRead } = await handle.read(head, 0, 24, 0);
-    if (
-      bytesRead < 24 ||
-      head.readUInt32BE(0) !== 0x89504e47 ||
-      head.toString("latin1", 12, 16) !== "IHDR"
-    )
-      return null;
+    const dimensions = readImageDimensions(head.subarray(0, bytesRead));
+    if (dimensions === null) return null;
     // A truncated frame (a capture cut off mid-write) has no IEND trailer, and
     // one undecodable input fails the whole ffmpeg tile.
     const { size } = await handle.stat();
     const tail = Buffer.alloc(12);
     const { bytesRead: tailRead } = await handle.read(tail, 0, 12, Math.max(0, size - 12));
     if (tailRead < 12 || tail.toString("latin1", 4, 8) !== "IEND") return null;
-    return { w: head.readUInt32BE(16), h: head.readUInt32BE(20) };
+    return { w: dimensions.width, h: dimensions.height };
   } catch {
     return null;
   } finally {

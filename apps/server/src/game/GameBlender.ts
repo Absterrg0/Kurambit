@@ -56,6 +56,7 @@ import {
   stopRecorded,
 } from "./processHost.ts";
 import { OFFSCREEN_POSITION, findWindowHost, type HostedWindow } from "./windowHost.ts";
+import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
@@ -218,18 +219,6 @@ const toolNetworkEnv = (): NodeJS.ProcessEnv => {
 
 /** Blender's window, the size its viewport looks render at. */
 const BLENDER_WINDOW = { width: 1280, height: 800 } as const;
-
-/** PNG IHDR dimensions without a decoder: width/height at bytes 16/20. */
-const pngSizeOf = (data: string, fallback: number): { width: number; height: number } => {
-  try {
-    const bytes = Buffer.from(data, "base64");
-    if (bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47)
-      return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
-  } catch {
-    /* fall through */
-  }
-  return { width: fallback, height: fallback };
-};
 
 type McpContent = {
   readonly content?: ReadonlyArray<{
@@ -896,7 +885,10 @@ const make = Effect.gen(function* () {
           const image = (result.content ?? []).find((entry) => entry.type === "image");
           if (image?.data === undefined)
             return { text: text === "" ? "Blender returned no image." : text };
-          const size = pngSizeOf(image.data, input.maxSize ?? 768);
+          const size = readImageDimensions(Buffer.from(image.data, "base64")) ?? {
+            width: input.maxSize ?? 768,
+            height: input.maxSize ?? 768,
+          };
           return {
             text: text === "" ? "See the attached viewport image." : text,
             screenshot: {
