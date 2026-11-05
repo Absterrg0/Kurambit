@@ -10,21 +10,48 @@ export interface GameBrowser {
   readonly executable: string;
   /** Chrome's sandbox, on unless the operator turned it off (KURAMBIT_SERVER_BROWSER_SANDBOX=0). */
   readonly sandbox: boolean;
-  /** What on this host kept the browser from starting, when that is known. */
-  readonly diagnose: (cause: unknown) => Promise<Error | undefined>;
+  /**
+   * Why the browser would not start, for the creator: what on this host
+   * stopped it when that is known, else the launch error and what to try.
+   */
+  readonly launchFailure: (cause: unknown) => Promise<string>;
 }
 
 /**
  * Kurambit's own headless browser for game pages: T3's pinned, verified
  * headless shell (PreviewBrowser), installed on first use, so a three.js game
  * needs nothing installed on the machine. Built once per service; the result
- * asks for it per launch.
+ * asks for it per launch. A browser that cannot be had is the machine's
+ * problem, never the game's: an install in progress is `busy` (its cause is
+ * the PreviewBrowserInstallingError), and a failed install or an unsupported
+ * platform is `tool-missing`.
  */
 export const makeGameBrowser = Effect.gen(function* () {
   const preview = yield* PreviewBrowser.PreviewBrowser;
   const services = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
   const sandbox = !PreviewBrowserHost.sandboxDisabled(yield* HostProcess.Environment);
+  const launchFailure = async (executable: string, cause: unknown): Promise<string> => {
+    // Playwright's launch error drops Chrome's own output; its sandbox note survives.
+    const diagnosed = await Effect.runPromiseWith(services)(
+      PreviewBrowserHost.diagnoseLaunchFailure({
+        executable,
+        setupCommand,
+        output: /sandboxing failed/i.test(String(cause))
+          ? PreviewBrowserHost.NO_SANDBOX_SIGNATURE
+          : "",
+      }),
+    ).catch(() => undefined);
+    if (diagnosed?._tag === "PreviewBrowserSandboxError")
+      return `${diagnosed.message} Or start Kurambit with KURAMBIT_SERVER_BROWSER_SANDBOX=0 to run it without the sandbox.`;
+    if (diagnosed !== undefined) return diagnosed.message;
+    const first = (cause instanceof Error ? cause.message : String(cause)).split("\n")[0] ?? "";
+    return `Kurambit's headless browser would not start (${first.slice(0, 120)}).${
+      sandbox
+        ? ` If this host blocks Chrome's sandbox, run \`${setupCommand}\` once, or start Kurambit with KURAMBIT_SERVER_BROWSER_SANDBOX=0.`
+        : ""
+    }`;
+  };
   return (operation: string, path: string): Effect.Effect<GameBrowser, GameOperationError> =>
     preview.executable.pipe(
       Effect.mapError(
@@ -32,12 +59,7 @@ export const makeGameBrowser = Effect.gen(function* () {
           new GameOperationError({
             operation,
             path,
-            reason:
-              error._tag === "PreviewBrowserInstallingError"
-                ? "busy"
-                : error._tag === "PreviewBrowserUnsupportedError"
-                  ? "unsupported-platform"
-                  : "download",
+            reason: error._tag === "PreviewBrowserInstallingError" ? "busy" : "tool-missing",
             detail: error.message,
             cause: error,
           }),
@@ -45,17 +67,7 @@ export const makeGameBrowser = Effect.gen(function* () {
       Effect.map((executable) => ({
         executable,
         sandbox,
-        // Playwright's launch error drops Chrome's own output; its sandbox note survives.
-        diagnose: (cause) =>
-          Effect.runPromiseWith(services)(
-            PreviewBrowserHost.diagnoseLaunchFailure({
-              executable,
-              setupCommand,
-              output: /sandboxing failed/i.test(String(cause))
-                ? PreviewBrowserHost.NO_SANDBOX_SIGNATURE
-                : "",
-            }),
-          ).catch(() => undefined),
+        launchFailure: (cause) => launchFailure(executable, cause),
       })),
     );
 });

@@ -113,6 +113,13 @@ export class WebPageNotReady extends Error {
   }
 }
 
+/** Headless Chromium itself would not start: the host's problem, never the page's. */
+export class WebBrowserLaunchFailed extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+  }
+}
+
 /**
  * Counts the page's animation frames: the engine-side frame counter of a
  * browser game, which stops when the page's main thread does.
@@ -163,7 +170,7 @@ export const openWebPlaySession = async (input: {
     })
     .catch(async (cause: unknown) => {
       if (input.signal?.aborted) throw new Error("aborted");
-      throw (await input.browser.diagnose(cause)) ?? cause;
+      throw new WebBrowserLaunchFailed(await input.browser.launchFailure(cause), cause);
     });
   if (input.signal?.aborted) {
     await browser.close().catch(() => undefined);

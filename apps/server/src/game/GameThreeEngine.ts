@@ -16,7 +16,12 @@ import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { stackToGameFile, type GameBrowser } from "./gameChromium.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
-import { openWebPlaySession, WebPageNotReady, type WebPageEvent } from "./webPlaySession.ts";
+import {
+  openWebPlaySession,
+  WebBrowserLaunchFailed,
+  WebPageNotReady,
+  type WebPageEvent,
+} from "./webPlaySession.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
 
@@ -137,14 +142,25 @@ export const makeThreeBackend = (
           }
           return { timedOut };
         },
+        // A browser that would not start says nothing about the build.
         catch: (cause) =>
-          new GameOperationError({
-            operation: "three-check",
-            path: ctx.projectDir,
-            reason: "command-failed",
-            detail: "Headless Chromium would not start.",
-            cause,
-          }),
+          cause instanceof WebBrowserLaunchFailed
+            ? new GameOperationError({
+                operation: "three-check",
+                path: ctx.projectDir,
+                reason: "tool-missing",
+                detail: cause.message,
+                cause,
+              })
+            : new GameOperationError({
+                operation: "three-check",
+                path: ctx.projectDir,
+                reason: "command-failed",
+                detail: `Headless Chromium failed during the check: ${
+                  cause instanceof Error ? cause.message.slice(0, 500) : String(cause).slice(0, 500)
+                }`,
+                cause,
+              }),
       }).pipe(Effect.ensuring(Effect.promise(() => server.close().catch(() => undefined))));
       const { timedOut } = played;
       const booted = reached.includes("boot");

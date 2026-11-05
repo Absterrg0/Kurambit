@@ -10,7 +10,7 @@ import type { GameBrowser } from "./gameChromium.ts";
 import type * as GameProcesses from "./GameProcesses.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 import { listenForRunner, type PlaySession } from "./playSession.ts";
-import { openWebPlaySession } from "./webPlaySession.ts";
+import { openWebPlaySession, WebBrowserLaunchFailed } from "./webPlaySession.ts";
 import type { WindowHost } from "./windowHost.ts";
 
 export interface PlayLaunch {
@@ -193,7 +193,12 @@ export const openPagePlay = (input: {
           signal,
           keptStorage: input.keptStorage,
         }),
-      catch: failure(operation, root, "command-failed"),
+      catch: (cause) =>
+        failure(
+          operation,
+          root,
+          cause instanceof WebBrowserLaunchFailed ? "tool-missing" : "command-failed",
+        )(cause),
     }).pipe(Effect.onError(() => Effect.promise(unserve)));
     return {
       play,
