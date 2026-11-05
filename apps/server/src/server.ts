@@ -10,6 +10,7 @@ import * as GameRunRecovery from "./orchestration-v2/gameRun/GameRunRecovery.ts"
 import { forkParked } from "./serverActivation.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
+import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as ProcessHost from "./game/processHost.ts";
 import * as GamePreview from "./game/GamePreview.ts";
 import * as GitRepositoryService from "./project/GitRepositoryService.ts";
@@ -524,6 +525,8 @@ const layerGameServices = GameRunControl.layer.pipe(
   // One process host for the server's life: every game launch joins its
   // Windows job and claims its private displays from it.
   Layer.provide(GameProcesses.layer.pipe(Layer.provideMerge(ProcessHost.layer))),
+  // The same layer the orchestration runtime uses, so one scheduler ticks both.
+  Layer.provide(Scheduler.layer),
 );
 
 const layerGame = layerGameServices;

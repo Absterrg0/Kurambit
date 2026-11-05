@@ -6,25 +6,13 @@ import { assetListSummary, assetUseSummary, readAssetUse } from "./assetUse.ts";
 import { laneProfile } from "../engineProfile.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { modelFacts } from "./modelFacts.ts";
+import { walkFiles } from "../walkFiles.ts";
 
 const readText = (path: string) => NodeFSP.readFile(path, "utf8").catch(() => "");
 
 export const botRunCount = async (root: string): Promise<number> =>
   (await readText(NodePath.join(root, ".studio", "bot-results.jsonl"))).split("\n").filter(Boolean)
     .length;
-
-const walk = async (
-  dir: string,
-  visit: (full: string, name: string) => Promise<void>,
-  skip: ReadonlyArray<string>,
-) => {
-  for (const entry of await NodeFSP.readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    const full = NodePath.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (!skip.includes(entry.name)) await walk(full, visit, skip);
-    } else await visit(full, entry.name);
-  }
-};
 
 // The bot's fastest finish is a plain fact with no length target beside it;
 // the reviewer decides what it means.
@@ -78,24 +66,24 @@ export const reviewerFacts = async (root: string, lane: string): Promise<string>
   let images = 0;
   let audio = 0;
   let models = 0;
-  await walk(
-    base,
-    async (full, name) => {
-      if (
-        ext.some((suffix) => name.endsWith(suffix)) &&
-        !full.includes(`${NodePath.sep}vendor${NodePath.sep}`)
-      )
-        sources.push({
-          f: NodePath.relative(root, full),
-          n: (await readText(full)).split("\n").length,
-        });
-      if (name.endsWith(".import") || name.endsWith(".meta")) return;
-      if (/\.(png|jpg|jpeg|webp|svg)$/i.test(name)) images += 1;
-      else if (/\.(wav|ogg|mp3|mid|midi)$/i.test(name)) audio += 1;
-      else if (/\.(glb|gltf|fbx|obj|blend)$/i.test(name)) models += 1;
-    },
-    [".godot", "builds"],
-  );
+  const files = await walkFiles(base, {
+    enter: (_full, name) => name !== ".godot" && name !== "builds",
+  });
+  for (const full of files) {
+    const name = NodePath.basename(full);
+    if (
+      ext.some((suffix) => name.endsWith(suffix)) &&
+      !full.includes(`${NodePath.sep}vendor${NodePath.sep}`)
+    )
+      sources.push({
+        f: NodePath.relative(root, full),
+        n: (await readText(full)).split("\n").length,
+      });
+    if (name.endsWith(".import") || name.endsWith(".meta")) continue;
+    if (/\.(png|jpg|jpeg|webp|svg)$/i.test(name)) images += 1;
+    else if (/\.(wav|ogg|mp3|mid|midi)$/i.test(name)) audio += 1;
+    else if (/\.(glb|gltf|fbx|obj|blend)$/i.test(name)) models += 1;
+  }
   sources.sort((a, b) => b.n - a.n);
   const top =
     sources

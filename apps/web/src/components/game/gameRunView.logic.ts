@@ -1,6 +1,6 @@
 import { gameRunRoleLabel, type GameRunExposure, type GameRunThreadRef } from "@kurambit/contracts";
 
-import { formatGameElapsed } from "./GameElapsed";
+import { formatElapsedSeconds } from "../chat/AgentElapsed";
 
 export interface RoleThreadGroup {
   readonly label: string;
@@ -34,7 +34,7 @@ export const exposureLine = (exposure: GameRunExposure): string =>
   [
     `${exposure.sessions} session${exposure.sessions === 1 ? "" : "s"}`,
     `${exposure.actions} action${exposure.actions === 1 ? "" : "s"}`,
-    `${formatGameElapsed(exposure.nominalMs / 1000)} of input`,
+    `${formatElapsedSeconds(exposure.nominalMs / 1000)} of input`,
     `${exposure.images} frame${exposure.images === 1 ? "" : "s"}`,
   ].join(" · ");
 

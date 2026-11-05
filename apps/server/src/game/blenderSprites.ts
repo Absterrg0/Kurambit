@@ -14,6 +14,7 @@ import {
 } from "@kurambit/contracts";
 import { laneAssets, laneLibrary } from "./engineProfile.ts";
 import { decodePng, measure, type Rgba } from "./run/spriteFacts.ts";
+import { walkFiles } from "./walkFiles.ts";
 import {
   colourHex,
   contactSheet,
@@ -136,17 +137,6 @@ const writeOwn = (path: string, bytes: Buffer) =>
       (NodeFSP.constants.O_NOFOLLOW ?? 0),
   });
 
-const pngsUnder = async (dir: string, out: string[], depth = 0): Promise<void> => {
-  if (depth > 6 || out.length >= PALETTE_FILES) return;
-  const entries = await NodeFSP.readdir(dir, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
-    if (out.length >= PALETTE_FILES) return;
-    const full = NodePath.join(dir, entry.name);
-    if (entry.isDirectory()) await pngsUnder(full, out, depth + 1);
-    else if (entry.isFile() && /\.png$/i.test(entry.name)) out.push(full);
-  }
-};
-
 /** The palette's opaque colours, most used first: a PNG, a folder of PNGs, or a pack id added to this game. */
 const paletteOf = (realRoot: string, lane: string, spec: string) =>
   Effect.gen(function* () {
@@ -169,10 +159,16 @@ const paletteOf = (realRoot: string, lane: string, spec: string) =>
       );
     if (!real.startsWith(`${realRoot}${NodePath.sep}`))
       return yield* fail(relative, "invalid-path", "The palette must be inside the game.");
-    const files: string[] = [];
     const stat = yield* Effect.tryPromise({ try: () => NodeFSP.stat(real), catch: io(relative) });
-    if (stat.isDirectory()) yield* Effect.promise(() => pngsUnder(real, files));
-    else files.push(real);
+    const files = stat.isDirectory()
+      ? yield* Effect.promise(() =>
+          walkFiles(real, {
+            match: (name) => /\.png$/i.test(name),
+            maxDepth: 6,
+            limit: PALETTE_FILES,
+          }),
+        )
+      : [real];
     const images: Rgba[] = [];
     let pixels = 0;
     for (const file of files) {

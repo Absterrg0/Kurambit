@@ -244,9 +244,6 @@ importers:
       '@ff-labs/fff-node':
         specifier: 0.11.0
         version: 0.11.0(patch_hash=60c0d8f131118e892034c692eafe235ac74e40059443009e7be7b277c6206d83)
-      '@gltf-transform/core':
-        specifier: 4.5.1
-        version: 4.5.1
       '@kurambit/provider-acp':
         specifier: workspace:*
         version: link:../../packages/provider-acp
@@ -2086,9 +2083,6 @@ packages:
 
   '@formkit/auto-animate@0.9.0':
     resolution: {integrity: sha512-VhP4zEAacXS3dfTpJpJ88QdLqMTcabMg0jwpOSxZ/VzfQVfl3GkZSCZThhGC5uhq/TxPHPzW0dzr4H9Bb1OgKA==}
-
-  '@gltf-transform/core@4.5.1':
-    resolution: {integrity: sha512-OWgBYssKHKoXMIrMb2N20jXqWRnMP9HdtcTFQBEAJtz4P+OOxx5fozl5eAeK7nktIs5uDE/lu4NbkE5VCZaR9g==}
 
   '@hono/node-server@1.19.17':
     resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
@@ -7396,9 +7390,6 @@ packages:
   proper-lockfile@4.1.2:
     resolution: {integrity: sha512-TjNPblN4BwAWMXU8s9AEz4JmQxnD1NNL7bNOY/AKUzyamc379FWASUhc/K1pL2noVb+XmZKLL68cjzLsiOAMaA==}
 
-  property-graph@4.1.0:
-    resolution: {integrity: sha512-AvPcP7XECNWy4LGmFQ77k7un4lSKM4eS29PTvW4ck95uYeLxXPWJM7hLuBqK91FaHqCcgJvIUCuNJjjxKE7VKQ==}
-
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
 
@@ -9619,10 +9610,6 @@ snapshots:
   '@fontsource/instrument-serif@5.3.0': {}
 
   '@formkit/auto-animate@0.9.0': {}
-
-  '@gltf-transform/core@4.5.1':
-    dependencies:
-      property-graph: 4.1.0
 
   '@hono/node-server@1.19.17(hono@4.13.7)':
     dependencies:
@@ -15034,8 +15021,6 @@ snapshots:
       graceful-fs: 4.2.11
       retry: 0.12.0
       signal-exit: 3.0.7
-
-  property-graph@4.1.0: {}
 
   property-information@7.2.0: {}
 

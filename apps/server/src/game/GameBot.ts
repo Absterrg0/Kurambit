@@ -25,14 +25,21 @@ import * as GameProjectService from "./GameProjectService.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { findExecutable } from "./GameProcesses.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
-import { requireChromium } from "./gameChromium.ts";
+import { makeGameBrowser } from "./gameChromium.ts";
 import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
-import { launchPageBot, launchProcessBot } from "./gameBotLaunch.ts";
+import * as GameProcesses from "./GameProcesses.ts";
+import { openPagePlay, openRunnerPlay } from "./playLaunch.ts";
 import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
-import { playBot, type BotLaunch } from "./gameBotPlay.ts";
-import { botEnding, botFinalState, makeJev, opError, type Session } from "./gameBotRuntime.ts";
-import { listenForRunner } from "./playSession.ts";
+import { playBot } from "./gameBotPlay.ts";
+import {
+  BOOT_TIMEOUT_MS,
+  botEnding,
+  botFinalState,
+  makeJev,
+  opError,
+  type Session,
+} from "./gameBotRuntime.ts";
 
 /** The Jev key lives in the server secret store under this name; bots never see it. */
 export const GAME_BOT_JEV_SECRET = "game-bot-jev-api-key";
@@ -377,6 +384,8 @@ const make = Effect.gen(function* () {
   const players = yield* GamePlayer.GamePlayer;
   const projects = yield* GameProjectService.GameProjectService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
+  const processes = yield* GameProcesses.GameProcesses;
+  const gameBrowser = yield* makeGameBrowser;
   const sessions = new Map<string, Session>();
   const runs = new Map<string, { root: string; result: GameBotRunResult }>();
 
@@ -460,7 +469,7 @@ const make = Effect.gen(function* () {
             ),
           ),
         ).viewport;
-      const chrome = isWeb ? yield* requireChromium("Bot run", root) : null;
+      const browser = isWeb ? yield* gameBrowser("Bot run", root) : null;
       const ffmpeg = yield* Effect.promise(() =>
         findExecutable("ffmpeg", { pathEnv, override: process.env.KURAMBIT_FFMPEG }),
       );
@@ -545,90 +554,51 @@ const make = Effect.gen(function* () {
                     : String(cause).slice(0, 2000),
                   cause,
                 );
-          // Whichever launch completes is stopped exactly once, however the
-          // run ends: the finalizer below stops what reached `launched`, and a
-          // launch that resolves after an interrupt (Effect no longer awaits
-          // it) stops itself. Chromium is not in session.processes, so drop() alone
-          // would never end it.
-          let launched: BotLaunch | null = null;
-          const keep = async (signal: AbortSignal, launch: Promise<BotLaunch>) => {
-            const opened = await launch;
-            if (signal.aborted) {
-              await opened.stop();
-              throw new Error("Bot run stopped.");
-            }
-            launched = opened;
-            return opened;
-          };
           const open = isWeb
-            ? Effect.tryPromise({
-                try: (signal) =>
-                  keep(
-                    signal,
-                    launchPageBot({
-                      root,
-                      projectDir,
-                      chrome: chrome!,
-                      viewport,
-                      session,
-                      signal,
-                      keptStorage: keptWebStorage(saves),
-                    }),
-                  ),
-                catch: failed,
+            ? openPagePlay({
+                operation: "Bot run",
+                root,
+                projectDir,
+                browser: browser!,
+                viewport,
+                bootTimeoutMs: BOOT_TIMEOUT_MS,
+                keptStorage: keptWebStorage(saves),
               })
-            : Effect.gen(function* () {
-                const launch = backend.playProcess;
-                if (launch === null)
-                  return yield* opError(
-                    "Bot run",
-                    root,
-                    "invalid-input",
-                    `${profile.displayName} games have no runner process.`,
-                  );
-                const listener = yield* Effect.tryPromise({
-                  try: () => listenForRunner(),
-                  catch: (cause) => opError("Bot run", runDir, "io", undefined, cause),
-                });
-                const requestPath = NodePath.join(runDir, "request.json");
-                return yield* launch({
-                  projectDir,
-                  player,
-                  requestPath,
-                  scriptDir: runDir,
-                  traceDir: runDir,
-                  saves,
-                  viewport,
-                  window: host!.kind,
-                }).pipe(
-                  Effect.flatMap((spec) =>
-                    Effect.tryPromise({
-                      try: (signal) =>
-                        keep(
-                          signal,
-                          launchProcessBot({
-                            spec,
-                            listener,
-                            requestPath,
-                            host: host!,
-                            viewport,
-                            runDir,
-                            session,
-                            signal,
-                          }),
-                        ),
-                      catch: failed,
-                    }),
-                  ),
-                  // Dropping twice is harmless; a listener nobody accepted on is not.
-                  Effect.onError(() => Effect.promise(() => listener.drop())),
-                );
+            : openRunnerPlay(processes, {
+                operation: "Bot run",
+                process: "bot-play",
+                root,
+                backend,
+                projectDir,
+                player,
+                viewport,
+                host,
+                scriptDir: runDir,
+                traceDir: runDir,
+                saves,
+                timeoutMs: BOOT_TIMEOUT_MS + (seconds + 300) * 1000,
+                bootTimeoutMs: BOOT_TIMEOUT_MS,
+                what: "The game's runner",
               });
-          const one = yield* open.pipe(
-            Effect.flatMap((opened) =>
+          // An interrupt does not wait for the play promise, and its finally
+          // still stops the bot child and the video encoder: the launch ends
+          // only once that settled (bounded), so nothing writes into the run's
+          // folder once the call returns and its caller removes it.
+          let playing: Promise<unknown> = Promise.resolve();
+          // A stop during boot interrupts the launch, which ends what it started.
+          const one = yield* Effect.acquireUseRelease(
+            open.pipe(
+              Effect.interruptible,
+              Effect.mapError((error) =>
+                session.stopped
+                  ? opError("Bot run", root, "command-failed", "Bot run stopped.")
+                  : error,
+              ),
+            ),
+            (opened) =>
               Effect.tryPromise({
-                try: (signal) =>
-                  playBot(jevApi, opened, {
+                try: (signal) => {
+                  const run = playBot(jevApi, opened, {
                     host: processHost,
                     root,
                     runId,
@@ -651,11 +621,22 @@ const make = Effect.gen(function* () {
                     runTotal: count,
                     seed: NodeCrypto.randomInt(1_000_000_000),
                     priorRuns: [...priorRuns],
-                  }),
+                  });
+                  playing = run;
+                  return run;
+                },
                 catch: failed,
               }),
-            ),
-            Effect.ensuring(Effect.promise(async () => launched?.stop())),
+            (opened) =>
+              Effect.promise(async () => {
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                await Promise.race([
+                  playing.catch(() => undefined),
+                  new Promise((resolve) => (timer = setTimeout(resolve, 30_000))),
+                ]);
+                clearTimeout(timer);
+                await opened.stop();
+              }),
           );
           out.push(one);
           runs.set(runId, { root, result: one });

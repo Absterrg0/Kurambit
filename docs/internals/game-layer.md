@@ -98,8 +98,8 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 - Web play shares the services: the browser host (`webPlaySession`) opens real-time
   headless-Chromium sessions on the served static folder (real keyboard/mouse, the read-only
   `window.__studio` probe, console and page errors; no pause between acts). `gameChromium`
-  resolves the executable (`KURAMBIT_CHROME` override, then host lookup) and holds the `__studio`
-  snippets; `gameWebServer` serves a game-relative directory over loopback for check/explore/bot
+  takes T3's pinned headless shell from `PreviewBrowser` (installed on first use, sandboxed as
+  preview is, so three.js needs no browser on the machine) and holds the `__studio` snippets; `gameWebServer` serves a game-relative directory over loopback for check/explore/bot
   without touching Preview state.
 - Unity play is a real Linux player of the current sources, built once per source identity
   under `builds/logs/unity-play-*`, run in a window host's window. The role runner makes a Unity sample's

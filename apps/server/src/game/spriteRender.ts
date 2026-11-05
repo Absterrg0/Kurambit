@@ -1,8 +1,8 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Pure pixel work on decoded PNGs; node:zlib encodes.
+// Pure pixel work on decoded PNGs; pngjs encodes.
 // The deterministic half of game_blender_render_sprites: Blender renders large, this turns the
 // renders into pixel art (downscale, hard alpha, a palette shared by every frame, an outline) and
 // draws the contact sheet. Same input, same bytes.
-import * as NodeZlib from "node:zlib";
+import { PNG } from "pngjs";
 import type { Rgba } from "./run/spriteFacts.ts";
 import type { SpriteCamera, SpriteFit } from "./spriteRenderPy.ts";
 
@@ -237,31 +237,11 @@ export const hexColour = (hex: string): number | null => {
 };
 export const colourHex = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
 
-const chunk = (name: string, body: Buffer) => {
-  const head = Buffer.alloc(8);
-  head.writeUInt32BE(body.length, 0);
-  head.write(name, 4, "latin1");
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(NodeZlib.crc32(Buffer.concat([head.subarray(4), body])), 0);
-  return Buffer.concat([head, body, crc]);
-};
-
-/** 8-bit RGBA PNG, no filtering, fixed deflate level: the same pixels give the same bytes. */
+/** 8-bit RGBA PNG, no filtering, fixed deflate settings: the same pixels give the same bytes. */
 export const encodePng = (img: Rgba): Buffer => {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(img.width, 0);
-  ihdr.writeUInt32BE(img.height, 4);
-  ihdr.set([8, 6, 0, 0, 0], 8);
-  const stride = img.width * 4;
-  const raw = Buffer.alloc((stride + 1) * img.height);
-  for (let y = 0; y < img.height; y++)
-    raw.set(img.data.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", NodeZlib.deflateSync(raw, { level: 9 })),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
+  const png = new PNG({ width: img.width, height: img.height });
+  png.data = Buffer.from(img.data.buffer, img.data.byteOffset, img.data.byteLength);
+  return PNG.sync.write(png, { filterType: 0, deflateLevel: 9, deflateStrategy: 0 });
 };
 
 /** Frames side by side, one row per view: the strip as an engine loads a sheet. */

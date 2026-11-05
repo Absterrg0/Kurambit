@@ -1,57 +1,78 @@
-// @effect-diagnostics nodeBuiltinImport:off -- This module owns the headless-Chromium boundary for the three.js lane.
-import * as NodeFSP from "node:fs/promises";
-import * as NodePath from "node:path";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
-import { GameOperationError, THREE_VIEWPORT } from "@kurambit/contracts";
-import { findExecutable } from "./GameProcesses.ts";
-import { HOST_OS } from "./processHost.ts";
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import { GameOperationError } from "@kurambit/contracts";
+import { resolveRootCliCommand } from "../cli/invocation.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 
-export const KURAMBIT_CHROME_OVERRIDE = "KURAMBIT_CHROME";
+export interface GameBrowser {
+  readonly executable: string;
+  /** Chrome's sandbox, on unless the operator turned it off (KURAMBIT_SERVER_BROWSER_SANDBOX=0). */
+  readonly sandbox: boolean;
+  /**
+   * Why the browser would not start, for the creator: what on this host
+   * stopped it when that is known, else the launch error and what to try.
+   */
+  readonly launchFailure: (cause: unknown) => Promise<string>;
+}
 
-/** Headless Chromium for the three.js lane: explicit override first, then the host install. */
-export const findChromium = async (): Promise<string | null> => {
-  const pathEnv = process.env.PATH ?? "";
-  const override = process.env[KURAMBIT_CHROME_OVERRIDE];
-  if (override !== undefined && override.trim() !== "") {
-    const hit = await findExecutable(NodePath.basename(override.trim()), {
-      pathEnv: NodePath.dirname(override.trim()) + NodePath.delimiter + pathEnv,
-      override: override.trim(),
-    });
-    if (hit !== null) return hit;
-  }
-  for (const name of ["google-chrome", "chromium", "chromium-browser", "chrome"]) {
-    const hit = await findExecutable(name, { pathEnv });
-    if (hit !== null) return hit;
-  }
-  // Windows and macOS put browsers in fixed install folders, not on PATH.
-  for (const path of chromiumInstalls()) {
-    const hit = await findExecutable(NodePath.basename(path), {
-      pathEnv: NodePath.dirname(path),
-    });
-    if (hit !== null) return hit;
-  }
-  return null;
-};
-
-const chromiumInstalls = (): ReadonlyArray<string> => {
-  if (HOST_OS === "darwin")
-    return [
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    ];
-  if (HOST_OS !== "win32") return [];
-  const roots = [
-    process.env.PROGRAMFILES,
-    process.env["PROGRAMFILES(X86)"],
-    process.env.LOCALAPPDATA,
-  ];
-  return roots
-    .filter((root): root is string => root !== undefined && root !== "")
-    .map((root) => NodePath.win32.join(root, "Google", "Chrome", "Application", "chrome.exe"));
-};
+/**
+ * Kurambit's own headless browser for game pages: T3's pinned, verified
+ * headless shell (PreviewBrowser), installed on first use, so a three.js game
+ * needs nothing installed on the machine. Built once per service; the result
+ * asks for it per launch. A browser that cannot be had is the machine's
+ * problem, never the game's: an install in progress is `busy` (its cause is
+ * the PreviewBrowserInstallingError), and a failed install or an unsupported
+ * platform is `tool-missing`.
+ */
+export const makeGameBrowser = Effect.gen(function* () {
+  const preview = yield* PreviewBrowser.PreviewBrowser;
+  const services = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
+  const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
+  const sandbox = !PreviewBrowserHost.sandboxDisabled(yield* HostProcess.Environment);
+  const launchFailure = async (executable: string, cause: unknown): Promise<string> => {
+    // Playwright's launch error drops Chrome's own output; its sandbox note survives.
+    const diagnosed = await Effect.runPromiseWith(services)(
+      PreviewBrowserHost.diagnoseLaunchFailure({
+        executable,
+        setupCommand,
+        output: /sandboxing failed/i.test(String(cause))
+          ? PreviewBrowserHost.NO_SANDBOX_SIGNATURE
+          : "",
+      }),
+    ).catch(() => undefined);
+    if (diagnosed?._tag === "PreviewBrowserSandboxError")
+      return `${diagnosed.message} Or start Kurambit with KURAMBIT_SERVER_BROWSER_SANDBOX=0 to run it without the sandbox.`;
+    if (diagnosed !== undefined) return diagnosed.message;
+    const first = (cause instanceof Error ? cause.message : String(cause)).split("\n")[0] ?? "";
+    return `Kurambit's headless browser would not start (${first.slice(0, 120)}).${
+      sandbox
+        ? ` If this host blocks Chrome's sandbox, run \`${setupCommand}\` once, or start Kurambit with KURAMBIT_SERVER_BROWSER_SANDBOX=0.`
+        : ""
+    }`;
+  };
+  return (operation: string, path: string): Effect.Effect<GameBrowser, GameOperationError> =>
+    preview.executable.pipe(
+      Effect.mapError(
+        (error) =>
+          new GameOperationError({
+            operation,
+            path,
+            reason: error._tag === "PreviewBrowserInstallingError" ? "busy" : "tool-missing",
+            detail: error.message,
+            cause: error,
+          }),
+      ),
+      Effect.map((executable) => ({
+        executable,
+        sandbox,
+        launchFailure: (cause) => launchFailure(executable, cause),
+      })),
+    );
+});
 
 export const chromiumLaunchArgs = (): readonly string[] => [
-  "--no-sandbox",
   "--no-first-run",
   "--no-default-browser-check",
   "--mute-audio",
@@ -112,26 +133,3 @@ export const stackToGameFile = (stack: string | undefined, origin: string): stri
   );
   return match?.[1] === undefined ? "web/main.js" : `web/${match[1]}`;
 };
-
-export const requireChromium = (operation: string, path: string) =>
-  Effect.gen(function* () {
-    const executable = yield* Effect.promise(() => findChromium());
-    if (executable === null)
-      return yield* new GameOperationError({
-        operation,
-        path,
-        reason: "tool-missing",
-        detail:
-          "Headless Chromium is needed to play this three.js game, and none was found. Install Google Chrome (or Chromium), or point KURAMBIT_CHROME at its executable.",
-      });
-    return executable;
-  });
-
-/** Scratch profile beside the run: Chromium stays out of the game's folder. */
-export const chromiumProfileDir = async (runDir: string): Promise<string> => {
-  const dir = NodePath.join(runDir, "chrome-profile");
-  await NodeFSP.mkdir(dir, { recursive: true });
-  return dir;
-};
-
-export const threeViewport = (): { width: number; height: number } => ({ ...THREE_VIEWPORT });

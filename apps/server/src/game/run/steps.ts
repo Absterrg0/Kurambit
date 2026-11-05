@@ -1,12 +1,16 @@
 // The run's boot step, as the step runner runs it on the game folder.
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import type { GameOperationError, ThreadId } from "@kurambit/contracts";
+import { PreviewBrowserInstallingError } from "../../preview/PreviewBrowser.ts";
 import type * as GameService from "../GameService.ts";
 import { type GameRunMemoryShort, handBackOnLowMemory, memoryEnded } from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
 import { laneProfile } from "../engineProfile.ts";
 
 type Game = GameService.GameService["Service"];
+
+const isBrowserInstalling = Schema.is(PreviewBrowserInstallingError);
 
 export const bootStep = (
   game: Game,
@@ -36,6 +40,13 @@ export const bootStep = (
       Effect.map((r) => ({ kind: "boot", ...r }) as const),
       Effect.catchTags({
         GameOperationError: (error) => {
+          // Kurambit's first browser install outlasts any number of tries on a
+          // slow line; each wait is bounded, and the install ends in a browser
+          // or in a tool-missing failure.
+          if (isBrowserInstalling(error.cause))
+            return ctx
+              .log(`${what}: ${error.detail ?? error.reason}; waiting`)
+              .pipe(Effect.andThen(judged(what, attempt, tries)));
           // A player build whose sources moved under it says nothing about them.
           const transient =
             error.reason === "busy" ||
@@ -49,7 +60,14 @@ export const bootStep = (
                 Effect.andThen(judged(what, attempt, tries + 1)),
               );
           if (error.reason === "low-memory") return Effect.succeed(memoryEnded(error));
-          if (error.reason === "tool-missing") return Effect.fail(error);
+          // The ending shows its first 300 characters: the detail says what to
+          // fix on this machine, where the error's message opens with advice
+          // written for an agent's tool call.
+          if (error.reason === "tool-missing")
+            return Effect.succeed({
+              kind: "failed",
+              reason: `${what} could not run: ${error.detail ?? error.message}`.slice(0, 300),
+            } as const);
           return Effect.succeed({
             kind: "boot",
             ok: false,

@@ -18,7 +18,19 @@ import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import { commandFlag, commandHas, readRecord, underIdleMemoryFloor } from "./liveProcess.ts";
+import {
+  commandFlag,
+  commandHas,
+  LIVE_IDLE_MS,
+  LIVE_SWEEP_MS,
+  type McpContent,
+  readRecord,
+  stringEnv,
+  sweepIdle,
+  textOf,
+} from "./liveProcess.ts";
+import * as HostResources from "../resourceTelemetry/HostResources.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
 import {
   adoptLaunch,
   LAUNCH_ENV,
@@ -42,7 +54,6 @@ import {
 import { checkoutOf, cloneTree } from "./unityPlayerCache.ts";
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
-const IDLE_MS = 10 * 60_000;
 /**
  * Free memory a live Unity editor needs to open, in MB: the editor plus its
  * import worker, compilers and player build tools peaked about 4 GB on a
@@ -133,16 +144,6 @@ interface SessionRecord {
   readonly editorLaunch?: LaunchRecord;
   readonly mcpLaunch?: LaunchRecord;
 }
-
-export type McpContent = {
-  readonly content?: ReadonlyArray<{
-    readonly type: string;
-    readonly text?: string;
-    readonly data?: string;
-    readonly mimeType?: string;
-  }>;
-  readonly isError?: boolean;
-};
 
 export interface UnityCliResult {
   /** The CLI's JSON envelope `data`, when it printed one. */
@@ -302,12 +303,6 @@ const reapRecord = async (
   await dropDataStoreMemory(homeDir);
 };
 
-export const textOf = (result: McpContent): string =>
-  (result.content ?? [])
-    .filter((entry) => entry.type === "text")
-    .map((entry) => entry.text ?? "")
-    .join("\n");
-
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /**
@@ -345,12 +340,6 @@ export const screenshotOf = (
     text: text.slice(0, 4000) || "See the attached Game view.",
     screenshot: { mimeType: "image/png", data, ...size },
   };
-};
-
-const stringEnv = (env: NodeJS.ProcessEnv): Record<string, string> => {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) if (value !== undefined) out[key] = value;
-  return out;
 };
 
 const withCliFlags = (args: ReadonlyArray<string>, flags: ReadonlyArray<string>): string[] => {
@@ -515,6 +504,8 @@ export class GameUnity extends Context.Service<
 >()("kurambit/game/GameUnity") {}
 
 const make = Effect.gen(function* () {
+  const scheduler = yield* Scheduler.Scheduler;
+  const memory = yield* HostResources.HostResources;
   const processHost = yield* ProcessHost;
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
@@ -677,7 +668,7 @@ const make = Effect.gen(function* () {
         if (
           existing !== undefined &&
           existing.editor.running() &&
-          (existing.inFlight > 0 || now - existing.lastActive < IDLE_MS)
+          (existing.inFlight > 0 || now - existing.lastActive < LIVE_IDLE_MS)
         ) {
           existing.lastActive = now;
           take(existing);
@@ -1064,34 +1055,29 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  // Idle sessions die on a sweep so one forgotten game cannot hold a 2-3 GB
-  // editor and its display forever, and close early when the machine runs
-  // short of memory; a held editor is never idle.
-  yield* Effect.forkScoped(
-    Effect.forever(
-      Effect.gen(function* () {
-        yield* Effect.sleep("15 seconds");
-        const now = yield* Clock.currentTimeMillis;
-        const idle = Array.from(sessions).filter(([, session]) => session.inFlight === 0);
-        const shortMb = idle.length === 0 ? null : yield* Effect.promise(underIdleMemoryFloor);
-        for (const [root, session] of idle) {
-          const expired = now - session.lastActive > IDLE_MS;
-          if (!expired && shortMb === null) continue;
-          yield* openLock.withPermits(1)(
-            // Re-read under the lock: a call may have taken it meanwhile.
-            Effect.suspend(() =>
-              session.inFlight === 0 && sessions.get(root) === session
-                ? (expired
-                    ? Effect.void
-                    : Effect.logWarning("closing the idle live Unity editor: memory is short", {
-                        root,
-                        availableMb: shortMb,
-                      })
-                  ).pipe(Effect.andThen(drop(root)))
-                : Effect.void,
-            ),
-          );
-        }
+  // A held editor is never idle.
+  yield* scheduler.register(
+    "game-unity-idle",
+    yield* Scheduler.every(
+      LIVE_SWEEP_MS,
+      sweepIdle({
+        what: "live Unity editor",
+        memory,
+        idle: () =>
+          Array.from(sessions)
+            .filter(([, session]) => session.inFlight === 0)
+            .map(([root, session]) => ({
+              root,
+              lastActive: session.lastActive,
+              // Re-read under the lock: a call may have taken it meanwhile.
+              close: openLock.withPermits(1)(
+                Effect.suspend(() =>
+                  session.inFlight === 0 && sessions.get(root) === session
+                    ? drop(root)
+                    : Effect.void,
+                ),
+              ),
+            })),
       }),
     ),
   );

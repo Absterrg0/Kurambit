@@ -29,18 +29,15 @@ import {
   type LineReader,
   type Session,
 } from "./gameBotRuntime.ts";
-import { parseLine, type PlaySession } from "./playSession.ts";
+import { parseLine } from "./playSession.ts";
 import { spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 import { VIDEO_FPS, VIDEO_WIDTH, openFrameVideo, type FrameVideo } from "./frameVideo.ts";
+import type { PlayLaunch } from "./playLaunch.ts";
 
 const END_SETTLE_MS = 1500;
 
-/** What an engine's launch hands the bot run: the session, and how to end what it started. */
-export interface BotLaunch {
-  readonly play: PlaySession;
-  /** Ends everything the launch started. Idempotent. */
-  readonly stop: () => Promise<void>;
-}
+/** What the launch hands the bot run: the session, and how to end what it started. */
+export type BotLaunch = Pick<PlayLaunch, "play" | "stop">;
 
 export interface BotRunArgs {
   readonly host: ProcessHostState;

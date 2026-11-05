@@ -10,6 +10,8 @@ import { GameOperationError, type GameLibraryKind } from "@kurambit/contracts";
 import { openZipArchive } from "../zipArchive.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
+import { readGltfJson } from "./gltfJson.ts";
+import { walkFiles } from "./walkFiles.ts";
 
 export interface LibraryPack {
   readonly id: string;
@@ -355,20 +357,6 @@ const oggSeconds = (head: Buffer, tail: Buffer) => {
 const GLB_HEADER_BYTES = 4 * 1024 * 1024;
 const GLTF_FILE_BYTES = 64 * 1024 * 1024;
 
-/** glTF JSON from a .glb header or a .gltf file, if it parses. */
-const gltfJson = (buffer: Buffer, binary: boolean): unknown => {
-  try {
-    if (!binary) return JSON.parse(buffer.toString("utf8"));
-    if (buffer.length < 20 || buffer.toString("latin1", 0, 4) !== "glTF") return undefined;
-    const length = buffer.readUInt32LE(12);
-    if (buffer.toString("latin1", 16, 20) !== "JSON" || 20 + length > buffer.length)
-      return undefined;
-    return JSON.parse(buffer.toString("utf8", 20, 20 + length));
-  } catch {
-    return undefined;
-  }
-};
-
 const relativeUris = (items: unknown): string[] =>
   Array.isArray(items)
     ? items.flatMap((item) => {
@@ -449,23 +437,14 @@ export const modelPictures = (
   return { ofImage, byModel };
 };
 
-const walk = async (directory: string, prefix = ""): Promise<string[]> => {
-  const entries = await NodeFSP.readdir(NodePath.join(directory, prefix), { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
-    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-    if (entry.isDirectory()) files.push(...(await walk(directory, relative)));
-    else if (entry.isFile()) files.push(relative);
-  }
-  return files;
-};
-
 /** Facts about every usable file in an unpacked pack. Reads headers only, except glTF JSON. */
 export const indexPack = async (
   pack: Pick<LibraryPack, "id" | "sha256">,
   directory: string,
 ): Promise<LibraryIndex> => {
-  const paths = await walk(directory);
+  const paths = (await walkFiles(directory)).map((full) =>
+    NodePath.relative(directory, full).split(NodePath.sep).join("/"),
+  );
   const present = new Set(paths);
   const files: LibraryFile[] = [];
   for (const path of paths) {
@@ -487,22 +466,13 @@ export const indexPack = async (
       );
       if (seconds !== undefined) file = { ...file, seconds: Math.round(seconds * 100) / 100 };
     }
-    const glbHead = format === "glb" ? await readHead(absolute, 20) : undefined;
-    const jsonBytes =
-      glbHead === undefined
-        ? size
-        : glbHead.length === 20 && glbHead.toString("latin1", 0, 4) === "glTF"
-          ? 20 + glbHead.readUInt32LE(12)
-          : 0;
-    if (
-      (format === "glb" && jsonBytes > GLB_HEADER_BYTES) ||
-      (format === "gltf" && size > GLTF_FILE_BYTES)
-    )
-      file = { ...file, clipsUnread: true };
-    else if (format === "glb" || format === "gltf") {
-      const head =
-        format === "glb" ? await readHead(absolute, jsonBytes) : await NodeFSP.readFile(absolute);
-      const facts = gltfFacts(gltfJson(head, format === "glb"));
+    const gltf =
+      format === "glb" || format === "gltf"
+        ? await readGltfJson(absolute, format === "glb" ? GLB_HEADER_BYTES : GLTF_FILE_BYTES)
+        : undefined;
+    if (gltf?.kind === "too-large") file = { ...file, clipsUnread: true };
+    else if (gltf !== undefined) {
+      const facts = gltfFacts(gltf.kind === "json" ? gltf.json : undefined);
       const deps = facts.uris.flatMap((uri) => {
         const dep = besides(path, uri);
         return dep !== undefined && present.has(dep) ? [dep] : [];

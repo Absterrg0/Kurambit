@@ -36,7 +36,7 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
-import { gitEra, toState } from "../../orchestration-v2/gameRun/decide.ts";
+import { gitEra, RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   gameRunOperationOwner,
@@ -74,6 +74,7 @@ import {
 import { modelFacts } from "./modelFacts.ts";
 import {
   blankFolder,
+  dropRunCopies,
   releaseCopy,
   removeBlank,
   runCopies,
@@ -933,6 +934,23 @@ const make = Effect.gen(function* () {
               : log(`the run's spent builds could not be cleared: ${causeText(cause)}`),
           ),
         );
+      const roleThreads = new Set(
+        records.gameRunSteps
+          .filter((s) => s.runId === run.id)
+          .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
+      );
+      yield* dropRunCopies(
+        deps,
+        { copies: copiesOf(run.id), log },
+        [...roleThreads],
+        RESUMABLE.has(run.ending ?? ""),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : log(`the run's copies could not be removed: ${causeText(cause)}`),
+        ),
+      );
     });
 
   // A creator's restore, from the effect its request committed. Every check is
@@ -1019,6 +1037,8 @@ const make = Effect.gen(function* () {
       if (held !== undefined && held !== step.attempt) return;
       if (held === undefined && step.completedAt === null) return;
       inFlightSteps.delete(step.id);
+      // A step that completed with nothing to say only restates its record.
+      if (step.status === "completed" && step.logs.length === 0) return;
       const root = yield* projects.resolve(step.threadId);
       yield* logLine(root, `${describe(step.step)} (${step.status})`);
       for (const line of step.logs) yield* logLine(root, `  ${line}`);

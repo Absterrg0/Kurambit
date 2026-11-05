@@ -2,7 +2,6 @@ import { expect, it } from "@effect/vitest";
 import {
   HOST_OS,
   isOurLaunch,
-  parseVmStat,
   launchToken,
   processFacts,
   makeProcessHost,
@@ -78,20 +77,4 @@ it.skipIf(HOST_OS !== "linux")("a tree stop ends what the child started", async 
   await owned.stop({ graceMs: 1_000 });
   expect(owned.alive()).toBe(false);
   expect(await processFacts(grandchild)).toBeNull();
-});
-
-it("counts the memory macOS hands out on demand, not only free pages", () => {
-  const vmStat = [
-    "Mach Virtual Memory Statistics: (page size of 16384 bytes)",
-    "Pages free:                               10000.",
-    "Pages active:                            400000.",
-    "Pages inactive:                          200000.",
-    "Pages speculative:                         5000.",
-    "Pages throttled:                              0.",
-    "Pages wired down:                        150000.",
-    "Pages purgeable:                           2000.",
-  ].join("\n");
-  // Purgeable pages sit inside the active and inactive queues: not counted twice.
-  expect(parseVmStat(vmStat)).toBe((10000 + 200000 + 5000) * 16384);
-  expect(parseVmStat("not vm_stat")).toBeNull();
 });

@@ -11,7 +11,11 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 export class HostResources extends Context.Service<
   HostResources,
-  { readonly read: Effect.Effect<HostResourcesSnapshot> }
+  {
+    readonly read: Effect.Effect<HostResourcesSnapshot>;
+    /** Memory new work can take, in bytes, read now: memory gates need it fresh, not cached. */
+    readonly availableMemory: Effect.Effect<number>;
+  }
 >()("kurambit/resourceTelemetry/HostResources") {}
 
 function readCpu() {
@@ -43,16 +47,7 @@ const make = Effect.fn("makeHostResources")(function* () {
   const platform = yield* HostProcess.Platform;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-  const sample = Effect.fn("HostResources.sample")(function* () {
-    const previousCpu = readCpu();
-    yield* Effect.sleep("200 millis");
-    const cpu = readCpu();
-    const totalDelta = cpu.total - previousCpu.total;
-    const idleDelta = cpu.idle - previousCpu.idle;
-    const cpuUtilization =
-      previousCpu.count === cpu.count && totalDelta > 0 && idleDelta >= 0
-        ? Math.min(1, Math.max(0, 1 - idleDelta / totalDelta))
-        : null;
+  const availableMemory = Effect.fn("HostResources.availableMemory")(function* () {
     const totalMemoryBytes = NodeOS.totalmem();
     // On Windows libuv returns GlobalMemoryStatusEx.ullAvailPhys, including standby memory.
     let availableMemoryBytes = NodeOS.freemem();
@@ -71,12 +66,25 @@ const make = Effect.fn("makeHostResources")(function* () {
         );
       availableMemoryBytes = darwinAvailableMemory(output) ?? availableMemoryBytes;
     }
+    return Math.min(totalMemoryBytes, Math.max(0, availableMemoryBytes));
+  });
+
+  const sample = Effect.fn("HostResources.sample")(function* () {
+    const previousCpu = readCpu();
+    yield* Effect.sleep("200 millis");
+    const cpu = readCpu();
+    const totalDelta = cpu.total - previousCpu.total;
+    const idleDelta = cpu.idle - previousCpu.idle;
+    const cpuUtilization =
+      previousCpu.count === cpu.count && totalDelta > 0 && idleDelta >= 0
+        ? Math.min(1, Math.max(0, 1 - idleDelta / totalDelta))
+        : null;
     return {
       sampledAt: DateTime.toEpochMillis(yield* DateTime.now),
       cpuUtilization,
       cpuCount: cpu.count,
-      availableMemoryBytes: Math.min(totalMemoryBytes, Math.max(0, availableMemoryBytes)),
-      totalMemoryBytes,
+      availableMemoryBytes: yield* availableMemory(),
+      totalMemoryBytes: NodeOS.totalmem(),
     };
   });
 
@@ -85,7 +93,7 @@ const make = Effect.fn("makeHostResources")(function* () {
     lookup: (_key: "host") => sample(),
     timeToLive: "5 seconds",
   });
-  return HostResources.of({ read: Cache.get(cache, "host") });
+  return HostResources.of({ read: Cache.get(cache, "host"), availableMemory: availableMemory() });
 });
 
 export const layer = Layer.effect(HostResources, make());

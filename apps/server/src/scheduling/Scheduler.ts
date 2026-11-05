@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -59,3 +60,18 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Scheduler, make);
+
+/**
+ * A source's work at most once per `periodMs` of the scheduler's ticks, the
+ * first one period after it is made.
+ */
+export const every = <E, R>(periodMs: number, work: Effect.Effect<void, E, R>) =>
+  Effect.map(Clock.currentTimeMillis, (start) => {
+    let due = start + periodMs;
+    return Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      if (now < due) return;
+      due = now + periodMs;
+      yield* work;
+    });
+  });
