@@ -58,6 +58,8 @@ export const measureChange = (
           toCheckpointRef: revision(to),
           ignoreWhitespace: false,
           format: "numstat",
+          // A game in a subfolder of a bigger repository: its own paths only.
+          relative: true,
         })
         .pipe(
           Effect.map((numstat) => {

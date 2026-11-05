@@ -810,12 +810,19 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       );
     });
 
+  // The repository's top and where `cwd` sits in it ("" at the top, else "game/"):
+  // scoped work names paths relative to `cwd` and never reaches past it.
   const resolveTopLevel = (cwd: string) =>
     execute({
       operation: "GitVcsDriver.checkpoints.resolveTopLevel",
       cwd,
-      args: ["rev-parse", "--show-toplevel"],
-    }).pipe(Effect.map((result) => result.stdout.trim()));
+      args: ["rev-parse", "--show-toplevel", "--show-prefix"],
+    }).pipe(
+      Effect.map((result) => {
+        const [top = "", prefix = ""] = result.stdout.split("\n");
+        return { top: top.trim(), prefix: prefix.trim() };
+      }),
+    );
 
   // Checkpoint index work never reads an fsmonitor's cached answer, which can
   // say a file is unchanged when it is not.
@@ -917,8 +924,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
 
   // Large trees: these walk and write every file in scope.
   const TREE_TIMEOUT_MS = 10 * 60_000;
-  const scopeSpecs = (filePaths: ReadonlyArray<string>) =>
-    filePaths.map((file) => `:(top,literal)${file}`);
+  const scopeSpecs = (prefix: string, filePaths: ReadonlyArray<string>) =>
+    filePaths.map((file) => `:(top,literal)${prefix}${file}`);
 
   /**
    * The checkpoint's files under `filePaths`, back in the worktree: only files
@@ -930,8 +937,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     Effect.gen(function* () {
       const operation = "GitVcsDriver.checkpoints.restoreCheckpoint";
       if (filePaths.length === 0) return;
-      const top = yield* resolveTopLevel(cwd);
-      const specs = scopeSpecs(filePaths);
+      const { top, prefix } = yield* resolveTopLevel(cwd);
+      const specs = scopeSpecs(prefix, filePaths);
       yield* withTempIndex(top, (env) =>
         Effect.gen(function* () {
           // A seeded copy of the user's index hashes only the files that may
@@ -1354,6 +1361,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         args: [
           "diff",
           ...(input.format === "numstat" ? ["--numstat", "-z"] : ["--patch"]),
+          ...(input.relative === true ? ["--relative"] : []),
           "--no-color",
           "--no-ext-diff",
           "--no-textconv",
@@ -1451,7 +1459,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         const operation = "GitVcsDriver.checkpoints.materializeCheckpoint";
         const commitOid = yield* resolveCheckpointCommit(input.cwd, input.checkpointRef);
         if (commitOid === null) return false;
-        const top = yield* resolveTopLevel(input.cwd);
+        const { top, prefix } = yield* resolveTopLevel(input.cwd);
         const fail = (detail: string) =>
           new VcsProcessExitError({ operation, command: "mkdir", cwd: top, exitCode: 1, detail });
         // A fresh folder every time, so a repeat writes the same copy and nothing older survives.
@@ -1463,7 +1471,11 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           .pipe(Effect.mapError((cause) => fail(cause.message)));
         yield* withTempIndex(top, (env) =>
           Effect.gen(function* () {
-            yield* execute({ operation, cwd: top, args: ["read-tree", commitOid], env });
+            // Only `cwd`'s own subtree, read as the index's root, so the copy
+            // holds the cwd's files at the paths they have below it.
+            const tree =
+              prefix.length === 0 ? commitOid : `${commitOid}:${prefix.replace(/\/$/, "")}`;
+            yield* execute({ operation, cwd: top, args: ["read-tree", tree], env });
             const excluded = input.excludePaths ?? [];
             if (excluded.length > 0)
               yield* execute({
@@ -1476,7 +1488,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
                   "--cached",
                   "--ignore-unmatch",
                   "--",
-                  ...scopeSpecs(excluded),
+                  ...scopeSpecs("", excluded),
                 ],
                 env,
               });

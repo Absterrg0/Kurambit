@@ -24,9 +24,10 @@ export interface VcsRestoreCheckpointInput {
   readonly checkpointRef: CheckpointRef;
   readonly fallbackToHead?: boolean;
   /**
-   * Restores only these repository paths (a directory covers its contents),
-   * writing only the files that differ and never the index. Without it the
-   * whole workspace is restored and its index reset.
+   * Restores only these paths, relative to `cwd` (a directory covers its
+   * contents), writing only the files that differ and never the index; nothing
+   * outside `cwd` is touched. Without it the whole workspace is restored and
+   * its index reset.
    */
   readonly filePaths?: ReadonlyArray<string>;
 }
@@ -43,7 +44,7 @@ export interface VcsMaterializeCheckpointInput {
   readonly checkpointRef: CheckpointRef;
   /** A folder outside the repository; it is replaced, and gets no git metadata. */
   readonly destination: string;
-  /** Repository paths left out of the copy. */
+  /** Paths relative to `cwd` left out of the copy, which holds only `cwd`'s subtree. */
   readonly excludePaths?: ReadonlyArray<string>;
 }
 
@@ -56,6 +57,8 @@ export interface VcsDiffCheckpointsInput {
   readonly format?: "patch" | "numstat";
   /** An empty list yields an empty diff. */
   readonly filePaths?: ReadonlyArray<string>;
+  /** Only what changed below `cwd`, with paths relative to it (`git diff --relative`). */
+  readonly relative?: boolean;
 }
 
 export interface VcsListAuthoredPathsInput {

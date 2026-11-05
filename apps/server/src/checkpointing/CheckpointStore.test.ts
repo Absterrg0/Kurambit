@@ -567,6 +567,80 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
     );
   });
 
+  describe("a game in a subfolder of a bigger repository", () => {
+    it.effect("restores, diffs and copies only below its cwd, by paths relative to it", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const fileSystem = yield* FileSystem.FileSystem;
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const at = (file: string) => NodePath.join(tmp, file);
+        const game = at("game");
+        yield* initRepoWithCommit(tmp);
+        // The repository's own top-level godot/ beside the game's.
+        yield* fileSystem.makeDirectory(at("godot"), { recursive: true });
+        yield* fileSystem.makeDirectory(at("game/godot"), { recursive: true });
+        yield* writeTextFile(at("godot/outer.gd"), "outer v1\n");
+        yield* writeTextFile(at("game/godot/main.gd"), "main v1\n");
+        yield* writeTextFile(at("game/NOTES.md"), "notes\n");
+        yield* git(tmp, ["add", "."]);
+        yield* git(tmp, ["commit", "-m", "repo with a game"]);
+        const oid = yield* checkpointStore.captureCheckpoint({
+          cwd: game,
+          checkpointRef: checkpointRefForGameRun("run_sub", "best"),
+        });
+        yield* writeTextFile(at("game/godot/main.gd"), "main v2\n");
+        yield* writeTextFile(at("game/godot/new.gd"), "new\n");
+        yield* writeTextFile(at("godot/outer.gd"), "outer v2\n");
+        yield* writeTextFile(at("godot/outer-new.gd"), "outer new\n");
+        const later = yield* checkpointStore.captureCheckpoint({
+          cwd: game,
+          checkpointRef: checkpointRefForGameRun("run_sub", "later"),
+        });
+
+        // The diff names the game's own paths, relative to it.
+        const numstat = yield* checkpointStore.diffCheckpoints({
+          cwd: game,
+          fromCheckpointRef: CheckpointRef.make(oid),
+          toCheckpointRef: CheckpointRef.make(later),
+          ignoreWhitespace: false,
+          format: "numstat",
+          relative: true,
+        });
+        expect(
+          parseTurnDiffFilesFromNumstat(numstat)
+            .map((file) => file.path)
+            .toSorted(),
+        ).toEqual(["godot/main.gd", "godot/new.gd"]);
+
+        // A restore of "godot" is the game's godot/, never the repository's.
+        yield* checkpointStore.restoreCheckpoint({
+          cwd: game,
+          checkpointRef: CheckpointRef.make(oid),
+          filePaths: ["godot"],
+        });
+        expect(yield* fileSystem.readFileString(at("game/godot/main.gd"))).toBe("main v1\n");
+        expect(yield* fileSystem.exists(at("game/godot/new.gd"))).toBe(false);
+        expect(yield* fileSystem.readFileString(at("godot/outer.gd"))).toBe("outer v2\n");
+        expect(yield* fileSystem.readFileString(at("godot/outer-new.gd"))).toBe("outer new\n");
+
+        // A copy holds the game's own files at their paths below it, nothing else.
+        const copy = yield* makeTmpDir("checkpoint-sub-copy-");
+        yield* checkpointStore.materializeCheckpoint({
+          cwd: game,
+          checkpointRef: CheckpointRef.make(oid),
+          destination: copy,
+          excludePaths: ["NOTES.md"],
+        });
+        expect(yield* fileSystem.readFileString(NodePath.join(copy, "godot/main.gd"))).toBe(
+          "main v1\n",
+        );
+        expect(yield* fileSystem.exists(NodePath.join(copy, "game"))).toBe(false);
+        expect(yield* fileSystem.exists(NodePath.join(copy, "README.md"))).toBe(false);
+        expect(yield* fileSystem.exists(NodePath.join(copy, "NOTES.md"))).toBe(false);
+      }),
+    );
+  });
+
   describe("a path-scoped restore", () => {
     it.effect(
       "changes only differing files in its scope, never the user's HEAD, branch or index",

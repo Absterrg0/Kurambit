@@ -21,8 +21,8 @@ export interface RestoreCheckpointInput {
   readonly checkpointRef: CheckpointRef;
   readonly fallbackToHead?: boolean;
   /**
-   * Restores only these repository paths (a directory covers its contents),
-   * writing only the files that differ and never the index.
+   * Restores only these paths, relative to `cwd` (a directory covers its
+   * contents), writing only the files that differ and never the index.
    */
   readonly filePaths?: ReadonlyArray<string>;
 }
@@ -39,6 +39,7 @@ export interface MaterializeCheckpointInput {
   readonly checkpointRef: CheckpointRef;
   /** A folder outside the repository; it is replaced, and gets no git metadata. */
   readonly destination: string;
+  /** Paths relative to `cwd` left out; the copy holds only `cwd`'s subtree. */
   readonly excludePaths?: ReadonlyArray<string>;
 }
 
@@ -51,6 +52,8 @@ export interface DiffCheckpointsInput {
   readonly format?: "patch" | "numstat";
   /** Limits the diff to these exact paths. An empty list yields an empty diff. */
   readonly filePaths?: ReadonlyArray<string>;
+  /** Only what changed below `cwd`, with paths relative to it. */
+  readonly relative?: boolean;
 }
 
 export interface ListAuthoredPathsInput {
