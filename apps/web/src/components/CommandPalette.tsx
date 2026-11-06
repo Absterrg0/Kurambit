@@ -1,6 +1,7 @@
 "use client";
 
 import { useGameDialogStore } from "./game/gameDialogStore";
+import { useTurnUndo } from "./game/useBuildActions";
 import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
@@ -64,7 +65,9 @@ import {
   MonitorIcon,
   MoonIcon,
   PlayIcon,
+  Redo2Icon,
   SquareIcon,
+  Undo2Icon,
   WrenchIcon,
   PaletteIcon,
   RotateCcwIcon,
@@ -747,6 +750,8 @@ function OpenCommandPaletteDialog(props: {
       : gameEnvironment.runStop.permissionAtom(activeThreadRef.environmentId),
   );
   const gameAccess = useGameStageAccess(activeThreadRef);
+  // The game's latest turn build: the palette offers the Undo or Redo its strip does.
+  const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const gameRun = useEnvironmentQuery(
     isGameThread && activeThreadRef !== null
       ? gameEnvironment.runStatus({
@@ -1569,6 +1574,34 @@ function OpenCommandPaletteDialog(props: {
         icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
           useGameWorkspaceStore.getState().showStageTab("builds");
+        },
+      });
+    const turnRestore = turnUndo.action;
+    if (
+      turnRestore !== null &&
+      turnRestore.kind !== "go-back" &&
+      turnRestore.blocked === null &&
+      turnUndo.canRestore &&
+      turnUndo.writer &&
+      !turnUndo.pending
+    )
+      actionItems.push({
+        kind: "action",
+        value: `action:game-turn-${turnRestore.kind}`,
+        title:
+          turnRestore.kind === "undo"
+            ? "Undo the last turn's change"
+            : "Redo the last turn's change",
+        searchTerms: [turnRestore.kind, "turn", "change", "revert", "build", "game"],
+        icon:
+          turnRestore.kind === "undo" ? (
+            <Undo2Icon className={ITEM_ICON_CLASS} />
+          ) : (
+            <Redo2Icon className={ITEM_ICON_CLASS} />
+          ),
+        run: async () => {
+          const failure = await turnUndo.send();
+          if (failure !== null) throw new Error(failure);
         },
       });
     actionItems.push({
