@@ -453,7 +453,7 @@ const runDependencies = [
 ];
 const RunStatusTool = Tool.make("game_run_status", {
   description:
-    "Whether this game's production run is live, what it is doing now (step), its profile (guided or autopilot), its rounds with verdicts and the creator notes waiting for the next round. While a Guided run waits for the creator, decision holds what to present: the evidence files (absolute paths), what goes with them, the answers the run accepts, its default and when the default fires; record the creator's answer with game_run_decide. Read-only. While a run is live, do not edit the game's files; pass the creator's requests to it with game_run_steer.",
+    "Whether this game's production run is live, what it is doing now (step), its profile (guided or autopilot), its rounds with verdicts and the creator notes waiting for the next round. While a Guided run waits for the creator, decision holds what to present: the evidence files (absolute paths), what goes with them, the answers the run accepts, its default and when the default fires; record the creator's answer with game_run_decide. A run that ended says why in message and whether it can be resumed: tool-failed (a program Kurambit runs kept failing), low-memory and busy are pauses in which nothing was judged, resumed with game_run_start and an empty brief once the cause is fixed. Read-only. While a run is live, do not edit the game's files; pass the creator's requests to it with game_run_steer.",
   success: GameRunStatusResult,
   failure,
   failureMode: "return",
@@ -524,11 +524,15 @@ const RunDecideTool = Tool.make("game_run_decide", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const RunStartTool = Tool.make("game_run_start", {
   description:
-    "Start this game's production run, or resume a stopped or ended one, when the creator asks. A new run needs the creator's brief; an empty brief resumes the existing run where it left off (an ended run whose ladder is done stays done; pass the creator's polish request with game_run_steer instead). budgetMinutes and profile (guided or autopilot) only when the creator gives them. The run plays in its own threads; tell the creator it started and that they can watch it on the Run tab.",
+    "Start this game's production run, or resume a stopped or ended one, when the creator asks. A new run needs the creator's brief; an empty brief resumes the existing run where it left off (an ended run whose ladder is done stays done; pass the creator's polish request with game_run_steer instead). While a run is live a new brief is refused: pass it on with game_run_steer, or stop the run first. A run paused as tool-failed, low-memory or busy resumes with an empty brief once the cause in game_run_status is fixed. budgetMinutes, profile (guided or autopilot), artDirection and the provider, model and variant its roles run on only when the creator gives them; by default the roles run on this chat's model. The run plays in its own threads and asks its questions in the chat the creator last used for it; tell the creator it started and that they can watch it on the Run tab.",
   parameters: Schema.Struct({
     brief: Schema.String.check(Schema.isMaxLength(8000)),
+    artDirection: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(8000))),
     budgetMinutes: Schema.optionalKey(Schema.Number),
     profile: Schema.optionalKey(GameRunProfile),
+    provider: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+    model: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+    variant: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
     commandId,
   }),
   success: GameRunStartResult,
@@ -541,7 +545,7 @@ const RunStartTool = Tool.make("game_run_start", {
 
 const RunStopTool = Tool.make("game_run_stop", {
   description:
-    "Stop this game's live production run when the creator asks. The run finishes saving its current step and can be resumed later with game_run_start and an empty brief.",
+    "Stop this game's live production run when the creator asks. The run keeps its current step, which a resume with game_run_start and an empty brief runs again.",
   parameters: Schema.Struct({ commandId }),
   success: GameRunStopResult,
   failure,

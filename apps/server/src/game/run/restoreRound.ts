@@ -18,6 +18,7 @@ import { RESUMABLE, abandonsRound } from "../../orchestration-v2/gameRun/decide.
 import type * as GameService from "../GameService.ts";
 import { causeText } from "../runSetup.ts";
 import { buildStep, type FolderLock, withBuildInFolder } from "./builds.ts";
+import { engineProfile, runEngine } from "../engineProfile.ts";
 import { BuildName, restoredPaths } from "./buildNames.ts";
 import { savedBuildLabel } from "./runView.ts";
 import type { RoundRecord, RunState } from "./state.ts";
@@ -39,7 +40,8 @@ export const restoreBuild = (input: {
 }): Effect.Effect<GameRunRestoreOutcome> => {
   const { game, checkpoints, root, run, state, target } = input;
   const deps = { game, checkpoints, lock: input.lock };
-  const lane = run.lane || "godot";
+  // A run recorded before its lane was kept names its engine's folder.
+  const lane = run.lane || engineProfile(runEngine(run)).projectDirectory;
   const isRound = target.kind === "round";
   // How the build reads in the outcome: "Round 3's build", "Round 4's unfinished work".
   const named =

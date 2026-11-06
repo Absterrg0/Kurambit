@@ -1,11 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off globalDate:off globalDateInEffect:off -- Export bookkeeping in the game folder: verified on-disk paths plus the final video copy.
 // Exports and the final video on any ending. Every outcome lands in the log and in
-// .studio/exports.json with verified on-disk paths (T27b reported the web build missing
-// because nothing recorded where the content-addressed export actually landed).
+// .studio/exports.json with the artifact each export published and whether it is
+// still there.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import type { ThreadId } from "@kurambit/contracts";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import type * as BotEvidence from "../botEvidence.ts";
 import type * as GameService from "../GameService.ts";
 import { walkFiles } from "../walkFiles.ts";
@@ -89,32 +90,24 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
         });
   const web = yield* runTarget("Web");
   const linux = yield* runTarget("Linux");
-  const verified = yield* Effect.tryPromise(async () => {
-    const selected = await NodeFSP.readFile(NodePath.join(root, "builds/web-selected.json"), "utf8")
-      .then((text) => (JSON.parse(text) as { directory?: unknown }).directory)
-      .catch(() => undefined);
-    const webIndex =
-      typeof selected === "string" ? NodePath.join(root, selected, "index.html") : null;
-    const webOk =
-      web.ok &&
-      webIndex !== null &&
-      (await fileOver(webIndex, 0)) &&
-      ((await fileOver(webIndex, 4096)) || (await dirBytes(NodePath.dirname(webIndex))) > 4096);
-    const linuxBin = NodePath.join(root, "builds/linux/game.x86_64");
-    return { webIndex, webOk, linuxBin, linuxOk: linux.ok && (await fileOver(linuxBin, 4096)) };
-  }).pipe(
-    Effect.orElseSucceed(() => ({
-      webIndex: null,
-      webOk: false,
-      linuxBin: NodePath.join(root, "builds/linux/game.x86_64"),
-      linuxOk: false,
-    })),
+  // An export's own result names the artifact it published (GameExport: an
+  // absolute path that existed at publication); the finish checks it is still
+  // there and has substance, and derives no engine's file names itself.
+  const verify = (row: Row) =>
+    Effect.promise(async () => {
+      if (!row.ok || row.path === null) return false;
+      const stat = await NodeFSP.stat(row.path).catch(() => null);
+      if (stat === null) return false;
+      // A static web entry is a few hundred bytes of HTML; its folder proves the build.
+      return stat.isDirectory() ? (await dirBytes(row.path)) > 4096 : stat.size > 4096;
+    });
+  const webOk = yield* verify(web);
+  const linuxOk = yield* verify(linux);
+  yield* log(
+    `finishExports web ok=${webOk} path=${web.path ?? "none"} msg=${web.message.slice(0, 200)}`,
   );
   yield* log(
-    `finishExports web ok=${verified.webOk} index=${verified.webIndex ?? "none"} msg=${web.message.slice(0, 200)}`,
-  );
-  yield* log(
-    `finishExports linux ok=${verified.linuxOk} bin=${verified.linuxBin} msg=${linux.message.slice(0, 200)}`,
+    `finishExports linux ok=${linuxOk} path=${linux.path ?? "none"} msg=${linux.message.slice(0, 200)}`,
   );
   // A record that cannot be read leaves its runs out; the video is a nicety.
   const records = yield* Effect.forEach(roleThreads, (threadId) =>
@@ -129,11 +122,16 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
   ).pipe(Effect.map((each) => each.flat()));
   // Best real run: fastest win first; otherwise the longest run with a real
   // video (a short clean run can be a bot stuck at the menu).
-  yield* Effect.tryPromise(async () => {
-    await NodeFSP.writeFile(
-      NodePath.join(root, ".studio", "exports.json"),
-      `${JSON.stringify({ at: new Date().toISOString(), web: { ...web, index: verified.webIndex, verified: verified.webOk }, linux: { ...linux, bin: verified.linuxBin, verified: verified.linuxOk } }, null, 2)}\n`,
-    ).catch(() => undefined);
+  // A record for people, whole or not at all.
+  yield* writeFileStringAtomically({
+    filePath: NodePath.join(root, ".studio", "exports.json"),
+    contents: `${JSON.stringify({ at: new Date().toISOString(), web: { ...web, verified: webOk }, linux: { ...linux, verified: linuxOk } }, null, 2)}\n`,
+  }).pipe(
+    Effect.catchCause((cause) =>
+      log(`finishExports: exports.json not written (${String(cause)})`.slice(0, 300)),
+    ),
+  );
+  const chosen = yield* Effect.tryPromise(async () => {
     const rows = botRuns(root, records);
     const ordered = [
       ...rows.filter((r) => r.won).sort((a, b) => a.seconds - b.seconds),
@@ -147,18 +145,16 @@ export const finishExports = Effect.fn("GameRun.finishExports")(function* (
       const reason = row.won
         ? `fastest winning bot run (${row.seconds.toFixed(1)}s)`
         : `longest non-winning bot run (${row.seconds.toFixed(1)}s, ${row.findings} findings; no win recorded)`;
-      await NodeFSP.copyFile(video, NodePath.join(root, ".studio", "final.mp4")).catch(
-        () => undefined,
-      );
-      await NodeFSP.writeFile(
-        NodePath.join(root, ".studio", "final-video.json"),
-        `${JSON.stringify({ runId: row.runId, video, reason, at: new Date().toISOString() }, null, 2)}\n`,
-      ).catch(() => undefined);
-      return `final video from run ${row.runId} (${reason})`;
+      await NodeFSP.copyFile(video, NodePath.join(root, ".studio", "final.mp4"));
+      return { runId: row.runId, video, reason };
     }
-    return "no bot run video for the final video";
-  }).pipe(
-    Effect.orElseSucceed(() => "the final video could not be chosen"),
-    Effect.flatMap((line) => log(`finishExports: ${line}`)),
-  );
+    return null;
+  }).pipe(Effect.orElseSucceed(() => undefined));
+  if (chosen === undefined) return yield* log("finishExports: the final video could not be chosen");
+  if (chosen === null) return yield* log("finishExports: no bot run video for the final video");
+  yield* writeFileStringAtomically({
+    filePath: NodePath.join(root, ".studio", "final-video.json"),
+    contents: `${JSON.stringify({ ...chosen, at: new Date().toISOString() }, null, 2)}\n`,
+  }).pipe(Effect.orElseSucceed(() => undefined));
+  yield* log(`finishExports: final video from run ${chosen.runId} (${chosen.reason})`);
 });

@@ -12,16 +12,19 @@ import {
 } from "@kurambit/contracts";
 import { undoOf } from "../../orchestration-v2/gameRun/decide.ts";
 import { BuildName, savedBuildOf } from "./buildNames.ts";
-import type * as Policy from "./policy.ts";
+import * as Policy from "./policy.ts";
 import type * as State from "./state.ts";
 
-// The question a live run waits on, with its evidence as absolute paths. A question
-// still queued behind a busy chat states when its wait would end if it arrived now.
+// The question a live run waits on, with its evidence as absolute paths. A
+// question still queued behind a busy chat states the bound its delivery has
+// (it takes the default if it never reaches the creator), a fixed time that
+// does not move with each read.
 export const decisionOf = (root: string, state: State.RunState): GameRunDecision | null => {
   const step = state.inFlight;
   if (step?.kind !== "decide") return null;
   const d = step.decision;
-  const deadline = step.deadline ?? (step.sent === null ? null : Date.now() + d.waitMs);
+  const deadline =
+    step.deadline ?? (step.sent === null ? null : step.sent + Policy.DECISION_DELIVERY_MS);
   return {
     id: d.id,
     kind: d.kind,

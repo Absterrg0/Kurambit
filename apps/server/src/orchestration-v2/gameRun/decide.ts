@@ -24,6 +24,7 @@ import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import { legacyLaneEngine, runEngine } from "../../game/engineProfile.ts";
 import { BuildName, savedBuildOf } from "../../game/run/buildNames.ts";
 import * as Policy from "../../game/run/policy.ts";
 import * as State from "../../game/run/state.ts";
@@ -148,6 +149,7 @@ export const toState = (
   seq: run.seq,
   budgetEndsAt: run.budgetEndsAt,
   lane: run.lane,
+  engine: runEngine(run),
   best: run.best,
   protos: run.protos,
   pickNotes: run.pickNotes,
@@ -240,7 +242,7 @@ const RESULTS: Record<string, ReadonlyArray<GameRunStepResult["kind"]>> = {
   facts: ["facts", "failed", "ended"],
   checks: ["checks", "failed", "ended"],
   bot: ["bot", "failed", "ended"],
-  note: ["note", "failed"],
+  note: ["note", "failed", "ended"],
 };
 
 // ── One command's work on one run. ─────────────────────────────────────────
@@ -275,7 +277,7 @@ const outputsEffect = (
  * of their own, the next step's job wrote them (walking back over decisions,
  * which have no job). Writing them again is harmless.
  */
-export const owedOutputs = (
+const owedOutputs = (
   run: GameRun,
   steps: ReadonlyArray<GameRunStep>,
 ): { readonly stepId: GameRunStepId; readonly files: GameRunStep["outputs"]["files"] } | null => {
@@ -323,6 +325,7 @@ const stepRecord = (
         // A new attempt (a resume after the waits ran out) waits afresh.
         memoryWaits: 0,
         busyWaits: 0,
+        toolWaits: 0,
         completedAt: null,
       }
     : {
@@ -595,6 +598,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
     next: prior?.ledger ?? "",
     creator: command.threadId,
     lane: command.lane,
+    engine: command.engine ?? legacyLaneEngine(command.lane),
     budgetEndsAt:
       command.budgetMinutes === undefined ? null : work.now + command.budgetMinutes * 60_000,
   };
@@ -604,7 +608,9 @@ const start = (work: Work, command: Command<"game-run.start">) => {
         id: command.runId,
         threadId: command.threadId,
         projectId: work.records.projectId,
+        ...(command.chat === undefined ? {} : { chat: command.chat }),
         lane: command.lane,
+        ...(command.engine === undefined ? {} : { engine: command.engine }),
         brief: command.brief,
         artDirection: command.artDirection ?? "",
         profile: state.profile,
@@ -652,6 +658,10 @@ const start = (work: Work, command: Command<"game-run.start">) => {
   );
 };
 
+/** The run as the creator's chat that just moved it left it: its questions wake there. */
+const withChat = (run: GameRun, chat: ThreadId | undefined): GameRun =>
+  chat === undefined ? run : { ...run, chat };
+
 /** The command's run: the thread's latest, which the command must name. */
 const current = (work: Work, runId: GameRunId) => {
   const run = work.records.runs.at(-1);
@@ -687,7 +697,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
     const budgetMinutes =
       command.budgetMinutes === undefined ? run.budgetMinutes : command.budgetMinutes;
     const resumed: GameRun = {
-      ...run,
+      ...withChat(run, command.chat),
       resumeSave: BuildName.resumeBefore(work.at),
       budgetMinutes,
       ...(command.modelSelection === undefined ? {} : { modelSelection: command.modelSelection }),
@@ -719,6 +729,12 @@ const stop = (work: Work, command: Command<"game-run.stop">) =>
     const inFlight = inFlightOf(work, run);
     const state = toState(run, work.records.rounds, inFlight);
     const why = command.reason?.trim() ?? "";
+    // The server's own stop for a tool that kept failing is a pause with its
+    // reason, never the creator's act.
+    const paused = command.ending === "tool-failed";
+    const line = paused
+      ? `run paused: ${why}`
+      : `run stopped by the creator${why.length > 0 ? `: ${why}` : ""}`;
     // The step in flight stays the run's: a resume runs it again.
     const steps =
       inFlight === null
@@ -727,21 +743,22 @@ const stop = (work: Work, command: Command<"game-run.stop">) =>
             {
               ...inFlight,
               status: "cancelled" as const,
-              logs: [
-                ...inFlight.logs,
-                `run stopped by the creator${why.length > 0 ? `: ${why}` : ""}`,
-              ],
+              logs: [...inFlight.logs, line],
               completedAt: work.at,
             },
           ];
+    const ended: State.RunState = paused
+      ? { ...state, ending: "tool-failed", lastFailure: why.slice(0, 300) }
+      : { ...state, ending: "stopped" };
     return Result.succeed({
-      ...settle(work, run, state, { ...state, ending: "stopped" }, steps, []),
+      ...settle(work, run, state, ended, steps, []),
       cancelEffects: true,
     });
   });
 
 const steer = (work: Work, command: Command<"game-run.steer">) =>
-  Result.flatMap(current(work, command.runId), (run) => {
+  Result.flatMap(current(work, command.runId), (asked) => {
+    const run = withChat(asked, command.chat);
     const busy = run.status === "ended" ? settling(run) : null;
     if (busy !== null) return busy;
     if (run.status === "ended" && gitEra(run)) return gitEraRefusal(run);
@@ -846,15 +863,16 @@ const copiesSpend = (work: Work, command: Command<"game-run.copies.spend">) => {
 };
 
 const decideCommand = (work: Work, command: Command<"game-run.decide">) =>
-  Result.flatMap(live(work, command.runId), (run) =>
-    Result.flatMap(waitingDecision(work, run, command.decisionId), ({ record, step }) => {
+  Result.flatMap(live(work, command.runId), (asked) => {
+    const run = withChat(asked, command.chat);
+    return Result.flatMap(waitingDecision(work, run, command.decisionId), ({ record, step }) => {
       const checked = Policy.checkAnswer(step.decision, command.answer, command.notes ?? "");
       if ("error" in checked) return refuse("invalid-answer", checked.error);
       return Result.succeed(
         takeDecision(work, run, record, { kind: "decided", ...checked, by: "creator" }),
       );
-    }),
-  );
+    });
+  });
 
 const expire = (work: Work, command: Command<"game-run.decision.expire">) =>
   Result.flatMap(live(work, command.runId), (run) =>
@@ -1242,6 +1260,12 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
 const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(currentStep(work, run, command.stepId), ({ record, seq }) => {
+      // A late start from an earlier attempt would write its thread on this one.
+      if (command.attempt !== record.attempt)
+        return refuse(
+          "stale-attempt",
+          `Attempt ${command.attempt ?? "?"} of step ${command.stepId} was superseded; the step runs as attempt ${record.attempt}.`,
+        );
       const state = toState(run, work.records.rounds, record);
       const started = {
         ...record,
@@ -1346,6 +1370,8 @@ const stepResult = (
       const state = toState(run, work.records.rounds, record);
       const input = { now: work.now, coin: work.input.coin, id: work.input.id };
       const own = ownRelease(roleAt(step, seq), landed);
+      // The one way a result reaches the policy: what was not measured pauses
+      // the run and judges nothing; only a measurement is applied.
       if (step.kind !== "pair")
         return Result.succeed(
           land(
@@ -1353,7 +1379,9 @@ const stepResult = (
             run,
             state,
             record,
-            Policy.applyResult(state, step, landed, input),
+            landed.kind === "ended" || landed.kind === "failed"
+              ? Policy.pause(state, step, landed)
+              : Policy.applyResult(state, step, landed, input),
             landed,
             status,
             own,
@@ -1363,16 +1391,23 @@ const stepResult = (
         return refuse("wrong-kind", `A pair half cannot finish with a ${landed.kind} result.`);
       if (step.results.some((r) => r.id === seq) || record.endedHalves.some((r) => r.seq === seq))
         return refuse("stale-step", `Step ${stepId} already finished.`);
-      // A half that ends the run waits for its partner like any other, so the
-      // partner's finished work is recorded before the run ends.
-      const endedHalves =
-        landed.kind === "ended"
-          ? [...record.endedHalves, { seq, result: landed }]
-          : record.endedHalves;
+      // A half that was not measured waits for its partner like any other, so
+      // the partner's measured work is recorded before the run pauses. A
+      // failed half a record from before this rule kept among the results is
+      // moved there too, so a resume runs exactly it again.
+      const legacy = step.results.flatMap((r) =>
+        r.result.kind === "failed" ? [{ seq: r.id, result: r.result }] : [],
+      );
+      const endedHalves = [
+        ...record.endedHalves,
+        ...legacy,
+        ...(landed.kind === "ended" || landed.kind === "failed" ? [{ seq, result: landed }] : []),
+      ];
+      const measured = step.results.filter((r) => r.result.kind !== "failed");
       const pair: State.PairStep =
-        landed.kind === "done" || landed.kind === "failed" || landed.kind === "bot"
-          ? { ...step, results: [...step.results, { id: seq, result: landed }] }
-          : step;
+        landed.kind === "done" || landed.kind === "bot"
+          ? { ...step, results: [...measured, { id: seq, result: landed }] }
+          : { ...step, results: measured };
       const withPair = { ...state, inFlight: pair };
       const held = { ...record, step: pair, endedHalves };
       if (
@@ -1406,7 +1441,7 @@ const stepResult = (
           held,
           ended === null
             ? Policy.applyPair(withPair, pair, input)
-            : Policy.applyResult(withPair, pair, ended, input),
+            : Policy.pause(withPair, pair, ended),
           ended,
           "completed",
           own,

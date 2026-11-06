@@ -3,15 +3,19 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
 import { laneAssets, laneLibrary } from "../engineProfile.ts";
-import { readGltfJson } from "../gltfJson.ts";
+import { readGltfJson, readMat4Accessor } from "../gltfJson.ts";
 import { walkFiles } from "../walkFiles.ts";
+import { listedIn, readAssetsDoc } from "./assetsDoc.ts";
 
-// Measured facts on the game's glTF models, read from their JSON alone (no
-// buffers): size, triangles, skeleton, clips and referenced files. The art
-// director judges with them; numbers, not verdicts.
+// Measured facts on the game's glTF models, read from their JSON (and, for a
+// skinned mesh, its inverse bind matrices alone): size, triangles, skeleton,
+// clips and referenced files. The art director judges with them; numbers, not
+// verdicts, and a size this cannot measure is said, never guessed.
 
 const MAX_MODELS = 24;
 const MAX_JSON_BYTES = 16 * 1024 * 1024;
+/** Inverse bind matrices read for one skin: 16 KB. */
+const MAX_JOINTS = 256;
 const MODEL = /\.(glb|gltf)$/i;
 
 type Mat = number[];
@@ -40,7 +44,12 @@ interface Doc {
     readonly min?: number[];
     readonly max?: number[];
   }>;
-  readonly skins?: Array<{ readonly joints?: number[] }>;
+  readonly skins?: Array<{ readonly joints?: number[]; readonly inverseBindMatrices?: number }>;
+  readonly bufferViews?: Array<{
+    readonly buffer?: number;
+    readonly byteOffset?: number;
+    readonly byteStride?: number;
+  }>;
   readonly animations?: Array<{ readonly name?: string }>;
   readonly images?: Array<{ readonly uri?: string }>;
   readonly buffers?: Array<{ readonly uri?: string }>;
@@ -91,52 +100,90 @@ const readJson = async (path: string): Promise<Doc | null> => {
 const round = (n: number) => (n >= 10 ? Math.round(n) : Math.round(n * 100) / 100);
 const thousands = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : `${n}`);
 
+const SAME = 1e-4;
+const sameMat = (a: Mat, b: Mat) =>
+  a.every((v, i) => Math.abs(v - b[i]!) <= SAME * (1 + Math.abs(v)));
+
 /** One line of facts for one model file. */
 export const describeModel = async (path: string, label: string): Promise<string> => {
   const doc = await readJson(path);
   if (doc === null) return `${label}: not a readable glTF file`;
   const nodes = doc.nodes ?? [];
   const lo = [Infinity, Infinity, Infinity];
+  let exact = true;
+  const notMeasured: string[] = [];
   const hi = [-Infinity, -Infinity, -Infinity];
   let triangles = 0;
+  // Every node's world matrix from the scene's roots: a skin's joints are nodes too.
+  const worlds = new Map<number, Mat>();
   const seen = new Set<number>();
-  const visit = (index: number, parent: Mat) => {
+  const walk = (index: number, parent: Mat) => {
     // A node reached twice (a cycle in a broken file) is measured once.
     if (seen.has(index)) return;
     seen.add(index);
     const node = nodes[index];
     if (node === undefined) return;
     const world = multiply(parent, local(node));
+    worlds.set(index, world);
+    for (const child of node.children ?? []) walk(child, world);
+  };
+  const roots = doc.scenes?.[doc.scene ?? 0]?.nodes ?? nodes.map((_, index) => index);
+  for (const root of roots) walk(root, IDENTITY);
+  const extend = (matrices: ReadonlyArray<Mat>, min: number[], max: number[]) => {
+    for (const m of matrices)
+      for (let corner = 0; corner < 8; corner++) {
+        const p = [0, 1, 2].map((axis) => (corner & (1 << axis) ? max[axis]! : min[axis]!));
+        for (let axis = 0; axis < 3; axis++) {
+          const v = m[axis]! * p[0]! + m[4 + axis]! * p[1]! + m[8 + axis]! * p[2]! + m[12 + axis]!;
+          lo[axis] = Math.min(lo[axis]!, v);
+          hi[axis] = Math.max(hi[axis]!, v);
+        }
+      }
+  };
+  for (const [index, world] of worlds) {
+    const node = nodes[index]!;
+    // glTF 2.0 §3.7.3: a skinned mesh ignores its own node's transform; each
+    // vertex is placed by its joints' world matrices times their inverse bind
+    // matrices, weighted to one. Where every joint agrees (the rest pose is
+    // the bind pose) that one matrix places the mesh; otherwise the box of
+    // every joint's placement holds it, an upper bound.
+    let placements: ReadonlyArray<Mat> | null = [world];
+    if (node.skin !== undefined && node.mesh !== undefined) {
+      const skin = doc.skins?.[node.skin];
+      const joints = skin?.joints ?? [];
+      const ibms =
+        skin?.inverseBindMatrices === undefined
+          ? joints.map(() => IDENTITY)
+          : await readMat4Accessor(path, doc, skin.inverseBindMatrices, MAX_JOINTS);
+      if (!Array.isArray(ibms) || joints.length === 0) {
+        notMeasured.push(
+          joints.length === 0 ? "its skin names no joints" : (ibms as { notRead: string }).notRead,
+        );
+        placements = null;
+      } else {
+        const each = joints.map((joint, j) =>
+          multiply(worlds.get(joint) ?? IDENTITY, [...ibms[j]!]),
+        );
+        placements = each.every((m) => sameMat(m, each[0]!)) ? [each[0]!] : each;
+        if (placements.length > 1) exact = false;
+      }
+    }
     for (const primitive of doc.meshes?.[node.mesh ?? -1]?.primitives ?? []) {
       if ((primitive.mode ?? 4) !== 4) continue;
       const position = doc.accessors?.[primitive.attributes?.POSITION ?? -1];
       const indices = doc.accessors?.[primitive.indices ?? -1];
       triangles += Math.floor(((indices ?? position)?.count ?? 0) / 3);
-      if (position?.min?.length !== 3 || position.max?.length !== 3) continue;
-      for (let corner = 0; corner < 8; corner++) {
-        const p = [0, 1, 2].map((axis) =>
-          corner & (1 << axis) ? position.max![axis]! : position.min![axis]!,
-        );
-        for (let axis = 0; axis < 3; axis++) {
-          const v =
-            world[axis]! * p[0]! +
-            world[4 + axis]! * p[1]! +
-            world[8 + axis]! * p[2]! +
-            world[12 + axis]!;
-          lo[axis] = Math.min(lo[axis]!, v);
-          hi[axis] = Math.max(hi[axis]!, v);
-        }
-      }
+      if (placements === null || position?.min?.length !== 3 || position.max?.length !== 3)
+        continue;
+      extend(placements, position.min, position.max);
     }
-    for (const child of node.children ?? []) visit(child, world);
-  };
-  const roots = doc.scenes?.[doc.scene ?? 0]?.nodes ?? nodes.map((_, index) => index);
-  for (const root of roots) visit(root, IDENTITY);
+  }
 
   const parts: string[] = [];
-  if (Number.isFinite(lo[0]))
+  if (notMeasured.length > 0) parts.push(`skinned: size not measured (${notMeasured[0]})`);
+  else if (Number.isFinite(lo[0]))
     parts.push(
-      `${round(hi[1]! - lo[1]!)} tall, ${round(hi[0]! - lo[0]!)} wide, ${round(hi[2]! - lo[2]!)} deep, base at y ${round(lo[1]!)}`,
+      `${exact ? "" : "at most "}${round(hi[1]! - lo[1]!)} tall, ${round(hi[0]! - lo[0]!)} wide, ${round(hi[2]! - lo[2]!)} deep, base at y ${round(lo[1]!)}`,
     );
   parts.push(`${thousands(triangles)} triangles`);
   const joints = Math.max(0, ...(doc.skins ?? []).map((skin) => skin.joints?.length ?? 0));
@@ -153,7 +200,13 @@ export const describeModel = async (path: string, label: string): Promise<string
   for (const item of [...(doc.images ?? []), ...(doc.buffers ?? [])]) {
     const uri = item.uri;
     if (typeof uri !== "string" || uri.startsWith("data:") || /^[a-z]+:/i.test(uri)) continue;
-    const target = NodePath.resolve(NodePath.dirname(path), decodeURIComponent(uri));
+    let name = uri;
+    try {
+      name = decodeURIComponent(uri);
+    } catch {
+      // A malformed escape (`50%_tex.png`) names the file as written.
+    }
+    const target = NodePath.resolve(NodePath.dirname(path), name);
     if (
       !(await NodeFSP.access(target).then(
         () => true,
@@ -181,20 +234,21 @@ export interface ModelFacts {
 export const modelFacts = async (root: string, lane: string): Promise<ModelFacts> => {
   const assets = NodePath.join(root, laneAssets(lane));
   const library = NodePath.join(root, laneLibrary(lane));
-  const assetsDoc = await NodeFSP.readFile(NodePath.join(root, "ASSETS.md"), "utf8").catch(
-    () => "",
-  );
-  const found = (
-    await walkFiles(assets, {
-      enter: (_full, name) => !name.startsWith("."),
-      match: (name) => MODEL.test(name),
-    })
-  )
-    .filter((full) => {
-      const inLibrary = full.startsWith(library + NodePath.sep);
-      const rel = NodePath.relative(root, full).split(NodePath.sep).join("/");
-      return !inLibrary || assetsDoc.includes(rel) || assetsDoc.includes(NodePath.basename(full));
-    })
+  const assetsDoc = (await readAssetsDoc(root)) ?? "";
+  const every = await walkFiles(assets, {
+    enter: (_full, name) => !name.startsWith("."),
+    match: (name) => MODEL.test(name),
+  });
+  // A library model counts once ASSETS.md lists it: by path, by its folder's glob, by a span.
+  const lanePath = (full: string) =>
+    NodePath.relative(NodePath.join(root, lane), full).split(NodePath.sep).join("/");
+  const listed = listedIn(
+    assetsDoc,
+    every.filter((full) => full.startsWith(library + NodePath.sep)).map(lanePath),
+    lane,
+  ).inList;
+  const found = every
+    .filter((full) => !full.startsWith(library + NodePath.sep) || listed.has(lanePath(full)))
     .sort();
   const lines: string[] = [];
   for (const full of found.slice(0, MAX_MODELS))

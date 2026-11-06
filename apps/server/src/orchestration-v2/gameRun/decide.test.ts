@@ -298,6 +298,7 @@ describe("game-run commands", () => {
       type: "game-run.step.start",
       runId,
       stepId: vision.id,
+      attempt: vision.attempt,
       roleThreadId: planner,
     }).records;
     expect(
@@ -318,6 +319,7 @@ describe("game-run commands", () => {
       type: "game-run.step.start",
       runId,
       stepId: write.id,
+      attempt: write.attempt,
       roleThreadId: planner,
     }).records;
     const submit = (
@@ -510,6 +512,112 @@ describe("game-run commands", () => {
     expect(stepOf(resumed)).toMatchObject({ attempt: pair.attempt + 1, endedHalves: [] });
   });
 
+  // A sample that was never played (its thread deleted) is no missing sample:
+  // the comparison is never judged on it, and a resume plays only it again.
+  it("a failed half pauses the pair after its partner, and never lands as a sample", () => {
+    const atCompare = comparing();
+    const pair = stepOf(atCompare);
+    if (pair.step.kind !== "pair") throw new Error("expected a pair");
+    const [first, second] = pair.step.halves;
+    const failed = accept(atCompare, {
+      type: "game-run.step.fail",
+      runId,
+      stepId: gameRunStepId(runId, first!.id),
+      attempt: pair.attempt,
+      reason: "sample-1: its thread was deleted",
+    }).records;
+    expect(runOf(failed).ending).toBeNull();
+    const ended = accept(failed, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: gameRunStepId(runId, second!.id),
+      attempt: pair.attempt,
+      result: roleDone(players[1]),
+    }).records;
+    expect(runOf(ended)).toMatchObject({ ending: "failed", inFlight: pair.seq });
+    const held = stepOf(ended);
+    expect(held.step.kind === "pair" ? held.step.results.map((r) => r.id) : null).toEqual([
+      second!.id,
+    ]);
+    const resumed = accept(finished(ended), { type: "game-run.resume", runId }).records;
+    const again = stepOf(resumed);
+    expect(again.step.kind === "pair" ? again.step.results.map((r) => r.id) : null).toEqual([
+      second!.id,
+    ]);
+  });
+
+  // A record from before the rule kept a failed half among the results; it
+  // must not count as finished, or a resume would run nothing and hang.
+  it("a failed half an older record kept among the results is run again on resume", () => {
+    const atCompare = comparing();
+    const pair = stepOf(atCompare);
+    if (pair.step.kind !== "pair") throw new Error("expected a pair");
+    const [first, second] = pair.step.halves;
+    const legacy: GameRunStep = {
+      ...pair,
+      step: {
+        ...pair.step,
+        results: [{ id: first!.id, result: { kind: "failed", reason: "no copy of its build" } }],
+      },
+    };
+    const before: Records = { ...atCompare, steps: upsert(atCompare.steps, legacy) };
+    const ended = accept(before, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: gameRunStepId(runId, second!.id),
+      attempt: pair.attempt,
+      result: roleDone(players[1]),
+    }).records;
+    expect(runOf(ended)).toMatchObject({ ending: "failed", inFlight: pair.seq });
+    expect(runOf(ended).lastFailure).toBe("no copy of its build");
+    const resumed = accept(finished(ended), { type: "game-run.resume", runId }).records;
+    const again = stepOf(resumed);
+    expect(again.step.kind === "pair" ? again.step.results.map((r) => r.id) : null).toEqual([
+      second!.id,
+    ]);
+  });
+
+  it("a failed single step keeps its step in flight for the resume", () => {
+    const atVision = complete(started(), gitOk());
+    const vision = stepOf(atVision);
+    const failed = accept(atVision, {
+      type: "game-run.step.fail",
+      runId,
+      stepId: vision.id,
+      attempt: vision.attempt,
+      reason: "vision: its thread was deleted",
+    }).records;
+    expect(runOf(failed)).toMatchObject({ ending: "failed", inFlight: vision.seq });
+    const resumed = accept(finished(failed), { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed)).toMatchObject({ seq: vision.seq, attempt: vision.attempt + 1 });
+  });
+
+  // A question wakes the chat the creator works in, never only the one that started the run.
+  it("a steer, an answer and a resume record the chat they came from", () => {
+    const other = ThreadId.make("thread:second-chat");
+    const steered = accept(started(), {
+      type: "game-run.steer",
+      runId,
+      note: "more enemies",
+      chat: other,
+    }).records;
+    expect(runOf(steered).chat).toBe(other);
+  });
+
+  it("a step start from an earlier attempt is refused", () => {
+    const atVision = complete(started(), gitOk());
+    const vision = stepOf(atVision);
+    expect(
+      refusal(atVision, {
+        type: "game-run.step.start",
+        runId,
+        stepId: vision.id,
+        attempt: vision.attempt + 1,
+        roleThreadId: planner,
+      }).reason,
+    ).toBe("stale-attempt");
+  });
+
   it("a run that stalled resumes with a fresh stall count", () => {
     const resumed = runOf(resumedAt(started(), { ending: "stalled", stallStreak: 3 }));
     expect(resumed.status).not.toBe("ended");
@@ -602,6 +710,7 @@ describe("game-run commands", () => {
       type: "game-run.step.start",
       runId,
       stepId: write.id,
+      attempt: write.attempt,
       roleThreadId: reviewer,
     }).records;
     const ledger = (rungChange?: GameRunRungChange) =>
@@ -647,6 +756,7 @@ describe("game-run commands", () => {
       type: "game-run.step.start",
       runId,
       stepId: write.id,
+      attempt: write.attempt,
       roleThreadId: reviewer,
     }).records;
     records = accept(records, {
@@ -712,6 +822,7 @@ describe("game-run commands", () => {
       type: "game-run.step.start",
       runId,
       stepId: write.id,
+      attempt: write.attempt,
       roleThreadId: reviewer,
     }).records;
     records = accept(records, {
@@ -761,7 +872,7 @@ describe("game-run commands", () => {
     // Presented a minute later: the answer's wait counts from there.
     records = accept(
       records,
-      { type: "game-run.step.start", runId, stepId: decision.id },
+      { type: "game-run.step.start", runId, stepId: decision.id, attempt: decision.attempt },
       T0 + MIN,
     ).records;
     expect(runOf(records).pendingDecision?.deadline).toBe(T0 + MIN + Policy.DECISION_WAIT_MS);
@@ -935,6 +1046,7 @@ describe("game-run commands", () => {
       type: "game-run.step.start",
       runId,
       stepId: write.id,
+      attempt: write.attempt,
       roleThreadId: planner,
     }).records;
     const rungs = ladder.rungs.map(({ is, checks }) => ({ is, checks }));

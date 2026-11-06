@@ -725,6 +725,12 @@ export const GameRun = Schema.Struct({
   id: GameRunId,
   /** The game's creator thread: the chat that runs it and whose stream holds its records. */
   threadId: ThreadId,
+  /**
+   * The chat the creator last started, resumed, steered or answered the run
+   * from: its questions wake there. Absent until then, and on runs before:
+   * the run's own thread.
+   */
+  chat: Schema.optionalKey(ThreadId),
   projectId: ProjectId,
   /** The engine project directory the manifest names (`godot`, `web`, `unity`). */
   lane: Schema.String,

@@ -1,5 +1,5 @@
-// The records an older Kurambit's next job would have written survive an
-// upgrade: recovery writes the ones the run's last landings still owe.
+// A decision that settled while the server was down still owes its clean-up:
+// recovery drops its wake, so no queued question asks what is decided.
 import { assert, it } from "@effect/vitest";
 import {
   type GameRun,
@@ -19,7 +19,7 @@ import * as GameRunJobs from "./GameRunJobs.ts";
 import * as GameRunRecovery from "./GameRunRecovery.ts";
 
 const threadId = ThreadId.make("thread:creator");
-const runId = GameRunId.make("run_upgrade");
+const runId = GameRunId.make("run_recovered");
 const file = (path: string) => ({ path, text: `${path}\n` });
 const step = (seq: number, kind: GameRunStep["kind"], files: string[], landed = true) =>
   ({
@@ -34,10 +34,8 @@ const step = (seq: number, kind: GameRunStep["kind"], files: string[], landed = 
     completedAt: landed ? "2026-11-01T00:00:00.000Z" : null,
   }) as unknown as GameRunStep;
 
-it.effect("recovery writes what the landings since the last non-decision step still owe", () =>
+it.effect("recovery cleans up the decision that settled last", () =>
   Effect.gen(function* () {
-    // A role landed, then a decision; the next decision waits: under the walk-back
-    // the job after it would have written both landings' records, in order.
     const run = {
       id: runId,
       threadId,
@@ -50,11 +48,11 @@ it.effect("recovery writes what the landings since the last non-decision step st
     } as unknown as GameRun;
     const steps = [
       step(2, "role", [".studio/older.md"]),
-      step(3, "role", [".studio/ladder.json"]),
+      step(3, "decide", []),
       step(4, "decide", [".studio/next.md"]),
       step(5, "decide", [], false),
     ];
-    const written: string[][] = [];
+    const dropped: number[] = [];
     const layer = GameRunRecovery.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
@@ -71,10 +69,11 @@ it.effect("recovery writes what the landings since the last non-decision step st
               }),
           }),
           Layer.mock(EffectOutbox.EffectOutboxV2)({ hasUnsettled: () => Effect.succeed(false) }),
-          Layer.mock(GameRunJobs.GameRunJobs)({
-            outputs: (job) => Effect.sync(() => void written.push(job.files.map((f) => f.path))),
+          Layer.mock(GameRunJobs.GameRunJobs)({}),
+          Layer.mock(GameRunDecisions.GameRunDecisions)({
+            presented: () => Effect.void,
+            drop: (_thread, settled) => Effect.sync(() => void dropped.push(settled.seq)),
           }),
-          Layer.mock(GameRunDecisions.GameRunDecisions)({ presented: () => Effect.void }),
           Layer.mock(Orchestrator.OrchestratorV2)({}),
         ),
       ),
@@ -82,6 +81,6 @@ it.effect("recovery writes what the landings since the last non-decision step st
     yield* Effect.flatMap(GameRunRecovery.GameRunRecovery, (recovery) => recovery.recover()).pipe(
       Effect.provide(layer),
     );
-    assert.deepEqual(written, [[".studio/ladder.json", ".studio/next.md"]]);
+    assert.deepEqual(dropped, [4]);
   }),
 );
