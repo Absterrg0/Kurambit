@@ -155,8 +155,9 @@ and your agent's editing tools are refused; Play still opens the last exported b
 
 A game has one run at a time: every chat of the game sees and steers the same run, and starting a
 run from another chat continues the one already there. While a run is live, **Stop game** stops
-only your own work on the game; stop the run to stop its builds and players. The command palette
-can also start, resume and stop a game's run.
+only your own work on the game and your Play of it; stop the run to stop its builds and players.
+The command palette can also start, resume and stop a game's run, and opens the Run tab to restore
+a saved build.
 
 ## Play and revise
 
