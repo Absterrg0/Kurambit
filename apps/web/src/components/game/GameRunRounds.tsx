@@ -1,7 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
+import * as Schema from "effect/Schema";
 import { ChevronRightIcon, HistoryIcon } from "lucide-react";
 import {
+  GameOperationError,
   gameRunRoleLabel,
   type GameRunComparison,
   type GameRunPickDetail,
@@ -9,15 +11,17 @@ import {
   type GameRunPickRef,
   type GameRunRoundDetail,
   type GameRunRoundOutcome,
+  type GameRunRestoreRef,
   type GameRunRoundRef,
+  type GameRunSavedBuild,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { resolveAssetUrl } from "../../assets/assetUrls";
 import { requestConfirmDialog } from "../../confirmDialog";
-import { cn } from "../../lib/utils";
-import { gameEnvironment, noteRunRestored } from "../../state/game";
+import { cn, randomUUID } from "../../lib/utils";
+import { gameEnvironment, runRestoreSending, setRunRestoreSending } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { usePreparedConnection } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -79,6 +83,104 @@ function Field({ title, children }: { title: string; children: ReactNode }) {
 }
 
 const asIs = (text: string): string => text;
+
+const isGameOperationError = Schema.is(GameOperationError);
+
+type RestoreTarget = { readonly round: number } | { readonly build: string };
+const targetKey = (target: RestoreTarget) =>
+  "round" in target ? `round:${target.round}` : `build:${target.build}`;
+
+/**
+ * Asks the run for a restore and follows it through the run's status: the
+ * call returns once the request is recorded, and the push that lands the
+ * outcome rereads the status. Asking again after a lost answer is a retry of
+ * the same request, so it never restores twice.
+ */
+function useRunRestore(threadRef: ScopedThreadRef, latest: GameRunRestoreRef | null) {
+  const canRestore = useAtomValue(
+    gameEnvironment.runRestore.permissionAtom(threadRef.environmentId),
+  );
+  const runRestore = useAtomCommand(gameEnvironment.runRestore, { reportFailure: false });
+  const key = useRef<{ readonly target: string; readonly id: string } | null>(null);
+  const shared = useAtomValue(runRestoreSending(threadRef));
+  const [sent, setSent] = useState<{ readonly target: string; readonly requestId: string } | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  // Sent by this client and not yet in the run's status, which moves past `since` once it is.
+  const waiting = shared !== null && (latest?.requestId ?? null) === shared.since;
+  const pending = waiting || (latest !== null && latest.outcome === null);
+  const send = async (target: RestoreTarget, question: string) => {
+    if (pending) return;
+    if ((await requestConfirmDialog(question)) !== true) return;
+    const name = targetKey(target);
+    if (key.current?.target !== name) key.current = { target: name, id: randomUUID() };
+    const since = latest?.requestId ?? null;
+    setRunRestoreSending(threadRef, { target: name, since });
+    setError(null);
+    const result = await runRestore({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, commandId: key.current.id, ...target },
+    });
+    if (result._tag === "Failure") {
+      setRunRestoreSending(threadRef, null);
+      const failure = squashAtomCommandFailure(result);
+      // The run's refusal is its answer to this id; asking again is a new request.
+      if (isGameOperationError(failure) && failure.runReason !== undefined) key.current = null;
+      setError(String(failure));
+      return;
+    }
+    key.current = null;
+    // A request answered earlier is already in the status; a new one makes it move.
+    if (result.value.done || result.value.requestId === since)
+      setRunRestoreSending(threadRef, null);
+    setSent({ target: name, requestId: result.value.requestId });
+  };
+  // The outcome of the restore this view asked for, once the run's status holds it.
+  const mine = sent !== null && latest?.requestId === sent.requestId ? latest : null;
+  return {
+    canRestore,
+    pending,
+    waiting,
+    restoring: (target: RestoreTarget) =>
+      (waiting && shared?.target === targetKey(target)) ||
+      (pending && mine !== null && sent?.target === targetKey(target)),
+    outcome: mine?.outcome ?? null,
+    error,
+    send,
+  };
+}
+
+function RestoreOutcome({
+  outcome,
+  error,
+  label,
+}: {
+  outcome: GameRunRestoreRef["outcome"];
+  error: string | null;
+  /** Names the restore when the outcome may be another client's or an agent's. */
+  label?: string | undefined;
+}) {
+  if (error !== null)
+    return (
+      <p role="alert" className="text-2xs text-destructive-foreground">
+        {error}
+      </p>
+    );
+  if (outcome === null) return null;
+  return (
+    <p
+      role={outcome.restored ? undefined : "alert"}
+      className={cn(
+        "text-2xs",
+        outcome.restored ? "text-muted-foreground" : "text-destructive-foreground",
+      )}
+    >
+      {label === undefined ? null : <span className="font-medium">Last restore, {label}: </span>}
+      {outcome.message}
+    </p>
+  );
+}
 
 /** A blind comparison's evidence: the comparators, the players' reports with their frames, the bots. */
 function ComparisonFields({
@@ -201,11 +303,13 @@ function RoundDetail({
   round,
   rung,
   live,
+  latestRestore,
 }: {
   threadRef: ScopedThreadRef;
   round: number;
   rung: GameRunRoundRef["rung"];
   live: boolean;
+  latestRestore: GameRunRestoreRef | null;
 }) {
   const query = useEnvironmentQuery(
     gameEnvironment.runRound({
@@ -214,13 +318,7 @@ function RoundDetail({
     }),
   );
   const connection = usePreparedConnection(threadRef.environmentId);
-  const canRestore = useAtomValue(
-    gameEnvironment.runRestore.permissionAtom(threadRef.environmentId),
-  );
-  const runRestore = useAtomCommand(gameEnvironment.runRestore, { reportFailure: false });
-  const [restoring, setRestoring] = useState(false);
-  const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
-  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const restores = useRunRestore(threadRef, latestRestore);
   // The signed video URL lasts an hour; one refetch per failure mints a new one,
   // and a video that loaded may retry again later.
   const [videoRetried, setVideoRetried] = useState(false);
@@ -238,26 +336,12 @@ function RoundDetail({
       : null;
   const comparison = detail.comparison;
 
-  const restore = async () => {
-    if (restoring) return;
-    const confirmed = await requestConfirmDialog(
-      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build; what the folder holds now is kept as a build first. Notes, PLAN.md, VISION.md, bots and run records stay as they are. A round the stopped run is in the middle of is abandoned, and a resume starts the next round from this build.`,
+  const restore = () =>
+    restores.send(
+      { round },
+      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build; what the folder holds now is saved as a build first. Notes, PLAN.md, VISION.md, bots and run records stay as they are. A round the stopped run is in the middle of is abandoned, and a resume starts the next round from this build.`,
     );
-    if (confirmed !== true) return;
-    setRestoring(true);
-    setRestoreError(null);
-    const result = await runRestore({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, round },
-    });
-    setRestoring(false);
-    if (result._tag === "Failure") {
-      setRestoreError(String(squashAtomCommandFailure(result)));
-      return;
-    }
-    setRestoreMessage(result.value.message);
-    noteRunRestored(threadRef.environmentId);
-  };
+  const restoring = restores.restoring({ round });
 
   return (
     <div className="space-y-3 border-t border-border px-3 py-3">
@@ -388,7 +472,7 @@ function RoundDetail({
               <Button
                 size="xs"
                 variant="outline"
-                disabled={live || restoring || !canRestore}
+                disabled={live || restores.pending || !restores.canRestore}
                 onClick={() => void restore()}
               >
                 <HistoryIcon aria-hidden="true" />
@@ -401,14 +485,7 @@ function RoundDetail({
               ) : null}
             </>
           )}
-          {restoreMessage ? (
-            <p className="text-2xs text-muted-foreground">{restoreMessage}</p>
-          ) : null}
-          {restoreError ? (
-            <p role="alert" className="text-2xs text-destructive-foreground">
-              {restoreError}
-            </p>
-          ) : null}
+          <RestoreOutcome outcome={restores.outcome} error={restores.error} />
         </div>
       ) : null}
     </div>
@@ -420,10 +497,12 @@ export function GameRunRoundRow({
   threadRef,
   round,
   live,
+  latestRestore,
 }: {
   threadRef: ScopedThreadRef;
   round: GameRunRoundRef;
   live: boolean;
+  latestRestore: GameRunRestoreRef | null;
 }) {
   const [open, setOpen] = useState(false);
   const outcome = OUTCOME[round.outcome];
@@ -460,7 +539,13 @@ export function GameRunRoundRow({
         </CollapsibleTrigger>
         <CollapsiblePanel animate={false}>
           {open ? (
-            <RoundDetail threadRef={threadRef} round={round.round} rung={round.rung} live={live} />
+            <RoundDetail
+              threadRef={threadRef}
+              round={round.round}
+              rung={round.rung}
+              live={live}
+              latestRestore={latestRestore}
+            />
           ) : null}
         </CollapsiblePanel>
       </Collapsible>
@@ -583,5 +668,68 @@ export function GameRunPickRow({
         </CollapsiblePanel>
       </Collapsible>
     </li>
+  );
+}
+
+const savedAt = (at: string): string =>
+  new Date(at).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+/**
+ * The builds a stopped run keeps beside its kept rounds: the game as it left
+ * it, unfinished work, the game before each restore. Restoring one brings it
+ * back to the folder and leaves the run's best as it is.
+ */
+export function GameRunSavedBuilds({
+  threadRef,
+  builds,
+  latestRestore,
+}: {
+  threadRef: ScopedThreadRef;
+  builds: ReadonlyArray<GameRunSavedBuild>;
+  latestRestore: GameRunRestoreRef | null;
+}) {
+  const restores = useRunRestore(threadRef, latestRestore);
+  const restore = (build: GameRunSavedBuild) =>
+    restores.send(
+      { build: build.name },
+      `Restore "${build.label}"?\nThe engine project, art/ and ASSETS.md go back to this build; what the folder holds now is saved as a build first. Notes, PLAN.md, VISION.md, bots and run records stay as they are. The run's best stays as it was, so a resume starts its next round from the best, and a round the stopped run is in the middle of is abandoned.`,
+    );
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">Saved builds</h3>
+      <ul className="divide-y divide-border rounded-lg border border-border bg-card">
+        {builds.map((build) => (
+          <li key={build.name} className="flex items-center gap-2 px-3 py-2">
+            <span className="min-w-0 flex-1 truncate text-xs">{build.label}</span>
+            <span className="shrink-0 text-2xs text-muted-foreground">{savedAt(build.at)}</span>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={restores.pending || !restores.canRestore}
+              onClick={() => void restore(build)}
+            >
+              <HistoryIcon aria-hidden="true" />
+              {restores.restoring({ build: build.name }) ? "Restoring…" : "Restore"}
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {restores.waiting ? (
+        <p className="text-2xs text-muted-foreground">Asking the run to restore…</p>
+      ) : latestRestore !== null && latestRestore.outcome === null ? (
+        <p className="text-2xs text-muted-foreground">Restoring {latestRestore.label}…</p>
+      ) : null}
+      {/* The latest restore's outcome, whoever asked for it: this view, a round, another client, an agent. */}
+      <RestoreOutcome
+        outcome={restores.waiting ? null : (latestRestore?.outcome ?? null)}
+        error={restores.error}
+        label={latestRestore?.label}
+      />
+    </section>
   );
 }

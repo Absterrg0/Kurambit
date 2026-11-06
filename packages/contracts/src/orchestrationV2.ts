@@ -3155,14 +3155,18 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
       Schema.Struct({ kind: Schema.Literal("recover") }),
     ]),
   }),
-  /** The creator asks for a kept round's build back on an ended run; a job moves the folder. */
+  /**
+   * The creator asks for a build back on an ended run, a kept round's or a
+   * saved one by its name (exactly one of them); a job moves the folder.
+   */
   Schema.Struct({
     type: Schema.Literal("game-run.restore.request"),
     ...GameRunCommandFields,
     requestId: TrimmedNonEmptyString,
-    round: PositiveInt,
+    round: Schema.optionalKey(PositiveInt),
+    build: Schema.optionalKey(TrimmedNonEmptyString),
   }),
-  /** The restore job's outcome; a restored build becomes the ended run's judged best. */
+  /** The restore job's outcome; a restored round becomes the ended run's judged best. */
   Schema.Struct({
     type: Schema.Literal("game-run.restore"),
     ...GameRunCommandFields,

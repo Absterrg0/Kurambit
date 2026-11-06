@@ -553,9 +553,11 @@ const RunStopTool = Tool.make("game_run_stop", {
 
 const RunRestoreTool = Tool.make("game_run_restore", {
   description:
-    "Put this game back to a kept round's build when the creator asks: that build's engine project, art and ASSETS.md return to the game folder, and a resumed run judges its next round against them. What the folder held before is kept first, and the result names it with the command that brings it back. Only a kept round, with no run live (stop it first). A stopped run's round in progress is abandoned: its work is in the build kept before, and a resume starts the next round from the restored build. A restore that does not fit is refused with the reason. game_run_status lists the rounds and which were kept.",
+    "Put this game back to an earlier build when the creator asks, with no run live (stop it first). Pass `round` for a kept round's build: it becomes the run's best, and a resumed run judges its next round against it. Or pass `build` with a name from game_run_status `builds` (the game as the run left it, a round's unfinished work, the game before an earlier restore, a round's build that was not kept): it comes back to the folder but the run's best stays as it was, so a resume starts from the best. Either way the engine project, art and ASSETS.md return, and what the folder held before is saved first as a build of its own in `builds`. Restoring the build saved before the latest restore, while no round has run since, undoes that restore: the run's best and the line it was continuing come back too, though a round in progress that restore abandoned stays abandoned. Restoring an older one brings back only its folder. A stopped run's round in progress is abandoned. The result says whether the folder has moved (`done`); a restore still moving after half a minute goes on, and game_run_status `restore` shows its outcome. A restore that does not fit is refused with the reason.",
   parameters: Schema.Struct({
-    round: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    round: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+    build: Schema.optionalKey(Schema.String),
+    commandId,
   }),
   success: GameRunRestoreResult,
   failure,

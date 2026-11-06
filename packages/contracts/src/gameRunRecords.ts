@@ -185,8 +185,15 @@ export type GameRunRoleStep = typeof GameRunRoleStep.Type;
 export const GameRunBuildOp = Schema.Union([
   /** The game folder as the build `name`; `changed` and `lines` count game code against `base`. */
   Schema.TaggedStruct("capture", { name: Schema.String, base: Schema.String }),
-  /** The build's files back in the folder (engine project, art, ASSETS.md); `keep` names point at it too. */
-  Schema.TaggedStruct("restore", { sha: Schema.String, keep: Schema.Array(Schema.String) }),
+  /**
+   * The build's files back in the folder (engine project, art, ASSETS.md); `keep` names point at it too.
+   * With `save`, the folder as it is first becomes that build, unless it already holds the one restored.
+   */
+  Schema.TaggedStruct("restore", {
+    sha: Schema.String,
+    keep: Schema.Array(Schema.String),
+    save: Schema.optionalKey(Schema.String),
+  }),
   /** The build is kept under these names; the folder already holds it. */
   Schema.TaggedStruct("keep", { names: Schema.Array(Schema.String), sha: Schema.String }),
 ]);
@@ -639,7 +646,7 @@ export const GameRunTask = Schema.Union([
 ]);
 export type GameRunTask = typeof GameRunTask.Type;
 
-// ── A creator's restore of a kept round. ────────────────────────────────────
+// ── A creator's restore of a kept round or a saved build. ───────────────────
 export const GameRunRestoreOutcome = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("restored"), sha: Schema.String, message: Schema.String }),
   Schema.Struct({
@@ -649,12 +656,32 @@ export const GameRunRestoreOutcome = Schema.Union([
   }),
 ]);
 export type GameRunRestoreOutcome = typeof GameRunRestoreOutcome.Type;
+/** What a restore replaced in the run's state, so restoring its folder before undoes it. */
+export const GameRunRestoreReplaced = Schema.Struct({
+  best: Schema.String,
+  pending: Schema.NullOr(GameRunPending),
+  /** Rounds recorded once the restore landed; any later round makes it no undo. */
+  rounds: Schema.Number,
+  /** The round in progress the restore abandoned, which an undo cannot bring back. */
+  abandoned: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+});
+export type GameRunRestoreReplaced = typeof GameRunRestoreReplaced.Type;
 export const GameRunRestore = Schema.Struct({
   requestId: Schema.String,
-  round: Schema.Number,
+  /** A kept round's build, which becomes the run's judged best; null for a saved build. */
+  round: Schema.NullOr(Schema.Number),
+  /** A saved build by its name (`endings/…`), which leaves the judged best as it is. */
+  build: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   requestedAt: IsoDateTime,
   /** Null while the job is moving the folder. */
   outcome: Schema.NullOr(GameRunRestoreOutcome),
+  replaced: Schema.NullOr(GameRunRestoreReplaced).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
+  /** The earlier restore this one undoes, by what that one replaced; null when it undoes none. */
+  undoes: Schema.NullOr(GameRunRestoreReplaced).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
 });
 export type GameRunRestore = typeof GameRunRestore.Type;
 
@@ -749,6 +776,14 @@ export const GameRun = Schema.Struct({
   finished: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   /** The creator's latest restore of a kept round: pending while its job moves the folder. */
   restore: Schema.NullOr(GameRunRestore).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  /**
+   * Set by a resume (or a note that reopens the run): the name the folder is
+   * kept under by the run's next step that moves it, so the creator's edits
+   * while the run was stopped are never lost. Cleared by that step's commit.
+   */
+  resumeSave: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
   /**
    * How the run keeps its builds: "checkpoints" under its own refs. Absent on a
    * run from before, which versioned on git branches: such a run is history,

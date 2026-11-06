@@ -6,6 +6,7 @@ import {
   CommandId,
   type GameRun,
   GameRunId,
+  type GameRunRoundId,
   type GameRunRound,
   type GameRunStep,
   type GameRunStepResult,
@@ -20,6 +21,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 
+import { BuildName } from "../../game/run/buildNames.ts";
 import * as Policy from "../../game/run/policy.ts";
 import * as State from "../../game/run/state.ts";
 import * as Decide from "./decide.ts";
@@ -883,6 +885,172 @@ describe("game-run commands", () => {
     const resumed = accept(restored, { type: "game-run.resume", runId }).records;
     expect(stepOf(resumed).seq).toBeGreaterThan(held.seq);
     expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: "beef" } });
+  });
+
+  it("a saved build comes back without becoming the best, and a resume goes on from the best", () => {
+    const stopped = finished(
+      accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
+    );
+    const best = runOf(stopped).best;
+    expect(best.length).toBeGreaterThan(0);
+    const ask = (input: { readonly round?: number; readonly build?: string }) =>
+      ({ type: "game-run.restore.request", runId, requestId: "r1", ...input }) as const;
+    // One build, by a name the run keeps for people: never its best or a turn's.
+    expect(refusal(stopped, ask({})).reason).toBe("wrong-kind");
+    expect(refusal(stopped, ask({ round: 1, build: "endings/x" })).reason).toBe("wrong-kind");
+    expect(refusal(stopped, ask({ build: "best" })).reason).toBe("wrong-kind");
+    const requested = accept(stopped, ask({ build: "round-1/unfinished-4" })).records;
+    expect(runOf(requested).restore).toMatchObject({ round: null, build: "round-1/unfinished-4" });
+    expect(refusal(requested, { type: "game-run.resume", runId }).reason).toBe("restoring");
+    const restored = accept(requested, {
+      type: "game-run.restore",
+      runId,
+      requestId: "r1",
+      outcome: { kind: "restored", sha: "beef", message: "" },
+    }).records;
+    // The folder it worked on is gone, so the held round is dropped all the same.
+    expect(runOf(restored)).toMatchObject({ best, inFlight: null, task: { _tag: "round", n: 2 } });
+    expect(restored.rounds.map((r) => r.round)).toMatchObject([{ round: 1, abandoned: true }]);
+    // Its first move of the folder keeps what the creator left there since, as a saved build.
+    const resumed = accept(restored, { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed).step).toMatchObject({
+      op: {
+        _tag: "restore",
+        sha: best,
+        save: BuildName.resumeBefore(DateTime.formatIso(DateTime.makeUnsafe(T0))),
+      },
+    });
+    expect(runOf(resumed).resumeSave).toBeNull();
+  });
+
+  it("a resume keeps the folder before the run's next move of it, wherever that falls", () => {
+    // Resumed with no ladder: the plan writes one first, and only then does a round restore the best.
+    const atLadder = resumedAt(complete(started(), gitOk()), {
+      task: { _tag: "ladder", phase: "write", thread: null, error: "" },
+    });
+    const save = BuildName.resumeBefore(DateTime.formatIso(DateTime.makeUnsafe(T0)));
+    const write = stepOf(atLadder);
+    expect(write.step.kind).toBe("role");
+    expect(runOf(atLadder).resumeSave).toBe(save);
+    const asked = accept(atLadder, {
+      type: "game-run.step.start",
+      runId,
+      stepId: write.id,
+      roleThreadId: planner,
+    }).records;
+    const rungs = ladder.rungs.map(({ is, checks }) => ({ is, checks }));
+    const submitted = accept(asked, {
+      type: "game-run.submit",
+      runId,
+      stepId: write.id,
+      roleThreadId: planner,
+      submission: { _tag: "ladder", rungs },
+    }).records;
+    const roundStart = complete(submitted, roleDone(planner));
+    expect(stepOf(roundStart).step).toMatchObject({ op: { _tag: "restore", save } });
+    // The step carries it from here; the flag is spent in the same commit.
+    expect(runOf(roundStart).resumeSave).toBeNull();
+  });
+
+  it("each resume of the same held restore keeps the folder under a name of its own", () => {
+    const base = complete(started(), gitOk());
+    const round = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    ).task;
+    const atStart = resumedAt(base, { ladder, task: round });
+    const held = stepOf(atStart);
+    const saveOf = (records: Records) => {
+      const step = stepOf(records).step;
+      return step.kind === "build" && step.op._tag === "restore" ? step.op.save : undefined;
+    };
+    const again = (records: Records, ms: number) =>
+      accept(
+        finished(accept(records, { type: "game-run.stop", runId }, ms).records),
+        { type: "game-run.resume", runId },
+        ms,
+      ).records;
+    const second = again(atStart, T0 + MIN);
+    const third = again(second, T0 + 2 * MIN);
+    expect(stepOf(third).id).toBe(held.id);
+    expect(new Set([saveOf(atStart), saveOf(second), saveOf(third)]).size).toBe(3);
+  });
+
+  it("restoring the folder the latest restore kept undoes it, best and line too, until a round runs", () => {
+    const stopped = finished(
+      accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
+    );
+    const before = runOf(stopped);
+    const restoreOf = (
+      records: Records,
+      requestId: string,
+      input: { readonly round?: number; readonly build?: string },
+    ) => {
+      const asked = accept(records, {
+        type: "game-run.restore.request",
+        runId,
+        requestId,
+        ...input,
+      }).records;
+      return accept(asked, {
+        type: "game-run.restore",
+        runId,
+        requestId,
+        outcome: { kind: "restored", sha: `${requestId}-sha`, message: "" },
+      }).records;
+    };
+    // A restores round 1's build, abandoning round 1 the stopped run was playing.
+    const a = restoreOf(stopped, "a", { round: 1 });
+    expect(runOf(a)).toMatchObject({ best: "a-sha", pending: null });
+    // B restores the folder A kept: the run stands where it stood before A.
+    const b = restoreOf(a, "b", { build: "restores/a-before" });
+    expect(runOf(b)).toMatchObject({ best: before.best, pending: before.pending });
+    expect(runOf(a).restore?.replaced).toMatchObject({ best: before.best, abandoned: 1 });
+    expect(b.rounds.map((r) => r.round)).toMatchObject([{ round: 1, abandoned: true }]);
+    const resumed = accept(b, { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: before.best } });
+    // C undoes B, back to A's best; an older folder brings back only its folder.
+    const c = restoreOf(b, "c", { build: "restores/b-before" });
+    expect(runOf(c).best).toBe("a-sha");
+    expect(runOf(restoreOf(c, "d", { build: "restores/a-before" })).best).toBe("a-sha");
+    // A round recorded since the restore makes its folder no undo: newer progress stays.
+    const later = {
+      ...c,
+      rounds: [...c.rounds, { ...c.rounds[0]!, id: "round-later" as GameRunRoundId }],
+    };
+    expect(runOf(restoreOf(later, "e", { build: "restores/c-before" })).best).toBe("a-sha");
+  });
+
+  it("an undo never rolls the best back over a round kept since, even before it is recorded", () => {
+    const stopped = finished(
+      accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
+    );
+    const before = runOf(stopped).best;
+    const asked = accept(stopped, {
+      type: "game-run.restore.request",
+      runId,
+      requestId: "a",
+      round: 1,
+    }).records;
+    const a = accept(asked, {
+      type: "game-run.restore",
+      runId,
+      requestId: "a",
+      outcome: { kind: "restored", sha: "a-sha", message: "" },
+    }).records;
+    // A later round was kept and stopped in its review: its outcome moved the best, unrecorded yet.
+    const kept = { ...a, runs: [...a.runs.slice(0, -1), { ...runOf(a), best: "kept-sha" }] };
+    const request = { type: "game-run.restore.request", runId, requestId: "b" } as const;
+    const b = accept(kept, { ...request, build: "restores/a-before" }).records;
+    expect(runOf(b).restore?.undoes).toBeNull();
+    const landed = accept(b, {
+      type: "game-run.restore",
+      runId,
+      requestId: "b",
+      outcome: { kind: "restored", sha: "b-sha", message: "" },
+    }).records;
+    expect(runOf(landed).best).toBe("kept-sha");
+    expect(runOf(landed).best).not.toBe(before);
   });
 
   it("a run's copies are spent once no way back reaches them", () => {

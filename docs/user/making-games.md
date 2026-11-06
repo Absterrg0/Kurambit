@@ -132,14 +132,23 @@ which were set aside and why; each round shows how many of its checks passed.
 
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this
 round**, or ask your agent to restore it. The engine project, the art sources under `art/` and `ASSETS.md` return to that build in the
-game folder, and restoring a later kept round goes forward again. What the folder held before is
-kept as a build first, so a restore never discards work: the restore's answer and `.studio/run.log`
-name that build with the command that brings it back. Work a run left unfinished when its budget
-ran out or it ended mid-round is kept and named in `.studio/run.log` the same way. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
+game folder, and restoring a later kept round goes forward again. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
 bots and the run's records stay as they are. A resumed run judges its next round against the
-restored build. Restore refuses while a run is live. Restoring while a stopped run is in the middle
-of a round abandons that round: its work is in the build kept before the restore, the round shows as
-**Abandoned**, and a resume starts the next round from the restored build.
+restored build. Restore refuses while a run is live.
+
+A stopped run also lists its **Saved builds** on the Run tab: the game as the run left it, work a
+round left unfinished, a round's build that was not kept, and the game before each restore. What
+the folder held before a restore is always saved first, so a restore never discards work. Restoring
+a saved build brings it back to the folder but leaves the run's best as it was: those builds were
+never judged better, so a resume starts its next round from the best. The one exception is an
+undo: while no round has run since your latest restore, restoring the game from before it (the row
+says "restoring it undoes that restore") also puts the run's best back, so a resume goes on from
+where the run stood before. Restoring while a stopped run is in the middle of a round abandons that
+round: its work is saved with the game before the restore, the round shows as **Abandoned**, and a
+resume starts the next round from the best. Undoing that restore brings the round's work back to
+the folder, but the round itself stays abandoned. When a resumed run first puts a build back in
+the folder, it saves the folder as it was first ("The game as it was when the run resumed"), so
+changes you made while it was stopped are never lost.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
@@ -151,8 +160,9 @@ and your agent's editing tools are refused; Play still opens the last exported b
 
 A game has one run at a time: every chat of the game sees and steers the same run, and starting a
 run from another chat continues the one already there. While a run is live, **Stop game** stops
-only your own work on the game; stop the run to stop its builds and players. The command palette
-can also start, resume and stop a game's run.
+only your own work on the game and your Play of it; stop the run to stop its builds and players.
+The command palette can also start, resume and stop a game's run, and opens the Run tab to restore
+a saved build.
 
 ## Play and revise
 

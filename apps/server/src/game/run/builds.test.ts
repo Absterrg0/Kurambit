@@ -8,6 +8,8 @@ import { assert, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import type { GameRun } from "@kurambit/contracts";
+
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
@@ -17,6 +19,7 @@ import type * as GameService from "../GameService.ts";
 import { BuildName } from "./buildNames.ts";
 import { buildStep, captureBuild, pruneBuilds } from "./builds.ts";
 import * as Policy from "./policy.ts";
+import { restoreBuild } from "./restoreRound.ts";
 import { type RunState, freshState } from "./state.ts";
 
 const layer = CheckpointStore.layer.pipe(
@@ -126,6 +129,8 @@ it.effect("clears a finished run's spent builds and keeps every one it or a pers
       BuildName.ending("2026-11-04T12:00:00.000Z"),
       BuildName.candidate("round-4"),
       BuildName.candidate("round-6"),
+      // Abandoned by a restore: its folder before may hold the best, not this candidate.
+      BuildName.candidate("round-7"),
       BuildName.turn("step:7", 1),
     ];
     // A turn whose build is the best is still the best.
@@ -195,6 +200,16 @@ it.effect("clears a finished run's spent builds and keeps every one it or a pers
               verdicts: [],
               kept: false,
               note: "rung checks failed (1 FAIL); not judged",
+              durationMs: 0,
+              linesChanged: 0,
+            },
+            {
+              round: 7,
+              move: "",
+              branch: "round-7",
+              verdicts: [],
+              kept: false,
+              abandoned: true,
               durationMs: 0,
               linesChanged: 0,
             },
@@ -295,4 +310,135 @@ it.effect(
       expect(git("show", `${kept}:godot/main.gd`)).toBe("extends Node2D");
       NodeFS.rmSync(root, { recursive: true, force: true });
     }).pipe(Effect.provide(layer)),
+);
+
+it.effect("restores a saved build by its name, keeps the folder before, and leaves the best", () =>
+  Effect.gen(function* () {
+    const { root, git } = repo();
+    const checkpoints = yield* CheckpointStore.CheckpointStore;
+    const runId = "run_saved";
+    const write = (text: string) =>
+      NodeFS.writeFileSync(NodePath.join(root, "godot", "main.gd"), text);
+    const capture = (name: string) => captureBuild({ checkpoints, lock }, root, runId, name);
+    write("best\n");
+    const best = yield* capture(BuildName.best);
+    const endedAt = "2026-11-05T12:00:00.000Z";
+    write("left at the stop\n");
+    const left = yield* capture(BuildName.ending(endedAt));
+    write("edited since\n");
+    const state: RunState = {
+      ...freshState(
+        {
+          runId,
+          profile: "guided",
+          brief: "",
+          artDirection: "",
+          budgetMinutes: null,
+          provider: null,
+          model: null,
+          variant: null,
+          startedAt: "",
+        },
+        { rounds: [], pending: null },
+      ),
+      best,
+    };
+    // The run as its pending restore holds it; the job reads only these.
+    const runFor = (requestId: string, build: string, undoes: string | null) =>
+      ({
+        id: runId,
+        lane: "godot",
+        ending: "stopped",
+        endedAt,
+        restore: {
+          requestId,
+          round: null,
+          build,
+          requestedAt: endedAt,
+          outcome: null,
+          replaced: null,
+          undoes:
+            undoes === null ? null : { best: undoes, pending: null, rounds: 0, abandoned: null },
+        },
+      }) as unknown as GameRun;
+    const restore = (requestId: string, name: string, undoes: string | null = null) =>
+      restoreBuild({
+        game,
+        checkpoints,
+        lock,
+        root,
+        run: runFor(requestId, name, undoes),
+        state,
+        target: { kind: "saved", name },
+        requestId,
+      });
+    const read = () => NodeFS.readFileSync(NodePath.join(root, "godot", "main.gd"), "utf8");
+    const at = (name: string) => git("rev-parse", checkpointRefForGameRun(runId, name));
+
+    const back = yield* restore("r1", BuildName.ending(endedAt));
+    expect(back).toMatchObject({ kind: "restored", sha: left });
+    expect(back.message).toContain("The game before restoring the game as the run left it");
+    expect(read()).toBe("left at the stop\n");
+    // The creator's edit is a saved build of its own, and the run's best never moved.
+    expect(git("show", `${at(BuildName.restoreBefore("r1"))}:godot/main.gd`)).toBe("edited since");
+    expect(at(BuildName.best)).toBe(best);
+
+    // Restoring the folder before undoes the restore; an undo moves the best's name to the best it puts back.
+    const undone = yield* restore("r2", BuildName.restoreBefore("r1"), left);
+    expect(undone.kind).toBe("restored");
+    expect(undone.kind === "restored" ? undone.message : "").toContain("undoes the latest restore");
+    expect(read()).toBe("edited since\n");
+    expect(at(BuildName.best)).toBe(left);
+
+    // A saved build the folder already holds moves nothing, so it is refused and keeps no "before".
+    const same = yield* restore("r4", BuildName.restoreBefore("r1"));
+    expect(same).toMatchObject({ kind: "refused", reason: "already-current" });
+    expect(() => at(BuildName.restoreBefore("r4"))).toThrow();
+
+    // A name the run never kept is refused, and the folder stays as it is.
+    const gone = yield* restore("r3", BuildName.unfinished("round-9", 1));
+    expect(gone).toMatchObject({ kind: "refused", reason: "commit-missing" });
+    expect(read()).toBe("edited since\n");
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("a resume's first move keeps the folder it found once, and only when it differs", () =>
+  Effect.gen(function* () {
+    const { root, git } = repo();
+    const checkpoints = yield* CheckpointStore.CheckpointStore;
+    const runId = "run_resume";
+    const write = (text: string) =>
+      NodeFS.writeFileSync(NodePath.join(root, "godot", "main.gd"), text);
+    const best = yield* captureBuild({ checkpoints, lock }, root, runId, BuildName.best);
+    const save = BuildName.resumeBefore("2026-11-06T10:00:00.000Z");
+    const move = buildStep(
+      { game, checkpoints, lock },
+      { root, runId, lane: "godot" },
+      { _tag: "restore", sha: best, keep: [], save },
+    );
+    const at = (name: string) => git("rev-parse", checkpointRefForGameRun(runId, name));
+    // The creator's edit since the stop is kept before the best comes back.
+    write("the creator's edit\n");
+    assert.isTrue((yield* move).build.ok);
+    expect(git("show", `${at(save)}:godot/main.gd`)).toBe("the creator's edit");
+    expect(NodeFS.readFileSync(NodePath.join(root, "godot", "main.gd"), "utf8")).toBe(
+      "extends Node\n",
+    );
+    // A restart runs the step again: the kept folder is not replaced by the restored one.
+    const kept = at(save);
+    assert.isTrue((yield* move).build.ok);
+    expect(at(save)).toBe(kept);
+    // A folder that already holds the build keeps nothing.
+    const other = BuildName.resumeBefore("2026-11-06T11:00:00.000Z");
+    assert.isTrue(
+      (yield* buildStep(
+        { game, checkpoints, lock },
+        { root, runId, lane: "godot" },
+        { _tag: "restore", sha: best, keep: [], save: other },
+      )).build.ok,
+    );
+    expect(() => at(other)).toThrow();
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }).pipe(Effect.provide(layer)),
 );

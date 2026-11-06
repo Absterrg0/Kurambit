@@ -1,4 +1,10 @@
-import { EnvironmentId, GAME_SAVED_MEDIA_EVENT, ThreadId, WS_METHODS } from "@kurambit/contracts";
+import {
+  EnvironmentId,
+  GAME_SAVED_MEDIA_EVENT,
+  type ScopedThreadRef,
+  ThreadId,
+  WS_METHODS,
+} from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -68,13 +74,31 @@ const gameListSignal = Atom.family((environmentId: string) => {
   }).pipe(Atom.withLabel(`game:list-signal:${environmentId}`));
 });
 
-// Bumped after a restore: every open round's "current build" may have changed.
-const runRestoredSignal = Atom.family((environmentId: string) =>
-  Atom.make(0).pipe(Atom.keepAlive, Atom.withLabel(`game:run-restored:${environmentId}`)),
-);
-
-export const noteRunRestored = (environmentId: EnvironmentId): void =>
-  appAtomRegistry.update(runRestoredSignal(environmentId), (n) => n + 1);
+/**
+ * Changes when an ended run's record changes on one thread's game: a restore
+ * requested or landed (from any client or an agent), a note, its finish. Each
+ * may change which round is the game's current build. A live run's step
+ * pushes leave it as it is, so an open round is never reread mid-run.
+ */
+const endedRunGameSignal = Atom.family((key: string) => {
+  const [environmentId = "", threadId = ""] = key.split("\0");
+  let last = "";
+  return Atom.make((get) => {
+    const result = get(
+      gameEvents({
+        environmentId: EnvironmentId.make(environmentId),
+        input: { threadId: ThreadId.make(threadId) },
+      }),
+    );
+    if (
+      AsyncResult.isSuccess(result) &&
+      result.value.name === "run" &&
+      result.value.state === "succeeded"
+    )
+      last = `${result.value.at}\0${result.value.revision ?? ""}`;
+    return last;
+  }).pipe(Atom.withLabel(`game:ended-run-signal:${key}`));
+});
 
 /**
  * Changes when the server pushes a change to one thread's game's saved/
@@ -101,6 +125,26 @@ const savedMediaSignal = Atom.family((key: string) => {
     return changes;
   }).pipe(Atom.withLabel(`game:saved-media:${key}`));
 });
+
+/**
+ * A restore this client is sending for one thread's game: which build, and the
+ * run's latest restore when it was sent. Every restore button of the game reads
+ * it, so none can send a second one before the run's status shows the first.
+ */
+export interface RunRestoreSending {
+  readonly target: string;
+  readonly since: string | null;
+}
+const runRestoreSendingAtom = Atom.family((key: string) =>
+  Atom.make<RunRestoreSending | null>(null).pipe(
+    Atom.keepAlive,
+    Atom.withLabel(`game:run-restore-sending:${key}`),
+  ),
+);
+export const runRestoreSending = (ref: ScopedThreadRef) =>
+  runRestoreSendingAtom(`${ref.environmentId}\0${ref.threadId}`);
+export const setRunRestoreSending = (ref: ScopedThreadRef, value: RunRestoreSending | null) =>
+  appAtomRegistry.set(runRestoreSending(ref), value);
 
 export const gameEnvironment = {
   toolchain: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
@@ -139,13 +183,15 @@ export const gameEnvironment = {
     refreshTrigger: threadSignal,
   }),
   // Read when a round row opens, never for every round; a finished round's
-  // evidence does not change, so an open row is not polled, only reread after a restore.
+  // evidence does not change, so an open row is not polled, only reread when
+  // an ended run's record changes (a restore makes another round current).
   runRound: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:runRound",
     tag: WS_METHODS.gameRunRound,
     staleTimeMs: 60_000,
     idleTtlMs: 60_000,
-    refreshTrigger: ({ environmentId }) => runRestoredSignal(environmentId),
+    refreshTrigger: (target) =>
+      endedRunGameSignal(`${target.environmentId}\0${target.input.threadId}`),
   }),
   // Read when the pick row opens; reread on the run's step pushes while the pick is open.
   runPick: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {

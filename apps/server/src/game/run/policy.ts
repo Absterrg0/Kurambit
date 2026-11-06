@@ -1464,7 +1464,7 @@ export const holdsRound = (state: RunState): boolean =>
 
 /**
  * A creator's restore drops the round in flight: the next round starts from
- * the restored best, never from this round's work (the restore kept the folder
+ * the best (a restored round is the best), never from this round's work (the restore kept the folder
  * as a build first). A round already judged, waiting only on its review, is
  * recorded with its outcome; one never judged is recorded as abandoned, which
  * is no stall and leaves its rung as it was, with the creator's notes it read

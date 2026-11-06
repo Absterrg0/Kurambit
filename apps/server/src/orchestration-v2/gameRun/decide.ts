@@ -4,6 +4,7 @@
 // this module only folds the records into its state and its answers back out.
 import {
   type GameRun,
+  type GameRunRestore,
   GameRunEnding,
   type GameRunId,
   type GameRunRefusalReason,
@@ -23,7 +24,7 @@ import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
-import { BuildName } from "../../game/run/buildNames.ts";
+import { BuildName, savedBuildOf } from "../../game/run/buildNames.ts";
 import * as Policy from "../../game/run/policy.ts";
 import * as State from "../../game/run/state.ts";
 import type { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
@@ -378,7 +379,14 @@ const advance = (
   const step: State.Step =
     planned.step.kind === "decide" && planned.step.sent === null
       ? { ...planned.step, sent: work.now }
-      : planned.step;
+      : run.resumeSave !== null &&
+          planned.step.kind === "build" &&
+          planned.step.op._tag === "restore"
+        ? // The first move of the folder since a resume keeps it as a saved
+          // build first, wherever that move falls, so what the creator did while
+          // the run was stopped is never lost. settle clears the flag with it.
+          { ...planned.step, op: { ...planned.step.op, save: run.resumeSave } }
+        : planned.step;
   const next = { ...planned.state, inFlight: step };
   const record = stepRecord(work, run, step, planned.logs ?? [], existing);
   const effects =
@@ -440,7 +448,16 @@ const settle = (
   effects: ReadonlyArray<GameRunEffect>,
   created = false,
 ): GameRunDecision => {
-  const settled = fromState(run, state, work.at);
+  // A step that took the resume's save carries it from here (its restart finds it there).
+  const saved =
+    run.resumeSave !== null &&
+    steps.some(
+      (s) =>
+        s.step.kind === "build" &&
+        s.step.op._tag === "restore" &&
+        s.step.op.save === run.resumeSave,
+    );
+  const settled = fromState(saved ? { ...run, resumeSave: null } : run, state, work.at);
   // The commit that ends a run owes its finish: an effect, so a restart cannot lose it.
   const ends = settled.status === "ended" && (created || run.status !== "ended");
   const record: GameRun = ends ? { ...settled, endedAt: work.at, finished: null } : settled;
@@ -539,7 +556,7 @@ export const settling = (run: GameRun) =>
   run.endedAt !== null && run.finished !== run.endedAt
     ? refuse("finishing", `Run ${run.id} is still finishing its ending; try again in a moment.`)
     : run.restore !== null && run.restore.outcome === null
-      ? refuse("restoring", `A round of run ${run.id} is being restored; try again once it is.`)
+      ? refuse("restoring", `A build of run ${run.id} is being restored; try again once it is.`)
       : null;
 
 const start = (work: Work, command: Command<"game-run.start">) => {
@@ -623,6 +640,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
         endedAt: null,
         finished: null,
         restore: null,
+        resumeSave: null,
         versions: "checkpoints",
         startedAt: work.at,
         updatedAt: work.at,
@@ -673,6 +691,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
       command.budgetMinutes === undefined ? run.budgetMinutes : command.budgetMinutes;
     const resumed: GameRun = {
       ...run,
+      resumeSave: BuildName.resumeBefore(work.at),
       budgetMinutes,
       ...(command.modelSelection === undefined ? {} : { modelSelection: command.modelSelection }),
       ...(command.runtimeMode === undefined ? {} : { runtimeMode: command.runtimeMode }),
@@ -738,9 +757,17 @@ const steer = (work: Work, command: Command<"game-run.steer">) =>
         ...noted,
         budgetEndsAt: run.budgetMinutes === null ? null : work.now + run.budgetMinutes * 60_000,
       };
-      const next = advance(work, run, Policy.reopen(budgeted, work.now), null);
+      const reopened: GameRun = { ...run, resumeSave: BuildName.resumeBefore(work.at) };
+      const next = advance(work, reopened, Policy.reopen(budgeted, work.now), null);
       return Result.succeed(
-        settle(work, run, before, next.state, next.step === null ? [] : [next.step], next.effects),
+        settle(
+          work,
+          reopened,
+          before,
+          next.state,
+          next.step === null ? [] : [next.step],
+          next.effects,
+        ),
       );
     }
     // A live run reads it at its next round; a stopped or interrupted one keeps it for its resume.
@@ -951,21 +978,40 @@ const finished = (work: Work, command: Command<"game-run.finished">) =>
     );
   });
 
-/** A creator asks for a kept round's build back: the run records it, a job moves the folder. */
+/**
+ * A creator asks for a build back, a kept round's or a saved one by its name:
+ * the run records it, a job moves the folder.
+ */
 const restoreRequest = (work: Work, command: Command<"game-run.restore.request">) =>
   Result.flatMap(current(work, command.runId), (run) => {
     if (run.status !== "ended")
-      return refuse("run-live", `Run ${run.id} is still going; stop it before restoring a round.`);
+      return refuse("run-live", `Run ${run.id} is still going; stop it before restoring a build.`);
     const busy = settling(run);
     if (busy !== null) return busy;
+    const round = command.round ?? null;
+    const build = command.build ?? null;
+    if ((round === null) === (build === null))
+      return refuse("wrong-kind", "A restore names one kept round or one saved build.");
+    if (build !== null && savedBuildOf(build) === null)
+      return refuse("wrong-kind", `${build} is not a saved build a restore brings back.`);
     const state = toState(run, work.records.rounds, inFlightOf(work, run));
     const pending: GameRun = {
       ...run,
       restore: {
         requestId: command.requestId,
-        round: command.round,
+        round,
+        build,
         requestedAt: work.at,
         outcome: null,
+        // Its rounds count is set again when it lands, past any round it abandons.
+        replaced: {
+          best: state.best,
+          pending: state.pending,
+          rounds: state.rounds.length,
+          abandoned: null,
+        },
+        // Read before this request takes the earlier one's place.
+        undoes: build === null ? null : undoOf(run, state, build),
       },
     };
     return Result.succeed(
@@ -1006,31 +1052,88 @@ export const copiesSpent = (
   return DateTime.toEpochMillis(DateTime.makeUnsafe(run.endedAt)) < input.now - input.keepMs;
 };
 
+/**
+ * What restoring `build` undoes: the run's latest restore, when `build` is the
+ * folder it kept before itself, it moved the folder, and the run has made no
+ * progress since it landed: no round recorded, and the best still the one it
+ * left (a round kept but still in its review has moved the best before it is
+ * recorded). That restore's best and pending line come back with its folder,
+ * so a resume goes on from where the run stood before it; a round in progress
+ * it abandoned stays abandoned. Undoing an undo is the same rule.
+ */
+export const undoOf = (
+  run: Pick<GameRun, "restore">,
+  state: Pick<State.RunState, "rounds" | "best">,
+  build: string,
+): GameRunRestore["replaced"] => {
+  const prev = run.restore;
+  if (prev === null || prev.replaced === null || prev.outcome?.kind !== "restored") return null;
+  const left =
+    prev.round !== null
+      ? prev.outcome.sha
+      : prev.undoes !== null
+        ? prev.undoes.best
+        : prev.replaced.best;
+  return build === BuildName.restoreBefore(prev.requestId) &&
+    state.rounds.length === prev.replaced.rounds &&
+    state.best === left
+    ? prev.replaced
+    : null;
+};
+
 /** A restore on a stopped run abandons the round it holds; a resume would continue it otherwise. */
 export const abandonsRound = (run: GameRun, state: State.RunState): boolean =>
   run.ending !== null && RESUMABLE.has(run.ending) && Policy.holdsRound(state);
 
 /**
- * The restore job's outcome; a restored build becomes the run's judged best,
- * and the round a stopped run held is dropped, its step with it.
+ * The restore job's outcome. A restored round becomes the run's judged best; a
+ * saved build was never judged better than the best, so the best stays and a
+ * resume goes on from it, unless it undoes the latest restore, whose best and
+ * pending line then come back. Either way the round a stopped run held is
+ * dropped, its step with it: the folder it worked on is gone.
  */
 const restore = (work: Work, command: Command<"game-run.restore">) =>
   Result.flatMap(current(work, command.runId), (run) => {
-    if (run.restore?.requestId !== command.requestId || run.restore.outcome !== null)
+    const asked = run.restore;
+    if (asked?.requestId !== command.requestId || asked.outcome !== null)
       return refuse("stale-step", `Restore ${command.requestId} is not the one pending.`);
-    const landed: GameRun = { ...run, restore: { ...run.restore, outcome: command.outcome } };
     const held = inFlightOf(work, run);
     const state = toState(run, work.records.rounds, held);
+    // What an undo of this restore puts back is fixed by where it leaves the run.
+    const landedAs = (next: State.RunState, abandoned: number | null): GameRun => ({
+      ...run,
+      restore: {
+        ...asked,
+        outcome: command.outcome,
+        replaced:
+          asked.replaced === null
+            ? null
+            : { ...asked.replaced, rounds: next.rounds.length, abandoned },
+      },
+    });
     if (command.outcome.kind !== "restored")
-      return Result.succeed(settle(work, landed, state, state, [], []));
-    const best = { ...state, best: command.outcome.sha, pending: null };
+      return Result.succeed(settle(work, landedAs(state, null), state, state, [], []));
+    const round = asked.round;
+    const undoes = asked.undoes;
+    const best =
+      round !== null
+        ? { ...state, best: command.outcome.sha, pending: null }
+        : undoes !== null
+          ? { ...state, best: undoes.best, pending: undoes.pending }
+          : state;
     if (!abandonsRound(run, state))
-      return Result.succeed(settle(work, landed, state, best, [], []));
+      return Result.succeed(settle(work, landedAs(best, null), state, best, [], []));
     const dropped = Policy.abandonRound(
       best,
-      `the creator restored round ${run.restore.round} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
+      `the creator restored ${round === null ? `the saved build ${asked.build ?? ""}` : `round ${round}`} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
       work.now,
     );
+    // Only a round that was under way is recorded as dropped; one not yet started simply starts again.
+    const abandoned =
+      state.task._tag === "round" && dropped.state.rounds.length > state.rounds.length
+        ? state.task.n
+        : null;
+    const landed = landedAs(dropped.state, abandoned);
     if (held === null) return Result.succeed(settle(work, landed, state, dropped.state, [], []));
     // The dropped round's copies go with this commit, as a landing's do: the
     // comparison's threads, and the held step's own roles (a blind player still
