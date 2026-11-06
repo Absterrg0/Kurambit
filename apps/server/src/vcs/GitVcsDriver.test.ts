@@ -19,7 +19,7 @@ import * as ServerConfig from "../config.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
-import type * as VcsDriver from "./VcsDriver.ts";
+import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsDriverRegistry from "./VcsDriverRegistry.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 import { runVcsDriverContractSuite } from "./testing/VcsDriverContractHarness.ts";
@@ -1211,3 +1211,40 @@ it.effect("GitVcsDriver flushes checkpoint objects and refs to disk before publi
     ),
   );
 });
+
+it.effect("a created repository's first commit ignores the user's signing config", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "kurambit-init-commit-" });
+    yield* fileSystem.writeFileString(path.join(cwd, "game.json"), "{}\n");
+    // A global signing config whose signer always fails: `git commit` would exit 128.
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const saved = { ...process.env };
+        Object.assign(process.env, {
+          GIT_CONFIG_COUNT: "2",
+          GIT_CONFIG_KEY_0: "commit.gpgSign",
+          GIT_CONFIG_VALUE_0: "true",
+          GIT_CONFIG_KEY_1: "gpg.program",
+          GIT_CONFIG_VALUE_1: "false",
+        });
+        return saved;
+      }),
+      (saved) =>
+        Effect.sync(() => {
+          for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+        }),
+    );
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    const vcs = yield* VcsDriver.VcsDriver;
+    yield* vcs.initRepository({ cwd, initialCommit: { message: "chore: create game project" } });
+    const log = yield* driver.execute({
+      operation: "test",
+      cwd,
+      args: ["log", "--format=%an %s", "--name-only"],
+    });
+    assert.include(log.stdout, "Kurambit chore: create game project");
+    assert.include(log.stdout, "game.json");
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
+);
