@@ -49,7 +49,10 @@ machine hang on swap; a production run waits for memory rather than failing, and
 short it pauses, ready to resume. The refusal says how much is needed and how much is free; close
 other apps or wait a few minutes, then ask again. Starts also take turns across the machine, so a
 start can wait behind another game's: a run that keeps waiting behind other starts pauses as
-**Machine busy**, ready to resume once they finish. Kurambit never closes your other apps to make
+**Machine busy**, ready to resume once they finish. A run whose own tools keep failing while they
+measure a build (the browser, an engine editor, a copy of the game) pauses as **Tool failed** after
+a few minutes of waiting, with what failed; it never judges the build on it, and resuming the run
+with an empty brief goes on once the cause is fixed. Kurambit never closes your other apps to make
 room. If free memory falls under about 1 GB while an editor sits idle, Kurambit closes it and
 reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB`,
 `KURAMBIT_BLENDER_MEMORY_MB`, `KURAMBIT_EXPLORE_NATIVE_MEMORY_MB`,
@@ -108,7 +111,7 @@ are not carried over; its history stays in git.
 
 A run is **Guided** (the default) or on **Autopilot**. A Guided run asks you at the moments that
 shape the game: once the vision and its key art exist, once both prototypes are built, and once
-the plan has written its ladder. Your agent posts the question in the game's chat with the key
+the plan has written its ladder. Your agent posts the question in the game chat you last started, steered or answered the run from, with the key
 art, each prototype's frames and its two-line pitch, or the ladder, and asks what you want. Answer
 in your own words: keep it or ask for changes ("pinker, rounder"), pick a prototype or combine
 them ("the second one, with the first one's camera"), ask for one more pair of prototypes, edit

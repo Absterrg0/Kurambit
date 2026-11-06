@@ -203,9 +203,10 @@ decision, and nothing outside the event log is the run's truth. Its events stay 
 stream; the Run tab and `game_run_status` read the records.
 
 A game has one run, not one per chat: the records sit on the thread that started the run, and every
-chat of the game's project reaches that run through `getProjectGameRun`. A start from another chat
-resumes or reports the live run instead of opening a second one, and the run's own role threads
-reach none of its controls.
+chat of the game's project reaches that run through `getProjectGameRun`. Starts read and dispatch
+under the project's lock, so two chats starting the first run at once cannot both find none; a
+start from another chat resumes the live run (an empty brief) or is refused (a new brief), and
+the run's own role threads reach none of its controls.
 
 - **Long work runs in jobs, never in effects.** An effect claim is a short lease on a worker pool
   every thread's provider work shares. A step's effect (`game-run.step.execute`) hands its work to
@@ -216,11 +217,21 @@ reach none of its controls.
   effect stays unsettled until its act is committed, and the outbox runs it again after a failure
   or a server death. A timer that only forked a job would be done before its work, and a death in
   between would leave the step running with no job and no timer.
-- **No failure is an answer.** A read or write the run decides by, or that moves it on, never
-  turns into null, false or a log line: it fails up to `retrying` (game/run/retrying.ts) and, when
-  every try fails, to a recorded ending (`game-run.step.fail`, a stop) or a log that recovery
-  owes it at startup. Only best-effort work for people (sheets, notes, log lines) and reads whose
-  unknown has a safe reading (a check with nothing to show is asked anyway) may swallow.
+- **No failure is an answer, and only a measurement is a verdict.** Every step's work, and each
+  half of a pair, reports through one boundary (`GameRunStepRunner.measure`). A measurement
+  completes the step: what the build did, including a crash, a freeze, a failed compile or a game
+  that never boots. What was not measured never does: memory short, the game held, or a tool of
+  Kurambit's that failed (a copy, a launch, a browser, an editor, a record), each read once
+  through `gameOperationFault` ([handBack.ts](../../apps/server/src/game/run/handBack.ts)), hands
+  the step back to a durable timer (memory 7 x 2 min, busy 15 x 1 min, a transient tool 3 x 2 min,
+  one command-id sequence across them), and past its waits, or at once for a fault waiting cannot
+  clear (`isStandingFault`), the run pauses resumably as `tool-failed`, `low-memory` or `busy`
+  with why. The decider hands those pauses, and `failed` (a thread or project deleted), to
+  `Policy.pause`, which keeps the step in flight; `applyResult` takes only a `Measured` result,
+  so no pass, fail, keep, drop or sample can be made of one. A build fault is re-tagged
+  `GameRunBuildFault`, which only the producers with a verdict form for it (boot, the checks, bot
+  facts) turn into one. Quick in-job retries (`retrying`) are only for the run's own record
+  writes. Prompt facts are total: what they could not read they say they did not measure.
 - **Attempts.** A step planned again (a resume) is a new attempt. Every report carries its attempt
   and a command id derived from step, attempt and action (`gameRunStepCommandId`), so a late report
   of an earlier try is refused and a retried one is a no-op. Each attempt has its own role thread
@@ -260,9 +271,12 @@ reach none of its controls.
   own interrupt (its command id), never by any interrupt.
 - **Decisions** wake the creator's chat the `DelegatedTaskQuestionReactor` way: one queued
   `message.dispatch` per decision and attempt with a `game_run` notification source (stored as
-  `background_task` for older clients). The answer's wait starts when that turn finished presenting
-  (`game-run.step.start`), its default fires from the `game-run.decision.deadline` effect with no
-  fiber holding it, and an answer cancels a wake still queued.
+  `background_task` for older clients), sent to the chat the creator last started, resumed,
+  steered or answered the run from (`GameRun.chat`), else the run's own thread, never one archived
+  or deleted. The answer's wait starts when that turn, or a restart's continuation of it, finished
+  presenting (`game-run.step.start`), its default fires from the `game-run.decision.deadline`
+  effect with no fiber holding it, and an answer cancels a wake still queued; recovery cleans up a
+  decision that settled while the server was down.
 - **The outbox timer exception.** The outbox runs a thread's effects in order, and an earlier
   pending effect holds later ones. The run's timers (a role's cap, a decision's deadline) wait
   minutes on the creator thread, so a pending `game-run.step.deadline`, `game-run.step.resend` or
@@ -368,7 +382,9 @@ comparators run, the tester's last play bot plays both builds in fresh copies fo
 time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
 that bot against the candidate, and a bot that fails on only one build would name it, so the
 comparators get bot facts only when the bot ran on both builds; otherwise neither report has them,
-and the step's record and the comparison record say why. A failing bot never drops the round. A comparison's two plays,
+and the step's record and the comparison record say why. Bot facts are withheld only when the bot
+itself did not play (its module would not load, its child broke, the run was stopped); a game
+that crashes, stops answering or never boots under it is a measured fact about that build. A comparison's two plays,
 and its two bot runs, run at once (Unity's one at a time, behind its one editor); that holds only
 because explore sessions, bot runs and game operations are keyed by checkout root, not by game.
 Two starts at once would both pass a free-memory check made before either allocates, so explore
@@ -377,14 +393,14 @@ that check through their import and boot (a Unity open through its launch and it
 not its whole cold import). Time queued behind the gate counts against the same 75 s bound, after
 which the start is refused `busy` (contention, not memory), never kept waiting unseen. No gated
 start may open an editor: the gate is one permit and does not nest. A sample's time waiting there is
-given back to its clock. A play turn whose explore start was refused `low-memory` or `busy` and that
-played nothing is played again after a pause, both causes under one count and one cap; past it the
-run ends resumably with that cause (`low-memory` or `busy`), so no sample lands unplayed. Its
-explore marks reset only as that turn is sent. A step whose own work is refused
-`low-memory`, or `busy` (another operation holds the game, or a start ahead of it holds the gate), ends its job and comes back on a
-durable `game-run.step.wake` timer, so a wait never holds one of the run jobs' shared step slots;
-each kind of wait is counted on the step record, and a cause that does not clear ends the run
-resumably rather than voiding the sample or judging the build. Samples play
+given back to its clock. A play turn (`plays`: a sample's, the tester's, the ship player's) whose
+play was refused for memory, a busy machine or a tool of ours, and that played nothing (no input
+and no bot run), is played again after a pause rather than landed as "played nothing": memory and
+busy under one count up to their cap, a transient tool once, a standing one never; past it the
+run pauses resumably with that cause, so no sample lands unplayed and no tester's checks fail
+for want of play. Its explore marks reset only as that turn is sent. A step's own work that was
+not measured ends its job and comes back on a durable `game-run.step.wake` timer (above), so a
+wait never holds one of the run jobs' shared step slots. Samples play
 plain copies of their builds with no git (`materializeCheckpoint`, without `.studio` and
 `NOTES.md`), so no history, date or note tells the builds apart. Comparators never work in the
 game folder, whose build refs and notes name every sample's build: each gets a folder of its own, empty
