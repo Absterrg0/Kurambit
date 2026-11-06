@@ -1,9 +1,14 @@
-import { UNITY_MIN_VERSION, UNITY_VIEWPORT, UNITY_PROJECT_DIRECTORY } from "@kurambit/contracts";
+import {
+  GAME_ENGINES,
+  UNITY_MIN_VERSION,
+  UNITY_VIEWPORT,
+  UNITY_PROJECT_DIRECTORY,
+} from "@kurambit/contracts";
 import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const UNITY_PROFILE: GameEngineProfile = {
   id: "unity",
-  turnLoop: false,
+  turnLoop: GAME_ENGINES.unity.turnLoop,
   displayName: "Unity",
   projectDirectory: UNITY_PROJECT_DIRECTORY,
   exportTargets: ["Linux", "Windows"],

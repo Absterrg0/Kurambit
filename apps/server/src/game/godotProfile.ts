@@ -1,8 +1,9 @@
+import { GAME_ENGINES } from "@kurambit/contracts";
 import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const GODOT_PROFILE: GameEngineProfile = {
   id: "godot",
-  turnLoop: false,
+  turnLoop: GAME_ENGINES.godot.turnLoop,
   displayName: "Godot",
   projectDirectory: "godot",
   exportTargets: ["Web", "Linux", "Windows"],

@@ -149,6 +149,12 @@ export const GAME_ENGINES: Readonly<
       readonly template: GameTemplateId;
       /** The installed tool its games build and play with; null when it needs none. */
       readonly tool: "godot" | "unity" | null;
+      /**
+       * When a chat turn changes the game, its build plays on the Stage and is
+       * measured at once. Off for parked lanes whose builds are too slow to follow
+       * every turn; their games build and play as before.
+       */
+      readonly turnLoop: boolean;
       readonly picker: { readonly title: string; readonly description: string };
     }
   >
@@ -157,6 +163,7 @@ export const GAME_ENGINES: Readonly<
     name: "Godot",
     template: "blank",
     tool: "godot",
+    turnLoop: false,
     picker: {
       title: "Godot native",
       description:
@@ -167,6 +174,7 @@ export const GAME_ENGINES: Readonly<
     name: "three.js",
     template: "blank-three",
     tool: null,
+    turnLoop: true,
     picker: {
       title: "three.js browser",
       description: "A quick static browser game, nothing to install. Web export only.",
@@ -176,6 +184,7 @@ export const GAME_ENGINES: Readonly<
     name: "Unity",
     template: "blank-unity",
     tool: "unity",
+    turnLoop: false,
     picker: {
       title: "Unity native",
       description:

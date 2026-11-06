@@ -1,9 +1,14 @@
-import { THREE_PINNED_VERSION, THREE_VIEWPORT, THREE_PROJECT_DIRECTORY } from "@kurambit/contracts";
+import {
+  GAME_ENGINES,
+  THREE_PINNED_VERSION,
+  THREE_VIEWPORT,
+  THREE_PROJECT_DIRECTORY,
+} from "@kurambit/contracts";
 import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const THREE_PROFILE: GameEngineProfile = {
   id: "three",
-  turnLoop: true,
+  turnLoop: GAME_ENGINES.three.turnLoop,
   displayName: "three.js",
   projectDirectory: THREE_PROJECT_DIRECTORY,
   exportTargets: ["Web"],
