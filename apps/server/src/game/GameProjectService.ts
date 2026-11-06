@@ -44,22 +44,8 @@ import { findKeyArt } from "./keyArt.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
 import { ensureScaffold } from "./runSetup.ts";
-import { createEngine, scaffoldFiles } from "./scaffold.ts";
+import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
-
-/**
- * Stand-in for scaffold.ts's `firstTurnMessage` (builder M, loop phase 1)
- * until it merges: the brief as the chat's first message, naming AGENTS.md
- * for providers that do not load it themselves.
- */
-const firstTurnMessage = (manifest: GameManifest): string =>
-  [
-    'Make this game. Follow "The first turn" in AGENTS.md.',
-    manifest.brief.trim(),
-    ...(manifest.artDirection.trim() === ""
-      ? []
-      : [`Art direction: ${manifest.artDirection.trim()}`]),
-  ].join("\n\n");
 
 export const insideGame = (root: string, relative: string) => {
   const target = NodePath.resolve(root, relative);

@@ -145,3 +145,9 @@ Use the game_* tools to check, play, export and package the game; never run Godo
     ".gitignore": `${[...GENERATED_IGNORES, ...RUN_STATE_IGNORES].join("\n")}\n`,
   };
 }
+
+// TEMPORARY stand-in (builder S) for builder M's firstTurnMessage; M's
+// definition replaces this whole block at merge.
+/** A new game's first chat message: the brief, and where the first turn's rules are. */
+export const firstTurnMessage = (manifest: GameManifest): string =>
+  `${manifest.engine.name === "three" ? 'Make this game. Follow "The first turn" in AGENTS.md.' : "Make this game. Read AGENTS.md first."}\n\n${manifest.brief}${manifest.artDirection.trim() === "" ? "" : `\n\nArt direction: ${manifest.artDirection}`}`;
