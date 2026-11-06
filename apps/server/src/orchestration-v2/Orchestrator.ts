@@ -84,6 +84,7 @@ import {
   gameRunHold,
   isNativeMaintenanceCommand,
   resolveMessageDispatchIntent,
+  threadCheckpointsOwnedByRun,
   threadTurnsOwnedByRun,
 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
@@ -607,17 +608,19 @@ function nextQueuedRun(
 }
 
 function latestStableRun(
-  projection: Pick<OrchestrationV2ThreadProjection, "runs">,
+  projection: Pick<OrchestrationV2ThreadProjection, "thread" | "runs">,
 ): OrchestrationV2Run | null {
+  // A role thread's turns keep no checkpoint, so its completed runs are stable as they are.
+  const uncheckpointed = threadCheckpointsOwnedByRun(projection.thread);
   return (
     projection.runs
-      .filter((run) => run.status === "completed" && run.checkpointId !== null)
+      .filter((run) => run.status === "completed" && (uncheckpointed || run.checkpointId !== null))
       .toSorted((left, right) => right.ordinal - left.ordinal)[0] ?? null
   );
 }
 
 function runForSourcePoint(
-  projection: Pick<OrchestrationV2ThreadProjection, "runs" | "checkpoints">,
+  projection: Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "checkpoints">,
   sourcePoint: Extract<
     OrchestrationV2Command,
     { readonly type: "thread.fork" | "thread.merge_back" }

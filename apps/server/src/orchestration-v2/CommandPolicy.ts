@@ -132,6 +132,15 @@ export function threadTurnsOwnedByRun(thread: {
 }
 
 /**
+ * A role thread's turns keep no checkpoints of their own: the run captures each
+ * role's work as one of its builds, and between turns it moves the folder
+ * (restoring the base or the best build). A second capture queued on the effect
+ * lane could land after that move and record the run's restore as the role's
+ * work. The turn's run still settles; it just has no diff or rollback point.
+ */
+export const threadCheckpointsOwnedByRun = threadTurnsOwnedByRun;
+
+/**
  * How a production run holds its game's folder: while live, while its ending
  * still exports, and while a creator's restore moves a round back. The run is
  * then the folder's one writer; null when no run holds it.

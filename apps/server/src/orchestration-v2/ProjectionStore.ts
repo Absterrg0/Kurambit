@@ -243,6 +243,7 @@ export type ProjectionCheckpointContext = typeof ProjectionCheckpointContext.Typ
 const decodeCheckpointContext = Schema.decodeUnknownEffect(ProjectionCheckpointContext);
 
 export interface ProjectionCheckpointCaptureContext {
+  readonly thread: OrchestrationV2AppThread;
   readonly run: OrchestrationV2Run | undefined;
   readonly rootNode: OrchestrationV2ExecutionNode | undefined;
   readonly scope: OrchestrationV2CheckpointScope | undefined;
@@ -4938,7 +4939,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql
         .withTransaction(
           Effect.gen(function* () {
-            yield* requireThread(threadId);
+            const threadRows = yield* sql<PayloadRow>`
+          SELECT payload_json FROM orchestration_v2_projection_threads
+          WHERE thread_id = ${threadId} LIMIT 1`;
+            if (threadRows[0] === undefined)
+              return yield* new ProjectionStoreThreadNotFoundError({ threadId });
+            const thread = yield* decodeThreadPayload(threadRows[0].payload_json);
             const runRows = yield* sql<PayloadRow>`
           SELECT payload_json FROM orchestration_v2_projection_runs
           WHERE thread_id = ${threadId} AND run_id = ${target.runId}`;
@@ -4961,6 +4967,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             WHERE thread_id = ${threadId} AND scope_id = ${target.scopeId} AND status = 'ready'`,
             ]);
             return {
+              thread,
               run,
               rootNode:
                 nodeRows[0] === undefined
@@ -6973,6 +6980,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             return yield* new ProjectionStoreThreadNotFoundError({ threadId });
           const run = projection.runs.find((candidate) => candidate.id === target.runId);
           return {
+            thread: projection.thread,
             run,
             rootNode: projection.nodes.find((candidate) => candidate.id === run?.rootNodeId),
             scope: projection.checkpointScopes.find((candidate) => candidate.id === target.scopeId),
