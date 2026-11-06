@@ -306,7 +306,7 @@ function StageStateCard({
               title="Your agent is making the first playable build"
               body={
                 <span className="inline-flex items-center gap-1.5">
-                  <span>It plays here when the turn ends.</span>
+                  <span>It plays here as soon as the turn ends.</span>
                   {phase.startedAt === null ? null : (
                     <GameElapsed since={phase.startedAt} className="shrink-0 text-stage-muted" />
                   )}

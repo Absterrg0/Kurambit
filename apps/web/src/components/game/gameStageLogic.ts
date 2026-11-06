@@ -48,9 +48,16 @@ export interface GameStageInput {
   busyStartedAt: number | null;
   /** A stage action failed in this client (RPC failure), not on the server. */
   localError: string | null;
+  /** The engine plays each changing turn's build on the stage (`GAME_ENGINES[engine].turnLoop`). */
+  turnLoop: boolean;
   /** The chat's agent turn is running, and when it started. */
   turnRunning: boolean;
   turnStartedAt: number | null;
+  /**
+   * This stage saw the turn end, the turn's build is listed, and no operation
+   * started since: the server's play of it is on its way.
+   */
+  turnBuildPending: boolean;
 }
 
 const operationStartedAt = (operation: GameStatus["operation"]) =>
@@ -59,16 +66,17 @@ const operationStartedAt = (operation: GameStatus["operation"]) =>
 export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
   const operation = input.operation;
   const playable = input.hasWebBuild && input.previewUrl !== null;
-  // The turn that will make the first build owns the stage until it ends: the
-  // agent's own checks and failed tries inside it are its work in progress,
-  // and its build plays when it lands. The person's own action still shows.
-  if (
-    input.turnRunning &&
+  // On an engine that plays every turn, the turn that will make the first
+  // build owns the stage until its build plays: the agent's own checks and
+  // failed tries inside it are its work in progress. The person's own action
+  // still shows.
+  const firstBuild =
+    input.turnLoop &&
     !input.hasWebBuild &&
     input.toolchainReady &&
     input.busyStartedAt === null &&
-    input.localError === null
-  )
+    input.localError === null;
+  if (firstBuild && input.turnRunning)
     return { kind: "first-build", startedAt: input.turnStartedAt };
   // Work in flight only takes over the stage when there is nothing to play: a
   // rebuild of a game that is already on screen keeps it running, and the new
@@ -83,6 +91,10 @@ export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
   // strip names the blocker, and the game keeps running.
   if (input.previewUrl !== null && input.hasWebBuild)
     return { kind: "playing", stale: input.webBuildStale };
+  // The turn ended and its build is about to play: no "Build & play" to race
+  // the server's own, and an older failure was the turn's work in progress.
+  if (firstBuild && input.turnBuildPending)
+    return { kind: "first-build", startedAt: input.turnStartedAt };
   // Only a failure that leaves nothing to play becomes the whole state.
   const failure = input.localError ?? (operation?.state === "failed" ? operation.message : null);
   if (failure !== null && !playable) return { kind: "failed", message: failure };
