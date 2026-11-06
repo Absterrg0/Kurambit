@@ -2,7 +2,7 @@
 // and a bot that never ran says nothing about it. The run loop must hand the
 // first over as a measured result with its trace, keep the second off the
 // record, and never take our own side going away for the game's.
-// @effect-diagnostics nodeBuiltinImport:off -- The bot child is a real Node process reading real files.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off -- The bot child is a real Node process reading real files, and a silent game waits out its own tick bound.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -68,10 +68,31 @@ const scriptedLaunch = (
   };
 };
 
+/** A game that answers these ticks, then goes silent: each later tick waits its whole bound. */
+const silentAfter = (ticks: ReadonlyArray<Record<string, unknown>>): BotLaunch => {
+  const launch = scriptedLaunch([], "timeout", { by: "game", detail: "" });
+  let sent = 0;
+  return {
+    ...launch,
+    play: {
+      ...launch.play,
+      nextTick: async (timeoutMs): Promise<PlayTick> => {
+        const tick = ticks[sent];
+        sent += 1;
+        if (tick !== undefined)
+          return { kind: "tick", observation: { op: "tick", tick: sent, ...tick } };
+        await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+        return { kind: "timeout" };
+      },
+    },
+  };
+};
+
 const runIn = (
   launch: BotLaunch,
   bot = BOT,
   session: { stopped: boolean; processes: never[] } = { stopped: false, processes: [] },
+  seconds = 30,
 ) => {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-bot-play-"));
   dirs.push(root);
@@ -95,7 +116,7 @@ const runIn = (
     decider: "policy",
     mode: "play",
     jevLive: false,
-    seconds: 30,
+    seconds,
     ffmpeg: "ffmpeg",
     jevKey: null,
     jevBase: "https://jev.invalid",
@@ -184,4 +205,10 @@ describe("playBot", () => {
     const run = await runIn(scriptedLaunch(dead, "timeout", { by: "game", detail: "" })).result;
     expect(run.status.state).toBe("bot:crashed");
   });
+
+  it("calls a game silent when its budget ends unresponsive, at the game time it stopped", async () => {
+    const run = await runIn(silentAfter(playing), BOT, { stopped: false, processes: [] }, 2).result;
+    expect(run.status.state).toBe("unresponsive");
+    expect(run.status.note).toContain("0.2 s");
+  }, 30_000);
 });

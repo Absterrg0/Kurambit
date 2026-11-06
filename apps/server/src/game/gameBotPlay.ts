@@ -628,6 +628,17 @@ export const playBot = async (
       }
       await play.input({ held: answer.held, taps: answer.taps, clicks });
     }
+    // The loop ended (the budget, the bot's word) while the game was not
+    // answering: it is asked once more, and silence again is the game's,
+    // measured, whatever the bot concluded from what it last saw.
+    if (misses > 0 && gameEnd === null && !stopped()) {
+      const last = await play.nextTick(PLAY_BOUNDS.tickMs);
+      if (last.kind === "timeout")
+        gameEnd = {
+          state: "unresponsive",
+          note: `The game stopped answering at ${lastT.toFixed(1)} s.`,
+        };
+    }
     const wallSeconds = Math.max(0.1, (Date.now() - wallStart) / 1000);
     const tickHz = ticks / wallSeconds;
     const gameSeconds = lastT;
