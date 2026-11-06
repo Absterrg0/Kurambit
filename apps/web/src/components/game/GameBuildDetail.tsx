@@ -68,7 +68,10 @@ export function GameBuildDetail({
   useEffect(() => {
     if (neverMeasured) void sendMeasure(build.id);
   }, [neverMeasured, build.id, sendMeasure]);
-  const isCurrent = list?.current === build.id && list.folderEdited === false;
+  // The folder holds this build unless the list knows of an edit since (phase
+  // 1's folder-build rule): going back to it restores nothing, and its record
+  // would replace the undo's, taking Redo away.
+  const isCurrent = list?.current === build.id && list.folderEdited !== true;
   // The server stays authoritative; these say why before the person presses.
   const restoreBlocked =
     build.noRestore ??
@@ -124,7 +127,7 @@ export function GameBuildDetail({
             <MenuItem onClick={() => onCompare(null)}>Pick on the timeline…</MenuItem>
           </MenuPopup>
         </Menu>
-        {writer ? (
+        {writer && !isCurrent ? (
           <Button
             size="sm"
             variant="outline"
@@ -145,11 +148,9 @@ export function GameBuildDetail({
         <p className="text-2xs text-muted-foreground">{build.noPlay}</p>
       ) : null}
       {isCurrent ? (
-        <p className="text-2xs text-muted-foreground">
-          The folder was this build when the list was last read.
-        </p>
+        <p className="text-2xs text-muted-foreground">The game folder holds this build.</p>
       ) : null}
-      {writer && restoreBlocked !== null ? (
+      {writer && !isCurrent && restoreBlocked !== null ? (
         <p className="text-2xs text-muted-foreground">{restoreBlocked}</p>
       ) : null}
       {restores.error(build.id) ? (

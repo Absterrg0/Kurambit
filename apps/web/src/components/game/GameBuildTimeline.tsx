@@ -25,6 +25,9 @@ import { isUndone, markLabel, markTone, stepMark } from "./gameBuildTimeline.log
 import { turnStripRestore } from "./gameTurnBuild.logic";
 import { restoreQuestion, useBuildRestore } from "./useBuildActions";
 
+/** How many older pages an "Open build" reads to find its build before it says so. */
+const SEEK_PAGES = 10;
+
 const TONE_BAR = {
   good: "bg-success",
   bad: "bg-destructive",
@@ -98,6 +101,9 @@ export function GameBuildTimeline({
   const [open, setOpen] = useState<string | null>(null);
   // The first side of a compare waiting for the mark that picks the second.
   const [picking, setPicking] = useState<GameBuildRef | "any" | null>(null);
+  // A build asked for by ref that no loaded page holds: pages back until it does.
+  const [sought, setSought] = useState<GameBuildRef | null>(null);
+  const [notFound, setNotFound] = useState(false);
   // A request made before the timeline mounted was answered, or was for another one.
   const [mountRequest] = useState(request?.n ?? 0);
   const restores = useBuildRestore(threadRef, first.data?.restore ?? null);
@@ -122,6 +128,22 @@ export function GameBuildTimeline({
       : lastPage !== undefined && AsyncResult.isSuccess(lastPage)
         ? lastPage.value.next
         : null;
+  // An older turn's "Open build": read pages back until it is a mark, then open it.
+  if (sought !== null) {
+    const found = marks.find((entry) => sameRef(sought, entry));
+    const waiting = lastPage !== undefined && !AsyncResult.isSuccess(lastPage);
+    if (found !== undefined) {
+      setSought(null);
+      setSelected(found.id);
+      setOpen(found.id);
+    } else if (list !== null && !waiting) {
+      if (olderNext !== null && olderCount < SEEK_PAGES) setOlderCount(olderCount + 1);
+      else {
+        setSought(null);
+        setNotFound(true);
+      }
+    }
+  }
   // The newest marks are the ones a person wants: a new build scrolls to them,
   // while Older adds marks at the left and leaves the row where it is.
   const newest = marks.at(-1)?.id ?? "";
@@ -162,6 +184,9 @@ export function GameBuildTimeline({
       if (build !== undefined) {
         setSelected(build.id);
         setOpen(build.id);
+      } else {
+        setSought(asked.build);
+        setNotFound(false);
       }
     } else
       setPicking(
@@ -398,6 +423,13 @@ export function GameBuildTimeline({
           </>
         )}
       </div>
+      {sought !== null ? (
+        <p className="text-2xs text-muted-foreground">Finding that build…</p>
+      ) : notFound ? (
+        <p className="text-2xs text-muted-foreground">
+          That build is older than the timeline reads; Older pages back to it.
+        </p>
+      ) : null}
       {action !== null && restores.error(action.target) ? (
         <p role="alert" className="text-2xs text-destructive-foreground">
           {restores.error(action.target)}
