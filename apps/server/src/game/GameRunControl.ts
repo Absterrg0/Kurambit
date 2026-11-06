@@ -319,7 +319,14 @@ const make = Effect.gen(function* () {
     const overridden = input.provider !== undefined || input.model !== undefined;
     const budgetMinutes =
       input.budgetMinutes === undefined ? undefined : Math.max(1, Math.round(input.budgetMinutes));
-    if (run !== null && run.ending !== null && RESUMABLE.has(run.ending) && !gitEra(run)) {
+    // An empty brief resumes; a new brief is a new run, the ended one kept as history.
+    if (
+      input.brief.trim().length === 0 &&
+      run !== null &&
+      run.ending !== null &&
+      RESUMABLE.has(run.ending) &&
+      !gitEra(run)
+    ) {
       yield* ensureScaffold(root, lane, false);
       yield* dispatch("run-start", {
         type: "game-run.resume",

@@ -333,7 +333,11 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
                 onClick={() => void start()}
               >
                 <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
-                {busy ? "Starting…" : resumable ? "Resume run" : "Start run"}
+                {busy
+                  ? "Starting…"
+                  : resumable && brief.trim().length === 0
+                    ? "Resume run"
+                    : "Start run"}
               </Button>
             </div>
           </div>
