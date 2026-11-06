@@ -6,9 +6,11 @@ import * as NodePath from "node:path";
 import {
   ProviderInstanceId,
   gameRunRoleLabel,
+  type GameRun,
   type GameRunDecision,
   type ModelSelection,
 } from "@kurambit/contracts";
+import { BuildName, savedBuildOf } from "./buildNames.ts";
 import type * as Policy from "./policy.ts";
 import type * as State from "./state.ts";
 
@@ -50,7 +52,9 @@ export const currentStep = (state: State.RunState): string => {
     case "round":
       return `Round ${t.n} · ${t.phase.replace("-", " ")}`;
     case "ladder":
-      return "Plan · writing the ladder";
+      return t.phase === "revise"
+        ? "Plan · rewriting the ladder with the creator's notes"
+        : "Plan · writing the ladder";
     case "ship":
       return `Ship review after round ${t.n}`;
     case "leave":
@@ -75,9 +79,57 @@ export const steerWhen = (state: State.RunState | null): string => {
     return `Round ${t.n} is in progress and finishes as planned; round ${t.n + 1} starts with it.`;
   if (t?._tag === "ship")
     return "A ship review is in progress; the next round starts with it before the run can end.";
-  if (t?._tag === "ladder") return "The plan is writing the ladder; the next round starts with it.";
+  if (t?._tag === "ladder")
+    return t.phase === "revise"
+      ? "The plan is rewriting the ladder with the creator's notes; the next round starts with it."
+      : "The plan is writing the ladder; the next round starts with it.";
   if (t?._tag === "leave") return "The run is ending at its budget; a resumed run starts with it.";
-  return "The run is still making its first build; its first round starts with it.";
+  const first = (state?.rounds.length ?? 0) === 0 ? "its first round" : "the next round";
+  if (t?._tag === "decide")
+    return `The run is waiting for the creator's answer on ${DECISION_LABEL[t.decision.kind]}; ${first} starts with it.`;
+  return `The run is still making its first build; ${first} starts with it.`;
+};
+
+/**
+ * A saved build as the Run tab and the tools name it, or null for a name
+ * that is no saved build (a kept round is restored by its round instead).
+ */
+export const savedBuildLabel = (
+  name: string,
+  state: Pick<State.RunState, "rounds">,
+  run: Pick<GameRun, "ending" | "endedAt" | "restore">,
+): string | null => {
+  const saved = savedBuildOf(name);
+  if (saved === null) return null;
+  switch (saved.kind) {
+    case "ending":
+      return run.endedAt !== null && name === BuildName.ending(run.endedAt)
+        ? `The game as the run left it (${run.ending ?? "ended"})`
+        : "The game as an earlier stop of the run left it";
+    case "restore-before": {
+      const last = run.restore;
+      if (last === null || name !== BuildName.restoreBefore(last.requestId))
+        return "The game before an earlier restore";
+      return last.round !== null
+        ? `The game before restoring round ${last.round}`
+        : "The game before restoring a saved build";
+    }
+    case "unfinished":
+      return `Round ${saved.round}'s unfinished work`;
+    case "candidate": {
+      const record = state.rounds.findLast((r) => r.branch === `round-${saved.round}`);
+      if (record?.kept === true) return null;
+      const how =
+        record === undefined || record.unjudged === true
+          ? "never judged"
+          : record.inconclusive === true
+            ? "judged inconclusive"
+            : record.abandoned === true
+              ? "abandoned"
+              : "not kept";
+      return `Round ${saved.round}'s build, ${how}`;
+    }
+  }
 };
 
 // The game's chosen provider, model and options: the creator's own unless the

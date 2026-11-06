@@ -885,6 +885,34 @@ describe("game-run commands", () => {
     expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: "beef" } });
   });
 
+  it("a saved build comes back without becoming the best, and a resume goes on from the best", () => {
+    const stopped = finished(
+      accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
+    );
+    const best = runOf(stopped).best;
+    expect(best.length).toBeGreaterThan(0);
+    const ask = (input: { readonly round?: number; readonly build?: string }) =>
+      ({ type: "game-run.restore.request", runId, requestId: "r1", ...input }) as const;
+    // One build, by a name the run keeps for people: never its best or a turn's.
+    expect(refusal(stopped, ask({})).reason).toBe("wrong-kind");
+    expect(refusal(stopped, ask({ round: 1, build: "endings/x" })).reason).toBe("wrong-kind");
+    expect(refusal(stopped, ask({ build: "best" })).reason).toBe("wrong-kind");
+    const requested = accept(stopped, ask({ build: "round-1/unfinished-4" })).records;
+    expect(runOf(requested).restore).toMatchObject({ round: null, build: "round-1/unfinished-4" });
+    expect(refusal(requested, { type: "game-run.resume", runId }).reason).toBe("restoring");
+    const restored = accept(requested, {
+      type: "game-run.restore",
+      runId,
+      requestId: "r1",
+      outcome: { kind: "restored", sha: "beef", message: "" },
+    }).records;
+    // The folder it worked on is gone, so the held round is dropped all the same.
+    expect(runOf(restored)).toMatchObject({ best, inFlight: null, task: { _tag: "round", n: 2 } });
+    expect(restored.rounds.map((r) => r.round)).toMatchObject([{ round: 1, abandoned: true }]);
+    const resumed = accept(restored, { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: best } });
+  });
+
   it("a run's copies are spent once no way back reaches them", () => {
     const keepMs = 14 * 24 * 60 * MIN;
     const at = { latest: true, chatDeleted: false, now: T0 + MIN, keepMs };

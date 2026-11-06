@@ -553,9 +553,10 @@ const RunStopTool = Tool.make("game_run_stop", {
 
 const RunRestoreTool = Tool.make("game_run_restore", {
   description:
-    "Put this game back to a kept round's build when the creator asks: that build's engine project, art and ASSETS.md return to the game folder, and a resumed run judges its next round against them. What the folder held before is kept first, and the result names it with the command that brings it back. Only a kept round, with no run live (stop it first). A stopped run's round in progress is abandoned: its work is in the build kept before, and a resume starts the next round from the restored build. A restore that does not fit is refused with the reason. game_run_status lists the rounds and which were kept.",
+    "Put this game back to an earlier build when the creator asks, with no run live (stop it first). Pass `round` for a kept round's build: it becomes the run's best, and a resumed run judges its next round against it. Or pass `build` with a name from game_run_status `builds` (the game as the run left it, a round's unfinished work, the game before an earlier restore, a round's build that was not kept): it comes back to the folder but the run's best stays as it was, so a resume starts from the best. Either way the engine project, art and ASSETS.md return, and what the folder held before is saved first as a build of its own (it shows in `builds`, so a restore can be undone the same way). A stopped run's round in progress is abandoned. A restore that does not fit is refused with the reason.",
   parameters: Schema.Struct({
-    round: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    round: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+    build: Schema.optionalKey(Schema.String),
   }),
   success: GameRunRestoreResult,
   failure,

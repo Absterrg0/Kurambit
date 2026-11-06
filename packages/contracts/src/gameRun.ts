@@ -171,6 +171,20 @@ export const GameRunDecision = Schema.Struct({
 });
 export type GameRunDecision = typeof GameRunDecision.Type;
 
+/**
+ * A build an ended run keeps that is no kept round: the work an ending found,
+ * a left round's unfinished work, the folder before a restore, or a round's
+ * build that was never kept. Restoring one never makes it the judged best.
+ */
+export const GameRunSavedBuild = Schema.Struct({
+  /** What game-run restore takes as `build`. */
+  name: Schema.String,
+  label: Schema.String,
+  /** When the build was kept (ISO). */
+  at: Schema.String,
+});
+export type GameRunSavedBuild = typeof GameRunSavedBuild.Type;
+
 export const GameRunStatusResult = Schema.Struct({
   active: Schema.Boolean,
   /** The run ended where game-run.resume continues it: a start without a new brief resumes it. */
@@ -197,6 +211,8 @@ export const GameRunStatusResult = Schema.Struct({
   /** Creator notes waiting for the next round. */
   steer: Schema.Array(Schema.String),
   threads: Schema.Array(GameRunThreadRef),
+  /** An ended run's saved builds, latest first; empty while a run is live. */
+  builds: Schema.Array(GameRunSavedBuild),
   message: Schema.String,
 });
 export type GameRunStatusResult = typeof GameRunStatusResult.Type;
@@ -320,7 +336,12 @@ export const GameRunPickDetail = Schema.Struct({
 });
 export type GameRunPickDetail = typeof GameRunPickDetail.Type;
 
-export const GameRunRestoreInput = GameRunRoundInput;
+/** A kept round by its number, or a saved build by the name the run's status lists it under. */
+export const GameRunRestoreInput = Schema.Struct({
+  threadId: ThreadId,
+  round: Schema.optionalKey(PositiveInt),
+  build: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
+});
 export type GameRunRestoreInput = typeof GameRunRestoreInput.Type;
 
 export const GameRunRestoreResult = Schema.Struct({

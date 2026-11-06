@@ -132,14 +132,18 @@ which were set aside and why; each round shows how many of its checks passed.
 
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this
 round**, or ask your agent to restore it. The engine project, the art sources under `art/` and `ASSETS.md` return to that build in the
-game folder, and restoring a later kept round goes forward again. What the folder held before is
-kept as a build first, so a restore never discards work: the restore's answer and `.studio/run.log`
-name that build with the command that brings it back. Work a run left unfinished when its budget
-ran out or it ended mid-round is kept and named in `.studio/run.log` the same way. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
+game folder, and restoring a later kept round goes forward again. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
 bots and the run's records stay as they are. A resumed run judges its next round against the
-restored build. Restore refuses while a run is live. Restoring while a stopped run is in the middle
-of a round abandons that round: its work is in the build kept before the restore, the round shows as
-**Abandoned**, and a resume starts the next round from the restored build.
+restored build. Restore refuses while a run is live.
+
+A stopped run also lists its **Saved builds** on the Run tab: the game as the run left it, work a
+round left unfinished, a round's build that was not kept, and the game before each restore. What
+the folder held before a restore is always saved first, so a restore never discards work, and
+restoring "The game before restoring round 3" undoes that restore. Restoring a saved build brings
+it back to the folder but leaves the run's best as it was: those builds were never judged better,
+so a resume starts its next round from the best. Restoring while a stopped run is in the middle
+of a round abandons that round: its work is saved with the game before the restore, the round shows
+as **Abandoned**, and a resume starts the next round from the best.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to

@@ -56,6 +56,7 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  HistoryIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -1552,6 +1553,18 @@ function OpenCommandPaletteDialog(props: {
               input: { threadId: threadRef.threadId, brief: "" },
             });
             if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          },
+        });
+      // Which build to bring back is the creator's pick from the Run tab's list.
+      if ((gameRun?.builds.length ?? 0) > 0)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-run-restore",
+          title: "Restore a saved build…",
+          searchTerms: ["restore", "undo", "back", "build", "run", "game"],
+          icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            useGameWorkspaceStore.getState().showStageTab("run");
           },
         });
       // A new run needs the creator's brief, which the Run tab takes.

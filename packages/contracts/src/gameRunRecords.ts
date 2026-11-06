@@ -639,7 +639,7 @@ export const GameRunTask = Schema.Union([
 ]);
 export type GameRunTask = typeof GameRunTask.Type;
 
-// ── A creator's restore of a kept round. ────────────────────────────────────
+// ── A creator's restore of a kept round or a saved build. ───────────────────
 export const GameRunRestoreOutcome = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("restored"), sha: Schema.String, message: Schema.String }),
   Schema.Struct({
@@ -651,7 +651,10 @@ export const GameRunRestoreOutcome = Schema.Union([
 export type GameRunRestoreOutcome = typeof GameRunRestoreOutcome.Type;
 export const GameRunRestore = Schema.Struct({
   requestId: Schema.String,
-  round: Schema.Number,
+  /** A kept round's build, which becomes the run's judged best; null for a saved build. */
+  round: Schema.NullOr(Schema.Number),
+  /** A saved build by its name (`endings/…`), which leaves the judged best as it is. */
+  build: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   requestedAt: IsoDateTime,
   /** Null while the job is moving the folder. */
   outcome: Schema.NullOr(GameRunRestoreOutcome),

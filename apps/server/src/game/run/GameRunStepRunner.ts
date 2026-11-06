@@ -60,7 +60,7 @@ import { runStateChecks } from "./checkRunner.ts";
 import { artAssetFacts, reviewerFacts } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
-import { restoreKeptRound } from "./restoreRound.ts";
+import { restoreBuild, type RestoreTarget } from "./restoreRound.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
 import { buildStep, captureBuild, type FolderLock, freeBy, pruneBuilds } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
@@ -1215,27 +1215,34 @@ const make = Effect.gen(function* () {
       const held =
         records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
       const state = toState(run, records.gameRunRounds, held);
-      const record = state.rounds.find((r) => r.round === pending.round);
+      const record =
+        pending.round === null ? undefined : state.rounds.find((r) => r.round === pending.round);
+      const target: RestoreTarget | null =
+        record !== undefined
+          ? { kind: "round", record }
+          : pending.build !== null
+            ? { kind: "saved", name: pending.build }
+            : null;
       // A restore that broke is still answered: the run would otherwise stay
       // "restoring" until a restart. An interrupt leaves it to recovery.
       const outcome: GameRunRestoreOutcome = yield* (
-        record === undefined
+        target === null
           ? Effect.succeed<GameRunRestoreOutcome>({
               kind: "refused",
               reason: "round-not-found",
-              message: `Round ${pending.round} is not recorded.`,
+              message: `Round ${pending.round ?? "?"} is not recorded.`,
             })
           : Effect.flatMap(
               Effect.all([projects.resolve(run.threadId, { deleted: "allowed" }), freeBy]),
               ([root, waitUntil]) =>
-                restoreKeptRound({
+                restoreBuild({
                   game,
                   checkpoints,
                   lock: folderLock(run, waitUntil),
                   root,
                   run,
                   state,
-                  record,
+                  target,
                   requestId: job.requestId,
                 }),
             )

@@ -48,7 +48,7 @@ import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameElapsed } from "./GameElapsed";
 import { GameKeyArt } from "./GameKeyArt";
-import { GameRunPickRow, GameRunRoundRow } from "./GameRunRounds";
+import { GameRunPickRow, GameRunRoundRow, GameRunSavedBuilds } from "./GameRunRounds";
 import { GAME_RUN_PROFILE_HINT, GameRunProfileToggle } from "./GameRunProfileToggle";
 import { formatRunDuration, groupRoleThreads } from "./gameRunView.logic";
 import { useGameLibrary } from "./useGameLibrary";
@@ -423,6 +423,10 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             ))}
           </ul>
         </section>
+      ) : null}
+
+      {!active && (status?.builds.length ?? 0) > 0 ? (
+        <GameRunSavedBuilds threadRef={threadRef} builds={status?.builds ?? []} />
       ) : null}
 
       {(status?.threads.length ?? 0) > 0 ? (

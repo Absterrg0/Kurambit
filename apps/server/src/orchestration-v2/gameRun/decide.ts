@@ -23,7 +23,7 @@ import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
-import { BuildName } from "../../game/run/buildNames.ts";
+import { BuildName, savedBuildOf } from "../../game/run/buildNames.ts";
 import * as Policy from "../../game/run/policy.ts";
 import * as State from "../../game/run/state.ts";
 import type { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
@@ -539,7 +539,7 @@ export const settling = (run: GameRun) =>
   run.endedAt !== null && run.finished !== run.endedAt
     ? refuse("finishing", `Run ${run.id} is still finishing its ending; try again in a moment.`)
     : run.restore !== null && run.restore.outcome === null
-      ? refuse("restoring", `A round of run ${run.id} is being restored; try again once it is.`)
+      ? refuse("restoring", `A build of run ${run.id} is being restored; try again once it is.`)
       : null;
 
 const start = (work: Work, command: Command<"game-run.start">) => {
@@ -951,22 +951,26 @@ const finished = (work: Work, command: Command<"game-run.finished">) =>
     );
   });
 
-/** A creator asks for a kept round's build back: the run records it, a job moves the folder. */
+/**
+ * A creator asks for a build back, a kept round's or a saved one by its name:
+ * the run records it, a job moves the folder.
+ */
 const restoreRequest = (work: Work, command: Command<"game-run.restore.request">) =>
   Result.flatMap(current(work, command.runId), (run) => {
     if (run.status !== "ended")
-      return refuse("run-live", `Run ${run.id} is still going; stop it before restoring a round.`);
+      return refuse("run-live", `Run ${run.id} is still going; stop it before restoring a build.`);
     const busy = settling(run);
     if (busy !== null) return busy;
+    const round = command.round ?? null;
+    const build = command.build ?? null;
+    if ((round === null) === (build === null))
+      return refuse("wrong-kind", "A restore names one kept round or one saved build.");
+    if (build !== null && savedBuildOf(build) === null)
+      return refuse("wrong-kind", `${build} is not a saved build a restore brings back.`);
     const state = toState(run, work.records.rounds, inFlightOf(work, run));
     const pending: GameRun = {
       ...run,
-      restore: {
-        requestId: command.requestId,
-        round: command.round,
-        requestedAt: work.at,
-        outcome: null,
-      },
+      restore: { requestId: command.requestId, round, build, requestedAt: work.at, outcome: null },
     };
     return Result.succeed(
       settle(
@@ -1011,8 +1015,10 @@ export const abandonsRound = (run: GameRun, state: State.RunState): boolean =>
   run.ending !== null && RESUMABLE.has(run.ending) && Policy.holdsRound(state);
 
 /**
- * The restore job's outcome; a restored build becomes the run's judged best,
- * and the round a stopped run held is dropped, its step with it.
+ * The restore job's outcome. A restored round becomes the run's judged best; a
+ * saved build was never judged better than the best, so the best stays and a
+ * resume goes on from it. Either way the round a stopped run held is dropped,
+ * its step with it: the folder it worked on is gone.
  */
 const restore = (work: Work, command: Command<"game-run.restore">) =>
   Result.flatMap(current(work, command.runId), (run) => {
@@ -1023,12 +1029,13 @@ const restore = (work: Work, command: Command<"game-run.restore">) =>
     const state = toState(run, work.records.rounds, held);
     if (command.outcome.kind !== "restored")
       return Result.succeed(settle(work, landed, state, state, [], []));
-    const best = { ...state, best: command.outcome.sha, pending: null };
+    const round = run.restore.round;
+    const best = round === null ? state : { ...state, best: command.outcome.sha, pending: null };
     if (!abandonsRound(run, state))
       return Result.succeed(settle(work, landed, state, best, [], []));
     const dropped = Policy.abandonRound(
       best,
-      `the creator restored round ${run.restore.round} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
+      `the creator restored ${round === null ? `the saved build ${run.restore.build ?? ""}` : `round ${round}`} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
       work.now,
     );
     if (held === null) return Result.succeed(settle(work, landed, state, dropped.state, [], []));

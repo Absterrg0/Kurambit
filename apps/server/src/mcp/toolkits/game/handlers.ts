@@ -150,7 +150,7 @@ const handlers = {
     withRuns((runs, threadId) => runs.runSubmit(threadId, input.submission)),
   ),
   game_run_restore: McpToolAccess.actsAsCaller((input) =>
-    withRuns((runs, threadId) => runs.restoreRound(threadId, input.round)),
+    withRuns((runs, threadId) => runs.runRestore(threadId, input)),
   ),
   game_run_profile: McpToolAccess.actsAsCaller((input) =>
     withRuns((runs, threadId) => runs.runProfile(threadId, input.profile, input.commandId)),

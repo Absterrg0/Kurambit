@@ -10,6 +10,7 @@ import {
   type GameRunRoundDetail,
   type GameRunRoundOutcome,
   type GameRunRoundRef,
+  type GameRunSavedBuild,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 
@@ -241,7 +242,7 @@ function RoundDetail({
   const restore = async () => {
     if (restoring) return;
     const confirmed = await requestConfirmDialog(
-      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build; what the folder holds now is kept as a build first. Notes, PLAN.md, VISION.md, bots and run records stay as they are. A round the stopped run is in the middle of is abandoned, and a resume starts the next round from this build.`,
+      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build; what the folder holds now is saved as a build first. Notes, PLAN.md, VISION.md, bots and run records stay as they are. A round the stopped run is in the middle of is abandoned, and a resume starts the next round from this build.`,
     );
     if (confirmed !== true) return;
     setRestoring(true);
@@ -583,5 +584,83 @@ export function GameRunPickRow({
         </CollapsiblePanel>
       </Collapsible>
     </li>
+  );
+}
+
+const savedAt = (at: string): string =>
+  new Date(at).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+/**
+ * The builds a stopped run keeps beside its kept rounds: the game as it left
+ * it, unfinished work, the game before each restore. Restoring one brings it
+ * back to the folder and leaves the run's best as it is.
+ */
+export function GameRunSavedBuilds({
+  threadRef,
+  builds,
+}: {
+  threadRef: ScopedThreadRef;
+  builds: ReadonlyArray<GameRunSavedBuild>;
+}) {
+  const canRestore = useAtomValue(
+    gameEnvironment.runRestore.permissionAtom(threadRef.environmentId),
+  );
+  const runRestore = useAtomCommand(gameEnvironment.runRestore, { reportFailure: false });
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const restore = async (build: GameRunSavedBuild) => {
+    if (restoring !== null) return;
+    const confirmed = await requestConfirmDialog(
+      `Restore "${build.label}"?\nThe engine project, art/ and ASSETS.md go back to this build; what the folder holds now is saved as a build first. Notes, PLAN.md, VISION.md, bots and run records stay as they are. The run's best stays as it was, so a resume starts its next round from the best, and a round the stopped run is in the middle of is abandoned.`,
+    );
+    if (confirmed !== true) return;
+    setRestoring(build.name);
+    setMessage(null);
+    setError(null);
+    const result = await runRestore({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, build: build.name },
+    });
+    setRestoring(null);
+    if (result._tag === "Failure") {
+      setError(String(squashAtomCommandFailure(result)));
+      return;
+    }
+    setMessage(result.value.message);
+    noteRunRestored(threadRef.environmentId);
+  };
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">Saved builds</h3>
+      <ul className="divide-y divide-border rounded-lg border border-border bg-card">
+        {builds.map((build) => (
+          <li key={build.name} className="flex items-center gap-2 px-3 py-2">
+            <span className="min-w-0 flex-1 truncate text-xs">{build.label}</span>
+            <span className="shrink-0 text-2xs text-muted-foreground">{savedAt(build.at)}</span>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={restoring !== null || !canRestore}
+              onClick={() => void restore(build)}
+            >
+              <HistoryIcon aria-hidden="true" />
+              {restoring === build.name ? "Restoring…" : "Restore"}
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {message ? <p className="text-2xs text-muted-foreground">{message}</p> : null}
+      {error ? (
+        <p role="alert" className="text-2xs text-destructive-foreground">
+          {error}
+        </p>
+      ) : null}
+    </section>
   );
 }

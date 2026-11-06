@@ -32,6 +32,29 @@ export const BuildName = {
 } as const;
 
 /**
+ * A build an ended run keeps that a creator may restore by its name, beside
+ * its kept rounds: the work an ending found, a left round's unfinished work,
+ * the folder before a restore, and a round's candidate. Any other name (the
+ * best, the base, a turn's, a kept round's) is none.
+ */
+export type SavedBuild =
+  | { readonly kind: "ending" }
+  | { readonly kind: "restore-before" }
+  | { readonly kind: "unfinished"; readonly round: number }
+  | { readonly kind: "candidate"; readonly round: number };
+
+export const savedBuildOf = (name: string): SavedBuild | null => {
+  if (/^endings\/[0-9A-Za-z_-]+$/.test(name)) return { kind: "ending" };
+  if (/^restores\/[0-9A-Za-z_-]+-before$/.test(name)) return { kind: "restore-before" };
+  const round = /^round-([1-9][0-9]*)\/(candidate|unfinished-[0-9]+)$/.exec(name);
+  if (round === null) return null;
+  const n = Number(round[1]);
+  return round[2] === "candidate"
+    ? { kind: "candidate", round: n }
+    : { kind: "unfinished", round: n };
+};
+
+/**
  * What a restore brings back: the engine project and the art sources with
  * their map, so built assets and the .blend files they came from stay
  * together. Notes, plans, bots and `.studio` stay as they are, and ignored
@@ -49,6 +72,9 @@ export const wayBack = (runId: string, name: string, lane: string) => {
   return `git restore --source ${ref} -- $(git ls-tree --name-only ${ref} -- ${restoredPaths(lane).join(" ")})`;
 };
 
-/** A kept build as a person can find it: its name, its commit and the way back. */
+/**
+ * A kept build as the run log names it: the Run tab's saved builds bring it
+ * back, and the git command is the fallback when the app cannot.
+ */
 export const keptBuild = (runId: string, name: string, lane: string, sha: string) =>
-  `build ${name}${sha.length > 0 ? ` (${sha.slice(0, 8)})` : ""}; to bring it back, run in the game folder: ${wayBack(runId, name, lane)}`;
+  `build ${name}${sha.length > 0 ? ` (${sha.slice(0, 8)})` : ""}; restore it from the Run tab's saved builds once the run is stopped, or run in the game folder: ${wayBack(runId, name, lane)}`;

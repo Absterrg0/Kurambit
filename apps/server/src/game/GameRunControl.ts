@@ -18,6 +18,7 @@ import {
   type GameRunProfile,
   type GameRunProfileResult,
   type GameRunRestoreResult,
+  type GameRunSavedBuild,
   type GameRunRoundDetail,
   type GameRunStartInput,
   type GameRunStartResult,
@@ -41,6 +42,7 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
+import { gameRunRefsFolder } from "../checkpointing/Utils.ts";
 import { gitEra, RESUMABLE, settling, toState } from "../orchestration-v2/gameRun/decide.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -58,7 +60,15 @@ import {
   roundBotThreads,
   roundOutcome,
 } from "./run/roundDetail.ts";
-import { DECISION_LABEL, currentStep, decisionOf, selectionFor, steerWhen } from "./run/runView.ts";
+import {
+  DECISION_LABEL,
+  currentStep,
+  decisionOf,
+  savedBuildLabel,
+  selectionFor,
+  steerWhen,
+} from "./run/runView.ts";
+import type { RunState } from "./run/state.ts";
 import { ensureScaffold, logLine } from "./runSetup.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
@@ -127,11 +137,15 @@ type Service = {
     threadId: ThreadId,
   ) => Fails<{ detail: GameRunPickDetail; sheetFiles: FrameSheets }>;
   /**
-   * Puts a kept round's build back in the game folder as the stopped run's
-   * judged best, keeping what the folder held first. Refused while a run is
+   * Puts a build back in the game folder, keeping what the folder held first:
+   * a kept round's, which becomes the stopped run's judged best, or a saved
+   * one by its name, which leaves the best as it is. Refused while a run is
    * live; a stopped run's round in progress is abandoned.
    */
-  readonly restoreRound: (threadId: ThreadId, round: number) => Fails<GameRunRestoreResult>;
+  readonly runRestore: (
+    threadId: ThreadId,
+    target: { readonly round?: number; readonly build?: string },
+  ) => Fails<GameRunRestoreResult>;
   /** A run role's typed result; the refusal's reason comes back in-turn. */
   readonly runSubmit: (
     roleThreadId: ThreadId,
@@ -411,6 +425,42 @@ const make = Effect.gen(function* () {
     return withRoleGroups(refs);
   };
 
+  /**
+   * An ended run's saved builds, latest first, read from its refs: what a
+   * restore by name may bring back. A live run has none to offer, and a run
+   * from before checkpoints keeps no refs.
+   */
+  const savedBuilds = (
+    root: string,
+    run: GameRun,
+    state: RunState,
+  ): Effect.Effect<ReadonlyArray<GameRunSavedBuild>> => {
+    if (run.status !== "ended" || gitEra(run)) return Effect.succeed([]);
+    const folder = gameRunRefsFolder(run.id);
+    return checkpoints.listCheckpointRefs({ cwd: root, prefix: folder }).pipe(
+      Effect.map((entries) =>
+        entries
+          .flatMap((entry) => {
+            const name = entry.checkpointRef.slice(folder.length);
+            const label = savedBuildLabel(name, state, run);
+            return label === null ? [] : [{ name, label, seconds: entry.committedAt }];
+          })
+          .toSorted((a, b) => b.seconds - a.seconds)
+          .map(({ name, label, seconds }) => ({
+            name,
+            label,
+            at: new Date(seconds * 1000).toISOString(),
+          })),
+      ),
+      Effect.catch((error) =>
+        Effect.logWarning("A run's saved builds could not be listed.", {
+          runId: run.id,
+          error,
+        }).pipe(Effect.as([])),
+      ),
+    );
+  };
+
   const runStatus: Service["runStatus"] = Effect.fn("GameRunControl.runStatus")(function* (
     threadId: ThreadId,
   ) {
@@ -432,6 +482,7 @@ const make = Effect.gen(function* () {
         rounds: [],
         steer: [],
         threads: [],
+        builds: [],
         message: "No run recorded for this game.",
         resumable: false,
       } satisfies GameRunStatusResult;
@@ -484,6 +535,7 @@ const make = Effect.gen(function* () {
       })),
       steer: [...run.steer],
       threads: threadRefs(records, run.id),
+      builds: yield* savedBuilds(root, run, state),
       message: !running
         ? `The run ended: ${run.ending ?? "unknown"}.${failure}`
         : run.status === "waiting" && state.inFlight?.kind === "decide"
@@ -745,21 +797,39 @@ const make = Effect.gen(function* () {
     return evidence;
   });
 
-  // A kept round's restore, command first: the run records the request and
-  // holds every start, resume and steer until its job lands the outcome, so
-  // the folder is never moved under a run. The caller waits for that outcome.
-  const restoreRound: Service["restoreRound"] = Effect.fn("GameRunControl.restoreRound")(function* (
+  // A restore, command first: the run records the request and holds every
+  // start, resume and steer until its job lands the outcome, so the folder is
+  // never moved under a run. The caller waits for that outcome.
+  const runRestore: Service["runRestore"] = Effect.fn("GameRunControl.runRestore")(function* (
     threadId: ThreadId,
-    round: number,
+    { round, build }: { readonly round?: number; readonly build?: string },
   ) {
-    const found = yield* findRound("run-restore", threadId, round);
-    const { root, run, record } = found;
-    if (!record.kept)
+    const { root } = yield* resolveGame(threadId);
+    const { run, state } = yield* latestOf(threadId);
+    if (run === null || state === null)
+      return yield* runError("run-restore", root, "no-run", "No run recorded for this game.");
+    if ((round === undefined) === (build === undefined))
       return yield* runError(
         "run-restore",
         root,
-        "not-kept",
-        `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored.${gitEra(run) ? ` Its work stays on branch ${record.branch}.` : ""}`,
+        "wrong-kind",
+        "Name one build: a kept round by `round`, or a saved build by `build`.",
+      );
+    if (round !== undefined) {
+      const { record } = yield* findRound("run-restore", threadId, round);
+      if (!record.kept)
+        return yield* runError(
+          "run-restore",
+          root,
+          "not-kept",
+          `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. A round's build that was not kept may still be among the saved builds game_run_status lists.${gitEra(run) ? ` Its work stays on branch ${record.branch}.` : ""}`,
+        );
+    } else if (!(yield* savedBuilds(root, run, state)).some((b) => b.name === build))
+      return yield* runError(
+        "run-restore",
+        root,
+        "commit-missing",
+        `${build} is not one of the run's saved builds${run.status === "ended" ? "" : " (a live run offers none: stop it first)"}; game_run_status lists them.`,
       );
     const requestId = NodeCrypto.randomUUID();
     const unreadable = (cause: { readonly message: string }) =>
@@ -774,7 +844,8 @@ const make = Effect.gen(function* () {
       threadId: run.threadId,
       runId: run.id,
       requestId,
-      round,
+      ...(round === undefined ? {} : { round }),
+      ...(build === undefined ? {} : { build }),
     });
     const landed = yield* engine
       .streamStoredEventsFrom({
@@ -872,7 +943,7 @@ const make = Effect.gen(function* () {
     runChecks,
     roundDetail,
     pickDetail,
-    restoreRound,
+    runRestore,
     runSubmit,
   });
 });
