@@ -1,5 +1,6 @@
 // The turn loop plays only the person's own chat turns, and only on an engine
 // whose turn builds are fast enough to play after every turn.
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -58,6 +59,7 @@ const run = (
     const layer = GameBuildsReactor.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
+          NodeServices.layer,
           Layer.mock(Orchestrator.OrchestratorV2)({}),
           Layer.mock(GameBuilds.GameBuilds)({
             recordTurn: () => Effect.void,
