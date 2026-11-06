@@ -14,6 +14,7 @@ import {
   PlayNotBooted,
   TIMED_OUT,
   bounded,
+  once,
   listenForRunner,
   type PlayEnd,
   type PlaySession,
@@ -75,11 +76,6 @@ const failure =
           detail: detail ?? (cause instanceof Error ? cause.message : String(cause)).slice(0, 2000),
           cause,
         });
-
-const once = <A>(work: () => Promise<A>): (() => Promise<A>) => {
-  let running: Promise<A> | null = null;
-  return () => (running ??= work());
-};
 
 /** How a runner process's exit reads: our display wrapper says when its display died first. */
 const runnerEnd = (result: GameProcessResult | null): PlayEnd =>

@@ -14,9 +14,11 @@ import { asGameState } from "./gameBotRuntime.ts";
 import { chromiumChildEnv } from "./gameWebServer.ts";
 import {
   PLAY_BOUNDS,
+  PlayClosed,
   PlayUnresponsive,
   TIMED_OUT,
   bounded,
+  once,
   parseLine,
   sanitizeProbe,
   type PlayEnd,
@@ -327,9 +329,41 @@ export const openWebPlaySession = async (input: {
     /** Our side gone, or the page crashed: the error that says whose. */
     const endError = (end: PlayEnd) =>
       end.by === "host" ? new WebBrowserGone(end.detail) : new WebPageCrashed(end.detail);
+    /**
+     * A Playwright call that failed, said by whose side, so no raw "Target
+     * closed" ever leaves the session: the page's end once known, our own
+     * close, or a browser that went away under it.
+     */
+    const classify = (cause: unknown): unknown =>
+      endedWith !== null
+        ? endError(endedWith)
+        : closing
+          ? new PlayClosed("The play session was closed.")
+          : cause instanceof Error && cause.name === "TargetClosedError"
+            ? new WebBrowserGone(cause.message)
+            : cause;
     // The page's frame count and clock as of the last state read; frames carry them.
     let pageFrames = 0;
     let pageSeconds = 0;
+    // The frame counter and clock a picture is tagged with, read again as
+    // pictures arrive (one read in flight), so they stay the page's own between
+    // ticks and after play: a counter that stops means the page stopped.
+    let reading = false;
+    const refreshCounters = () => {
+      if (reading) return;
+      reading = true;
+      void bounded(
+        page
+          .evaluate("[window.__kurambitFrames ?? 0, window.__kurambitTime ?? 0]")
+          .catch(() => null),
+        PLAY_BOUNDS.webCallMs,
+      ).then((raw) => {
+        reading = false;
+        if (!Array.isArray(raw)) return;
+        if (typeof raw[0] === "number") pageFrames = raw[0];
+        if (typeof raw[1] === "number") pageSeconds = raw[1];
+      });
+    };
     /** The page's state; TIMED_OUT when its main thread did not answer in `ms`. */
     const readState = async (ms: number) => {
       const raw = await bounded(
@@ -530,7 +564,12 @@ export const openWebPlaySession = async (input: {
         0,
       );
       const done = await Promise.race([
-        bounded(actBody(steps, screenshotPath, signal), stepMs + PLAY_BOUNDS.webActGraceMs),
+        bounded(
+          actBody(steps, screenshotPath, signal).catch((cause: unknown) => {
+            throw classify(cause);
+          }),
+          stepMs + PLAY_BOUNDS.webActGraceMs,
+        ),
         ended.then((end) => ({ end })),
       ]);
       if (done === TIMED_OUT) throw unresponsive();
@@ -567,7 +606,9 @@ export const openWebPlaySession = async (input: {
         frameSink = frames.onFrame;
         // A video that never starts is our browser's failure: claimed as a
         // video it would read as a game that drew nothing.
-        const opening = context.newCDPSession(page);
+        const opening = context.newCDPSession(page).catch((cause: unknown) => {
+          throw classify(cause);
+        });
         const cdp = await bounded(opening, PLAY_BOUNDS.webCallMs);
         if (cdp === TIMED_OUT) {
           void opening.then((late) => late.detach()).catch(() => undefined);
@@ -581,15 +622,20 @@ export const openWebPlaySession = async (input: {
           lastJpeg = Buffer.from(event.data, "base64");
           lastSentFrame = pageFrames;
           frames.onFrame({ frame: pageFrames, t: gameT(), jpeg: lastJpeg });
+          refreshCounters();
         });
         const width = Math.min(frames.width, input.width);
         const started = await bounded(
-          cdp.send("Page.startScreencast", {
-            format: "jpeg",
-            quality: 75,
-            maxWidth: width,
-            maxHeight: Math.round((input.height * width) / input.width),
-          }),
+          cdp
+            .send("Page.startScreencast", {
+              format: "jpeg",
+              quality: 75,
+              maxWidth: width,
+              maxHeight: Math.round((input.height * width) / input.width),
+            })
+            .catch((cause: unknown) => {
+              throw classify(cause);
+            }),
           PLAY_BOUNDS.webCallMs,
         );
         if (started === TIMED_OUT)
@@ -688,10 +734,15 @@ export const openWebPlaySession = async (input: {
           ),
           PLAY_BOUNDS.stillMs,
         )) === true,
-      close: async () => {
+      // Once, and never failing: the bot loop and its launch both close the
+      // session, and a page our own bound already gave up on has nothing to answer.
+      close: once(async () => {
         frameSink = null;
         if (screencast !== null)
-          await bounded(screencast.send("Page.stopScreencast"), PLAY_BOUNDS.webCallMs);
+          await bounded(
+            screencast.send("Page.stopScreencast").catch(() => undefined),
+            PLAY_BOUNDS.webCallMs,
+          );
         try {
           if (keptStorage !== null && endedWith === null) {
             // Leaving the page fires pagehide as closing the tab would, so a game
@@ -722,7 +773,7 @@ export const openWebPlaySession = async (input: {
         } finally {
           await closeBrowser();
         }
-      },
+      }),
     };
     return session;
   } catch (cause) {

@@ -55,13 +55,16 @@ describe("web play session", () => {
           height: 240,
           bootTimeoutMs: 20_000,
         });
-        await session.realtime();
+        await session.realtime({ fps: 12, width: 320, onFrame: () => undefined });
         await new Promise((resolve) => setTimeout(resolve, 800));
         const started = Date.now();
         expect((await session.nextTick(1_000)).kind).toBe("timeout");
         expect(Date.now() - started).toBeLessThan(3_000);
         await expect(session.act([{ waitMs: 100 }], null)).rejects.toBeInstanceOf(PlayUnresponsive);
         await session.input({ held: ["d"], taps: [], clicks: [] });
+        // Both the bot loop and its launch close the session: neither may
+        // surface a raw "Target closed" from a page our own bound gave up on.
+        await session.close();
         await session.close();
         expect(Date.now() - started).toBeLessThan(60_000);
       } finally {

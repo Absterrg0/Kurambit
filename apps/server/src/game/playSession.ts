@@ -118,6 +118,12 @@ export const PLAY_BOUNDS = {
   endedMs: 5_000,
 } as const;
 
+/** The first call's promise, for every call: a close or stop runs once. */
+export const once = <A>(work: () => Promise<A>): (() => Promise<A>) => {
+  let running: Promise<A> | null = null;
+  return () => (running ??= work());
+};
+
 /** `promise`, or TIMED_OUT once `ms` pass; a late rejection is swallowed. */
 export const TIMED_OUT: unique symbol = Symbol("timed out");
 export const bounded = <T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> => {
