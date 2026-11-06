@@ -407,6 +407,25 @@ const make = Effect.gen(function* () {
     NodePath.join(homeDirOf(root), SESSION_FILE),
   );
 
+  // uv comes from the toolchain: detected, or fetched once on first use. Defined
+  // before anything that runs during construction can reach it.
+  interface UvPaths {
+    readonly uvx: string;
+    readonly binDir: string | null;
+  }
+  const uvPaths = (uv: string): Effect.Effect<UvPaths> =>
+    Effect.promise(async () => {
+      const dir = NodePath.dirname(uv);
+      const sibling = NodePath.join(dir, "uvx");
+      const hasSibling = await NodeFSP.access(sibling, NodeFSP.constants.X_OK)
+        .then(() => true)
+        .catch(() => false);
+      return { uvx: hasSibling ? sibling : uv, binDir: dir };
+    });
+  const resolveUv: Effect.Effect<UvPaths, GameOperationError> = tools.uv.pipe(
+    Effect.flatMap(uvPaths),
+  );
+
   const liveExecutables: Effect.Effect<LiveExecutables> = Effect.gen(function* () {
     const blender = yield* tools.executable("blender").pipe(
       Effect.map((resolved): string | null => resolved.path),
@@ -460,24 +479,6 @@ const make = Effect.gen(function* () {
   yield* records.reapAll(async (record) => {
     if (typeof record.homeDir === "string") await reapRecord(record, record.homeDir, startupLive);
   });
-
-  // uv comes from the toolchain: detected, or fetched once on first use.
-  interface UvPaths {
-    readonly uvx: string;
-    readonly binDir: string | null;
-  }
-  const uvPaths = (uv: string): Effect.Effect<UvPaths> =>
-    Effect.promise(async () => {
-      const dir = NodePath.dirname(uv);
-      const sibling = NodePath.join(dir, "uvx");
-      const hasSibling = await NodeFSP.access(sibling, NodeFSP.constants.X_OK)
-        .then(() => true)
-        .catch(() => false);
-      return { uvx: hasSibling ? sibling : uv, binDir: dir };
-    });
-  const resolveUv: Effect.Effect<UvPaths, GameOperationError> = tools.uv.pipe(
-    Effect.flatMap(uvPaths),
-  );
 
   const withBinDir = (env: NodeJS.ProcessEnv, binDir: string | null): NodeJS.ProcessEnv => {
     if (binDir === null) return env;
