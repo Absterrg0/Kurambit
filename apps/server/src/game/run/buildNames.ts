@@ -64,7 +64,7 @@ export const savedBuildOf = (name: string): SavedBuild | null => {
  * together. Notes, plans, bots and `.studio` stay as they are, and ignored
  * engine caches (`.godot`, `Library`) are never touched.
  */
-export const restoredPaths = (lane: string) => [lane, "art", "ASSETS.md"];
+export const restoredPaths = (lane: string) => [lane, "art", "ASSETS.md", "STYLE.json"];
 
 /**
  * How a person puts a kept build's engine project and art back, run in the

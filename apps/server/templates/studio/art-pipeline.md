@@ -1,9 +1,9 @@
 # Art pipeline
 
 Adapted from OhMyGame's sprite-pipeline and game-ui-frontend skills (Apache-2.0).
-The live Blender behind the `game_blender_*` tools is your modeller and
-renderer; you have no local Blender, Godot or image tools. `<assets>` is
-your lane's asset folder: `godot/assets/`, `web/assets/`, or
+The live Blender behind the `game_blender_*` tools is your renderer and your
+modeller for props; you have no local Blender, Godot or image tools.
+`<assets>` is your lane's asset folder: `godot/assets/`, `web/assets/`, or
 `unity/Assets/` for Unity (capital A: Unity imports nothing else, and
 `unity/assets/` is a different folder it never reads; Unity art goes under
 `unity/Assets/Art/`).
@@ -12,23 +12,94 @@ your lane's asset folder: `godot/assets/`, `web/assets/`, or
 2. Every in-game visual is a file: characters, objects, tiles, backgrounds, UI
    pieces, effects, animation frames. No code-drawn shapes, flat color
    rectangles or default UI skin on the played path. Dynamic text stays code.
-3. 3D: build with `game_blender_code`, see with `game_blender_look`, measure
-   with `game_blender_scene`, export GLB with `game_blender_export` (rigged
-   where they move), then `game_import` and `game_check`.
-4. One palette, one silhouette language, one ground line. Movement, hurt, win
+3. One look, locked in `STYLE.json` before the first asset (below). The art
+   tools hold the game to it.
+4. Characters and creatures come from the library, from one rig family.
+   Blender builds props, set pieces, backgrounds and key art, never a
+   character from boxes.
+5. One palette, one silhouette language, one ground line. Movement, hurt, win
    and lose read at a glance. Put the set in one contact-sheet PNG, look at
    it, and redo the weak ones.
-5. Library first for characters, tiles, UI, icons and fonts:
-   `game_assets_search` finds CC0 packs (no key); pass `pack` to look inside
-   one and look at its contact sheet before you pick. `game_assets_add` copies
-   files or whole folders into `<assets>library/<pack>/` (`unity/Assets/Library/<pack>/`) and credits
-   them in ASSETS.md. One style per game: take a game's sprites, tiles and UI
-   from packs that look alike (same pixel size or same vector look), never a
-   mix. Make your own art (below) when nothing fits or the look must be
-   unique. Realistic models and textures: `game_blender_assets_search` and
-   `_import` (Poly Haven is CC0, no key; Sketchfab and Poly Pizza need the
-   user's keys). Never scrape websites. Record every file's source and
-   licence in ASSETS.md; unknown-source files do not ship.
+6. Record every file's source and licence in ASSETS.md; unknown-source files
+   do not ship. Never scrape websites.
+
+## Lock the look: STYLE.json
+
+`game_assets_search` with no words lists the library by style family: one
+look each (KayKit, Kenney low-poly, Kenney pixel, ...), its packs, each
+character pack's rig, and a pixel palette where the family has one. Look at
+a pack's contact sheet (pass `pack`) before choosing. Pick one family whose
+look fits the key art and write `STYLE.json` at the game root:
+
+```json
+{
+  "version": 1,
+  "family": "kaykit",
+  "mode": "smooth",
+  "view": "perspective",
+  "rig": "kaykit-1",
+  "packs": [
+    "kaykit-adventurers",
+    "kaykit-skeletons",
+    "kaykit-dungeon-remastered",
+    "kenney-ui-pack"
+  ],
+  "audio": {
+    "packs": ["kenney-rpg-audio", "juhani-chiptune-adventures"],
+    "musicLufs": -23,
+    "sfxPeakDbtp": -1
+  }
+}
+```
+
+- `mode`: `smooth`, or `pixel` with `tile` (source pixels per tile, 16 for a
+  16 px pack) and `palette` (a pack id added to the game, or a PNG in it);
+  `outline` (true or `#rrggbb`) outlines pixel sprites.
+- `view`: `side`, `top-down`, `isometric` or `perspective` (3D).
+- `rig`: the skeleton every character shares, so every clip fits every
+  character. Leave it out when nothing is rigged.
+- `packs` and `audio.packs`: where the game's visuals and sounds come from.
+  UI, icons and fonts packs go in `packs` too.
+
+What the tools do with it: `game_assets_add` refuses a pack outside the lists
+and characters on another rig, and measures each added clip's loudness
+against `musicLufs` (music) and `sfxPeakDbtp` (effects);
+`game_blender_render_sprites` fills the palette, outline, size and views from
+the lock and refuses a palette or mode it does not hold; `game_assets_search`
+shows the lock's packs first. A refusal says what to change. Changing
+direction is an edit to STYLE.json made on purpose, never a drift: when the
+look changes, change the lock first, then the art. STYLE.json is the person's
+to read and edit too.
+
+## Characters from a rig family
+
+- 3D: `game_assets_add` the character models from the lock's rig family (for
+  `kaykit-1`: `kaykit-adventurers` heroes, `kaykit-skeletons` enemies, 76-95
+  clips each). Play their clips by state with the engine's character
+  animator (`CharacterAnimator` in Godot and Unity, `animate` in three.js;
+  TEMPLATE.md): it finds "Idle", "Walking_A", "1H_Melee_Attack_Chop" by
+  their words, and any clip plays by a word of its name.
+- 2D: render the family's character into strips. Import the added GLB into
+  the live Blender and list its clips:
+
+  ```python
+  import bpy, os
+  bpy.ops.import_scene.gltf(filepath=os.path.abspath("godot/assets/library/kaykit-adventurers/Characters/gltf/Knight.glb"))
+  rig = next(o for o in bpy.context.selected_objects if o.type == "ARMATURE")
+  print(rig.name, [c.name for c in rig.children], [a.name for a in bpy.data.actions])
+  ```
+
+  Hide what this character should not carry (`ob.hide_render = True` on
+  extra weapons), then `game_blender_render_sprites` with
+  `"objects": ["<rig name>"], "action": "Walking_A"`, once per clip. With a
+  pixel lock, leave out `pixelArt`, `size` and `views`: the lock fills them.
+
+- No character in the family fits: recolour one. A family's characters share
+  one small colormap texture; edit a copy of that PNG (hue, palette) and point
+  the copy's material at it. Never model a character from cubes or
+  primitives; a hand-made rig with sine-wave limbs reads as programmer art.
+- Creatures off the humanoid rig (monsters, animals) come from a pack in the
+  lock that carries their own clips.
 
 ## 2D sprites from 3D
 
@@ -44,22 +115,10 @@ look at it. Its `output` is a path prefix under `<assets>`: `godot/assets/sprite
 `SpriteStrips.apply` loads strips from the `.sprite.json`; elsewhere use the
 anchor offset it gives.
 
-- Pixel-art game: pass the style pack VISION.md names as the palette, and the
-  size the sprite has in that pack's own pixels (a 16 px tile pack wants a
-  16-32 px character); the engine scales sprites and tiles up together with
-  nearest filtering. Smooth game: leave out `pixelArt` and render at the size
-  the game draws.
-
-  ```json
-  {
-    "output": "<assets>sprites/hero_walk",
-    "objects": ["hero"],
-    "action": "hero_walk",
-    "size": 32,
-    "pixelArt": { "palette": "<pack id>", "outline": true }
-  }
-  ```
-
+- Pixel-art game: STYLE.json's palette, outline and tile size apply (the
+  canvas defaults to two tiles); the engine scales sprites and tiles up
+  together with nearest filtering. Smooth game: render at the size the game
+  draws.
 - One character, one scale: leave out `pixelsPerUnit` for its first strip,
   then pass the value that strip reports to every other strip of the same
   character (idle, walk, attack), or an attack renders smaller than the idle.
@@ -67,39 +126,22 @@ anchor offset it gives.
 - Render in-place clips. A clip that moves the character across the ground
   (root motion) is refused; the game moves the sprite.
 - Views: side-scroller `right` (flip it for left); top-down `front`, `back`,
-  `left`, `right` with `elevation` 35, or `top`; `isometric`.
-- The model lives in the live scene: a library character (its clips are
-  actions: list `bpy.data.actions`), an imported model, or one you build. A
-  built model moves through one action keyed on every part, like this walk:
+  `left`, `right` with `elevation` 35, or `top`; `isometric`. STYLE.json's
+  view sets them when you leave `views` out.
+- Props and pickups render the same way, from a library model or one you
+  build in Blender. The model faces -Y, like imported glTF models; `right`
+  shows it facing screen right.
 
-```python
-import bpy, bmesh, math
-col = bpy.data.collections.new("hero"); bpy.context.scene.collection.children.link(col)
-act = bpy.data.actions.new("hero_walk"); parts = []
-def part(label, dims, loc, rgb, parent=None):  # pivot at the top face: limbs swing at the joint
-    me = bpy.data.meshes.new(label); bm = bmesh.new(); bmesh.ops.create_cube(bm, size=1.0)
-    bmesh.ops.scale(bm, vec=dims, verts=bm.verts)
-    bmesh.ops.translate(bm, vec=(0, 0, -dims[2] / 2), verts=bm.verts); bm.to_mesh(me); bm.free()
-    mat = bpy.data.materials.new(label); mat.diffuse_color = (*rgb, 1); me.materials.append(mat)
-    ob = bpy.data.objects.new(label, me); ob.location = loc; ob.parent = parent
-    col.objects.link(ob); ob.animation_data_create().action = act; parts.append(ob); return ob
-body = part("body", (0.5, 0.3, 0.7), (0, 0, 1.6), (0.03, 0.1, 0.45))
-part("head", (0.4, 0.4, 0.4), (0, 0, 0.45), (0.75, 0.42, 0.25), body)
-limbs = [(part(f"leg{s}", (0.18, 0.18, 0.8), (s * 0.12, 0, -0.7), (0.08, 0.05, 0.03), body),
-          part(f"arm{s}", (0.14, 0.14, 0.6), (s * 0.32, 0, 0), (0.75, 0.42, 0.25), body), s) for s in (-1, 1)]
-def pose(t):  # a sine swing repeats a pose either side of its peak; the foot lift tells them apart
-    for leg, arm, s in limbs:
-        leg.rotation_euler.x, arm.rotation_euler.x = 0.6 * s * math.sin(t), -0.7 * s * math.sin(t)
-        leg.location.z = -0.7 + 0.3 * max(0.0, s * math.cos(t))
-    body.location.z = 1.6 + 0.06 * abs(math.cos(t))
-for f in range(0, 25, 3):  # frame 24 repeats frame 0, so the cycle loops
-    pose(2 * math.pi * f / 24)
-    for ob in parts: ob.keyframe_insert("location", frame=f); ob.keyframe_insert("rotation_euler", frame=f)
-```
+## Props, set pieces and 3D models
 
-The model faces -Y, like imported glTF models; `right` shows it facing screen
-right. Then `game_blender_render_sprites` with `"objects": ["hero"],
-"action": "hero_walk"` renders 8 frames of the cycle.
+Library pieces from the lock's packs come first. What no pack has, build in
+the live Blender: `game_blender_code` to model, `game_blender_look` to see,
+`game_blender_scene` to measure, `game_blender_export` for a GLB, then
+`game_import` and `game_check`. Match the family's look: its proportions,
+its flat or colormap colours, its bevel. Realistic models and textures
+(`game_blender_assets_search` and `_import`: Poly Haven is CC0, no key;
+Sketchfab and Poly Pizza need the user's keys) belong only in a realistic
+lock.
 
 ## Key art
 

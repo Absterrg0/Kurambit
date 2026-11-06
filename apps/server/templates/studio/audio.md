@@ -8,13 +8,18 @@ Original to this studio, kept short.
 3. Library first: `game_assets_search` with `kind` sfx or music finds CC0
    packs of clicks, hits, pickups, footsteps, jingles and chiptune loops with
    their lengths; `game_assets_add` copies the ones you pick and credits them
-   in ASSETS.md. Keep one sound family per game.
+   in ASSETS.md. Keep one sound family per game: STYLE.json's `audio.packs`
+   lists them (art-pipeline), and an add outside it is refused.
 4. Synthesize what the library lacks with numpy and Python's `wave` module
    inside the live Blender (`game_blender_code`). Record each file as
    synthesized in ASSETS.md. Placeholders are silence, never engine beeps
    described as final.
 5. Keep clips short and levels even. A loud UI click ruins a quiet scene.
-   You cannot listen, so print each clip's length and peak and compare them.
+   You cannot listen: `game_assets_add` measures each added clip against
+   STYLE.json's targets (music around `musicLufs`, -23 LUFS by default;
+   effects peaking under `sfxPeakDbtp`, -1 dBTP) and says which are off.
+   Turn those down in the game's mix (the player's volume, the bus). For a
+   clip you synthesize, print its length and peak and compare them.
 
 The working directory is the game root; print every path you write. Sound
 goes under your lane's asset folder: `godot/assets/sfx/`, `web/assets/sfx/`,

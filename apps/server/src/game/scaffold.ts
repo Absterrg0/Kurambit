@@ -133,7 +133,7 @@ Use the game_* tools to check, play, export and package the game; never launch y
 `
         : `# Kurambit project
 
-Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the project.
+Build BRIEF.md's game in Godot 4.7 (GDScript; Forward+ natively, Compatibility on Web). godot/ is the project.
 
 Use the game_* tools to check, play, export and package the game; never run Godot yourself. Keep builds/ and godot/.godot/ generated.
 `;

@@ -21,3 +21,6 @@ OhMyGame's sprite-pipeline quality gates (Apache-2.0).
    frame. Judge them at play size, not zoomed in. The measured image facts
    in your prompt say where to look first; open each file they name and
    judge it yourself.
+8. The game holds to STYLE.json: a character built from boxes or primitives,
+   a character off the lock's rig, or art outside its packs and palette is a
+   defect. A new look is a change to STYLE.json first, never a drift.
