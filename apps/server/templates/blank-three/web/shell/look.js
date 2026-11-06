@@ -42,14 +42,14 @@ const TONE = {
   none: THREE.NoToneMapping,
 };
 const BLOOM = { strength: 0.5, radius: 0.4, threshold: 1 };
-const ENVIRONMENTS = ["sky", "room", false];
+const ENVIRONMENTS = new Set(["sky", "room", false]);
 
 export function createLook(renderer, options = {}) {
   const tone = TONE[options.toneMapping ?? "neutral"];
   if (tone === undefined)
     throw new Error(`LOOK.toneMapping must be one of ${Object.keys(TONE).join(", ")}.`);
   const environment = options.environment ?? "sky";
-  if (!ENVIRONMENTS.includes(environment))
+  if (!ENVIRONMENTS.has(environment))
     throw new Error('LOOK.environment must be "sky", "room" or false.');
   const ambient = options.ambient ?? 1;
   renderer.toneMapping = tone;
