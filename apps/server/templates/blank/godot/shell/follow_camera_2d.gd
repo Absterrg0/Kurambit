@@ -28,6 +28,9 @@ var _ahead := Vector2.ZERO
 
 
 func _ready() -> void:
+	# Physics interpolation draws bodies between ticks; a camera that follows on
+	# the idle clock would step against them on a fast display.
+	process_callback = Camera2D.CAMERA2D_PROCESS_PHYSICS
 	position_smoothing_enabled = true
 	position_smoothing_speed = smoothing
 	drag_horizontal_enabled = dead_zone.x > 0.0
@@ -43,7 +46,7 @@ func _ready() -> void:
 	reset_smoothing()
 
 
-func _process(delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	if delta <= 0.0:
 		return
 	var at := _followed()

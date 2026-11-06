@@ -1,5 +1,7 @@
 [gd_scene format=3]
 
+[ext_resource type="Environment" path="res://shell/look_3d.tres" id="1_look"]
+
 [node name="Game" type="Node3D"]
 
 [node name="Camera3D" type="Camera3D" parent="."]
@@ -8,3 +10,7 @@ current = true
 
 [node name="Light" type="DirectionalLight3D" parent="."]
 rotation_degrees = Vector3(-45, -30, 0)
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = ExtResource("1_look")

@@ -312,6 +312,10 @@ func _scale_tween(node: Node) -> Tween:
 	if node is Control and (node as Control).pivot_offset == Vector2.ZERO:
 		(node as Control).pivot_offset = (node as Control).size * 0.5
 	var tween := node.create_tween()
+	# Interpolated nodes are drawn between physics ticks, so their scale moves on
+	# the physics clock too; on the idle clock it would step on a fast display.
+	if not node is Control:
+		tween.set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
 	node.set_meta("_juice_tween", tween)
 	return tween
 
