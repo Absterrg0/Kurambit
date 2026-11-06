@@ -6,13 +6,20 @@ import {
   type GamePreviewServe,
   type GameStageInput,
   nextGamePreviewFrame,
+  liveServe,
   playHeldFrame,
+  reloadFrame,
   remountOrHold,
   gameSourceFreshnessLabel,
   toolchainReadyFor,
 } from "./gameStageLogic";
 
+const IN_GAME = { focused: true, hidden: false };
+const WATCHING = { focused: false, hidden: false };
+const HIDDEN = { focused: false, hidden: true };
+
 const BASE: GameStageInput = {
+  stage: "export",
   toolchainReady: true,
   operation: null,
   hasWebBuild: false,
@@ -75,6 +82,7 @@ it("keeps a loaded game running while a later failure is reported on the side", 
   expect(deriveGameStagePhase({ ...BASE, operation: failed("Export failed") })).toEqual({
     kind: "failed",
     message: "Export failed",
+    what: "build",
   });
   // A fresh build that was never served still surfaces the failure with retry.
   expect(
@@ -84,11 +92,12 @@ it("keeps a loaded game running while a later failure is reported on the side", 
       webBuildStale: false,
       operation: failed("Browser failed to start"),
     }),
-  ).toEqual({ kind: "failed", message: "Browser failed to start" });
+  ).toEqual({ kind: "failed", message: "Browser failed to start", what: "build" });
   // A client-side failure is reported the same way while nothing is playable.
   expect(deriveGameStagePhase({ ...BASE, localError: "busy" })).toEqual({
     kind: "failed",
     message: "busy",
+    what: "build",
   });
 });
 
@@ -209,23 +218,23 @@ it("never reloads a new build under a player whose game has focus", () => {
     previewUrl,
     servedArtifactId: id,
   });
-  const first = remountOrHold(null, serve("a"), true);
+  const first = remountOrHold(null, serve("a"), IN_GAME);
   expect(first.held).toBeNull();
   // Nothing new: the same object, so the render does not set state.
-  expect(remountOrHold(first, serve("a"), true)).toBe(first);
-  expect(remountOrHold(first, serve(null), true)).toBe(first);
+  expect(remountOrHold(first, serve("a"), IN_GAME)).toBe(first);
+  expect(remountOrHold(first, serve(null), IN_GAME)).toBe(first);
 
   // Not in the game: the new build plays at once.
-  const played = remountOrHold(first, serve("b"), false);
+  const played = remountOrHold(first, serve("b"), WATCHING);
   expect(played.key).not.toBe(first.key);
   expect(played.held).toBeNull();
 
   // In the game: the frame stays and the build waits, even after focus leaves.
-  const held = remountOrHold(first, serve("b"), true);
+  const held = remountOrHold(first, serve("b"), IN_GAME);
   expect(held.key).toBe(first.key);
   expect(held.held?.servedArtifactId).toBe("b");
-  expect(remountOrHold(held, serve("b"), false)).toBe(held);
-  expect(remountOrHold(held, serve(null), false)).toBe(held);
+  expect(remountOrHold(held, serve("b"), WATCHING)).toBe(held);
+  expect(remountOrHold(held, serve(null), WATCHING)).toBe(held);
   // Play is the one remount the person asks for.
   const asked = playHeldFrame(held);
   expect(asked.key).toBe(played.key);
@@ -233,13 +242,74 @@ it("never reloads a new build under a player whose game has focus", () => {
   expect(playHeldFrame(first)).toBe(first);
 
   // A newer build decides again; the build on screen served again leaves nothing waiting.
-  expect(remountOrHold(held, serve("c"), true).held?.servedArtifactId).toBe("c");
-  expect(remountOrHold(held, serve("c"), false)).toMatchObject({ held: null });
-  expect(remountOrHold(held, serve("a"), true)).toEqual({ ...first, held: null });
+  expect(remountOrHold(held, serve("c"), IN_GAME).held?.servedArtifactId).toBe("c");
+  expect(remountOrHold(held, serve("c"), WATCHING)).toMatchObject({ held: null });
+  expect(remountOrHold(held, serve("a"), IN_GAME)).toEqual({ ...first, held: null });
 
   // A new or stopped preview session has no old frame to keep.
-  expect(remountOrHold(held, serve("b", "http://127.0.0.1:10/index.html"), true).held).toBeNull();
-  expect(remountOrHold(first, serve(null, null), true).key).not.toBe(first.key);
+  expect(
+    remountOrHold(held, serve("b", "http://127.0.0.1:10/index.html"), IN_GAME).held,
+  ).toBeNull();
+  expect(remountOrHold(first, serve(null, null), IN_GAME).key).not.toBe(first.key);
+});
+
+it("plays a live game whenever it is served, and never waits on a build", () => {
+  const live = { ...BASE, stage: "live" as const, webBuildStale: false };
+  expect(deriveGameStagePhase({ ...live, previewUrl: "http://127.0.0.1:1/" })).toEqual({
+    kind: "playing",
+    stale: false,
+  });
+  // An agent's operation or failure is not the live game's state, nor is turn 1.
+  expect(
+    deriveGameStagePhase({ ...live, operation: running(), turnRunning: true, turnLoop: true }),
+  ).toEqual({ kind: "stopped" });
+  expect(deriveGameStagePhase({ ...live, operation: failed("Export") }).kind).toBe("stopped");
+  // Only the person's own Play shows, and its failure.
+  expect(deriveGameStagePhase({ ...live, busyStartedAt: 1_000 }).kind).toBe("building");
+  expect(deriveGameStagePhase({ ...live, localError: "no port" })).toEqual({
+    kind: "failed",
+    message: "no port",
+    what: "open",
+  });
+  // A window engine shows its card, unless its engine is missing.
+  expect(deriveGameStagePhase({ ...BASE, stage: "window" })).toEqual({ kind: "window" });
+  expect(deriveGameStagePhase({ ...BASE, stage: "window", toolchainReady: false }).kind).toBe(
+    "tools-missing",
+  );
+});
+
+// A hidden Stage that reloads plays a game nobody sees; one that never catches up shows a stale one.
+it("holds a live change silently while hidden and loads it when shown", () => {
+  const URL = "http://127.0.0.1:9/";
+  const first = remountOrHold(null, liveServe(URL, 0), WATCHING);
+  const change = liveServe(URL, 1);
+  const hidden = remountOrHold(first, change, HIDDEN);
+  expect(hidden).toMatchObject({ key: first.key, heldFor: "hidden" });
+  expect(remountOrHold(hidden, change, HIDDEN)).toBe(hidden);
+  // Shown again: it loads, unless the person is already in the game.
+  const shown = remountOrHold(hidden, change, WATCHING);
+  expect(shown).toMatchObject({ held: null, heldFor: null });
+  expect(shown.key).not.toBe(first.key);
+  expect(remountOrHold(hidden, change, IN_GAME)).toMatchObject({
+    key: first.key,
+    heldFor: "focus",
+  });
+  // A later change while hidden replaces what waits.
+  expect(remountOrHold(hidden, liveServe(URL, 2), HIDDEN).held?.servedArtifactId).toBe("live:2");
+  // Every live push is a new identity; none before the serve.
+  expect(liveServe(null, 3).servedArtifactId).toBeNull();
+});
+
+it("reloads on request, with what is held or the same serve again", () => {
+  const URL = "http://127.0.0.1:9/";
+  const first = remountOrHold(null, liveServe(URL, 0), WATCHING);
+  const again = reloadFrame(first, 1);
+  expect(again.key).not.toBe(first.key);
+  expect(again.serve).toEqual(first.serve);
+  // The fold keeps the reload: the same serve read again is absorbed.
+  expect(remountOrHold(again, liveServe(URL, 0), WATCHING)).toBe(again);
+  const held = remountOrHold(first, liveServe(URL, 1), IN_GAME);
+  expect(reloadFrame(held, 2)).toMatchObject({ held: null, serve: liveServe(URL, 1) });
 });
 
 it("describes unknown source freshness and preserves selected Play", () => {

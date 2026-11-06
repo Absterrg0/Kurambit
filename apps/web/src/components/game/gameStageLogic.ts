@@ -1,6 +1,7 @@
 import {
   GAME_ENGINES,
   type GameEngineId,
+  type GameStageKind,
   type GameStatus,
   type GameToolStatus,
   type GameToolchainStatus,
@@ -32,12 +33,19 @@ export type GameStagePhase =
   /** The agent's turn is making the game's first build: nothing to play yet, nothing to press. */
   | { kind: "first-build"; startedAt: number | null }
   | { kind: "building"; message: string; startedAt: number | null }
-  | { kind: "failed"; message: string }
+  /** `open`: the live folder could not be served; `build`: an export failed. */
+  | { kind: "failed"; message: string; what: "build" | "open" }
   | { kind: "never-built" }
   | { kind: "ready"; stale: boolean }
+  /** A live game that is not being served: Play serves the folder again. */
+  | { kind: "stopped" }
+  /** The engine plays in its own window, never on the Stage. */
+  | { kind: "window" }
   | { kind: "playing"; stale: boolean };
 
 export interface GameStageInput {
+  /** How the engine shows the game (`GAME_ENGINES[engine].stage`). */
+  stage: GameStageKind;
   toolchainReady: boolean;
   operation: GameStatus["operation"];
   /** A build that can be served from `builds/web` exists. */
@@ -48,7 +56,7 @@ export interface GameStageInput {
   busyStartedAt: number | null;
   /** A stage action failed in this client (RPC failure), not on the server. */
   localError: string | null;
-  /** The engine plays each changing turn's build on the stage (`GAME_ENGINES[engine].turnLoop`). */
+  /** The engine plays each changing turn's build (`GAME_ENGINES[engine].turnLoop`); export engines only. */
   turnLoop: boolean;
   /** The chat's agent turn is running, and when it started. */
   turnRunning: boolean;
@@ -64,6 +72,9 @@ const operationStartedAt = (operation: GameStatus["operation"]) =>
   operation === null ? null : Date.parse(operation.at);
 
 export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
+  if (input.stage === "window")
+    return input.toolchainReady ? { kind: "window" } : { kind: "tools-missing" };
+  if (input.stage === "live") return deriveLivePhase(input);
   const operation = input.operation;
   const playable = input.hasWebBuild && input.previewUrl !== null;
   // On an engine that plays every turn, the turn that will make the first
@@ -97,16 +108,34 @@ export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
     return { kind: "first-build", startedAt: input.turnStartedAt };
   // Only a failure that leaves nothing to play becomes the whole state.
   const failure = input.localError ?? (operation?.state === "failed" ? operation.message : null);
-  if (failure !== null && !playable) return { kind: "failed", message: failure };
+  if (failure !== null && !playable) return { kind: "failed", message: failure, what: "build" };
   const serveFreshBuild = input.hasWebBuild && !input.webBuildStale;
   if (!input.toolchainReady && !serveFreshBuild) return { kind: "tools-missing" };
   if (input.hasWebBuild) return { kind: "ready", stale: input.webBuildStale };
   return { kind: "never-built" };
 }
 
+/**
+ * A live game is the folder itself, served in milliseconds: nothing builds, so
+ * the agent's operations never take the stage, and serving needs no engine.
+ * Only the person's own Play in flight, or its failure, shows instead of it.
+ */
+function deriveLivePhase(input: GameStageInput): GameStagePhase {
+  if (input.previewUrl !== null) return { kind: "playing", stale: false };
+  if (input.busyStartedAt !== null)
+    return { kind: "building", message: "Opening the game…", startedAt: input.busyStartedAt };
+  if (input.localError !== null) return { kind: "failed", message: input.localError, what: "open" };
+  return { kind: "stopped" };
+}
+
 /** The message the "Ask agent to fix" button puts in the composer. */
 export function buildFailurePrompt(error: string): string {
   return `The web preview build failed. Fix the error and rebuild the game.\n\n${error.trim()}`;
+}
+
+/** The message "Ask agent to fix" sends for an error the live game threw. */
+export function liveErrorPrompt(error: string): string {
+  return `The game throws an error on the Stage. Fix it and keep the game booting.\n\n${error.trim()}`;
 }
 
 /**
@@ -144,46 +173,77 @@ export function nextGamePreviewFrame(
 }
 
 /**
- * What the play surface runs, and a newer build of the same preview session it
+ * A live game's identity: its serve and the last settled change under the
+ * folder, so each live push is a new game to show.
+ */
+export const liveServe = (previewUrl: string | null, liveRevision: number): GamePreviewServe => ({
+  previewUrl,
+  servedArtifactId: previewUrl === null ? null : `live:${liveRevision}`,
+});
+
+/**
+ * What the play surface runs, and a newer serve of the same preview session it
  * holds back. A tab switch never changes the frame, or the game restarts.
  */
 export interface GameFrameFold {
   readonly key: string;
   readonly serve: GamePreviewServe;
-  /** A replaced artifact that arrived while the person was in the game. */
+  /** A newer serve the frame did not load yet. */
   readonly held: GamePreviewServe | null;
+  /** Why: the person is in the game (the chip asks), or the Stage is hidden (it loads when shown). */
+  readonly heldFor: "focus" | "hidden" | null;
 }
 
+const showing = (serve: GamePreviewServe): GameFrameFold => ({
+  key: frameKeyOf(serve),
+  serve,
+  held: null,
+  heldFor: null,
+});
+
 /**
- * PURE. The frame after one status read. A new build never reloads under a
- * player whose game frame has focus: it is held until they press Play, and a
- * still newer build decides again. A new preview session (or none) always
- * remounts, because the old frame's server is gone. Returns `previous` itself
- * when nothing changed, so a render can compare by identity.
+ * PURE. The frame after one read of what is served (D2). A new build or a
+ * live change remounts a visible frame nobody is in. Under a player whose
+ * frame has focus it is held until they press Reload, even after focus
+ * leaves; while the Stage is hidden it is held silently and loads when the
+ * Stage is shown. A still newer serve decides again. A new preview session (or
+ * none) always remounts, because the old frame's server is gone. Returns
+ * `previous` itself when nothing changed, so a render can compare by identity.
  */
 export function remountOrHold(
   previous: GameFrameFold | null,
   next: GamePreviewServe,
-  gameFocused: boolean,
+  view: { readonly focused: boolean; readonly hidden: boolean },
 ): GameFrameFold {
-  if (previous === null) return { ...nextGamePreviewFrame(null, next), held: null };
-  if (previous.held !== null && frameKeyOf(previous.held) === frameKeyOf(next)) return previous;
+  if (previous === null) return showing(next);
+  if (previous.held !== null && frameKeyOf(previous.held) === frameKeyOf(next)) {
+    if (previous.heldFor !== "hidden" || view.hidden) return previous;
+    return view.focused ? { ...previous, heldFor: "focus" } : showing(next);
+  }
   const shown = nextGamePreviewFrame(previous, next);
   if (shown === previous) {
-    // The shown build is served again (an undo of what was held): nothing is waiting.
+    // The shown serve is back (an undo of what was held): nothing is waiting.
     const backToShown =
       next.servedArtifactId !== null && next.servedArtifactId === previous.serve.servedArtifactId;
-    return previous.held !== null && backToShown ? { ...previous, held: null } : previous;
+    return previous.held !== null && backToShown
+      ? { ...previous, held: null, heldFor: null }
+      : previous;
   }
-  const sameSession = shown.serve.previewUrl === previous.serve.previewUrl;
-  return gameFocused && sameSession
-    ? { ...previous, held: next }
-    : { key: shown.key, serve: shown.serve, held: null };
+  if (shown.serve.previewUrl !== previous.serve.previewUrl) return showing(next);
+  if (view.hidden) return { ...previous, held: next, heldFor: "hidden" };
+  if (view.focused) return { ...previous, held: next, heldFor: "focus" };
+  return showing(next);
 }
 
-/** PURE. Plays the held build: the one remount the person asked for. */
+/** PURE. Loads what is held: the one remount the person asked for. */
 export function playHeldFrame(fold: GameFrameFold): GameFrameFold {
-  return fold.held === null ? fold : { key: frameKeyOf(fold.held), serve: fold.held, held: null };
+  return fold.held === null ? fold : showing(fold.held);
+}
+
+/** PURE. Reloads the frame now, even with nothing new: the header's Reload. */
+export function reloadFrame(fold: GameFrameFold, at: number): GameFrameFold {
+  const serve = fold.held ?? fold.serve;
+  return { ...showing(serve), key: `${frameKeyOf(serve)}#reload:${at}` };
 }
 
 export function gameSourceFreshnessLabel(value: GameStatus["sourcesDifferFromPlay"]): string {

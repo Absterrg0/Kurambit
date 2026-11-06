@@ -6,7 +6,7 @@ import { GameBuildId, type GameRunRoundRef, type ScopedThreadRef } from "@kuramb
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import type { TimelineAnchoredCard } from "../../session-logic";
-import { chatRuns, gameEnvironment, setStagePlayTarget, type GameChatRun } from "../../state/game";
+import { chatRuns, gameEnvironment, type GameChatRun } from "../../state/game";
 import { useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
 import { Badge } from "../ui/badge";
@@ -14,7 +14,7 @@ import { Button } from "../ui/button";
 import { GameBuildFactsDiff } from "./GameBuildFacts";
 import { roundCardAction } from "./gameBuilds.logic";
 import { formatRunDuration } from "./gameRunView.logic";
-import { restoreQuestion, useBuildPlay, useBuildRestore } from "./useBuildActions";
+import { restoreQuestion, useBuildRestore } from "./useBuildActions";
 
 const isBuildId = Schema.is(GameBuildId);
 
@@ -128,7 +128,6 @@ export function GameRoundCard({
     }),
   );
   const restores = useBuildRestore(threadRef, builds.data?.restore ?? null);
-  const plays = useBuildPlay(threadRef);
   if (run === undefined || ref === null) return null;
   const outcome = OUTCOME[ref.outcome];
   const action = roundCardAction(ref, { active: run.active, best: run.best }, turnRunning);
@@ -140,17 +139,6 @@ export function GameRoundCard({
     : states.some((state) => state !== "measured")
       ? "Not every fact is measured on both builds; none measured changed."
       : "No fact changed against the build before it.";
-  const play = async () => {
-    if (build === null) return;
-    const result = await plays.send({ _tag: "build", build });
-    if (result === null) return;
-    setStagePlayTarget(threadRef, {
-      build,
-      label: `Round ${round}'s build`,
-      result,
-    });
-    useGameWorkspaceStore.getState().showStageTab("play");
-  };
   const best = run.best !== null && isBuildId(run.best) ? run.best : null;
   const against = best !== null && best !== build ? best : base;
   return (
@@ -191,8 +179,11 @@ export function GameRoundCard({
           <Button
             size="xs"
             variant="outline"
-            disabled={!plays.canPlay || plays.playing({ _tag: "build", build })}
-            onClick={() => void play()}
+            onClick={() =>
+              useGameWorkspaceStore
+                .getState()
+                .requestStage({ kind: "play", build: { _tag: "build", build } })
+            }
           >
             <PlayIcon className="fill-current" aria-hidden="true" />
             Play
@@ -203,8 +194,9 @@ export function GameRoundCard({
             size="xs"
             variant="ghost"
             onClick={() =>
-              useGameWorkspaceStore.getState().showStageTab("builds", {
-                compare: [
+              useGameWorkspaceStore.getState().requestStage({
+                kind: "compare",
+                pair: [
                   { _tag: "build", build: against },
                   { _tag: "build", build },
                 ],
@@ -241,11 +233,6 @@ export function GameRoundCard({
       {action !== null && restores.error(action.target) ? (
         <p role="alert" className="text-2xs text-destructive-foreground">
           {restores.error(action.target)}
-        </p>
-      ) : null}
-      {build !== null && plays.error({ _tag: "build", build }) ? (
-        <p role="alert" className="text-2xs text-destructive-foreground">
-          {plays.error({ _tag: "build", build })}
         </p>
       ) : null}
     </section>

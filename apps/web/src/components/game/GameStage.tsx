@@ -1,15 +1,13 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import {
-  ChevronDownIcon,
   DownloadIcon,
   HistoryIcon,
   MaximizeIcon,
   MessageSquareIcon,
   MinimizeIcon,
-  MonitorIcon,
   MoreHorizontalIcon,
   PanelRightIcon,
   PlayIcon,
@@ -20,13 +18,21 @@ import {
   XIcon,
 } from "lucide-react";
 import { AsyncResult } from "effect/reactivity";
-import type { GameAction, GameBuildsResult, ScopedThreadRef } from "@kurambit/contracts";
+import type {
+  GameAction,
+  GameBuild,
+  GameBuildRef,
+  GameBuildsResult,
+  ScopedThreadRef,
+} from "@kurambit/contracts";
 import { GAME_ENGINES, GAME_TEMPLATES } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 
 import {
   buildPlaysOf,
   gameEnvironment,
+  liveSignal,
+  setStagePlayTarget,
   stageAfterGameAction,
   stagePlayTarget,
   turnBuild,
@@ -35,36 +41,40 @@ import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import {
   clampGameChatWidth,
-  type GameStageTab,
+  type GameStageRequest,
   useGameWorkspaceStore,
 } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator,
-  MenuTrigger,
-} from "../ui/menu";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { GameBuildsView } from "./GameBuildsView";
+import { GameBuildCompare } from "./GameBuildCompare";
+import { GameBuildTimeline, type GameTimelineRequest } from "./GameBuildTimeline";
 import { GameExports } from "./GameExports";
-import { useBuildStop } from "./useBuildActions";
+import { buildName } from "./gameBuilds.logic";
+import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
-import { GameFrame, GameFrameBox, GamePlaySurface } from "./GamePlaySurface";
-import { GameRunPanel } from "./GameRunPanel";
+import { GameFrame, GameFrameBox, GamePlaySurface, type StudioMessage } from "./GamePlaySurface";
 import {
   buildFailurePrompt,
   deriveGameStagePhase,
+  liveErrorPrompt,
+  liveServe,
   playHeldFrame,
+  reloadFrame,
   remountOrHold,
   type GameFrameFold,
 } from "./gameStageLogic";
@@ -88,18 +98,27 @@ const folderBuildTurn = (result: AsyncResult.AsyncResult<GameBuildsResult, unkno
 const isFolderGameFrame = (target: EventTarget) =>
   target instanceof HTMLIFrameElement && target.closest('[data-game-play-surface="true"]') !== null;
 
-const PLAY_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
-  // The stage is the game itself; "Play" is the action, not the tab, so the
-  // header does not read as two Play buttons side by side.
-  { value: "play", label: "Stage" },
-  { value: "run", label: "Run" },
-  { value: "builds", label: "Builds" },
-];
+/** "Changed web/enemies/imp.js" → "imp.js". */
+const changedFile = (message: string) =>
+  message
+    .replace(/^Changed\s+/, "")
+    .split(/[/\\]/)
+    .at(-1) ?? message;
+
+const clockTime = (at: string) => {
+  const date = new Date(at);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+};
 
 /**
- * The game workspace for a game thread: the stage owns the centre of the
- * window and chat is docked to its right. ChatView mounts this once the
- * thread's game status resolves, which is also what makes it a game thread.
+ * The game workspace for a game thread: the game owns the centre of the
+ * window, its builds sit under it, and chat is docked to its right. ChatView
+ * mounts this once the thread's game status resolves, which is also what makes
+ * it a game thread. How the game shows depends on its engine
+ * (`GAME_ENGINES[engine].stage`): its folder served live, a Web export, or its
+ * own window.
  */
 export function GameStage({
   threadRef,
@@ -123,33 +142,33 @@ export function GameStage({
   const navigate = useNavigate();
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
+  const canRunStop = useAtomValue(gameEnvironment.runStop.permissionAtom(threadRef.environmentId));
   // A run's role thread shows the game but never writes beside the run.
   const access = useGameStageAccess(threadRef);
   const canOperate = canAct && access === "writer";
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
+  const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
   const chatWidth = useGameWorkspaceStore((state) => state.chatWidth);
   const chatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
   const setChatWidth = useGameWorkspaceStore((state) => state.setChatWidth);
   const setChatCollapsed = useGameWorkspaceStore((state) => state.setChatCollapsed);
-  const [tab, setTab] = useState<GameStageTab | null>(null);
-  // An earlier build the stage plays from a copy instead of the folder's own preview.
+  // An earlier build the stage plays from a copy instead of the folder's own game.
   const asked = useAtomValue(stagePlayTarget(threadRef));
   const stopBuild = useBuildStop(threadRef);
-  const tabRequest = useGameWorkspaceStore((state) => state.stageTabRequest);
-  const [seenTabRequest, setSeenTabRequest] = useState(tabRequest);
-  // The latest build another surface asked the Builds tab to open; the view
-  // remounts for each one and reads it once.
-  const [buildRequest, setBuildRequest] = useState<typeof tabRequest>(null);
-  if (tabRequest !== seenTabRequest) {
-    setSeenTabRequest(tabRequest);
-    if (tabRequest !== null) setTab(tabRequest.tab);
-    if (tabRequest?.build !== undefined) setBuildRequest(tabRequest);
-  }
-  const [buildsSeen, setBuildsSeen] = useState(false);
+  const plays = useBuildPlay(threadRef);
+  const turnUndo = useTurnUndo(threadRef, null);
+  const live = useAtomValue(liveSignal(threadRef));
+  const stageRequest = useGameWorkspaceStore((state) => state.stageRequest);
+  // A request made before this stage mounted was for another one.
+  const [mountRequestN] = useState(stageRequest?.n ?? 0);
+  const [timelineRequest, setTimelineRequest] = useState<GameTimelineRequest | null>(null);
+  const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [focusRequest, setFocusRequest] = useState(0);
+  // The build the person last asked to play, for its refusal.
+  const [playRef, setPlayRef] = useState<GameBuildRef | null>(null);
   const [askedSeen, setAskedSeen] = useState(asked);
   const [askedStatus, setAskedStatus] = useState<typeof query.data>(null);
-  // A game being made by its production run opens on the run, not on an
-  // empty stage; the creator's own choice of tab always wins.
   const runStatus = useEnvironmentQuery(
     gameEnvironment.runStatus({
       environmentId: threadRef.environmentId,
@@ -167,11 +186,15 @@ export function GameStage({
   const [seenRevision, setSeenRevision] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  // The fold of what the play surface runs across status reads; state, so the
-  // render below can pin this serve without touching refs.
+  // The fold of what the play surface runs across reads; state, so the render
+  // below can pin this serve without touching refs.
   const [frameFold, setFrameFold] = useState<GameFrameFold | null>(null);
   // The person is in the game: its frame is the document's focused element.
   const [gameFocused, setGameFocused] = useState(false);
+  // The live game's first page error, for the frame that threw it.
+  const [studioError, setStudioError] = useState<{ key: string; text: string } | null>(null);
+  // A live game opens itself once per stage; after that, Play is the person's.
+  const [liveOpenAsked, setLiveOpenAsked] = useState(false);
   // The quiet shell: streamed tokens do not re-render the stage.
   const latestRun = useQuietThreadShell(threadRef)?.latestRun ?? null;
   const turnStartedAt = latestRun?.startedAt ?? latestRun?.requestedAt ?? null;
@@ -186,9 +209,9 @@ export function GameStage({
     useAtomValue(
       turnBuild(sawTurnEnd && latestRun !== null ? threadRef : null, latestRun?.runId ?? null),
     ) !== null;
-  // Read only while a build is held: the Builds list names its turn.
+  // Read only while an export engine's build is held: the Builds list names its turn.
   const heldTurn = useEnvironmentQuerySelector(
-    frameFold?.held == null
+    frameFold?.held == null || frameFold.serve.servedArtifactId?.startsWith("live:") === true
       ? null
       : gameEnvironment.builds({
           environmentId: threadRef.environmentId,
@@ -230,6 +253,105 @@ export function GameStage({
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
+
+  const perform = async (stageAction: GameAction) => {
+    if (stageAction === "preview") stageAfterGameAction(threadRef, stageAction);
+    if (stageAction === "preview" && data?.previewUrl != null) {
+      setCompare(null);
+      return;
+    }
+    if (busy !== null && stageAction !== "stop") return;
+    setBusy({ action: stageAction, startedAt: Date.now() });
+    setMessage(null);
+    setError(null);
+    const result = await action({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, action: stageAction },
+    });
+    setBusy(null);
+    if (result._tag === "Failure") {
+      setError(String(squashAtomCommandFailure(result)));
+    } else if (!result.value.success) {
+      setError(result.value.message);
+    } else {
+      setMessage(result.value.message);
+      if (stageAction === "stop") stageAfterGameAction(threadRef, stageAction);
+    }
+    refresh();
+  };
+  const backToLive = () => {
+    setCompare(null);
+    if (asked !== null) void stopBuild(asked.build);
+  };
+  // An earlier build on the Stage, from a copy: the copy's frame shows it.
+  const playBuild = async (build: GameBuild | GameBuildRef) => {
+    const ref: GameBuildRef = "id" in build ? { _tag: "build", build: build.id } : build;
+    if (ref._tag !== "build") return;
+    setCompare(null);
+    setPlayRef(ref);
+    const result = await plays.send(ref);
+    if (result === null) return;
+    if (result._tag === "window") {
+      setMessage(result.message);
+      return;
+    }
+    setStagePlayTarget(threadRef, {
+      build: ref.build,
+      label: "id" in build ? buildName(build) : "an earlier build",
+      result,
+    });
+  };
+  const handleRequest = useStableCallback((request: GameStageRequest, n: number) => {
+    switch (request.kind) {
+      case "live":
+        backToLive();
+        return;
+      case "play":
+      case "detail":
+      case "step":
+        setCompare(null);
+        setTimelineRequest({ request, n });
+        return;
+      case "compare":
+        if (request.pair === undefined) setTimelineRequest({ request, n });
+        else setCompare(request.pair);
+        return;
+      case "focus":
+        setFocusRequest(n);
+        return;
+      case "undo":
+      case "redo": {
+        const turn = turnUndo.action;
+        if (
+          turn?.kind === request.kind &&
+          turn.blocked === null &&
+          turnUndo.canRestore &&
+          turnUndo.writer &&
+          !turnUndo.pending
+        )
+          void turnUndo.send();
+        return;
+      }
+      case "export":
+        setExportOpen(true);
+        return;
+    }
+  });
+  const requestN = stageRequest?.n ?? 0;
+  const latestRequest = stageRequest?.request ?? null;
+  useEffect(() => {
+    if (latestRequest !== null && requestN !== mountRequestN)
+      handleRequest(latestRequest, requestN);
+  }, [requestN, latestRequest, mountRequestN, handleRequest]);
+  const openLive = useStableCallback(() => void perform("preview"));
+  useEffect(() => {
+    if (liveOpenAsked) openLive();
+  }, [liveOpenAsked, openLive]);
+  const onStudioMessage = useStableCallback((studio: StudioMessage) => {
+    const key = frameFold?.key ?? "";
+    setStudioError(studio.type === "studio-error" ? { key, text: studio.message } : null);
+  });
+
   if (!data)
     return query.error !== null && isGameStatusFailure(query.failure) ? (
       <section className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
@@ -242,6 +364,8 @@ export function GameStage({
         </span>
       </section>
     ) : null;
+  const engine = GAME_ENGINES[data.manifest.engine.name];
+  const stageKind = engine.stage;
   // The copy the stage was asked to play shows only while the server says it
   // plays (CONTRACT A3), so a Stop from the palette, another client or an
   // agent takes the banner down. Until the status is read again after the ask,
@@ -250,25 +374,20 @@ export function GameStage({
     setAskedSeen(asked);
     setAskedStatus(data);
   }
-  const plays = buildPlaysOf(data);
+  const buildPlays = buildPlaysOf(data);
   const playTarget =
     asked !== null &&
-    (plays === null || data === askedStatus || plays.some((play) => play.build === asked.build))
+    (buildPlays === null ||
+      data === askedStatus ||
+      buildPlays.some((play) => play.build === asked.build))
       ? asked
       : null;
-  const tabs = PLAY_TABS;
-  // A live run brings the creator to the Run view once; its stopping or ending
-  // later never moves them off it.
-  if (tab === null && runStatus.data?.active === true) setTab("run");
-  const activeTab = tab ?? "play";
-  // The Builds tab stays mounted once opened, so going to the stage to play a
-  // build and coming back keeps what was open there.
-  if (activeTab === "builds" && !buildsSeen) setBuildsSeen(true);
   const webBuild = data.builds.find((build) => build.target === "Web");
   const turnEndedAt = latestRun?.completedAt == null ? null : Date.parse(latestRun.completedAt);
   const operationSinceTurnEnd =
     data.operation !== null && turnEndedAt !== null && Date.parse(data.operation.at) >= turnEndedAt;
   const phase = deriveGameStagePhase({
+    stage: stageKind,
     // The game's own engine tool, as the server resolved it for this project.
     toolchainReady: data.engineTool === null || data.engineTool.status !== "error",
     // A failure becomes the stage's own only when this chat's work failed: a
@@ -282,16 +401,25 @@ export function GameStage({
     previewUrl: data.previewUrl,
     busyStartedAt: busy?.startedAt ?? null,
     localError: error,
-    turnLoop: GAME_ENGINES[data.manifest.engine.name].turnLoop,
+    turnLoop: engine.turnLoop,
     turnRunning,
     turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
     turnBuildPending: sawTurnEnd && endedTurnBuilt && !operationSinceTurnEnd,
   });
+  // A live game serves itself when the stage shows it, once (design §2.2).
+  if (
+    stageKind === "live" &&
+    !liveOpenAsked &&
+    !hidden &&
+    data.previewUrl === null &&
+    canAct &&
+    busy === null &&
+    error === null
+  )
+    setLiveOpenAsked(true);
   // The turn's own build is coming: a Build & play now would race it and be refused.
   const awaitingTurnBuild = phase.kind === "first-build";
   const building = busy !== null || operationState === "running";
-  // Play only starts a preview when none is running; a started game can always
-  // be brought back to Stage.
   // Play of a build that exists only reads, so a run's role thread may play it.
   const webPlay = data.exportTargets.includes("Web");
   const playEnabled =
@@ -316,95 +444,110 @@ export function GameStage({
     operation.revision !== dismissedRevision &&
     seenRevision !== null &&
     operation.revision > seenRevision;
+  // The folder's frame is not on screen: a copy, a compare, or another pane.
+  const frameHidden = hidden || playTarget !== null || compare !== null;
+  // Fold the served identity across reads (D2): a live change or a replaced
+  // export remounts the game, unless the person is in it (the chip asks) or
+  // it is not on screen (it loads when shown). Absorbed reads return the same
+  // object, so this only adjusts state when the fold advanced.
+  const frame = remountOrHold(
+    frameFold,
+    stageKind === "live"
+      ? liveServe(data.previewUrl, live.revision)
+      : {
+          previewUrl: data.previewUrl,
+          servedArtifactId:
+            webBuild === undefined ? null : `${webBuild.path}#${webBuild.updatedAt}`,
+        },
+    // A frame hidden by another view or pane may keep focus without a blur.
+    { focused: gameFocused && !frameHidden, hidden: frameHidden },
+  );
+  if (frame !== frameFold) setFrameFold(frame);
+  const frameKey = frame.key;
+  // A reload clears what the old page threw; a later error sets it again.
+  const liveError = studioError !== null && studioError.key === frameKey ? studioError.text : null;
   const failureVisible =
     error ??
     (operation !== null && operationVisible && operation.state === "failed"
       ? operation.message
-      : null);
+      : null) ??
+    (liveError !== null && !turnRunning ? liveError : null);
+  const failurePrompt =
+    failureVisible !== null && failureVisible === liveError
+      ? liveErrorPrompt(failureVisible)
+      : buildFailurePrompt(failureVisible ?? "");
+  const playFailure = playRef === null ? null : plays.error(playRef);
   const noticeVisible =
-    (message ?? (operation !== null && operationVisible ? operation.message : "")).trim() || null;
-  // Fold the served identity across status reads: remount the game only when
-  // its preview session or served artifact really changed — a source edit and a
-  // failed rebuild leave both running untouched, and a new build waits behind a
-  // chip while the person is in the game. Absorbed reads return the same
-  // object, so this only adjusts state when the fold advanced.
-  const frame = remountOrHold(
-    frameFold,
-    {
-      previewUrl: data.previewUrl,
-      servedArtifactId: webBuild === undefined ? null : `${webBuild.path}#${webBuild.updatedAt}`,
-    },
-    // A frame hidden by another view or pane may keep focus without a blur.
-    gameFocused && activeTab === "play" && !hidden && playTarget === null,
-  );
-  if (frame !== frameFold) setFrameFold(frame);
-  const frameKey = frame.key;
-  // One status line, and a failure outranks the staleness it just caused. A
-  // held build outranks the notice of the operation that made it.
-  const heldVisible = failureVisible === null && frame.held !== null && playTarget === null;
+    (
+      message ??
+      playFailure ??
+      (operation !== null && operationVisible ? operation.message : "")
+    ).trim() || null;
   const staleChipVisible =
     failureVisible === null &&
     (phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false);
+  const held =
+    frame.heldFor !== "focus"
+      ? null
+      : stageKind === "live"
+        ? { label: "Your agent changed the game while you were playing", action: "Reload" }
+        : {
+            label: heldTurn === null ? "New build" : `New build from turn ${heldTurn}`,
+            action: "Play",
+          };
+  const run = runStatus.data?.active === true ? runStatus.data : null;
   const stagePhaseLabel =
-    phase.kind === "playing"
-      ? data.webBuildStale
-        ? "Playing · older than the game"
-        : "Playing"
-      : phase.kind === "ready"
-        ? data.webBuildStale
-          ? "Ready · older than the game"
-          : "Ready to play"
-        : phase.kind === "first-build"
-          ? "Making the first build"
-          : phase.kind === "never-built"
-            ? "No build yet"
-            : phase.kind === "failed"
-              ? "Build failed"
-              : phase.kind === "tools-missing"
-                ? "Engine not ready"
-                : null;
+    run !== null
+      ? `Production run · ${run.step ?? run.stage}`
+      : stageKind === "live"
+        ? phase.kind === "playing"
+          ? live.revision === 0
+            ? "Live"
+            : `Live · reloaded when ${changedFile(live.message)} changed, ${clockTime(live.at)}`
+          : phase.kind === "stopped"
+            ? "Stopped"
+            : null
+        : phase.kind === "playing"
+          ? data.webBuildStale
+            ? "Playing · older than the game"
+            : "Playing"
+          : phase.kind === "ready"
+            ? data.webBuildStale
+              ? "Ready · older than the game"
+              : "Ready to play"
+            : phase.kind === "first-build"
+              ? "Making the first build"
+              : phase.kind === "never-built"
+                ? "No build yet"
+                : phase.kind === "failed"
+                  ? "Build failed"
+                  : phase.kind === "tools-missing"
+                    ? "Engine not ready"
+                    : phase.kind === "window"
+                      ? "Plays in its own window"
+                      : null;
   const runningSomething =
     busy !== null ||
     operationState === "running" ||
     data.processes.length > 0 ||
     data.previewUrl !== null ||
     playTarget !== null ||
-    (plays?.length ?? 0) > 0;
+    (buildPlays?.length ?? 0) > 0;
   const buildingMessage =
     operationState === "running" && data.operation !== null
       ? data.operation.message
       : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
   const template = GAME_TEMPLATES.find((entry) => entry.id === data.manifest.template);
-  const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
-  const perform = async (stageAction: GameAction) => {
-    if (stageAction === "preview") stageAfterGameAction(threadRef, stageAction);
-    if (stageAction === "preview" && data.previewUrl !== null) {
-      setTab("play");
-      return;
-    }
-    if (busy !== null && stageAction !== "stop") return;
-    setBusy({ action: stageAction, startedAt: Date.now() });
-    setMessage(null);
-    setError(null);
-    const result = await action({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, action: stageAction },
-    });
-    setBusy(null);
-    if (result._tag === "Failure") {
-      setError(String(squashAtomCommandFailure(result)));
-    } else if (!result.value.success) {
-      setError(result.value.message);
-    } else {
-      setMessage(result.value.message);
-      if (stageAction === "export-linux" || stageAction === "export-windows") setTab("builds");
-      if (stageAction === "stop") stageAfterGameAction(threadRef, stageAction);
-    }
-    refresh();
-  };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void stageRef.current?.requestFullscreen();
+  };
+  const stopRun = async () => {
+    const result = await runStop({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    });
+    if (result._tag === "Failure") setError(String(squashAtomCommandFailure(result)));
   };
   const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -424,16 +567,15 @@ export function GameStage({
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const templateName =
-    template?.name ??
-    `${GAME_ENGINES[data.manifest.engine.name].name} ${data.manifest.engine.version}`;
+  const templateName = template?.name ?? `${engine.name} ${data.manifest.engine.version}`;
   const stageSubtitle =
     stagePhaseLabel === null
       ? templateName
-      : template === undefined
-        ? stagePhaseLabel
-        : `${templateName} · ${stagePhaseLabel}`;
-  const activeTabLabel = tabs.find((entry) => entry.value === activeTab)?.label ?? "Stage";
+      : run !== null || stageKind === "live"
+        ? `${engine.name} · ${stagePhaseLabel}`
+        : template === undefined
+          ? stagePhaseLabel
+          : `${templateName} · ${stagePhaseLabel}`;
   const statusBanner =
     failureVisible !== null ? (
       <div className="flex items-center gap-2 border-t border-destructive/20 bg-destructive/8 px-3 py-1.5 text-xs text-destructive-foreground">
@@ -445,21 +587,21 @@ export function GameStage({
           size="xs"
           variant="ghost"
           className="shrink-0"
-          onClick={() => askAgentToFix(failureVisible)}
+          onClick={() => onAskAgent(failurePrompt)}
         >
           Ask agent to fix
         </Button>
       </div>
-    ) : heldVisible ? (
-      <div className="flex items-center gap-2 border-t border-info/20 bg-info/8 px-3 py-1.5 text-xs text-info-foreground">
-        <HistoryIcon className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate">
-          {heldTurn === null ? "New build" : `New build from turn ${heldTurn}`}
+    ) : liveError !== null ? (
+      // Mid-turn, a save may be half-written: the error is named, not alarmed.
+      <div className="flex items-center gap-2 border-t border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+        <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <TruncatedText
+            text={`The game threw while your agent is editing: ${liveError}`}
+            className="block"
+          />
         </span>
-        <Button size="xs" variant="ghost" onClick={() => setFrameFold(playHeldFrame(frame))}>
-          <PlayIcon className="fill-current" aria-hidden="true" />
-          Play
-        </Button>
       </div>
     ) : noticeVisible !== null ? (
       <div className="flex items-center gap-2 border-t border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
@@ -474,6 +616,7 @@ export function GameStage({
           onClick={() => {
             setError(null);
             setMessage(null);
+            setPlayRef(null);
             setDismissedRevision(operation?.revision ?? null);
           }}
         >
@@ -526,12 +669,10 @@ export function GameStage({
             </span>
           </span>
           <div className="flex min-w-0 flex-1 flex-col justify-center">
-            <div className="flex min-w-0 items-center gap-2">
-              <h2 className="min-w-0 truncate text-base font-semibold leading-5 tracking-tight">
-                <TruncatedText text={data.manifest.name} />
-              </h2>
-            </div>
-            {building ? (
+            <h2 className="min-w-0 truncate text-base font-semibold leading-5 tracking-tight">
+              <TruncatedText text={data.manifest.name} />
+            </h2>
+            {building && stageKind !== "live" && run === null ? (
               <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
                 {/* Static: the elapsed timer already shows it is live. */}
                 <RefreshCwIcon className="size-3 shrink-0" aria-hidden="true" />
@@ -540,106 +681,68 @@ export function GameStage({
                   <GameElapsed since={buildingStartedAt} className="shrink-0" />
                 )}
               </span>
-            ) : stagePhaseLabel !== null ? (
+            ) : (
               <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
                 {phase.kind === "playing" ? (
                   <span className="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />
                 ) : null}
                 <span className="truncate">{stageSubtitle}</span>
               </span>
-            ) : (
-              <span className="truncate text-xs leading-4 text-muted-foreground">
-                {templateName}
-              </span>
             )}
           </div>
-          <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
-          <Menu>
-            <MenuTrigger
-              render={
+          <div className="flex shrink-0 items-center gap-1">
+            {stageKind === "export" ? (
+              <>
                 <Button
                   size="sm"
-                  variant="ghost"
-                  aria-label={`Game view: ${activeTabLabel}`}
-                  className="inline-flex @[48rem]/stage-header:hidden"
-                />
-              }
-            >
-              {activeTabLabel}
-              <ChevronDownIcon className="size-3.5" aria-hidden="true" />
-            </MenuTrigger>
-            <MenuPopup align="start">
-              {tabs.map((entry) => (
-                <MenuItem key={entry.value} onClick={() => setTab(entry.value)}>
-                  {entry.label}
-                </MenuItem>
-              ))}
-            </MenuPopup>
-          </Menu>
-          <ToggleGroup
-            aria-label="Game workspace"
-            className="hidden shrink-0 @[48rem]/stage-header:flex"
-            variant="segmented"
-            value={[activeTab]}
-            onValueChange={(value) => {
-              const next = value[0];
-              if (next === "run" || next === "play" || next === "builds") setTab(next);
-            }}
-          >
-            {tabs.map((entry) => (
-              <Toggle key={entry.value} value={entry.value} data-game-tab={entry.value}>
-                {entry.label}
-              </Toggle>
-            ))}
-          </ToggleGroup>
-          <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              size="sm"
-              variant="default"
-              aria-label={webBuild === undefined ? "Build and play" : "Play game"}
-              disabled={!playEnabled}
-              onClick={() => void perform("preview")}
-            >
-              <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
-              <span className="hidden @[40rem]/stage-header:inline">
-                {webBuild === undefined ? "Build & play" : "Play"}
-              </span>
-            </Button>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Rebuild the web export"
-                    className="hidden @[46rem]/stage-header:inline-flex"
-                    disabled={!rebuildEnabled}
-                    onClick={() => void perform("rebuild")}
-                  />
-                }
+                  variant="default"
+                  aria-label={webBuild === undefined ? "Build and play" : "Play game"}
+                  disabled={!playEnabled}
+                  onClick={() => void perform("preview")}
+                >
+                  <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
+                  <span className="hidden @[40rem]/stage-header:inline">
+                    {webBuild === undefined ? "Build & play" : "Play"}
+                  </span>
+                </Button>
+                <IconAction
+                  label="Rebuild the web export"
+                  disabled={!rebuildEnabled}
+                  onClick={() => void perform("rebuild")}
+                >
+                  <RefreshCwIcon className="size-3.5" aria-hidden="true" />
+                </IconAction>
+                <IconAction
+                  label="Stop the game and its preview"
+                  disabled={!canOperate || !runningSomething}
+                  onClick={() => void perform("stop")}
+                >
+                  <SquareIcon className="size-3.5" aria-hidden="true" />
+                </IconAction>
+              </>
+            ) : null}
+            {stageKind === "live" ? (
+              <IconAction
+                label="Reload the game"
+                disabled={data.previewUrl === null}
+                onClick={() => setFrameFold(reloadFrame(frame, Date.now()))}
               >
                 <RefreshCwIcon className="size-3.5" aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">Rebuild the web export</TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Stop the game"
-                    className="hidden @[40rem]/stage-header:inline-flex"
-                    disabled={!canOperate || !runningSomething}
-                    onClick={() => void perform("stop")}
-                  />
-                }
+              </IconAction>
+            ) : null}
+            {stageKind !== "window" ? (
+              <IconAction
+                label={fullscreen ? "Leave fullscreen" : "Fullscreen"}
+                disabled={phase.kind !== "playing"}
+                onClick={toggleFullscreen}
               >
-                <SquareIcon className="size-3.5" aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">Stop the game and its preview</TooltipPopup>
-            </Tooltip>
+                {fullscreen ? (
+                  <MinimizeIcon className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <MaximizeIcon className="size-3.5" aria-hidden="true" />
+                )}
+              </IconAction>
+            ) : null}
             <Menu>
               <MenuTrigger
                 render={
@@ -654,9 +757,9 @@ export function GameStage({
                 <MoreHorizontalIcon className="size-4" aria-hidden="true" />
               </MenuTrigger>
               <MenuPopup align="end">
-                <MenuItem disabled={!rebuildEnabled} onClick={() => void perform("rebuild")}>
-                  <RefreshCwIcon />
-                  Rebuild the web export
+                <MenuItem onClick={() => setExportOpen(true)}>
+                  <DownloadIcon />
+                  Export…
                 </MenuItem>
                 <MenuItem
                   disabled={!canOperate || !runningSomething}
@@ -665,40 +768,13 @@ export function GameStage({
                   <SquareIcon />
                   Stop the game
                 </MenuItem>
-                {data.exportTargets.includes("Windows") ? (
-                  <MenuItem
-                    disabled={!stagingEnabled}
-                    onClick={() => void perform("export-windows")}
-                  >
-                    <MonitorIcon />
-                    Export for Windows
-                  </MenuItem>
-                ) : null}
-                {data.exportTargets.includes("Linux") ? (
-                  <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-linux")}>
-                    <DownloadIcon />
-                    Export for Linux
+                {run !== null && access === "writer" ? (
+                  <MenuItem disabled={!canRunStop} onClick={() => void stopRun()}>
+                    <SquareIcon />
+                    Stop production run
                   </MenuItem>
                 ) : null}
                 <MenuSeparator />
-                <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">View</div>
-                <MenuRadioGroup
-                  value={activeTab}
-                  onValueChange={(value) => {
-                    if (value === "run" || value === "play" || value === "builds") setTab(value);
-                  }}
-                >
-                  {tabs.map((entry) => (
-                    <MenuRadioItem key={entry.value} value={entry.value}>
-                      {entry.label}
-                    </MenuRadioItem>
-                  ))}
-                </MenuRadioGroup>
-                <MenuSeparator />
-                <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
-                  {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
-                  {fullscreen ? "Leave fullscreen" : "Fullscreen"}
-                </MenuItem>
                 <MenuItem
                   onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
                 >
@@ -707,6 +783,7 @@ export function GameStage({
                 </MenuItem>
               </MenuPopup>
             </Menu>
+            <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -736,15 +813,7 @@ export function GameStage({
         </div>
         {statusBanner}
       </header>
-      {activeTab === "run" ? <GameRunPanel threadRef={threadRef} /> : null}
-      {/*
-        The stage stays mounted across workspace tabs; hiding it keeps the
-        iframe alive and the frame key unchanged, so the game keeps its
-        progress. The engine cannot see CSS hiding (an iframe's document stays
-        visible with its parent), so GamePlaySurface tells the game over
-        postMessage to pause and mute while the tab is elsewhere.
-      */}
-      {playTarget !== null && activeTab === "play" ? (
+      {playTarget !== null && compare === null ? (
         <div className="flex items-center gap-2 border-b border-info/20 bg-info/8 px-3 py-1.5 text-xs text-info-foreground">
           <HistoryIcon className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate">
@@ -755,12 +824,31 @@ export function GameStage({
           </Button>
         </div>
       ) : null}
+      {compare !== null ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <GameBuildCompare
+            threadRef={threadRef}
+            pair={compare}
+            viewport={data.viewport}
+            gameName={data.manifest.name}
+            compact={compact}
+            hidden={hidden}
+            onClose={() => setCompare(null)}
+          />
+        </div>
+      ) : null}
+      {/*
+        The folder's game stays mounted under a copy or a compare, so it keeps
+        its progress. The engine cannot see CSS hiding (an iframe's document
+        stays visible with its parent), so the frame tells the game over
+        postMessage to pause and mute while it is not shown.
+      */}
       {playTarget !== null ? (
         <div
-          aria-hidden={activeTab !== "play"}
+          aria-hidden={compare !== null}
           data-game-play-surface="build"
           className={
-            activeTab === "play"
+            compare === null
               ? "relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-stage p-3 [container-type:size]"
               : "hidden"
           }
@@ -771,7 +859,8 @@ export function GameStage({
                 key={`${playTarget.build}\0${playTarget.result.url}`}
                 url={playTarget.result.url}
                 title={`${data.manifest.name}, ${playTarget.label}`}
-                hidden={hidden || activeTab !== "play"}
+                hidden={hidden || compare !== null}
+                focusRequest={focusRequest}
               />
             ) : (
               <p className="flex size-full items-center justify-center p-6 text-center text-sm text-washi/90">
@@ -782,9 +871,9 @@ export function GameStage({
         </div>
       ) : null}
       <div
-        aria-hidden={activeTab !== "play" || playTarget !== null}
+        aria-hidden={playTarget !== null || compare !== null}
         className={
-          activeTab === "play" && playTarget === null ? "flex min-h-0 flex-1 flex-col" : "hidden"
+          playTarget === null && compare === null ? "flex min-h-0 flex-1 flex-col" : "hidden"
         }
       >
         <GamePlaySurface
@@ -793,7 +882,7 @@ export function GameStage({
           gameName={data.manifest.name}
           previewUrl={data.previewUrl}
           frameKey={frameKey}
-          hidden={hidden || activeTab !== "play" || playTarget !== null}
+          hidden={frameHidden}
           canOperate={canOperate}
           operation={
             busy !== null
@@ -808,43 +897,56 @@ export function GameStage({
           onPlay={() => void perform("preview")}
           onRebuild={() => void perform("rebuild")}
           onStop={() => void perform("stop")}
-          onAskAgent={askAgentToFix}
+          onAskAgent={(failure) => onAskAgent(buildFailurePrompt(failure))}
           onOpenTools={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
+          held={held}
+          onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
+          onStudioMessage={onStudioMessage}
+          focusRequest={playTarget === null ? focusRequest : 0}
         />
       </div>
-      {buildsSeen ? (
-        <GameBuildsView
-          key={`${threadRef.threadId}\0${buildRequest?.n ?? 0}`}
-          threadRef={threadRef}
-          compact={compact}
-          writer={canOperate}
-          turnRunning={turnRunning}
-          runActive={runStatus.data?.active === true}
-          viewport={data.viewport}
-          gameName={data.manifest.name}
-          request={buildRequest}
-          hidden={hidden || activeTab !== "builds"}
-          onShowStage={() => setTab("play")}
-          exports={
+      <GameBuildTimeline
+        threadRef={threadRef}
+        writer={canOperate}
+        turnRunning={turnRunning}
+        live={stageKind === "live"}
+        playing={playTarget?.build ?? null}
+        request={timelineRequest}
+        onPlay={(build) => void playBuild(build)}
+        onPlayUnlisted={(ref) => void playBuild(ref)}
+        onLive={backToLive}
+        onCompare={setCompare}
+      />
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogPopup className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Export</DialogTitle>
+            <DialogDescription>
+              Releases of the game folder, written to builds/ and never committed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
             <GameExports
               threadRef={threadRef}
               builds={data.builds}
               exportTargets={data.exportTargets}
+              live={stageKind === "live"}
               webBuildStale={data.webBuildStale}
               sourcesDifferFromPlay={data.sourcesDifferFromPlay}
               canOperate={canOperate}
               operationRunning={building}
               onPlay={() => {
-                setTab("play");
+                setExportOpen(false);
                 void perform("preview");
               }}
+              onExportWeb={() => void perform("rebuild")}
               onExport={(target) =>
                 void perform(target === "Windows" ? "export-windows" : "export-linux")
               }
             />
-          }
-        />
-      ) : null}
+          </DialogPanel>
+        </DialogPopup>
+      </Dialog>
       {compact || hidden || chatCollapsed || fullscreen ? null : (
         <div
           role="separator"
@@ -872,6 +974,38 @@ export function GameStage({
         />
       )}
     </section>
+  );
+}
+
+/** A header icon button with its name in a tooltip. */
+function IconAction({
+  label,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={label}
+            disabled={disabled}
+            onClick={onClick}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{label}</TooltipPopup>
+    </Tooltip>
   );
 }
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
+  AppWindowIcon,
   HammerIcon,
   PlayIcon,
   RefreshCwIcon,
@@ -30,6 +31,29 @@ const frameStyle = (viewport: GameViewport) => ({
  */
 const visibilityMessage = (visible: boolean) => ({ type: "studio-visibility" as const, visible });
 
+/**
+ * What the template's bridge (`shell/studio.js`) says about the page (D3): its
+ * first error, bounded, or that the game booted. Older games never send them.
+ */
+export type StudioMessage =
+  | { readonly type: "studio-error"; readonly message: string }
+  | { readonly type: "studio-ready" };
+
+const readStudioMessage = (data: unknown): StudioMessage | null => {
+  if (typeof data !== "object" || data === null || !("type" in data)) return null;
+  if (data.type === "studio-ready") return { type: "studio-ready" };
+  if (data.type !== "studio-error") return null;
+  const field = (key: string) => {
+    const value = (data as Record<string, unknown>)[key];
+    return typeof value === "string" || typeof value === "number"
+      ? String(value).slice(0, 500)
+      : "";
+  };
+  const where = [field("source"), field("line")].filter((part) => part !== "").join(":");
+  const message = field("message") || "Unknown error";
+  return { type: "studio-error", message: where === "" ? message : `${message} (${where})` };
+};
+
 /** The game's answer, so the stage knows whether hidden playback really stopped. */
 interface VisibilityAck {
   readonly type: "studio-visibility-ack";
@@ -52,6 +76,10 @@ export function GamePlaySurface({
   onStop,
   onAskAgent,
   onOpenTools,
+  held,
+  onTakeHeld,
+  onStudioMessage,
+  focusRequest,
 }: {
   phase: GameStagePhase;
   /** The operation running on the game: its name, and whether it is this thread's own (Stop ends only those). */
@@ -69,6 +97,12 @@ export function GamePlaySurface({
   onStop: () => void;
   onAskAgent: (error: string) => void;
   onOpenTools: () => void;
+  /** A newer game waits while the person plays: the chip's words and its button. */
+  held: { readonly label: string; readonly action: string } | null;
+  onTakeHeld: () => void;
+  onStudioMessage: (message: StudioMessage) => void;
+  /** Changes when something asks for the game to have the keyboard. */
+  focusRequest: number;
 }) {
   const playing = phase.kind === "playing" && previewUrl !== null;
   return (
@@ -83,6 +117,8 @@ export function GamePlaySurface({
             url={previewUrl}
             title={`${gameName} preview`}
             hidden={hidden}
+            onStudioMessage={onStudioMessage}
+            focusRequest={focusRequest}
           />
         ) : (
           <StageStateCard
@@ -97,6 +133,17 @@ export function GamePlaySurface({
             onOpenTools={onOpenTools}
           />
         )}
+        {playing && held !== null ? (
+          <div className="absolute inset-x-0 top-2 z-20 flex justify-center px-2">
+            <div className="flex items-center gap-2 rounded-full bg-black/75 py-1 ps-3 pe-1 text-xs text-stage-foreground ring-1 ring-white/15">
+              <span className="min-w-0 truncate">{held.label}</span>
+              <Button size="xs" variant="secondary" onClick={onTakeHeld}>
+                <RefreshCwIcon aria-hidden="true" />
+                {held.action}
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </GameFrameBox>
     </div>
   );
@@ -144,11 +191,16 @@ export function GameFrame({
   url,
   title,
   hidden,
+  onStudioMessage,
+  focusRequest = 0,
 }: {
   url: string;
   title: string;
   /** The game should pause and mute itself: another tab is open, or another frame has focus. */
   hidden: boolean;
+  /** Hears the bridge's error and ready messages from this frame only. */
+  onStudioMessage?: ((message: StudioMessage) => void) | undefined;
+  focusRequest?: number;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [frameFocused, setFrameFocused] = useState(false);
@@ -175,6 +227,25 @@ export function GameFrame({
     window.addEventListener("message", onAck);
     return () => window.removeEventListener("message", onAck);
   }, []);
+
+  useEffect(() => {
+    if (onStudioMessage === undefined) return;
+    const onMessage = (event: MessageEvent) => {
+      // Only this frame's own window speaks for the game on screen.
+      if (event.source !== frameRef.current?.contentWindow) return;
+      const message = readStudioMessage(event.data);
+      if (message !== null) onStudioMessage(message);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [onStudioMessage]);
+
+  useEffect(() => {
+    if (focusRequest === 0) return;
+    // The frame's own focus event takes the "Click to play" cover down.
+    frameRef.current?.focus();
+    frameRef.current?.contentWindow?.focus();
+  }, [focusRequest]);
 
   useEffect(() => {
     // The outstanding-hide accounting IS the hint: a hide request is in flight
@@ -363,22 +434,51 @@ function StageStateCard({
             </div>
           </>
         ) : null}
+        {phase.kind === "stopped" ? (
+          <>
+            <StageCopy
+              title="The game is stopped"
+              body="Play serves the game folder here again, live as your agent changes it."
+            />
+            <Button size="lg" disabled={!canOperate} onClick={onPlay}>
+              <PlayIcon className="size-4 fill-current" aria-hidden="true" />
+              Play
+            </Button>
+          </>
+        ) : null}
+        {phase.kind === "window" ? (
+          <>
+            <StageIcon tone="quiet">
+              <AppWindowIcon className="size-5" aria-hidden="true" />
+            </StageIcon>
+            <StageCopy
+              title="This game plays in its own window"
+              body="Its engine makes no Web build to play here. Export a Linux or Windows release from More, Export…."
+            />
+          </>
+        ) : null}
         {phase.kind === "failed" ? (
           <>
             <StageIcon tone="danger">
               <TriangleAlertIcon className="size-5" aria-hidden="true" />
             </StageIcon>
             <StageCopy
-              title="The build failed"
-              body="The game did not build, so there is nothing to play yet."
+              title={phase.what === "open" ? "The game could not be opened" : "The build failed"}
+              body={
+                phase.what === "open"
+                  ? "Kurambit could not serve the game folder here."
+                  : "The game did not build, so there is nothing to play yet."
+              }
             />
             <pre className="max-h-40 w-full max-w-xl overflow-auto rounded-md bg-white/5 p-3 text-left font-mono text-2xs leading-relaxed whitespace-pre-wrap text-stage-muted">
               {phase.message}
             </pre>
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => onAskAgent(phase.message)}>
-                Ask agent to fix
-              </Button>
+              {phase.what === "build" ? (
+                <Button size="sm" onClick={() => onAskAgent(phase.message)}>
+                  Ask agent to fix
+                </Button>
+              ) : null}
               <Button size="sm" variant="outline" disabled={!canOperate} onClick={onPlay}>
                 Try again
               </Button>
