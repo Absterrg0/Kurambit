@@ -76,29 +76,32 @@ chat with your brief already sent as its first message, so you see exactly what 
 Your agent builds a first playable version in a few minutes; every message after that makes it
 better.
 
-While that first turn runs, the stage says your agent is making the first playable build. On a
-three.js game, the build plays on the stage by itself when the turn ends, and so does the build of
-every later turn that changes the game. If you are playing at that moment (you clicked into the
-game), it is not reloaded under you: the stage shows **New build from turn N** with **Play**
-instead. The stage never switches views by itself. Godot and Unity games are not rebuilt by
-themselves; **Rebuild** and **Play** work as before.
+A three.js game is live on the stage from the moment it exists: Kurambit serves the game folder and
+plays it, so you watch the starter turn into your game while your agent works. Each time the agent
+saves, the game reloads within about a second. If you are playing at that moment (you clicked into
+the game), it is not reloaded under you: the stage says your agent changed the game while you were
+playing, with **Reload**. A hidden stage catches up when you show it. If a save breaks the game, the
+stage names the error: quietly while the turn runs, since the agent may be mid-change, and with
+**Ask agent to fix** once the turn has ended. Godot and Unity games are not live: while the first
+turn runs, the stage says your agent is making the first playable build, and **Rebuild** and
+**Play** work as before.
 
 Engine: three.js browser (default), Godot native or Unity native. Godot is the full native lane: a real Godot 4.7 project
 with Blender-made art, native play, and Web, Windows and Linux exports. Its Windows and Linux builds
 draw with Forward+; its Web build, Play and the agent's play sessions draw with the simpler
 Compatibility renderer, so a few effects only the native builds draw are left out of the default look. three.js is the quick
 browser lane: a static browser game with three.js vendored (no install step), played in real time
-through the same tools, with a Web export only. The run loop, Play, preview and web packaging work
-the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
+through the same tools, with a Web export only. Play, preview and web packaging work the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
 editor on a private display, plays real Linux builds of it, and exports Linux and Windows builds.
 Unity games have no Web export, so Play and web packaging are not available for them; explore
 sessions and bot runs play a Linux player of the current sources, built once per change. In a production run, each blind comparison builds a Unity game in a separate
 checkout of it, which takes over the one Unity editor for that build; the game's own editor reopens
 on its next Unity call.
 
-To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
-folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
-empty one.
+To continue an existing game, choose its card under **Your games** or its row in the sidebar, or use
+**Open game** and pick a folder that contains `game.json`. A game opens on its main chat: the first
+chat it was made in, or the next oldest if you archive that one. The arrow on the game's sidebar row
+lists its **Other chats** and its **Past runs**, and **+** starts a new chat.
 
 ## Style
 
@@ -110,191 +113,125 @@ it: art from other packs, characters on another skeleton and sprites in another 
 until the file changes. To change the game's direction, edit `STYLE.json` or ask your agent to,
 then have the art redone. Delete it to lift the lock.
 
-## Run the production loop
+## Past runs
 
-The **Run** tab in the stage drives the whole build: vision, prototypes, a blind pick, plan, art,
-then round after round of building, playtesting and judging until the ladder is done and a ship
-review has played the game, the budget ends, the run stalls, or you stop it. A new game does not
-start a run; to run one on any game, give a one-line brief and an optional budget in minutes, then
-**Start run**. The status
-line says what the run is doing, how long it has been going and what comes next; the sidebar and
-**Your games** say a game's run is working and on which step. The timeline starts with the
-prototype pick: which prototype the game continued from, the comparator's reasoning and each blind
-player's report and frames. Each round after it says what it tried and whether it was kept, tied
-(inconclusive), rejected or never judged. Open a round to read the evidence: the blind judges'
-verdicts and reasoning, the blind players' reports, the bot's results and video, the tester's note
-and the reviewer's direction. Your agent can read the same with `game_run_round`, so you can ask it
-what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
-the work. **Stop run** ends it; its kept builds stay, as do rounds that failed their checks, were inconclusive or were not judged; a round whose build the best beat in both orders is cleared when the run ends. The run never
-commits, switches branches or touches your git: its builds are Kurambit checkpoints, and your
-game folder holds the current build as uncommitted work you commit when you like. Starting the run again without
-a new brief continues it where it stopped, and if Kurambit restarts during a run, the run picks up
-where it was on its own. A run that stops on a usage limit is never continued by **Auto-resume
-limited threads**; start it again once the limit resets. A game whose run was made by an earlier version of Kurambit needs a new
-run from your brief, which continues from the game as it is: no new vision or prototypes, a plan
-writes a ladder for the game, then rounds build it. The earlier run's rounds, ladder and decisions
-are not carried over; its history stays in git.
+Games made before the turn loop may have production runs: a vision, prototypes, a blind pick, a
+plan, then rounds of building, playtesting and judging. Nothing in the app starts or resumes a run
+any more, but a past run stays readable:
 
-A run is **Guided** (the default) or on **Autopilot**. A Guided run asks you at the moments that
-shape the game: once the vision and its key art exist, once both prototypes are built, and once
-the plan has written its ladder. Your agent posts the question in the game chat you last started, steered or answered the run from, with the key
-art, each prototype's frames and its two-line pitch, or the ladder, and asks what you want. Answer
-in your own words: keep it or ask for changes ("pinker, rounder"), pick a prototype or combine
-them ("the second one, with the first one's camera"), ask for one more pair of prototypes, edit
-the ladder, or let the run decide. Each kind of redo happens once. If nobody answers within about
-three minutes of the question reaching the chat, the run goes on with its own choice: it keeps the
-vision and the ladder and lets the blind pick choose the prototype. The Run tab says what the run
-is waiting for and when it goes on. Autopilot never asks. Choose the profile in the new-game
-dialog or next to **Start run**, switch it on the Run tab while a run is live, or ask your agent
-to switch; switching to Autopilot while a question waits lets the run decide it at once.
+- its round cards stay in the chat it talked to, with what each round tried, whether it was kept,
+  and its build, facts and evidence;
+- its rounds are marks on the build timeline, so you can play, compare or go back to them like any
+  build;
+- the chats its roles worked in are under **Past runs** in the game's sidebar row. Open one, and its
+  relationship control leads to the rest.
 
-The plan writes a ladder: four to seven steps from the first playable build to a game shaped like
-a Steam demo (the core loop end to end, a complete first area with a win and a loss, progression,
-a title-to-ending flow, feel and audio), each with checks a player could verify. Each round builds
-the next step. A tester plays it and passes or fails each check, and the round is kept when every
-check passes and the blind judges do not find the old build clearly better. Checks must be
-things a player can see in play, so a ladder (yours too, when you edit it) is refused, with the
-reason, when a check jumps the game to a later state, counts volume ("at least ten"), or asks a
-tester to judge sound or a flash that lasts under a second; those become values the game reports.
-A round that fails because the run could not judge it does not count against the step, and the
-run judges the same build again; if that fails too, the run pauses for you. A check the tester
-cannot verify in play is rewritten once. A step that fails twice is never tried a third time as
-it is: on Autopilot the run splits it into smaller steps; a Guided run asks you to split it,
-change it, or set it aside. A set-aside step is not done. Starting a new run with the same brief
-keeps the game's ladder; a new brief writes a new one. When the ladder is done, a ship review
-plays the whole game: if it says the game is ready, the run ends **Ready**; if not, it ends **Not
-done** with the review's reasons, and resuming works on them for a round. A run that ends with
-set-aside steps is **Not done** too, and resuming splits them. The run never
-polishes on its own: ask for what you want polished in the chat, and the run comes back for one
-round on it. Three rounds in a row that fail for the game's own reasons (a build that does not boot, checks it fails, a step that got worse) stop the run as **Stalled**, with the last round's reason; fix what it names (or ask for a change), then resume. A plan that wrote no valid
-ladder stops the run as **No ladder**; resuming gives the plan another go. The **Ladder** list on the Run tab shows which steps landed, which one is being built and
-which were set aside and why; each round shows how many of its checks passed.
-
-To go back to an earlier kept round, stop the run and go back to its build on the **Builds** tab
-(or the round's card in the chat), or ask your agent to restore it. The engine project, the art sources under `art/` and `ASSETS.md` return to that build in the
-game folder, and restoring a later kept round goes forward again. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
-bots and the run's records stay as they are. A resumed run judges its next round against the
-restored build. Restore refuses while a run is live.
-
-The **Builds** tab also lists a stopped run's saved builds: the game as the run left it, work a
-round left unfinished, a round's build that was not kept, and the game before each restore. What
-the folder held before a restore is always saved first, so a restore never discards work. Restoring
-a saved build brings it back to the folder but leaves the run's best as it was: those builds were
-never judged better, so a resume starts its next round from the best. The one exception is an
-undo: while no round has run since your latest restore, restoring the game from before it (the row
-says "restoring it undoes that restore") also puts the run's best back, so a resume goes on from
-where the run stood before. Restoring while a stopped run is in the middle of a round abandons that
-round: its work is saved with the game before the restore, the round shows as **Abandoned**, and a
-resume starts the next round from the best. Undoing that restore brings the round's work back to
-the folder, but the round itself stays abandoned. When a resumed run first puts a build back in
-the folder, it saves the folder as it was first ("The game as it was when the run resumed"), so
-changes you made while it was stopped are never lost.
-
-While a run is live, steer it instead of editing the game yourself: type what should change into
-**Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
-the run. The round in progress finishes as planned; the next round starts with your note, ahead of
-its ladder step or the reviewer's direction, and the rounds list shows what you asked. A stopped
-run keeps your note for when it continues. When no run is live, your agent works on the game
-directly. While a run works on the game, including while it exports at its end, Rebuild, exports
-and your agent's editing tools are refused; Play still opens the last exported build.
-
-A game has one run at a time: every chat of the game sees and steers the same run, and starting a
-run from another chat continues the one already there. While a run is live, **Stop game** stops
-only your own work on the game and your Play of it; stop the run to stop its builds and players.
-The command palette can also start, resume and stop a game's run, go back to a build, and compare
-two builds.
+A run that is still live shows on the stage's subtitle with what it is doing. **Stop production
+run**, in the stage's **More** menu or the command palette, stops it; its kept builds stay. While a
+run is live, exports, going back to a build and your agent's editing tools are refused, so stop the
+run first. The run never commits or touches your git: its builds are Kurambit checkpoints.
 
 ## Play and revise
 
-A game opens on its latest session: the game owns the middle of the window and the chat is docked to
-its right.
+A game opens on its main chat: the game owns the middle of the window, its build timeline sits under
+it, and the chat is docked to its right.
 
-- **Play** serves the selected build, even when the game's files have changed. If no build exists,
-  it builds the web version and plays it in the stage. It is the real game, not a recording; click
-  the picture once so the keyboard reaches it, and use **Fullscreen** to give it the whole screen.
-  A game made from the starter opens on its title screen: choose Play there, or press Enter.
-  Opening **Run** or **Builds** keeps the game running; it pauses and mutes while hidden
-  and resumes when you come back. Only **Stop**, a rebuild that lands a new build, or pressing Play
-  again starts a new session. In a three.js game, each chat turn that changes the game builds it
-  and plays the new build by itself. If you are in the game when it lands, the Stage waits and
-  offers **Play** instead of restarting you.
-- **Rebuild** always exports a fresh web build. When the game's files changed after the last build,
-  the stage says so and offers to rebuild.
-- **Stop** ends only the processes Kurambit
-  started for this game, and closes its preview server.
-- **Export Windows** writes a 64-bit build to `builds/windows/` (Godot and Unity games; the Builds
-  tab shows only the targets a game's engine makes, and three.js games export Web only). A Godot
+- **A three.js game is always on.** The stage plays the game folder itself, and **Reload** restarts
+  it now. Click the picture once so the keyboard reaches it, and use **Fullscreen** to give it the
+  whole screen. A game made from the starter opens on its title screen: choose Play there, or press
+  Enter. The game pauses and mutes while the stage is hidden and resumes when you come back.
+- **A Godot game** plays its latest Web build. **Play** serves it, building one first if none
+  exists, and **Rebuild** exports a fresh one; when the game's files changed after the last build,
+  the stage says so and offers to rebuild. **A Unity game** plays in its own window.
+- **Stop game**, in the stage's **More** menu, ends only the processes Kurambit started for this
+  game and closes its preview server; **Play** starts it again.
+- **Export…**, in the stage's **More** menu or the command palette, lists the targets the game's
+  engine makes, each with its time, folder, logs and a freshness check against the current sources.
+  three.js games export Web only.
+- **Export Windows** writes a 64-bit build to `builds/windows/` (Godot and Unity games). A Godot
   build is `game.exe`: the standard preset embeds the game data, so you can copy that one file to a
   Windows PC; a preset that does not embed it also writes `game.pck`, and both files must be copied
   together. A Unity build is the whole `builds/windows/` folder (`game.exe` with its `game_Data/`
   and runtime files); ship the folder. **Download package** on the same card zips a Godot release
   Kurambit already exported — `game.exe` alone, or `game.exe` and `game.pck` — without
-  exporting again; a Unity folder is not packaged. If the game sources changed since that export, export Windows again before
-  packaging. **Export Linux** writes a standalone build to `builds/linux/` (for Unity, the whole
-  folder ships). A release replaces the previous one only once it is complete and checked, so a
-  failed or interrupted export leaves the last good build in place. Kurambit checks the
-  Windows executable it produced but does not run it, so try it on Windows before sharing it. If
-  Godot's Windows export templates are missing, add them in the Godot editor under **Editor →
-  Manage Export Templates**. The **Builds**
-  tab lists every target with its time, folder and logs, and a freshness check against the current
-  sources.
-- **Download package** on the Web card zips the exact build Play serves, without exporting or
-  rebuilding. Kurambit keeps the build Play serves and the one before it; older web builds are
-  removed as new ones land. Later source edits are not included; only a new export changes what a new package
-  contains. Upload the extracted files to an ordinary static HTTP host and serve them over HTTP;
-  opening `index.html` directly from disk (`file://`) is not a supported way to play a WebAssembly
-  export.
+  exporting again; a Unity folder is not packaged. If the game sources changed since that export,
+  export Windows again before packaging. **Export Linux** writes a standalone build to
+  `builds/linux/` (for Unity, the whole folder ships). A release replaces the previous one only once
+  it is complete and checked, so a failed or interrupted export leaves the last good build in place.
+  Kurambit checks the Windows executable it produced but does not run it, so try it on Windows
+  before sharing it. If Godot's Windows export templates are missing, add them in the Godot editor
+  under **Editor → Manage Export Templates**.
+- **Download package** on the Web card zips the latest Web export (for a Godot game, the build Play
+  serves) without exporting again. Kurambit keeps the latest web export and the one before it; older
+  ones are removed as new ones land. Later source edits are not included; only a new export changes
+  what a new package contains. Upload the extracted files to an ordinary static HTTP host and serve
+  them over HTTP; opening `index.html` directly from disk (`file://`) is not a supported way to play
+  a WebAssembly export.
 - The chat column is resizable; drag its edge, or hide it with the panel control in the stage header
   to give the game the whole window.
 - **Check and playtest on three.js.** `game_check` on a three.js game loads the page headless and
   reports console and page errors instead of script errors; `game_explore_*` play it in real time
   with real keys and clicks (see the `three` studio skill for the bridge contract).
 
-To change the game, write a follow-up in the session, for example "make the rocks taller and spread
+To change the game, write a follow-up in the chat, for example "make the rocks taller and spread
 the trees out". The agent edits the same Blender sources and re-exports to the same paths, so scenes
-keep their references.
+keep their references. A game's agent ends its reply with the one change it would make next; when
+it does, the composer shows it as **Next:**. **Ask for it** puts that change in the composer for you
+to edit or send, and dismissing it hides it until the next reply.
 
 Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
-keeps running; use **Stop** in the stage to close it.
+keeps running; use **Stop game** to close it.
 
 ## Builds and undo
 
 Every agent turn that changes the game is a build, in any of the game's chats, and so is every
-round of a production run. Under a turn's changed files in the chat, the turn's build shows:
+round of a past production run. A build is the game folder as its turn left it. A three.js game's
+stage shows the folder live, so while your agent works it can be ahead of the latest build.
 
-- up to three of its facts, or that it is still being measured, queued, or not measured and why;
-- **Play**, which shows it on the stage;
-- **Undo** on the game's latest turn, which puts back the build the turn started from. After an
-  undo, **Redo** puts the turn's change back. **Undo the last turn's change** in the command
-  palette does the same.
-- **Go back to this build** on an older turn;
-- **Open build**, which opens it on the **Builds** tab.
+The build timeline under the game has one mark per build, oldest to newest, then **Now**, the game
+folder itself; while the agent is mid-turn or someone edited the folder, Now says what it changed
+since. **Older** pages back. A mark's bar takes the tone of its worst fact, an undone build is dimmed,
+and a round's mark reads R and its number. The selected mark, by default the latest, shows its
+summary, changed files, time and up to three facts, with:
+
+- **Play**, which plays it from a copy on the stage, even an old one; the game folder is never
+  touched. **Back to the current game** returns to the live game, and **Stop game** ends the copies
+  too. Unity builds cannot be played this way yet; the build says so.
+- **Undo** on the latest turn, which puts back the build the turn started from. After an undo,
+  **Redo** puts the turn's change back.
+- **Go back** on an older build, which puts it in the game folder: the engine project, `art/` and
+  `ASSETS.md` return to that build, and notes, `PLAN.md`, `VISION.md`, bots and run records stay as
+  they are. What the folder held is saved as a build first, so going back never discards work, and
+  **Redo** puts it back.
+
+Clicking a mark opens its detail: every fact, the evidence, the changed files, **Open diff**,
+**Play**, **Go back** and **Compare**. **Compare** (or **Compare builds…** in the command palette)
+picks two marks and shows them side by side in the game area, each playable, with their facts in a
+table: ↑ and ↓ show which way a fact moved, ≠ that it changed without a direction (an ending that
+became another), and = that it did not change; a change is coloured when it is better or worse. A
+fact that was not measured on one side reads "not comparable" with the reason. Only the side you are
+playing runs; the other is paused and muted. **Close** returns to the live game.
+
+Under a turn's changed files in the chat, the turn's build shows the same: up to three facts,
+**Play**, **Undo** or **Redo** on the latest turn, **Go back to this build** on an older one, and
+**Open build**, which opens its detail on the timeline.
 
 Undo changes the game's files, not the chat: the conversation stays as it is, so your agent still
 knows what it tried, and it sees from the files that you undid it. Undo, Redo and going back wait
 for the agent's turn to end and for a live run to be stopped. The chat's own **Edit from here**
 still rewinds the conversation itself.
 
-The **Builds** tab lists every build newest first, with when and where each came from (a chat turn
-or a run round), what changed, and its facts once measured. The top entry, **Now**, is the game
-folder itself and its exports.
+After each round of a past production run, the run's chat shows a round card: the round's build,
+what changed, its facts against the build before it, and the minutes and tokens it took. On a
+stopped run, **Keep this build as the run's best** puts a round that was not kept in the folder and
+makes it the best; **Revert to the build before it** puts back the best a kept round was judged
+against. While the run is live, the card shows the run's own decision.
 
-- **Play** plays a build from a copy, in the stage, even an old one; the game folder is never
-  touched. **Back to the current game** returns to the folder's own game, and **Stop** ends the
-  copies too. Unity builds cannot be played this way yet; the build says so.
-- **Compare with…** shows two builds side by side, each playable, with their facts in a table:
-  ↑ and ↓ show which way a fact moved, ≠ that it changed without a direction (an ending that
-  became another), and = that it did not change; a change is coloured when it is better or worse. A fact that was not measured on one side reads "not comparable" with the reason.
-  Only the side you are playing runs; the other is paused and muted.
-- **Go back to this build** puts it in the game folder: the engine project, `art/` and `ASSETS.md`
-  return to that build, and notes, `PLAN.md`, `VISION.md`, bots and run records stay as they are.
-  What the folder held is saved as a build first, and **Undo this restore** puts it back. Going back
-  waits for a live run to be stopped and for the agent's turn to end.
-- After each round of a production run, the run's chat shows a round card: the round's build, what
-  changed, its facts against the build before it, and the minutes and tokens it took. On a stopped
-  run, **Keep this build as the run's best** puts a round that was not kept in the folder and makes
-  it the best, so a resume continues from it; **Revert to the build before it** puts back the best a
-  kept round was judged against. While the run is live, the card shows the run's own decision.
+**Keys.** `mod+Alt+Z` undoes the latest turn's change and `mod+Alt+Shift+Z` redoes it; `mod+Alt+[`
+and `mod+Alt+]` play the previous and next build on the timeline (past the newest, back to the live
+game); `mod+Alt+G` puts the keyboard in the game. The command palette has each of these, plus
+**Compare builds…**, **Export…** and **Go back to a build…**. A game you clicked into owns the
+keyboard, and its keys never reach Kurambit: click the chat or press Tab before using these.
 
 **Facts** are what Kurambit measured by playing the build: whether it boots, what happens when a
 player does nothing (idle) or presses keys at random (masher), what the game's own bot does
@@ -308,10 +245,10 @@ again** tries once more. Your agent sees the same builds and facts.
 ## Keep a video or image
 
 Bot videos, explore screenshots and the blind players' frame sheets live with the game's logs, which
-**Settings → Storage** deletes after a while (14 days by default). To keep one, choose **Save** under
-it, in a round of the Run tab or in the prototype pick, or ask your agent to save it. The copy goes
+**Settings → Storage** deletes after a while (14 days by default). To keep one, ask your agent to
+save it, or choose **Save** under it where Kurambit shows it. The copy goes
 into the game's `saved/` folder under a dated name such as `2026-11-05 round 2 bot run.mp4`; open it
-or show it in its folder from there. The **Saved** list in the Builds tab shows everything saved and
+or show it in its folder from there. The **Saved** list in **Export…** shows everything saved and
 deletes a copy you no longer want. `saved/` is not committed to the game repository, and saving never
 replaces a file already there.
 
