@@ -59,6 +59,7 @@ import {
   resolveSidebarDropVerb,
   gameMainThread,
   partitionGameChats,
+  resolveGameSidebarStatus,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@kurambit/client-runtime/state/thread-search";
 
@@ -2441,5 +2442,47 @@ describe("a game's chats", () => {
     expect(partitionGameChats([role("r", "gone", "2026-11-01T09:00:00Z")], new Set()).main).toBe(
       null,
     );
+  });
+});
+
+describe("a game row's status", () => {
+  const thread = (
+    status: "idle" | "running" | "failed" | null,
+    pending: { approvals?: boolean; input?: boolean } = {},
+  ) => ({
+    hasPendingApprovals: pending.approvals === true,
+    hasPendingUserInput: pending.input === true,
+    pendingSubagentRequest: null,
+    runtime: status === null ? null : ({ status } as never),
+  });
+  const game = (
+    main: ReturnType<typeof thread>,
+    others: ReturnType<typeof thread>[] = [],
+    roles: ReturnType<typeof thread>[] = [],
+  ) => ({
+    main,
+    others,
+    runs:
+      roles.length === 0 ? [] : [{ chatId: "c", chatLive: true, threads: roles, updatedAt: "" }],
+  });
+
+  it("is the most urgent state among every chat and run thread of the game", () => {
+    expect(resolveGameSidebarStatus(game(thread(null)))).toBe("ready");
+    // Another chat works while the main chat is idle: the game is working.
+    expect(resolveGameSidebarStatus(game(thread("idle"), [thread("running")]))).toBe("working");
+    // A live run's role thread works.
+    expect(resolveGameSidebarStatus(game(thread(null), [], [thread("running")]))).toBe("working");
+    // A question anywhere outranks work anywhere.
+    expect(resolveGameSidebarStatus(game(thread("running"), [thread(null, { input: true })]))).toBe(
+      "input",
+    );
+    expect(
+      resolveGameSidebarStatus(
+        game(thread(null, { input: true }), [], [thread(null, { approvals: true })]),
+      ),
+    ).toBe("approval");
+    // A failed chat needs attention; a role thread's failure is its run's to report.
+    expect(resolveGameSidebarStatus(game(thread(null), [thread("failed")]))).toBe("failed");
+    expect(resolveGameSidebarStatus(game(thread(null), [], [thread("failed")]))).toBe("ready");
   });
 });

@@ -1439,3 +1439,37 @@ export function partitionGameChats<T extends GameChatShell>(
     runs: runs.sort(byNewest),
   };
 }
+
+// The sidebar's precedence for one thread (resolveSidebarThreadStatus), most urgent first.
+const SIDEBAR_STATUS_URGENCY: readonly SidebarThreadStatus[] = [
+  "approval",
+  "input",
+  "working",
+  "waiting",
+  "failed",
+  "limited",
+  "ready",
+];
+
+/**
+ * A game row's status is the whole game's: the most urgent of its chats and
+ * its runs' role threads. A role thread's failure is its run's to report (the
+ * row's run progress), so a stage-era run that ended badly never leaves the
+ * game reading "Needs attention".
+ */
+export function resolveGameSidebarStatus(
+  chats: GameChats<SidebarThreadStatusInput>,
+): SidebarThreadStatus {
+  let urgency = SIDEBAR_STATUS_URGENCY.length - 1;
+  const consider = (status: SidebarThreadStatus) => {
+    urgency = Math.min(urgency, SIDEBAR_STATUS_URGENCY.indexOf(status));
+  };
+  for (const chat of chats.main === null ? chats.others : [chats.main, ...chats.others])
+    consider(resolveSidebarThreadStatus(chat));
+  for (const run of chats.runs)
+    for (const thread of run.threads) {
+      const status = resolveSidebarThreadStatus(thread);
+      if (status !== "failed" && status !== "limited") consider(status);
+    }
+  return SIDEBAR_STATUS_URGENCY[urgency]!;
+}

@@ -236,6 +236,7 @@ import {
   type SidebarListMarker,
   type SidebarSection,
   partitionGameChats,
+  resolveGameSidebarStatus,
   type GameChats,
   type GameRunThreads,
 } from "./Sidebar.logic";
@@ -1771,7 +1772,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = resolveSidebarThreadStatus(thread);
+  // A game row stands for the whole game, while still opening its main chat.
+  const status =
+    game !== null && gameChats !== null
+      ? resolveGameSidebarStatus(gameChats)
+      : resolveSidebarThreadStatus(thread);
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
