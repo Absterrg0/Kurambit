@@ -264,6 +264,18 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   one, which in a game includes whatever the run or another chat did in between. A turn build
   counts from the newest build of the game captured before the turn began, and says so when the
   turn began while a run round was building, since concurrent edits to one folder cannot be split.
+- **Turn builds play and measure themselves.** On an engine whose profile has `turnLoop`
+  (three.js; Godot and Unity are parked), `GameBuildsReactor` takes a chat turn's checkpoint
+  that changed files and makes the folder's Web build current as the chat's own operation
+  (`GameService.playCurrent`, the `preview` freshness rule), which the Stage remounts on, then
+  measures the turn's build in the background. The trigger is the checkpoint, not a file watcher,
+  so a half-written turn never reloads the game. Role and subagent turns are the run's, and while
+  a run holds the game it owns the folder, so neither is played. A newer turn's measure drops an
+  earlier turn's that is still queued (`supersede`), never one running, a person's or a run's,
+  so quick turns cost one measurement. A build's `base` is what restoring undoes it to: a turn's
+  is the folder as it began (T3's diff base, turn 1's the start checkpoint, ordinal 0, unless a
+  newer build landed between), and Undo is that restore, never T3's conversation revert, which
+  is refused in a game's shared folder and would make the agent forget the attempt.
 - **Copies, never the folder.** A build is played and measured in a plain copy under the
   worktrees folder's `game-builds/`, which is in `GIT_CEILING_DIRECTORIES` like the run's copies
   ([GameBuildCopies](../../apps/server/src/game/GameBuildCopies.ts)). One engine step at a
