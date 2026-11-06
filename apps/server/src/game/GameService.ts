@@ -186,8 +186,9 @@ export class GameService extends Context.Service<
     /**
      * Makes the folder's Web build current, as the thread's own operation: the
      * same freshness rule as `preview`, waiting a while behind another
-     * operation rather than refusing. A failure is the operation's news on
-     * the Stage. Nothing for an engine without a Web build.
+     * operation rather than refusing. A build already fresh is left as it is
+     * (served or stopped). A failure is the operation's news on the Stage.
+     * Nothing for an engine without a Web build.
      */
     readonly playCurrent: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
     /** Stop game: the caller's work, and while no run holds the game, every process of it; says what did not stop. */
@@ -625,34 +626,62 @@ const make = Effect.gen(function* () {
       owner,
     );
   });
-  // The folder's Web build served, rebuilt only when the selected build is of
-  // other sources: an unreadable tree cannot be shown current, and a damaged
-  // selection record is no build of these sources, so both are rebuilt.
+  // Whether the selected Web build is of the folder's sources: an unreadable
+  // tree cannot be shown current, and a damaged selection record is no build
+  // of these sources, so neither is fresh.
+  const webFresh = (root: string, manifest: GameManifest) =>
+    Effect.gen(function* () {
+      const profile = engineProfile(manifest.engine.name);
+      const selected = yield* selectionOf(root);
+      const current = yield* statusSnapshot(
+        root,
+        manifestProject(manifest),
+        false,
+        profile.buildInputs,
+      );
+      return (
+        selected !== null &&
+        selected !== "damaged" &&
+        selected.sourceId !== null &&
+        current.kind === "known" &&
+        current.sourceId === selected.sourceId
+      );
+    });
+  // The folder's Web build, rebuilt only when it is not fresh. Freshness is
+  // decided again inside the lock, as Play does: a build that queued behind
+  // another Build Web of the same sources finds it done. `serveFresh` false
+  // leaves a fresh build alone, so a turn that changed nothing playable never
+  // restarts a game the person stopped.
   const currentWeb = Effect.fnUntraced(function* (
     threadId: ThreadId,
     root: string,
     manifest: GameManifest,
-    waitUntil?: number,
+    options: { readonly serveFresh: boolean; readonly waitUntil?: number },
   ) {
-    const profile = engineProfile(manifest.engine.name);
-    const selected = yield* selectionOf(root);
-    const current = yield* statusSnapshot(
-      root,
-      manifestProject(manifest),
-      false,
-      profile.buildInputs,
-    );
-    const fresh =
-      selected !== null &&
-      selected !== "damaged" &&
-      selected.sourceId !== null &&
-      current.kind === "known" &&
-      current.sourceId === selected.sourceId;
-    if (fresh) {
-      const served = yield* exporter.serve(root);
-      if (served?.success === true) return served;
+    const served = (): Effect.Effect<GameActionResult | null, GameOperationError> =>
+      options.serveFresh
+        ? Effect.map(exporter.serve(root), (result) => (result?.success === true ? result : null))
+        : Effect.succeed(null);
+    if (yield* webFresh(root, manifest)) {
+      const result = yield* served();
+      if (result !== null || !options.serveFresh) return result;
     }
-    return yield* withRoot(threadId, "Build Web", exporter.publishWeb, String(threadId), waitUntil);
+    return yield* withRoot(
+      threadId,
+      "Build Web",
+      (root) =>
+        Effect.flatMap(webFresh(root, manifest), (fresh) =>
+          fresh
+            ? Effect.flatMap(served(), (result) =>
+                result !== null || !options.serveFresh
+                  ? Effect.succeed(result)
+                  : exporter.publishWeb(root),
+              )
+            : exporter.publishWeb(root),
+        ),
+      String(threadId),
+      options.waitUntil,
+    );
   });
   const playCurrent = Effect.fn("GameService.playCurrent")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
@@ -660,13 +689,17 @@ const make = Effect.gen(function* () {
     if (!engineProfile(manifest.engine.name).exportTargets.includes("Web")) return;
     // A turn's own check or Play may still hold the game for a moment.
     const waitUntil = (yield* Clock.currentTimeMillis) + 120_000;
-    yield* currentWeb(threadId, root, manifest, waitUntil);
+    yield* currentWeb(threadId, root, manifest, { serveFresh: false, waitUntil });
   });
   const gamePreview = Effect.fn("GameService.preview")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
     const profile = engineProfile(manifest.engine.name);
-    if (profile.exportTargets.includes("Web")) return yield* currentWeb(threadId, root, manifest);
+    if (profile.exportTargets.includes("Web")) {
+      const result = yield* currentWeb(threadId, root, manifest, { serveFresh: true });
+      if (result !== null) return result;
+      return yield* rebuild(threadId);
+    }
     if (profile.play === "player") {
       yield* projects.admitWrite(
         threadId,

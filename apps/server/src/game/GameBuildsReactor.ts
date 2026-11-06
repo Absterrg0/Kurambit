@@ -1,6 +1,7 @@
 import { GAME_BUILDS_EVENT, type OrchestrationV2DomainEvent } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -22,12 +23,13 @@ import * as GameService from "./GameService.ts";
  * has facts without anyone opening it; Unity builds are left to an open, as
  * a measurement would take the one editor from the run.
  *
- * The turn loop: on an engine whose profile has `turnLoop`, a chat turn that
- * changed the game is played at once (the folder's Web build made current,
- * as the chat's own operation, which the Stage remounts on) and its build is
- * measured in the background, replacing an earlier turn's measure still
- * queued. The trigger is the turn's checkpoint, never a file watcher, so a
- * half-written turn never reloads the game.
+ * A chat turn's build has its base recorded as it lands. The turn loop: on
+ * an engine whose profile has `turnLoop`, the build is measured in the
+ * background, replacing an earlier turn's measure still queued, then played
+ * (the folder's Web build made current, as the chat's own operation, which
+ * the Stage remounts on). The trigger is the turn's checkpoint, never a file
+ * watcher, so a half-written turn never reloads the game; a turn the person
+ * stopped, or one cancelled, is measured but not played.
  */
 export class GameBuildsReactor extends Context.Service<
   GameBuildsReactor,
@@ -45,6 +47,8 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const game = yield* GameService.GameService;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
+  const scope = yield* Effect.scope;
+  const perThread = yield* KeyedLock.make<string>();
   const announced = new Set<string>();
   const roles = new Map<string, boolean>();
   const isRole = (threadId: OrchestrationV2DomainEvent["threadId"]) =>
@@ -70,13 +74,34 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const turnBuilt = (event: Extract<OrchestrationV2DomainEvent, { type: "checkpoint.captured" }>) =>
+  const turnBuilt = (
+    event: Extract<OrchestrationV2DomainEvent, { type: "checkpoint.captured" }>,
+    runId: NonNullable<typeof event.payload.runId>,
+  ) =>
     Effect.gen(function* () {
+      const ref = event.payload.ref;
+      yield* builds.recordTurn(event.threadId, ref);
       const root = yield* pushTo(event, "A turn changed the game.");
       const manifest = yield* projects.read(root);
       if (!engineProfile(manifest.engine.name).turnLoop) return;
+      // Measured first: the measure registers at once, the play may wait on the game.
+      const build = yield* checkpoints
+        .listCheckpointRefs({ cwd: root, prefix: ref })
+        .pipe(Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid));
+      if (build !== undefined) yield* builds.measureIn(root, build, { supersede: true });
+      const stopped = yield* projections
+        .getThreadRecords(event.threadId, ["runs"], { runIds: [runId] })
+        .pipe(
+          Effect.map((records) =>
+            records.runs.some(
+              (run) =>
+                run.id === runId && (run.status === "interrupted" || run.status === "cancelled"),
+            ),
+          ),
+          Effect.orElseSucceed(() => false),
+        );
       // While a run holds the game the folder is the run's: no Play beside it.
-      if ((yield* projects.runHold(event.threadId)) === null)
+      if (!stopped && (yield* projects.runHold(event.threadId)) === null)
         yield* game
           .playCurrent(event.threadId)
           .pipe(
@@ -84,24 +109,21 @@ const make = Effect.gen(function* () {
               Effect.logWarning("A turn's build could not be played.", { root, cause }),
             ),
           );
-      const ref = event.payload.ref;
-      const build = yield* checkpoints
-        .listCheckpointRefs({ cwd: root, prefix: ref })
-        .pipe(Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid));
-      if (build !== undefined) yield* builds.measureIn(root, build, { supersede: true });
     }).pipe(Effect.ignore);
 
   const handle: GameBuildsReactor["Service"]["handle"] = (event) => {
     switch (event.type) {
-      case "checkpoint.captured":
+      case "checkpoint.captured": {
+        const runId = event.payload.runId;
         return event.payload.status !== "ready" ||
           event.payload.files.length === 0 ||
-          event.payload.runId === null
+          runId === null
           ? Effect.void
           : Effect.flatMap(isRole(event.threadId), (role) =>
               // A run's role turns are folded into its rounds: no rail changes for them.
-              role ? Effect.void : turnBuilt(event),
+              role ? Effect.void : turnBuilt(event, runId),
             );
+      }
       case "game-run-round.recorded": {
         const record = event.payload.round;
         return pushTo(event, `Round ${record.round} landed.`).pipe(
@@ -130,7 +152,17 @@ const make = Effect.gen(function* () {
     Effect.andThen(
       forkParked(
         engine.streamDomainEvents.pipe(
-          Stream.mapEffect(handle, { concurrency: 4 }),
+          // A turn's play may wait minutes on its game's lock: each thread's
+          // turns run forked, in order, so no game's wait holds the stream.
+          Stream.mapEffect(
+            (event) =>
+              event.type === "checkpoint.captured"
+                ? Effect.forkIn(perThread.withLock(event.threadId, handle(event)), scope).pipe(
+                    Effect.asVoid,
+                  )
+                : handle(event),
+            { concurrency: 4 },
+          ),
           Stream.runDrain,
           Effect.catchCause((cause) =>
             Effect.logWarning("game builds event stream failed", { cause }),

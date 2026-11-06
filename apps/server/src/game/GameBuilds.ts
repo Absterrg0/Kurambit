@@ -51,10 +51,20 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import * as GameService from "./GameService.ts";
 import { BuildName } from "./run/buildNames.ts";
-import { isRestored, withBuildInFolder } from "./run/builds.ts";
+import { engineProfile } from "./engineProfile.ts";
+import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */
 const NO_RUN = "game-builds";
+/**
+ * Each turn build's base as it was when the turn landed, one ref per build
+ * (`bases/<build>` pointing at the base), the way T3 records a checkpoint: a
+ * base read later from the latest restore alone would be wrong once a second
+ * restore replaced the first. The refs also keep every base restorable.
+ */
+const BASES = `${gameRunRefsFolder(NO_RUN)}bases/`;
+/** The folder as last compared with the build it was made from (folderEdited); no build of its own. */
+const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
 /** Where a build with no known time sorts: last. */
 const EPOCH = "1970-01-01T00:00:00.000Z";
 const isoOfSeconds = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe(seconds * 1000));
@@ -142,6 +152,12 @@ export class GameBuilds extends Context.Service<
     ) => Effect.Effect<GameBuildFacts, GameOperationError>;
     /** Measures the work owed by data (rows owing tiers, live runs' rounds) and settles cut-short restores. */
     readonly reconcile: Effect.Effect<void>;
+    /**
+     * Fixes a turn build's base (what restoring undoes it to) as the turn
+     * lands; the reactor calls it on the turn's checkpoint, a reconcile after
+     * a restart for the newest turn.
+     */
+    readonly recordTurn: (threadId: ThreadId, checkpointRef: string) => Effect.Effect<void>;
     /**
      * A measure no thread waits for: a run's round as it lands, or a chat
      * turn's build, which with `supersede` replaces the game's earlier turn
@@ -286,6 +302,7 @@ const make = Effect.gen(function* () {
     limit: number,
     before: string | undefined,
     fromRun: ReadonlyArray<Entry>,
+    recorded: ReadonlyMap<string, string>,
   ) =>
     Effect.gen(function* () {
       const rows = yield* projections
@@ -345,10 +362,13 @@ const make = Effect.gen(function* () {
       const entries = yield* Effect.forEach(captures, ({ row, oid, at }) =>
         Effect.gen(function* () {
           const startedAt = row.startedAt;
-          const base = turnChangeBase(
-            { id: oid, startedAt, thread: row.threadId, turn: row.runOrdinal },
-            earlier,
-          );
+          // The base recorded as the turn landed, else what the builds read now say.
+          const base =
+            recorded.get(oid) ??
+            turnChangeBase(
+              { id: oid, startedAt, thread: row.threadId, turn: row.runOrdinal },
+              earlier,
+            );
           // T3's own base: the thread's checkpoint before this one, which for
           // turn 1 is the thread's start (ordinal 0, captured as it began).
           const ordinal = row.checkpoint.ordinalWithinScope;
@@ -366,7 +386,7 @@ const make = Effect.gen(function* () {
             return path !== null && restored(path) ? [{ ...file, path }] : [];
           });
           const change =
-            base === null
+            base === null || base === t3Base
               ? { files: topFiles(t3Files), count: t3Files.length }
               : yield* changeOf(g.root, g.lane, base, oid);
           if (change.count === 0) return [];
@@ -550,7 +570,14 @@ const make = Effect.gen(function* () {
           : [],
       );
       const allRun = yield* runEntries(g, noRunSaved);
-      const turns = yield* turnEntries(g, byRef, limit * 3, before, allRun);
+      const recorded = new Map(
+        refs.flatMap((ref) =>
+          ref.checkpointRef.startsWith(BASES)
+            ? [[ref.checkpointRef.slice(BASES.length), ref.oid] as const]
+            : [],
+        ),
+      );
+      const turns = yield* turnEntries(g, byRef, limit * 3, before, allRun, recorded);
       const fromRun = allRun.filter((entry) => before === undefined || entry.at < before);
       // A round's build is also a turn's at times; one entry each, the round's first.
       const seen = new Set<string>();
@@ -560,7 +587,13 @@ const make = Effect.gen(function* () {
       // Turns past the page's last scanned turn may be newer than run builds below it.
       const floor = turns.scanned === limit * 3 ? turns.oldest : null;
       const listed = floor === null ? merged : merged.filter((entry) => entry.at >= floor);
-      return { entries: listed, kept, more: floor !== null || listed.length > limit, refs: byRef };
+      return {
+        entries: listed,
+        kept,
+        more: floor !== null || listed.length > limit,
+        refs: byRef,
+        recorded,
+      };
     });
 
   /** The content key of each build: its engine folder's tree. */
@@ -628,6 +661,41 @@ const make = Effect.gen(function* () {
       });
     });
 
+  // The folder captured (T3's capture, its kept index makes it cheap) and its
+  // restored paths compared with the build it was made from.
+  const folderEditedSince = (g: Game, current: string) =>
+    checkpoints
+      .withWorkspaceLock(
+        g.root,
+        checkpoints.captureCheckpoint({ cwd: g.root, checkpointRef: FOLDER_REF }),
+      )
+      .pipe(
+        Effect.flatMap((folder) =>
+          measureChange(checkpoints, g.root, isRestored(g.lane), current, folder),
+        ),
+        Effect.map((change) => change.changed),
+        Effect.orElseSucceed(() => "unknown" as const),
+      );
+
+  const recordTurn: GameBuilds["Service"]["recordTurn"] = (threadId, checkpointRef) =>
+    Effect.gen(function* () {
+      const g = yield* gameOf(threadId);
+      const { entries, refs, recorded } = yield* allEntries(g, 50, undefined);
+      const id = refs.get(checkpointRef);
+      if (id === undefined || recorded.has(id)) return;
+      const base = entries.find((entry) => entry.id === id && entry.source._tag === "turn")?.base;
+      if (base === undefined || base === null) return;
+      yield* checkpoints.updateCheckpointRef({
+        cwd: g.root,
+        checkpointRef: CheckpointRef.make(`${BASES}${id}`),
+        oid: base,
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("A turn build's base could not be recorded.", { threadId, cause }),
+      ),
+    );
+
   const list: GameBuilds["Service"]["list"] = (threadId, input) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
@@ -656,7 +724,10 @@ const make = Effect.gen(function* () {
         builds,
         next: more && page.length > 0 ? page.at(-1)!.at : null,
         current: input.before === undefined ? (candidates[0]?.id ?? null) : null,
-        folderEdited: "unknown",
+        folderEdited:
+          input.before === undefined && candidates[0] !== undefined
+            ? yield* folderEditedSince(g, candidates[0].id)
+            : "unknown",
         restore,
       } satisfies GameBuildsResult;
     });
@@ -884,10 +955,31 @@ const make = Effect.gen(function* () {
             ),
           );
         yield* operations.changed(g.root, GAME_BUILDS_EVENT, result.message);
+        if (result.done) yield* playRestored(threadId, g);
         return result;
       }
-      return yield* restoreWithoutRun(threadId, g, build, commandId);
+      const result = yield* restoreWithoutRun(threadId, g, build, commandId);
+      yield* playRestored(threadId, g);
+      return result;
     });
+
+  // On the turn loop's engines the Stage plays the folder: a restore that moved
+  // it plays what it brought back, as the restoring thread's own operation,
+  // in the service's fiber so the caller has its answer at once. A folder that
+  // already held the build is fresh, so nothing rebuilds.
+  const playRestored = (threadId: ThreadId, g: Game) =>
+    engineProfile(g.engine).turnLoop
+      ? Effect.forkIn(
+          game
+            .playCurrent(threadId)
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("A restored build could not be played.", { root: g.root, cause }),
+              ),
+            ),
+          scope,
+        ).pipe(Effect.asVoid)
+      : Effect.void;
 
   // A game with no run restores through the same moves as the run's restore:
   // the folder parked first as a build of its own, the build's engine project,
@@ -1017,6 +1109,48 @@ const make = Effect.gen(function* () {
     }
   });
 
+  // A chat turn's work is registered after its checkpoint commits, so a
+  // restart can cut it off. Owed from data: the newest turn build of each
+  // turn-loop game gets its base recorded and, with no facts yet, its
+  // background measure. Its play is not replayed: the Stage offers Rebuild.
+  const reconcileTurns = Effect.gen(function* () {
+    const games = yield* projects.list().pipe(Effect.orElseSucceed(() => []));
+    for (const summary of games)
+      yield* Effect.gen(function* () {
+        const manifest = yield* projects.read(summary.root);
+        const engine = manifest.engine.name as GameEngineId;
+        if (!engineProfile(engine).turnLoop) return;
+        const rows = yield* projections.listProjectTurnCheckpoints(summary.projectId, { limit: 5 });
+        const newest = rows.find(
+          (row) => row.cwd === summary.root && row.checkpoint.files.length > 0,
+        );
+        if (newest === undefined) return;
+        yield* recordTurn(newest.threadId, newest.checkpoint.ref);
+        const ref = (yield* checkpoints.listCheckpointRefs({
+          cwd: summary.root,
+          prefix: newest.checkpoint.ref,
+        })).find((each) => each.checkpointRef === newest.checkpoint.ref);
+        if (ref === undefined || !isGameBuildId(ref.oid)) return;
+        const lane = manifestProject(manifest);
+        const [tree] = yield* checkpoints.resolveTrees({
+          cwd: summary.root,
+          revisions: [ref.oid],
+          path: lane,
+        });
+        if (tree === null || tree === undefined) return;
+        const build = { root: summary.root, build: ref.oid, key: `${engine}:${tree}`, engine };
+        if ((yield* facts.read(build)).state === "never")
+          yield* facts.measure(build, { queue: "background", supersede: true });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("A game's owed turn work could not be reconciled.", {
+            root: summary.root,
+            cause,
+          }),
+        ),
+      );
+  });
+
   // Measures owed from data, after a restart or between startup and the
   // reactor's subscription: every row that still owes a tier, and every live
   // run's rounds (a cache hit is free). Unity waits for an open.
@@ -1035,6 +1169,7 @@ const make = Effect.gen(function* () {
       const [root, run] = live;
       for (const round of run.rounds) if (round.build !== null) yield* measureIn(root, round.build);
     }
+    yield* reconcileTurns;
   }).pipe(Effect.catchCause((cause) => Effect.logWarning("Build reconcile failed.", { cause })));
 
   const stopPlay: GameBuilds["Service"]["stopPlay"] = (threadId, ref) =>
@@ -1052,6 +1187,7 @@ const make = Effect.gen(function* () {
     facts: factsOf,
     measure,
     measureIn,
+    recordTurn,
     play,
     restore,
   });

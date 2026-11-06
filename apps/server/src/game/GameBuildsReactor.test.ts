@@ -47,7 +47,11 @@ const captured = (threadId: string) =>
     },
   }) as unknown as OrchestrationV2DomainEvent;
 
-const run = (engine: GameEngineId, relationship: string | null) =>
+const run = (
+  engine: GameEngineId,
+  relationship: string | null,
+  turnStatus: "completed" | "interrupted" = "completed",
+) =>
   Effect.gen(function* () {
     const played: string[] = [];
     const measured: Array<{ build: string; supersede: boolean }> = [];
@@ -56,6 +60,7 @@ const run = (engine: GameEngineId, relationship: string | null) =>
         Layer.mergeAll(
           Layer.mock(Orchestrator.OrchestratorV2)({}),
           Layer.mock(GameBuilds.GameBuilds)({
+            recordTurn: () => Effect.void,
             measureIn: (_root, build, options) =>
               Effect.sync(() => {
                 measured.push({ build, supersede: options?.supersede === true });
@@ -78,6 +83,11 @@ const run = (engine: GameEngineId, relationship: string | null) =>
               } as unknown as Effect.Success<
                 ReturnType<ProjectionStore.ProjectionStoreV2["Service"]["getThreadShell"]>
               >),
+            // Generic over the fields asked; this test reads only the turn's run.
+            getThreadRecords: (() =>
+              Effect.succeed({
+                runs: [{ id: "run-1", status: turnStatus }],
+              })) as unknown as ProjectionStore.ProjectionStoreV2["Service"]["getThreadRecords"],
           }),
           Layer.mock(GameService.GameService)({
             playCurrent: (threadId) => Effect.sync(() => void played.push(threadId)),
@@ -111,6 +121,14 @@ describe("GameBuildsReactor turn loop", () => {
         assert.deepStrictEqual(played, []);
         assert.deepStrictEqual(measured, []);
       }
+    }),
+  );
+
+  it.effect("measures but does not play a turn the person stopped", () =>
+    Effect.gen(function* () {
+      const { played, measured } = yield* run("three", null, "interrupted");
+      assert.deepStrictEqual(played, []);
+      assert.deepStrictEqual(measured, [{ build: OID, supersede: true }]);
     }),
   );
 

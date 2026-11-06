@@ -6,8 +6,8 @@
 A new game is a chat: its first message is the brief, and every turn that changes the game is a
 build (the turn's T3 checkpoint). On engines whose profile has `turnLoop`, the harness plays that
 build on the Stage and measures its facts in the background. Undo restores the build it was made
-from (`base`). The production run is an older, separate loop. It stays until phase 3 replaces it
-with "keep going" on top of the same turns. The harness, not the model, owns every check that
+from (`base`). The production run is an older, separate loop. It stays until phase 3, keep going, replaces it
+with a run on top of the same turns (phase 2 is the one-screen app). The harness, not the model, owns every check that
 matters.
 
 ## Decisions that span the services
@@ -269,16 +269,27 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   turn began while a run round was building, since concurrent edits to one folder cannot be split.
 - **Turn builds play and measure themselves.** On an engine whose profile has `turnLoop`
   (three.js; Godot and Unity are parked), `GameBuildsReactor` takes a chat turn's checkpoint
-  that changed files and makes the folder's Web build current as the chat's own operation
-  (`GameService.playCurrent`, the `preview` freshness rule), which the Stage remounts on, then
-  measures the turn's build in the background. The trigger is the checkpoint, not a file watcher,
-  so a half-written turn never reloads the game. Role and subagent turns are the run's, and while
-  a run holds the game it owns the folder, so neither is played. A newer turn's measure drops an
-  earlier turn's that is still queued (`supersede`), never one running, a person's or a run's,
-  so quick turns cost one measurement. A build's `base` is what restoring undoes it to: a turn's
-  is the folder as it began (T3's diff base, turn 1's the start checkpoint, ordinal 0, unless a
-  newer build landed between), and Undo is that restore, never T3's conversation revert, which
-  is refused in a game's shared folder and would make the agent forget the attempt.
+  that changed files, measures the turn's build in the background, then makes the folder's Web
+  build current as the chat's own operation (`GameService.playCurrent`), which the Stage remounts
+  on. The trigger is the checkpoint, not a file watcher, so a half-written turn never reloads the
+  game; a stopped or cancelled turn is measured but not played. Freshness is decided inside the
+  game's lock, and a fresh build is left as it is, so a turn that changed nothing playable never
+  restarts a game the person stopped. Each thread's turns run forked, in order, off the event
+  stream, so one game's wait for its lock never holds another's. Role and subagent turns are the
+  run's, and while a run holds the game it owns the folder, so neither is played. A newer turn's
+  measure drops an earlier turn's that is still queued (`supersede`), never one running, a
+  person's or a run's. A restart can cut a turn's work off, so the reconcile measures the newest
+  turn build of each turn-loop game that has no facts.
+- **A build's base is fixed when it lands.** `base` is what restoring undoes a build to. A
+  turn's is the folder as the turn began: T3's diff base (turn 1's is the start checkpoint,
+  ordinal 0), or a newer build that landed in between, such as a restore's target. It is
+  recorded as a ref (`game-builds/bases/<build>`) on the turn's checkpoint, the way T3 records
+  checkpoints, because reading it later from the game's latest restore goes wrong once a second
+  restore replaces the first. Undo is that restore, never T3's conversation revert, which is
+  refused in a game's shared folder and would make the agent forget the attempt. On the turn
+  loop's engines a restore plays what it brought back, through the same `playCurrent`.
+  `folderEdited` compares the folder's restored paths, captured with T3's capture, against
+  `current`.
 - **Copies, never the folder.** A build is played and measured in a plain copy under the
   worktrees folder's `game-builds/`, which is in `GIT_CEILING_DIRECTORIES` like the run's copies
   ([GameBuildCopies](../../apps/server/src/game/GameBuildCopies.ts)). One engine step at a
