@@ -77,14 +77,14 @@ Your agent builds a first playable version in a few minutes; every message after
 better.
 
 A three.js game is live on the stage from the moment it exists: Kurambit serves the game folder and
-plays it, so you watch the starter turn into your game while your agent works. Each time the agent
-saves, the game reloads within about a second. If you are playing at that moment (you clicked into
+plays it, so you watch the starter turn into your game while your agent works. When the agent saves,
+the game reloads straight into play: at once when no turn is running, and while your agent's turn
+runs, at most every ten seconds and once more when the turn ends. If you are playing at that moment (you clicked into
 the game), it is not reloaded under you: the stage says your agent changed the game while you were
 playing, with **Reload**. A hidden stage catches up when you show it. If a save breaks the game, the
 stage names the error: quietly while the turn runs, since the agent may be mid-change, and with
-**Ask agent to fix** once the turn has ended. Godot and Unity games are not live: while the first
-turn runs, the stage says your agent is making the first playable build, and **Rebuild** and
-**Play** work as before.
+**Ask agent to fix** once the turn has ended. Godot and Unity games are not live: a Godot game plays
+its latest Web build, with **Play** and **Rebuild**, and a Unity game plays in its own window.
 
 Engine: three.js browser (default), Godot native or Unity native. Godot is the full native lane: a real Godot 4.7 project
 with Blender-made art, native play, and Web, Windows and Linux exports. Its Windows and Linux builds
@@ -137,14 +137,15 @@ A game opens on its main chat: the game owns the middle of the window, its build
 it, and the chat is docked to its right.
 
 - **A three.js game is always on.** The stage plays the game folder itself, and **Reload** restarts
-  it now. Click the picture once so the keyboard reaches it, and use **Fullscreen** to give it the
+  it now, at its title screen. Click the picture once so the keyboard reaches it, and use **Fullscreen** to give it the
   whole screen. A game made from the starter opens on its title screen: choose Play there, or press
   Enter. The game pauses and mutes while the stage is hidden and resumes when you come back.
 - **A Godot game** plays its latest Web build. **Play** serves it, building one first if none
   exists, and **Rebuild** exports a fresh one; when the game's files changed after the last build,
   the stage says so and offers to rebuild. **A Unity game** plays in its own window.
 - **Stop game**, in the stage's **More** menu, ends only the processes Kurambit started for this
-  game and closes its preview server; **Play** starts it again.
+  game and closes its preview server. A stopped game stays stopped, in every window and for your
+  agent, until **Play** starts it again.
 - **Export…**, in the stage's **More** menu or the command palette, lists the targets the game's
   engine makes, each with its time, folder, logs and a freshness check against the current sources.
   three.js games export Web only.

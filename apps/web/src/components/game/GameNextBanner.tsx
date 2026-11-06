@@ -2,6 +2,7 @@ import { ArrowRightIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerBannerStackItem } from "../chat/ComposerBannerStack";
 import { gameNextLine } from "./gameNextLine";
 
@@ -21,10 +22,23 @@ export function useGameNextBanner(
   return {
     id: `game-next:${reply.key}`,
     variant: "default",
-    priority: "notice",
+    // The stack lays out an activity row inline, so the suggestion, Ask for it
+    // and the dismiss share one line; a notice row wraps its actions under it.
+    priority: "activity",
     icon: <ArrowRightIcon />,
-    title: "Next",
-    description: next,
+    title: (
+      <span className="flex min-w-0 items-baseline gap-1.5">
+        <span className="shrink-0 text-muted-foreground">Next:</span>
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className="min-w-0 truncate font-normal text-foreground" />}
+          >
+            {next}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{next}</TooltipPopup>
+        </Tooltip>
+      </span>
+    ),
     actions: (
       <Button size="xs" variant="ghost" onClick={() => onAsk(next)}>
         Ask for it

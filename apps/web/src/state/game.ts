@@ -165,7 +165,8 @@ const gameListSignal = Atom.family((environmentId: string) => {
   return Atom.make((get) => {
     const result = get(gameEvents({ environmentId: EnvironmentId.make(environmentId), input: {} }));
     // The server sends the library only games' own folders (never a run's sample copies).
-    // A card shows no saved media, builds or facts, so their pushes never reread the list.
+    // A card shows no saved media, builds, facts or live serve, so their pushes
+    // never reread the list: an agent's saves on a live game are many.
     if (!AsyncResult.isSuccess(result)) return changes;
     const scope = gameEventScope(result.value);
     if (scope === "saved" || scope === "builds" || scope === "facts" || scope === "live")
