@@ -676,10 +676,12 @@ function GameBuildDetail({
         <div className="flex items-center gap-2">
           <h4 className="text-xs font-medium">Facts</h4>
           {factsData !== null &&
-          (factsData.state === "stale" || factsData.state === "incomplete") ? (
+          (factsData.state === "never" ||
+            factsData.state === "stale" ||
+            factsData.state === "incomplete") ? (
             <Button size="xs" variant="ghost" onClick={onMeasureAgain}>
               <RefreshCwIcon aria-hidden="true" />
-              Measure again
+              {factsData.state === "never" ? "Measure" : "Measure again"}
             </Button>
           ) : null}
         </div>
