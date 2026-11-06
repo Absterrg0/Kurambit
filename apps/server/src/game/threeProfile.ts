@@ -59,8 +59,6 @@ export const THREE_PROFILE: GameEngineProfile = {
       art: "Models are GLB, library or Blender models (game_blender_* tools, exported under web/assets), sprites and textures as rendered PNGs; code-built primitives are placeholders. The export is a static copy, so everything the game loads must be a file under web/. ",
       titleArt:
         '; also add, inside :root in web/style.css, --title-art: linear-gradient(rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.55)), url("assets/ui/title_bg.png"); (this one CSS line is allowed)',
-      stateHook:
-        "A setup target of the game's own is a branch in export function setState(target, values, ctx) in web/main.js, returning true when it put the game there. ",
     },
   },
 };

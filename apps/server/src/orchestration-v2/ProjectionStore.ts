@@ -411,6 +411,8 @@ export interface ProjectTurnCheckpoint {
   /** The folder the checkpoint was captured from. */
   readonly cwd: string | null;
   readonly request: string | null;
+  /** When the turn began its work (else when it was asked): what changed before it is not its own. */
+  readonly startedAt: string;
 }
 
 export interface ProjectionStoreV2Shape {
@@ -5286,10 +5288,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           readonly ordinal: number;
           readonly cwd: string | null;
           readonly request: string | null;
+          readonly started_at: string;
         }
       >`
         SELECT checkpoint.payload_json, thread.thread_id, thread.title,
           run.run_id, run.ordinal,
+          coalesce(json_extract(run.payload_json, '$.workStartedAt'),
+            json_extract(run.payload_json, '$.startedAt'), run.requested_at) AS started_at,
           json_extract(scope.payload_json, '$.cwd') AS cwd,
           substr(json_extract(message.payload_json, '$.text'), 1, 200) AS request
         FROM orchestration_v2_projection_checkpoints AS checkpoint
@@ -5324,6 +5329,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 checkpoint,
                 cwd: row.cwd,
                 request: row.request,
+                startedAt: row.started_at,
               })),
             ),
           ),
@@ -7029,6 +7035,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                         projection.messages
                           .find((message) => message.id === run.userMessageId)
                           ?.text.slice(0, 200) ?? null,
+                      startedAt: DateTime.formatIso(orchestrationV2RunWorkStartedAt(run)),
                     },
                   ];
                 });

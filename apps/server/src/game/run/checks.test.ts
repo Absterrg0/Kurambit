@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it, vi } from "@effect/vitest";
 import { checkBot, evaluate, keysOf, needlesOf, parseExpect, readReport } from "./checks.ts";
+import * as State from "./state.ts";
 
 const terms = (text: string) => {
   const parsed = parseExpect(text);
@@ -81,13 +82,12 @@ describe("the generated check bot", () => {
     throw new Error("the bot never reported");
   };
 
-  it("leaves the title, asks for the setup, plays the input and reports only what the expect reads", async () => {
+  it("leaves the title, plays the input and reports only what the expect reads", async () => {
     const t0 = terms('zone >= 2 and delta(score) >= 1 and hud contains "Zone"');
     const { status, sent } = await drive(
       {
         what: "x",
         from: "play",
-        setup: "zone2",
         input: [{ hold: "d", ms: 500 }, { press: "Space" }],
         keys: keysOf(t0),
         needles: needlesOf(t0),
@@ -97,7 +97,7 @@ describe("the generated check bot", () => {
         return {
           gameState: {
             state: playing ? "playing" : "title",
-            zone: s.setStates.includes("zone2") ? 2 : 1,
+            zone: s.held.has("d") || s.presses.includes("Space") ? 2 : 1,
             score: s.presses.includes("Space") ? 3 : 2,
             secret: "unrelated",
           },
@@ -105,7 +105,7 @@ describe("the generated check bot", () => {
         };
       },
     );
-    expect(sent.setStates).toEqual(["zone2"]);
+    expect(sent.setStates).toEqual([]);
     expect(sent.presses.filter((k) => k === "Enter").length).toBeLessThanOrEqual(2);
     expect(sent.held.size).toBe(0);
     const seen = readReport(status.evidence)!;
@@ -121,7 +121,6 @@ describe("the generated check bot", () => {
       {
         what: "x",
         from: "title",
-        setup: null,
         input: [],
         keys: keysOf(t0),
         needles: needlesOf(t0),
@@ -140,7 +139,6 @@ describe("the generated check bot", () => {
       {
         what: "x",
         from: "title",
-        setup: null,
         input: [],
         keys: keysOf(t0),
         needles: needlesOf(t0),
@@ -156,5 +154,64 @@ describe("the generated check bot", () => {
     );
     expect(JSON.stringify(status.evidence).length).toBeLessThan(4096);
     expect(readReport(status.evidence)!.cut).toEqual(["inventory", "player.name"]);
+  });
+});
+
+// A check the run cannot verify in play stalls its rung forever (research-anatomy:
+// GC-2's audio and 0.32 s flash checks cost 54 minutes), so the plan's own
+// submission is refused with the reason, whoever wrote the ladder.
+describe("the check lint", () => {
+  const rung = (check: Record<string, unknown>) => ({
+    is: "the game has a goal",
+    checks: [{ what: "the title shows", kind: "look", how: "look at the title" }, check],
+  });
+  const problem = (check: Record<string, unknown>) => {
+    const parsed = State.ladderOf(
+      Array.from({ length: 4 }, () => rung(check)) as unknown as Parameters<
+        typeof State.ladderOf
+      >[0],
+    );
+    return "error" in parsed ? parsed.error : null;
+  };
+  const state = (expect: string, extra: Record<string, unknown> = {}) => ({
+    what: "it holds",
+    kind: "state",
+    from: "play",
+    input: [{ hold: "d", ms: 500 }],
+    expect,
+    ...extra,
+  });
+  const look = (what: string, how = "watch it") => ({ what, kind: "look", how });
+
+  it("refuses setups and teleports, volume rewards, and audio or sub-second looks", () => {
+    expect(problem(state("won == true", { setup: "shrine5" }))).toMatch(
+      /no setup states or teleports/,
+    );
+    expect(problem(state("won == true", { values: { position: [1, 2, 3] } }))).toMatch(
+      /drop setup and values/,
+    );
+    expect(problem(state("score >= 10"))).toMatch(/"score >= 10" rewards volume/);
+    expect(problem(state("delta(gems) > 2"))).toMatch(/rewards volume/);
+    expect(problem(look("at least 5 enemy types appear"))).toMatch(/rewards volume/);
+    expect(problem(look("a chime plays when a gem is taken"))).toMatch(/without sound/);
+    expect(problem(look("the music swells near the gate"))).toMatch(/without sound/);
+    expect(problem(look("the screen shakes on a hit"))).toMatch(/faster than frames show/);
+    expect(problem(look("the knight flashes red", "for 0.32 s after a hit"))).toMatch(
+      /faster than frames show/,
+    );
+  });
+
+  it("takes what play can verify: exists, exact states, upper bounds, still looks", () => {
+    expect(problem(state("delta(score) >= 1"))).toBeNull();
+    expect(problem(state("lives <= 3 and won == false"))).toBeNull();
+    expect(problem(state("sounds_played > 0"))).toBeNull();
+    expect(problem(look("at least one enemy is on screen"))).toBeNull();
+    expect(problem(look("the flashlight beam lights the path", "look at the frames"))).toBeNull();
+    expect(problem(look("a 2.5 s countdown shows before each wave"))).toBeNull();
+    expect(problem(look("the player respawns within 1.5 seconds"))).toBeNull();
+    expect(problem(look("the settings menu shows a music volume slider"))).toBeNull();
+    expect(problem(look("a mute button sits on the HUD"))).toBeNull();
+    expect(problem(look("the hit flash lasts 300 ms"))).toMatch(/faster than frames show/);
+    expect(problem(look("the door opens in .5 s"))).toMatch(/faster than frames show/);
   });
 });

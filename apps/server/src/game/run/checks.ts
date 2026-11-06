@@ -35,6 +35,12 @@ export type Observed = {
 };
 
 export const MAX_INPUT_MS = 20_000;
+/**
+ * How a check's evidence starts when the check itself, not the game, failed:
+ * nothing played could show it. The run rewrites such a check, and never
+ * counts the round against the game.
+ */
+export const CANNOT_VERIFY = "cannot be verified in play: ";
 const MAX_KEY = 64;
 const KEY = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 const TERM =
@@ -192,16 +198,14 @@ export const readReport = (evidence: unknown): Observed | null => {
 
 /**
  * A bot that plays one check's scenario and reports what the game showed; it
- * judges nothing. It waits for the probe, records the start state, asks for the
- * setup state, plays the input in game time, lets the game settle, then reports
+ * judges nothing. It waits for the probe, records the start state, plays the
+ * input in game time, lets the game settle, then reports
  * the named keys at start and end and the HUD text, in its status evidence (the
  * note is prose and cut short), holding just what the expectation reads.
  */
 export const checkBot = (spec: {
   readonly what: string;
   readonly from: CheckStart;
-  readonly setup: string | null;
-  readonly values?: Readonly<Record<string, unknown>>;
   readonly input: ReadonlyArray<CheckInput>;
   readonly keys: ReadonlyArray<string>;
   readonly needles: ReadonlyArray<string>;
@@ -211,8 +215,6 @@ export const tempo = 10;
 export const switchMargin = 0;
 export const stallSeconds = ${Math.ceil(inputMs(spec.input) / 1000) + 30};
 const from = ${JSON.stringify(spec.from)};
-const setup = ${JSON.stringify(spec.setup)};
-const values = ${JSON.stringify(spec.values ?? {})};
 const input = ${JSON.stringify(spec.input)};
 const keys = ${JSON.stringify(spec.keys)};
 const needles = ${JSON.stringify(spec.needles.map((n) => n.toLowerCase()))};
@@ -253,11 +255,6 @@ export function observe(api, last) {
   if (phase === "wait" && end !== null && t - since >= 0.5) {
     onTitleAtStart = from === "play" && end?.state === "title";
     start = end;
-    if (setup !== null) api.setState(setup, values);
-    phase = "setup";
-    since = t;
-  }
-  if (phase === "setup" && t - since >= (setup === null ? 0 : 0.6)) {
     phase = "input";
     since = t;
   }
@@ -326,3 +323,80 @@ export function status(obs) {
   return { state: "done", note: "scenario reported", evidence: { s, e, h, title: onTitleAtStart ? titlePresses : 0, cut: [...cut] } };
 }
 `;
+
+// ── Check lint: what a check may ask, so every check can be verified in play.
+const WORD_NUMBER: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  dozen: 12,
+  twenty: 20,
+  hundred: 100,
+};
+const numberOf = (word: string): number =>
+  /^\d+$/.test(word) ? Number(word) : (WORD_NUMBER[word.toLowerCase()] ?? 0);
+const VOLUME_TEXT = [/\bat least (\d+|[a-z]+)\b/gi, /\b(\d+|[a-z]+) or more\b/gi];
+// Testers judge still frames without sound: these can never be seen in play.
+const AUDIO =
+  /\b(sounds?|soundtrack|audio|audible|music|musical|sfx|chimes?|thuds?|rattles?|jingles?|beeps?|hears?|heard|volume|melody|tune)\b/i;
+// A control that shows on screen (a volume slider, a mute button) is a still
+// frame's to judge, not sound: its words are left out before the audio words are looked for.
+const AUDIO_CONTROL =
+  /\b(?:(?:master|music|sound|sfx|audio|effects?)\s+)*(?:volume|mute|music|sound|sfx|audio)\s+(?:slider|sliders|toggle|toggles|button|buttons|setting|settings|option|options|menu|bar|icon|control|controls|label|switch|checkbox)\b/gi;
+const TRANSIENT_WORD =
+  /\b(shakes?|shaking|screen ?shake|flash(es|ing)?|flicker(s|ing)?|blink(s|ing)?|hit[- ]?(stop|pause)|squash(es|ing)?|split[- ]second)\b/i;
+// A duration, read as a number, so "1.5 s" is a second and a half, never ".5 s".
+const DURATION = /(?<![\d.])(\d*\.?\d+)\s?(ms|milliseconds?|s|secs?|seconds?)\b/gi;
+const subSecond = (text: string): string | null => {
+  for (const match of text.matchAll(DURATION)) {
+    const n = Number(match[1]);
+    const ms = /^m/i.test(match[2] ?? "") ? n : n * 1000;
+    if (Number.isFinite(ms) && ms > 0 && ms < 1000) return match[0];
+  }
+  return null;
+};
+
+/** What a check asks that play cannot verify or that rewards volume, in plain words; null when it is fine. */
+export const lintCheck = (check: {
+  readonly what: string;
+  readonly how?: string | undefined;
+  readonly kind?: "state" | "look" | undefined;
+  readonly setup?: string | undefined;
+  readonly values?: unknown;
+  readonly expect?: string | undefined;
+}): string | null => {
+  if (check.setup !== undefined || check.values !== undefined)
+    return "a check starts from the title or from play with real input only: drop setup and values (no setup states or teleports). A goal deeper than 20 s of scripted input is a look check a tester plays to";
+  if (check.kind === "state") {
+    const parsed = parseExpect(check.expect ?? "");
+    if ("error" in parsed) return null;
+    for (const term of parsed.terms) {
+      if (term.ref.kind === "hud" || typeof term.value !== "number") continue;
+      const volume = (term.op === ">=" && term.value > 1) || (term.op === ">" && term.value >= 1);
+      if (volume) {
+        const name = term.ref.kind === "delta" ? `delta(${term.ref.key})` : term.ref.key;
+        return `"${name} ${term.op} ${term.value}" rewards volume: use == for an exact state, >= 1 for exists, or an upper bound`;
+      }
+    }
+    return null;
+  }
+  const text = `${check.what} ${check.how ?? ""}`;
+  for (const pattern of VOLUME_TEXT)
+    for (const match of text.matchAll(pattern))
+      if (numberOf(match[1] ?? "") >= 2)
+        return `"${match[0]}" rewards volume: check that something exists or happens, not how much of it`;
+  const audio = AUDIO.exec(text.replace(AUDIO_CONTROL, " "));
+  if (audio !== null)
+    return `a look check cannot judge "${audio[0]}": testers see still frames without sound. Have the game report it as state (a count of sounds played, whether music runs) and make it a state check`;
+  const transient = TRANSIENT_WORD.exec(text)?.[0] ?? subSecond(text);
+  if (transient !== null)
+    return `a look check cannot judge "${transient}": it is over faster than frames show. Have the game report it as state (a count of shakes or flashes started) and make it a state check`;
+  return null;
+};

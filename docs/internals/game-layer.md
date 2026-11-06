@@ -260,6 +260,10 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   reads the rail each time from the turn checkpoints and the run's records; a build's id is its
   commit. Every surface (the six RPCs, the `game_builds`, `game_facts` and `game_build_restore`
   tools) is one method of that service.
+- **A turn's change is its own.** T3 diffs a turn's checkpoint against its thread's previous
+  one, which in a game includes whatever the run or another chat did in between. A turn build
+  counts from the newest build of the game captured before the turn began, and says so when the
+  turn began while a run round was building, since concurrent edits to one folder cannot be split.
 - **Copies, never the folder.** A build is played and measured in a plain copy under the
   worktrees folder's `game-builds/`, which is in `GIT_CEILING_DIRECTORIES` like the run's copies
   ([GameBuildCopies](../../apps/server/src/game/GameBuildCopies.ts)). One engine step at a
@@ -428,19 +432,44 @@ Rounds climb a ladder. The plan submits it, 4 to 7 rungs from the picked
 prototype to a game with the shape of a Steam demo, each a sentence of what the game is after it
 plus 2 to 4 checks with how to observe them; `game-run.submit` refuses a wrong shape in the plan's
 turn, and a plan that submits none gets one fix turn, else the run ends "no-ladder": a creator's
-note still gets a finish round, and a resume plans the ladder again. The run's record is the one truth for which rung landed; `.studio/ladder.json` is a
+note still gets a finish round, and a resume plans the ladder again. A new run on the same brief
+builds the ladder the game already has (a new brief plans one): every earlier run on Lantern Marsh
+re-planned, five ladders in five runs. The run's record is the one truth for which rung landed; `.studio/ladder.json` is a
 copy for people and roles. A round builds the first open rung, and the tester submits pass or
 fail per look check. An earlier run measured why this matters: when every round's goal was the last review's top flaw and judges asked
 which build handled that flaw better, a run spent five hours on one flaw while the game never
 grew, and two near-identical builds gave noisy ties. So acceptance is the rung's checks, and blind
 judging is only a regression gate: a round whose checks pass is kept unless the old build wins
 both orders (ties, splits and missing verdicts keep it). A round whose checks fail is not judged
-at all, since no verdict could keep it, and its work stays a build of its own. Any round that does not
-land its rung (failed checks, a regression, a boot failure, no change) counts against the rung;
-the second sets it aside with its reason, and set-aside rungs come back once after the rest. A
-run never pays twice for the same work: a retry right after a try that passed some checks grows
-that try's build (the gate still judges it against the best), a builder turn that changes no game
-file ends its block, a rung round's reviewer writes from the tester's and blind players'
+at all, since no verdict could keep it, and its work stays a build of its own.
+
+A check must be verifiable in play, so the lint in [checks.ts](../../apps/server/src/game/run/checks.ts)
+refuses at every ladder submission (the plan's, a reviewer's rung, the creator's edit) a check
+that starts from a setup state or a teleport (a state check that reads the game's self-report
+after a jump proves nothing a player can reach), a volume reward ("at least N"), and audio or
+sub-second motion as a look check (testers see still frames without sound). One family of such
+checks cost GC-2 54 minutes of identical retries.
+
+Every round that does not land names whose failure it was (`failure` on its record), and only the
+game's counts against the rung and the stall rule: a boot or check failure, a regression, no
+change. The harness's (an unjudged gate, a tester with no play or no result, a git move that
+failed) leaves the rung as it was, and the next round judges the same build again with no builder
+turn; two in a row pause the run `tool-failed`, since a broken evaluation would otherwise repeat
+at the game's cost. A check the tester marks unverifiable gets one plan turn that rewrites the
+rung's checks (submission `rungs`, one rung), and the next round grows the work it judged. The
+game's second failure never builds the rung a third time as it is: Autopilot's plan splits it
+(two or three rungs, never split again), a Guided run asks the creator (`rung` decision, split by
+default), and a change that does not fit sets it aside. A set-aside rung returns only changed (a
+resume splits it) and is never done: a ladder with one, or a ship review that says not
+shippable, ends the run "incomplete", resumably. These rules apply to a game's history too: a
+resume and a reused ladder refold each rung from its rounds (`Policy.recount`), so the rounds an
+earlier harness bug failed no longer count.
+
+A run never pays twice for the same work: a retry right after a try that passed some checks grows
+that try's build (the gate still judges it against the best), a builder block ends on the
+builder's own end of its turn (the harness then scores the build, and a failed state check is a
+fix turn for the same builder: asking a builder that stopped to keep going bought only closing
+turns that changed nothing), a rung round's reviewer writes from the tester's and blind players'
 evidence instead of replaying the build, and a gate whose best is the build an earlier gate's
 blind player saw reuses that play and plays only the candidate. "The same build" is exact: a kept
 round's build is its candidate's own checkpoint, so a play of the candidate is a play of the new
@@ -452,15 +481,15 @@ result is not known to come from the same bot. The reviewer's ledger (copied to 
 rung, never a round's goal; the reviewer may add one rung with its ledger
 when something blocks the ladder, one open at a time. The old round shape (the review's top flaw,
 judged on that flaw) runs only as finish rounds, and only on the creator's ask. The run's end
-point is its goal, not a round count: the ladder bounds the building (two tries per rung, one
-comeback), a finished ladder gets one ship check, and the run ends ("ready" or "done"). Polish past
+point is its goal, not a round count: the ladder bounds the building, a finished ladder gets one
+ship check of its best, and the run ends "ready", or "incomplete" with the review's reasons, which
+a resume leads one round with. Polish past
 that is the creator's call: a game_run_steer note resumes an ended run for one round on it, so no
-tokens go to rounds nobody asked for. Three rounds in a row that land nothing, for any reason (a
-regression, an unjudged or inconclusive gate, failed checks, a build that could not be kept, a boot failure, no
-change), end the run "stalled", resumably, with the last round's reason: otherwise a game whose
-checks can never pass (a broken state hook) works through every rung, its retry and its comeback,
-30 rounds on a full ladder, for nothing. A kept round resets the count, a round counts once where
-it ends (`finishRound` or `stallRound`), and a resume or a note's round starts it fresh.
+tokens go to rounds nobody asked for. Three rounds in a row that land nothing for the game's own
+reasons end the run "stalled", resumably, with the last round's reason: otherwise a game whose
+checks can never pass (a broken state hook) works through every rung for nothing. A kept round
+resets the count, a round counts once where it ends (`finishRound` or `stallRound`), and a resume
+or a note's round starts it fresh.
 
 Before the
 comparators run, the tester's last play bot plays both builds in fresh copies for the same real
@@ -481,7 +510,9 @@ is the one place that order is kept, so nothing takes the operation lock while h
 Time queued behind the lock or the gate counts against the same 75 s bound, after which the start
 is refused `busy` (contention, not memory), never kept waiting unseen. No gated
 start may open an editor: the gate is one permit and does not nest. A sample's time waiting there is
-given back to its clock. A play turn (`plays`: a sample's, the tester's, the ship player's) whose
+given back to its clock. A blind player's clock is its input budget, which the explore service
+enforces across its sessions; its wall cap is only a backstop, since a wall cap near what players
+take cut them short and bought a "plays on" turn each time. A play turn (`plays`: a sample's, the tester's, the ship player's) whose
 play was refused for memory, a busy machine or a tool of ours, and that played nothing (no input
 and no bot run), is played again after a pause rather than landed as "played nothing": memory and
 busy under one count up to their cap, a transient tool once, a standing one never; past it the

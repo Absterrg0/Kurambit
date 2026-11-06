@@ -9,6 +9,7 @@ import type { GameRunCheckOutcome } from "@kurambit/contracts";
 import { plainReason } from "@kurambit/contracts";
 import type * as GameService from "../GameService.ts";
 import {
+  CANNOT_VERIFY,
   checkBot,
   evaluate,
   inputMs,
@@ -57,14 +58,16 @@ export const runStateChecks = (
           frame: "",
         });
         const parsed = parseExpect(c.expect ?? "");
-        if ("error" in parsed) return fail(`the check's expect does not read: ${parsed.error}`);
+        if ("error" in parsed)
+          return fail(`${CANNOT_VERIFY}its expect does not read: ${parsed.error}`);
+        // An older ladder's check from a setup state: checks now start from the title or play.
+        if (c.setup !== undefined || c.values !== undefined)
+          return fail(`${CANNOT_VERIFY}it starts from a setup state, which checks no longer use`);
         const input = c.input ?? [];
         const file = `${CHECK_BOT_DIR}/rung-${rung.id}-${k + 1}.mjs`;
         const source = checkBot({
           what: c.what,
           from: c.from ?? "play",
-          setup: c.setup ?? null,
-          ...(c.values === undefined ? {} : { values: c.values }),
           input,
           keys: keysOf(parsed.terms),
           needles: needlesOf(parsed.terms),
@@ -126,8 +129,6 @@ export const runStateChecks = (
             standing: true,
           });
         const verdict = evaluate(parsed.terms, seen);
-        const refusal = result.refusedStates?.[0];
-        const setup = refusal === undefined ? "" : `setup refused: ${refusal.error}; `;
         const title =
           (seen.stuckOnTitle ?? 0) > 0
             ? `the scenario meant to start in a run never left the title (Enter pressed ${seen.stuckOnTitle} times; make Enter start a run from the title, or start the check from the title); `
@@ -144,7 +145,7 @@ export const runStateChecks = (
           k,
           what: c.what,
           pass: verdict.pass,
-          evidence: `${setup}${title}${verdict.detail}${missing}${cut}`.slice(0, 600),
+          evidence: `${title}${verdict.detail}${missing}${cut}`.slice(0, 600),
           frame,
         };
       }),

@@ -29,6 +29,7 @@ import {
   GameRunRoundTask,
   GameRunRung,
   type GameRunRungCheck,
+  GameRunRungFields,
   type GameRunRungChange,
   GameRunRungRecord,
   GameRunSample,
@@ -38,7 +39,7 @@ import {
   GameRunVerdict,
   GameEngineId,
 } from "@kurambit/contracts";
-import { MAX_INPUT_MS, inputMs, parseExpect } from "./checks.ts";
+import { MAX_INPUT_MS, inputMs, lintCheck, parseExpect } from "./checks.ts";
 
 export type Verdict = GameRunVerdict;
 
@@ -56,6 +57,8 @@ const decodeLadderJson = Schema.decodeUnknownResult(Schema.fromJsonString(GameRu
 
 /** What is wrong with one check beyond its JSON shape, or null. */
 const checkProblem = (c: RungCheck, where: string): string | null => {
+  const lint = lintCheck(c);
+  if (lint !== null) return `${where}: ${lint}`;
   if (c.kind !== "state")
     return (c.how ?? "").trim().length === 0 ? `${where}: a look check needs "how"` : null;
   if (c.expect === undefined) return `${where}: a state check needs "expect"`;
@@ -105,6 +108,33 @@ export const parseLadder = (
   const decoded = decodeLadderJson(text);
   if (Result.isFailure(decoded)) return { error: decoded.failure.message.slice(0, 1500) };
   return ladderOf(decoded.success.rungs);
+};
+
+/** A rung change's rungs (a rewrite's one, a split's two or three), or what is wrong with them. */
+export const rungsOf = <R extends { readonly checks: ReadonlyArray<RungCheck> }>(
+  rungs: ReadonlyArray<R>,
+  count: { readonly min: number; readonly max: number },
+): { readonly rungs: ReadonlyArray<R> } | { readonly error: string } => {
+  if (rungs.length < count.min || rungs.length > count.max)
+    return {
+      error:
+        count.min === count.max
+          ? `submit exactly ${count.min} rung${count.min === 1 ? "" : "s"}, not ${rungs.length}`
+          : `submit ${count.min} to ${count.max} rungs, not ${rungs.length}`,
+    };
+  const problem = rungs.map((r, i) => rungProblem(r, `rung ${i + 1}`)).find((x) => x !== null);
+  return problem !== undefined && problem !== null ? { error: problem } : { rungs };
+};
+
+const decodeRungsJson = Schema.decodeUnknownResult(
+  Schema.fromJsonString(Schema.Struct({ rungs: Schema.Array(Schema.Struct(GameRunRungFields)) })),
+  { errors: "all" },
+);
+/** A creator's rung change as JSON ({"rungs":[...]}, one to three), or what is wrong with it. */
+export const parseRungs = (text: string) => {
+  const decoded = decodeRungsJson(text);
+  if (Result.isFailure(decoded)) return { error: decoded.failure.message.slice(0, 1500) };
+  return rungsOf(decoded.success.rungs, { min: 1, max: 3 });
 };
 
 /** A reviewer's proposed rung as a ladder rung, or what is wrong with it. */
@@ -178,6 +208,8 @@ const RunState = Schema.Struct({
   stallStreak: Schema.Number,
   lastFailure: Schema.String,
   shipNoReasons: Schema.String,
+  /** The best build the ship review last judged, "" before one. */
+  shipCheckedOn: Schema.String,
   rounds: Schema.Array(GameRunRoundRecord),
   /** The role threads the run launched, from its step records; status views read their times. */
   threads: Schema.Array(ThreadRef),
@@ -236,6 +268,7 @@ export const freshState = (
   stallStreak: 0,
   lastFailure: "",
   shipNoReasons: "",
+  shipCheckedOn: "",
   rounds: history.rounds,
   threads: [],
   pending: history.pending,

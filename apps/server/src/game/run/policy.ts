@@ -11,7 +11,16 @@ import { engineProfile } from "../engineProfile.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
 import * as Roles from "./roles.ts";
 import type * as State from "./state.ts";
-import { BLANK, isStateCheck, ladderOf, parseLadder, rungOfChange } from "./state.ts";
+import { CANNOT_VERIFY, lintCheck } from "./checks.ts";
+import {
+  BLANK,
+  isStateCheck,
+  ladderOf,
+  parseLadder,
+  parseRungs,
+  rungOfChange,
+  rungsOf,
+} from "./state.ts";
 import type {
   Block,
   BotFact,
@@ -42,9 +51,6 @@ import type {
 } from "./state.ts";
 
 const MIN = 60_000;
-// A blind player that used less than half its input budget saw only the
-// opening; a weak model often stops there, so judges never see late flaws.
-const PLAY_FLOOR_MS = 60_000;
 const CAP = {
   block: 25 * MIN,
   // A ladder round builds a whole rung, not one fix.
@@ -60,13 +66,19 @@ const CAP = {
   artRedo: 12 * MIN,
   tester: 12 * MIN,
   duty: 6 * MIN,
-  judge: 6 * MIN,
+  // A blind player's clock is its input budget (Roles.SAMPLE_INPUT_MS), which
+  // the explore service enforces; this wall cap is only a backstop. Players
+  // reach 46-80 s of input in 6 min, so a wall cap near that cut them short and
+  // cost a "plays on" turn each time.
+  play: 15 * MIN,
   write: 2 * MIN,
   reviewer: 5 * MIN,
   ship: 7 * MIN,
 };
+// What a blind play usually takes in wall time to spend its input budget.
+const PLAY_TYPICAL_MS = 10 * MIN;
 // Both blind plays plus both comparator verdicts, uncorrected.
-const COMPARE_MIN_MS = 2 * (CAP.judge + CAP.write) + 2 * CAP.write;
+const COMPARE_MIN_MS = 2 * (PLAY_TYPICAL_MS + CAP.write) + 2 * CAP.write;
 // The round's bot plays each build for up to this long in real time; one run's
 // share adds a fresh checkout and engine import. Skipped when the budget lacks it.
 const BOT_SECONDS = 150;
@@ -78,7 +90,8 @@ const FLOOR_MS = 2 * MIN;
 // run only when they leave the build its start.
 const BUILD_RESERVE_MS = 24 * MIN;
 const LADDER = Roles.LADDER_FILE;
-// A rung that fails in this many rounds is set aside for the next.
+// A rung that fails in this many rounds for the game's own reasons is never
+// built again as it is: it is split, or the creator is asked.
 const RUNG_TRIES = 2;
 // A reviewer's insertions stop growing the ladder past this.
 const LADDER_MAX = 10;
@@ -137,15 +150,75 @@ const submitted = <K extends GameRunSubmissionKind>(
 // Later roles and the creator read these files, so a submission lands there too.
 const ladderJson = (rungs: Submitted<"ladder">["rungs"]) =>
   `${JSON.stringify({ rungs }, null, 2)}\n`;
+// The ladder the run holds, as the same file (a rung's change rewrites it).
+const ladderFile = (ladder: Ladder) =>
+  ladderJson(ladder.rungs.map((x) => ({ is: x.is, checks: x.checks })));
 
 // A tester's look-check results by their number in the rung; the run's own scoring covers state checks.
 const submittedChecksOf = (sub: Submitted<"checks">, rung: Rung): Round["checks"] =>
   rung.checks.map((check, i) => {
     const said = sub.checks.findLast((c) => c.check === i + 1);
-    return said === undefined
-      ? { what: check.what, pass: false, evidence: "the tester submitted no result for this check" }
+    if (said === undefined) return { what: check.what, pass: false, evidence: NO_RESULT };
+    return said.unverifiable === true
+      ? {
+          what: check.what,
+          pass: false,
+          evidence: `${CANNOT_VERIFY}${said.evidence}`.slice(0, 400),
+        }
       : { what: check.what, pass: said.pass, evidence: said.evidence.slice(0, 400) };
   });
+
+// ── Why a round failed. Only the game's own failure counts against its rung;
+// the harness's and a check's never do (research-anatomy: a harness bug and one
+// unverifiable check family cost GC-2 half its round time).
+export type Failure = NonNullable<RoundRecord["failure"]>;
+// The run's own words for a tester that judged nothing; they mark the round as the harness's.
+const NO_RESULT = "the tester submitted no result for this check";
+const NO_PLAY = "no play on record for the tester (no explore input, no bot run)";
+
+type CheckVerdict = Round["checks"][number];
+const unverified = (c: CheckVerdict) => c.evidence.startsWith(CANNOT_VERIFY);
+const unjudgedCheck = (c: CheckVerdict) =>
+  c.evidence.startsWith(NO_RESULT) || c.evidence.startsWith(NO_PLAY);
+
+/**
+ * Whose failure a round's failed checks are, check by check: any check the
+ * game failed on real evidence makes it the game's; only when every failed
+ * check is one play cannot verify (or the tester never judged) is it the
+ * check's, or the harness's when none is unverifiable.
+ */
+const checksFailure = (
+  checks: ReadonlyArray<CheckVerdict>,
+  cannotVerify: (c: CheckVerdict) => boolean = unverified,
+): Failure => {
+  const failed = checks.filter((c) => !c.pass);
+  if (failed.length === 0 || failed.some((c) => !cannotVerify(c) && !unjudgedCheck(c)))
+    return "game";
+  return failed.some(cannotVerify) ? "check" : "harness";
+};
+
+/**
+ * A round recorded before failures were named, read as they are named now:
+ * an unjudged gate, a tester with no play or result, a git move that failed
+ * are the harness's; a failed check the lint now refuses is the check's.
+ */
+const recordedFailure = (r: RoundRecord, rung: Rung | null): Failure => {
+  if (r.failure !== undefined) return r.failure;
+  const note = r.note ?? "";
+  if (r.unjudged === true || /tester write failed|could not be restored|not kept \(/.test(note))
+    return "harness";
+  return checksFailure(r.rung?.checks ?? [], (c) => recordedUnverified(c, rung));
+};
+
+// A recorded failed check play could not verify: said so, or one the lint now refuses.
+const recordedUnverified = (c: CheckVerdict, rung: Rung | null): boolean => {
+  if (unverified(c)) return true;
+  const check = rung?.checks.find((x) => x.what === c.what);
+  return check !== undefined && lintCheck(check) !== null;
+};
+
+/** The rung's checks in their full form (kind, expect, setup, input, how): a rewrite is a new rung. */
+const checksKey = (rung: Pick<Rung, "checks">): string => fnv(JSON.stringify(rung.checks));
 
 // ── Pure round decisions. ─────────────────────────────────────────────────
 export type PairKind = "best-wins" | "candidate-wins" | "inconclusive" | "unjudged";
@@ -204,26 +277,24 @@ type RungPick =
       readonly rung: Rung;
       readonly logs: ReadonlyArray<string>;
     }
-  | { readonly kind: "finish"; readonly why: string };
+  | { readonly kind: "finish"; readonly why: string; readonly aside?: boolean };
 
 const LADDER_DONE = "the ladder is done";
 
-// The first open rung, else a set-aside one back for its one more try, else the finish.
+// The first open rung, else the finish. A set-aside rung never comes back as
+// it is: only changed (a split, a rewrite, the creator's edit), so a ladder with
+// one is not done.
 const pickRung = (ladder: Ladder): RungPick => {
   if (ladder.rungs.length === 0)
     return { kind: "finish", why: ladder.note || "the run has no ladder" };
   const open = ladder.rungs.find((x) => x.status === "todo");
   if (open !== undefined) return { kind: "rung", ladder, rung: open, logs: [] };
-  const i = ladder.rungs.findIndex((x) => x.status === "set-aside" && !x.back);
-  if (i < 0) return { kind: "finish", why: LADDER_DONE };
-  const was = ladder.rungs[i]!;
-  const rung: Rung = { ...was, status: "todo", fails: 0, back: true };
-  return {
-    kind: "rung",
-    ladder: { ...ladder, rungs: ladder.rungs.with(i, rung) },
-    rung,
-    logs: [`rung ${i + 1} comes back after the rest of the ladder (set aside: ${was.why})`],
-  };
+  const aside = ladder.rungs.flatMap((x, i) =>
+    x.status === "set-aside" ? [`rung ${i + 1} set aside (${x.why || "no reason recorded"})`] : [],
+  );
+  return aside.length === 0
+    ? { kind: "finish", why: LADDER_DONE }
+    : { kind: "finish", why: `${aside.join("; ")}`.slice(0, 300), aside: true };
 };
 
 const rungOf = (state: RunState, r: Pick<Round, "rung">): Rung | null =>
@@ -239,16 +310,22 @@ const ladderText = (ladder: Ladder, current: number | null): string =>
     .map((x, i) => `${i + 1}. [${x.id === current ? "this round" : x.status}] ${x.is}`)
     .join("\n");
 
-// Why the last round on this rung did not land it, for the next attempt's direction.
-// A retry right after a try that booted and passed some of its checks grows that
-// work instead of rebuilding from the best: the best has not moved since, and the
-// blind gate still judges the result against the best.
-const retryFrom = (state: RunState, rung: Rung): string | null => {
+// Where the next round on this rung starts, from the last round when it was on
+// this rung. A try whose evaluation failed (the harness's fault) is judged again
+// as it is, with no builder turn: nobody faulted its work. A try whose check was
+// rewritten, or that booted and passed some checks, grows that work instead of
+// rebuilding from the best: the best has not moved, and the gate still judges.
+type RetryFrom = { readonly build: string; readonly reeval: boolean };
+const retryFrom = (state: RunState, rung: Rung): RetryFrom | null => {
   const last = state.rounds.at(-1);
   const result = last?.rung;
   if (last === undefined || result === undefined || result.rung !== rung.id) return null;
-  if (result.outcome !== "failed" || !result.checks.some((c) => c.pass)) return null;
-  return last.build !== undefined && last.build.length > 0 ? last.build : null;
+  const build = last.build !== undefined && last.build.length > 0 ? last.build : null;
+  if (build === null || last.kept || result.outcome === "landed") return null;
+  const failure = recordedFailure(last, rung);
+  if (failure === "harness") return { build, reeval: true };
+  if (failure === "check" || result.checks.some((c) => c.pass)) return { build, reeval: false };
+  return null;
 };
 
 // Fix turns a builder gets in one round when state checks fail, and how long each runs.
@@ -302,8 +379,33 @@ const takeLadder = (
   };
 };
 
-// A round's end settles its rung: landed when kept, else one more failure, and
-// the RUNG_TRIES-th sets it aside so the next rung starts.
+// A rung without the wait for a change, as a fresh rung would have it.
+const withoutNeed = ({ need: _need, ...rung }: Rung): Rung => rung;
+/** The rung set aside with why: it returns only changed (a split, a rewrite, the creator's edit). */
+const setAside = (rung: Rung, why: string): Rung => ({
+  ...withoutNeed(rung),
+  status: "set-aside",
+  why: why.slice(0, 500),
+});
+/** What a rung waits for after this failure: a rewrite once, else a split; a split's own rung is set aside. */
+const afterFailure = (
+  rung: Rung,
+  failure: Failure,
+  fails: number,
+  someUnverifiable: boolean,
+): Rung["need"] | "set-aside" => {
+  if (failure === "check" && rung.rewritten !== true) return "rewrite";
+  if (failure === "check" || (failure === "game" && fails >= RUNG_TRIES))
+    return rung.from === "split" ? "set-aside" : "split";
+  // The game failed, and a check of the same round cannot be verified: the
+  // failure counts, and the check is rewritten before the next try.
+  if (failure === "game" && someUnverifiable && rung.rewritten !== true) return "rewrite";
+  return undefined;
+};
+
+// A round's end settles its rung: landed when kept; else a failure of the game's
+// counts, and the RUNG_TRIES-th asks for a split; a check that could not be
+// verified asks for one rewrite; the harness's failure leaves the rung as it was.
 const settleRung = (
   state: RunState,
   r: Round,
@@ -324,23 +426,47 @@ const settleRung = (
         ? `checks failed: ${failed.map((c) => `${c.what} (${c.evidence || "no evidence"})`).join("; ")}`
         : (record.note ?? "not kept")
       ).slice(0, 500);
-  const fails = record.kept ? rung.fails : rung.fails + 1;
-  const outcome = record.kept ? "landed" : fails >= RUNG_TRIES ? "set-aside" : "failed";
+  const failure: Failure = record.failure ?? "game";
+  const fails = !record.kept && failure === "game" ? rung.fails + 1 : rung.fails;
+  const next = record.kept
+    ? undefined
+    : afterFailure(
+        rung,
+        failure,
+        fails,
+        checks.some((c) => !c.pass && unverified(c)),
+      );
+  const outcome = record.kept ? "landed" : next === "set-aside" ? "set-aside" : "failed";
   const k = positionOf(ladder, rung);
   logs.push(
     outcome === "landed"
       ? `round ${r.n}: rung ${k} landed (checks ${checkLine(checks)})`
       : outcome === "set-aside"
-        ? `round ${r.n}: rung ${k} set aside after ${fails} rounds that did not land it: ${why}`
-        : `round ${r.n}: rung ${k} not landed (${fails} of ${RUNG_TRIES} tries): ${why}`,
+        ? `round ${r.n}: rung ${k}, made by a split, failed again and is set aside: ${why}`
+        : failure === "harness"
+          ? `round ${r.n}: rung ${k} not landed, the harness's failure (it does not count): ${why}`
+          : next === "rewrite"
+            ? `round ${r.n}: rung ${k} not landed, a check cannot be verified in play; its checks are rewritten next: ${why}`
+            : next === "split"
+              ? `round ${r.n}: rung ${k} not landed again; it is never built a third time as it is: ${why}`
+              : `round ${r.n}: rung ${k} not landed (${fails} of ${RUNG_TRIES} tries): ${why}`,
   );
-  const settled: Rung = {
-    ...rung,
-    fails,
-    status: outcome === "landed" ? "done" : outcome === "set-aside" ? "set-aside" : "todo",
-    why: outcome === "set-aside" ? why : rung.why,
+  const settled: Rung =
+    outcome === "landed"
+      ? { ...withoutNeed(rung), fails, status: "done" }
+      : next === "set-aside"
+        ? { ...setAside(rung, why), fails }
+        : next === undefined
+          ? { ...rung, fails }
+          : { ...rung, fails, need: next, why };
+  const result: RungResult = {
+    rung: rung.id,
+    is: rung.is,
+    checks,
+    outcome,
+    why,
+    checksKey: checksKey(rung),
   };
-  const result: RungResult = { rung: rung.id, is: rung.is, checks, outcome, why };
   return {
     state: {
       ...state,
@@ -349,6 +475,107 @@ const settleRung = (
     record: { ...record, rung: result },
   };
 };
+
+/**
+ * A rung's change as the ladder takes it: a rewrite keeps its id and place with
+ * new checks (and fresh tries); a split puts its rungs in its place, under new
+ * ids, never split again. Null when the ladder has no room for a split.
+ */
+const changeRung = (
+  ladder: Ladder,
+  rung: Rung,
+  rungs: ReadonlyArray<Pick<Rung, "is" | "checks">>,
+): Ladder | null => {
+  if (rungs.length === 1)
+    return {
+      ...ladder,
+      rungs: ladder.rungs.map((x) =>
+        x.id === rung.id
+          ? {
+              ...withoutNeed(x),
+              is: rungs[0]!.is,
+              checks: rungs[0]!.checks,
+              status: "todo",
+              fails: 0,
+              why: "",
+              rewritten: true,
+            }
+          : x,
+      ),
+    };
+  if (ladder.rungs.length - 1 + rungs.length > LADDER_MAX) return null;
+  const first = Math.max(0, ...ladder.rungs.map((x) => x.id)) + 1;
+  const made: Rung[] = rungs.map((x, i) => ({
+    id: first + i,
+    is: x.is,
+    checks: x.checks,
+    status: "todo",
+    fails: 0,
+    back: false,
+    why: "",
+    from: "split",
+  }));
+  const at = ladder.rungs.findIndex((x) => x.id === rung.id);
+  return { ...ladder, rungs: ladder.rungs.toSpliced(at, 1, ...made) };
+};
+
+/**
+ * The ladder's rungs refolded from the rounds that built each one, under the
+ * rules above: what an earlier harness fault or a check the lint now refuses
+ * cost a rung no longer counts. A rung matches its rounds by id, sentence and
+ * checks, since ids repeat across a game's earlier ladders. Landed rungs and
+ * rungs no round built stay as they are; an open rung whose check the lint
+ * refuses waits for its rewrite.
+ */
+export const recount = (ladder: Ladder, rounds: ReadonlyArray<RoundRecord>): Ladder => ({
+  ...ladder,
+  rungs: ladder.rungs.map((rung) => {
+    if (rung.status === "done") return rung;
+    const whats = rung.checks.map((c) => c.what).join("\n");
+    const key = checksKey(rung);
+    // A round built exactly these checks: by their full form, or on an older
+    // record (no key) by sentence and check names, which a rewritten rung never
+    // trusts (its rewrite may keep both and change only how a check is read).
+    const built = rounds.filter(
+      (r) =>
+        r.abandoned !== true &&
+        r.rung !== undefined &&
+        r.rung.rung === rung.id &&
+        r.rung.is === rung.is &&
+        (r.rung.checksKey !== undefined
+          ? r.rung.checksKey === key
+          : rung.rewritten !== true && r.rung.checks.map((c) => c.what).join("\n") === whats),
+    );
+    let next: Rung = { ...withoutNeed(rung), status: "todo", fails: 0, why: "" };
+    if (built.length === 0) next = rung;
+    for (const r of built) {
+      if (r.kept || r.rung?.outcome === "landed") return { ...withoutNeed(rung), status: "done" };
+      const failure = recordedFailure(r, rung);
+      const fails = failure === "game" ? next.fails + 1 : next.fails;
+      const after = afterFailure(
+        next,
+        failure,
+        fails,
+        (r.rung?.checks ?? []).some((c) => !c.pass && recordedUnverified(c, rung)),
+      );
+      const why = r.rung?.why ?? "";
+      next =
+        after === "set-aside"
+          ? { ...setAside(next, why), fails }
+          : after === undefined
+            ? { ...next, fails }
+            : { ...next, fails, need: after, why };
+      if (next.status === "set-aside") break;
+    }
+    if (
+      next.status === "todo" &&
+      next.need === undefined &&
+      rung.checks.some((c) => lintCheck(c) !== null)
+    )
+      return { ...next, need: "rewrite", why: "its checks are ones the run no longer takes" };
+    return next;
+  }),
+});
 
 // A reviewer's one ladder change goes in as the next rung; one open at a time.
 // Why the ladder takes no reviewer's rung now, or null when it does.
@@ -399,7 +626,11 @@ export const DECISION_WAIT_MS = 3 * MIN;
 /** How long a question may wait behind a busy creator chat before the run takes its default. */
 export const DECISION_DELIVERY_MS = 10 * MIN;
 // Answers that send work back once; each needs the creator's notes.
-const ONCE = { style: "redo", prototype: "retry", ladder: "rewrite" } as const;
+const ONCE: Partial<Record<Decision["kind"], string>> = {
+  style: "redo",
+  prototype: "retry",
+  ladder: "rewrite",
+};
 
 const protoFiles = (i: number) => ({
   pitch: `.studio/proto-${i}.md`,
@@ -497,6 +728,45 @@ const ladderDecision = (s: RunState, ladder: Ladder): Decision => ({
   waitMs: DECISION_WAIT_MS,
 });
 
+// The rung a rung decision is about, by the id its decision id carries: a
+// resume while it waits may mark other rungs for a split too.
+const RUNG_DECISION = /-of-rung-(\d+)$/;
+const splitting = (ladder: Ladder | null, d: Decision): Rung | null => {
+  const id = Number(RUNG_DECISION.exec(d.id)?.[1] ?? Number.NaN);
+  return ladder?.rungs.find((x) => x.id === id && x.status === "todo") ?? null;
+};
+
+const rungDecision = (s: RunState, rung: Rung, k: number): Decision => ({
+  id: `${decisionId(s, "rung")}-of-rung-${rung.id}`,
+  kind: "rung",
+  ask: `Rung ${k} of the ladder (${rung.is}) failed in two rounds, and the run never builds it a third time as it is. Split it into smaller steps, change it, or set it aside?`,
+  evidence: [{ label: "Ladder", path: LADDER }],
+  text: `Why it failed: ${rung.why || lastTry(s, rung) || "see the rounds"}`.slice(0, 1500),
+  answers: [
+    {
+      answer: "split",
+      means:
+        "The plan splits it into 2 or 3 smaller rungs from the game as it is; notes, if any, say how.",
+    },
+    {
+      answer: "rewrite",
+      means:
+        "The plan rewrites its checks (and the step itself where needed); notes say what to change.",
+    },
+    {
+      answer: "edit",
+      means:
+        'Replace it: notes hold {"rungs":[{"is":"...","checks":[{"what":"...","how":"..."}]}]}, 1 to 3 rungs with 2 to 4 checks each.',
+    },
+    {
+      answer: "set-aside",
+      means: "Set it aside: the run goes on without it, and the ladder is not done while it is.",
+    },
+  ],
+  fallback: "split",
+  waitMs: DECISION_WAIT_MS,
+});
+
 /** The creator's answer as the run takes it, or why it is refused. */
 export const checkAnswer = (
   d: Decision,
@@ -514,6 +784,11 @@ export const checkAnswer = (
   if (d.kind === "ladder" && a === "edit") {
     const parsed = parseLadder(n);
     if ("error" in parsed) return { error: `The ladder in notes was refused: ${parsed.error}` };
+    return { answer: a, notes: n };
+  }
+  if (d.kind === "rung" && a === "edit") {
+    const parsed = parseRungs(n);
+    if ("error" in parsed) return { error: `The rungs in notes were refused: ${parsed.error}` };
     return { answer: a, notes: n };
   }
   return { answer: a, notes: n.slice(0, 4000) };
@@ -561,6 +836,7 @@ const decide = (
   taken: { readonly answer: string; readonly notes: string; readonly by: Decided["by"] } | null,
   input: Inputs,
   logs: string[],
+  files: Array<{ path: string; text: string }> = [],
 ): RunState => {
   // Anything the checks would refuse is the default: the run never stops on an answer.
   const checked = taken === null ? null : checkAnswer(d, taken.answer, taken.notes);
@@ -596,6 +872,41 @@ const decide = (
       return inRounds
         ? { ...next, task: newRound(next, input.now) }
         : proceed(next, "plan", input.now);
+    }
+    case "rung": {
+      const rung = splitting(s.ladder, d);
+      if (rung === null || s.ladder === null) return { ...s, task: newRound(s, input.now) };
+      if (answer === "split" || answer === "rewrite")
+        return {
+          ...s,
+          task: {
+            _tag: "ladder",
+            phase: answer,
+            thread: null,
+            error: "",
+            rung: rung.id,
+            ...(notes.length > 0 ? { notes } : {}),
+          },
+        };
+      const edited = answer === "edit" ? parseRungs(notes) : null;
+      const changed =
+        edited !== null && "rungs" in edited ? changeRung(s.ladder, rung, edited.rungs) : null;
+      const ladder = changed ?? {
+        ...s.ladder,
+        rungs: s.ladder.rungs.map((x) =>
+          x.id === rung.id
+            ? setAside(
+                x,
+                answer === "edit"
+                  ? "the creator's rungs did not fit the ladder"
+                  : "set aside by the creator",
+              )
+            : x,
+        ),
+      };
+      if (changed !== null) files.push({ path: LADDER, text: ladderFile(changed) });
+      const next = { ...s, ladder };
+      return { ...next, task: newRound(next, input.now) };
     }
     case "prototype": {
       if (answer === "retry") {
@@ -706,17 +1017,20 @@ const blockStep = (id: number, b: Block, game: Roles.RunGame): Step =>
     role: `builder-${b.tag}`,
     title: `studio builder ${b.tag}`,
     thread: b.thread,
-    prompt:
-      b.thread === null
-        ? Roles.builderFirst(b.whole, game, b.direction)
-        : Roles.builderMore(Math.max(1, Math.round(b.msLeft / MIN)), b.direction),
+    // A follow-up on the block's thread is only ever a fix turn, its direction the checks' evidence.
+    prompt: b.thread === null ? Roles.builderFirst(b.whole, game, b.direction) : b.direction,
     capMs: b.msLeft,
     source: true,
     // Each turn's landing captures the folder and measures it against the last.
     since: b.source,
   });
 
-/** A finished turn may need follow-up, but a turn without a game-file change ends the block. */
+/**
+ * A block ends with the builder's own end of its turn: the harness then scores
+ * the captured build, and a failed check is a fix turn for the same builder.
+ * Asking a builder that stopped to "keep going" bought only a closing turn that
+ * changed nothing (17 of them in the measured runs).
+ */
 const advanceBlock = (b: Block, res: RoleDone): { block: Block; over: boolean } => {
   // A turn whose change could not be measured counts as a change.
   const quiet = res.changed === false ? b.quiet + 1 : 0;
@@ -729,7 +1043,7 @@ const advanceBlock = (b: Block, res: RoleDone): { block: Block; over: boolean } 
     turns: b.turns + 1,
     msLeft,
   };
-  return { block, over: quiet >= 1 || res.timedOut || msLeft < FLOOR_MS };
+  return { block, over: true };
 };
 
 // ── Blind comparison. ─────────────────────────────────────────────────────
@@ -771,7 +1085,7 @@ const fnv = (text: string) => {
   return h.toString(16);
 };
 const playerKey = (s: RunState, question: string) =>
-  `input ${Roles.SAMPLE_INPUT_MS} ms, floor ${PLAY_FLOOR_MS} ms, turn ${CAP.judge} ms; player ${s.provider ?? ""}/${s.model ?? ""}/${s.variant ?? ""} via ${s.model === null ? s.creator : ""}; prompt ${fnv(Roles.samplePlay(question, ""))}`;
+  `input ${Roles.SAMPLE_INPUT_MS} ms, turn ${CAP.play} ms; player ${s.provider ?? ""}/${s.model ?? ""}/${s.variant ?? ""} via ${s.model === null ? s.creator : ""}; prompt ${fnv(Roles.samplePlay(question, ""))}`;
 const reusable = (s: Sample) => usable(s) && s.notes.trim().length > 0;
 
 // The blind play a kept round's merge may carry to the new best: the
@@ -894,38 +1208,8 @@ const nodeCounts = (f: BotFact): string =>
     ? ""
     : ` Scene nodes: ${f.perf.nodesStart} at boot, ${f.perf.nodesPeak} at peak, ${f.perf.nodesEnd} at the end; ${f.perf.orphansEnd} orphan nodes (out of the tree, not freed) at the end. A build that reached more of the game is expected to have more nodes; many orphans, or nodes far above what the visible play needs, suggest something spawned and was not freed.`;
 
-// Judges discount a verdict when one build was played much longer than the
-// other. A sample about to write up that played well short of the other
-// side's finished play takes its one extra turn now (the same neutral prompt
-// as the floor's), unless it already had one.
-const CATCH_UP_MS = 20_000;
-const catchUp = (samples: ReadonlyArray<Sample>, logs: string[]): ReadonlyArray<Sample> => {
-  let out = samples;
-  for (const side of ["x", "y"] as const) {
-    const mi = out.findLastIndex((s) => s.side === side);
-    const oi = out.findLastIndex((s) => s.side !== side);
-    if (mi < 0 || oi < 0) continue;
-    const mine = out[mi]!;
-    const other = out[oi]!;
-    if (mine.phase !== "write" || mine.extra) continue;
-    if (other.phase !== "write" && other.phase !== "done") continue;
-    const played = mine.evidence?.nominalMs ?? 0;
-    const theirs = other.evidence?.nominalMs ?? 0;
-    if (
-      theirs - played > Math.max(CATCH_UP_MS, theirs * 0.25) &&
-      played < Roles.SAMPLE_INPUT_MS - CATCH_UP_MS
-    ) {
-      logs.push(
-        `sample ${mine.label} plays on: ${Math.round(played / 1000)} s against ${Math.round(theirs / 1000)} s`,
-      );
-      out = out.with(mi, { ...mine, phase: "more", extra: true });
-    }
-  }
-  return out;
-};
-
-// One play turn of one side's sample: its first play, the floor's one extra
-// turn, or the write-up. Both sides get the same prompt, caps and input budget.
+// One play turn of one side's sample: its play, or the write-up. Both sides get
+// the same prompt, caps and input budget.
 const sampleStep = (
   id: number,
   c: Compare,
@@ -950,27 +1234,14 @@ const sampleStep = (
       title: "studio sample",
       at,
       prompt: Roles.samplePlay(c.question, sampleFile(s)),
-      capMs: CAP.judge,
+      capMs: CAP.play,
       inputCapMs: Roles.SAMPLE_INPUT_MS,
       plays: true,
     });
     return { sample: s, step };
   }
+  // An older record's "more" turn is no longer played: its sample writes up.
   const s = move.current;
-  if (s.phase === "more")
-    return {
-      sample: null,
-      step: role(id, {
-        role: `sample-${s.label}`,
-        title: "studio sample",
-        thread: s.thread,
-        at,
-        prompt: Roles.sampleMore(Math.round((s.evidence?.nominalMs ?? 0) / 1000), sampleFile(s)),
-        capMs: CAP.judge,
-        inputCapMs: Roles.SAMPLE_INPUT_MS,
-        plays: true,
-      }),
-    };
   const step = role(id, {
     role: `sample-${s.label}`,
     title: "studio sample",
@@ -1147,24 +1418,20 @@ const applyCompare = (
         ? {
             ...s,
             thread: res.threadId,
-            // Evidence is cumulative per thread, so the second turn adds to it.
-            ...(res.evidence !== null && res.evidence.nominalMs < PLAY_FLOOR_MS
-              ? { phase: "more" as const, extra: true }
-              : { phase: "write" as const }),
+            phase: "write" as const,
             evidence: res.evidence,
           }
-        : s.phase === "more"
-          ? { ...s, phase: "write", evidence: res.evidence ?? s.evidence }
-          : {
-              ...s,
-              phase: "done",
-              notes: submitted(res, "report")?.report ?? "",
-              evidence: res.evidence ?? s.evidence,
-              sheet: res.sheet,
-            };
+        : // An older record's "more" sample was planned as its write-up: either lands done.
+          {
+            ...s,
+            phase: "done",
+            notes: submitted(res, "report")?.report ?? "",
+            evidence: res.evidence ?? s.evidence,
+            sheet: res.sheet,
+          };
     if (next.phase === "done" && !usable(next))
       logs.push(`play sample ${s.label} lacked usable hands-on evidence`);
-    return { ...c, samples: catchUp(c.samples.with(si, next), logs) };
+    return { ...c, samples: c.samples.with(si, next) };
   }
   const ji = c.judges.findIndex((j) => j.phase !== "done");
   if (ji < 0) return c;
@@ -1397,8 +1664,9 @@ const roundDirection = (state: RunState) => {
  */
 export type Asked =
   | { readonly kind: null }
-  | { readonly kind: Exclude<GameRunSubmissionKind, "checks"> }
-  | { readonly kind: "checks"; readonly look: ReadonlyArray<number> };
+  | { readonly kind: Exclude<GameRunSubmissionKind, "checks" | "rungs"> }
+  | { readonly kind: "checks"; readonly look: ReadonlyArray<number> }
+  | { readonly kind: "rungs"; readonly min: number; readonly max: number };
 
 export const asked = (state: RunState, step: RoleStep): Asked => {
   const t = state.task;
@@ -1415,7 +1683,11 @@ export const asked = (state: RunState, step: RoleStep): Asked => {
         ? { kind: "ladder" }
         : none;
     case "ladder":
-      return { kind: "ladder" };
+      return t.phase === "rewrite"
+        ? { kind: "rungs", min: 1, max: 1 }
+        : t.phase === "split"
+          ? { kind: "rungs", min: 2, max: 3 }
+          : { kind: "ladder" };
     case "ship":
       return t.phase === "write" ? { kind: "ship" } : none;
     case "pick":
@@ -1456,11 +1728,35 @@ export const reopen = (state: RunState, now: number): RunState => ({
  * gets its rounds, and a run whose plan wrote no valid ladder plans again
  * instead of ending at once on the same empty ladder.
  */
-export const resume = (state: RunState): RunState => ({
-  ...state,
-  stallStreak: 0,
-  ladder: state.ladder !== null && state.ladder.rungs.length === 0 ? null : state.ladder,
+/**
+ * A ladder an ended run carries on with (its resume, or a new run's reuse):
+ * rungs refold under today's rules (an earlier harness fault no longer counts),
+ * and a set-aside rung comes back only changed: split first.
+ */
+export const refold = (ladder: Ladder, rounds: ReadonlyArray<RoundRecord>): Ladder => ({
+  ...ladder,
+  rungs: recount(ladder, rounds).rungs.map((x) =>
+    x.status === "set-aside"
+      ? { ...x, status: "todo" as const, need: "split" as const, why: x.why || "it was set aside" }
+      : x,
+  ),
 });
+
+export const resume = (state: RunState): RunState => {
+  const kept = state.ladder !== null && state.ladder.rungs.length === 0 ? null : state.ladder;
+  const ladder = kept === null ? null : refold(kept, state.rounds);
+  // A ladder that landed, judged not shippable on this best: the resume buys
+  // one round led by the review's reasons, which is the creator's ask.
+  const shipAsk =
+    state.ending === "incomplete" &&
+    ladder !== null &&
+    ladderDone(ladder) &&
+    state.shipCheckedOn === state.best &&
+    state.shipNoReasons.length > 0
+      ? [`The ship review said the game is not shippable yet; work on this: ${state.shipNoReasons}`]
+      : [];
+  return { ...state, stallStreak: 0, ladder, steer: [...state.steer, ...shipAsk] };
+};
 
 /**
  * Whether a creator's restore abandons the round a stopped run holds: one
@@ -1637,8 +1933,24 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       const made = compareStep(id, t.cmp, input, state);
       return go(made.step, { ...t, cmp: made.cmp }, made.logs);
     }
-    case "ladder":
-      return act(ladderSpec(t));
+    case "ladder": {
+      if (t.phase !== "rewrite" && t.phase !== "split") return act(ladderSpec(t));
+      const rung = state.ladder?.rungs.find((x) => x.id === t.rung) ?? null;
+      // The rung is gone (a creator's ladder edit): nothing to change.
+      if (rung === null || state.ladder === null)
+        return plan({ ...state, task: newRound(state, input.now) }, input);
+      const k = positionOf(state.ladder, rung);
+      const why = rung.why || lastTry(state, rung) || "see the rung's rounds";
+      return act({
+        role: "plan",
+        title: t.phase === "rewrite" ? "studio rung rewrite" : "studio rung split",
+        prompt:
+          t.phase === "rewrite"
+            ? Roles.rungRewrite(rung, k, why, t.notes ?? "")
+            : Roles.rungSplit(rung, k, why, t.notes ?? ""),
+        capMs: CAP.plan,
+      });
+    }
     case "ship":
       return t.phase === "play"
         ? act({
@@ -1694,8 +2006,32 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       // Polish is the creator's call: with no rung left (the ladder is done, or
       // the plan wrote none) a round runs only on their ask. A run without a
       // ladder ends resumably, and a resume plans one again.
-      if (pick.kind === "finish" && state.steer.length === 0)
-        return pick.why === LADDER_DONE ? end("done") : end("no-ladder", pick.why.slice(0, 300));
+      if (pick.kind === "finish" && state.steer.length === 0) {
+        // A set-aside rung is never done: the run ends resumably, and a resume splits it.
+        if (pick.aside === true) return end("incomplete", pick.why);
+        if (pick.why !== LADDER_DONE) return end("no-ladder", pick.why.slice(0, 300));
+        // A finished ladder is the demo the run set out to build; only a ship
+        // review that plays this best decides whether it is ready.
+        if (state.shipCheckedOn !== state.best)
+          return plan(
+            {
+              ...state,
+              task: {
+                _tag: "ship",
+                n: state.rounds.at(-1)?.round ?? 0,
+                phase: "play",
+                thread: null,
+              },
+            },
+            input,
+          );
+        return state.shipNoReasons.length > 0
+          ? end(
+              "incomplete",
+              `the ship review says not shippable: ${state.shipNoReasons}`.slice(0, 300),
+            )
+          : end("ready");
+      }
       if (pick.kind === "finish") {
         const { direction, repeating } = roundDirection(state);
         const move = direction.slice(0, 300);
@@ -1717,7 +2053,24 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       const { ladder, rung } = pick;
       const k = positionOf(ladder, rung);
       const total = ladder.rungs.length;
-      const from = retryFrom(state, rung);
+      // A rung waiting for its change gets that one plan turn (or, in a Guided
+      // run, the creator's call on a split) before it is built again.
+      if (rung.need !== undefined) {
+        const change: Task =
+          rung.need === "split" && state.profile === "guided"
+            ? { _tag: "decide", decision: rungDecision(state, rung, k) }
+            : { _tag: "ladder", phase: rung.need, thread: null, error: "", rung: rung.id };
+        const planned = plan({ ...state, ladder, task: change }, input);
+        const line =
+          rung.need === "rewrite"
+            ? `round ${n}: rung ${k}'s checks are rewritten first (${rung.why || "a check could not be verified"})`
+            : `round ${n}: rung ${k} failed twice; ${state.profile === "guided" ? "the creator is asked how to change it" : "the plan splits it first"}`;
+        return planned.kind === "step"
+          ? { ...planned, logs: [line, ...(planned.logs ?? [])] }
+          : planned;
+      }
+      const retry = retryFrom(state, rung);
+      const from = retry?.build ?? null;
       const base = Roles.rungDirection(
         rung,
         k,
@@ -1736,9 +2089,18 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         direction,
         repeating: false,
         move,
-        record: { ...r.record, branch: label, move, ...steer },
+        // Set before the block only when the round judges that build again as it
+        // is. No builder reads its direction, so the creator's notes wait for
+        // the next round that has one.
+        ...(retry?.reeval === true ? { candidate: retry.build } : {}),
+        record: { ...r.record, branch: label, move, ...(retry?.reeval === true ? {} : steer) },
       };
-      const logs = [...pick.logs, `round ${n} builds rung ${k} of ${total}: ${rung.is}`];
+      const logs = [
+        ...pick.logs,
+        retry?.reeval === true
+          ? `round ${n} judges rung ${k}'s last build again: its evaluation failed, not its work`
+          : `round ${n} builds rung ${k} of ${total}: ${rung.is}`,
+      ];
       // A ladder round starts from the judged best (or the try it retries); an open
       // pending line stays a build of its own.
       if (state.pending !== null)
@@ -1831,15 +2193,64 @@ export const plan = (state: RunState, input: Inputs): Planned => {
 };
 
 // ── Results. ──────────────────────────────────────────────────────────────
+// The build a round's candidate is, by name: its own, or, when the round judged
+// an earlier round's build again (no block, no capture of its own), that one.
+const builtAs = (s: RunState, r: Round): string => {
+  if (r.block !== null || r.rung === null) return `build ${r.branch}`;
+  const made = s.rounds.findLast((x) => x.build === r.candidate);
+  return made === undefined
+    ? `build ${r.candidate.slice(0, 8)}`
+    : `build ${made.branch} (judged again)`;
+};
+// A round that fails on its state checks, without a tester or judges.
+const failedOnChecks = (rung: Rung, stateChecks: Round["stateChecks"]): Round["checks"] =>
+  rung.checks.map((c, k) => {
+    const scored = stateChecks.find((x) => x.k === k);
+    return {
+      what: c.what,
+      pass: scored?.pass ?? false,
+      evidence: scored?.evidence ?? "not tested: the state checks failed first",
+    };
+  });
+
 const noteOf = (r: Round, add: string) => `${r.record.note ?? ""} ${add}`.trim();
 
-// Every round writes a record or it doesn't count; three stalls in a row end the run.
+/** How the pause after two rounds the harness could not judge begins its reason. */
+export const UNJUDGED_PAUSE =
+  "two rounds in a row could not be judged, so the run paused before it judged a third: ";
+
+/**
+ * What a round that did not land does to the run beyond its rung: only the
+ * game's failure is a stall; the harness's failing twice in a row pauses the
+ * run resumably (a broken evaluation would otherwise repeat, at the game's
+ * cost); a check's failure gets its rewrite.
+ */
+const afterRound = (
+  before: RunState,
+  next: RunState,
+  record: RoundRecord,
+  why: string,
+): Pick<RunState, "stallStreak" | "ending" | "lastFailure"> => {
+  if (record.kept) return { stallStreak: 0, ending: next.ending, lastFailure: next.lastFailure };
+  const failure = record.failure ?? "game";
+  const twice = failure === "harness" && before.rounds.at(-1)?.failure === "harness";
+  return {
+    stallStreak: failure === "game" ? before.stallStreak + 1 : before.stallStreak,
+    ending: twice && next.ending === null ? "tool-failed" : next.ending,
+    lastFailure: twice
+      ? `${UNJUDGED_PAUSE}${why}`.slice(0, 300)
+      : `round ${record.round}: ${why}`.slice(0, 300),
+  };
+};
+
+// Every round writes a record or it doesn't count; three of the game's own stalls in a row end the run.
 const stallRound = (
   state: RunState,
   r: Round,
   note: string,
   now: number,
   logs: string[],
+  failure: Failure,
 ): RunState => {
   logs.push(`round ${r.n}: ${note}`);
   const settled = settleRung(
@@ -1849,6 +2260,7 @@ const stallRound = (
       ...r.record,
       note: noteOf(r, note),
       durationMs: now - r.startedAt,
+      failure,
       ...(r.candidate.length > 0 ? { build: r.candidate } : {}),
     },
     logs,
@@ -1856,11 +2268,10 @@ const stallRound = (
   const next = {
     ...settled.state,
     rounds: [...state.rounds, settled.record],
-    stallStreak: state.stallStreak + 1,
-    lastFailure: `round ${r.n}: ${note}`,
     stage: `round-${r.n}`,
   };
-  return { ...next, task: newRound(next, now) };
+  const after = { ...next, ...afterRound(state, next, settled.record, note) };
+  return { ...after, task: newRound(after, now) };
 };
 
 // A budget end inside a round keeps the round's work as a build of its own and
@@ -1981,6 +2392,7 @@ export const applyResult = (state: RunState, done: Step, res: Measured, input: I
         res.kind === "decided" ? { answer: res.answer, notes: res.notes, by: res.by } : null,
         input,
         logs,
+        files,
       );
       // The run holds an edited ladder; the file is what the creator and every role read.
       const taken = next.decided.at(-1);
@@ -2169,20 +2581,64 @@ export const applyResult = (state: RunState, done: Step, res: Measured, input: I
       if (t.phase === "play" && res.kind === "done")
         return out({ ...s, task: { ...t, phase: "write", thread: res.threadId } });
       const ship = submitted(res, "ship");
-      const yes = ship?.ship === true;
-      // A creator note that arrived during the ship review still gets its round.
-      if (yes && s.steer.length === 0) return out({ ...s, ending: "ready" });
       const reasons = (ship?.reasons ?? "").trim().slice(0, 500);
-      // The run's goal was the ladder: it ends here with the review's reasons, and
-      // polish runs only when the creator asks (a note sent during the review does).
+      // A review that gave no verdict judged nothing: the next ship check plays this best again.
+      const checked: RunState =
+        ship === null
+          ? s
+          : { ...s, shipCheckedOn: s.best, shipNoReasons: ship.ship ? "" : reasons };
+      // A creator note that arrived during the ship review still gets its round.
+      if (s.steer.length > 0) return out({ ...checked, task: newRound(checked, now) });
+      if (ship?.ship === true) return out({ ...checked, ending: "ready" });
+      // Not shippable is not done: the run ends resumably with the review's
+      // reasons, and a resume leads one round with them.
+      logs.push(`ship review: ${ship === null ? "no verdict" : "not shippable"}`);
       return out({
-        ...s,
-        shipNoReasons: reasons,
-        task: newRound(s, now),
-        ...(s.steer.length === 0 ? { ending: "done" } : {}),
+        ...checked,
+        ending: "incomplete",
+        lastFailure:
+          ship === null
+            ? "the ship review gave no verdict; resume to play it again"
+            : `the ship review says not shippable: ${reasons}`.slice(0, 300),
+        task: newRound(checked, now),
       });
     }
     case "ladder": {
+      if (t.phase === "rewrite" || t.phase === "split") {
+        // One plan turn, never repeated: a change that does not fit sets the rung aside.
+        const rung = s.ladder?.rungs.find((x) => x.id === t.rung) ?? null;
+        if (rung === null || s.ladder === null) return out({ ...s, task: newRound(s, now) });
+        const sub = submitted(res, "rungs");
+        const parsed =
+          sub === null
+            ? { error: "no rungs were submitted" }
+            : rungsOf(sub.rungs, t.phase === "rewrite" ? { min: 1, max: 1 } : { min: 2, max: 3 });
+        const changed = "rungs" in parsed ? changeRung(s.ladder, rung, parsed.rungs) : null;
+        const k = positionOf(s.ladder, rung);
+        const what =
+          t.phase === "rewrite" ? "its checks could not be rewritten" : "it could not be split";
+        const ladder = changed ?? {
+          ...s.ladder,
+          rungs: s.ladder.rungs.map((x) =>
+            x.id === rung.id
+              ? setAside(
+                  x,
+                  `${what}: ${"error" in parsed ? parsed.error : `the ladder has no room past ${LADDER_MAX} rungs`}`,
+                )
+              : x,
+          ),
+        };
+        logs.push(
+          changed === null
+            ? `rung ${k}: ${what}; set aside`
+            : t.phase === "rewrite"
+              ? `rung ${k}: checks rewritten`
+              : `rung ${k}: split into ${changed.rungs.length - s.ladder.rungs.length + 1} rungs`,
+        );
+        if (changed !== null) files.push({ path: LADDER, text: ladderFile(changed) });
+        const next = { ...s, ladder };
+        return out({ ...next, task: newRound(next, now) });
+      }
       // A rewrite the creator asked for, as the plan stage's rewrite: a ladder of
       // the wrong shape (or none) keeps the reviewed ladder, and the creator is
       // asked again; there is no fix turn that would drop their notes.
@@ -2259,6 +2715,7 @@ const applyRound = (
           `stalled (its base build could not be restored: ${g!.detail})`.slice(0, 300),
           now,
           logs,
+          "harness",
         );
       if (r.repeating)
         logs.push(
@@ -2276,6 +2733,21 @@ const applyRound = (
       if (continued) logs.push(`round ${r.n}: continues the last try's work`);
       const round = { ...r, base: g!.sha, continued };
       if (ms < FLOOR_MS) return leaveRound({ ...s, pending }, round);
+      // A build whose evaluation failed is judged again as it is: no builder turn.
+      if (r.rung !== null && r.candidate !== "")
+        return {
+          ...s,
+          pending,
+          task: {
+            ...round,
+            phase: "boot",
+            continued: true,
+            record: {
+              ...r.record,
+              note: noteOf(r, "judged again as it is: the last round's evaluation failed"),
+            },
+          },
+        };
       const direction = Roles.roundDirection(r.direction, r.repeating, lane);
       // Only the notes this round read are used up; later ones wait for the next.
       return {
@@ -2293,6 +2765,14 @@ const applyRound = (
     case "retry": {
       if (res.kind !== "done")
         return at({ phase: r.phase === "block" ? "commit" : "retry-commit" });
+      // A fix turn that changed nothing leaves the checks as they failed: no re-score.
+      if (r.fixes > 0 && res.changed === false) {
+        const rung = rungOf(s, r);
+        if (rung !== null) {
+          logs.push(`round ${r.n}: the fix turn changed nothing; the round fails on its checks`);
+          return at({ phase: "restore", checks: failedOnChecks(rung, r.stateChecks) });
+        }
+      }
       const stepped = advanceBlock(r.block!, res);
       if (stepped.block.quiet >= 1)
         logs.push(`builder ${r.block!.tag}: done (a turn changed no game files)`);
@@ -2351,6 +2831,7 @@ const applyRound = (
         r.record.note ?? "stalled",
         now,
         logs,
+        "game",
       );
     case "boot": {
       // Only a boot verdict moves the phase on; nothing else measured the boot.
@@ -2383,7 +2864,14 @@ const applyRound = (
       if (failed.length === 0) return at({ phase: "tester-facts", stateChecks });
       // The same builder fixes what the checks showed, in this round, while its
       // context is warm: a failed fact costs minutes, not the round.
-      if (r.fixes < MAX_FIXES && r.block !== null && remaining(s, now) > ROUND_RESERVE_MS) {
+      // A check no build can pass (it cannot be verified in play) buys no fix turn.
+      const fixable = failed.some((c) => !c.evidence.startsWith(CANNOT_VERIFY));
+      if (
+        fixable &&
+        r.fixes < MAX_FIXES &&
+        r.block !== null &&
+        remaining(s, now) > ROUND_RESERVE_MS
+      ) {
         logs.push(
           `round ${r.n}: fix turn ${r.fixes + 1} of ${MAX_FIXES} for the failed state checks`,
         );
@@ -2393,7 +2881,7 @@ const applyRound = (
           fixes: r.fixes + 1,
           block: {
             ...r.block,
-            direction: Roles.fixChecks(failed, rung, gameOf(s)),
+            direction: Roles.fixChecks(failed, rung),
             msLeft: FIX_MS,
             quiet: 0,
             turns: Math.max(1, r.block.turns),
@@ -2401,16 +2889,8 @@ const applyRound = (
         });
       }
       // Out of fix turns: the round fails on its facts, without a tester or judges.
-      const checks = rung.checks.map((c, k) => {
-        const scored = stateChecks.find((x) => x.k === k);
-        return {
-          what: c.what,
-          pass: scored?.pass ?? false,
-          evidence: scored?.evidence ?? "not tested: the state checks failed first",
-        };
-      });
       logs.push(`round ${r.n}: the state checks still fail after ${r.fixes} fix turns`);
-      return at({ phase: "restore", stateChecks, checks });
+      return at({ phase: "restore", stateChecks, checks: failedOnChecks(rung, stateChecks) });
     }
     case "reject":
       return stallRound(
@@ -2419,6 +2899,7 @@ const applyRound = (
         r.record.note ?? "boot failed",
         now,
         logs,
+        "game",
       );
     case "tester-facts":
       return at({ phase: "tester", jev: res.kind === "facts" && res.jev });
@@ -2436,8 +2917,17 @@ const applyRound = (
       if (sub !== null && notes.length > 20)
         files.push({ path: `.studio/tester-${r.n}.md`, text: `${notes}\n` });
       // A submission's checks are held over a follow-up turn that submits none.
+      // A tester that never submitted judged nothing: each look check is the
+      // role's missing result (the harness's), and the state checks keep the
+      // harness's own scores.
       const submittedChecks =
-        rung === null ? [] : sub !== null ? submittedChecksOf(sub, rung) : r.checks;
+        rung === null
+          ? []
+          : sub !== null
+            ? submittedChecksOf(sub, rung)
+            : r.checks.length > 0
+              ? r.checks
+              : submittedChecksOf({ _tag: "checks", checks: [], notes: "" }, rung);
       // The bot service's record of the tester's thread, which spans its
       // play, write and duty turns; the game folder's copy decides nothing.
       if (r.phase === "tester-write" && res.kind === "done" && res.bots === 0) {
@@ -2479,11 +2969,7 @@ const applyRound = (
               : {
                   ...check,
                   pass: false,
-                  evidence:
-                    `no play on record for the tester (no explore input, no bot run); ${check.evidence}`.slice(
-                      0,
-                      400,
-                    ),
+                  evidence: `${NO_PLAY}; ${check.evidence}`.slice(0, 400),
                 },
           );
       if (rung !== null && !played && declared.some((check, k) => check.pass && !isState(k)))
@@ -2504,7 +2990,10 @@ const applyRound = (
       const rung = rungOf(s, r);
       if (rung !== null && !checksPassed(r, rung)) {
         const why = `rung checks failed (${checkLine(r.checks) || "none verified"})`;
-        logs.push(`round ${r.n}: ${why}; not judged, candidate kept as build ${r.branch}`);
+        const failure = checksFailure(r.checks);
+        logs.push(
+          `round ${r.n}: ${why}; not judged, candidate kept as ${builtAs(s, r)}${failure === "game" ? "" : ` (the ${failure === "check" ? "check's" : "harness's"} failure, not the game's)`}`,
+        );
         return {
           ...s,
           lastFailure: `round ${r.n}: ${why}`,
@@ -2512,8 +3001,8 @@ const applyRound = (
             ...r,
             phase: "outcome",
             outcome: "drop",
-            reviewed: `the current best (this round's rung failed its checks; its candidate is set aside as build ${r.branch})`,
-            record: { ...r.record, note: noteOf(r, `${why}; not judged`) },
+            reviewed: `the current best (this round's rung failed its checks; its candidate is set aside as ${builtAs(s, r)})`,
+            record: { ...r.record, note: noteOf(r, `${why}; not judged`), failure },
           },
         };
       }
@@ -2594,7 +3083,8 @@ const applyRound = (
             reviewed: `the candidate in the folder (not kept: ${g!.detail})`.slice(0, 300),
             record: {
               ...r.record,
-              note: noteOf(r, `not kept (${g!.detail}); its build stays ${r.branch}`.slice(0, 200)),
+              note: noteOf(r, `not kept (${g!.detail}); it stays ${builtAs(s, r)}`.slice(0, 200)),
+              failure: "harness",
             },
           },
         };
@@ -2689,11 +3179,11 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
       lastFailure: `round ${r.n}: rejected, best won both orders`,
       task: round(
         { outcome: "drop", reviewed: "the current best (last candidate rejected; best won both)" },
-        { note: noteOf(r, "rejected: best won both orders") },
+        { note: noteOf(r, "rejected: best won both orders"), failure: "game" },
       ),
     };
   if (kind === "unjudged") {
-    logs.push(`round ${r.n}: no judge verdicts after retry; candidate kept as build ${r.branch}`);
+    logs.push(`round ${r.n}: no judge verdicts after retry; candidate kept as ${builtAs(s, r)}`);
     const why = verdicts[0]!.verdict === "NONE" ? verdicts[0]!.reason : verdicts[1]!.reason;
     return {
       ...s,
@@ -2702,11 +3192,14 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
       task: round(
         {
           outcome: "drop",
-          reviewed: `the current best (last round unjudged; its candidate is set aside as build ${r.branch})`,
+          reviewed: `the current best (last round unjudged; its candidate is set aside as ${builtAs(s, r)})`,
         },
         {
           unjudged: true,
           note: noteOf(r, "no judge verdicts after retry; candidate kept as a build"),
+          // One judge preferring the old build is a verdict on the game; only a
+          // gate that could not judge (no input on record, no verdict at all) is the harness's.
+          failure: gate === null && favoursBest ? "game" : "harness",
         },
       ),
     };
@@ -2715,12 +3208,10 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
   // later rounds refine this candidate against the same judged best.
   const split = `${verdicts[0]!.verdict}/${verdicts[1]!.verdict}`;
   const pending = advancePending(s.pending, r.branch, r.n, verdicts, r.candidate);
-  logs.push(
-    `round ${r.n}: inconclusive ${split}; best stands, candidate kept as build ${r.branch}`,
-  );
+  logs.push(`round ${r.n}: inconclusive ${split}; best stands, candidate kept as ${builtAs(s, r)}`);
   const note = noteOf(
     r,
-    `inconclusive (${split}); best stands, candidate kept as build ${r.branch}${pending === null ? "; pending dropped after 3 inconclusive rounds" : ""}`,
+    `inconclusive (${split}); best stands, candidate kept as ${builtAs(s, r)}${pending === null ? "; pending dropped after 3 inconclusive rounds" : ""}`,
   );
   return {
     ...s,
@@ -2728,9 +3219,9 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
     task: round(
       {
         outcome: "hold",
-        reviewed: `the current best (last round inconclusive ${split}; its candidate is set aside as build ${r.branch}; the top flaw below is still open)`,
+        reviewed: `the current best (last round inconclusive ${split}; its candidate is set aside as ${builtAs(s, r)}; the top flaw below is still open)`,
       },
-      { inconclusive: true, note },
+      { inconclusive: true, note, failure: "game" },
     ),
   };
 };
@@ -2769,7 +3260,7 @@ const finishRound = (
   // anything else (rejected, unjudged, inconclusive, failed checks, a failed
   // merge) is one more stall, with its reason for a "stalled" ending.
   const kept = settled.record.kept;
-  const state: RunState = {
+  const rounded: RunState = {
     ...settled.state,
     ladder: r.rung === null || ladder === null ? ladder : insertRung(ladder, change, r.n, logs),
     rounds: [...s.rounds, settled.record],
@@ -2777,25 +3268,30 @@ const finishRound = (
     next,
     lastDirection: r.direction,
     ending,
-    stallStreak: kept ? 0 : s.stallStreak + 1,
-    lastFailure: kept
-      ? s.lastFailure
-      : `round ${r.n}: ${settled.record.note || "nothing landed"}`.slice(0, 300),
+  };
+  const state: RunState = {
+    ...rounded,
+    ...afterRound(s, rounded, settled.record, settled.record.note || "nothing landed"),
+    ...(kept ? { lastFailure: s.lastFailure } : {}),
   };
   const ship: RunState["task"] = { _tag: "ship", n: r.n, phase: "play", thread: null };
-  // A stalled run ends at the next round's start, before any ship check.
-  if (ending !== null || state.steer.length > 0 || state.stallStreak >= STALL_LIMIT)
+  // A stalled or paused run ends at the next round's start, before any ship check.
+  if (state.ending !== null || state.steer.length > 0 || state.stallStreak >= STALL_LIMIT)
     return { ...state, task: newRound(state, now) };
   // A finished ladder is the demo the run set out to build: the ship check plays
-  // it before any polish is paid for.
-  if (r.rung !== null && state.ladder !== null && ladderDone(state.ladder)) {
+  // this best before any polish is paid for.
+  if (
+    r.rung !== null &&
+    state.ladder !== null &&
+    ladderDone(state.ladder) &&
+    state.shipCheckedOn !== state.best
+  ) {
     logs.push(`round ${r.n}: the ladder is done; the ship check plays the game`);
     return { ...state, task: ship };
   }
   return { ...state, task: newRound(state, now) };
 };
 
-// Every rung landed, or came back once and was set aside again.
+// Every rung landed: a set-aside rung is never done.
 const ladderDone = (ladder: Ladder): boolean =>
-  ladder.rungs.length > 0 &&
-  ladder.rungs.every((x) => x.status === "done" || (x.status === "set-aside" && x.back));
+  ladder.rungs.length > 0 && ladder.rungs.every((x) => x.status === "done");

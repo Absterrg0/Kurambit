@@ -58,7 +58,11 @@ export const currentStep = (state: State.RunState): string => {
     case "ladder":
       return t.phase === "revise"
         ? "Plan · rewriting the ladder with the creator's notes"
-        : "Plan · writing the ladder";
+        : t.phase === "rewrite"
+          ? "Plan · rewriting a step's checks that could not be verified"
+          : t.phase === "split"
+            ? "Plan · splitting a step that failed twice"
+            : "Plan · writing the ladder";
     case "ship":
       return `Ship review after round ${t.n}`;
     case "leave":
@@ -72,6 +76,7 @@ export const DECISION_LABEL: Record<State.Decision["kind"], string> = {
   style: "the vision and look",
   prototype: "which prototype to keep",
   ladder: "the ladder",
+  rung: "a ladder step that failed twice",
 };
 
 // When a note takes effect: a round's direction is fixed once it starts.

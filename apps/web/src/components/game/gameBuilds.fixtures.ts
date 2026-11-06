@@ -80,7 +80,7 @@ export const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     source: { _tag: "saved", runId: "run-1", label: "The game before restoring round 2" },
     summary: "The game before restoring round 2",
     files: [],
-    fileCount: 0,
+    fileCount: null,
     available: false,
     noPlay: "Unity builds cannot be played here yet.",
     noRestore: "This build's history was pruned.",

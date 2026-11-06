@@ -285,3 +285,39 @@ export const skilledFact = (
     return value(final["result"], null);
   return value("no-ending", status);
 };
+
+/** A build captured before a turn began: a turn checkpoint (its thread and turn) or a run's build. */
+export interface EarlierBuild {
+  readonly id: string;
+  readonly at: string;
+  readonly thread: string | null;
+  readonly turn: number | null;
+}
+/**
+ * What a turn's changes are counted from, when T3's own list would be wrong:
+ * the newest build of the game captured after the thread's previous turn and
+ * before this turn began (the run's, another chat's). Null keeps T3's list,
+ * which is exact for a thread's first turn (T3 captures its baseline as the
+ * turn starts) and the best known when the previous turn is not among the
+ * builds read (a page ends there): no base older than T3's proves anything.
+ */
+export const turnChangeBase = (
+  turn: {
+    readonly id: string;
+    readonly startedAt: string;
+    readonly thread: string;
+    readonly turn: number;
+  },
+  earlier: ReadonlyArray<EarlierBuild>,
+): string | null => {
+  if (turn.turn <= 1) return null;
+  const previous = earlier.find((e) => e.thread === turn.thread && e.turn === turn.turn - 1);
+  if (previous === undefined) return null;
+  const base = earlier
+    .filter((e) => e.id !== turn.id && e.at > previous.at && e.at <= turn.startedAt)
+    .reduce<EarlierBuild | null>(
+      (newest, e) => (newest === null || e.at > newest.at ? e : newest),
+      null,
+    );
+  return base === null ? null : base.id;
+};

@@ -97,5 +97,6 @@ export const ladderRefs = (state: RunState): GameRunRungRef[] => {
     current: rung.id === current,
     why: rung.why,
     from: rung.from,
+    ...(rung.need === undefined ? {} : { need: rung.need }),
   }));
 };

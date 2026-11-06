@@ -99,7 +99,8 @@ export const GameBuild = Schema.Struct({
   summary: Schema.String,
   /** At most 8, most changed first. */
   files: Schema.Array(GameBuildFile),
-  fileCount: NonNegativeInt,
+  /** Null when the change was not counted (no build before it to diff with): never shown as 0. */
+  fileCount: Schema.NullOr(NonNegativeInt),
   /** False when its ref was pruned: listed for history, no play or restore. */
   available: Schema.Boolean,
   /** Why it cannot be played here (an engine with no Web build), else null. */

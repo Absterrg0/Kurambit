@@ -458,6 +458,7 @@ const DECISION: Record<GameRunDecision["kind"], string> = {
   style: "the vision and look",
   prototype: "which prototype to keep",
   ladder: "the ladder",
+  rung: "a step that failed twice",
 };
 
 /** What a Guided run waits for. Static: the deadline is a time of day, not a countdown. */
@@ -480,6 +481,7 @@ const ENDING: Record<string, string> = {
   failed: "Failed",
   stalled: "Stalled",
   "no-ladder": "No ladder",
+  incomplete: "Not done",
   done: "Done",
   "usage-limit": "Usage limit",
   "provider-down": "Provider down",
@@ -530,7 +532,15 @@ function RunLadder({ rungs }: { rungs: ReadonlyArray<GameRunRungRef> }) {
               </span>
               {rung.why.length > 0 ? (
                 <span className="block text-2xs text-muted-foreground">
-                  {rung.status === "set-aside" ? "Set aside: " : "Added by the reviewer: "}
+                  {rung.status === "set-aside"
+                    ? "Set aside: "
+                    : rung.need === "rewrite"
+                      ? "Its checks are rewritten next: "
+                      : rung.need === "split"
+                        ? "Split into smaller steps next: "
+                        : rung.from === "reviewer"
+                          ? "Added by the reviewer: "
+                          : ""}
                   {rung.why}
                 </span>
               ) : null}

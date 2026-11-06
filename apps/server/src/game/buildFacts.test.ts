@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { GameOperationError, type GameBotRunResult } from "@kurambit/contracts";
 
-import { faultOf, skilledFact, tierFact, winnableOf } from "./buildFacts.ts";
+import { faultOf, skilledFact, tierFact, turnChangeBase, winnableOf } from "./buildFacts.ts";
 
 const run = (
   state: string,
@@ -119,5 +119,29 @@ describe("skilledFact", () => {
       status: "measured",
       value: { ending: "no-ending", botWord: "done" },
     });
+  });
+});
+
+// A chat turn's build lists its own changes, never the run's work between two turns.
+describe("turnChangeBase", () => {
+  const turn = { id: "t2", startedAt: "2026-11-06T12:00:00.000Z", thread: "chat", turn: 2 };
+  const t1 = { id: "t1", at: "2026-11-06T10:00:00.000Z", thread: "chat", turn: 1 };
+  it("keeps T3's own diff when the thread's previous turn is the newest build before it", () => {
+    expect(turnChangeBase(turn, [t1])).toBeNull();
+  });
+  it("keeps T3's list for a thread's first turn, and when its previous turn was not read", () => {
+    const restoreBefore = {
+      id: "before",
+      at: "2026-11-06T11:00:00.000Z",
+      thread: null,
+      turn: null,
+    };
+    expect(turnChangeBase({ ...turn, turn: 1 }, [restoreBefore])).toBeNull();
+    expect(turnChangeBase(turn, [restoreBefore])).toBeNull();
+  });
+  it("counts from the run's build when the run changed the folder between the two turns", () => {
+    const round = { id: "r3", at: "2026-11-06T11:00:00.000Z", thread: null, turn: null };
+    const later = { id: "r4", at: "2026-11-06T12:30:00.000Z", thread: null, turn: null };
+    expect(turnChangeBase(turn, [t1, round, later])).toBe("r3");
   });
 });

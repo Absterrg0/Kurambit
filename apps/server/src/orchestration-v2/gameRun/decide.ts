@@ -117,6 +117,8 @@ const ENDINGS: Readonly<
   stalled: { resumable: true, exports: true },
   // A resume plans the ladder again.
   "no-ladder": { resumable: true, exports: true },
+  // A resume splits each set-aside rung, or leads one round with the ship review's reasons.
+  incomplete: { resumable: true, exports: true },
   stopped: { resumable: true, exports: false },
   failed: { resumable: true, exports: false },
   "low-memory": { resumable: true, exports: false },
@@ -132,7 +134,7 @@ export const RESUMABLE = endingsWhere((e) => e.resumable);
 /** Endings whose finish exports nothing. */
 export const NO_EXPORT = endingsWhere((e) => !e.exports);
 // A run with no rung left to build comes back for a creator's note, one round per note.
-const REOPENED_BY_NOTE: ReadonlySet<string> = new Set(["done", "ready", "no-ladder"]);
+const REOPENED_BY_NOTE: ReadonlySet<string> = new Set(["done", "ready", "no-ladder", "incomplete"]);
 
 const isEnding = Schema.is(GameRunEnding);
 
@@ -163,6 +165,7 @@ export const toState = (
   stallStreak: run.stallStreak,
   lastFailure: run.lastFailure,
   shipNoReasons: run.shipNoReasons,
+  shipCheckedOn: run.shipCheckedOn ?? "",
   rounds: rounds.map((r) => r.round).toSorted((a, b) => a.round - b.round),
   threads,
   pending: run.pending,
@@ -219,6 +222,7 @@ const fromState = (run: GameRun, state: State.RunState, at: string): GameRun => 
     stallStreak: state.stallStreak,
     lastFailure: state.lastFailure,
     shipNoReasons: state.shipNoReasons,
+    ...(state.shipCheckedOn === "" ? {} : { shipCheckedOn: state.shipCheckedOn }),
     ledger: state.next,
     lastDirection: state.lastDirection,
     pickNotes: state.pickNotes,
@@ -580,6 +584,10 @@ export const settling = (run: GameRun) =>
       ? refuse("restoring", `A build of run ${run.id} is being restored; try again once it is.`)
       : null;
 
+/** Whether two briefs ask for the same game: the same words, whatever the spacing. */
+export const sameBrief = (a: string, b: string): boolean =>
+  a.trim().replace(/\s+/g, " ") === b.trim().replace(/\s+/g, " ");
+
 const start = (work: Work, command: Command<"game-run.start">) => {
   const prior = work.records.runs.at(-1) ?? null;
   if (prior !== null && prior.status !== "ended")
@@ -604,10 +612,21 @@ const start = (work: Work, command: Command<"game-run.start">) => {
     },
     { rounds: work.records.rounds.map((r) => r.round), pending: null },
   );
+  // A new run on the same brief builds the ladder the game already has, refolded
+  // under today's rules; a new brief plans one for it.
+  const rounds = fresh.rounds.toSorted((a, b) => a.round - b.round);
+  const reused =
+    prior !== null &&
+    prior.ladder !== null &&
+    prior.ladder.rungs.length > 0 &&
+    sameBrief(prior.brief, command.brief)
+      ? Policy.refold(prior.ladder, rounds)
+      : null;
   // Stages an earlier run on this game finished are not redone.
   const state: State.RunState = {
     ...fresh,
-    rounds: fresh.rounds.toSorted((a, b) => a.round - b.round),
+    rounds,
+    ladder: reused,
     // A game an earlier run built continues from what it is; stages a run on
     // this thread finished are not redone either.
     stage: command.stage ?? prior?.stage ?? fresh.stage,
@@ -966,6 +985,16 @@ const submissionProblem = (
         return { reason: "invalid-submission", message: `Check ${check} is scored twice.` };
       seen.add(check);
     }
+    const both = submission.checks.find((c) => c.unverifiable === true && c.pass);
+    if (both !== undefined)
+      return {
+        reason: "invalid-submission",
+        message: `Check ${both.check} cannot pass and be unverifiable: give pass false when it cannot be seen in play.`,
+      };
+  }
+  if (submission._tag === "rungs" && asked.kind === "rungs") {
+    const rungs = State.rungsOf(submission.rungs, asked);
+    if ("error" in rungs) return { reason: "invalid-submission", message: rungs.error };
   }
   if (submission._tag === "ladder") {
     const ladder = State.ladderOf(submission.rungs);
