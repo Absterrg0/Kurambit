@@ -214,7 +214,9 @@ its right.
   A game made from the starter opens on its title screen: choose Play there, or press Enter.
   Opening **Run** or **Builds** keeps the game running; it pauses and mutes while hidden
   and resumes when you come back. Only **Stop**, a rebuild that lands a new build, or pressing Play
-  again starts a new session.
+  again starts a new session. In a three.js game, each chat turn that changes the game builds it
+  and plays the new build by itself. If you are in the game when it lands, the Stage waits and
+  offers **Play** instead of restarting you.
 - **Rebuild** always exports a fresh web build. When the game's files changed after the last build,
   the stage says so and offers to rebuild.
 - **Stop** ends only the processes Kurambit

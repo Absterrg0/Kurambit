@@ -3,9 +3,12 @@
 > For maintainers. The code lives in `apps/server/src/game/`, `apps/server/src/mcp/toolkits/game/`,
 > `packages/contracts/src/game.ts`, `apps/web/src/components/game/`.
 
-One brief produces a game through a harness-run production run, and the harness — not the model — owns every
-check that matters: it plays every build with a separate session, compares builds blind so a worse
-one never lands, and keeps working until a ship review says yes, it stalls, or the creator stops it.
+A new game is a chat: its first message is the brief, and every turn that changes the game is a
+build (the turn's T3 checkpoint). On engines whose profile has `turnLoop`, the harness plays that
+build on the Stage and measures its facts in the background. Undo restores the build it was made
+from (`base`). The production run is an older, separate loop. It stays until phase 3 replaces it
+with "keep going" on top of the same turns. The harness, not the model, owns every check that
+matters.
 
 ## Decisions that span the services
 
