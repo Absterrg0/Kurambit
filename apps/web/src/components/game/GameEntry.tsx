@@ -10,7 +10,6 @@ import {
   ModelSelection,
   type EnvironmentId,
   type GameEngineId,
-  type GameRunProfile,
   type GameToolStatus,
 } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
@@ -43,7 +42,6 @@ import { gameEnvironment } from "../../state/game";
 import { engineToolFor } from "./gameStageLogic";
 import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import { GameToolLink } from "./GameToolLink";
-import { GAME_RUN_PROFILE_HINT, GameRunProfileToggle } from "./GameRunProfileToggle";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { gameSlug } from "./gameLibrary.logic";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -138,7 +136,6 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
   const [brief, setBrief] = useState(draft?.brief ?? "");
   const [artDirection, setArtDirection] = useState("");
-  const [profile, setProfile] = useState<GameRunProfile>("guided");
   const { toolchain, ready: engineReady } = useEngineReadiness(environmentId);
   const [chosenEngine, setEngine] = useState<GameEngineId | null>(draft?.engine ?? null);
   const engine = chooseEngine(chosenEngine, engineReady);
@@ -237,7 +234,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
             <DialogTitle>{isCreate ? "Name your game" : "Open game"}</DialogTitle>
             <DialogDescription>
               {isCreate
-                ? "Every game starts from its engine's blank project: Godot, Unity or three.js."
+                ? "Your agent builds a first playable version in a few minutes; every message after that makes it better."
                 : "Open a game folder containing game.json."}
             </DialogDescription>
           </DialogHeader>
@@ -294,13 +291,6 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                     disabled={busy}
                   />
                 </label>
-                <div className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium">How the run decides</span>
-                  <GameRunProfileToggle value={profile} onChange={setProfile} disabled={busy} />
-                  <span className="text-xs text-muted-foreground">
-                    {GAME_RUN_PROFILE_HINT[profile]}
-                  </span>
-                </div>
                 <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5">
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
                     <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
