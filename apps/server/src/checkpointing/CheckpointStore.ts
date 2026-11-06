@@ -12,6 +12,7 @@ import type {
   VcsCheckpointOps,
   VcsCheckpointRefEntry,
   VcsListCheckpointRefsInput,
+  VcsResolveTreesInput,
 } from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
@@ -114,6 +115,14 @@ export class CheckpointStore extends Context.Service<
     readonly updateCheckpointRef: (
       input: UpdateCheckpointRefInput,
     ) => Effect.Effect<boolean, CheckpointStoreError>;
+
+    /**
+     * The tree id of a folder in each of many checkpoints, in one call: what
+     * the folder held, as a content key. Null where a checkpoint or the folder is gone.
+     */
+    readonly resolveTrees: (
+      input: VcsResolveTreesInput,
+    ) => Effect.Effect<ReadonlyArray<string | null>, CheckpointStoreError>;
 
     /** Writes a checkpoint's files into a folder of their own; false when it is gone. */
     readonly materializeCheckpoint: (
@@ -227,6 +236,13 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.materializeCheckpoint(input);
   });
 
+  const resolveTrees: CheckpointStore["Service"]["resolveTrees"] = Effect.fn("resolveTrees")(
+    function* (input) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.resolveTrees", input.cwd);
+      return yield* checkpoints.resolveTrees(input);
+    },
+  );
+
   return CheckpointStore.of({
     isGitRepository,
     captureCheckpoint,
@@ -238,6 +254,7 @@ export const make = Effect.gen(function* () {
     listCheckpointRefs,
     updateCheckpointRef,
     materializeCheckpoint,
+    resolveTrees,
     // One folder reached through a symlink or a relative path is still one workspace.
     withWorkspaceLock: (cwd, effect) =>
       Effect.promise(() => NodeFSP.realpath(cwd).catch(() => NodePath.resolve(cwd))).pipe(

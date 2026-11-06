@@ -21,6 +21,7 @@ import type {
   GameRunStep,
   GameRunStepId,
   OrchestrationV2AppThread,
+  OrchestrationV2Checkpoint,
   OrchestrationV2CheckpointScope,
   OrchestrationV2ExecutionNode,
   OrchestrationV2PlanArtifact,
@@ -399,6 +400,19 @@ export interface ShellSnapshotOptions {
   readonly unsettledOnly?: boolean;
 }
 
+/** One turn's checkpoint in a project, as listProjectTurnCheckpoints reads it. */
+export interface ProjectTurnCheckpoint {
+  readonly threadId: ThreadId;
+  readonly threadTitle: string;
+  readonly runId: RunId;
+  /** The turn's ordinal in its thread. */
+  readonly runOrdinal: number;
+  readonly checkpoint: OrchestrationV2Checkpoint;
+  /** The folder the checkpoint was captured from. */
+  readonly cwd: string | null;
+  readonly request: string | null;
+}
+
 export interface ProjectionStoreV2Shape {
   readonly searchThreadStream: (
     input: OrchestrationV2SearchThreadInput,
@@ -456,6 +470,17 @@ export interface ProjectionStoreV2Shape {
   readonly getProjectGameRun: (
     projectId: ProjectId,
   ) => Effect.Effect<GameRun | null, ProjectionStoreV2Error>;
+  /**
+   * A project's turn checkpoints, newest first: every ready checkpoint a
+   * turn of one of its live threads captured, with the thread, the turn and
+   * the person's request (its first 200 characters). Threads a game run
+   * launched and subagent or role threads are left out: their work is the
+   * run's. `before` is a capture time (ISO) the page ends before.
+   */
+  readonly listProjectTurnCheckpoints: (
+    projectId: ProjectId,
+    options: { readonly limit: number; readonly before?: string | undefined },
+  ) => Effect.Effect<ReadonlyArray<ProjectTurnCheckpoint>, ProjectionStoreV2Error>;
   /** Live runs on threads a game run launched, with the thread each was launched under. */
   readonly listLiveGameRunRoleTurns: () => Effect.Effect<
     ReadonlyArray<{
@@ -5231,6 +5256,63 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
       );
 
+    const listProjectTurnCheckpoints: ProjectionStoreV2Shape["listProjectTurnCheckpoints"] = (
+      projectId,
+      options,
+    ) =>
+      sql<
+        PayloadRow & {
+          readonly thread_id: string;
+          readonly title: string;
+          readonly run_id: string;
+          readonly ordinal: number;
+          readonly cwd: string | null;
+          readonly request: string | null;
+        }
+      >`
+        SELECT checkpoint.payload_json, thread.thread_id, thread.title,
+          run.run_id, run.ordinal,
+          json_extract(scope.payload_json, '$.cwd') AS cwd,
+          substr(json_extract(message.payload_json, '$.text'), 1, 200) AS request
+        FROM orchestration_v2_projection_checkpoints AS checkpoint
+        JOIN orchestration_v2_projection_threads AS thread
+          ON thread.thread_id = checkpoint.thread_id
+        JOIN orchestration_v2_projection_runs AS run
+          ON run.run_id = checkpoint.run_id AND run.thread_id = checkpoint.thread_id
+        LEFT JOIN orchestration_v2_projection_checkpoint_scopes AS scope
+          ON scope.scope_id = checkpoint.scope_id
+        LEFT JOIN orchestration_v2_projection_messages AS message
+          ON message.thread_id = run.thread_id
+          AND message.message_id = json_extract(run.payload_json, '$.userMessageId')
+        WHERE thread.project_id = ${projectId}
+          AND thread.deleted_at IS NULL
+          AND checkpoint.status = 'ready'
+          AND checkpoint.run_id IS NOT NULL
+          AND json_extract(thread.payload_json, '$.launchedBy') IS NOT 'game_run'
+          AND coalesce(json_extract(thread.payload_json, '$.lineage.relationshipToParent'), '')
+            NOT IN ('role', 'subagent')
+          AND (${options.before ?? null} IS NULL OR checkpoint.captured_at < ${options.before ?? null})
+        ORDER BY checkpoint.captured_at DESC, checkpoint.rowid DESC
+        LIMIT ${options.limit}
+      `.pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) =>
+            decodeCheckpointPayload(row.payload_json).pipe(
+              Effect.map((checkpoint): ProjectTurnCheckpoint => ({
+                threadId: ThreadId.make(row.thread_id),
+                threadTitle: row.title,
+                runId: RunId.make(row.run_id),
+                runOrdinal: row.ordinal,
+                checkpoint,
+                cwd: row.cwd,
+                request: row.request,
+              })),
+            ),
+          ),
+        ),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const listGameRunThreadsToRecover: ProjectionStoreV2Shape["listGameRunThreadsToRecover"] = () =>
       sql<{ readonly thread_id: string }>`
         SELECT DISTINCT thread_id FROM orchestration_v2_projection_game_runs
@@ -6472,6 +6554,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       listGameRunRoleThreads,
       listGameRunThreadsToRecover,
       listLiveGameRunRoleTurns,
+      listProjectTurnCheckpoints,
       getProjectGameRun,
       getRuntimeRequest,
       getPlan,
@@ -6883,6 +6966,51 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               (state.projections.get(run.threadId)?.thread.deletedAt ?? null) !== null;
             return deleted && gameRunSettled(run) ? null : run;
           }),
+        ),
+      listProjectTurnCheckpoints: (projectId, options) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.projections.values()]
+              .flatMap((projection): ReadonlyArray<ProjectTurnCheckpoint> => {
+                const thread = projection.thread;
+                if (
+                  thread.projectId !== projectId ||
+                  thread.deletedAt !== null ||
+                  thread.launchedBy === "game_run" ||
+                  thread.lineage.relationshipToParent === "role" ||
+                  thread.lineage.relationshipToParent === "subagent"
+                )
+                  return [];
+                return projection.checkpoints.flatMap((checkpoint) => {
+                  const run = projection.runs.find((each) => each.id === checkpoint.runId);
+                  if (checkpoint.status !== "ready" || run === undefined) return [];
+                  const at = DateTime.formatIso(checkpoint.capturedAt);
+                  if (options.before !== undefined && at >= options.before) return [];
+                  return [
+                    {
+                      threadId: thread.id,
+                      threadTitle: thread.title,
+                      runId: run.id,
+                      runOrdinal: run.ordinal,
+                      checkpoint,
+                      cwd:
+                        projection.checkpointScopes.find((scope) => scope.id === checkpoint.scopeId)
+                          ?.cwd ?? null,
+                      request:
+                        projection.messages
+                          .find((message) => message.id === run.userMessageId)
+                          ?.text.slice(0, 200) ?? null,
+                    },
+                  ];
+                });
+              })
+              .toSorted((a, b) =>
+                DateTime.formatIso(b.checkpoint.capturedAt).localeCompare(
+                  DateTime.formatIso(a.checkpoint.capturedAt),
+                ),
+              )
+              .slice(0, options.limit),
+          ),
         ),
       listLiveGameRunRoleTurns: () =>
         Ref.get(replayState).pipe(
