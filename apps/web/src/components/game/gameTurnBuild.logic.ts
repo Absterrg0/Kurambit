@@ -2,9 +2,14 @@ import type { GameBuildId } from "@kurambit/contracts";
 
 import type { TurnBuildView } from "../../state/gameTurnBuild";
 
-/** PURE. Whether the folder holds this build, so Play shows the Stage's own game instead of a copy. */
+/**
+ * PURE. Whether the folder holds this build, so Play shows the Stage's own
+ * game instead of a copy and Go back is not offered. Only a known edit since
+ * makes it another game: going back to the folder's own build restores nothing,
+ * and its "already there" record would take the undo's Redo away.
+ */
 export const turnBuildIsFolder = (view: TurnBuildView): boolean =>
-  view.current === view.build.id && view.folderEdited === false;
+  view.current === view.build.id && view.folderEdited !== true;
 
 /**
  * What a turn's strip offers for the folder (B4): Undo on the game's latest

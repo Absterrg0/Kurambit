@@ -51,7 +51,8 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
   return (
     <div data-game-turn-build={build.id} className="mt-1.5 space-y-1">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="min-w-0 flex-1">
+        {/* Never narrower than its widest chip: the buttons wrap below instead. */}
+        <span className="flex-1">
           {build.facts.state === "never" ? (
             <span className="text-2xs text-muted-foreground">
               {build.noPlay === null
