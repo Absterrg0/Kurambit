@@ -349,7 +349,7 @@ import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnect
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
-import { useGameWorkspaceStore } from "../gameWorkspaceStore";
+import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
 import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
 import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useGameRunComposerNotice } from "./game/useGameRunComposerNotice";
@@ -1658,14 +1658,21 @@ export default function ChatView(props: ChatViewProps) {
   const gameWorkspaceCompact = useGameWorkspaceCompact(workspaceLayoutElement, isGameThread);
   const [compactGamePane, setCompactGamePane] = useCompactGamePane(gameWorkspaceCompact);
   const showCompactGame = () => setCompactGamePane("game");
-  // A request for a stage tab (Open build, a round card, the palette) is a
-  // request to see the game: a compact workbench showing the chat switches.
-  const stageTabRequestN = useGameWorkspaceStore((state) => state.stageTabRequest?.n ?? 0);
-  const [seenStageTabRequestN, setSeenStageTabRequestN] = useState(stageTabRequestN);
-  if (stageTabRequestN !== seenStageTabRequestN) {
-    setSeenStageTabRequestN(stageTabRequestN);
-    if (compactGamePane !== "game") setCompactGamePane("game");
+  // A Stage request (a strip's Play, a round card, the palette, a key) is a
+  // request to see the game, so a compact workbench showing the chat
+  // switches. Undo and Redo change the folder and need no pane.
+  const stageRequest = useGameWorkspaceStore((state) => state.stageRequest);
+  const [seenStageRequestN, setSeenStageRequestN] = useState(stageRequest?.n ?? 0);
+  if (stageRequest !== null && stageRequest.n !== seenStageRequestN) {
+    setSeenStageRequestN(stageRequest.n);
+    const kind = stageRequest.request.kind;
+    if (kind !== "undo" && kind !== "redo" && compactGamePane !== "game")
+      setCompactGamePane("game");
   }
+  const requestGameStage = (request: GameStageRequest): false | void => {
+    if (!isGameThread) return false;
+    useGameWorkspaceStore.getState().requestStage(request);
+  };
   const showCompactChat = () => {
     setCompactGamePane("chat");
     window.requestAnimationFrame(() => composerRef.current?.focusAtEnd());
@@ -5423,6 +5430,14 @@ export default function ChatView(props: ChatViewProps) {
         }
         useGameWorkspaceStore.getState().toggleChat();
       },
+      // The Stage acts on these, so the keys, the palette and the timeline
+      // share one path. A focused game never sees them: its frame is
+      // cross-origin, so its keys stay in the game.
+      "game.undoTurn": () => requestGameStage({ kind: "undo" }),
+      "game.redoTurn": () => requestGameStage({ kind: "redo" }),
+      "game.focus": () => requestGameStage({ kind: "focus" }),
+      "game.playPrevious": () => requestGameStage({ kind: "step", by: -1 }),
+      "game.playNext": () => requestGameStage({ kind: "step", by: 1 }),
       "rightPanel.toggleMaximized": ({ event }) => {
         if (!event.repeat) toggleRightPanelMaximizedStable();
       },
