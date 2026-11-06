@@ -185,6 +185,13 @@ export const ensureScaffold = (root: string, lane: string, fresh: boolean) =>
   }).pipe(Effect.ignore);
 
 export const causeText = (cause: Cause.Cause<unknown>): string => {
-  const squashed: unknown = Cause.squash(cause);
-  return (squashed instanceof Error ? squashed.message : "unrecognized failure").slice(0, 300);
+  // A wrapper error (a tagged one carries no message of its own) says what
+  // broke only through its cause.
+  const text = (error: unknown, depth: number): string => {
+    if (error instanceof Error && error.message !== "") return error.message;
+    if (depth < 4 && typeof error === "object" && error !== null && "cause" in error)
+      return text(error.cause, depth + 1);
+    return error instanceof Error ? error.name : "unrecognized failure";
+  };
+  return text(Cause.squash(cause), 0).slice(0, 300);
 };

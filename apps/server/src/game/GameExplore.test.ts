@@ -51,13 +51,13 @@ it.effect("a cap whose write failed is written by the retry, never taken from me
     // A file where the dir should be: every write of a record fails.
     NodeFS.rmSync(dir, { recursive: true, force: true });
     NodeFS.writeFileSync(dir, "");
-    const first = yield* Effect.result(explore.limitInput(thread, 60_000));
+    const first = yield* Effect.result(explore.limitInput(thread, 60_000, "/game"));
     assert.equal(first._tag, "Failure");
-    const retry = yield* Effect.result(explore.limitInput(thread, 60_000));
+    const retry = yield* Effect.result(explore.limitInput(thread, 60_000, "/game"));
     assert.equal(retry._tag, "Failure");
     // The disk is back: the next retry puts the cap where a restart reads it.
     NodeFS.rmSync(dir, { force: true });
-    yield* explore.limitInput(thread, 60_000);
+    yield* explore.limitInput(thread, 60_000, "/game");
     const onDisk = yield* Effect.promise(() => ExploreEvidence.read(dir, thread));
     assert.equal(onDisk?.inputCapMs, 60_000);
   }).pipe(Effect.provide(layer)),

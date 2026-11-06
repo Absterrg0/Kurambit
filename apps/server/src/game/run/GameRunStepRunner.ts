@@ -513,8 +513,10 @@ const make = Effect.gen(function* () {
           );
       // A sample's cap that cannot be kept breaks the job, which is tried
       // again, then fails the step: no sample is sent a turn without it.
-      const limitInput = (target: ThreadId) =>
-        role.inputCapMs > 0 ? needed(game.limitExploreInput(target, role.inputCapMs)) : Effect.void;
+      const limitInput = (target: ThreadId, folder: string) =>
+        role.inputCapMs > 0
+          ? needed(game.limitExploreInput(target, role.inputCapMs, folder))
+          : Effect.void;
 
       const launchThread = (target: ThreadId, replaces: ThreadId | undefined, text: string) =>
         Effect.gen(function* () {
@@ -576,7 +578,7 @@ const make = Effect.gen(function* () {
             Effect.map((s) => s !== null && s.deletedAt === null),
           );
           if (!(yield* startStep(target, replaces))) return yield* dropWorkspace;
-          yield* limitInput(target);
+          yield* limitInput(target, workspace?.path ?? root);
           const launched = yield* launches
             .launch({
               commandId: CommandId.make(
@@ -633,7 +635,7 @@ const make = Effect.gen(function* () {
         const turns = GameRunRoleReactor.stepTurns(runs, stepId);
         const latest = turns.findLast((t) => t.turn.attempt === job.attempt);
         if (latest !== undefined) {
-          yield* limitInput(threadId);
+          yield* limitInput(threadId, shell.worktreePath ?? root);
           if (!GameRunRoleReactor.isSettledRun(latest.run)) {
             yield* log(`${role.role}: reattaching to thread ${threadId}`);
             return yield* reported(capTurn(half, latest.run.id));
@@ -675,7 +677,7 @@ const make = Effect.gen(function* () {
           return yield* launchThread(own, threadId, yield* promptOf(run, role, root));
         }
         if (!(yield* startStep(threadId))) return;
-        yield* limitInput(threadId);
+        yield* limitInput(threadId, shell.worktreePath ?? root);
         // A turn an earlier try started and a restart or an ending cut off continues.
         const resumed = turns.length > 0;
         const prompt = yield* promptOf(run, role, root);

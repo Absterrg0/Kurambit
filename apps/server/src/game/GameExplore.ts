@@ -141,11 +141,14 @@ export class GameExplore extends Context.Service<
     /**
      * Caps the explore input this thread may use across all its sessions. It
      * fails when the cap cannot be kept on disk, since a restart would then
-     * let a blind sample play past its fair budget.
+     * let a blind sample play past its fair budget. `root` is the folder the
+     * thread plays, given rather than resolved: the cap is set before the
+     * thread exists, so its first turn is never sent without it.
      */
     readonly limitInput: (
       threadId: ThreadId,
       totalMs: number,
+      root: string,
     ) => Effect.Effect<void, GameOperationError>;
     readonly memoryWait: (threadId: ThreadId) => Effect.Effect<
       {
@@ -1282,27 +1285,25 @@ const make = Effect.gen(function* () {
     // On the thread's evidence record, so a restart keeps a sample's budget.
     // Cached only once on disk: a retry after a failed write must find the
     // cap missing and write it again, not take the cache's word for it.
-    limitInput: (threadId, totalMs) =>
-      Effect.flatMap(projects.resolve(threadId), (root) =>
-        evidenceLock.withPermits(1)(
-          Effect.gen(function* () {
-            const record = yield* loadEvidence(String(threadId), root);
-            if (record.inputCapMs === totalMs) return;
-            const next = { ...record, inputCapMs: totalMs };
-            yield* persistEvidence(next).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new GameOperationError({
-                    operation: "Explore input cap",
-                    path: evidenceDir,
-                    reason: "io",
-                    cause,
-                  }),
-              ),
-            );
-            rememberEvidence(next);
-          }),
-        ),
+    limitInput: (threadId, totalMs, root) =>
+      evidenceLock.withPermits(1)(
+        Effect.gen(function* () {
+          const record = yield* loadEvidence(String(threadId), root);
+          if (record.inputCapMs === totalMs) return;
+          const next = { ...record, inputCapMs: totalMs };
+          yield* persistEvidence(next).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "Explore input cap",
+                  path: evidenceDir,
+                  reason: "io",
+                  cause,
+                }),
+            ),
+          );
+          rememberEvidence(next);
+        }),
       ),
     memoryWait: Effect.fn("GameExplore.memoryWait")(function* (threadId) {
       const root = yield* projects.resolve(threadId);

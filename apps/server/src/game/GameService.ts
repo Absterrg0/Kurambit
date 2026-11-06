@@ -124,6 +124,7 @@ export class GameService extends Context.Service<
     readonly limitExploreInput: (
       threadId: ThreadId,
       totalMs: number,
+      root: string,
     ) => Effect.Effect<void, GameOperationError>;
     /**
      * Since this thread's last finishExploration: how long its explore starts
