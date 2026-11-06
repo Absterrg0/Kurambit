@@ -153,8 +153,18 @@ const make = Effect.gen(function* () {
       yield* fileSystem
         .watch(NodePath.join(root, directory), { recursive: true, onReady: settle })
         .pipe(
+          Stream.filter((event) => isLiveChange(event.path)),
+          // A folder made (Blender's first export makes assets/blender/) changes
+          // nothing the game loads; the files then written in it each count.
+          Stream.filterEffect((event) =>
+            event._tag !== "Create"
+              ? Effect.succeed(true)
+              : fileSystem.stat(NodePath.join(root, directory, event.path)).pipe(
+                  Effect.map((info) => info.type !== "Directory"),
+                  Effect.orElseSucceed(() => true),
+                ),
+          ),
           Stream.map((event) => event.path),
-          Stream.filter(isLiveChange),
           Stream.debounce(LIVE_SETTLE),
           Stream.runForEach(onChange),
           Effect.catchCause((cause) =>
