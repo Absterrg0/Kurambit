@@ -2,6 +2,9 @@ import * as GameService from "./game/GameService.ts";
 import * as GameOperations from "./game/GameOperations.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
+import * as GameBuilds from "./game/GameBuilds.ts";
+import * as GameBuildsReactor from "./game/GameBuildsReactor.ts";
+import * as GameFacts from "./game/GameFacts.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameRunRoleReactor from "./game/run/GameRunRoleReactor.ts";
 import * as GameRunStepRunner from "./game/run/GameRunStepRunner.ts";
@@ -514,7 +517,9 @@ const layerGameRunWork = GameRunStepRunner.layer.pipe(
   Layer.provideMerge(GameRunRoleReactor.layer),
   Layer.provide(ProjectionStoreV2.layer),
 );
-const layerGameServices = GameRunControl.layer.pipe(
+const layerGameServices = GameBuilds.layer.pipe(
+  Layer.provideMerge(GameFacts.layer),
+  Layer.provideMerge(GameRunControl.layer),
   Layer.provideMerge(layerGameRunWork),
   Layer.provide(ProjectionStoreV2.layer),
   Layer.provideMerge(GameService.layer),
@@ -538,6 +543,12 @@ const layerMakeRoutes = Layer.mergeAll(
       yield* reactor.start();
     }),
   ).pipe(Layer.provide(GameTurnCancellationReactor.layer)),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const reactor = yield* GameBuildsReactor.GameBuildsReactor;
+      yield* reactor.start();
+    }),
+  ).pipe(Layer.provide(GameBuildsReactor.layer)),
   // A production run is a long-lived job: a restart (an update, a crash, a
   // dev reload) re-runs what it cut off instead of leaving it dead mid-round.
   Layer.effectDiscard(

@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import { GameOperationError } from "@kurambit/contracts";
 import type * as GameProcesses from "./GameProcesses.ts";
 
-export interface VideoSignals {
+interface VideoSignals {
   readonly freezes: ReadonlyArray<{ readonly at: number; readonly seconds: number }>;
   readonly longestFreeze: number;
   readonly motion: number;
@@ -20,7 +20,7 @@ export interface VideoSignals {
 }
 
 /** One frame's metadata lines from ffmpeg's `metadata=mode=print`: its time and its keys. */
-export const parseMetadata = (
+const parseMetadata = (
   text: string,
 ): ReadonlyArray<{ readonly t: number; readonly values: Readonly<Record<string, string>> }> => {
   const frames: Array<{ t: number; values: Record<string, string> }> = [];
@@ -42,7 +42,7 @@ const mean = (values: ReadonlyArray<number>) =>
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 
 /** The share of pixels the most common colour holds, quantised to 4 bits a channel. */
-export const dominantShare = (rgb: Uint8Array): number => {
+const dominantShare = (rgb: Uint8Array): number => {
   const counts = new Uint32Array(4096);
   let top = 0;
   const pixels = Math.floor(rgb.length / 3);

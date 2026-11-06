@@ -2,6 +2,7 @@ import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
+import * as GameBuilds from "./game/GameBuilds.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
@@ -274,17 +275,6 @@ const signPackage = <P extends { readonly archivePath: string; readonly fileName
           cause,
         }),
     ),
-  );
-
-// Foundation placeholder for the Slice 1 build RPCs until builder F's GameBuilds lands.
-const buildsPending = (threadId: string) =>
-  Effect.fail(
-    new GameOperationError({
-      operation: "Builds",
-      path: threadId,
-      reason: "tool-failed",
-      detail: "Builds are not available in this server yet.",
-    }),
   );
 
 // The frame sheets a blind comparison's players made, signed the same way.
@@ -1223,6 +1213,7 @@ const layerWsRpc = (
       const game = yield* GameService.GameService;
       const gameRun = yield* GameRunControl.GameRunControl;
       const gameProjects = yield* GameProjectService.GameProjectService;
+      const gameBuilds = yield* GameBuilds.GameBuilds;
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
@@ -1914,13 +1905,15 @@ const layerWsRpc = (
         [WS_METHODS.gameSavedList]: ({ threadId }) => game.listSaved(threadId),
         [WS_METHODS.gameSavedDelete]: ({ threadId, name }) =>
           game.deleteSaved(threadId, name).pipe(Effect.as({})),
-        // Foundation placeholders (Slice 1 CONTRACT): builder F replaces each with one GameBuilds call.
-        [WS_METHODS.gameBuilds]: ({ threadId }) => buildsPending(threadId),
-        [WS_METHODS.gameBuildCompare]: ({ threadId }) => buildsPending(threadId),
-        [WS_METHODS.gameBuildFacts]: ({ threadId }) => buildsPending(threadId),
-        [WS_METHODS.gameBuildMeasure]: ({ threadId }) => buildsPending(threadId),
-        [WS_METHODS.gameBuildPlay]: ({ threadId }) => buildsPending(threadId),
-        [WS_METHODS.gameBuildRestore]: ({ threadId }) => buildsPending(threadId),
+        [WS_METHODS.gameBuilds]: ({ threadId, before, limit }) =>
+          gameBuilds.list(threadId, { before, limit }),
+        [WS_METHODS.gameBuildCompare]: ({ threadId, a, b }) => gameBuilds.compare(threadId, a, b),
+        [WS_METHODS.gameBuildFacts]: ({ threadId, build }) => gameBuilds.facts(threadId, build),
+        [WS_METHODS.gameBuildMeasure]: ({ threadId, build }) =>
+          gameBuilds.measure(threadId, build, { queue: "person" }),
+        [WS_METHODS.gameBuildPlay]: ({ threadId, build }) => gameBuilds.play(threadId, build),
+        [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId }) =>
+          gameBuilds.restore(threadId, build, commandId),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined ? game.libraryEvents : game.threadEvents(input.threadId),
@@ -3030,6 +3023,7 @@ export const layer = Layer.unwrap(
     const gameRun = yield* GameRunControl.GameRunControl;
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
+    const gameBuilds = yield* GameBuilds.GameBuilds;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3089,6 +3083,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameRunControl.GameRunControl, gameRun)),
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
+              Layer.provide(Layer.succeed(GameBuilds.GameBuilds, gameBuilds)),
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
               // their defects, not the rest of the server's.

@@ -21,6 +21,11 @@ import {
   GameAssetsAddResult,
   GameAssetsSearchInput,
   GameAssetsSearchResult,
+  GameBuildComparison,
+  GameBuildFacts,
+  GameBuildId,
+  GameBuildRestoreResult,
+  GameBuildsResult,
   GameCheckResult,
   GameUnityConsoleInput,
   GameUnityEditInput,
@@ -66,6 +71,7 @@ import {
   OrchestratorMcpFailure,
 } from "@kurambit/contracts";
 import { PROFILES, type GameEngineProfile } from "../../../game/engineProfile.ts";
+import * as GameBuilds from "../../../game/GameBuilds.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -598,6 +604,49 @@ const RunSubmitTool = Tool.make("game_run_submit", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, onlyForRunThreads);
 /** The studio toolkit: status, export and play-level tools for every thread. */
+const buildDependencies = [
+  GameBuilds.GameBuilds,
+  McpInvocationContext.McpInvocationContext,
+  ThreadManagementService.ThreadManagementService,
+];
+const BuildsTool = Tool.make("game_builds", {
+  description:
+    "This game's builds, newest first: every turn of any chat that changed the engine project, art or ASSETS.md, and every round and saved build of its production run, each with when, which turn or round, what changed (files and a line), and its facts once measured (`facts.chips`, the few that matter, and how many were not measured). `current` is the build the folder was last made from; `restore` is the latest restore, whose `undo` build, restored with game_build_restore, undoes it. Pass `before` with a `next` cursor for older builds. Pass `compare` with two build ids instead to diff their facts: each delta reads up, down, same or changed, or not-comparable with why (a side not measured, or measured by another harness or another tester bot); both builds play side by side in the Game panel. Facts are read as measured; game_facts measures. Read-only.",
+  parameters: Schema.Struct({
+    compare: Schema.optionalKey(Schema.Tuple([GameBuildId, GameBuildId])),
+    before: Schema.optionalKey(Schema.String),
+    limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
+  }),
+  success: Schema.Union([GameBuildsResult, GameBuildComparison]),
+  failure,
+  failureMode: "return",
+  dependencies: buildDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const FactsTool = Tool.make("game_facts", {
+  description:
+    "What the harness measured on one build of this game (the newest when `build` is omitted), the same facts the Builds rail shows: whether it boots; how it ends with no input (idle), with random input (masher) and with the game's latest play-mode bot (skilled), and when; whether it is winnable without skill; still stretches, motion, detail and colour over the random-input play video; and the time from a held key to the player moving. Each is measured, or not measured with why. A build is measured once, in a copy of its own (the game folder is never touched), in about 3 to 5 minutes; this call measures what is missing, waits up to 30 s, and otherwise returns with the rest pending: call again later. Facts are of builds (a turn's end), not of uncommitted work; for that, use game_bot_run.",
+  parameters: Schema.Struct({ build: Schema.optionalKey(GameBuildId) }),
+  success: GameBuildFacts,
+  failure,
+  failureMode: "return",
+  dependencies: buildDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const BuildRestoreTool = Tool.make("game_build_restore", {
+  description:
+    "Put one of this game's builds (an id from game_builds) back in the game folder when the creator asks: its engine project, art and ASSETS.md return, and what the folder held before is kept first as a build of its own, so restoring that one undoes it (game_builds `restore.undo`). Refused while a production run is live (stop it first). With a run, it goes through the run's restore: a kept round becomes the run's best, any other build leaves the best as it is. The result says whether the folder has moved (`done`).",
+  parameters: Schema.Struct({ build: GameBuildId, commandId }),
+  success: GameBuildRestoreResult,
+  failure,
+  failureMode: "return",
+  dependencies: buildDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
   BlenderCodeTool,
@@ -638,4 +687,7 @@ export const GameToolkit = Toolkit.make(
   RunProfileTool,
   RunRestoreTool,
   RunSubmitTool,
+  BuildsTool,
+  FactsTool,
+  BuildRestoreTool,
 );
