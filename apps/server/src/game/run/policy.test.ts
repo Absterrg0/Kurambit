@@ -1678,6 +1678,20 @@ describe("ladder", () => {
     expect(second.answers).not.toContain("rewrite");
     expect(second.state.task._tag).toBe("round");
 
+    // A rewrite turn that submits no ladder keeps the reviewed one and asks again,
+    // with no fix turn that would drop the creator's notes.
+    const revisePlanned = Policy.plan(rewritten.state, { now: T0, coin: 0, id: "e-plan" });
+    if (revisePlanned.kind !== "step" || revisePlanned.step.kind !== "role")
+      throw new Error("expected the rewrite turn");
+    const kept = Policy.applyResult(
+      revisePlanned.state,
+      revisePlanned.step,
+      done(revisePlanned.step, {}),
+      { now: T0, coin: 0, id: "e-apply" },
+    ).state;
+    expect(kept.ladder?.rungs).toHaveLength(4);
+    expect(kept.task._tag === "decide" && kept.task.decision.kind).toBe("ladder");
+
     // Autopilot is unchanged: no review.
     const autopilot = writeLadder({ ...startedAtBuild, profile: "autopilot" as const }, "d");
     expect(autopilot.task._tag).toBe("round");

@@ -60,7 +60,10 @@ export const runProgress = (state: RunState): { stage: number; next: string | nu
         ? { stage: STAGE.Vision, next: "Prototypes" }
         : t.decision.kind === "prototype"
           ? { stage: STAGE["Blind pick"], next: "Plan" }
-          : { stage: STAGE.Plan, next: "Art" };
+          : state.stage === "plan"
+            ? { stage: STAGE.Plan, next: "Art" }
+            : // The rounds' own ladder review: the next thing is the first round.
+              { stage: STAGE.Rounds, next: `Round ${state.rounds.length + 1}` };
   }
 };
 

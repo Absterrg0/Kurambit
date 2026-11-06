@@ -2167,6 +2167,29 @@ export const applyResult = (
       });
     }
     case "ladder": {
+      // A rewrite the creator asked for, as the plan stage's rewrite: a ladder of
+      // the wrong shape (or none) keeps the reviewed ladder, and the creator is
+      // asked again; there is no fix turn that would drop their notes.
+      if (t.phase === "revise") {
+        const sub = submitted(res, "ladder");
+        const parsed = sub !== null ? ladderOf(sub.rungs) : { error: MISSING_LADDER };
+        if ("ladder" in parsed && sub !== null)
+          files.push({ path: LADDER, text: ladderJson(sub.rungs) });
+        if ("ladder" in parsed) logs.push(`ladder rewritten: ${parsed.ladder.rungs.length} rungs`);
+        else
+          logs.push(`ladder rewrite not taken (${parsed.error.slice(0, 200)}); keeping the ladder`);
+        const ladder = "ladder" in parsed ? parsed.ladder : s.ladder;
+        if (ladder === null || ladder.rungs.length === 0)
+          return out({ ...s, ladder, task: newRound({ ...s, ladder }, now) });
+        return out({
+          ...s,
+          ladder,
+          task:
+            s.profile === "guided"
+              ? { _tag: "decide", decision: ladderDecision(s, ladder) }
+              : newRound({ ...s, ladder }, now),
+        });
+      }
       const taken = takeLadder(res, t.phase === "fix", logs, files);
       if (taken.kind === "fix")
         return out({
