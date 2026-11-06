@@ -952,6 +952,30 @@ describe("game-run commands", () => {
     expect(runOf(roundStart).resumeSave).toBeNull();
   });
 
+  it("each resume of the same held restore keeps the folder under a name of its own", () => {
+    const base = complete(started(), gitOk());
+    const round = Policy.reopen(
+      { ...State.freshState(fresh, { rounds: [], pending: null }), ladder },
+      T0,
+    ).task;
+    const atStart = resumedAt(base, { ladder, task: round });
+    const held = stepOf(atStart);
+    const saveOf = (records: Records) => {
+      const step = stepOf(records).step;
+      return step.kind === "build" && step.op._tag === "restore" ? step.op.save : undefined;
+    };
+    const again = (records: Records, ms: number) =>
+      accept(
+        finished(accept(records, { type: "game-run.stop", runId }, ms).records),
+        { type: "game-run.resume", runId },
+        ms,
+      ).records;
+    const second = again(atStart, T0 + MIN);
+    const third = again(second, T0 + 2 * MIN);
+    expect(stepOf(third).id).toBe(held.id);
+    expect(new Set([saveOf(atStart), saveOf(second), saveOf(third)]).size).toBe(3);
+  });
+
   it("restoring the folder the latest restore kept undoes it, best and line too, until a round runs", () => {
     const stopped = finished(
       accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
