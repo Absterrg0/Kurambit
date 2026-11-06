@@ -108,7 +108,7 @@ describe("the generated check bot", () => {
     expect(sent.setStates).toEqual(["zone2"]);
     expect(sent.presses.filter((k) => k === "Enter").length).toBeLessThanOrEqual(2);
     expect(sent.held.size).toBe(0);
-    const seen = readReport(status.note)!;
+    const seen = readReport(status.evidence)!;
     expect(seen.start).toEqual({ zone: 1, score: 2 });
     expect(seen.end).toEqual({ zone: 2, score: 3 });
     expect(seen.hud).toBe("Zone 2 / 3");
@@ -129,6 +129,6 @@ describe("the generated check bot", () => {
       () => ({ gameState: { state: "title" }, hudText: "Play" }),
     );
     expect(sent.presses).toEqual([]);
-    expect(evaluate(t0, readReport(status.note)!).pass).toBe(true);
+    expect(evaluate(t0, readReport(status.evidence)!).pass).toBe(true);
   });
 });

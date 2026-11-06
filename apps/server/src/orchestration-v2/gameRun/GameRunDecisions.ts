@@ -195,6 +195,7 @@ const make = Effect.gen(function* () {
           threadId,
           runId: run.id,
           stepId: step.id,
+          attempt: step.attempt,
         }),
       );
     });

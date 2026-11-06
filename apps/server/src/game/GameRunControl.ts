@@ -33,12 +33,15 @@ import {
   GameOperationError,
   GameRunErrorReason,
   manifestProject,
+  plainReason,
 } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
@@ -173,6 +176,8 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const game = yield* GameService.GameService;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
 
   /**
    * The caller's game: its folder, and the thread its run lives on. The folder
@@ -290,21 +295,34 @@ const make = Effect.gen(function* () {
         busy.failure.reason,
         busy.failure.message,
       );
-    // The lane is the whole run's engine: a manifest that cannot be read is no Godot game.
-    const lane = manifestProject(
-      yield* projects
-        .read(root)
-        .pipe(
-          Effect.mapError((cause) =>
-            runError(
-              "run-start",
-              input.threadId,
-              "project-not-found",
-              `The game's manifest could not be read (${cause.detail ?? cause.reason}).`,
-            ),
+    // The manifest names the run's engine and its project folder: one that
+    // cannot be read is no game of any engine.
+    const manifest = yield* projects
+      .read(root)
+      .pipe(
+        Effect.mapError((cause) =>
+          runError(
+            "run-start",
+            input.threadId,
+            "project-not-found",
+            `The game's manifest could not be read (${cause.detail ?? cause.reason}).`,
           ),
         ),
-    );
+      );
+    const lane = manifestProject(manifest);
+    const scaffold = (fresh: boolean) =>
+      ensureScaffold(root, manifest.engine.name, fresh).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, pathService),
+        Effect.mapError((cause) =>
+          runError(
+            "run-start",
+            root,
+            "command-failed",
+            `The run's skill pack and bot kit could not be put in the game (${plainReason(cause.detail ?? cause.message, [root])}).`,
+          ),
+        ),
+      );
     const projection = yield* threads
       .getThreadProjection(input.threadId)
       .pipe(
@@ -330,7 +348,7 @@ const make = Effect.gen(function* () {
       RESUMABLE.has(run.ending) &&
       !gitEra(run)
     ) {
-      yield* ensureScaffold(root, lane, false);
+      yield* scaffold(false);
       yield* dispatch("run-start", {
         type: "game-run.resume",
         commandId: commandId("game-run.start", input.commandId, { thread: run.threadId, run }),
@@ -375,13 +393,14 @@ const make = Effect.gen(function* () {
     const runId = GameRunId.make(
       `run_${Date.now().toString(36)}${NodeCrypto.randomBytes(3).toString("hex")}`,
     );
-    yield* ensureScaffold(root, lane, true);
+    yield* scaffold(true);
     yield* dispatch("run-start", {
       type: "game-run.start",
       commandId: commandId("game-run.start", input.commandId, { thread: runThread, run }),
       threadId: runThread,
       runId,
       lane,
+      engine: manifest.engine.name,
       brief,
       ...(input.artDirection === undefined ? {} : { artDirection: input.artDirection }),
       ...(budgetMinutes === undefined ? {} : { budgetMinutes }),
@@ -723,7 +742,7 @@ const make = Effect.gen(function* () {
           "run-checks",
           root,
           "command-failed",
-          `The checks could not run now (${error.reason}: ${(error.detail ?? "").slice(0, 200)}); try again in a minute.`,
+          `The checks could not run now (${(error._tag === "GameRunToolFailed" ? error.reason : plainReason(error.error.detail ?? error.error.reason, [root])).slice(0, 200)}); try again in a minute.`,
         ),
       ),
     );

@@ -57,6 +57,7 @@ import {
 } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
+import { GameEngineId } from "./game.ts";
 import { GameRunProfile, GameRunSubmission } from "./gameRun.ts";
 import {
   GameRun,
@@ -3034,6 +3035,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     ...GameRunCommandFields,
     /** The engine project directory the game's manifest names. */
     lane: TrimmedNonEmptyString,
+    /** The game's engine, from its manifest. Absent on commands from older servers; runEngine then derives it from lane. */
+    engine: Schema.optionalKey(GameEngineId),
     brief: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(8000)),
     artDirection: Schema.optional(Schema.String),
     budgetMinutes: Schema.optional(PositiveInt),

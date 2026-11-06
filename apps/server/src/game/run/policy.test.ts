@@ -77,6 +77,17 @@ const answerPair = (
   })),
 });
 
+/** A result as the decider lands it: what was not measured pauses, anything else is applied. */
+const apply = (
+  state: State.RunState,
+  step: State.Step,
+  res: State.StepResult,
+  input: Policy.Inputs,
+): Policy.Applied =>
+  res.kind === "ended" || res.kind === "failed"
+    ? Policy.pause(state, step, res)
+    : Policy.applyResult(state, step, res, input);
+
 // Applies a planned step, a pair through its halves.
 const applyStep = (
   state: State.RunState,
@@ -86,7 +97,7 @@ const applyStep = (
 ): Policy.Applied =>
   step.kind === "pair"
     ? Policy.applyPair(state, answerPair(step, state, respond), input)
-    : Policy.applyResult(state, step, respond(step, state), input);
+    : apply(state, step, respond(step, state), input);
 
 const asked = (state: State.RunState): State.RunState => ({ ...state, steer: [POLISH] });
 /** The restore that starts a round in the folder from its base. */
@@ -140,7 +151,7 @@ const drive = (
       applied = Policy.applyPair(state, answerPair(s, state, respond), applyInput);
     } else {
       steps.push(stepName(s));
-      applied = Policy.applyResult(state, s, respond(s, state), applyInput);
+      applied = apply(state, s, respond(s, state), applyInput);
     }
     logs.push(...applied.logs);
     released.push(...applied.release);
@@ -259,7 +270,7 @@ const atRound = (patch: Partial<State.RunState> = {}) =>
     stage: "build",
     ladder: { rungs: [], note: "finish rounds only" },
     steer: [POLISH],
-    task: Policy.applyResult(
+    task: apply(
       base({ stage: "build" }),
       { kind: "build", id: 1, op: { _tag: "capture", name: "base", base: "" } },
       buildOk({ sha: "best" }),
@@ -616,12 +627,11 @@ describe("parallel samples", () => {
     const { state, pair } = planPair(atCompare());
     const [x] = roles(pair);
     const withX = { ...pair, results: [{ id: x!.id, result: done(x!) as State.HalfResult }] };
-    const applied = Policy.applyResult(
-      state,
-      withX,
-      { kind: "ended", ending: "usage-limit", reason: "usage limit" },
-      { now: T0, coin: 0, id: "y" },
-    );
+    const applied = Policy.pause(state, withX, {
+      kind: "ended",
+      ending: "usage-limit",
+      reason: "usage limit",
+    });
     expect(applied.state.ending).toBe("usage-limit");
     expect(applied.state.inFlight).toEqual(withX);
   });
@@ -1055,12 +1065,11 @@ describe("blind comparators", () => {
     const adopting = atPick({ phase: "adopt", chosen: "proto1", comparison: "c1" });
     const planned = Policy.plan(adopting, { now: T0, coin: 0.3, id: "p" });
     if (planned.kind !== "step") throw new Error("expected the adopt step");
-    const applied = Policy.applyResult(
-      planned.state,
-      planned.step,
-      buildOk({ ok: false, detail: "conflict" }),
-      { now: T0, coin: 0.3, id: "a" },
-    );
+    const applied = apply(planned.state, planned.step, buildOk({ ok: false, detail: "conflict" }), {
+      now: T0,
+      coin: 0.3,
+      id: "a",
+    });
     expect(applied.state.task._tag).not.toBe("pick");
     expect(applied.state.picked).toBeNull();
     expect(applied.state.best).toBe("trunk0");
@@ -1607,7 +1616,7 @@ describe("ladder", () => {
     if (planned.kind !== "step" || planned.step.kind !== "role") throw new Error("expected a role");
     expect(planned.step.role).toBe("plan");
     expect(Policy.asked(planned.state, planned.step).kind).toBe("ladder");
-    const applied = Policy.applyResult(
+    const applied = apply(
       planned.state,
       planned.step,
       done(planned.step, ladderSubmitted(ladderJson(4))),
@@ -1626,7 +1635,7 @@ describe("ladder", () => {
       if (planned.kind !== "step" || planned.step.kind !== "role")
         throw new Error("expected a role");
       expect(planned.step.role).toBe("plan");
-      return Policy.applyResult(
+      return apply(
         planned.state,
         planned.step,
         done(planned.step, ladderSubmitted(ladderJson(4))),
@@ -1640,7 +1649,7 @@ describe("ladder", () => {
       expect(planned.step.decision.kind).toBe("ladder");
       return {
         answers: planned.step.decision.answers.map((a) => a.answer),
-        state: Policy.applyResult(
+        state: apply(
           planned.state,
           planned.step,
           { kind: "decided", answer: given, notes, by: "creator" },
@@ -1679,12 +1688,11 @@ describe("ladder", () => {
     const revisePlanned = Policy.plan(rewritten.state, { now: T0, coin: 0, id: "e-plan" });
     if (revisePlanned.kind !== "step" || revisePlanned.step.kind !== "role")
       throw new Error("expected the rewrite turn");
-    const kept = Policy.applyResult(
-      revisePlanned.state,
-      revisePlanned.step,
-      done(revisePlanned.step, {}),
-      { now: T0, coin: 0, id: "e-apply" },
-    ).state;
+    const kept = apply(revisePlanned.state, revisePlanned.step, done(revisePlanned.step, {}), {
+      now: T0,
+      coin: 0,
+      id: "e-apply",
+    }).state;
     expect(kept.ladder?.rungs).toHaveLength(4);
     expect(kept.task._tag === "decide" && kept.task.decision.kind).toBe("ladder");
 
@@ -1758,7 +1766,7 @@ describe("art review", () => {
     } as State.RunState;
     const planned = Policy.plan(reviewing, { now: T0, coin: 0, id: "r" });
     if (planned.kind !== "step") throw new Error("expected the review step");
-    const applied = Policy.applyResult(planned.state, planned.step, done(planned.step), {
+    const applied = apply(planned.state, planned.step, done(planned.step), {
       now: T0,
       coin: 0,
       id: "r2",
@@ -1866,12 +1874,11 @@ describe("resume", () => {
     const planned = Policy.plan(atRound(), { now: T0, coin: 0, id: "x" });
     if (planned.kind !== "step") throw new Error("expected a step");
     const attached = { ...planned.step };
-    const applied = Policy.applyResult(
-      planned.state,
-      attached,
-      { kind: "ended", ending: "usage-limit", reason: "usage limit" },
-      { now: T0, coin: 0, id: "y" },
-    );
+    const applied = Policy.pause(planned.state, attached, {
+      kind: "ended",
+      ending: "usage-limit",
+      reason: "usage limit",
+    });
     expect(applied.state.ending).toBe("usage-limit");
     expect(applied.state.inFlight).toEqual(attached);
   });

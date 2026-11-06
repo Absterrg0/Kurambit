@@ -622,14 +622,16 @@ interface World {
   projectDeleted: boolean;
   /** The game folder no longer resolves. */
   folderGone: boolean;
-  /** Runs when the runner reads the creator's shell, which it does just before a role's start. */
-  onCreatorShell: Effect.Effect<void> | null;
+  /** Runs when the job reads the run's project, before a role's start. */
+  onProjectRead: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
   onSend: ((threadId: ThreadId, messageId: string) => void) | null;
   /** Runs, once, as a role turn is being sent, before it reaches the thread. */
   duringSend: Effect.Effect<void> | null;
   /** This many sends break before reaching the thread, as a server dying mid-send would. */
   sendBreaks: number;
+  /** This many role launches fail, as a thread store that refuses them would. */
+  launchBreaks: number;
   /** This many interrupts break before reaching the thread. */
   interruptBreaks: number;
   /** This many of the role reactor's reads of the run's records break. */
@@ -667,10 +669,11 @@ const newWorld = Effect.gen(function* () {
     botRecords: new Map(),
     projectDeleted: false,
     folderGone: false,
-    onCreatorShell: null,
+    onProjectRead: null,
     onSend: null,
     duringSend: null,
     sendBreaks: 0,
+    launchBreaks: 0,
     interruptBreaks: 0,
     recordsBreaks: 0,
     endRecordBreaks: 0,
@@ -735,9 +738,7 @@ const roleThreadsOf = (world: World) =>
           world.chats.has(threadId)
             ? orchestrator.getThreadShell(threadId)
             : threadId === creator
-              ? (world.onCreatorShell ?? Effect.void).pipe(
-                  Effect.andThen(orchestrator.getThreadShell(threadId)),
-                )
+              ? orchestrator.getThreadShell(threadId)
               : Effect.succeed(
                   world.existing.has(threadId)
                     ? ({
@@ -907,8 +908,10 @@ const layerGame = (root: string, world: World) => {
         }),
         Layer.mock(ProjectService.ProjectService)({
           getById: () =>
-            Effect.succeed(
-              world.projectDeleted ? Option.none() : Option.some({ id: projectId } as never),
+            (world.onProjectRead ?? Effect.void).pipe(
+              Effect.as(
+                world.projectDeleted ? Option.none() : Option.some({ id: projectId } as never),
+              ),
             ),
         }),
         Layer.mock(GameProjectService.GameProjectService)({
@@ -922,7 +925,11 @@ const layerGame = (root: string, world: World) => {
                   }),
                 )
               : Effect.succeed(root),
-          read: () => Effect.succeed({ project: "godot" } as never),
+          read: () =>
+            Effect.succeed({
+              project: "godot",
+              engine: { name: "godot", version: "4.7" },
+            } as never),
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
@@ -932,6 +939,13 @@ const layerGame = (root: string, world: World) => {
         Layer.mock(ThreadLaunch.ThreadLaunchService)({
           launch: (input) =>
             Effect.gen(function* () {
+              if (world.launchBreaks-- > 0)
+                return yield* new ThreadLaunch.ThreadLaunchError({
+                  operation: "create-thread",
+                  commandId: input.commandId,
+                  projectId,
+                  cause: "the thread store refused it",
+                });
               const threadId = input.threadId!;
               world.launches.push(threadId);
               world.existing.add(threadId);
@@ -944,6 +958,7 @@ const layerGame = (root: string, world: World) => {
     ),
     Layer.provideMerge(layerConfig),
     Layer.provideMerge(layerWithRecovery),
+    Layer.provideMerge(NodeServices.layer),
   );
 };
 
@@ -978,6 +993,7 @@ const recordThread = (stepId: GameRunStep["id"], attempt: number, thread: Thread
       threadId: creator,
       runId,
       stepId,
+      attempt,
       roleThreadId: thread,
     }),
   );
@@ -1098,7 +1114,8 @@ it.effect(
         const ended = yield* awaitRun((run) => run.ending !== null);
         yield* recover;
         yield* Fiber.join(ended);
-        assert.equal((yield* inFlight).run.ending, "failed");
+        // Neither the build nor the role: a pause, never a result.
+        assert.equal((yield* inFlight).run.ending, "tool-failed");
         assert.lengthOf(world.sends, 1);
       }),
     ),
@@ -1507,13 +1524,42 @@ it.effect("a role launches nothing once the run refuses its start", () =>
       const vision = (yield* inFlight).step!;
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       // The run stops after the job read its step and before the role's start.
-      world.onCreatorShell = orchestrator
+      world.onProjectRead = orchestrator
         .dispatch({ type: "game-run.stop", commandId: nextId(), threadId: creator, runId })
         .pipe(Effect.asVoid, Effect.orDie);
       const runner = yield* GameRunStepRunner.GameRunStepRunner;
       yield* runner.execute({ threadId: creator, runId, stepId: vision.id, attempt: 1 });
       assert.equal((yield* inFlight).run.ending, "stopped");
       assert.deepEqual(world.launches, []);
+    }),
+  ),
+);
+
+// A launch that fails is a tool of ours failing: the role's step waits for it
+// on a durable timer, three times, then the run pauses with why. It is never
+// the role's result, so no comparison or verdict is ever made of it.
+it.effect("a role launch that fails hands its step back, then pauses the run as tool-failed", () =>
+  withGame((world) =>
+    Effect.gen(function* () {
+      yield* createCreator;
+      yield* startRun("autopilot");
+      yield* completeStep((yield* inFlight).step!, gitOk);
+      const vision = (yield* inFlight).step!;
+      world.launchBreaks = 4;
+      const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      const job = { threadId: creator, runId, stepId: vision.id, attempt: 1 };
+      yield* runner.execute(job);
+      const waiting = yield* inFlight;
+      assert.isNull(waiting.run.ending);
+      assert.equal(waiting.step?.toolWaits, 1);
+      assert.isNull(waiting.step?.result ?? null);
+      for (let wake = 0; wake < 3; wake += 1) yield* runner.execute(job);
+      const { run } = yield* inFlight;
+      assert.equal(run.ending, "tool-failed");
+      assert.match(run.lastFailure, /^vision's turn: /);
+      assert.deepEqual(world.launches, []);
+      // The step stays in flight: a resume launches it again as a new attempt.
+      assert.equal(run.inFlight, vision.seq);
     }),
   ),
 );
@@ -1750,7 +1796,7 @@ const occupy = (commandId: string) =>
     }),
   );
 
-it.effect("a landing that never gets written fails its step, so the run ends resumably", () =>
+it.effect("a landing that never gets written hands its step back to wait, never a result", () =>
   withGame((world) =>
     Effect.gen(function* () {
       const { vision, thread } = yield* atVision(world);
@@ -1759,9 +1805,11 @@ it.effect("a landing that never gets written fails its step, so the run ends res
       yield* occupy(gameRunStepCommandId(vision.id, 1, "complete"));
       const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
       yield* withClockRunning(roles.settle(thread, turn));
-      const { run } = yield* inFlight;
-      assert.equal(run.ending, "failed");
-      assert.match(run.lastFailure ?? "", /could not be landed/);
+      // The step's wake lands the settled turn again; nothing was judged meanwhile.
+      const { run, step } = yield* inFlight;
+      assert.isNull(run.ending);
+      assert.equal(step?.toolWaits, 1);
+      assert.isNull(step?.result ?? null);
     }),
   ),
 );
@@ -1776,7 +1824,7 @@ it.effect("a turn whose resend timer never gets written fails its step", () =>
       const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
       yield* withClockRunning(roles.settle(thread, turn));
       const { run } = yield* inFlight;
-      assert.equal(run.ending, "failed");
+      assert.equal(run.ending, "tool-failed");
       assert.match(run.lastFailure ?? "", /could not be set to go again/);
     }),
   ),
@@ -1797,7 +1845,7 @@ it.effect("a step whose job cannot report is tried again, then fails", () =>
       );
       assert.deepEqual(world.launches, []);
       const { run } = yield* inFlight;
-      assert.equal(run.ending, "failed");
+      assert.equal(run.ending, "tool-failed");
       assert.match(run.lastFailure ?? "", /could not be reported after 4 tries/);
     }),
   ),
@@ -1824,7 +1872,7 @@ it.effect("a turn its timer cannot send by the last try fails its step", () =>
       yield* TestClock.setTime(Date.now() + 20_000);
       yield* drainThroughRetries;
       const { run } = yield* inFlight;
-      assert.equal(run.ending, "failed");
+      assert.equal(run.ending, "tool-failed");
       assert.match(run.lastFailure ?? "", /turn could not be sent/);
     }),
   ),
@@ -1870,7 +1918,10 @@ it.effect("records a landing cannot write by the last try stop the run before it
         effectId: "effect:outputs-test",
         final: true,
       });
-      assert.equal((yield* inFlight).run.ending, "stopped");
+      // The server's own stop pauses as a tool that kept failing, never the creator's.
+      const paused = (yield* inFlight).run;
+      assert.equal(paused.ending, "tool-failed");
+      assert.match(paused.lastFailure, /records could not be written/);
       // The step the records were for never starts: the stop cancelled its effect.
       world.folderGone = false;
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
@@ -1961,7 +2012,7 @@ it.effect("a reattached turn whose cap could not be set has it set when the job 
   ),
 );
 
-it.effect("a landing's last resort that breaks once still fails its step", () =>
+it.effect("a landing's last resort that breaks once still hands its step back", () =>
   withGame((world) =>
     Effect.gen(function* () {
       const { vision, thread } = yield* atVision(world);
@@ -1970,11 +2021,11 @@ it.effect("a landing's last resort that breaks once still fails its step", () =>
       yield* occupy(gameRunStepCommandId(vision.id, 1, "complete"));
       world.breakDispatch = firstOf(
         1,
-        (who, _id, type) => who === "reactor" && type === "game-run.step.fail",
+        (who, _id, type) => who === "reactor" && type === "game-run.step.schedule",
       );
       const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
       yield* withClockRunning(roles.settle(thread, turn));
-      assert.equal((yield* inFlight).run.ending, "failed");
+      assert.equal((yield* inFlight).step?.toolWaits, 1);
     }),
   ),
 );
@@ -2162,6 +2213,7 @@ it.effect("startup stops a role turn no step record names, and leaves a named on
       threadId: creator,
       runId,
       stepId: vision.id,
+      attempt: 1,
       roleThreadId: named,
     });
     for (const threadId of [named, unnamed])

@@ -20,14 +20,16 @@ import {
   type ThreadId,
   gameRunStepCommandId,
   gameRunStepId,
+  plainReason,
 } from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -49,15 +51,15 @@ import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../../serverActivation.ts";
-import { laneProfile } from "../engineProfile.ts";
+import { engineProfile, runEngine } from "../engineProfile.ts";
 import * as GameOperations from "../GameOperations.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameService from "../GameService.ts";
-import { causeText, logLine, refreshHarnessFiles, writeAtomic } from "../runSetup.ts";
+import { causeText, logLine, refreshHarnessFiles } from "../runSetup.ts";
 import { runBotFact } from "./botFacts.ts";
 import { runStateChecks } from "./checkRunner.ts";
-import { artAssetFacts, reviewerFacts } from "./facts.ts";
+import { artAssetFacts, type ReviewBots, reviewerFacts, total } from "./facts.ts";
 import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreBuild, type RestoreTarget } from "./restoreRound.ts";
@@ -65,18 +67,14 @@ import { BuildName, keptBuild } from "./buildNames.ts";
 import { buildStep, type FolderLock, freeBy, pruneBuilds, withBuildInFolder } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import {
-  BUSY_PAUSE,
-  BUSY_WAITS,
-  busyEnded,
-  type GameRunGameBusy,
-  type GameRunMemoryShort,
-  MEMORY_PAUSE,
-  MEMORY_WAITS,
-  handBackOnBusy,
-  handBackOnLowMemory,
-  isContention,
-  lastLine,
-} from "./lowMemory.ts";
+  type GameRunBuildFault,
+  GameRunJobBroke,
+  type NotMeasured,
+  handBack,
+  measuring,
+  needed,
+  toolFailed,
+} from "./handBack.ts";
 import { modelFacts } from "./modelFacts.ts";
 import {
   blankFolder,
@@ -95,18 +93,7 @@ import { BLANK, type BotStep, type RoleStep } from "./state.ts";
 import { bootStep } from "./steps.ts";
 import { RETRIES, retrying } from "./retrying.ts";
 
-/**
- * A read or write a step's job needs that failed (its report, a record it
- * decides by, a timer it sets): the job is tried again (executeJob), never
- * reported as the step's own failure, and never read as an answer.
- */
-class GameRunJobBroke extends Data.TaggedError("GameRunJobBroke")<{
-  readonly cause: unknown;
-}> {}
 const isJobBroke = (error: unknown): error is GameRunJobBroke => error instanceof GameRunJobBroke;
-/** A read or write the job's progress depends on: its failure breaks the job. */
-const needed = <A, E, R>(work: Effect.Effect<A, E, R>) =>
-  work.pipe(Effect.mapError((cause) => new GameRunJobBroke({ cause })));
 
 export class GameRunStepRunner extends Context.Service<
   GameRunStepRunner,
@@ -137,7 +124,15 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const jobs = yield* GameRunJobs.GameRunJobs;
   const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
   const deps: RoleDeps = { launches, threads, game, checkpoints };
+  /** A record of the run's in the game folder, whole or not at all. */
+  const writeRecord = (file: string, text: string) =>
+    writeFileStringAtomically({ filePath: file, contents: text }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, pathService),
+    );
   // Jobs read the run's step in flight and its role threads, never every step's prompts.
   const inFlightOf = (threadId: ThreadId) =>
     projections.getGameRunRecords(threadId, { steps: "in-flight" });
@@ -249,64 +244,6 @@ const make = Effect.gen(function* () {
         reason: reason.slice(0, 300),
       }),
     );
-  /**
-   * Memory short, or the game held by another operation: the step's job ends
-   * and a durable timer runs its work again, so no job holds one of the
-   * shared step slots while it waits. The waits are counted on the step's
-   * record, each kind on its own, so a restart does not reset them. Both
-   * halves of a pair refused at once make one wait, whatever each was refused
-   * for: the command id counts every wait the step made, not each kind. The run
-   * finds a pair's step by a half's id, so the timer names the half refused.
-   * A timer that could not be written fails the step: a step left running
-   * with neither job nor timer would wait for a restart.
-   */
-  const waitForMemory = (
-    job: GameRunJobs.GameRunStepJob,
-    record: GameRunStep,
-    stepId: GameRunStepId,
-    short: GameRunMemoryShort | GameRunGameBusy,
-    log: (line: string) => Effect.Effect<void>,
-  ) =>
-    Effect.gen(function* () {
-      const kind = short._tag === "GameRunGameBusy" ? "busy" : "memory";
-      const n = ((kind === "busy" ? record.busyWaits : record.memoryWaits) ?? 0) + 1;
-      const pause = kind === "busy" ? BUSY_PAUSE : MEMORY_PAUSE;
-      yield* log(
-        kind === "busy"
-          ? `${short.what} could not start yet (${lastLine(short.error)}); the step waits ${BUSY_PAUSE} (${n} of ${BUSY_WAITS})`
-          : `${short.what} refused, memory short (${lastLine(short.error)}); the step waits ${MEMORY_PAUSE} (${n} of ${MEMORY_WAITS})`,
-      );
-      const at =
-        DateTime.toEpochMillis(yield* DateTime.now) +
-        Duration.toMillis(Duration.fromInputUnsafe(pause));
-      yield* engine
-        .dispatch({
-          type: "game-run.step.schedule",
-          commandId: CommandId.make(
-            `server:game-run-wait:${record.id}:attempt:${job.attempt}:${(record.memoryWaits ?? 0) + (record.busyWaits ?? 0) + 1}`,
-          ),
-          threadId: job.threadId,
-          runId: job.runId,
-          stepId,
-          attempt: job.attempt,
-          at,
-          timer: { kind, n },
-        })
-        .pipe(
-          Effect.asVoid,
-          Effect.catchTags({
-            // The run moved on or stopped, or the other half's wait already holds this one.
-            OrchestratorGameRunRefusedError: (error) =>
-              Effect.logInfo("game run wait not taken", { kind, detail: error.detail }),
-            OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
-          }),
-          // A wait that could not be set breaks the job, which is tried again:
-          // a step left running with neither job nor timer would wait for a restart.
-          Effect.mapError((cause) => new GameRunJobBroke({ cause })),
-        );
-    });
-  const memoryWaitsLeft = (record: GameRunStep) => (record.memoryWaits ?? 0) < MEMORY_WAITS;
-  const busyWaitsLeft = (record: GameRunStep) => (record.busyWaits ?? 0) < BUSY_WAITS;
   // Steps hand a busy game back to their timer; the end of a run and a restore wait it out, until `waitUntil`.
   const folderLock = (run: GameRun, waitUntil: number | null): FolderLock => ({
     operations,
@@ -314,23 +251,62 @@ const make = Effect.gen(function* () {
     waitUntil,
   });
 
-  // A step's work that broke reports it, so the run ends resumably with why;
-  // an interrupt is a stop and reports nothing, and a report that could not be
-  // written goes up to the job, which is tried again.
-  const reporting = <E>(
+  /**
+   * The one way a step's work, or one half of a pair, reports. A measurement
+   * completes the step. What was not measured never does: memory short, the
+   * game held or a tool failed hands the step back to a durable timer while
+   * its waits last, else (or at once, for a fault waiting cannot clear) the
+   * run pauses with why. A build fault that reached here has no verdict form
+   * in its step (a capture of a folder the build broke): the step fails with
+   * the build's reason, resumable once it is fixed. Any other failure of the
+   * run's own code is a tool fault too, never an answer. A broken record
+   * write breaks the job, which executeJob tries again; an interrupt is a
+   * stop and reports nothing.
+   */
+  const measure = <E>(
     job: GameRunJobs.GameRunStepJob,
+    record: GameRunStep,
     stepId: GameRunStepId,
-    work: Effect.Effect<void, E>,
-  ): Effect.Effect<void, GameRunJobBroke> =>
-    work.pipe(
-      Effect.catchCause((cause) => {
-        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
-        const broke = Cause.findErrorOption(cause).pipe(Option.filter(isJobBroke));
-        return Option.isSome(broke)
-          ? Effect.fail(broke.value)
-          : fail(job, stepId, causeText(cause));
+    what: string,
+    root: string,
+    log: (line: string) => Effect.Effect<void>,
+    work: Effect.Effect<GameRunStepResult | null, E>,
+  ): Effect.Effect<void, GameRunJobBroke> => {
+    const half = { ...job, stepId };
+    const notMeasured = (cause: NotMeasured) =>
+      handBack(
+        engine,
+        { creator: job.threadId, runId: job.runId, stepId, attempt: job.attempt, record },
+        cause,
+        (result) => complete(half, stepId, result),
+        log,
+      ).pipe(
+        Effect.mapError((cause) => (isJobBroke(cause) ? cause : new GameRunJobBroke({ cause }))),
+      );
+    // Every failure is read once; only a broken record write stays the job's own.
+    const read = work.pipe(measuring(what, [root])) as Effect.Effect<
+      GameRunStepResult | null,
+      NotMeasured | GameRunBuildFault | GameRunJobBroke
+    >;
+    return read.pipe(
+      Effect.flatMap((result) =>
+        result === null
+          ? Effect.void
+          : log(`  ${summarize(result)}`).pipe(Effect.andThen(complete(half, stepId, result))),
+      ),
+      Effect.catchTags({
+        GameRunMemoryShort: notMeasured,
+        GameRunGameBusy: notMeasured,
+        GameRunToolFailed: notMeasured,
+        GameRunBuildFault: (fault: GameRunBuildFault) =>
+          fail(
+            half,
+            stepId,
+            `the build cannot be kept: ${plainReason(fault.error.detail ?? fault.error.reason, [root])}`,
+          ),
       }),
     );
+  };
 
   /** The run and its step in flight, if this job's attempt still holds it. */
   const current = (job: GameRunJobs.GameRunStepJob) =>
@@ -372,9 +348,7 @@ const make = Effect.gen(function* () {
             cause: "the game folder could not be found",
           });
         for (const file of job.files)
-          yield* Effect.tryPromise(() =>
-            writeAtomic(NodePath.join(root.value, file.path), file.text),
-          );
+          yield* writeRecord(NodePath.join(root.value, file.path), file.text);
       });
       const stop = <E>(cause: Cause.Cause<E>) =>
         retrying(
@@ -384,6 +358,8 @@ const make = Effect.gen(function* () {
               commandId: CommandId.make(`server:game-run-outputs-failed:${job.effectId}`),
               threadId: job.threadId,
               runId: job.runId,
+              // Not the creator's act: the run pauses as a tool that kept failing.
+              ending: "tool-failed",
               reason: `the run's records could not be written (${causeText(cause).slice(0, 200)})`,
             }),
           ),
@@ -431,33 +407,63 @@ const make = Effect.gen(function* () {
     });
 
   // The art director judges files, so it gets the asset-list and measured
-  // image facts; the redo that answers it sees the same measurements.
+  // image facts; the redo that answers it sees the same measurements. The
+  // readers are total (facts.ts): what they could not read they say.
   const promptOf = (run: GameRun, role: RoleStep, root: string) =>
     Effect.gen(function* () {
       const task = run.task;
       const redo = role.role === "art" && task._tag === "stage" && task.phase === "redo";
       const judged = role.role === "art-director" || redo;
       if (!judged) return role.prompt;
-      const sprites = (yield* Effect.promise(() => spriteFacts(root, run.lane))).full;
-      const models = (yield* Effect.promise(() => modelFacts(root, run.lane))).full;
+      const sprites = yield* Effect.promise(() =>
+        total("Image facts", async () => (await spriteFacts(root, run.lane)).full),
+      );
+      const models = yield* Effect.promise(() =>
+        total("Model facts", async () => (await modelFacts(root, run.lane)).full),
+      );
       return role.role === "art-director"
         ? `${role.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, run.lane)), sprites)}${modelBlock(models)}`
         : `${role.prompt}${spriteBlock(sprites, true)}${modelBlock(models, true)}`;
     });
 
+  /**
+   * The reviewer's facts: the folder's code and art, and the bot runs of the
+   * round's tester on its candidate with the report of exactly those runs,
+   * never another round's or another build's. A record that cannot be read is
+   * said so; these are facts for a prompt, never a verdict.
+   */
+  const reviewFacts = (root: string, run: GameRun, tester: ThreadId | null) =>
+    Effect.gen(function* () {
+      const bots: ReviewBots =
+        tester === null
+          ? { kind: "none" }
+          : yield* game.botRuns(tester).pipe(
+              Effect.flatMap((record) => {
+                const runs = record.root === root ? record.runs : [];
+                return game
+                  .botReportText(
+                    root,
+                    runs.map((each) => each.runId),
+                  )
+                  .pipe(Effect.map((report): ReviewBots => ({ kind: "runs", runs, report })));
+              }),
+              Effect.catch((error) =>
+                Effect.succeed<ReviewBots>({
+                  kind: "not measured",
+                  why: plainReason(error.detail ?? error.reason, [root]),
+                }),
+              ),
+            );
+      return yield* Effect.promise(() => reviewerFacts(root, run.lane, bots));
+    });
+
   const copiesOf = (runId: string) => runCopies(config.worktreesDir, runId);
-  const roleContext = (
-    run: GameRun,
-    record: GameRunStep,
-    root: string,
-    log: RoleContext["log"],
-  ): RoleContext => ({
+  const roleContext = (run: GameRun, root: string, log: RoleContext["log"]): RoleContext => ({
     root,
-    lane: run.lane,
+    engine: runEngine(run),
     runId: run.id,
     copies: copiesOf(run.id),
     log,
-    memoryWaitsLeft: memoryWaitsLeft(record),
   });
 
   /**
@@ -497,6 +503,7 @@ const make = Effect.gen(function* () {
             threadId: job.threadId,
             runId: run.id,
             stepId,
+            attempt: job.attempt,
             roleThreadId: target,
             ...(replaces === undefined ? {} : { replaces }),
           })
@@ -527,59 +534,53 @@ const make = Effect.gen(function* () {
           );
           if (!projectLive)
             return yield* fail(half, stepId, `${role.role}: its project was deleted`);
-          const ctx = roleContext(run, record, root, log);
+          const ctx = roleContext(run, root, log);
           // An engine whose first editor open imports the whole project (minutes;
           // later opens take seconds) pays it here, before any role's clock.
-          const engineProfile = laneProfile(run.lane);
-          if (engineProfile.run.warmEditor && role.at === null) {
+          // Memory short waits; any other failure leaves the open to the role.
+          const profile = engineProfile(ctx.engine);
+          if (profile.run.warmEditor && role.at === null) {
             const from = Date.now();
-            yield* handBackOnLowMemory(
-              game.warmEditor(root),
-              `${engineProfile.displayName} warm-up`,
-              ctx.memoryWaitsLeft,
-            ).pipe(
-              Effect.matchEffect({
-                onSuccess: (warmed) =>
-                  warmed
-                    ? log(
-                        `${engineProfile.displayName} warm-up: first import took ${Math.round((Date.now() - from) / 1000)} s, before ${role.role}'s clock`,
-                      )
-                    : Effect.void,
-                onFailure: (error) =>
-                  error._tag === "GameRunMemoryShort"
-                    ? Effect.fail(error)
-                    : log(
-                        `${engineProfile.displayName} warm-up skipped (${(error.detail ?? error.reason).slice(0, 200)}); the role opens the editor itself`,
-                      ),
+            const skipped = (why: string) =>
+              log(
+                `${profile.displayName} warm-up skipped (${why}); the role opens the editor itself`,
+              );
+            yield* game.warmEditor(root).pipe(
+              measuring(`${profile.displayName} warm-up`, [root]),
+              Effect.flatMap((warmed) =>
+                warmed
+                  ? log(
+                      `${profile.displayName} warm-up: first import took ${Math.round((Date.now() - from) / 1000)} s, before ${role.role}'s clock`,
+                    )
+                  : Effect.void,
+              ),
+              Effect.catchTags({
+                GameRunGameBusy: (busy) => skipped(busy.error.detail ?? busy.error.reason),
+                GameRunToolFailed: (tool) => skipped(tool.reason),
+                GameRunBuildFault: (fault) => skipped(fault.error.detail ?? fault.error.reason),
               }),
             );
           }
+          // A comparator's folder and a sample's copy that cannot be made are not
+          // measured: they fail the step's work, never stand for a role's result.
           const blank = role.at === BLANK ? yield* blankFolder(deps, ctx, role) : null;
-          if (role.at === BLANK && blank === null)
-            return yield* fail(half, stepId, `${role.role}: no folder of its own`);
           if (role.at === null && replaces === undefined)
             for (const file of role.clear)
-              yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, file), { force: true }));
+              yield* Effect.tryPromise(() =>
+                NodeFSP.rm(NodePath.join(root, file), { force: true }),
+              );
           // A blind sample plays a plain copy of its build: the same game, but no
           // git, round notes or bots that would tell the builds apart.
           const sample =
             role.at !== null && role.at !== BLANK
               ? yield* sampleCopy(deps, ctx, role, role.at)
               : null;
-          if (role.at !== null && role.at !== BLANK && sample === null)
-            return yield* fail(half, stepId, `${role.role}: no copy of its build`);
           const workspace = blank ?? sample;
           const dropWorkspace =
             workspace === null ? Effect.void : removeBlank(deps, ctx, workspace);
-          // A deleted creator chat cannot be a parent; the role then stands alone
-          // rather than failing. A read that fails decides nothing: a role
-          // launched without its parent would never have its turns landed.
-          const creatorLive = yield* needed(threads.getThreadShell(run.threadId)).pipe(
-            Effect.map((s) => s !== null && s.deletedAt === null),
-          );
           if (!(yield* startStep(target, replaces))) return yield* dropWorkspace;
           yield* limitInput(target, workspace?.path ?? root);
-          const launched = yield* launches
+          yield* launches
             .launch({
               commandId: CommandId.make(
                 `server:game-run-role:${stepId}:attempt:${job.attempt}:launch:${target}`,
@@ -603,14 +604,11 @@ const make = Effect.gen(function* () {
               createdBy: "user",
               creationSource: "server",
               launchedBy: "game_run",
-              ...(creatorLive ? { parentThreadId: run.threadId } : {}),
+              // The run's chat is always live here: deleting it stops the run in the same commit.
+              parentThreadId: run.threadId,
             })
-            .pipe(Effect.option);
-          if (Option.isNone(launched)) {
             // No thread owns a checkout made here until a launch succeeds.
-            yield* dropWorkspace;
-            return yield* fail(half, stepId, `${role.role}: thread launch failed`);
-          }
+            .pipe(Effect.tapError(() => dropWorkspace));
           yield* log(`${role.role}: launched thread ${target}`);
         });
 
@@ -647,8 +645,13 @@ const make = Effect.gen(function* () {
             const cut = attemptTurns.filter(
               (t) => GameRunRoleReactor.isCutOff(t.run) && t.run.startedAt !== null,
             ).length;
+            // Neither the build nor the role: the server kept restarting during the turn.
             if (cut >= CUT_OFF_LIMIT)
-              return yield* fail(half, stepId, `${role.role}: role turn cut off repeatedly`);
+              return yield* toolFailed(
+                `${role.role}'s turn`,
+                `the server restarted during this turn ${cut} times`,
+                { standing: true },
+              );
             yield* log(`${role.role}: turn on ${threadId} was cut off; continuing it`);
             const n = Math.max(...attemptTurns.map((t) => t.turn.n)) + 1;
             yield* roles.sendTurn({
@@ -673,7 +676,11 @@ const make = Effect.gen(function* () {
           );
         }
         if (role.at !== null && shell.worktreePath === null) {
-          if (threadId === own) return yield* fail(half, stepId, `${role.role}: its copy is gone`);
+          // A resume's new attempt makes a new copy; this attempt cannot.
+          if (threadId === own)
+            return yield* toolFailed(`${role.role}'s copy of its build`, "its copy is gone", {
+              standing: true,
+            });
           return yield* launchThread(own, threadId, yield* promptOf(run, role, root));
         }
         if (!(yield* startStep(threadId))) return;
@@ -700,52 +707,10 @@ const make = Effect.gen(function* () {
       // A thread the creator deleted is replaced, never waited on.
       yield* log(`${role.role}: thread ${threadId} is gone; launching the step again`);
       return yield* launchThread(own, entry?.threadId ?? undefined, prompt);
-    }).pipe(
-      Effect.catchTags({
-        GameRunMemoryShort: (short) =>
-          waitForMemory(
-            job,
-            record,
-            record.step.kind === "pair" ? gameRunStepId(run.id, role.id) : record.id,
-            short,
-            log,
-          ),
-      }),
-    );
-
-  const botHalf = (
-    job: GameRunJobs.GameRunStepJob,
-    run: GameRun,
-    record: GameRunStep,
-    stepId: GameRunStepId,
-    step: BotStep,
-    root: string,
-    log: (line: string) => Effect.Effect<void>,
-  ) =>
-    runBotFact(
-      deps,
-      {
-        root,
-        runId: run.id,
-        copies: copiesOf(run.id),
-        log,
-        memoryWaitsLeft: memoryWaitsLeft(record),
-        busyWaitsLeft: busyWaitsLeft(record),
-      },
-      step,
-    ).pipe(
-      Effect.tap((result) => log(`  step ${step.id}: ${summarize(result)}`)),
-      Effect.flatMap((result) => complete({ ...job, stepId }, stepId, result)),
-      Effect.catchTags({
-        GameRunMemoryShort: (short) => waitForMemory(job, record, stepId, short, log),
-        GameRunGameBusy: (busy) => waitForMemory(job, record, stepId, busy, log),
-      }),
-    );
+    });
 
   const execute = (job: GameRunJobs.GameRunStepJob) =>
-    Effect.flatMap(current(job), (found) =>
-      found === null ? Effect.void : reporting(job, found.record.id, work(job, found)),
-    );
+    Effect.flatMap(current(job), (found) => (found === null ? Effect.void : work(job, found)));
 
   const work = (
     job: GameRunJobs.GameRunStepJob,
@@ -753,134 +718,101 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const { run, record } = found;
-      const root = yield* projects.resolve(run.threadId);
+      // The run's own folder: a read that fails is no answer about the build.
+      const root = yield* projects
+        .resolve(run.threadId)
+        .pipe(Effect.mapError((cause) => new GameRunJobBroke({ cause })));
       const log = (line: string) => logLine(root, line);
       const step = record.step;
       yield* log(describe(step));
-      const done = (result: GameRunStepResult) =>
-        log(`  ${summarize(result)}`).pipe(Effect.andThen(complete(job, record.id, result)));
+      const engineId = runEngine(run);
+      const measured = <E>(what: string, effect: Effect.Effect<GameRunStepResult | null, E>) =>
+        measure(job, record, record.id, what, root, log, effect);
+      const botHalf = (stepId: GameRunStepId, bot: BotStep) =>
+        measure(
+          job,
+          record,
+          stepId,
+          "the bot run on one compared build",
+          root,
+          log,
+          runBotFact(deps, { root, copies: copiesOf(run.id) }, bot),
+        );
       switch (step.kind) {
         case "build":
-          return yield* reporting(
-            job,
-            record.id,
+          return yield* measured(
+            `build ${step.op._tag}`,
             // The base build includes the engine's harness files as this run ships them.
             (step.op._tag === "capture" && step.op.name === "base"
-              ? refreshHarnessFiles(root, run.lane, log)
+              ? refreshHarnessFiles(root, engineId, run.lane, log).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, pathService),
+                )
               : Effect.void
             ).pipe(
               Effect.andThen(
-                handBackOnBusy(
-                  buildStep(
-                    { game, checkpoints, lock: folderLock(run, null) },
-                    { root, runId: run.id, lane: run.lane },
-                    step.op,
-                  ),
-                  `build ${step.op._tag}`,
-                  busyWaitsLeft(record),
+                buildStep(
+                  { game, checkpoints, lock: folderLock(run, null) },
+                  { root, runId: run.id, lane: run.lane },
+                  step.op,
                 ),
               ),
-              Effect.flatMap(done),
-              Effect.catchTags({
-                GameRunGameBusy: (busy) => waitForMemory(job, record, record.id, busy, log),
-                GameOperationError: (error) =>
-                  isContention(error)
-                    ? fail(job, record.id, busyEnded(`build ${step.op._tag}`, error).reason)
-                    : Effect.fail(error),
-              }),
             ),
           );
         case "boot":
-          return yield* reporting(
-            job,
-            record.id,
+          return yield* measured(
+            "boot check",
             bootStep(game, {
               creator: run.threadId,
               owner: gameRunOperationOwner(run.id),
               root,
-              lane: run.lane,
+              engine: engineId,
               log,
-              memoryWaitsLeft: memoryWaitsLeft(record),
-              busyWaitsLeft: busyWaitsLeft(record),
-            }).pipe(
-              Effect.flatMap(done),
-              Effect.catchTags({
-                GameRunMemoryShort: (short) => waitForMemory(job, record, record.id, short, log),
-                GameRunGameBusy: (busy) => waitForMemory(job, record, record.id, busy, log),
-              }),
-            ),
+            }),
           );
         case "facts":
-          return yield* reporting(
-            job,
-            record.id,
+          return yield* measured(
+            "facts",
             Effect.gen(function* () {
+              // No key reads as the bot's own policy deciding, which is what the tester then gets.
               const jev = yield* settings.getSettings.pipe(
                 Effect.map(({ gameJevApiKey }) => gameJevApiKey !== ""),
                 Effect.orElseSucceed(() => false),
               );
-              // A record that cannot be read breaks the job: the reviewer is
-              // never told no bot ran because a read failed.
-              const bots = yield* Effect.forEach(
-                yield* needed(runRoleThreads(run.threadId, run.id)),
-                (thread) => needed(game.botRuns(thread)),
-              );
-              const code = yield* Effect.promise(() =>
-                reviewerFacts(
-                  root,
-                  run.lane,
-                  bots.flatMap((each) => (each.root === root ? each.runs : [])),
-                ),
-              );
-              yield* done({ kind: "facts", jev, code });
+              // Only the review's facts state code and bots; the tester's step reads the key alone.
+              if (step.bots === undefined) return { kind: "facts", jev, code: "" } as const;
+              const code = yield* reviewFacts(root, run, step.bots);
+              return { kind: "facts", jev, code } as const;
             }),
           );
         case "checks": {
           const rung = run.ladder?.rungs.find((x) => x.id === step.rung);
-          return yield* reporting(
-            job,
-            record.id,
-            (rung === undefined
-              ? Effect.succeed([])
-              : handBackOnBusy(
-                  handBackOnLowMemory(
-                    runStateChecks(game, root, rung),
-                    "state checks",
-                    memoryWaitsLeft(record),
-                  ),
-                  "state checks",
-                  busyWaitsLeft(record),
-                )
-            ).pipe(
-              Effect.flatMap((results) => done({ kind: "checks", results })),
-              Effect.catchTags({
-                GameRunMemoryShort: (short) => waitForMemory(job, record, record.id, short, log),
-                GameRunGameBusy: (busy) => waitForMemory(job, record, record.id, busy, log),
-              }),
+          return yield* measured(
+            "state checks",
+            (rung === undefined ? Effect.succeed([]) : runStateChecks(game, root, rung)).pipe(
+              Effect.map((results) => ({ kind: "checks", results }) as const),
             ),
           );
         }
         case "bot":
-          return yield* reporting(
-            job,
-            record.id,
-            botHalf(job, run, record, record.id, step, root, log),
-          );
+          return yield* botHalf(record.id, step);
         case "note":
-          return yield* reporting(
-            job,
-            record.id,
-            Effect.promise(async () => {
-              for (const file of step.files)
-                await writeAtomic(NodePath.join(root, file.path), file.text);
-            }).pipe(Effect.andThen(done({ kind: "note" }))),
+          return yield* measured(
+            "the run's notes",
+            Effect.forEach(step.files, (file) =>
+              writeRecord(NodePath.join(root, file.path), file.text),
+            ).pipe(Effect.as({ kind: "note" } as const)),
           );
         case "role":
-          return yield* reporting(job, record.id, roleHalf(job, run, record, step, root, log));
+          return yield* measured(
+            `${step.role}'s turn`,
+            roleHalf(job, run, record, step, root, log).pipe(Effect.as(null)),
+          );
         case "pair": {
           // Both halves at once, each in its own worktree, launched in play
           // order (ids follow the coin) so neither side systematically starts
-          // first; one failing never cancels the other.
+          // first; one not measured never cancels the other, which goes on
+          // while the first waits on its timer.
           const owed = step.halves
             .filter(
               (h) =>
@@ -892,13 +824,17 @@ const make = Effect.gen(function* () {
             owed,
             (h) => {
               const stepId = gameRunStepId(run.id, h.id);
-              return reporting(
-                { ...job, stepId },
-                stepId,
-                h.kind === "role"
-                  ? roleHalf(job, run, record, h, root, log)
-                  : botHalf(job, run, record, stepId, h, root, log),
-              );
+              return h.kind === "role"
+                ? measure(
+                    job,
+                    record,
+                    stepId,
+                    `${h.role}'s turn`,
+                    root,
+                    log,
+                    roleHalf(job, run, record, h, root, log).pipe(Effect.as(null)),
+                  )
+                : botHalf(stepId, h);
             },
             { concurrency: 2, discard: true },
           );
@@ -1309,7 +1245,13 @@ const make = Effect.gen(function* () {
                       )
                       .map((h) => gameRunStepId(job.runId, h.id))
                   : [found.record.id];
-              for (const stepId of owed) yield* fail({ ...job, stepId }, stepId, reason);
+              // A tool of ours kept failing (the store the reports go to): a pause, never a result.
+              for (const stepId of owed)
+                yield* complete({ ...job, stepId }, stepId, {
+                  kind: "ended",
+                  ending: "tool-failed",
+                  reason: reason.slice(0, 300),
+                });
             }),
           ).pipe(
             Effect.catch((cause) =>
@@ -1360,11 +1302,15 @@ const make = Effect.gen(function* () {
         // A turn that could not be sent again on the last try fails its step.
         resend: (job) =>
           lastTry(job, resend(job), (cause) =>
-            fail(
-              job,
-              job.stepId,
-              `${job.turn === "memory" ? "a memory wait's" : "a retry's"} turn could not be sent (${causeText(cause)})`,
-            ),
+            complete(job, job.stepId, {
+              kind: "ended",
+              ending: "tool-failed",
+              reason:
+                `${job.turn === "memory" ? "a memory wait's" : "a retry's"} turn could not be sent (${causeText(cause)})`.slice(
+                  0,
+                  300,
+                ),
+            }),
           ),
         outputs: (job) =>
           outputs(job).pipe(

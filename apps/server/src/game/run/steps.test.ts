@@ -8,11 +8,10 @@ import { bootStep } from "./steps.ts";
 // The step builds its check once and runs that effect on every try.
 const boot = (
   check: () => Effect.Effect<{ ok: boolean }, GameOperationError>,
-  busyWaitsLeft = true,
   player: {
-    readonly lane: string;
+    readonly engine: "three" | "unity";
     readonly prepare: () => Effect.Effect<never, GameOperationError>;
-  } = { lane: "three", prepare: () => Effect.die("a three.js game builds no player") },
+  } = { engine: "three", prepare: () => Effect.die("a three.js game builds no player") },
 ) =>
   bootStep(
     {
@@ -23,10 +22,8 @@ const boot = (
       creator: ThreadId.make("creator"),
       owner: "run",
       root: "/g",
-      lane: player.lane,
+      engine: player.engine,
       log: () => Effect.void,
-      memoryWaitsLeft: true,
-      busyWaitsLeft,
     },
   );
 
@@ -51,31 +48,38 @@ it.effect("a browser install in progress spends no boot try", () =>
   }),
 );
 
-it.effect("a browser that cannot be had fails the step, never the build", () =>
-  Effect.gen(function* () {
-    const result = yield* boot(() => Effect.fail(refusal("tool-missing")));
-    expect(result).toEqual({ kind: "failed", reason: "boot check could not run: why" });
-  }),
+it.effect(
+  "a browser that cannot be had is not measured, waiting cannot clear it, and it is never the build's",
+  () =>
+    Effect.gen(function* () {
+      const missing = yield* boot(() => Effect.fail(refusal("tool-missing"))).pipe(Effect.flip);
+      expect(missing).toMatchObject({ _tag: "GameRunToolFailed", standing: true, reason: "why" });
+      const lost = yield* boot(() => Effect.fail(refusal("tool-failed"))).pipe(Effect.flip);
+      expect(lost).toMatchObject({ _tag: "GameRunToolFailed", standing: false });
+    }),
 );
 
 // Another operation holding the game says nothing about the build.
-it.effect(
-  "a busy game hands the step back, and past its waits ends the run, never as a boot failure",
-  () =>
-    Effect.gen(function* () {
-      const handedBack = yield* boot(() => Effect.fail(refusal("busy"))).pipe(Effect.flip);
-      expect(handedBack._tag).toBe("GameRunGameBusy");
-      const ended = yield* boot(() => Effect.fail(refusal("busy")), false);
-      expect(ended.kind).toBe("failed");
-    }),
+it.effect("a busy game is not measured, never a boot failure", () =>
+  Effect.gen(function* () {
+    const handedBack = yield* boot(() => Effect.fail(refusal("busy"))).pipe(Effect.flip);
+    expect(handedBack._tag).toBe("GameRunGameBusy");
+  }),
+);
+
+it.effect("the build's own fault is the boot verdict", () =>
+  Effect.gen(function* () {
+    const result = yield* boot(() => Effect.fail(refusal("command-failed")));
+    expect(result).toEqual({ kind: "boot", ok: false, detail: "why" });
+  }),
 );
 
 // A Unity build the source snapshot cannot read (a link in the project) is the build's fault:
 // handed back, it would wait out every resume as "busy" and never be judged.
 it.effect("a player build refused for its own sources is a boot verdict, not a hand-back", () =>
   Effect.gen(function* () {
-    const result = yield* boot(() => Effect.succeed({ ok: true, errors: [] }), true, {
-      lane: "unity",
+    const result = yield* boot(() => Effect.succeed({ ok: true, errors: [] }), {
+      engine: "unity",
       prepare: () =>
         Effect.fail(
           new GameOperationError({
