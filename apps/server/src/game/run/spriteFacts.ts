@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import * as NodeZlib from "node:zlib";
 import { laneAssets, laneLibrary } from "../engineProfile.ts";
+import { listedIn, readAssetsDoc } from "./assetsDoc.ts";
 import { walkFiles } from "../walkFiles.ts";
 
 const MAX_IMAGES = 160;
@@ -545,10 +546,11 @@ export const spriteFacts = async (root: string, lane: string): Promise<SpriteFac
   const game = loader(MAX_TOTAL_PIXELS);
 
   // Files ASSETS.md lists come first, so the cap and the budget go to the set the game uses.
-  const assetsDoc = await NodeFSP.readFile(NodePath.join(root, "ASSETS.md"), "utf8").catch(
-    () => "",
-  );
-  const listedInDoc = (full: string) => assetsDoc.includes(NodePath.basename(full));
+  // Globs and spans count as listing every file they cover (assetsDoc.ts).
+  const lanePath = (full: string) =>
+    NodePath.relative(NodePath.join(root, lane), full).split(NodePath.sep).join("/");
+  const inDoc = listedIn((await readAssetsDoc(root)) ?? "", files.map(lanePath), lane).inList;
+  const listedInDoc = (full: string) => inDoc.has(lanePath(full));
   const measured = [
     ...roundRobin(files.filter(listedInDoc)),
     ...roundRobin(files.filter((full) => !listedInDoc(full))),

@@ -422,7 +422,7 @@ const make = Effect.gen(function* () {
         total("Model facts", async () => (await modelFacts(root, run.lane)).full),
       );
       return role.role === "art-director"
-        ? `${role.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, run.lane)), sprites)}${modelBlock(models)}`
+        ? `${role.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, runEngine(run), run.lane)), sprites)}${modelBlock(models)}`
         : `${role.prompt}${spriteBlock(sprites, true)}${modelBlock(models, true)}`;
     });
 
@@ -454,7 +454,7 @@ const make = Effect.gen(function* () {
                 }),
               ),
             );
-      return yield* Effect.promise(() => reviewerFacts(root, run.lane, bots));
+      return yield* Effect.promise(() => reviewerFacts(root, runEngine(run), run.lane, bots));
     });
 
   const copiesOf = (runId: string) => runCopies(config.worktreesDir, runId);

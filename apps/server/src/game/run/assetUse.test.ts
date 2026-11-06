@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, describe, expect, it } from "@effect/vitest";
 import { assetUseSummary, readAssetUse } from "./assetUse.ts";
+import { codeOnly } from "./sourceText.ts";
 
 const roots: string[] = [];
 afterAll(() =>
@@ -42,7 +43,7 @@ describe("readAssetUse", () => {
         'uid="uid://abc"\npath="res://.godot/imported/step.wav-1.sample"\n',
       "godot/assets/unused.png": "",
     });
-    const use = await readAssetUse(root, "godot");
+    const use = await readAssetUse(root, "godot", "godot");
     expect(use.engine).toBe("godot");
     expect(use.assets).toBe(5);
     expect(use.unused).toEqual(["assets/unused.png"]);
@@ -74,8 +75,8 @@ describe("readAssetUse", () => {
       "web/assets/run_1.png": "",
       "web/assets/spare.glb": "",
     });
-    const use = await readAssetUse(root, "web");
-    expect(use.engine).toBe("web");
+    const use = await readAssetUse(root, "three", "web");
+    expect(use.engine).toBe("three");
     expect(use.unused).toEqual(["assets/spare.glb"]);
     expect(use.missing).toEqual(["./missing.json in src/a.js"]);
     expect(use.listed).toBeNull();
@@ -98,7 +99,7 @@ describe("readAssetUse", () => {
       "web/vendor/addons/textures/noise.png": "",
       "web/lib/noise.min.js": 'load("audio/ocean.ogg");',
     });
-    const use = await readAssetUse(root, "web");
+    const use = await readAssetUse(root, "three", "web");
     expect(use.assets).toBe(0);
     expect(use.missing).toEqual([]);
     expect(use.unloaded).toEqual([]);
@@ -114,7 +115,7 @@ describe("readAssetUse", () => {
       "web/assets/models/hero.glb": "",
       "web/assets/audio/jump.wav": "",
     });
-    const webUse = await readAssetUse(web, "web");
+    const webUse = await readAssetUse(web, "three", "web");
     expect(webUse.missing).toEqual([]);
     expect(webUse.unused).toEqual([]);
 
@@ -130,7 +131,7 @@ describe("readAssetUse", () => {
       "godot/assets/boss.png": "",
       "godot/assets/spare.png": "",
     });
-    const godotUse = await readAssetUse(godot, "godot");
+    const godotUse = await readAssetUse(godot, "godot", "godot");
     expect(godotUse.missing).toEqual([]);
     expect(godotUse.unused).toEqual(["assets/spare.png"]);
   });
@@ -157,7 +158,7 @@ describe("readAssetUse", () => {
         ].map((name) => [`godot/assets/sprites/${name}.png`, ""]),
       ),
     });
-    const use = await readAssetUse(root, "godot");
+    const use = await readAssetUse(root, "godot", "godot");
     expect(use.listedMissing).toEqual(["assets/sprites/gone_*.png"]);
     expect(use.unlisted).toEqual(["assets/sprites/stray.png"]);
     expect(use.listed).toBe(15);
@@ -179,7 +180,7 @@ describe("readAssetUse", () => {
         ]),
       ),
     });
-    const use = await readAssetUse(root, "godot");
+    const use = await readAssetUse(root, "godot", "godot");
     expect(use.assets).toBe(2);
     expect(use.unused).toEqual(["assets/spare.png"]);
     expect(use.library).toEqual({ files: 4, referenced: 1 });
@@ -206,7 +207,7 @@ describe("readAssetUse", () => {
       NodePath.join(root, "godot/assets/linked.png"),
     );
     await NodeFSP.symlink(NodePath.join(root, "art/folder"), NodePath.join(root, "godot/linked"));
-    const use = await readAssetUse(root, "godot");
+    const use = await readAssetUse(root, "godot", "godot");
     expect(use.assets).toBe(2);
     expect(use.missing).toEqual([]);
     expect(use.unused).toEqual([]);
@@ -233,7 +234,7 @@ describe("readAssetUse", () => {
       "unity/Assets/Resources/Sfx/jump.wav": "",
       "unity/Library/PackageCache/x/huge.png": "",
     });
-    const use = await readAssetUse(root, "unity");
+    const use = await readAssetUse(root, "unity", "unity");
     expect(use.engine).toBe("unity");
     expect(use.assets).toBe(3);
     expect(use.unused).toEqual(["Assets/Art/spare.png"]);
@@ -290,9 +291,70 @@ describe("readAssetUse", () => {
       "unity/Assets/Resources/Sfx/jump.wav": "",
       "unity/Assets/Resources/Faces/happy.png": "",
     });
-    const use = await readAssetUse(root, "unity");
+    const use = await readAssetUse(root, "unity", "unity");
     expect(use.missing).toEqual([]);
     expect(use.unused).toEqual(["Assets/Art/old.png"]);
     expect(use.unloaded).toEqual(["Assets/Scenes/Old.unity", "Assets/Scripts/Aaa.cs"]);
+  });
+});
+
+// The facts a reviewer acts on must hold on the games Kurambit starts from:
+// a path in a doc comment is no missing file, and Godot's own bus layout loads.
+describe("the shipped templates", () => {
+  const templates = NodePath.join(import.meta.dirname, "../../../templates");
+  it.each([
+    ["blank", "godot", "godot"],
+    ["blank-three", "three", "web"],
+    ["blank-unity", "unity", "unity"],
+  ] as const)(
+    "%s names no file only a comment names, and loads its engine's defaults",
+    async (template, engine, lane) => {
+      const root = NodePath.join(templates, template);
+      const use = await readAssetUse(root, engine, lane);
+      // A template may name a file its art step makes later; never one only a comment names.
+      for (const entry of use.missing) {
+        const [raw, file] = entry.split(" in ");
+        const text = await NodeFSP.readFile(NodePath.join(root, lane, file!), "utf8");
+        expect(codeOnly(file!, text)).toContain(raw!);
+      }
+      expect(use.unloaded.filter((path) => path.includes("default_bus_layout"))).toEqual([]);
+    },
+  );
+});
+
+describe("comments and Unity's other kinds", () => {
+  it("reads no path from a comment in any of the game's languages", async () => {
+    const root = await fixture({
+      "web/index.html":
+        '<link rel="stylesheet" href="style.css"><script type="module" src="main.js"></script><!-- <img src="assets/old.png"> -->',
+      "web/main.js":
+        '// load("./assets/gone.png")\n/* "assets/also.png" */\nconst s = "//not a comment";\nfetch("./assets/hero.png");\n',
+      "web/style.css": '/* url("assets/x.png") */ body { background: url(assets/bg.png); }',
+      "web/assets/hero.png": "",
+      "web/assets/bg.png": "",
+    });
+    const use = await readAssetUse(root, "three", "web");
+    expect(use.missing).toEqual([]);
+    expect(use.unused).toEqual([]);
+  });
+
+  it("counts USS references, Resources and StreamingAssets as possibly used", async () => {
+    const guid = "0123456789abcdef0123456789abcdef";
+    const root = await fixture({
+      "unity/ProjectSettings/ProjectVersion.txt": "m_EditorVersion: 6000.6.7f1\n",
+      "unity/ProjectSettings/EditorBuildSettings.asset":
+        "EditorBuildSettings:\n  m_Scenes:\n  - enabled: 1\n    path: Assets/Scenes/Main.unity\n    guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "unity/Assets/Scenes/Main.unity": "--- !u!1 &1\nGameObject:\n  m_Name: x\n",
+      "unity/Assets/Scenes/Main.unity.meta": "guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "unity/Assets/UI/Hud.uss": `.hud { background-image: url("project://database/Assets/UI/frame.png?fileID=2800000&guid=${guid}&type=3"); }`,
+      "unity/Assets/UI/Hud.uss.meta": "guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+      "unity/Assets/UI/frame.png": "",
+      "unity/Assets/UI/frame.png.meta": `guid: ${guid}\n`,
+      "unity/Assets/Resources/Levels/one.png": "",
+      "unity/Assets/StreamingAssets/intro.ogg": "",
+    });
+    const use = await readAssetUse(root, "unity", "unity");
+    expect(use.unused).not.toContain("Assets/Resources/Levels/one.png");
+    expect(use.unused).not.toContain("Assets/StreamingAssets/intro.ogg");
   });
 });

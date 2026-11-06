@@ -5,9 +5,9 @@
 // prompt built from these facts never fails or pauses the run.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { plainReason } from "@kurambit/contracts";
+import { type GameEngineId, plainReason } from "@kurambit/contracts";
 import { assetListSummary, assetUseSummary, readAssetUse } from "./assetUse.ts";
-import { laneProfile } from "../engineProfile.ts";
+import { engineProfile } from "../engineProfile.ts";
 import { spriteFacts } from "./spriteFacts.ts";
 import { modelFacts } from "./modelFacts.ts";
 import type * as BotEvidence from "../botEvidence.ts";
@@ -60,16 +60,16 @@ const botsText = (bots: ReviewBots): string => {
 };
 
 /** Which asset files the code loads and how much it draws itself, bounded for a prompt. */
-export const assetFacts = (root: string, lane: string): Promise<string> =>
-  total("Asset use", async () => assetUseSummary(await readAssetUse(root, lane), lane));
+export const assetFacts = (root: string, engine: GameEngineId, lane: string): Promise<string> =>
+  total("Asset use", async () => assetUseSummary(await readAssetUse(root, engine, lane), lane));
 
 /** The art stage's facts: ASSETS.md against the disk, and missing files. */
-export const artAssetFacts = (root: string, lane: string): Promise<string> =>
-  total("Asset list", async () => assetListSummary(await readAssetUse(root, lane), lane));
+export const artAssetFacts = (root: string, engine: GameEngineId, lane: string): Promise<string> =>
+  total("Asset list", async () => assetListSummary(await readAssetUse(root, engine, lane), lane));
 
 /** The sources' sizes and the files by kind, as one sentence. */
-const codeFacts = async (root: string, lane: string): Promise<string> => {
-  const { extensions: ext, under } = laneProfile(lane).run.sources;
+const codeFacts = async (root: string, engine: GameEngineId, lane: string): Promise<string> => {
+  const { extensions: ext, under } = engineProfile(engine).run.sources;
   const base = NodePath.join(root, lane, under);
   const sources: Array<{ f: string; n: number | null }> = [];
   let images = 0;
@@ -109,12 +109,13 @@ const codeFacts = async (root: string, lane: string): Promise<string> => {
 /** Code facts plus the round tester's bot runs, as one sentence block for the reviewer. */
 export const reviewerFacts = async (
   root: string,
+  engine: GameEngineId,
   lane: string,
   bots: ReviewBots,
 ): Promise<string> => {
-  const code = await total("Code facts", () => codeFacts(root, lane));
+  const code = await total("Code facts", () => codeFacts(root, engine, lane));
   // Only the notable image facts: the reviewer judges the whole game, not each file.
   const sprites = await total("Image facts", async () => (await spriteFacts(root, lane)).notable);
   const modelNotes = await total("Model facts", async () => (await modelFacts(root, lane)).notable);
-  return `${code} ${await assetFacts(root, lane)}${sprites.length > 0 ? ` ${sprites}` : ""}${modelNotes.length > 0 ? ` Models: ${modelNotes}.` : ""}${botsText(bots)}`;
+  return `${code} ${await assetFacts(root, engine, lane)}${sprites.length > 0 ? ` ${sprites}` : ""}${modelNotes.length > 0 ? ` Models: ${modelNotes}.` : ""}${botsText(bots)}`;
 };
