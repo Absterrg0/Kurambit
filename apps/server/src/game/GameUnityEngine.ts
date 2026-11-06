@@ -264,13 +264,17 @@ export const makeUnityBackend = (
         return "usable" as const;
       }
       out.entries.push(label);
-      const ready = yield* live.cli(ctx.root, ["status", "--until-ready", "--timeout", "120"], {
-        operation: "unity-play-ready",
-        timeoutMs: 150_000,
-      });
-      if (ready.process.timedOut)
+      // The editor answered the play start, so one that stops being reachable
+      // now is held by the game: the CLI's own "unreachable" answer is the
+      // freeze, as much as our timer firing is. Bounded like a frozen game.
+      const ready = yield* live.cli(
+        ctx.root,
+        ["status", "--until-ready", "--timeout", String(FROZEN_WAIT_S)],
+        { operation: "unity-play-ready", timeoutMs: (FROZEN_WAIT_S + 30) * 1000 },
+      );
+      if (ready.process.timedOut || GameUnity.answerOf(ready).kind !== "answered")
         return yield* froze(
-          `The editor never became ready after play mode started in ${scene}: the game froze its main thread.`,
+          `The game froze: the editor stopped answering within ${FROZEN_WAIT_S} s of play mode starting in ${scene}.`,
         );
       const frame = Effect.gen(function* () {
         const read = GameUnity.answerOf(

@@ -83,10 +83,24 @@ const operationFailed = (result: unknown): boolean => {
   if ("ok" in result && result.ok === false) return true;
   return false;
 };
-/** The honest message for a finished operation. */
-const operationMessage = (result: unknown, name: string): string => {
-  if (typeof result !== "object" || result === null) return `${name} completed.`;
-  return "message" in result ? String(result.message) : `${name} completed.`;
+/**
+ * The honest message for a finished operation: its own, else one that agrees
+ * with its state. A check reports no message of its own, so a failed one names
+ * its first error instead of claiming it completed.
+ */
+const operationMessage = (result: unknown, name: string, failed: boolean): string => {
+  if (typeof result === "object" && result !== null && "message" in result)
+    return String(result.message);
+  if (!failed) return `${name} completed.`;
+  const errors =
+    typeof result === "object" &&
+    result !== null &&
+    "errors" in result &&
+    Array.isArray(result.errors)
+      ? (result.errors as ReadonlyArray<{ readonly message?: unknown }>)
+      : [];
+  const first = errors[0]?.message;
+  return typeof first === "string" && first !== "" ? `${name} failed: ${first}` : `${name} failed.`;
 };
 /** A failed operation's message, whatever its error. */
 const errorMessage = (error: unknown): string =>
@@ -203,7 +217,7 @@ export const layer = Layer.effect(
                 {
                   name,
                   state: failed ? "failed" : "succeeded",
-                  message: operationMessage(exit.value, name),
+                  message: operationMessage(exit.value, name, failed),
                   at,
                 },
                 failed ? "failed" : "succeeded",
