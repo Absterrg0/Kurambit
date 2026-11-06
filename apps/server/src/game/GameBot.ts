@@ -26,6 +26,7 @@ import {
   type GameBotViewInput,
   type GameBotViewResult,
   type ThreadId,
+  manifestProject,
 } from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -611,17 +612,9 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const backend = yield* engines.backendFor(manifest.engine.name);
       const profile = backend.profile;
-      const projectDir = insideGame(root, backend.projectDirectory(manifest));
+      const projectDir = insideGame(root, manifestProject(manifest));
       const isWeb = profile.play === "browser";
-      const viewport =
-        profile.viewport ??
-        backend.projectSettings(
-          yield* Effect.promise(() =>
-            NodeFSP.readFile(NodePath.join(projectDir, backend.projectSettingsFile), "utf8").catch(
-              () => "",
-            ),
-          ),
-        ).viewport;
+      const viewport = yield* backend.viewport(projectDir);
       const browser = isWeb ? yield* gameBrowser("Bot run", root) : null;
       const ffmpeg = yield* Effect.promise(() =>
         findExecutable("ffmpeg", { pathEnv, override: process.env.KURAMBIT_FFMPEG }),

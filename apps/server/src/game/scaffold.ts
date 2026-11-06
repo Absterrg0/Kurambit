@@ -1,7 +1,5 @@
 import {
   GAME_TEMPLATES,
-  THREE_PINNED_VERSION,
-  UNITY_MIN_VERSION,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameEngineId,
@@ -80,12 +78,7 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
       ? {}
       : { gameplayScene: templateEntry.gameplayScene }),
     ...(templateEntry?.probe === true ? { probe: true } : {}),
-    engine:
-      engine === "three"
-        ? { name: "three", version: THREE_PINNED_VERSION }
-        : engine === "unity"
-          ? { name: "unity", version: UNITY_MIN_VERSION }
-          : { name: "godot", version: "4.7.2" },
+    engine: { name: engine, version: engineProfile(engine).scaffold.version },
     project: engineProfile(engine).projectDirectory,
     // The same folder under its legacy key, for one release, so an older installed Kurambit still opens the game.
     godotProject: engineProfile(engine).projectDirectory,

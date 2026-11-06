@@ -125,8 +125,12 @@ export const layer = Layer.effect(
     ) =>
       Effect.gen(function* () {
         revision += 1;
-        operations.set(root, { ...operation, revision });
         const ownerThreadId = ownerThread(owner);
+        operations.set(root, {
+          ...operation,
+          revision,
+          ...(ownerThreadId === undefined ? {} : { ownerThreadId }),
+        });
         yield* PubSub.publish(events, {
           root,
           revision,

@@ -13,6 +13,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
   gameOperationFault,
+  manifestProject,
   isStandingFault,
   type ThreadId,
   GAME_EXPLORE_BOUNDS,
@@ -239,8 +240,10 @@ const make = Effect.gen(function* () {
   yield* Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, startedMs)).pipe(
     Effect.catchCause((cause) => Effect.logWarning("Pruning explore evidence failed.", { cause })),
   );
-  const snapshot = (root: string, project: string) =>
-    Effect.promise((signal) => snapshotBuildSource(root, project, { signal }));
+  const snapshot = (root: string, project: string, backend: GameEngine.GameEngineBackend) =>
+    Effect.promise((signal) =>
+      snapshotBuildSource(root, project, { signal, rules: backend.profile.buildInputs }),
+    );
   interface ExploreSession {
     readonly id: string;
     readonly root: string;
@@ -828,18 +831,13 @@ const make = Effect.gen(function* () {
               -2000,
             ),
         });
-      const before = yield* snapshot(root, ctx.projectName);
+      const before = yield* snapshot(root, ctx.projectName, backend);
       if (before.kind !== "known")
         return yield* exploreInvalid(
           root,
           "The game sources could not be identified before the native session ran; the result would not be current.",
         );
-      const projectText = yield* Effect.promise(() =>
-        NodeFSP.readFile(NodePath.join(ctx.projectDir, backend.projectSettingsFile), "utf8").catch(
-          () => "",
-        ),
-      );
-      const viewport = backend.projectSettings(projectText).viewport;
+      const viewport = yield* backend.viewport(ctx.projectDir);
       if (
         viewport.width > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
         viewport.height > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
@@ -913,7 +911,7 @@ const make = Effect.gen(function* () {
       const opened = yield* openRunner({
         root,
         backend,
-        projectDir: insideGame(root, backend.projectDirectory(manifest)),
+        projectDir: insideGame(root, manifestProject(manifest)),
         player: prepared.player,
         viewport,
         id,
@@ -951,7 +949,7 @@ const make = Effect.gen(function* () {
           root,
           "Web exploration plays browser games; this game runs on another engine.",
         );
-      const before = yield* snapshot(root, ctx.projectName);
+      const before = yield* snapshot(root, ctx.projectName, backend);
       if (before.kind !== "known")
         return yield* exploreInvalid(
           root,
