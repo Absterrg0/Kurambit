@@ -1,20 +1,24 @@
 // @effect-diagnostics nodeBuiltinImport:off -- A measurement writes the harness's bots into a build's copy and moves their evidence into the game's logs on disk.
 // A build's facts: measured once per engine-project tree and harness, in a
 // copy of the build (GameBuildCopies), never in the game folder, and kept in
-// one table. One measurement runs at a time on the server; every bot start
-// still passes the memory gate. A tier is written as soon as it is measured,
-// so a restart loses only the tier in flight, and the next measure does what
-// is missing. A tool or machine fault is stored as "not measured" with
-// whether waiting can clear it, and every measure tries those again.
+// one table. Nothing that matters lives only in memory: a measure writes the
+// build's row first (owed), each tier is written as it lands, and a reconcile
+// at startup measures every row with tiers still owed. In memory is only the
+// one keyed queue, one job per key, that runs one measurement at a time on
+// the server (every bot start still passes the memory gate) and that Stop
+// game clears for its game. A tool or machine fault is stored as "not
+// measured": with `retry` when waiting may clear it (every measure tries
+// again), as `standing` when it needs a person (their measure tries again).
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -26,13 +30,14 @@ import {
   GameBuildFacts,
   GameBuildId,
   type GameBotRunResult,
-  type GameEngineId,
+  GameEngineId,
   GameOperationError,
 } from "@kurambit/contracts";
 import {
   bootsFact,
   faultOf,
   firstResponseOf,
+  isStanding,
   notMeasured,
   skilledFact,
   tierEvidenceOf,
@@ -42,15 +47,17 @@ import {
 } from "./buildFacts.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
+import { ensureGameDir } from "./gameKeptSaves.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { findExecutable } from "./GameProcesses.ts";
 import * as GameService from "./GameService.ts";
+import { HOST_OS } from "./processHost.ts";
 import { resolveTemplatesDirectory } from "./templates.ts";
-import { measureVideo, playSpan } from "./videoSignals.ts";
+import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 
 /** Changes when the server's reading of a measurement changes; the bot files are hashed besides. */
-const FACTS_VERSION = 1;
+const FACTS_VERSION = 2;
 /** A measurement's operations on copies are its own: no thread owns them. */
 const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait for the one running. */
@@ -68,6 +75,9 @@ export interface ResolvedBuild {
 type Fact<K extends keyof GameBuildFacts> = GameBuildFacts[K];
 const Stored = Schema.Struct({
   build: GameBuildId,
+  /** Where the build was asked for, so a reconcile after a restart can measure what is owed. */
+  root: Schema.optionalKey(Schema.String),
+  engine: Schema.optionalKey(GameEngineId),
   measuredAt: Schema.NullOr(Schema.String),
   renderer: Schema.NullOr(Schema.String),
   boots: Schema.optionalKey(GameBuildFacts.fields.boots),
@@ -76,8 +86,11 @@ const Stored = Schema.Struct({
   skilled: Schema.optionalKey(GameBuildFacts.fields.skilled),
   liveness: Schema.optionalKey(GameBuildFacts.fields.liveness),
   firstResponse: Schema.optionalKey(GameBuildFacts.fields.firstResponse),
+  /** The facts not measured for a standing tool or machine fault: a person's measure tries them again. */
+  standing: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 type Stored = typeof Stored.Type;
+type Found = { readonly harness: string; readonly stored: Stored };
 const StoredJson = Schema.fromJsonString(Stored);
 const decodeStored = Schema.decodeUnknownOption(StoredJson);
 const encodeStored = Schema.encodeSync(StoredJson);
@@ -89,20 +102,21 @@ const decodeSidecar = Schema.decodeUnknownOption(
       frames: Schema.optionalKey(
         Schema.Array(Schema.Tuple([Schema.Number, Schema.Number, Schema.Number])),
       ),
-      longestStallMs: Schema.optionalKey(Schema.Number),
     }),
   ),
 );
 
 /** The facts a tier's run writes. */
 type Tier = "boots" | "idle" | "masher" | "skilled";
-const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<keyof Stored>>> = {
+type FactName = "boots" | "idle" | "masher" | "skilled" | "liveness" | "firstResponse";
+const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
   boots: ["boots"],
   idle: ["idle"],
   masher: ["masher", "liveness", "firstResponse"],
   skilled: ["skilled"],
 };
 const TIERS: ReadonlyArray<Tier> = ["boots", "idle", "masher", "skilled"];
+const FACT_NAMES: ReadonlyArray<FactName> = TIERS.flatMap((tier) => TIER_FACTS[tier]);
 /** About how long each tier takes, for the message. */
 const TIER_SECONDS: Readonly<Record<Tier, number>> = {
   boots: 20,
@@ -110,6 +124,19 @@ const TIER_SECONDS: Readonly<Record<Tier, number>> = {
   masher: 85,
   skilled: 80,
 };
+
+/** One measurement asked for: queued until it holds the server's one permit, then running. */
+interface Job {
+  readonly build: ResolvedBuild;
+  /** A person asked: standing faults are tried again. */
+  person: boolean;
+  /** What it measures, known once it runs. */
+  tiers: ReadonlySet<Tier> | null;
+  running: boolean;
+  stopped: boolean;
+  fiber: Fiber.Fiber<void> | null;
+  readonly done: Deferred.Deferred<void>;
+}
 
 export class GameFacts extends Context.Service<
   GameFacts,
@@ -124,15 +151,21 @@ export class GameFacts extends Context.Service<
     ) => Effect.Effect<ReadonlyMap<string, GameBuildFacts>>;
     /**
      * Measures what the build lacks (never measured, not measured with a
-     * reason waiting clears, an older harness, a changed tester bot) and
-     * returns at once, or after `waitFor` if it finishes sooner. A person's
-     * measure (`queue: "person"`) waits behind at most three others; past
-     * that it starts nothing and says so.
+     * reason waiting clears, an older harness, a changed tester bot; a
+     * person's also what a standing fault kept) and returns at once, or after
+     * `waitFor` if it finishes sooner. A person's measure waits behind at
+     * most three others; past that it starts nothing and says so.
      */
     readonly measure: (
       build: ResolvedBuild,
       options?: { readonly waitFor?: Duration.Input; readonly queue?: "person" | "background" },
     ) => Effect.Effect<GameBuildFacts>;
+    /**
+     * The builds whose row still owes a tier (asked for, never measured), so
+     * a reconcile after a restart measures them again: no owed work lives
+     * only in memory.
+     */
+    readonly owed: Effect.Effect<ReadonlyArray<ResolvedBuild>>;
   }
 >()("kurambit/game/GameFacts") {}
 
@@ -143,6 +176,7 @@ const make = Effect.gen(function* () {
   const bots = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
   const processes = yield* GameProcesses.GameProcesses;
+  const scope = yield* Effect.scope;
   const templates = yield* resolveTemplatesDirectory().pipe(Effect.orDie);
   const kit = NodePath.join(templates, "bot-kit");
   const boundsFile = `// Written by the harness for this measurement (GAME_FACTS_BOUNDS).\nexport const PLAY_SECONDS = { idle: ${GAME_FACTS_BOUNDS.idleSeconds}, masher: ${GAME_FACTS_BOUNDS.masherSeconds} };\nexport const START_SECONDS = ${GAME_FACTS_BOUNDS.startSeconds};\n`;
@@ -157,51 +191,49 @@ const make = Effect.gen(function* () {
       hash.update(await NodeFSP.readFile(NodePath.join(kit, file)).catch(() => Buffer.from(file)));
     return hash.digest("hex").slice(0, 12);
   });
-  const jobs = yield* FiberMap.make<string, void>();
   const permit = yield* Semaphore.make(1);
-  /** What each job in flight will measure, and whether it is still waiting for the permit. */
-  const inFlight = new Map<string, { readonly tiers: ReadonlySet<Tier>; waiting: boolean }>();
+  /** The one queue: a job per facts key, registered before anything yields, removed when it ends. */
+  const jobs = new Map<string, Job>();
+  const waiting = () => [...jobs.values()].filter((job) => !job.running).length;
 
+  const decodeRow = (row: { readonly harness: string; readonly payload_json: string }) => {
+    const stored = decodeStored(row.payload_json);
+    return Option.isSome(stored) ? { harness: row.harness, stored: stored.value } : null;
+  };
   const load = (key: string) =>
     sql<{ readonly harness: string; readonly payload_json: string }>`
       SELECT harness, payload_json FROM game_build_facts WHERE facts_key = ${key}
     `.pipe(
-      Effect.map((rows) => {
-        const row = rows[0];
-        if (row === undefined) return null;
-        const stored = decodeStored(row.payload_json);
-        return Option.isSome(stored) ? { harness: row.harness, stored: stored.value } : null;
-      }),
+      Effect.map((rows) => (rows[0] === undefined ? null : decodeRow(rows[0]))),
       // An unreadable row is no facts: the next measure writes it again.
       Effect.orElseSucceed(() => null),
     );
   const save = (key: string, stored: Stored) =>
-    sql`
-      INSERT INTO game_build_facts (facts_key, harness, payload_json, updated_at)
-      VALUES (${key}, ${harness}, ${encodeStored(stored)}, ${stored.measuredAt ?? ""})
-      ON CONFLICT (facts_key) DO UPDATE SET
-        harness = excluded.harness,
-        payload_json = excluded.payload_json,
-        updated_at = excluded.updated_at
-    `.pipe(
+    Effect.gen(function* () {
+      const now = DateTime.formatIso(yield* DateTime.now);
+      yield* sql`
+        INSERT INTO game_build_facts (facts_key, harness, payload_json, updated_at)
+        VALUES (${key}, ${harness}, ${encodeStored(stored)}, ${now})
+        ON CONFLICT (facts_key) DO UPDATE SET
+          harness = excluded.harness,
+          payload_json = excluded.payload_json,
+          updated_at = excluded.updated_at
+      `;
+    }).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("A build's facts could not be saved.", { key, cause }),
       ),
     );
 
   const NEVER = notMeasured("not measured yet", true);
-  const view = (
-    build: ResolvedBuild,
-    found: { readonly harness: string; readonly stored: Stored } | null,
-  ): GameBuildFacts => {
-    const job = inFlight.get(build.key);
+  const view = (build: ResolvedBuild, found: Found | null): GameBuildFacts => {
+    const job = jobs.get(build.key);
+    const current = found !== null && found.harness === harness ? found.stored : null;
     const stored = found?.stored;
-    const pending = (fact: keyof Stored) =>
-      job !== undefined &&
-      TIERS.some((tier) => job.tiers.has(tier) && TIER_FACTS[tier].includes(fact));
-    const get = <K extends "boots" | "idle" | "masher" | "skilled" | "liveness" | "firstResponse">(
-      fact: K,
-    ): Fact<K> =>
+    const pending = (fact: FactName) =>
+      job?.tiers != null &&
+      TIERS.some((tier) => job.tiers!.has(tier) && TIER_FACTS[tier].includes(fact));
+    const get = <K extends FactName>(fact: K): Fact<K> =>
       pending(fact) ? { status: "pending" } : ((stored?.[fact] as Fact<K> | undefined) ?? NEVER);
     const idle = get("idle");
     const masher = get("masher");
@@ -214,30 +246,30 @@ const make = Effect.gen(function* () {
       liveness: get("liveness"),
       firstResponse: get("firstResponse"),
     };
-    const all = Object.values(facts);
+    const anyMeasured = FACT_NAMES.some((fact) => stored?.[fact] !== undefined);
     const state =
       job !== undefined
-        ? job.waiting
-          ? "queued"
-          : "measuring"
-        : found === null
+        ? job.running
+          ? "measuring"
+          : "queued"
+        : found === null || !anyMeasured
           ? "never"
-          : found.harness !== harness
+          : current === null
             ? "stale"
-            : all.every((fact) => fact.status === "measured")
+            : Object.values(facts).every((fact) => fact.status === "measured")
               ? "measured"
               : "incomplete";
     const left =
       job === undefined
         ? 0
-        : TIERS.filter((tier) => job.tiers.has(tier)).reduce(
+        : TIERS.filter((tier) => job.tiers === null || job.tiers.has(tier)).reduce(
             (sum, tier) => sum + TIER_SECONDS[tier],
             0,
           );
-    const queued = [...inFlight.values()].filter((entry) => entry.waiting).length;
+    const ahead = Math.max(0, waiting() - 1);
     const message =
       state === "queued"
-        ? `Queued behind ${Math.max(1, queued - 1)} other measurement${queued - 1 === 1 ? "" : "s"}; about ${Math.ceil(left / 60)} min once it starts.`
+        ? `Queued${ahead > 0 ? ` behind ${ahead} other measurement${ahead === 1 ? "" : "s"}` : ""}; about ${Math.max(1, Math.ceil(left / 60))} min once it starts.`
         : state === "measuring"
           ? `Measuring: about ${Math.max(1, Math.ceil(left / 60))} min left.`
           : state === "never"
@@ -310,10 +342,8 @@ const make = Effect.gen(function* () {
             `.pipe(Effect.orElseSucceed(() => []));
       const found = new Map(
         rows.flatMap((row) => {
-          const stored = decodeStored(row.payload_json);
-          return Option.isSome(stored)
-            ? [[row.facts_key, { harness: row.harness, stored: stored.value }] as const]
-            : [];
+          const decoded = decodeRow(row);
+          return decoded === null ? [] : [[row.facts_key, decoded] as const];
         }),
       );
       return new Map(
@@ -338,55 +368,60 @@ const make = Effect.gen(function* () {
     });
 
   // What a measurement must do: everything under a new harness, else each
-  // tier never measured, one not measured for a reason waiting clears, and
-  // the skilled tier again when the tester's bot changed.
+  // tier never measured or not measured for a reason waiting clears (and,
+  // for a person, a standing fault they may have fixed), and the skilled
+  // tier again when the tester's bot changed.
   const planOf = (
-    found: { readonly harness: string; readonly stored: Stored } | null,
+    found: Found | null,
     bot: { readonly hash: string } | null,
+    person: boolean,
   ): ReadonlySet<Tier> => {
     if (found === null || found.harness !== harness) return new Set(TIERS);
     const stored = found.stored;
-    const needs = (fact: Stored[keyof Stored] | undefined) =>
-      fact === undefined ||
-      typeof fact !== "object" ||
-      fact === null ||
-      !("status" in fact) ||
-      fact.status === "pending" ||
-      (fact.status === "not-measured" && fact.retry);
+    const standing = new Set(stored.standing ?? []);
+    const needs = (name: FactName) => {
+      const fact = stored[name];
+      return (
+        fact === undefined ||
+        fact.status === "pending" ||
+        (fact.status === "not-measured" && (fact.retry || (person && standing.has(name))))
+      );
+    };
     const tiers = new Set<Tier>();
-    for (const tier of TIERS)
-      if (TIER_FACTS[tier].some((fact) => needs(stored[fact]))) tiers.add(tier);
+    for (const tier of TIERS) if (TIER_FACTS[tier].some(needs)) tiers.add(tier);
     const skilled = stored.skilled;
     const botChanged =
       bot === null
         ? skilled?.status === "measured"
         : skilled?.status !== "measured" || skilled.value.bot.hash !== bot.hash;
     if (botChanged) tiers.add("skilled");
-    // A build that did not boot gets nothing more until its boot is measured again.
     return tiers;
   };
 
+  /** A tier's run folder, kept under the game's logs (checked inside the game: no link leads out). */
   const moveEvidence = (root: string, key: string, tier: Tier, result: GameBotRunResult) =>
     Effect.promise(async () => {
       const from = NodePath.dirname(result.tracePath);
       const name = `game-bot-facts-${key.split(":")[1]?.slice(0, 12) ?? "x"}-${tier}`;
-      const to = NodePath.join(root, "builds", "logs", name);
       try {
-        await NodeFSP.mkdir(NodePath.dirname(to), { recursive: true });
+        const logs = await ensureGameDir(root, "builds/logs");
+        const to = NodePath.join(logs, name);
         await NodeFSP.rm(to, { recursive: true, force: true });
         await NodeFSP.rename(from, to).catch(async () => {
           // The copies live under Kurambit's folder, which may be another filesystem.
           await NodeFSP.cp(from, to, { recursive: true });
           await NodeFSP.rm(from, { recursive: true, force: true });
         });
-        return NodePath.relative(root, to).split(NodePath.sep).join("/");
+        return `builds/logs/${name}`;
       } catch {
         return null;
       }
     });
 
+  // On Linux a bot plays on Xvfb, where the engine is forced to Compatibility
+  // (GameGodotEngine); elsewhere it draws with the project's own renderer.
   const rendererOf = (copy: string, engine: GameEngineId) =>
-    engine !== "godot"
+    engine !== "godot" || HOST_OS !== "linux"
       ? Effect.succeed(null)
       : Effect.promise(async () => {
           const text = await NodeFSP.readFile(
@@ -396,35 +431,47 @@ const make = Effect.gen(function* () {
           const method = /^renderer\/rendering_method="([^"]+)"/m.exec(text)?.[1] ?? "forward_plus";
           return method === "gl_compatibility"
             ? null
-            : "Compatibility; native exports draw Forward+";
+            : `Compatibility; native exports draw ${method === "mobile" ? "Mobile" : "Forward+"}`;
         });
 
-  const measureJob = (build: ResolvedBuild, tiers: ReadonlySet<Tier>) =>
+  const measureJob = (build: ResolvedBuild, tiers: ReadonlySet<Tier>, found: Found | null) =>
     Effect.scoped(
       Effect.gen(function* () {
         const { root, key } = build;
         const announce = (message: string) => operations.changed(root, GAME_FACTS_EVENT, message);
-        yield* copies.track(root, FiberMap.remove(jobs, key));
         const copy = yield* copies.lease(root, { oid: build.build, key });
-        const loaded = yield* load(key);
+        // Every engine step is the copy's only one: Play and a measurement never import at once.
+        const step = <A, E>(work: Effect.Effect<A, E>) => copies.exclusive(copy, work);
         // A new harness measures from nothing: no older reading is kept beside newer ones.
         let stored: Stored =
-          loaded !== null && loaded.harness === harness
-            ? loaded.stored
+          found !== null && found.harness === harness
+            ? found.stored
             : { build: build.build, measuredAt: null, renderer: null };
-        stored = { ...stored, renderer: yield* rendererOf(copy, build.engine) };
-        const write = (patch: Partial<Stored>) =>
+        stored = {
+          ...stored,
+          root,
+          engine: build.engine,
+          renderer: yield* rendererOf(copy, build.engine),
+        };
+        const write = (patch: Partial<Record<FactName, unknown>>) =>
           Effect.gen(function* () {
-            stored = { ...stored, ...patch, measuredAt: DateTime.formatIso(yield* DateTime.now) };
+            const names = Object.keys(patch) as FactName[];
+            const standing = new Set(stored.standing ?? []);
+            for (const name of names)
+              if (isStanding(patch[name])) standing.add(name);
+              else standing.delete(name);
+            stored = {
+              ...stored,
+              ...(patch as Partial<Stored>),
+              standing: [...standing],
+              measuredAt: DateTime.formatIso(yield* DateTime.now),
+            };
             yield* save(key, stored);
-            yield* announce(
-              `Build ${build.build.slice(0, 8)}: ${Object.keys(patch).join(", ")} measured.`,
-            );
+            yield* announce(`Build ${build.build.slice(0, 8)}: ${names.join(", ")} measured.`);
           });
-        const notRun = (why: string, retry: boolean) => notMeasured(why, retry);
 
         if (tiers.has("boots")) {
-          const boots = yield* game.checkIn(copy, OWNER).pipe(
+          const boots = yield* step(game.checkIn(copy, OWNER)).pipe(
             Effect.map(bootsFact),
             Effect.catchTags({
               GameOperationError: (error) =>
@@ -438,38 +485,42 @@ const make = Effect.gen(function* () {
           );
           yield* write({ boots });
         }
+        // The harness's own bots, fresh from the server's templates, never the game's.
+        const kitWritten = yield* Effect.promise(async () => {
+          const dir = NodePath.join(copy, ".studio", "bot", "kit");
+          await NodeFSP.mkdir(dir, { recursive: true });
+          await NodeFSP.cp(kit, dir, { recursive: true, force: true });
+          await NodeFSP.writeFile(NodePath.join(dir, "tier-bounds.mjs"), boundsFile);
+        }).pipe(
+          Effect.as(true),
+          Effect.catchCause(() => Effect.succeed(false)),
+        );
         const boots = stored.boots;
         const unbooted = boots?.status === "measured" && !boots.value.ok;
-        const blocked =
-          unbooted || boots?.status !== "measured"
-            ? notRun(
-                unbooted
-                  ? "the build failed its boot check"
-                  : `its boot check was not measured${boots?.status === "not-measured" ? `: ${boots.why}` : ""}`,
-                !unbooted,
+        const blocked = unbooted
+          ? notMeasured("the build failed its boot check", false)
+          : boots?.status !== "measured"
+            ? notMeasured(
+                `its boot check was not measured${boots?.status === "not-measured" ? `: ${boots.why}` : ""}`,
+                true,
               )
-            : null;
-
-        // The harness's own bots, fresh from the server's templates, never the game's.
-        yield* Effect.tryPromise({
-          try: async () => {
-            const dir = NodePath.join(copy, ".studio", "bot", "kit");
-            await NodeFSP.mkdir(dir, { recursive: true });
-            await NodeFSP.cp(kit, dir, { recursive: true, force: true });
-            await NodeFSP.writeFile(NodePath.join(dir, "tier-bounds.mjs"), boundsFile);
-          },
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "Build facts",
-              path: copy,
-              reason: "io",
-              detail: "the harness's bots could not be written",
-              cause,
-            }),
-        }).pipe(Effect.ignore);
+            : !kitWritten
+              ? notMeasured("the harness's bots could not be written into the build's copy", true)
+              : null;
 
         const runBot = (file: string, seconds: number, decider: "policy" | "jev") =>
-          game.botRunIn(copy, { file, seconds, mode: "play", decider });
+          step(game.botRunIn(copy, { file, seconds, mode: "play", decider }));
+        const didNotBoot = (error: GameOperationError) =>
+          ({
+            status: "measured",
+            value: {
+              ending: "did-not-boot",
+              at: null,
+              played: 0,
+              note: (error.detail ?? error.reason).slice(0, 200),
+              evidence: null,
+            },
+          }) as const;
         const tier = (name: "idle" | "masher", playSeconds: number) =>
           runBot(`.studio/bot/kit/${name}.mjs`, tierWallSeconds(playSeconds), "policy").pipe(
             Effect.flatMap((result) =>
@@ -484,18 +535,7 @@ const make = Effect.gen(function* () {
                 Effect.succeed({
                   result: null,
                   evidence: null,
-                  fact:
-                    faultOf(error) ??
-                    ({
-                      status: "measured",
-                      value: {
-                        ending: "did-not-boot",
-                        at: null,
-                        played: 0,
-                        note: (error.detail ?? error.reason).slice(0, 200),
-                        evidence: null,
-                      },
-                    } as const),
+                  fact: faultOf(error) ?? didNotBoot(error),
                 }),
             }),
           );
@@ -510,19 +550,24 @@ const make = Effect.gen(function* () {
             yield* write({ masher: blocked, liveness: blocked, firstResponse: blocked });
           else {
             const run = yield* tier("masher", GAME_FACTS_BOUNDS.masherSeconds);
+            const notFromRun = (what: string) =>
+              run.fact.status === "not-measured"
+                ? notMeasured(
+                    `the random-input run was not measured: ${run.fact.why}`,
+                    run.fact.retry,
+                    isStanding(run.fact),
+                  )
+                : notMeasured(what, true);
+            const measuredRun = run.fact.status === "measured" && run.result !== null;
             const firstResponse =
-              run.result === null
-                ? notRun("the random-input run was not measured", true)
-                : run.fact.status === "measured"
-                  ? firstResponseOf(run.result)
-                  : notRun(
-                      `the random-input run was not measured: ${run.fact.status === "not-measured" ? run.fact.why : ""}`,
-                      run.fact.status === "not-measured" && run.fact.retry,
-                    );
-            const liveness =
-              run.result === null || run.evidence === null || run.fact.status !== "measured"
-                ? notRun("the random-input run has no play video", run.fact.status !== "measured")
-                : yield* livenessOf(copy, NodePath.join(root, run.evidence), run.result);
+              measuredRun && run.result !== null
+                ? firstResponseOf(run.result)
+                : notFromRun("the random-input run was not measured");
+            const liveness = !measuredRun
+              ? notFromRun("the random-input run was not measured")
+              : run.evidence === null
+                ? notMeasured("the random-input run's video could not be kept", true)
+                : yield* step(livenessOf(copy, NodePath.join(root, run.evidence), run.result!));
             yield* write({ masher: run.fact, liveness, firstResponse });
           }
         }
@@ -532,7 +577,7 @@ const make = Effect.gen(function* () {
           if (blocked !== null) yield* write({ skilled: blocked });
           else if (bot === null)
             yield* write({
-              skilled: notRun(
+              skilled: notMeasured(
                 "this game has no play-mode bot yet (a tester writes one in a run)",
                 false,
               ),
@@ -542,17 +587,14 @@ const make = Effect.gen(function* () {
               NodeFSP.cp(
                 NodePath.join(root, ".studio", "bot"),
                 NodePath.join(copy, ".studio", "bot"),
-                {
-                  recursive: true,
-                  force: true,
-                },
+                { recursive: true, force: true },
               ).then(
                 () => true,
                 () => false,
               ),
             );
             const skilled = !copied
-              ? notRun("the game's bot files could not be copied", true)
+              ? notMeasured("the game's bot files could not be copied", true)
               : yield* runBot(
                   bot.file,
                   tierWallSeconds(GAME_FACTS_BOUNDS.skilledSeconds),
@@ -568,15 +610,7 @@ const make = Effect.gen(function* () {
                       Effect.succeed(
                         faultOf(error) ?? {
                           status: "measured" as const,
-                          value: {
-                            ending: "did-not-boot" as const,
-                            at: null,
-                            played: 0,
-                            note: (error.detail ?? error.reason).slice(0, 200),
-                            evidence: null,
-                            bot,
-                            botWord: null,
-                          },
+                          value: { ...didNotBoot(error).value, bot, botWord: null },
                         },
                       ),
                   }),
@@ -587,6 +621,8 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  // Liveness and the stall over the span of play only: from the start of play
+  // to its end, or to the end of the tier's span when the game never ended.
   const livenessOf = (copy: string, evidence: string, result: GameBotRunResult) =>
     Effect.gen(function* () {
       const ffmpeg = yield* Effect.promise(() =>
@@ -595,16 +631,19 @@ const make = Effect.gen(function* () {
           override: process.env.KURAMBIT_FFMPEG,
         }),
       );
-      if (ffmpeg === null) return notMeasured("ffmpeg is not installed", false);
+      if (ffmpeg === null) return notMeasured("ffmpeg is not installed", false, true);
       const sidecar = yield* Effect.promise(() =>
         NodeFSP.readFile(NodePath.join(evidence, "run.frames.json"), "utf8").catch(() => null),
       ).pipe(Effect.map((text) => (text === null ? null : Option.getOrNull(decodeSidecar(text)))));
       const frames = sidecar?.frames ?? [];
+      // A missing or empty frame record is the encoder's failure, not the game's.
+      if (frames.length === 0) return notMeasured("the run video's frame record is missing", true);
       const times = tierEvidenceOf(result.status.evidence);
-      const span =
-        times?.playingAt === null || times?.playingAt === undefined
-          ? null
-          : playSpan(frames, times.playingAt, times.endedAt);
+      const from = times?.playingAt;
+      if (from === null || from === undefined)
+        return notMeasured("the random-input run reported no start of play", false);
+      const to = times?.endedAt ?? from + GAME_FACTS_BOUNDS.masherSeconds;
+      const span = playSpan(frames, from, to);
       if (span === null) return notMeasured("the run video has no frames of play", false);
       return yield* measureVideo(processes, {
         root: copy,
@@ -615,13 +654,7 @@ const make = Effect.gen(function* () {
       }).pipe(
         Effect.map((signals): Fact<"liveness"> => ({
           status: "measured",
-          value: {
-            ...signals,
-            longestStall:
-              typeof sidecar?.longestStallMs === "number"
-                ? Number((sidecar.longestStallMs / 1000).toFixed(1))
-                : 0,
-          },
+          value: { ...signals, longestStall: stallWithin(frames, from, to) },
         })),
         Effect.catchTags({
           GameOperationError: (error) =>
@@ -630,67 +663,136 @@ const make = Effect.gen(function* () {
       );
     });
 
+  // A job: its row first (so the work is owed even across a restart), then
+  // the permit, then the plan read fresh, then the tiers.
+  const runJob = (job: Job) =>
+    Effect.gen(function* () {
+      const { build } = job;
+      const before = yield* load(build.key);
+      if (before === null || before.harness !== harness)
+        yield* save(build.key, {
+          build: build.build,
+          root: build.root,
+          engine: build.engine,
+          measuredAt: null,
+          renderer: null,
+        });
+      yield* permit.withPermits(1)(
+        Effect.gen(function* () {
+          if (job.stopped) return;
+          job.running = true;
+          const found = yield* load(build.key);
+          const tiers = planOf(found, yield* currentBot(build.root), job.person);
+          job.tiers = tiers;
+          if (tiers.size === 0) return;
+          yield* operations.changed(
+            build.root,
+            GAME_FACTS_EVENT,
+            `Measuring build ${build.build.slice(0, 8)}.`,
+          );
+          yield* measureJob(build, tiers, found);
+        }),
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logWarning("A build's measurement failed.", { key: job.build.key, cause }),
+      ),
+      Effect.ensuring(
+        Effect.suspend(() => {
+          if (jobs.get(job.build.key) === job) jobs.delete(job.build.key);
+          Deferred.doneUnsafe(job.done, Effect.void);
+          return operations.changed(
+            job.build.root,
+            GAME_FACTS_EVENT,
+            `Build ${job.build.build.slice(0, 8)}: measurement ended.`,
+          );
+        }),
+      ),
+    );
+
   const measure: GameFacts["Service"]["measure"] = (build, options = {}) =>
     Effect.gen(function* () {
-      const existing = yield* FiberMap.get(jobs, build.key);
-      if (Option.isNone(existing)) {
-        const found = yield* load(build.key);
-        const tiers = planOf(found, yield* currentBot(build.root));
-        if (tiers.size === 0) return view(build, found);
-        const waiting = [...inFlight.values()].filter((entry) => entry.waiting).length;
-        if (options.queue === "person" && waiting >= QUEUE_LIMIT)
-          return {
-            ...view(build, found),
-            message: `Queued behind ${waiting} measurements; try again shortly.`,
-          };
-        const entry = { tiers, waiting: true };
-        inFlight.set(build.key, entry);
-        yield* FiberMap.run(
-          jobs,
-          build.key,
-          permit
-            .withPermits(1)(
-              Effect.suspend(() => {
-                entry.waiting = false;
-                return operations
-                  .changed(
-                    build.root,
-                    GAME_FACTS_EVENT,
-                    `Measuring build ${build.build.slice(0, 8)}.`,
-                  )
-                  .pipe(Effect.andThen(measureJob(build, tiers)));
-              }),
-            )
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("A build's measurement failed.", { key: build.key, cause }),
-              ),
-              Effect.ensuring(
-                Effect.suspend(() => {
-                  if (inFlight.get(build.key) === entry) inFlight.delete(build.key);
-                  return operations.changed(
-                    build.root,
-                    GAME_FACTS_EVENT,
-                    `Build ${build.build.slice(0, 8)} measured.`,
-                  );
-                }),
-              ),
-            ),
-          { onlyIfMissing: true },
+      const person = options.queue === "person";
+      // Decided and registered in one step, with nothing yielding between.
+      const job = yield* Effect.suspend((): Effect.Effect<Job | null> => {
+        const existing = jobs.get(build.key);
+        if (existing !== undefined) {
+          if (person) existing.person = true;
+          return Effect.succeed(existing);
+        }
+        if (person && waiting() >= QUEUE_LIMIT) return Effect.succeed(null);
+        const fresh: Job = {
+          build,
+          person,
+          tiers: null,
+          running: false,
+          stopped: false,
+          fiber: null,
+          done: Deferred.makeUnsafe<void>(),
+        };
+        jobs.set(build.key, fresh);
+        return Effect.forkIn(runJob(fresh), scope).pipe(
+          Effect.map((fiber) => {
+            fresh.fiber = fiber;
+            return fresh;
+          }),
         );
+      });
+      if (job === null) {
+        const facts = yield* read(build);
+        return {
+          ...facts,
+          message: `Queued behind ${QUEUE_LIMIT} measurements already; try again shortly.`,
+        };
       }
-      if (options.waitFor !== undefined) {
-        const fiber = yield* FiberMap.get(jobs, build.key);
-        if (Option.isSome(fiber))
-          yield* Fiber.await(fiber.value).pipe(
-            Effect.timeoutOption(options.waitFor),
-            Effect.ignore,
-          );
-      }
+      if (options.waitFor !== undefined)
+        yield* Deferred.await(job.done).pipe(Effect.timeoutOption(options.waitFor), Effect.ignore);
       return yield* read(build);
     });
 
-  return GameFacts.of({ harness, read, readMany, measure });
+  // Stop game clears the game's measurements, queued and running.
+  yield* copies.onStop((root) =>
+    Effect.forEach(
+      [...jobs.values()].filter((job) => job.build.root === root),
+      (job) =>
+        Effect.suspend(() => {
+          job.stopped = true;
+          if (jobs.get(job.build.key) === job) jobs.delete(job.build.key);
+          return job.fiber === null ? Effect.void : Fiber.interrupt(job.fiber);
+        }),
+      { discard: true },
+    ),
+  );
+
+  const owed: GameFacts["Service"]["owed"] = sql<{
+    readonly facts_key: string;
+    readonly harness: string;
+    readonly payload_json: string;
+  }>`
+    SELECT facts_key, harness, payload_json FROM game_build_facts WHERE harness = ${harness}
+  `.pipe(
+    Effect.orElseSucceed(() => []),
+    Effect.map((rows) =>
+      rows.flatMap((row): ReadonlyArray<ResolvedBuild> => {
+        const stored = decodeRow(row)?.stored;
+        // Owed: a tier never measured. A retryable fault waits for the next open.
+        if (
+          stored?.root === undefined ||
+          stored.engine === undefined ||
+          !FACT_NAMES.some((name) => stored[name] === undefined) ||
+          jobs.has(row.facts_key)
+        )
+          return [];
+        return [
+          { root: stored.root, build: stored.build, key: row.facts_key, engine: stored.engine },
+        ];
+      }),
+    ),
+  );
+
+  return GameFacts.of({ harness, read, readMany, measure, owed });
 });
 
 export const layer = Layer.effect(GameFacts, make);

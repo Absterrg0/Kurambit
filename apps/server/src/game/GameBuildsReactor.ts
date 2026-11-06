@@ -6,6 +6,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as GameBuilds from "./GameBuilds.ts";
 import * as GameOperations from "./GameOperations.ts";
@@ -31,7 +32,22 @@ const make = Effect.gen(function* () {
   const builds = yield* GameBuilds.GameBuilds;
   const operations = yield* GameOperations.GameOperations;
   const projects = yield* GameProjectService.GameProjectService;
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
   const announced = new Set<string>();
+  const roles = new Map<string, boolean>();
+  const isRole = (threadId: OrchestrationV2DomainEvent["threadId"]) =>
+    roles.has(threadId)
+      ? Effect.succeed(roles.get(threadId)!)
+      : projections.getThreadShell(threadId).pipe(
+          Effect.map((shell) => {
+            const relation = shell?.lineage.relationshipToParent;
+            const role = relation === "role" || relation === "subagent";
+            if (roles.size > 2000) roles.clear();
+            roles.set(threadId, role);
+            return role;
+          }),
+          Effect.orElseSucceed(() => false),
+        );
 
   const pushTo = (event: OrchestrationV2DomainEvent, message: string) =>
     projects
@@ -47,16 +63,15 @@ const make = Effect.gen(function* () {
       case "checkpoint.captured":
         return event.payload.status !== "ready" || event.payload.files.length === 0
           ? Effect.void
-          : pushTo(event, "A turn changed the game.").pipe(Effect.ignore);
+          : Effect.flatMap(isRole(event.threadId), (role) =>
+              // A run's role turns are folded into its rounds: no rail changes for them.
+              role ? Effect.void : pushTo(event, "A turn changed the game.").pipe(Effect.ignore),
+            );
       case "game-run-round.recorded": {
         const record = event.payload.round;
         return pushTo(event, `Round ${record.round} landed.`).pipe(
           Effect.flatMap((root) =>
-            Effect.gen(function* () {
-              const manifest = yield* projects.read(root);
-              if (manifest.engine.name === "unity") return;
-              if (record.build !== undefined) yield* builds.measureIn(root, record.build);
-            }),
+            record.build === undefined ? Effect.void : builds.measureIn(root, record.build),
           ),
           Effect.ignore,
         );
@@ -74,15 +89,20 @@ const make = Effect.gen(function* () {
     }
   };
 
+  // The events from now on, and the reconcile for what landed before (or
+  // was owed when the server last stopped): owed work is read from data.
   const start: GameBuildsReactor["Service"]["start"] = () =>
-    forkParked(
-      engine.streamDomainEvents.pipe(
-        Stream.mapEffect(handle, { concurrency: 4 }),
-        Stream.runDrain,
-        Effect.catchCause((cause) =>
-          Effect.logWarning("game builds event stream failed", { cause }),
+    Effect.andThen(
+      forkParked(
+        engine.streamDomainEvents.pipe(
+          Stream.mapEffect(handle, { concurrency: 4 }),
+          Stream.runDrain,
+          Effect.catchCause((cause) =>
+            Effect.logWarning("game builds event stream failed", { cause }),
+          ),
         ),
       ),
+      forkParked(builds.reconcile),
     );
 
   return GameBuildsReactor.of({ start, handle });

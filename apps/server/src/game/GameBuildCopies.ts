@@ -7,6 +7,12 @@
 // copy names its game folder in COPY_OF, so a Unity copy reuses that folder's
 // import cache. This service sits below GameService so Stop game reaches the
 // work on a game's copies too.
+//
+// One owner at a time: Play and a measurement of the same build share one
+// copy, and every engine step on it (a check, a bot run, a Web export) runs
+// under the copy's one lock, so two never import into its project at once
+// and neither fails the other "busy". A copy is removed only while nothing
+// leases or serves it, decided under the lock its lease takes.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -49,14 +55,13 @@ export class GameBuildCopies extends Context.Service<
       root: string,
       build: { readonly oid: string; readonly key: string },
     ) => Effect.Effect<string, GameOperationError, Scope.Scope>;
-    /**
-     * Registers work on the game's copies (a measurement) that Stop game
-     * ends, for the caller's scope.
-     */
-    readonly track: (
-      root: string,
-      stop: Effect.Effect<void>,
-    ) => Effect.Effect<void, never, Scope.Scope>;
+    /** Runs one engine step on a copy (a check, a bot run, a Web export) as the copy's only one. */
+    readonly exclusive: <A, E, R>(
+      copy: string,
+      work: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>;
+    /** Work on a game's copies that Stop game also ends (the measurements, queued or running). */
+    readonly onStop: (stop: (root: string) => Effect.Effect<void>) => Effect.Effect<void>;
     /** Ends the game's work on its copies: measurements, their operations, bots and previews. */
     readonly stopFor: (root: string) => Effect.Effect<void>;
     /** Records that `copy` is serving build `build` of the game at `url`, and says so to its clients. */
@@ -82,17 +87,26 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const preview = yield* GamePreview.GamePreview;
   const bots = yield* GameBot.GameBot;
-  const locks = yield* KeyedLock.make<string>();
+  /** Held while a copy is made or removed, and while eviction decides. */
+  const folderLocks = yield* KeyedLock.make<string>();
+  /** Held for one engine step on a copy. */
+  const engineLocks = yield* KeyedLock.make<string>();
   const base = NodePath.join(config.worktreesDir, GAME_BUILD_COPIES);
-  const leases = new Map<string, number>();
-  const tracked = new Map<string, Set<Effect.Effect<void>>>();
+  /** Holders of each copy: leases, and a served Play counts as one. */
+  const holders = new Map<string, number>();
+  const stoppers: Array<(root: string) => Effect.Effect<void>> = [];
   const served = new Map<
     string,
     Map<GameBuildId, { readonly copy: string; readonly url: string | null }>
   >();
+  const hold = (path: string, by: number) => {
+    const next = (holders.get(path) ?? 0) + by;
+    if (next <= 0) holders.delete(path);
+    else holders.set(path, next);
+  };
   const announce = (root: string, message: string) =>
     operations.changed(root, GAME_BUILDS_EVENT, message);
-  // A copy that goes ends its Play; its game's clients hear of it.
+  // A Play that ends lets its copy go; its game's clients hear of it.
   const unserve = (root: string, copy: string) =>
     Effect.suspend(() => {
       const plays = served.get(root);
@@ -100,7 +114,10 @@ const make = Effect.gen(function* () {
         .filter(([, play]) => play.copy === copy)
         .map(([build]) => build);
       if (gone.length === 0) return Effect.void;
-      for (const build of gone) plays?.delete(build);
+      for (const build of gone) {
+        plays?.delete(build);
+        hold(copy, -1);
+      }
       return announce(root, `Stopped playing build ${gone[0]!.slice(0, 8)}.`);
     });
 
@@ -133,40 +150,46 @@ const make = Effect.gen(function* () {
       { discard: true },
     );
 
-  // The oldest copies beyond KEPT that nothing holds go, their previews first.
+  // The oldest copies beyond KEPT go; each is checked again under its lock,
+  // so one leased or served meanwhile stays.
   const evict = (root: string) =>
-    Effect.promise(async () => {
+    Effect.gen(function* () {
       const dir = gameDir(root);
-      const names = await NodeFSP.readdir(dir).catch(() => [] as string[]);
-      const complete = await Promise.all(
-        names
-          .filter((name) => !name.endsWith(".making"))
-          .map(async (name) => {
-            const path = NodePath.join(dir, name);
-            const stat = await NodeFSP.stat(path).catch(() => null);
-            return { path, used: stat?.mtimeMs ?? 0 };
-          }),
-      );
-      return complete
-        .filter((entry) => (leases.get(entry.path) ?? 0) === 0)
-        .toSorted((a, b) => b.used - a.used)
-        .slice(KEPT)
-        .map((entry) => entry.path);
-    }).pipe(
-      Effect.flatMap((gone) =>
-        Effect.forEach(
-          gone,
-          (path) =>
-            stopIn(path).pipe(
-              Effect.andThen(unserve(root, path)),
-              Effect.andThen(
-                Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
-              ),
+      const candidates = yield* Effect.promise(async () => {
+        const names = await NodeFSP.readdir(dir).catch(() => [] as string[]);
+        const complete = await Promise.all(
+          names
+            .filter((name) => !name.endsWith(".making"))
+            .map(async (name) => {
+              const path = NodePath.join(dir, name);
+              const stat = await NodeFSP.stat(path).catch(() => null);
+              return { path, used: stat?.mtimeMs ?? 0 };
+            }),
+        );
+        return complete
+          .filter((entry) => !holders.has(entry.path))
+          .toSorted((a, b) => b.used - a.used)
+          .slice(KEPT)
+          .map((entry) => entry.path);
+      });
+      yield* Effect.forEach(
+        candidates,
+        (path) =>
+          folderLocks.withLock(
+            path,
+            Effect.suspend(() =>
+              holders.has(path)
+                ? Effect.void
+                : stopIn(path).pipe(
+                    Effect.andThen(
+                      Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+                    ),
+                  ),
             ),
-          { discard: true },
-        ),
-      ),
-    );
+          ),
+        { discard: true },
+      );
+    });
 
   const lease: GameBuildCopies["Service"]["lease"] = (root, build) =>
     Effect.gen(function* () {
@@ -174,16 +197,12 @@ const make = Effect.gen(function* () {
       if (key === null || !/^[0-9a-f]{40,64}$/.test(build.oid))
         return yield* invalid(root, "a build copy is named by its build's content key");
       const path = NodePath.join(gameDir(root), `${key[1]}-${key[2]}`);
+      // Held before the folder is looked at, so an eviction deciding under the lock sees it.
       yield* Effect.acquireRelease(
-        Effect.sync(() => void leases.set(path, (leases.get(path) ?? 0) + 1)),
-        () =>
-          Effect.sync(() => {
-            const left = (leases.get(path) ?? 1) - 1;
-            if (left === 0) leases.delete(path);
-            else leases.set(path, left);
-          }).pipe(Effect.andThen(evict(root)), Effect.ignore),
+        Effect.sync(() => hold(path, 1)),
+        () => Effect.sync(() => hold(path, -1)).pipe(Effect.andThen(evict(root)), Effect.ignore),
       );
-      yield* locks.withLock(
+      yield* folderLocks.withLock(
         path,
         Effect.gen(function* () {
           const exists = yield* Effect.promise(() =>
@@ -220,25 +239,23 @@ const make = Effect.gen(function* () {
       return path;
     });
 
-  const track: GameBuildCopies["Service"]["track"] = (root, stop) =>
-    Effect.acquireRelease(
-      Effect.sync(() => {
-        const set = tracked.get(root) ?? new Set();
-        set.add(stop);
-        tracked.set(root, set);
-      }),
-      () => Effect.sync(() => void tracked.get(root)?.delete(stop)),
-    );
+  const exclusive: GameBuildCopies["Service"]["exclusive"] = (copy, work) =>
+    engineLocks.withLock(copy, work);
+
+  const onStop: GameBuildCopies["Service"]["onStop"] = (stop) =>
+    Effect.sync(() => void stoppers.push(stop));
 
   const stopFor: GameBuildCopies["Service"]["stopFor"] = (root) =>
     Effect.gen(function* () {
-      yield* Effect.forEach([...(tracked.get(root) ?? [])], (stop) => stop, { discard: true });
+      yield* Effect.forEach(stoppers, (stop) => stop(root), { discard: true });
       const dir = gameDir(root);
       const names = yield* Effect.promise(() => NodeFSP.readdir(dir).catch(() => [] as string[]));
       yield* Effect.forEach(names, (name) => stopIn(NodePath.join(dir, name)), {
         discard: true,
       });
-      if ((served.get(root)?.size ?? 0) > 0) {
+      const plays = served.get(root);
+      if (plays !== undefined && plays.size > 0) {
+        for (const play of plays.values()) hold(play.copy, -1);
         served.delete(root);
         yield* announce(root, "Stopped playing the game's builds.");
       }
@@ -247,6 +264,7 @@ const make = Effect.gen(function* () {
   const playing: GameBuildCopies["Service"]["playing"] = (root, build, copy, url) =>
     Effect.suspend(() => {
       const plays = served.get(root) ?? new Map();
+      if (!plays.has(build)) hold(copy, 1);
       plays.set(build, { copy, url });
       served.set(root, plays);
       return announce(root, `Playing build ${build.slice(0, 8)}.`);
@@ -262,9 +280,18 @@ const make = Effect.gen(function* () {
       // Only the copy's preview: a measurement of the same build keeps going.
       yield* preview.stop(play.copy);
       yield* unserve(root, play.copy);
+      yield* evict(root);
     });
 
-  return GameBuildCopies.of({ lease, track, stopFor, playing, plays, stopPlay });
+  return GameBuildCopies.of({
+    lease,
+    exclusive,
+    onStop,
+    stopFor,
+    playing,
+    plays,
+    stopPlay,
+  });
 });
 
 export const layer = Layer.effect(GameBuildCopies, make);

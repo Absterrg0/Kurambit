@@ -548,7 +548,7 @@ const layerMakeRoutes = Layer.mergeAll(
       const reactor = yield* GameBuildsReactor.GameBuildsReactor;
       yield* reactor.start();
     }),
-  ).pipe(Layer.provide(GameBuildsReactor.layer)),
+  ).pipe(Layer.provide(GameBuildsReactor.layer.pipe(Layer.provide(ProjectionStoreV2.layer)))),
   // A production run is a long-lived job: a restart (an update, a crash, a
   // dev reload) re-runs what it cut off instead of leaving it dead mid-round.
   Layer.effectDiscard(
