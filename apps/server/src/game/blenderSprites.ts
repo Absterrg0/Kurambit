@@ -16,6 +16,7 @@ import {
 import { engineProfile, gamePaths } from "./engineProfile.ts";
 import { decodePng, measure, type Rgba } from "./run/spriteFacts.ts";
 import { walkFiles } from "./walkFiles.ts";
+import { lockSpriteInput, readGameStyle } from "./gameStyle.ts";
 import {
   colourHex,
   contactSheet,
@@ -287,10 +288,18 @@ export interface SpriteDeps {
 export const renderSprites = (
   deps: SpriteDeps,
   root: string,
-  input: GameBlenderRenderSpritesInput,
+  requested: GameBlenderRenderSpritesInput,
 ): Effect.Effect<GameBlenderRenderSpritesResult, GameOperationError> =>
   Effect.gen(function* () {
     const manifest = yield* deps.manifest(root);
+    const realRoot = yield* Effect.tryPromise({
+      try: () => NodeFSP.realpath(root),
+      catch: io(root),
+    });
+    // Before anything renders, so a drift from the lock costs no Blender time.
+    const locked = lockSpriteInput(requested, yield* readGameStyle(realRoot));
+    if ("refusal" in locked) return yield* fail(requested.output, "invalid-input", locked.refusal);
+    const input = locked.input;
     const lane = manifestProject(manifest);
     const profile = engineProfile(manifest.engine.name);
     const output = input.output.trim().replace(/\.png$/i, "");
@@ -326,10 +335,6 @@ export const renderSprites = (
           : Math.max(2, Math.round(Math.min(width, height) * 0.04)))) + (outlined ? 1 : 0);
     const anchorKinds = views.map((v) => input.anchor ?? (v.elevation >= 60 ? "center" : "feet"));
 
-    const realRoot = yield* Effect.tryPromise({
-      try: () => NodeFSP.realpath(root),
-      catch: io(root),
-    });
     // Checked before anything renders, so a bad palette costs no Blender time.
     const palette =
       pixel?.palette === undefined
@@ -711,6 +716,7 @@ export const renderSprites = (
           ? `Anchor (${v.name}): ground line y=${groundOf(a)} (the red line on the contact sheet), ${column}, fixed in every frame: the lowest point across all frames rests on it, so any bob or lifted foot is the animation's own. ${profile.groundHint(width, height, groundOf(a))}`
           : `Anchor (${v.name}): ${a.x},${a.y}, the canvas centre (${column}), in every frame: the engine's default centred sprite puts the node origin there.`;
       }),
+      ...locked.notes,
       ...(paletteText === "" ? [] : [paletteText]),
       lumas.length === 0
         ? "Measured: every frame is empty (nothing visible was rendered); check the objects, the camera views and the frames before using them."

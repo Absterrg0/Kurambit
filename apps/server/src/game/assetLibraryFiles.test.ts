@@ -15,6 +15,7 @@ import {
   unpackArchive,
   type UnpackLimits,
 } from "./assetLibraryFiles.ts";
+import { LIBRARY_CATALOG, LIBRARY_FAMILIES } from "./assetLibraryCatalog.ts";
 
 interface Member {
   readonly name: string;
@@ -248,4 +249,24 @@ it("accepts only the pinned bytes", () => {
   expect(pinProblem(pin, { sha256: "a".repeat(64), bytes: 10 })).toBeNull();
   expect(pinProblem(pin, { sha256: "b".repeat(64), bytes: 10 })).toMatch(/Pinned sha256/);
   expect(pinProblem(pin, { sha256: "a".repeat(64), bytes: 11 })).not.toBeNull();
+});
+
+it("pins every pack with evidence, in a family, its rig shared and its folder plain", () => {
+  const families = new Set(LIBRARY_FAMILIES.map((family) => family.id));
+  const ids = LIBRARY_CATALOG.map((pack) => pack.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  for (const pack of LIBRARY_CATALOG) {
+    expect(pack.sha256, pack.id).toMatch(/^[0-9a-f]{64}$/);
+    expect(pack.bytes, pack.id).toBeGreaterThan(0);
+    expect(pack.licenceEvidence, pack.id).toMatch(/^https:\/\//);
+    expect(families.has(pack.family), `${pack.id} family ${pack.family}`).toBe(true);
+    // A root never climbs out of the unpacked archive.
+    if (pack.root !== undefined)
+      expect(
+        pack.root.split("/").every((part) => part !== "" && part !== ".." && part !== "."),
+        pack.id,
+      ).toBe(true);
+  }
+  for (const family of LIBRARY_FAMILIES)
+    if (family.palette !== undefined) expect(ids, family.id).toContain(family.palette);
 });

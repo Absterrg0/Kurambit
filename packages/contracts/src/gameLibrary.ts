@@ -17,7 +17,8 @@ export const GameLibraryKind = Schema.Literals([
 ]);
 export type GameLibraryKind = typeof GameLibraryKind.Type;
 
-const packId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{1,63}$/));
+/** A library pack's id, as game_assets_search lists it. */
+export const GameLibraryPackId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{1,63}$/));
 const packPath = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300));
 
 export const GameAssetsSearchInput = Schema.Struct({
@@ -25,7 +26,7 @@ export const GameAssetsSearchInput = Schema.Struct({
   query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   kind: Schema.optionalKey(GameLibraryKind),
   /** Look inside this pack: it is fetched once, and matching files come with a contact sheet. */
-  pack: Schema.optionalKey(packId),
+  pack: Schema.optionalKey(GameLibraryPackId),
   limit: Schema.optionalKey(
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(24)),
   ),
@@ -45,7 +46,7 @@ export const GameAssetsSearchResult = Schema.Struct({
 export type GameAssetsSearchResult = typeof GameAssetsSearchResult.Type;
 
 export const GameAssetsAddInput = Schema.Struct({
-  pack: packId,
+  pack: GameLibraryPackId,
   /** Pack-relative files or folders, as game_assets_search lists them. */
   paths: Schema.Array(packPath).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
 });

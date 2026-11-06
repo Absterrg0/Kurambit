@@ -28,6 +28,21 @@ export interface LibraryPack {
   readonly style: string;
   readonly tags: string;
   readonly description: string;
+  /** The style family (LIBRARY_FAMILIES) whose look the pack shares. */
+  readonly family: string;
+  /** The rig its characters share, so every clip fits every character; absent when none is shared. */
+  readonly rig?: string;
+  /** The archive folder that holds the pack, when it is not the archive's top (a GitHub commit archive). */
+  readonly root?: string;
+}
+
+export interface LibraryFamily {
+  readonly id: string;
+  readonly title: string;
+  /** One line a person can picture. */
+  readonly look: string;
+  /** A pack of the family whose colours suit a pixel-art STYLE.json palette. */
+  readonly palette?: string;
 }
 
 export type LibraryMedia = "image" | "model" | "audio" | "font" | "data";
