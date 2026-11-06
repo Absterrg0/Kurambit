@@ -2,9 +2,8 @@
 
 Adapted from Genex's director material (MIT), cut hard.
 
-For a production run's planning step, or when the person asks for a plan. A
-chat turn writes no PLAN.md or design document: it builds the change, and a
-game's first turn goes straight to the build (AGENTS.md, "The first turn").
+A game whose AGENTS.md has "The first turn" follows it: that turn writes no
+plan or design document and goes straight to the build.
 
 1. Look at the game first. Play the current build before writing anything.
 2. Cut to the ask: one sentence for what the player does, one for why it matters.

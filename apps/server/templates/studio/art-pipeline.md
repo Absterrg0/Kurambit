@@ -8,13 +8,12 @@ modeller for props; you have no local Blender, Godot or image tools.
 `unity/assets/` is a different folder it never reads; Unity art goes under
 `unity/Assets/Art/`).
 
-The first turn is library-only: lock the look in `STYLE.json`, add the
-characters and props with `game_assets_add`, and nothing else from this
-skill. Key art, sprite renders and Blender props come in later turns, for
-what no pack has. A three.js game loads GLB and glTF only (`three.md`).
+A game whose AGENTS.md has "The first turn" follows it there: that turn
+locks the look in `STYLE.json` and adds the characters and props with
+`game_assets_add`, and takes nothing else from this skill. Key art, sprite
+renders and Blender props come in later turns, for what no pack has.
 
-1. Key art first, when the game gets its own art direction: one image the
-   finished game must live up to.
+1. Key art first: one image the finished game must live up to.
 2. Every in-game visual is a file: characters, objects, tiles, backgrounds, UI
    pieces, effects, animation frames. No code-drawn shapes, flat color
    rectangles or default UI skin on the played path. Dynamic text stays code.
