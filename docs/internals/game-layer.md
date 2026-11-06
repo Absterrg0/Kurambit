@@ -66,10 +66,26 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   refused, never re-pinned at runtime: a source can change contents or licence silently, and a
   refusal is the only honest answer. A pin changes only in a reviewed commit that rechecks the
   licence. Kenney packs come from Kenney's own OpenGameArt uploads, because kenney.nl hands out
-  short-lived signed links behind a session cookie, which cannot be pinned. Every server on the
+  short-lived signed links behind a session cookie, which cannot be pinned. KayKit packs are
+  GitHub commit archives of Kay Lousberg's own repositories, pinned by commit; itch.io links are
+  signed and cannot be pinned either, which is also why Quaternius' Universal Base Characters are
+  not in the library. A pack's `root` names the archive folder that holds it. Every server on the
   machine (the installed app and any dev server) shares that cache, so fetches lock per pack only
   within one process, scratch names carry the fetching server's pid (a start-up sweep spares live
   ones), and placing a pack accepts a complete copy another server placed first.
+- Every pack belongs to a style family (`LIBRARY_FAMILIES`), and a pack with rigged characters
+  names its rig, read from its GLBs' skin joints when it is pinned: a game whose characters share
+  one rig can play any clip on any character, so the art guide takes characters from one rig
+  family and builds only props in Blender. Weak models given a box-built example character
+  copy it.
+- `STYLE.json` at the game root is the style lock (`packages/contracts/src/gameStyle.ts`), read
+  by `gameStyle.ts` on every art-tool call and never cached, so an edit takes effect at once. The
+  tools refuse what drifts rather than warn: an add outside its packs (checked before the pack is
+  fetched) or of characters on another rig, a sprite render in another palette or mode. Each
+  refusal names the one edit that changes direction on purpose. A lock that is a link, not JSON
+  or names unknown library ids fails every art tool with the field, so a broken lock is never
+  silently lifted. It is a game file, so checkpoints carry it and a run's restore brings it back
+  with the art (`restoredPaths`).
 - An engine is two modules, and nothing above them names an engine. Its profile
   (`godotProfile.ts`, `threeProfile.ts`, `unityProfile.ts`, read through `engineProfile.ts`) is pure
   data the services, the client tables and the run's pure policy share: directories, its releases
@@ -81,7 +97,13 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   and checking its own files, how a play session starts its runner (`playProcess`; null for a
   browser page), and the optional `editor` (a live editor that refuses a second user) and `player`
   (where a game keeps its built players). A per-engine table outside a driver is a
-  `Record<GameEngineId, …>`, so a new engine does not compile without its entries. The game is
+  `Record<GameEngineId, …>`, so a new engine does not compile without its entries. A Godot
+  game draws Forward+ in native exports and Compatibility in its Web export
+  (`rendering_method.web`), and every play on a private display forces Compatibility because Xvfb
+  has only software GL: the facts and frames the harness takes are Compatibility's. The template's
+  look therefore uses only what both renderers draw. The three.js shell's bloom is opt-in for the
+  same reason: the harness plays in Chromium on SwiftShader, where bloom cost several times the
+  plain look per frame, and the harness must play the build the player gets. The game is
   known by its manifest's engine id (and its project folder by `manifestProject`), never by the
   folder's name; a run records the engine it started with (`runEngine` derives it from the lane for
   older records).
