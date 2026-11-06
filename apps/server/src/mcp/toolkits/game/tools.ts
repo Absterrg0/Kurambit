@@ -553,10 +553,11 @@ const RunStopTool = Tool.make("game_run_stop", {
 
 const RunRestoreTool = Tool.make("game_run_restore", {
   description:
-    "Put this game back to an earlier build when the creator asks, with no run live (stop it first). Pass `round` for a kept round's build: it becomes the run's best, and a resumed run judges its next round against it. Or pass `build` with a name from game_run_status `builds` (the game as the run left it, a round's unfinished work, the game before an earlier restore, a round's build that was not kept): it comes back to the folder but the run's best stays as it was, so a resume starts from the best. Either way the engine project, art and ASSETS.md return, and what the folder held before is saved first as a build of its own (it shows in `builds`, so a restore can be undone the same way). A stopped run's round in progress is abandoned. A restore that does not fit is refused with the reason.",
+    "Put this game back to an earlier build when the creator asks, with no run live (stop it first). Pass `round` for a kept round's build: it becomes the run's best, and a resumed run judges its next round against it. Or pass `build` with a name from game_run_status `builds` (the game as the run left it, a round's unfinished work, the game before an earlier restore, a round's build that was not kept): it comes back to the folder but the run's best stays as it was, so a resume starts from the best. Either way the engine project, art and ASSETS.md return, and what the folder held before is saved first as a build of its own (it shows in `builds`, so a restore can be undone the same way). A stopped run's round in progress is abandoned. The result says whether the folder has moved (`done`); a restore still moving after half a minute goes on, and game_run_status `restore` shows its outcome. A restore that does not fit is refused with the reason.",
   parameters: Schema.Struct({
     round: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
     build: Schema.optionalKey(Schema.String),
+    commandId,
   }),
   success: GameRunRestoreResult,
   failure,

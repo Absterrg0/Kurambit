@@ -419,6 +419,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
                 threadRef={threadRef}
                 round={round}
                 live={active}
+                latestRestore={status?.restore ?? null}
               />
             ))}
           </ul>
@@ -426,7 +427,11 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       ) : null}
 
       {!active && (status?.builds.length ?? 0) > 0 ? (
-        <GameRunSavedBuilds threadRef={threadRef} builds={status?.builds ?? []} />
+        <GameRunSavedBuilds
+          threadRef={threadRef}
+          builds={status?.builds ?? []}
+          latestRestore={status?.restore ?? null}
+        />
       ) : null}
 
       {(status?.threads.length ?? 0) > 0 ? (

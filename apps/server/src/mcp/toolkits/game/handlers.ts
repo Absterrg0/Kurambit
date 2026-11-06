@@ -37,6 +37,9 @@ const withRuns = <A>(
       Effect.mapError(runFailure),
     );
   });
+// Within the shortest tool-call timeout a provider gives an MCP server (Codex's is 60s).
+const TOOL_RESTORE_WAIT = "30 seconds";
+
 const handlers = {
   game_status: McpToolAccess.readsAsCaller((input) =>
     withGame((game, threadId) => game.status(threadId, { checkSources: input.checkSources })),
@@ -150,7 +153,11 @@ const handlers = {
     withRuns((runs, threadId) => runs.runSubmit(threadId, input.submission)),
   ),
   game_run_restore: McpToolAccess.actsAsCaller((input) =>
-    withRuns((runs, threadId) => runs.runRestore(threadId, input)),
+    // The agent tells the creator how it went in the same turn, so it waits a
+    // little; a restore still moving past that answers with where to look.
+    withRuns((runs, threadId) =>
+      runs.runRestore({ threadId, ...input }, { waitFor: TOOL_RESTORE_WAIT }),
+    ),
   ),
   game_run_profile: McpToolAccess.actsAsCaller((input) =>
     withRuns((runs, threadId) => runs.runProfile(threadId, input.profile, input.commandId)),

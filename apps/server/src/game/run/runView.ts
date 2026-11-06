@@ -194,3 +194,14 @@ export const summarize = (res: Policy.StepResult): string => {
     return `bot ${res.fact.ending} after ${res.fact.seconds.toFixed(0)}s ${JSON.stringify(res.fact.final)} ${res.fact.note}`.trim();
   return res.kind;
 };
+
+/** What a restore brings back, in words: "Round 3's build", or the saved build's label. */
+export const restoreLabel = (
+  restore: NonNullable<GameRun["restore"]>,
+  state: Pick<State.RunState, "rounds">,
+  run: Pick<GameRun, "ending" | "endedAt" | "restore">,
+): string =>
+  restore.round !== null
+    ? `Round ${restore.round}'s build`
+    : (savedBuildLabel(restore.build ?? "", state, run) ??
+      `the saved build ${restore.build ?? ""}`);

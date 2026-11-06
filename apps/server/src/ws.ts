@@ -1873,9 +1873,9 @@ const layerWsRpc = (
               ),
             ),
           ),
-        [WS_METHODS.gameRunRestore]: ({ threadId, ...target }) =>
+        [WS_METHODS.gameRunRestore]: (input) =>
           gameRun
-            .runRestore(threadId, target)
+            .runRestore(input)
             .pipe(
               Effect.mapError((cause) =>
                 GameRunControl.GameRunError.toOperationError("game-run-restore", cause),

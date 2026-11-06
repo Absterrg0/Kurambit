@@ -185,6 +185,19 @@ export const GameRunSavedBuild = Schema.Struct({
 });
 export type GameRunSavedBuild = typeof GameRunSavedBuild.Type;
 
+/** The run's latest restore, as its record holds it. */
+export const GameRunRestoreRef = Schema.Struct({
+  requestId: Schema.String,
+  round: Schema.NullOr(Schema.Number),
+  build: Schema.NullOr(Schema.String),
+  /** What it brings back, in words ("Round 3's build"). */
+  label: Schema.String,
+  requestedAt: Schema.String,
+  /** Null while its job moves the game folder. */
+  outcome: Schema.NullOr(Schema.Struct({ restored: Schema.Boolean, message: Schema.String })),
+});
+export type GameRunRestoreRef = typeof GameRunRestoreRef.Type;
+
 export const GameRunStatusResult = Schema.Struct({
   active: Schema.Boolean,
   /** The run ended where game-run.resume continues it: a start without a new brief resumes it. */
@@ -213,6 +226,7 @@ export const GameRunStatusResult = Schema.Struct({
   threads: Schema.Array(GameRunThreadRef),
   /** An ended run's saved builds, latest first; empty while a run is live. */
   builds: Schema.Array(GameRunSavedBuild),
+  restore: Schema.NullOr(GameRunRestoreRef),
   message: Schema.String,
 });
 export type GameRunStatusResult = typeof GameRunStatusResult.Type;
@@ -339,13 +353,17 @@ export type GameRunPickDetail = typeof GameRunPickDetail.Type;
 /** A kept round by its number, or a saved build by the name the run's status lists it under. */
 export const GameRunRestoreInput = Schema.Struct({
   threadId: ThreadId,
+  commandId: GameRunCommandKey,
   round: Schema.optionalKey(PositiveInt),
   build: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
 });
 export type GameRunRestoreInput = typeof GameRunRestoreInput.Type;
 
+/** A restore once it is recorded; its outcome follows in the run's status. */
 export const GameRunRestoreResult = Schema.Struct({
-  sha: Schema.String,
+  requestId: Schema.String,
+  /** The folder has moved, or the restore found it already there; false while the job runs. */
+  done: Schema.Boolean,
   message: Schema.String,
 });
 export type GameRunRestoreResult = typeof GameRunRestoreResult.Type;

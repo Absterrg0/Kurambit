@@ -65,6 +65,7 @@ import * as ServerConfig from "../../config.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as GameProjectService from "../GameProjectService.ts";
+import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import * as GameRunControl from "../GameRunControl.ts";
 import * as BotEvidence from "../botEvidence.ts";
 import * as GameService from "../GameService.ts";
@@ -1369,6 +1370,55 @@ it.effect(
         assert.isTrue(yield* recorded());
         yield* resume;
         assert.equal((yield* inFlight).run.status, "running");
+      }),
+    ),
+);
+
+it.effect(
+  "a restore retried with its commandId is the same restore, and the call never waits",
+  () =>
+    withGame(() =>
+      Effect.gen(function* () {
+        yield* createCreator;
+        yield* startRun("autopilot");
+        yield* stopRun;
+        yield* finishEnding;
+        // A saved build of the run, as an ending keeps one.
+        NodeChildProcess.execFileSync(
+          "git",
+          ["update-ref", checkpointRefForGameRun(runId, "endings/x"), "HEAD"],
+          { cwd: lastRoot },
+        );
+        const control = yield* GameRunControl.GameRunControl;
+        const ask = { threadId: creator, build: "endings/x", commandId: "restore-1" };
+        // No runner runs the job: the call returns once the request is recorded.
+        const first = yield* control.runRestore(ask);
+        assert.isFalse(first.done);
+        assert.equal((yield* inFlight).run.restore?.requestId, first.requestId);
+        // A retry after a lost answer is the same request, while it is pending…
+        assert.equal((yield* control.runRestore(ask)).requestId, first.requestId);
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        yield* orchestrator.dispatch({
+          type: "game-run.restore",
+          commandId: nextId(),
+          threadId: creator,
+          runId,
+          requestId: first.requestId,
+          outcome: { kind: "restored", sha: "abc", message: "back" },
+        });
+        // …and once it landed: it answers with that outcome and restores nothing again.
+        assert.deepEqual(yield* control.runRestore(ask), {
+          requestId: first.requestId,
+          done: true,
+          message: "back",
+        });
+        const { run } = yield* inFlight;
+        assert.equal(run.restore?.requestId, first.requestId);
+        assert.equal(run.restore?.outcome?.kind, "restored");
+        // Another id is another restore.
+        const next = yield* control.runRestore({ ...ask, commandId: "restore-2" });
+        assert.notEqual(next.requestId, first.requestId);
+        assert.isNull((yield* inFlight).run.restore?.outcome);
       }),
     ),
 );

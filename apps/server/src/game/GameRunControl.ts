@@ -17,6 +17,7 @@ import {
   type GameRunPickDetail,
   type GameRunProfile,
   type GameRunProfileResult,
+  type GameRunRestoreInput,
   type GameRunRestoreResult,
   type GameRunSavedBuild,
   type GameRunRoundDetail,
@@ -35,6 +36,7 @@ import {
 } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -64,6 +66,7 @@ import {
   DECISION_LABEL,
   currentStep,
   decisionOf,
+  restoreLabel,
   savedBuildLabel,
   selectionFor,
   steerWhen,
@@ -143,8 +146,9 @@ type Service = {
    * live; a stopped run's round in progress is abandoned.
    */
   readonly runRestore: (
-    threadId: ThreadId,
-    target: { readonly round?: number; readonly build?: string },
+    input: GameRunRestoreInput,
+    /** How long to wait for the outcome; without it the call returns once the request is recorded. */
+    options?: { readonly waitFor?: Duration.Input },
   ) => Fails<GameRunRestoreResult>;
   /** A run role's typed result; the refusal's reason comes back in-turn. */
   readonly runSubmit: (
@@ -159,9 +163,6 @@ export class GameRunControl extends Context.Service<GameRunControl, Service>()(
 
 const runError = (operation: string, path: string, reason: GameRunErrorReason, detail: string) =>
   new GameRunError({ operation, path, reason, detail });
-
-// A restore moves files and may build nothing; past this the caller reads the run's status.
-const RESTORE_WAIT = "5 minutes";
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
@@ -483,6 +484,7 @@ const make = Effect.gen(function* () {
         steer: [],
         threads: [],
         builds: [],
+        restore: null,
         message: "No run recorded for this game.",
         resumable: false,
       } satisfies GameRunStatusResult;
@@ -536,6 +538,23 @@ const make = Effect.gen(function* () {
       steer: [...run.steer],
       threads: threadRefs(records, run.id),
       builds: yield* savedBuilds(root, run, state),
+      restore:
+        run.restore === null
+          ? null
+          : {
+              requestId: run.restore.requestId,
+              round: run.restore.round,
+              build: run.restore.build,
+              label: restoreLabel(run.restore, state, run),
+              requestedAt: run.restore.requestedAt,
+              outcome:
+                run.restore.outcome === null
+                  ? null
+                  : {
+                      restored: run.restore.outcome.kind === "restored",
+                      message: run.restore.outcome.message,
+                    },
+            },
       message: !running
         ? `The run ended: ${run.ending ?? "unknown"}.${failure}`
         : run.status === "waiting" && state.inFlight?.kind === "decide"
@@ -799,11 +818,14 @@ const make = Effect.gen(function* () {
 
   // A restore, command first: the run records the request and holds every
   // start, resume and steer until its job lands the outcome, so the folder is
-  // never moved under a run. The caller waits for that outcome.
+  // never moved under a run. The call returns once the request is recorded; the
+  // outcome reaches the Run tab through the run's push and its status. A caller's
+  // commandId names the request too, so its retry is the same restore.
   const runRestore: Service["runRestore"] = Effect.fn("GameRunControl.runRestore")(function* (
-    threadId: ThreadId,
-    { round, build }: { readonly round?: number; readonly build?: string },
+    input: GameRunRestoreInput,
+    options: { readonly waitFor?: Duration.Input } = {},
   ) {
+    const { threadId, round, build } = input;
     const { root } = yield* resolveGame(threadId);
     const { run, state } = yield* latestOf(threadId);
     if (run === null || state === null)
@@ -831,56 +853,70 @@ const make = Effect.gen(function* () {
         "commit-missing",
         `${build} is not one of the run's saved builds${run.status === "ended" ? "" : " (a live run offers none: stop it first)"}; game_run_status lists them.`,
       );
-    const requestId = NodeCrypto.randomUUID();
+    const id = commandId("game-run.restore.request", input.commandId, {
+      thread: run.threadId,
+      run,
+    });
+    const requestId =
+      input.commandId === undefined
+        ? NodeCrypto.randomUUID()
+        : NodeCrypto.createHash("sha256").update(id).digest("hex").slice(0, 32);
     const unreadable = (cause: { readonly message: string }) =>
       runError("run-restore", root, "records-unreadable", cause.message);
-    // Taken before the request, so its outcome cannot land unseen.
+    // Taken before the request, so an outcome the caller waits for cannot land unseen.
     const after = yield* engine
       .getThreadEventSequence(run.threadId)
       .pipe(Effect.mapError(unreadable));
     yield* dispatch("run-restore", {
       type: "game-run.restore.request",
-      commandId: commandId(),
+      commandId: id,
       threadId: run.threadId,
       runId: run.id,
       requestId,
       ...(round === undefined ? {} : { round }),
       ...(build === undefined ? {} : { build }),
     });
-    const landed = yield* engine
-      .streamStoredEventsFrom({
-        threadId: run.threadId,
-        afterSequence: after,
-        eventType: "game-run.updated",
-      })
-      .pipe(
-        Stream.map(({ event }) =>
-          event.type === "game-run.updated" && event.payload.restore?.requestId === requestId
-            ? event.payload.restore.outcome
-            : null,
-        ),
-        Stream.filter((outcome) => outcome !== null),
-        Stream.runHead,
-        Effect.timeoutOption(RESTORE_WAIT),
-        Effect.map(Option.flatten),
-        Effect.mapError(unreadable),
-      );
+    const what =
+      round !== undefined
+        ? `round ${round}'s build`
+        : `"${savedBuildLabel(build ?? "", state, run) ?? build}"`;
+    // A retry finds its restore already landed; a first call may wait, within its bound.
+    const recorded = (yield* latestOf(threadId)).run?.restore;
+    const known =
+      recorded?.requestId === requestId && recorded.outcome !== null
+        ? Option.some(recorded.outcome)
+        : Option.none();
+    const landed =
+      Option.isSome(known) || options.waitFor === undefined
+        ? known
+        : yield* engine
+            .streamStoredEventsFrom({
+              threadId: run.threadId,
+              afterSequence: after,
+              eventType: "game-run.updated",
+            })
+            .pipe(
+              Stream.map(({ event }) =>
+                event.type === "game-run.updated" && event.payload.restore?.requestId === requestId
+                  ? event.payload.restore.outcome
+                  : null,
+              ),
+              Stream.filter((outcome) => outcome !== null),
+              Stream.runHead,
+              Effect.timeoutOption(options.waitFor),
+              Effect.map(Option.flatten),
+              Effect.mapError(unreadable),
+            );
     if (Option.isNone(landed))
-      return yield* runError(
-        "run-restore",
-        root,
-        "restoring",
-        "The restore is still moving the game folder; game_run_status shows when it is done.",
-      );
+      return {
+        requestId,
+        done: false,
+        message: `Restoring ${what}: the run is moving the game folder; the Run tab and game_run_status show the outcome.`,
+      } satisfies GameRunRestoreResult;
     const outcome = landed.value;
-    if (outcome === null || outcome.kind === "refused")
-      return yield* runError(
-        "run-restore",
-        root,
-        outcome?.reason ?? "restore-incomplete",
-        outcome?.message ?? "The restore left no outcome.",
-      );
-    return { sha: outcome.sha, message: outcome.message } satisfies GameRunRestoreResult;
+    if (outcome.kind === "refused")
+      return yield* runError("run-restore", root, outcome.reason, outcome.message);
+    return { requestId, done: true, message: outcome.message } satisfies GameRunRestoreResult;
   });
 
   const createGame: Service["createGame"] = Effect.fn("GameRunControl.createGame")(function* (
