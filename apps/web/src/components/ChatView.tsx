@@ -353,6 +353,7 @@ import { useGameWorkspaceStore } from "../gameWorkspaceStore";
 import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
 import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useGameRunComposerNotice } from "./game/useGameRunComposerNotice";
+import { useGameRoundCards } from "./game/GameRoundCard";
 import { useEnvironmentScope } from "~/state/session";
 import {
   environmentServerConfigsAtom,
@@ -2695,6 +2696,8 @@ export default function ChatView(props: ChatViewProps) {
     }
     return urls;
   })();
+  // A game run's round cards sit in the run's chat at each round's end.
+  const gameRoundCards = useGameRoundCards(isGameThread ? routeThreadDetailRef : null);
   const anchoredTimelineMessages = feedbackSubmissions.flatMap((submission) =>
     submission.status === "interrupted"
       ? []
@@ -2707,6 +2710,7 @@ export default function ChatView(props: ChatViewProps) {
     visibleTurnItems: serverVisibleTurnItems,
     optimisticMessages: optimisticUserMessages,
     anchoredMessages: anchoredTimelineMessages,
+    anchoredCards: gameRoundCards,
     attachmentUrlById: timelineAttachmentUrlById,
     ...(serverProjection === null
       ? {}

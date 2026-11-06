@@ -165,6 +165,12 @@ export type TimelineEntry = (
       readonly createdAt: string;
       readonly projectedItem: OrchestrationV2ProjectedTurnItem;
     }
+  | {
+      readonly id: string;
+      readonly kind: "game-round";
+      readonly createdAt: string;
+      readonly round: number;
+    }
 ) & {
   readonly attempt?: TimelineAttempt;
 };
@@ -562,10 +568,21 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
  * Builds the web timeline in the exact order committed by `visibleTurnItems`. Persistent
  * client-owned messages are inserted by timestamp without sorting the canonical sequence.
  */
+/**
+ * A card the client derives from records it already holds, placed by time: a
+ * production run's round card in the run's chat. It adds no message and starts no turn.
+ */
+export interface TimelineAnchoredCard {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly round: number;
+}
+
 export interface TimelineEntriesInput {
   readonly visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
   readonly optimisticMessages: ReadonlyArray<ChatMessage>;
   readonly anchoredMessages?: ReadonlyArray<ChatMessage>;
+  readonly anchoredCards?: ReadonlyArray<TimelineAnchoredCard>;
   readonly attachmentUrlById?: ReadonlyMap<string, string>;
   readonly attempts?: ReadonlyArray<OrchestrationV2RunAttempt>;
   readonly nodes?: ReadonlyArray<OrchestrationV2ExecutionNode>;
@@ -776,6 +793,18 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     }
   }
 
+  for (const card of input.anchoredCards ?? []) {
+    const entry: TimelineEntry = {
+      id: card.id,
+      kind: "game-round",
+      createdAt: card.createdAt,
+      round: card.round,
+    };
+    const insertionIndex = entries.findIndex((candidate) => candidate.createdAt > card.createdAt);
+    if (insertionIndex === -1) entries.push(entry);
+    else entries.splice(insertionIndex, 0, entry);
+  }
+
   for (const message of input.optimisticMessages) {
     if (message.inputIntent !== "queued_turn" && !retainedMessageIds.has(message.id)) {
       retainedMessageIds.add(message.id);
@@ -919,6 +948,7 @@ function reuseTimelineEntries(
     input.visibleTurnItems.length < before.visibleTurnItems.length ||
     !shallow(input.optimisticMessages, before.optimisticMessages) ||
     !shallow(input.anchoredMessages, before.anchoredMessages) ||
+    !shallow(input.anchoredCards, before.anchoredCards) ||
     !shallow(input.attachmentUrlById, before.attachmentUrlById) ||
     !shallow(input.attempts, before.attempts) ||
     !shallow(input.nodes, before.nodes) ||
@@ -931,7 +961,9 @@ function reuseTimelineEntries(
   // committed items arrive. Keep the full projection for that transition.
   if (
     appended &&
-    (input.optimisticMessages.length > 0 || (input.anchoredMessages?.length ?? 0) > 0)
+    (input.optimisticMessages.length > 0 ||
+      (input.anchoredMessages?.length ?? 0) > 0 ||
+      (input.anchoredCards?.length ?? 0) > 0)
   ) {
     return null;
   }
