@@ -166,20 +166,5 @@ export const runEngine = (run: {
   readonly engine?: GameEngineId;
   readonly lane: string;
 }): GameEngineId => run.engine ?? legacyLaneEngine(run.lane);
-/** Kept until E's and P's code reads `engineProfile(runEngine(run))`; deleted at the merge. */
-export const laneProfile = (lane: string): GameEngineProfile =>
-  PROFILES.find((profile) => profile.projectDirectory === lane) ?? GODOT_PROFILE;
-
-/** Game-relative directory of the lane's art. */
-export const laneAssets = (lane: string): string => `${lane}/${laneProfile(lane).layout.assets}`;
-
-/** Game-relative directory of the lane's icon and title art. */
-export const laneUi = (lane: string): string =>
-  `${laneAssets(lane)}/${laneProfile(lane).layout.ui}`;
-
-/** Game-relative directory library packs land in. */
-export const laneLibrary = (lane: string): string =>
-  `${laneAssets(lane)}/${laneProfile(lane).layout.library}`;
-
 /** Every engine's skill name, for dropping the ones a lane does not use. */
 export const ENGINE_SKILLS: ReadonlyArray<string> = PROFILES.map((profile) => profile.run.skill);
