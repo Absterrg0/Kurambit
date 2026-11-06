@@ -168,15 +168,10 @@ export class GameProjectService extends Context.Service<
       owner: string,
     ) => Effect.Effect<void, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
-    /** Expensive reads (asset usage, viewport, builds). */
-    readonly inventory: (root: string) => Effect.Effect<
-      {
-        manifest: GameManifest;
-        viewport: GodotViewport;
-        builds: { target: string; path: string; updatedAt: string }[];
-      },
-      GameOperationError
-    >;
+    /** The manifest and the resolution the game plays at. */
+    readonly inventory: (
+      root: string,
+    ) => Effect.Effect<{ manifest: GameManifest; viewport: GodotViewport }, GameOperationError>;
   }
 >()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
@@ -359,7 +354,11 @@ const make = Effect.gen(function* () {
       const parent = input.parentDirectory.trim() || NodePath.join(NodeOS.homedir(), "Games");
       const requestedRoot = NodePath.resolve(
         parent.replace(/^~(?=\/|$)/, NodeOS.homedir()),
-        gameFolderName(name, NodeCrypto.randomBytes(3).toString("hex")),
+        gameFolderName(
+          name,
+          // From the name itself, so a retry or a second click names the same folder.
+          NodeCrypto.createHash("sha256").update(name.normalize("NFC")).digest("hex").slice(0, 6),
+        ),
       );
       // One create per folder at a time in this server, so a second click
       // cannot take the first's half-made folder for a leftover.
@@ -397,19 +396,11 @@ const make = Effect.gen(function* () {
             created = claimed;
             await NodeFSP.mkdir(NodePath.join(root, "builds"), { recursive: true });
             await NodeFSP.writeFile(NodePath.join(root, CREATE_MARKER), "", { flag: "wx" });
-            const engine = createEngine(input);
-            // The Unity template ships its own Assets/ tree, and Unity has no web build.
-            const engineDirs =
-              engine === "three"
-                ? ["web/assets", "builds/web"]
-                : engine === "unity"
-                  ? []
-                  : ["godot/assets/models", "godot/scripts", "builds/web"];
             for (const relative of [
               "art/blender",
               "art/scripts",
               "art/previews",
-              ...engineDirs,
+              ...engineProfile(createEngine(input)).scaffold.directories,
               "builds/linux",
             ])
               await NodeFSP.mkdir(NodePath.join(root, relative), { recursive: true });
@@ -626,7 +617,12 @@ const make = Effect.gen(function* () {
             const latestThread = newestThreadByProject.get(project.id) ?? null;
             const currentOperation = operations.current(root);
             const keyArt = yield* Effect.promise(() =>
-              findKeyArt(root, manifestProject(manifest.value)),
+              findKeyArt(
+                root,
+                manifestProject(manifest.value),
+                "title",
+                manifest.value.engine.name,
+              ),
             );
             const summary: GameSummary = {
               projectId: project.id,
@@ -679,8 +675,6 @@ const make = Effect.gen(function* () {
     read,
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
-      // The walk stays bounded to the engine tree; every source is read once
-      // to attribute asset usage, and a changed tree is never served stale.
       // An engine with a fixed resolution (three.js, Unity) plays at it; Godot's is in project.godot.
       const expensive = yield* Effect.tryPromise({
         try: async () => {
@@ -696,70 +690,7 @@ const make = Effect.gen(function* () {
         catch: (cause) =>
           new GameOperationError({ operation: "inventory", path: root, reason: "io", cause }),
       });
-      // Stat-only reads detect new builds and a deleted brief without a walk.
-      const builds = yield* Effect.promise(async () => {
-        const found: { target: string; path: string; updatedAt: string }[] = [];
-        // A Web build is either the legacy mutable directory or one immutable
-        // candidate. Report the newest artifact that exists; the stage replaces
-        // this with the selected record when one is stored.
-        const webCandidates: { relative: string; mtimeMs: number; updatedAt: string }[] = [];
-        const legacy = await NodeFSP.stat(NodePath.join(root, "builds/web/index.html")).then(
-          (stat) => stat,
-          () => null,
-        );
-        if (legacy !== null)
-          webCandidates.push({
-            relative: "builds/web/index.html",
-            mtimeMs: legacy.mtimeMs,
-            updatedAt: DateTime.formatIso(DateTime.fromDateUnsafe(legacy.mtime)),
-          });
-        const candidates = await NodeFSP.readdir(NodePath.join(root, "builds/candidates"), {
-          withFileTypes: true,
-        }).catch(() => []);
-        for (const entry of candidates) {
-          if (!entry.isDirectory() || !/^[0-9a-f]{64}$/.test(entry.name)) continue;
-          const relative = `builds/candidates/${entry.name}/index.html`;
-          const stat = await NodeFSP.stat(NodePath.join(root, relative)).then(
-            (found) => found,
-            () => null,
-          );
-          if (stat !== null)
-            webCandidates.push({
-              relative,
-              mtimeMs: stat.mtimeMs,
-              updatedAt: DateTime.formatIso(DateTime.fromDateUnsafe(stat.mtime)),
-            });
-        }
-        webCandidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
-        const newestWeb = webCandidates[0];
-        if (newestWeb !== undefined)
-          found.push({
-            target: "Web",
-            path: newestWeb.relative,
-            updatedAt: newestWeb.updatedAt,
-          });
-        for (const [target, relative] of [
-          ["Linux", "builds/linux/game.x86_64"],
-          ["Windows", "builds/windows/game.exe"],
-        ] as const) {
-          try {
-            const stat = await NodeFSP.stat(NodePath.join(root, relative));
-            found.push({
-              target,
-              path: relative,
-              updatedAt: stat.mtime.toISOString(),
-            });
-          } catch {
-            /* A game need not have been built for every platform. */
-          }
-        }
-        return found;
-      });
-      return {
-        manifest,
-        builds,
-        viewport: expensive.viewport,
-      };
+      return { manifest, viewport: expensive.viewport };
     }),
   });
 });

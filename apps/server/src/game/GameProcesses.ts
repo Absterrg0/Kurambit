@@ -10,6 +10,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { GameOperationError, type GameProcessResult, type GameViewport } from "@kurambit/contracts";
+import { ensureGameDir } from "./gameKeptSaves.ts";
 import { HOST_OS, ProcessHost, spawnOwned, type ProcessFacts } from "./processHost.ts";
 import type { WindowCommand, WindowHost } from "./windowHost.ts";
 
@@ -159,8 +160,9 @@ const make = Effect.gen(function* () {
     signal?: AbortSignal,
   ) => {
     const keepsLog = input.log !== false;
-    const logs = NodePath.join(input.root, "builds/logs");
-    if (keepsLog) await NodeFSP.mkdir(logs, { recursive: true });
+    // Checked to be inside the root, links followed: a log never lands through
+    // a builds/ an agent pointed elsewhere.
+    const logs = keepsLog ? await ensureGameDir(input.root, "builds/logs") : "";
     signal?.throwIfAborted();
     const logPath = keepsLog
       ? NodePath.join(logs, `${Date.now()}-${input.operation}-${NodeCrypto.randomUUID()}.log`)

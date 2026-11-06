@@ -70,6 +70,11 @@ export const findXvfb = (): Promise<string | null> =>
  * be taken for.
  */
 export const DISPLAY_LOST_EXIT = 71;
+/** The exit a hosted command reports when its private display never started. */
+export const DISPLAY_FAILED_EXIT = 70;
+/** Whether a hosted command's exit says its display, not the game, failed: our side. */
+export const isHostExit = (exitCode: number): boolean =>
+  exitCode === DISPLAY_FAILED_EXIT || exitCode === DISPLAY_LOST_EXIT;
 
 /**
  * Runs a command on its own Xvfb display, as xvfb-run does. Xvfb picks a free
@@ -83,16 +88,20 @@ export const DISPLAY_LOST_EXIT = 71;
  */
 const XVFB_WRAPPER = `size=$1 xvfb=$2
 shift 2
-dir=$(mktemp -d) || exit 70
-mkfifo "$dir/display" || { rm -rf "$dir"; exit 70; }
+dir=$(mktemp -d) || exit ${DISPLAY_FAILED_EXIT}
+mkfifo "$dir/display" || { rm -rf "$dir"; exit ${DISPLAY_FAILED_EXIT}; }
 "$xvfb" -displayfd 3 -screen 0 "$size" -nolisten tcp 3>"$dir/display" </dev/null >/dev/null 2>&1 &
 x=$!
+# A display that never says it is ready is ended, which ends the read below.
+( sleep 15; kill "$x" 2>/dev/null ) &
+w=$!
 read -r n < "$dir/display"
+kill "$w" 2>/dev/null
 rm -rf "$dir"
 if [ -z "$n" ] || ! kill -0 "$x" 2>/dev/null; then
   echo "kurambit: the private display did not start" >&2
   kill "$x" 2>/dev/null
-  exit 70
+  exit ${DISPLAY_FAILED_EXIT}
 fi
 DISPLAY=":$n" "$@"
 status=$?

@@ -19,6 +19,8 @@ import {
   asNumber,
   botChildEnv,
   boundEvidence,
+  cellOf,
+  botsOwnWord,
   END_FRAME,
   extractRunFrames,
   medianOf,
@@ -262,7 +264,7 @@ export const playBot = async (
         maxX = Math.max(maxX, x);
         minZ = Math.min(minZ, z);
         maxZ = Math.max(maxZ, z);
-        cells.add(`${Math.floor(x / 4) * 4},${Math.floor(z / 4) * 4}`);
+        cells.add(cellOf(x, z).key);
       }
       return {
         cells4m: cells.size,
@@ -326,6 +328,7 @@ export const playBot = async (
         continue;
       }
       if (tick.kind === "closed") {
+        video?.markEnd();
         // A stop ends the game too: it is checked first, so it never reads as a crash.
         if (stopped()) break;
         const end = await bounded(launch.ended, PLAY_BOUNDS.endedMs);
@@ -629,14 +632,9 @@ export const playBot = async (
     const tickHz = ticks / wallSeconds;
     const gameSeconds = lastT;
     const timeRatio = gameSeconds / wallSeconds;
-    // The harness's words where the game or a stop ended the run; else the bot's
-    // own, with its plain "error" said as the bot's, never the game's.
+    // The harness's words where the game or a stop ended the run; else the bot's own.
     const childStatus =
-      childDone === null
-        ? null
-        : childDone.state === "error"
-          ? { ...childDone, state: "bot-error" }
-          : childDone;
+      childDone === null ? null : { ...childDone, state: botsOwnWord(childDone.state) };
     const status: { state: string; note: string; evidence: unknown } = stopped()
       ? { state: "stopped", note: "The run was stopped.", evidence: undefined }
       : gameEnd !== null
@@ -661,6 +659,7 @@ export const playBot = async (
         : status.note,
       ...(evidence.value === undefined ? {} : { evidence: evidence.value }),
     };
+    video?.markEnd();
     // The run's last screen (often its ending) is kept before the game quits: the
     // video's tail is recorded after the window is gone. A bot that reported an
     // outcome gets a moment first, since games show their end screen after a beat.
@@ -878,7 +877,6 @@ export const runWithoutPlay = async (
     frames: [],
     message,
   };
-  await NodeFSP.mkdir(NodePath.dirname(args.tracePath), { recursive: true }).catch(() => undefined);
   await NodeFSP.writeFile(
     args.tracePath,
     JSON.stringify({ ...result, file, decider: args.decider, samples: [] }, null, 2),

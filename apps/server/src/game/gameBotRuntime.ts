@@ -47,9 +47,12 @@ export const medianOf = (xs: ReadonlyArray<number>): number | null => {
   return sorted[Math.floor(sorted.length / 2)]!;
 };
 
-/** The 4 m map cell a position falls in, over x and z: the one coverage grid. */
-export const cellOf = (pos: readonly [number, number, number]): string =>
-  `${Math.floor(pos[0] / 4) * 4},${Math.floor(pos[2] / 4) * 4}`;
+/** The 4 m map cell a point falls in, over x and z: the one coverage grid. */
+export const cellOf = (x: number, z: number) => {
+  const cx = Math.floor(x / 4) * 4;
+  const cz = Math.floor(z / 4) * 4;
+  return { cx, cz, key: `${cx},${cz}` };
+};
 
 /** The bot child's structured evidence, kept only when its JSON fits 4 KB. */
 export const boundEvidence = (
@@ -106,11 +109,29 @@ const ENDINGS: Readonly<Record<string, string>> = {
   unresponsive: "stopped answering",
   "not-booted": "did not boot",
   "bot-error": "bot error",
-  // A bot's own "error" is about the bot, never the game.
-  error: "bot error",
   stopped: "stopped",
 };
 export const botEnding = (state: string): string => ENDINGS[state] ?? state.slice(0, 40);
+
+/** The endings only the harness measures; a bot's own status can never claim one. */
+const HARNESS_STATES: ReadonlySet<string> = new Set([
+  "crashed",
+  "unresponsive",
+  "not-booted",
+  "bot-error",
+  "stopped",
+]);
+
+/**
+ * A bot's own end word, kept as the bot's: its "error" is about the bot, and a
+ * word the harness reserves (a bot that sees a death screen and says
+ * "crashed") is kept as `bot:<word>`, so it never reads as a measured ending.
+ */
+export const botsOwnWord = (state: string): string => {
+  const word = state.slice(0, 40);
+  if (word === "error") return "bot-error";
+  return HARNESS_STATES.has(word) ? `bot:${word}` : word;
+};
 
 /**
  * Folds one observation's node counts into the run's: the first reading is

@@ -12,6 +12,7 @@ import { serveGameDirectory } from "./gameWebServer.ts";
 import {
   PLAY_BOUNDS,
   PlayNotBooted,
+  TIMED_OUT,
   bounded,
   listenForRunner,
   type PlayEnd,
@@ -24,7 +25,7 @@ import {
   WebPageNotReady,
   type KeptStorage,
 } from "./webPlaySession.ts";
-import { DISPLAY_LOST_EXIT, type WindowHost } from "./windowHost.ts";
+import { isHostExit, type WindowHost } from "./windowHost.ts";
 
 export interface PlayLaunch {
   readonly play: PlaySession;
@@ -82,8 +83,8 @@ const once = <A>(work: () => Promise<A>): (() => Promise<A>) => {
 
 /** How a runner process's exit reads: our display wrapper says when its display died first. */
 const runnerEnd = (result: GameProcessResult | null): PlayEnd =>
-  result !== null && result.exitCode === DISPLAY_LOST_EXIT
-    ? { by: "host", detail: "The private display ended while the game ran." }
+  result !== null && isHostExit(result.exitCode)
+    ? { by: "host", detail: "The game's private display failed." }
     : {
         by: "game",
         detail:
@@ -185,12 +186,23 @@ export const openRunnerPlay = (
           const play = yield* restore(
             Effect.tryPromise({
               try: (signal) =>
-                listener.accept({
-                  timeoutMs: input.bootTimeoutMs,
-                  what: input.what,
-                  signal,
-                  exited: started.exited,
-                }),
+                listener
+                  .accept({
+                    timeoutMs: input.bootTimeoutMs,
+                    what: input.what,
+                    signal,
+                    exited: started.exited,
+                  })
+                  .catch(async (cause: unknown) => {
+                    // A launch that ended before its hello is the game's only
+                    // while our own side lived: a display that failed is ours.
+                    const end = await bounded(
+                      started.exited.then(runnerEnd, () => runnerEnd(null)),
+                      PLAY_BOUNDS.endedMs,
+                    );
+                    if (end !== TIMED_OUT && end.by === "host") throw new Error(end.detail);
+                    throw cause;
+                  }),
               catch: (cause) =>
                 cause instanceof PlayNotBooted
                   ? didNotBoot(cause.message)

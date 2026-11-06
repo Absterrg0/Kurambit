@@ -13,6 +13,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
   gameOperationFault,
+  manifestProject,
   isStandingFault,
   type ThreadId,
   GAME_EXPLORE_BOUNDS,
@@ -54,7 +55,7 @@ import {
   type PlayObservation,
   type PlaySession,
 } from "./playSession.ts";
-import { keptSavesFor, keptWebStorage, writeKeptStorage } from "./gameKeptSaves.ts";
+import { ensureGameDir, keptSavesFor, keptWebStorage, writeKeptStorage } from "./gameKeptSaves.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import {
   openPagePlay,
@@ -239,8 +240,10 @@ const make = Effect.gen(function* () {
   yield* Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, startedMs)).pipe(
     Effect.catchCause((cause) => Effect.logWarning("Pruning explore evidence failed.", { cause })),
   );
-  const snapshot = (root: string, project: string) =>
-    Effect.promise((signal) => snapshotBuildSource(root, project, { signal }));
+  const snapshot = (root: string, project: string, backend: GameEngine.GameEngineBackend) =>
+    Effect.promise((signal) =>
+      snapshotBuildSource(root, project, { signal, rules: backend.profile.buildInputs }),
+    );
   interface ExploreSession {
     readonly id: string;
     readonly root: string;
@@ -447,6 +450,24 @@ const make = Effect.gen(function* () {
         });
       }),
     );
+  /** A start refused by the machine or a tool of ours, by its reason; anything else is not a refusal. */
+  const markFault = (
+    threadId: ThreadId,
+    root: string,
+    reason: GameOperationError["reason"],
+    waitedMs: number,
+  ) => {
+    const fault = gameOperationFault(reason);
+    return fault !== "machine" && fault !== "tool"
+      ? Effect.void
+      : markRefusal(
+          threadId,
+          root,
+          waitedMs,
+          fault === "tool" ? "tool-failed" : reason === "low-memory" ? "low-memory" : "busy",
+          isStandingFault(reason),
+        );
+  };
   /** The caller holds `evidenceLock`. */
   const loadEvidence = (threadId: string, root: string) =>
     Effect.gen(function* () {
@@ -674,7 +695,21 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const { root } = input;
       const host = yield* Effect.promise(() => findWindowHost(processHost));
+      // The runner's script folder: fresh, under a logs folder checked to be the game's.
       const scriptDir = NodePath.join(root, "builds/logs", `game-explore-${input.id}`);
+      yield* Effect.tryPromise({
+        try: async () => {
+          await ensureGameDir(root, "builds/logs");
+          await NodeFSP.mkdir(scriptDir);
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "Explore session",
+            path: scriptDir,
+            reason: "io",
+            cause,
+          }),
+      });
       const dropScratch = Effect.promise(() =>
         Promise.all([
           NodeFSP.rm(input.traceDir, { recursive: true, force: true }),
@@ -828,18 +863,13 @@ const make = Effect.gen(function* () {
               -2000,
             ),
         });
-      const before = yield* snapshot(root, ctx.projectName);
+      const before = yield* snapshot(root, ctx.projectName, backend);
       if (before.kind !== "known")
         return yield* exploreInvalid(
           root,
           "The game sources could not be identified before the native session ran; the result would not be current.",
         );
-      const projectText = yield* Effect.promise(() =>
-        NodeFSP.readFile(NodePath.join(ctx.projectDir, backend.projectSettingsFile), "utf8").catch(
-          () => "",
-        ),
-      );
-      const viewport = backend.projectSettings(projectText).viewport;
+      const viewport = yield* backend.viewport(ctx.projectDir);
       if (
         viewport.width > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
         viewport.height > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
@@ -913,7 +943,7 @@ const make = Effect.gen(function* () {
       const opened = yield* openRunner({
         root,
         backend,
-        projectDir: insideGame(root, backend.projectDirectory(manifest)),
+        projectDir: insideGame(root, manifestProject(manifest)),
         player: prepared.player,
         viewport,
         id,
@@ -951,7 +981,7 @@ const make = Effect.gen(function* () {
           root,
           "Web exploration plays browser games; this game runs on another engine.",
         );
-      const before = yield* snapshot(root, ctx.projectName);
+      const before = yield* snapshot(root, ctx.projectName, backend);
       if (before.kind !== "known")
         return yield* exploreInvalid(
           root,
@@ -1067,19 +1097,7 @@ const make = Effect.gen(function* () {
         // opens through the memory gate itself, and its refusal is marked like
         // a gated start's, so a run replays a sample turn that never played.
         const player =
-          engine.play === "player"
-            ? yield* players
-                .playerFor(String(threadId), root, admit)
-                .pipe(
-                  Effect.tapError((error) =>
-                    error.reason === "low-memory" || error.reason === "busy"
-                      ? markRefusal(threadId, root, 0, error.reason, false).pipe(
-                          Effect.ignore({ log: true }),
-                        )
-                      : Effect.void,
-                  ),
-                )
-            : null;
+          engine.play === "player" ? yield* players.playerFor(String(threadId), root, admit) : null;
         const start =
           target === "web"
             ? exploreStartWeb(threadId, root, input)
@@ -1113,14 +1131,14 @@ const make = Effect.gen(function* () {
         return started;
       }).pipe(
         Effect.onExit(() => unclaim),
-        // A tool of ours that kept the session from starting is marked, so a
-        // run's play turn that played nothing is replayed, not judged.
+        // The machine or a tool of ours that kept the session from starting
+        // (the player's build included) is marked, so a run's play turn that
+        // played nothing is replayed, not judged. A run's own refusal of the
+        // write is no such start.
         Effect.tapError((error) =>
-          gameOperationFault(error.reason) === "tool"
-            ? markRefusal(threadId, root, 0, "tool-failed", isStandingFault(error.reason)).pipe(
-                Effect.ignore({ log: true }),
-              )
-            : Effect.void,
+          error.reason === "cancelled" || error.runReason !== undefined
+            ? Effect.void
+            : markFault(threadId, root, error.reason, 0).pipe(Effect.ignore({ log: true })),
         ),
       );
     });
@@ -1456,18 +1474,7 @@ const make = Effect.gen(function* () {
           yield* writeEvidence({ ...record, inputCapMs: totalMs });
         }),
       ),
-    markRefused: (threadId, root, reason, waitedMs) =>
-      markRefusal(
-        threadId,
-        root,
-        waitedMs,
-        gameOperationFault(reason) === "machine"
-          ? reason === "low-memory"
-            ? "low-memory"
-            : "busy"
-          : "tool-failed",
-        isStandingFault(reason),
-      ),
+    markRefused: markFault,
     memoryWait: Effect.fn("GameExplore.memoryWait")(function* (threadId) {
       const record = yield* threadEvidence(threadId, "");
       const { executedInputSteps } = ExploreEvidence.totals(record);

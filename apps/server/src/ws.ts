@@ -1212,7 +1212,6 @@ const layerWsRpc = (
       const game = yield* GameService.GameService;
       const gameRun = yield* GameRunControl.GameRunControl;
       const gameProjects = yield* GameProjectService.GameProjectService;
-      const gameToolchain = yield* GameToolchain.GameToolchain;
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
@@ -1907,7 +1906,7 @@ const layerWsRpc = (
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined ? game.libraryEvents : game.threadEvents(input.threadId),
-        [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status(),
+        [WS_METHODS.gameToolchainStatus]: () => game.toolchain(),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

@@ -459,20 +459,15 @@ const make = Effect.gen(function* () {
       if (reread) cache.clear();
       return snapshotBuildSource(root, project, { signal, cache, rules });
     });
-  // The run itself takes minutes and holds no game lock: GameBot takes the
-  // game's operation lock and the memory gate only around each run's import
-  // and boot, and refuses a second call on the same checkout as busy.
-  const botRunIn = (root: string, input: GameBotRunInput, owner?: ThreadId) =>
-    gameBot.run(root, input, owner);
-  // The toolchain's answer per project (Unity speaks for its own editor
-  // version), cached: the stage reads it on its own query, never on every
-  // status read, and a settings change clears it.
+  // The machine's toolchain, cached: the stage reads it on its own query,
+  // never on every status read. Keyed by the toolchain's revision, so a fetch
+  // is seen at once; a settings change clears it.
   const toolchainStatus = yield* Cache.make({
-    lookup: (unityProject: string) =>
-      tools.status(unityProject === "" ? undefined : { unityProject }),
-    capacity: 32,
+    lookup: (_revision: number) => tools.status(),
+    capacity: 4,
     timeToLive: "30 seconds",
   });
+  const toolchainOf = () => Cache.get(toolchainStatus, tools.revision());
   yield* settings.subscribeChanges.pipe(
     Effect.flatMap((changes) =>
       Stream.runForEach(changes, () => Cache.invalidateAll(toolchainStatus)),
@@ -840,22 +835,38 @@ const make = Effect.gen(function* () {
     // Its video lands in the game folder; the run is recorded on the thread.
     botRun: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) =>
-        projects.admitWrite(threadId, root, "Bot run", String(threadId)).pipe(
-          Effect.andThen(botRunIn(root, input, threadId)),
-          // A play refused for a cause not about the game is marked like an
-          // explore start's, so a run's play turn that played nothing is replayed.
-          Effect.tapError((error) =>
-            error.reason !== "cancelled" &&
-            (gameOperationFault(error.reason) === "machine" ||
-              gameOperationFault(error.reason) === "tool")
-              ? explore
-                  .markRefused(threadId, root, error.reason, 0)
-                  .pipe(Effect.ignore({ log: true }))
-              : Effect.void,
-          ),
+        Effect.andThen(
+          projects.admitWrite(threadId, root, "Bot run", String(threadId)),
+          Effect.suspend(() => {
+            // A start refused for a cause not about the game (queued past its
+            // bound, memory short, a tool of ours) is marked with its wait, as
+            // an explore start's is, so a run's play turn that played nothing
+            // is replayed; the admission's own refusal is no such start.
+            const waited = { ms: 0, refused: null as "low-memory" | "busy" | null };
+            return gameBot
+              .run(root, input, threadId, {
+                onWaited: (ms, refused) => {
+                  waited.ms += ms;
+                  waited.refused = refused;
+                },
+              })
+              .pipe(
+                Effect.tapError((error) => {
+                  const fault = gameOperationFault(error.reason);
+                  return error.reason === "cancelled" || (fault !== "machine" && fault !== "tool")
+                    ? Effect.void
+                    : explore
+                        .markRefused(threadId, root, waited.refused ?? error.reason, waited.ms)
+                        .pipe(Effect.ignore({ log: true }));
+                }),
+              );
+          }),
         ),
       ),
-    botRunIn: (root, input) => botRunIn(root, input),
+    // The run itself takes minutes and holds no game lock: GameBot takes the
+    // game's operation lock and the memory gate only around each run's import
+    // and boot, and refuses a second call on the same checkout as busy.
+    botRunIn: (root, input) => gameBot.run(root, input),
     botRuns: (threadId) => gameBot.runs(threadId),
     botView: (threadId, input) =>
       Effect.gen(function* () {
@@ -865,16 +876,14 @@ const make = Effect.gen(function* () {
     botReportText: (root, runIds) => gameBot.reportText(root, runIds),
     toolchain: (threadId) =>
       Effect.gen(function* () {
-        if (threadId === undefined) return yield* Cache.get(toolchainStatus, "");
-        const root = yield* projects.resolve(threadId);
-        const manifest = yield* projects.read(root);
-        // Only Unity picks its editor by the project's own version.
-        return yield* Cache.get(
-          toolchainStatus,
-          manifest.engine.name === "unity"
-            ? GameProjectService.insideGame(root, manifestProject(manifest))
-            : "",
-        );
+        const status = yield* toolchainOf();
+        if (threadId === undefined) return status;
+        // The game's own engine speaks for its project (Unity picks its editor
+        // by the project's version); the engine says which tool that is.
+        const own = yield* engines.toolStatus(yield* projects.resolve(threadId));
+        return own === null
+          ? status
+          : { tools: status.tools.map((tool) => (tool.tool === own.tool ? own : tool)) };
       }),
     botReport: (threadId) =>
       Effect.gen(function* () {
