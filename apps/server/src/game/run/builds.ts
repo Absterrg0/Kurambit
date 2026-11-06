@@ -2,14 +2,16 @@
 // (checkpointRefForGameRun): the run never commits, checks out, merges or
 // writes the user's index, HEAD or branches. A build is its commit oid.
 import { CheckpointRef } from "@kurambit/contracts";
-import * as Effect from "effect/Effect";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
 
 import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../../checkpointing/Utils.ts";
 import type * as GameOperations from "../GameOperations.ts";
 import type * as GameService from "../GameService.ts";
+import { causeText } from "../runSetup.ts";
 import { restoredPaths } from "./buildNames.ts";
 import { type BuildOutcome, classifyComparePair } from "./policy.ts";
 import type { BuildOp, RunState } from "./state.ts";
@@ -261,3 +263,100 @@ export const buildStep = (
   });
   return asRunOperation(deps.lock, root, `Run build ${op._tag}`, run.pipe(Effect.uninterruptible));
 };
+
+/**
+ * How a build's stay in the folder ended: `why` it did not come in or its
+ * work broke there, if so. `parked` is the folder's work as kept now ("" when
+ * an earlier try kept it). `back` is null when the folder holds what the
+ * outcome says, else why putting the work back failed: it is still parked.
+ */
+export type InFolder<A> = { readonly parked: string; readonly back: string | null } & (
+  | { readonly kind: "current" | "done"; readonly value: A }
+  | {
+      readonly kind: "refused";
+      readonly why: "gone" | "incomplete" | "broke";
+      readonly detail: string;
+    }
+);
+
+// A failure is an answer; an interrupt is left to the repeat.
+const caught =
+  <A>(onFailure: (detail: string) => A) =>
+  <B, E, R>(self: Effect.Effect<B, E, R>): Effect.Effect<A | B, never, R> =>
+    Effect.catchCause(self, (cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.interrupt
+        : Effect.succeed(onFailure(causeText(cause))),
+    );
+
+/**
+ * The build `move.sha` in the game folder for `work` (a finish's exports, a
+ * creator's restore), with the folder's own work kept first as `move.park`,
+ * once: a repeat after a restart finds the name and never keeps the build or a
+ * half-restored folder as the work. "Already in the folder" is measured from
+ * the park, so a repeat answers as the first try did. A refusal or failure on
+ * the way, or a work that asks, puts the work back; `keep` names follow the
+ * build in, `back` names follow the work back, and `check` names the capture
+ * each move is verified by. An interrupt leaves the rest to the repeat: every
+ * move is whole (buildStep).
+ */
+export const withBuildInFolder = <A, E>(
+  deps: Parameters<typeof buildStep>[0],
+  ctx: Parameters<typeof buildStep>[1],
+  move: {
+    readonly sha: string;
+    readonly park: string;
+    readonly keep?: ReadonlyArray<string>;
+    readonly back?: { readonly names: ReadonlyArray<string>; readonly sha: string };
+    readonly check?: string;
+  },
+  work: (current: boolean) => Effect.Effect<{ readonly value: A; readonly putBack: boolean }, E>,
+) =>
+  Effect.gen(function* () {
+    const { checkpoints } = deps;
+    const { root, runId, lane } = ctx;
+    const parkRef = checkpointRefForGameRun(runId, move.park);
+    const parked = (yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: parkRef }))
+      ? ""
+      : yield* captureBuild(deps, root, runId, move.park);
+    const restored = isRestored(lane);
+    if (!(yield* measureChange(checkpoints, root, restored, parkRef, move.sha)).changed)
+      return {
+        parked,
+        back: null,
+        kind: "current",
+        value: (yield* work(true)).value,
+      } satisfies InFolder<A>;
+    // The folder holds `expected`, or says why it does not.
+    const verify = (expected: string) =>
+      move.check === undefined
+        ? Effect.succeed(null)
+        : Effect.flatMap(captureBuild(deps, root, runId, move.check), (now) =>
+            Effect.map(measureChange(checkpoints, root, restored, expected, now), (change) =>
+              change.changed ? "the folder still differs from it" : null,
+            ),
+          );
+    const putBack = Effect.gen(function* () {
+      const back = yield* buildStep(deps, ctx, { _tag: "restore", sha: parkRef, keep: [] });
+      if (move.back !== undefined && move.back.sha.length > 0)
+        yield* buildStep(deps, ctx, { _tag: "keep", names: move.back.names, sha: move.back.sha });
+      return back.build.ok ? yield* verify(parkRef) : back.build.detail;
+    }).pipe(caught((detail) => detail));
+    const moved = yield* Effect.gen(function* () {
+      const came = yield* buildStep(deps, ctx, {
+        _tag: "restore",
+        sha: move.sha,
+        keep: move.keep ?? [],
+      });
+      if (!came.build.ok) return { why: "gone", detail: came.build.detail } as const;
+      const differs = yield* verify(move.sha);
+      if (differs !== null) return { why: "incomplete", detail: differs } as const;
+      return yield* work(false);
+    }).pipe(caught((detail) => ({ why: "broke", detail }) as const));
+    const back = "why" in moved || moved.putBack ? yield* putBack : null;
+    return (
+      "why" in moved
+        ? { parked, back, kind: "refused", ...moved }
+        : { parked, back, kind: "done", value: moved.value }
+    ) satisfies InFolder<A>;
+  });

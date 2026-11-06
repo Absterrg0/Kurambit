@@ -60,12 +60,21 @@ describe("explore evidence", () => {
       const record: ExploreEvidence.ThreadEvidence = {
         ...ExploreEvidence.upsert(ExploreEvidence.empty("t", "/g"), session("a", 2, 30_000)),
         inputCapMs: 120_000,
-        memory: { waitedMs: 45_000, refusals: 1, refused: false },
+        memory: { waitedMs: 45_000, refused: "busy" },
       };
       await ExploreEvidence.write(dir, record);
       const reloaded = await ExploreEvidence.read(dir, "t");
       expect(reloaded?.inputCapMs).toBe(120_000);
-      expect(reloaded?.memory).toEqual({ waitedMs: 45_000, refusals: 1, refused: false });
+      expect(reloaded?.memory).toEqual({ waitedMs: 45_000, refused: "busy" });
+      // A record an older server wrote, with a refusal count and a plain flag, still reads.
+      NodeFS.writeFileSync(
+        ExploreEvidence.recordPath(dir, "t"),
+        JSON.stringify({ ...record, memory: { waitedMs: 1, refusals: 1, refused: true } }),
+      );
+      expect((await ExploreEvidence.read(dir, "t"))?.memory).toEqual({
+        waitedMs: 1,
+        refused: true,
+      });
     } finally {
       NodeFS.rmSync(dir, { recursive: true, force: true });
     }

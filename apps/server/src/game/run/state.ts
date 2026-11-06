@@ -184,7 +184,6 @@ const RunState = Schema.Struct({
   seq: Schema.Number,
   budgetEndsAt: Schema.NullOr(Schema.Number),
   lane: Schema.String,
-  trunk: Schema.String,
   best: Schema.String,
   protos: Schema.Array(
     Schema.Struct({
@@ -240,7 +239,6 @@ export const freshState = (
   seq: 0,
   budgetEndsAt: null,
   lane: "",
-  trunk: "",
   best: "",
   protos: [],
   pickNotes: "",

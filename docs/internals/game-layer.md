@@ -233,7 +233,9 @@ reach none of its controls.
 - **Finish is an effect.** The commit that ends a run emits `game-run.finish`; its job stops the
   run's jobs and live role turns, exports the best build, then records `game-run.finished`. A finish is safe to run twice: an ending mid-round keeps the folder's
   unfinished work as a build once per ending, restores the best for the exports and puts the work
-  back, so a resume goes on from it.
+  back, so a resume goes on from it. It and a creator's restore swap through `withBuildInFolder`,
+  which parks the work once by name and measures "already in the folder" from the park, so a
+  repeat after a restart answers as the first try did.
 - **Restore is a command first.** `game-run.restore.request` records the pending restore, a job does
   the git work, and `game-run.restore` lands its outcome. The git work and a run's next move would
   race on the game folder, so the decider refuses resume, steer and another restore while an ending
@@ -282,11 +284,13 @@ that differ (an unchanged file keeps its mtime, so an engine watching the folder
 nothing). Records hold builds by commit oid; labels (`round-N`, `proto-N`) only name files and
 text. A builder turn's change is measured at its landing: the folder is captured and diffed with
 the build before it, and a diff that cannot be read counts as a change. A run from before kept
-its builds on git branches (`GameRun.versions` absent): it is history, read but never continued,
-and recovery stops one left live without touching the folder.
+its builds on git branches (`GameRun.versions` absent): it is history. Its records still decode
+and display, a resume or steer of it is refused, one an older Kurambit left live is stopped at
+startup without touching the folder, and a finish it still owes exports its folder as it is.
 
-Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups,
-run.log) are written for people and later roles; nothing the run decides reads them. A game
+Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups)
+are written for people and later roles; nothing the run decides reads them. The run keeps no log
+file: its step records are its history, and its jobs' own lines go to the server log. A game
 whose `.studio/run.json` comes from the run's earlier file-based form imports nothing of it but
 the fact that the game was built: its new run starts at the rounds (`stage: "build"`), where the
 plan writes a ladder for the game as it is, so no placeholder prototypes go over a finished game.
@@ -364,23 +368,26 @@ comparators run, the tester's last play bot plays both builds in fresh copies fo
 time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
 that bot against the candidate, and a bot that fails on only one build would name it, so the
 comparators get bot facts only when the bot ran on both builds; otherwise neither report has them,
-and run.log and the comparison record say why. A failing bot never drops the round. A comparison's two plays,
+and the step's record and the comparison record say why. A failing bot never drops the round. A comparison's two plays,
 and its two bot runs, run at once (Unity's one at a time, behind its one editor); that holds only
 because explore sessions, bot runs and game operations are keyed by checkout root, not by game.
 Two starts at once would both pass a free-memory check made before either allocates, so explore
 and bot starts and the live Unity and Blender editor opens hold one gate (`GameMemoryGate`) from
 that check through their import and boot (a Unity open through its launch and its first minute,
 not its whole cold import). Time queued behind the gate counts against the same 75 s bound, after
-which the start is refused `low-memory`, never kept waiting unseen. No gated start may open an
-editor: the gate is one permit and does not nest. A sample's time waiting there for memory is given back to its clock; a
-play turn refused `low-memory` is played again after a pause. A step whose own work is refused
-`low-memory`, or finds the game `busy` with another operation, ends its job and comes back on a
+which the start is refused `busy` (contention, not memory), never kept waiting unseen. No gated
+start may open an editor: the gate is one permit and does not nest. A sample's time waiting there is
+given back to its clock. A play turn whose explore start was refused `low-memory` or `busy` and that
+played nothing is played again after a pause, both causes under one count and one cap; past it the
+run ends resumably with that cause (`low-memory` or `busy`), so no sample lands unplayed. Its
+explore marks reset only as that turn is sent. A step whose own work is refused
+`low-memory`, or `busy` (another operation holds the game, or a start ahead of it holds the gate), ends its job and comes back on a
 durable `game-run.step.wake` timer, so a wait never holds one of the run jobs' shared step slots;
 each kind of wait is counted on the step record, and a cause that does not clear ends the run
 resumably rather than voiding the sample or judging the build. Samples play
 plain copies of their builds with no git (`materializeCheckpoint`, without `.studio` and
 `NOTES.md`), so no history, date or note tells the builds apart. Comparators never work in the
-game folder, where run.log maps every sample to its build: each gets a folder of its own, empty
+game folder, whose build refs and notes name every sample's build: each gets a folder of its own, empty
 but for its two frame sheets under neutral names, and submits its verdict; the root keeps the
 write-ups once all verdicts are in. The copies live in a folder of the run's own under
 Kurambit's worktrees folder, never in the game repository. A home inside some repository would

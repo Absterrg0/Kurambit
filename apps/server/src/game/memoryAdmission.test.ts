@@ -9,7 +9,7 @@ import { admitWithMemory } from "./memoryAdmission.ts";
 // Memory is short for the first 60 s; each start (import plus boot) takes 10 s.
 const pair = Effect.gen(function* () {
   const gate = Semaphore.makeUnsafe(1);
-  const credited: Record<string, [number, boolean]> = {};
+  const credited: Record<string, [number, string | null]> = {};
   const half = (name: string) =>
     admitWithMemory({
       gate,
@@ -35,13 +35,13 @@ it.effect(
       const { a, b, credited } = yield* pair;
       expect([a, b]).toEqual(["a", "b"]);
       // a waited 60 s for memory; b waited the same and then queued behind a's 10 s start.
-      expect(credited).toEqual({ a: [60_000, false], b: [70_000, false] });
+      expect(credited).toEqual({ a: [60_000, null], b: [70_000, null] });
     }),
 );
 
 it.effect("refuses after the bound, with the time it waited", () =>
   Effect.gen(function* () {
-    const credited: Array<[number, boolean]> = [];
+    const credited: Array<[number, string | null]> = [];
     const fiber = yield* Effect.forkChild(
       Effect.flip(
         admitWithMemory({
@@ -57,15 +57,16 @@ it.effect("refuses after the bound, with the time it waited", () =>
     );
     yield* TestClock.adjust("2 minutes");
     expect(yield* Fiber.join(fiber)).toEqual({ short: "needs 1.3 GB", waitedMs: 75_000 });
-    expect(credited).toEqual([[75_000, true]]);
+    expect(credited).toEqual([[75_000, "low-memory"]]);
   }),
 );
 
 it.effect(
-  "refuses a start queued behind a long hold once its bound passes, never interrupting the holder",
+  "refuses a start queued behind a long hold once its bound passes as contention, never as memory, and never interrupts the holder",
   () =>
     Effect.gen(function* () {
       const gate = Semaphore.makeUnsafe(1);
+      const credited: Array<[number, string | null]> = [];
       const admit = (start: Effect.Effect<string>) =>
         admitWithMemory({
           gate,
@@ -73,7 +74,7 @@ it.effect(
           maxWaitMs: 75_000,
           poll: "5 seconds",
           refuse: (short, waitedMs) => ({ short, waitedMs }),
-          onWaited: () => {},
+          onWaited: (waitedMs, refused) => credited.push([waitedMs, refused]),
           start,
         });
       const holder = yield* Effect.forkChild(
@@ -81,7 +82,12 @@ it.effect(
       );
       const queued = yield* Effect.forkChild(Effect.flip(admit(Effect.succeed("ran"))));
       yield* TestClock.adjust("2 minutes");
-      expect(yield* Fiber.join(queued)).toMatchObject({ waitedMs: 75_000 });
+      expect(yield* Fiber.join(queued)).toEqual({ short: null, waitedMs: 75_000 });
+      // The holder's admission, then the queued start's wait: a refusal for contention, not memory.
+      expect(credited).toEqual([
+        [0, null],
+        [75_000, "busy"],
+      ]);
       yield* TestClock.adjust("15 minutes");
       expect(yield* Fiber.join(holder)).toBe("held");
     }),

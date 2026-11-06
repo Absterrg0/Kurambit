@@ -104,7 +104,10 @@ export class GameService extends Context.Service<
   GameService,
   {
     readonly cancelThread: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
-    readonly finishExploration: (threadId: ThreadId) => Effect.Effect<
+    readonly finishExploration: (
+      threadId: ThreadId,
+      options?: { readonly keepMarks?: boolean },
+    ) => Effect.Effect<
       {
         sessions: number;
         actions: number;
@@ -124,14 +127,13 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<void, GameOperationError>;
     /**
      * Since this thread's last finishExploration: how long its explore starts
-     * waited for memory, how many were refused `low-memory` and whether the
-     * latest was; with the input steps its sessions have executed in all.
+     * waited and why the latest was refused (`low-memory`, or `busy` behind
+     * another start); with the input steps its sessions have executed in all.
      */
     readonly exploreMemoryWait: (threadId: ThreadId) => Effect.Effect<
       {
         readonly waitedMs: number;
-        readonly refusals: number;
-        readonly refused: boolean;
+        readonly refused: "low-memory" | "busy" | null;
         readonly executedInputSteps: number;
       },
       GameOperationError

@@ -331,7 +331,7 @@ const BotResult = Schema.Struct({
 // Usage limits, a provider that stays down and memory that stays short end the run resumably.
 const EndedResult = Schema.Struct({
   kind: Schema.Literal("ended"),
-  ending: Schema.Literals(["usage-limit", "provider-down", "low-memory"]),
+  ending: Schema.Literals(["usage-limit", "provider-down", "low-memory", "busy"]),
   reason: Schema.String,
 });
 
@@ -702,6 +702,8 @@ export const GameRunEnding = Schema.Literals([
   "usage-limit",
   "provider-down",
   "low-memory",
+  /** A sample's explore start kept waiting behind other starts on this machine. */
+  "busy",
 ]);
 export type GameRunEnding = typeof GameRunEnding.Type;
 
@@ -725,8 +727,8 @@ export const GameRun = Schema.Struct({
   ending: Schema.NullOr(GameRunEnding),
   /** The last stage finished ("vision", "plan", "round-3"). */
   stage: Schema.String,
-  /** Git-era runs only: the branch their rounds merged into; "" for a run on checkpoints. */
-  trunk: Schema.String,
+  /** Git-era runs only, kept so their records still read: the branch their rounds merged into. */
+  trunk: Schema.optionalKey(Schema.String),
   /** The best build's checkpoint oid (a git-era run's: a commit on `trunk`). */
   best: Schema.String,
   /** Null until the plan wrote one. */

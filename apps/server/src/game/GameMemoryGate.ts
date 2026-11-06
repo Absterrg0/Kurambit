@@ -28,15 +28,16 @@ export class GameMemoryGate extends Context.Service<
     /**
      * Runs `start` once there is room for `room`, waiting up to
      * {@link MEMORY_WAIT_MS}, else fails `low-memory` with what it needs
-     * against what is available. It never frees memory itself: everything
-     * else on the machine is someone's work.
+     * against what is available, or `busy` when the time went queueing
+     * behind another start. It never frees memory itself: everything else on
+     * the machine is someone's work.
      */
     readonly admit: <A, E, R>(
       operation: string,
       path: string,
       room: MemoryRoom,
       start: Effect.Effect<A, E, R>,
-      onWaited?: (waitedMs: number, refused: boolean) => void,
+      onWaited?: (waitedMs: number, refused: "low-memory" | "busy" | null) => void,
     ) => Effect.Effect<A, E | GameOperationError, R>;
   }
 >()("kurambit/game/GameMemoryGate") {}
@@ -57,8 +58,11 @@ export const layer = Layer.effect(
             new GameOperationError({
               operation,
               path,
-              reason: "low-memory",
-              detail: `${short} Waited ${Math.round(waitedMs / 1000)} s for memory to free.`,
+              reason: short === null ? "busy" : "low-memory",
+              detail:
+                short === null
+                  ? `Waiting for another start: another start on this machine that needs memory (an editor, an import, a bot run) held the way in for ${Math.round(waitedMs / 1000)} s, so this one did not start. Retry once it is done.`
+                  : `${short} Waited ${Math.round(waitedMs / 1000)} s for memory to free.`,
             }),
           onWaited,
           start,

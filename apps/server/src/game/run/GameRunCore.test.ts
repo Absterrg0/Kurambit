@@ -244,14 +244,12 @@ const countingRunner = Effect.gen(function* () {
     showable: () => Effect.succeed(true),
   };
   yield* (yield* GameRunJobs.GameRunJobs).attach(runner);
-  const jobs = yield* GameRunJobs.GameRunJobs;
   return {
     handed,
     /** Each ending a finish job was handed for. */
     finishes,
     /** The next job the runner was handed. */
     next: Queue.take(arrivals),
-    live: (stepId: string, attempt: number) => jobs.isLive(`execute:${stepId}:attempt:${attempt}`),
     release: Deferred.succeed(hold, undefined),
   };
 });
@@ -318,7 +316,7 @@ it.effect("a stopped run stays stopped across recovery, until a resume", () =>
   Effect.gen(function* () {
     yield* createCreator;
     yield* startRun("autopilot");
-    const { handed, next, live } = yield* countingRunner;
+    const { handed, next } = yield* countingRunner;
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     yield* orchestrator.dispatch({
       type: "game-run.stop",
@@ -331,8 +329,7 @@ it.effect("a stopped run stays stopped across recovery, until a resume", () =>
     yield* recovery.recover();
     const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
     yield* worker.drain();
-    // A job is registered as it is handed over, so none means none was started.
-    assert.isFalse(yield* live((yield* inFlight).step!.id, 1));
+    // A job is handed over as it starts, so none means none was started.
     assert.deepEqual(handed, []);
     assert.equal((yield* inFlight).run.ending, "stopped");
 
@@ -894,7 +891,7 @@ const layerGame = (root: string, world: World) => {
             }),
           exploreMemoryWait: () =>
             Deferred.succeed(world.capWatched, undefined).pipe(
-              Effect.as({ waitedMs: 0, refusals: 0, refused: false, executedInputSteps: 0 }),
+              Effect.as({ waitedMs: 0, refused: null, executedInputSteps: 0 }),
             ),
           limitExploreInput: () => Effect.void,
           botRuns: (threadId) =>
@@ -2007,11 +2004,9 @@ it.effect("a restart while a turn waits to be sent again leaves it to its resend
       const { vision, thread } = yield* atVision(world);
       world.runs.set(thread, [turnRun({ stepId: vision.id, status: "failed", ranMs: 500 })]);
       yield* startRunner;
+      // Each landing of the failed turn sets its resend timer.
       const landings = () =>
-        (NodeFS.existsSync(NodePath.join(lastRoot, ".studio", "run.log"))
-          ? NodeFS.readFileSync(NodePath.join(lastRoot, ".studio", "run.log"), "utf8")
-          : ""
-        ).split("instant-failed turn").length - 1;
+        world.dispatched.filter((id) => id.startsWith("server:game-run-resend:")).length;
       // The step's job lands the failed turn: its resend waits on a timer.
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       yield* until(() => landings() === 1);

@@ -47,7 +47,9 @@ for memory to free: about 1.3 GB for a Godot session, 1 GB for a browser session
 bot run. Work started with less tends to be killed by the system midway, or to make the whole
 machine hang on swap; a production run waits for memory rather than failing, and if memory stays
 short it pauses, ready to resume. The refusal says how much is needed and how much is free; close
-other apps or wait a few minutes, then ask again. Kurambit never closes your other apps to make
+other apps or wait a few minutes, then ask again. Starts also take turns across the machine, so a
+start can wait behind another game's: a run that keeps waiting behind other starts pauses as
+**Machine busy**, ready to resume once they finish. Kurambit never closes your other apps to make
 room. If free memory falls under about 1 GB while an editor sits idle, Kurambit closes it and
 reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB`,
 `KURAMBIT_BLENDER_MEMORY_MB`, `KURAMBIT_EXPLORE_NATIVE_MEMORY_MB`,

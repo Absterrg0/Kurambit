@@ -90,7 +90,7 @@ export const bootStep = (
   const check = game.check(ctx.creator, ctx.owner).pipe(
     Effect.map((r): Verdict => ({
       ok: r.ok,
-      // The run log says why a build was rejected, not only that it was.
+      // The step's result says why a build was rejected, not only that it was.
       detail: r.ok
         ? "boot clean"
         : `check failed: ${
@@ -115,7 +115,7 @@ export const bootStep = (
       (error) => error.reason === "command-failed",
       (error) => {
         // The first line names the session the build was for; the errors follow it,
-        // then the log path and the editor's own output, which only the run log keeps.
+        // then the log path and the editor's own output, which only the server log keeps.
         const full = (error.detail ?? "").split("\n").slice(1).join(" ").trim();
         const why = full.replace(/ See \/.*$/s, "");
         return ctx.log(`boot player build failed: ${full.slice(0, 2000)}`).pipe(

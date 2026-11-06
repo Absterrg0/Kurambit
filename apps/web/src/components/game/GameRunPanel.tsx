@@ -486,6 +486,7 @@ const ENDING: Record<string, string> = {
   "usage-limit": "Usage limit",
   "provider-down": "Provider down",
   "low-memory": "Memory short",
+  busy: "Machine busy",
 };
 const endingLabel = (ending: string | null): string =>
   ending === null ? "Paused" : (ENDING[ending] ?? ending);

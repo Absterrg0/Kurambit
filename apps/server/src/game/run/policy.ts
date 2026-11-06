@@ -1954,7 +1954,7 @@ export const applyResult = (
   const now = input.now;
   switch (t._tag) {
     case "init":
-      return out(afterStage({ ...s, trunk: "", best: g!.sha }, s.stage, now));
+      return out(afterStage({ ...s, best: g!.sha }, s.stage, now));
     case "decide": {
       const next = decide(
         s,
