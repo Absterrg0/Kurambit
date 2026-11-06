@@ -1264,15 +1264,18 @@ const make = Effect.gen(function* () {
     start: exploreStart,
     act: exploreAct,
     close: exploreClose,
+    // The thread's evidence is keyed by the thread, not its folder: a role in a
+    // folder that is no game (a comparator's blank one) still finishes.
     finish: Effect.fn("GameExplore.finish")(function* (threadId, options) {
-      const root = yield* projects.resolve(threadId);
-      const live = exploreLive.get(root);
-      if (live !== undefined && String(live.threadId) === String(threadId))
+      const live = [...exploreLive.values()].find(
+        (session) => String(session.threadId) === String(threadId),
+      );
+      if (live !== undefined)
         yield* live.lock.withPermits(1)(exploreFinalize(live, "role-finished"));
       // A finish starts the thread's memory marks over: the next turn counts its own.
       const record = yield* evidenceLock.withPermits(1)(
         Effect.gen(function* () {
-          const loaded = yield* loadEvidence(String(threadId), root);
+          const loaded = yield* loadEvidence(String(threadId), live?.root ?? "");
           if (loaded.memory === undefined || options?.keepMarks === true) return loaded;
           const { memory: _cleared, ...rest } = loaded;
           rememberEvidence(rest);
@@ -1306,8 +1309,7 @@ const make = Effect.gen(function* () {
         }),
       ),
     memoryWait: Effect.fn("GameExplore.memoryWait")(function* (threadId) {
-      const root = yield* projects.resolve(threadId);
-      const record = yield* threadEvidence(threadId, root);
+      const record = yield* threadEvidence(threadId, "");
       const { executedInputSteps } = ExploreEvidence.totals(record);
       const memory = record.memory ?? { waitedMs: 0, refused: false };
       // An older record's `true` was a low-memory refusal.
