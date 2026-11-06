@@ -16,7 +16,9 @@ import type { PlayEnd, PlayTick } from "./playSession.ts";
 const BOT = `export const goal = "walk right";
 export const observe = (api, obs) => obs;
 export const options = () => [{ name: "go", description: "walk", facts: {}, run: (api) => { api.hold("d"); return "running"; } }];
-export const status = (obs) => obs?.probe?.gameState?.won === true
+export const status = (obs) => obs?.probe?.gameState?.dead === true
+  ? { state: "crashed", note: "saw a death screen" }
+  : obs?.probe?.gameState?.won === true
   ? { state: "done", note: "reached the end", evidence: obs.probe.gameState.big ? { blob: "x".repeat(5000) } : { s: 1, e: 2 } }
   : { state: "running" };
 `;
@@ -175,5 +177,11 @@ describe("playBot", () => {
     const big = await runIn(scriptedLaunch(bigWon, "timeout", { by: "game", detail: "" })).result;
     expect(big.status.evidence).toBeUndefined();
     expect(big.status.note).toContain("4 KB");
+  });
+
+  it("never lets a bot claim an ending only the harness measures", async () => {
+    const dead = [{ t: 0.1, probe: { gameState: { dead: true } } }];
+    const run = await runIn(scriptedLaunch(dead, "timeout", { by: "game", detail: "" })).result;
+    expect(run.status.state).toBe("bot:crashed");
   });
 });
