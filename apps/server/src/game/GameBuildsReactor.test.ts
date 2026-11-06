@@ -108,10 +108,10 @@ const run = (
   });
 
 describe("GameBuildsReactor turn loop", () => {
-  it.effect("plays and measures a chat turn's build on three.js", () =>
+  it.effect("measures a chat turn's build on three.js, whose live Stage needs no Web export", () =>
     Effect.gen(function* () {
       const { played, measured } = yield* run("three", null);
-      assert.deepStrictEqual(played, ["chat"]);
+      assert.deepStrictEqual(played, []);
       assert.deepStrictEqual(measured, [{ build: OID, supersede: true }]);
     }),
   );

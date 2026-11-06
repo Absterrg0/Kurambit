@@ -217,6 +217,19 @@ each frame's counter, game time and arrival (the evidence route is `engine-frame
 frame is the runner's own `still`. A protocol 1 runner (an older game's Unity probe) still plays,
 without video.
 
+The person's own play depends on how the engine is staged (`GAME_ENGINES[engine].stage`). A
+`live` engine (three.js) is played from its folder: `GamePreview.live`
+([GamePreview.ts](../../apps/server/src/game/GamePreview.ts)) is the game's dev server, one
+loopback server and one recursive watch per game, so the person watches the agent's saves land. A
+settled save (400 ms, Blender sources and editors' temporaries filtered out) is one `live` push
+on the game event stream, which the Stage remounts on; it rereads nothing. Serving is not a write,
+so Play there takes no lock and records no operation, and Stop closes the watch before the server
+so nothing is pushed after it. What the person sees mid-turn is never a build: builds stay the
+turns' checkpoints, because facts, Undo and Go back need a fixed tree, and a folder the agent is
+still writing is not one. A `live` engine's Web export is a release only and never replaces the
+live serve. An `export` engine (Godot) plays the selected Web export, rebuilt when stale, and a
+`window` engine (Unity) plays in its own window.
+
 So the harness needs exactly two things from an OS: a **process host**
 ([processHost.ts](../../apps/server/src/game/processHost.ts), above) and a **window host**
 ([windowHost.ts](../../apps/server/src/game/windowHost.ts)): one `launch(command, viewport)` that

@@ -60,9 +60,10 @@ import {
   type GameBotReportResult,
   type GameBotViewInput,
   type GameBotViewResult,
+  GAME_LIVE_EVENT,
   manifestProject,
 } from "@kurambit/contracts";
-import { engineProfile } from "./engineProfile.ts";
+import { engineProfile, type GameEngineProfile } from "./engineProfile.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameBlender from "./GameBlender.ts";
 import * as GameBot from "./GameBot.ts";
@@ -588,7 +589,15 @@ const make = Effect.gen(function* () {
     );
   const exportAs = (threadId: ThreadId, target: "Linux" | "Windows") =>
     withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target));
-  const rebuild = (threadId: ThreadId) => withRoot(threadId, "Build Web", exporter.publishWeb);
+  // A live-staged game's Web export is a release only: Play keeps the live folder.
+  const rebuild = (threadId: ThreadId) =>
+    Effect.flatMap(projects.resolve(threadId), projects.read).pipe(
+      Effect.flatMap((manifest) =>
+        engineProfile(manifest.engine.name).stage === "live"
+          ? withRoot(threadId, "Export Web", (root) => exporter.export(root, "Web"))
+          : withRoot(threadId, "Build Web", exporter.publishWeb),
+      ),
+    );
   /** What a game whose engine makes no Web build answers Play with. */
   const noWebPlay = (root: string, displayName: string): GameActionResult => ({
     success: false,
@@ -597,8 +606,26 @@ const make = Effect.gen(function* () {
     url: null,
     process: null,
   });
+  // A live-staged game is its folder, served as its dev server: nothing is
+  // built or written, so there is no operation and no write admission.
+  const playLive = (root: string, profile: GameEngineProfile) =>
+    preview
+      .live(root, profile.projectDirectory, (path) =>
+        operations.changed(root, GAME_LIVE_EVENT, `Changed ${profile.projectDirectory}/${path}`),
+      )
+      .pipe(
+        Effect.map((url): GameActionResult => ({
+          success: true,
+          message: `The game's folder ${profile.projectDirectory}/ is served live at ${url}: it reloads on the person's Stage as files are saved. Exports are made on demand.`,
+          path: NodePath.join(root, profile.projectDirectory, "index.html"),
+          url,
+          process: null,
+        })),
+      );
   const play = Effect.fn("GameService.play")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
+    const profile = engineProfile((yield* projects.read(root)).engine.name);
+    if (profile.stage === "live") return yield* playLive(root, profile);
     // Play of a build already exported only reads, so it never takes the
     // lock a run's capture or check may hold; one it must export is a write.
     const served = yield* exporter.serve(root);
@@ -695,6 +722,7 @@ const make = Effect.gen(function* () {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
     const profile = engineProfile(manifest.engine.name);
+    if (profile.stage === "live") return yield* playLive(root, profile);
     if (profile.exportTargets.includes("Web")) {
       const result = yield* currentWeb(threadId, root, manifest, { serveFresh: true });
       if (result !== null) return result;
@@ -885,11 +913,14 @@ const make = Effect.gen(function* () {
           : currentId === selected.sourceId;
       // What Play would show: a good export does not make the selected build
       // fresh, and a source edit does not make the selected artifact unplayable.
+      // A live-staged game plays its folder, which is never older than itself.
+      const live = profile.stage === "live";
       const webBuildStale =
-        damaged ||
-        (selected === null ? false : selectedPresent !== true || matchesSelected === false);
+        !live &&
+        (damaged ||
+          (selected === null ? false : selectedPresent !== true || matchesSelected === false));
       const sourcesDifferFromPlay: boolean | "unknown" =
-        selected === null
+        live || selected === null
           ? false
           : statusOptions?.checkSources !== true
             ? "unknown"
@@ -911,7 +942,7 @@ const make = Effect.gen(function* () {
         engineTool: yield* engines.toolStatus(root),
         processes: processes.list(root),
         // Status observes the preview; it never switches it.
-        previewUrl: preview.url(root),
+        previewUrl: live ? preview.liveUrl(root) : preview.url(root),
         buildPlays: copies.plays(root),
         operation: operations.current(root),
       };

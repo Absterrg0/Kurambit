@@ -3,6 +3,13 @@
 The browser lane: one static project under `web/`, checked, played and
 exported with the same `game_*` tools as a Godot game.
 
+The Stage is live: keep the game booting between saves. Kurambit serves
+`web/` itself on the person's Stage and reloads it a moment after each save,
+so every save is a version they may be playing. Write a new module before
+the line that imports it, change `main.js` in whole working steps, and add a
+model to `ASSETS` only once its file is in place. A save that throws shows
+the person the error until a save boots again.
+
 ## The first turn
 
 - Library art from the first build. The player, threats and level pieces
