@@ -23,6 +23,7 @@ import {
   type GameRunSavedBuild,
   type GameRunRound,
   type GameRunRoundDetail,
+  type GameRunRoundsResult,
   type GameRunStartInput,
   type GameRunStartResult,
   type GameRunStatusResult,
@@ -201,6 +202,8 @@ type Service = {
     /** How long to wait for the outcome; without it the call returns once the request is recorded. */
     options?: { readonly waitFor?: Duration.Input },
   ) => Fails<GameRunRestoreResult>;
+  /** Every run whose chat is this thread, newest first (at most 10), with its rounds, for the round cards. */
+  readonly runRounds: (threadId: ThreadId) => Fails<GameRunRoundsResult>;
   /** The game's run as the Builds rail lists it; null when the game has no run. */
   readonly runBuilds: (threadId: ThreadId) => Fails<RunBuilds | null>;
   /** A run role's typed result; the refusal's reason comes back in-turn. */
@@ -712,6 +715,83 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /** A run's rounds as the Run tab and the round cards show them. */
+  const roundRefs = (
+    runThread: ThreadId,
+    run: GameRun,
+    state: RunState,
+    roundRecords: ReadonlyArray<GameRunRound>,
+  ) =>
+    Effect.gen(function* () {
+      const extras = yield* roundExtras(
+        state,
+        roundRecords,
+        yield* projections
+          .listGameRunRoleThreads(runThread, run.id)
+          .pipe(Effect.orElseSucceed(() => [])),
+      );
+      return state.rounds.map((r, i) => ({
+        ...extras[i],
+        round: r.round,
+        move: r.move,
+        branch: r.branch,
+        kept: r.kept,
+        current: r.kept && r.build !== undefined && r.build === run.best,
+        outcome: roundOutcome(r),
+        verdicts: r.verdicts.map(({ order, verdict }) => ({ order, verdict })),
+        linesChanged: r.linesChanged,
+        durationMs: r.durationMs,
+        note: r.note ?? null,
+        steer: r.steer ?? [],
+        rung:
+          r.rung === undefined
+            ? null
+            : { is: r.rung.is, checks: r.rung.checks, outcome: r.rung.outcome, why: r.rung.why },
+      }));
+    });
+
+  // The runs that talk to this chat, newest first, for its round cards.
+  const runRounds: Service["runRounds"] = Effect.fn("GameRunControl.runRounds")(function* (
+    threadId: ThreadId,
+  ) {
+    const { projectId } = yield* resolveGame(threadId);
+    const unreadable = (cause: { readonly message: string }) =>
+      runError("run-read", threadId, "records-unreadable", String(cause.message));
+    const own = yield* projections.getGameRunRecords(threadId).pipe(Effect.mapError(unreadable));
+    const latest = yield* projections
+      .getProjectGameRun(projectId)
+      .pipe(Effect.mapError(unreadable));
+    // The project's latest run may live on another chat's thread and talk to this one.
+    const elsewhere =
+      latest !== null && latest.threadId !== threadId
+        ? yield* projections.getGameRunRecords(latest.threadId).pipe(Effect.mapError(unreadable))
+        : null;
+    const candidates = [
+      ...own.gameRuns.map((run) => ({ run, records: own })),
+      ...(elsewhere === null || latest === null
+        ? []
+        : elsewhere.gameRuns
+            .filter((run) => run.id === latest.id)
+            .map((run) => ({ run, records: elsewhere }))),
+    ]
+      .filter(({ run }) => (run.chat ?? run.threadId) === threadId)
+      .toSorted((a, b) => b.run.startedAt.localeCompare(a.run.startedAt))
+      .slice(0, 10);
+    const runsOut = yield* Effect.forEach(candidates, ({ run, records }) =>
+      Effect.gen(function* () {
+        const roundRecords = records.gameRunRounds.filter((r) => r.runId === run.id);
+        const state = toState(run, roundRecords, null, []);
+        return {
+          runId: run.id,
+          active: run.status !== "ended",
+          best: run.best.length > 0 ? run.best : null,
+          rounds: yield* roundRefs(run.threadId, run, state, roundRecords),
+        };
+      }),
+    );
+    return { runs: runsOut };
+  });
+
   const runStatus: Service["runStatus"] = Effect.fn("GameRunControl.runStatus")(function* (
     threadId: ThreadId,
   ) {
@@ -760,13 +840,7 @@ const make = Effect.gen(function* () {
           };
     const failure = run.lastFailure.length > 0 ? ` Last failure: ${run.lastFailure}` : "";
     const step = running ? currentStep(state) : null;
-    const extras = yield* roundExtras(
-      state,
-      roundRecords,
-      yield* projections
-        .listGameRunRoleThreads(runThread, run.id)
-        .pipe(Effect.orElseSucceed(() => [])),
-    );
+    const rounds = yield* roundRefs(runThread, run, state, roundRecords);
     return {
       chat: run.chat ?? run.threadId,
       best: run.best.length > 0 ? run.best : null,
@@ -781,24 +855,7 @@ const make = Effect.gen(function* () {
       progress: runProgress(state),
       pick: pickRef(state),
       ladder: ladderRefs(state),
-      rounds: state.rounds.map((r, i) => ({
-        ...extras[i],
-        round: r.round,
-        move: r.move,
-        branch: r.branch,
-        kept: r.kept,
-        current: r.kept && r.build !== undefined && r.build === run.best,
-        outcome: roundOutcome(r),
-        verdicts: r.verdicts.map(({ order, verdict }) => ({ order, verdict })),
-        linesChanged: r.linesChanged,
-        durationMs: r.durationMs,
-        note: r.note ?? null,
-        steer: r.steer ?? [],
-        rung:
-          r.rung === undefined
-            ? null
-            : { is: r.rung.is, checks: r.rung.checks, outcome: r.rung.outcome, why: r.rung.why },
-      })),
+      rounds,
       steer: [...run.steer],
       threads,
       builds: yield* savedBuilds(root, run, state),
@@ -1191,9 +1248,17 @@ const make = Effect.gen(function* () {
         "wrong-kind",
         "Name one build: a kept round by `round`, or a saved build by `build`.",
       );
+    if (input.asBest === true && round === undefined)
+      return yield* runError(
+        "run-restore",
+        root,
+        "wrong-kind",
+        "Only a round's build can be made the run's best; name the round.",
+      );
     if (round !== undefined) {
       const { record } = yield* findRound("run-restore", threadId, round);
-      if (!record.kept)
+      // Keep on a round card makes a round that was not kept the best, by the creator's say.
+      if (!record.kept && input.asBest !== true)
         return yield* runError(
           "run-restore",
           root,
@@ -1374,6 +1439,7 @@ const make = Effect.gen(function* () {
     pickDetail,
     runRestore,
     runBuilds,
+    runRounds,
     runSubmit,
   });
 });

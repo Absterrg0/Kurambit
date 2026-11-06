@@ -1912,8 +1912,18 @@ const layerWsRpc = (
         [WS_METHODS.gameBuildMeasure]: ({ threadId, build }) =>
           gameBuilds.measure(threadId, build, { queue: "person" }),
         [WS_METHODS.gameBuildPlay]: ({ threadId, build }) => gameBuilds.play(threadId, build),
-        [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId }) =>
-          gameBuilds.restore(threadId, build, commandId),
+        [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId, asBest }) =>
+          gameBuilds.restore(threadId, build, commandId, asBest === undefined ? {} : { asBest }),
+        [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
+          gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
+        [WS_METHODS.gameRunRounds]: ({ threadId }) =>
+          gameRun
+            .runRounds(threadId)
+            .pipe(
+              Effect.mapError((cause) =>
+                GameRunControl.GameRunError.toOperationError("game-run-rounds", cause),
+              ),
+            ),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined ? game.libraryEvents : game.threadEvents(input.threadId),

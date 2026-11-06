@@ -138,12 +138,21 @@ export class GameBuilds extends Context.Service<
       threadId: ThreadId,
       build: GameBuildRef,
     ) => Effect.Effect<GameBuildPlayResult, GameOperationError>;
-    /** Puts the build's engine project, art and ASSETS.md back in the game folder, keeping the folder before as a build. */
+    /** Stops one build's Play from its copy; the folder's own Play is never touched. */
+    readonly stopPlay: (
+      threadId: ThreadId,
+      build: GameBuildRef,
+    ) => Effect.Effect<void, GameOperationError>;
+    /**
+     * Puts the build's engine project, art and ASSETS.md back in the game
+     * folder, keeping the folder before as a build. With `asBest`, a round's
+     * build of a stopped run becomes the run's best (Keep on its card).
+     */
     readonly restore: (
       threadId: ThreadId,
       build: GameBuildRef,
       commandId: string | undefined,
-      options?: { readonly waitFor?: Duration.Input },
+      options?: { readonly waitFor?: Duration.Input; readonly asBest?: boolean },
     ) => Effect.Effect<typeof GameBuildRestoreResult.Type, GameOperationError>;
   }
 >()("kurambit/game/GameBuilds") {}
@@ -631,7 +640,15 @@ const make = Effect.gen(function* () {
       if (g.engine === "unity") return { _tag: "window", message: UNITY_NO_PLAY } as const;
       const result = yield* Effect.scoped(
         Effect.flatMap(copies.lease(g.root, { oid: build.build, key: build.key }), (copy) =>
-          game.playIn(copy, `game-builds:${threadId}`),
+          game
+            .playIn(copy, `game-builds:${threadId}`)
+            .pipe(
+              Effect.tap((played) =>
+                played.url === null
+                  ? Effect.void
+                  : copies.playing(g.root, build.build, copy, played.url),
+              ),
+            ),
         ),
       );
       return result.url !== null
@@ -643,16 +660,38 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
+      if (options.asBest === true) {
+        if (g.run === null)
+          return yield* failed(
+            "Restore build",
+            g.root,
+            "invalid-input",
+            "This game has no production run, so it has no best to set.",
+          );
+        if (g.run.live) return yield* failed("Restore build", g.root, "busy", LIVE_RUN);
+      }
       if (g.run !== null) {
         const { entries } = yield* allEntries(g, 50, undefined);
         const entry = entries.find((each) => each.id === build.build);
-        const handle = entry?.handle ?? { build: build.build };
+        const round = entry?.source._tag === "round" ? entry.source.round : null;
+        if (options.asBest === true && round === null)
+          return yield* failed(
+            "Restore build",
+            g.root,
+            "invalid-input",
+            "Only a round's build can become the run's best; this build is not a round's.",
+          );
+        const handle =
+          options.asBest === true && round !== null
+            ? { round }
+            : (entry?.handle ?? { build: build.build });
         const result = yield* runs
           .runRestore(
             {
               threadId,
               ...(commandId === undefined ? {} : { commandId }),
               ...("round" in handle ? { round: handle.round } : { build: handle.build }),
+              ...(options.asBest === true ? { asBest: true } : {}),
             },
             options.waitFor === undefined ? {} : { waitFor: options.waitFor },
           )
@@ -752,7 +791,15 @@ const make = Effect.gen(function* () {
       return { requestId, done: true, message: outcome.message };
     });
 
+  const stopPlay: GameBuilds["Service"]["stopPlay"] = (threadId, ref) =>
+    Effect.gen(function* () {
+      const g = yield* gameOf(threadId);
+      const id = ref._tag === "build" ? ref.build : (yield* resolve(g, ref)).build;
+      yield* copies.stopPlay(g.root, id);
+    });
+
   return GameBuilds.of({
+    stopPlay,
     list,
     compare,
     facts: factsOf,

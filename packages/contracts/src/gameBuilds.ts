@@ -1,17 +1,11 @@
 import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
 import { GameBotDecider } from "./gameBot.ts";
+import { GameBuildId } from "./gameBuildId.ts";
 
-/**
- * A build: a playable version of the game the person and the agent can list,
- * play, compare and go back to. Every turn that changed the game is one (its
- * T3 checkpoint), and so is every run round and saved build. The id is the
- * build's commit oid; the UI treats it as opaque.
- */
-export const GameBuildId = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
-).pipe(Schema.brand("GameBuildId"));
-export type GameBuildId = typeof GameBuildId.Type;
+// GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
+// it without importing this module, which would close an import cycle through gameBot.ts.
+export { GameBuildId } from "./gameBuildId.ts";
 
 /** Bounds of one measurement, the same for every engine. */
 export const GAME_FACTS_BOUNDS = {
@@ -596,7 +590,11 @@ export const GameBuildRestoreInput = Schema.Struct({
   threadId: ThreadId,
   build: GameBuildRef,
   commandId: Schema.optionalKey(Schema.String),
+  /** A round's build of a stopped run becomes the run's best (Keep on its card). */
+  asBest: Schema.optionalKey(Schema.Boolean),
 });
+/** Stops one build's play copy; the folder's own Play is never touched. */
+export const GameBuildStopInput = Schema.Struct({ threadId: ThreadId, build: GameBuildRef });
 export const GameBuildRestoreResult = Schema.Struct({
   requestId: Schema.String,
   done: Schema.Boolean,

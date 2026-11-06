@@ -16,7 +16,12 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
-import { CheckpointRef, GameOperationError } from "@kurambit/contracts";
+import {
+  CheckpointRef,
+  GAME_BUILDS_EVENT,
+  type GameBuildId,
+  GameOperationError,
+} from "@kurambit/contracts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
 import { GAME_BUILD_COPIES } from "../config.ts";
@@ -54,6 +59,19 @@ export class GameBuildCopies extends Context.Service<
     ) => Effect.Effect<void, never, Scope.Scope>;
     /** Ends the game's work on its copies: measurements, their operations, bots and previews. */
     readonly stopFor: (root: string) => Effect.Effect<void>;
+    /** Records that `copy` is serving build `build` of the game at `url`, and says so to its clients. */
+    readonly playing: (
+      root: string,
+      build: GameBuildId,
+      copy: string,
+      url: string | null,
+    ) => Effect.Effect<void>;
+    /** The builds of the game being played from their copies now. */
+    readonly plays: (
+      root: string,
+    ) => ReadonlyArray<{ readonly build: GameBuildId; readonly url: string | null }>;
+    /** Stops one build's Play; a measurement of it and the folder's own Play go on. */
+    readonly stopPlay: (root: string, build: GameBuildId) => Effect.Effect<void>;
   }
 >()("kurambit/game/GameBuildCopies") {}
 
@@ -68,6 +86,23 @@ const make = Effect.gen(function* () {
   const base = NodePath.join(config.worktreesDir, GAME_BUILD_COPIES);
   const leases = new Map<string, number>();
   const tracked = new Map<string, Set<Effect.Effect<void>>>();
+  const served = new Map<
+    string,
+    Map<GameBuildId, { readonly copy: string; readonly url: string | null }>
+  >();
+  const announce = (root: string, message: string) =>
+    operations.changed(root, GAME_BUILDS_EVENT, message);
+  // A copy that goes ends its Play; its game's clients hear of it.
+  const unserve = (root: string, copy: string) =>
+    Effect.suspend(() => {
+      const plays = served.get(root);
+      const gone = [...(plays ?? [])]
+        .filter(([, play]) => play.copy === copy)
+        .map(([build]) => build);
+      if (gone.length === 0) return Effect.void;
+      for (const build of gone) plays?.delete(build);
+      return announce(root, `Stopped playing build ${gone[0]!.slice(0, 8)}.`);
+    });
 
   const gameDir = (root: string) =>
     NodePath.join(base, NodeCrypto.createHash("sha256").update(root).digest("hex").slice(0, 16));
@@ -123,6 +158,7 @@ const make = Effect.gen(function* () {
           gone,
           (path) =>
             stopIn(path).pipe(
+              Effect.andThen(unserve(root, path)),
               Effect.andThen(
                 Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
               ),
@@ -202,9 +238,33 @@ const make = Effect.gen(function* () {
       yield* Effect.forEach(names, (name) => stopIn(NodePath.join(dir, name)), {
         discard: true,
       });
+      if ((served.get(root)?.size ?? 0) > 0) {
+        served.delete(root);
+        yield* announce(root, "Stopped playing the game's builds.");
+      }
     });
 
-  return GameBuildCopies.of({ lease, track, stopFor });
+  const playing: GameBuildCopies["Service"]["playing"] = (root, build, copy, url) =>
+    Effect.suspend(() => {
+      const plays = served.get(root) ?? new Map();
+      plays.set(build, { copy, url });
+      served.set(root, plays);
+      return announce(root, `Playing build ${build.slice(0, 8)}.`);
+    });
+
+  const plays: GameBuildCopies["Service"]["plays"] = (root) =>
+    [...(served.get(root) ?? [])].map(([build, play]) => ({ build, url: play.url }));
+
+  const stopPlay: GameBuildCopies["Service"]["stopPlay"] = (root, build) =>
+    Effect.gen(function* () {
+      const play = served.get(root)?.get(build);
+      if (play === undefined) return;
+      // Only the copy's preview: a measurement of the same build keeps going.
+      yield* preview.stop(play.copy);
+      yield* unserve(root, play.copy);
+    });
+
+  return GameBuildCopies.of({ lease, track, stopFor, playing, plays, stopPlay });
 });
 
 export const layer = Layer.effect(GameBuildCopies, make);

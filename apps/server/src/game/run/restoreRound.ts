@@ -1,7 +1,8 @@
 // A creator's restore, as its job does it: a kept round's build or a saved one
 // comes back into the game folder (engine project, art, ASSETS.md), and
 // whatever the folder held before is kept as a saved build first, so a restore
-// loses nothing. A kept round becomes the best; a saved build leaves the best
+// loses nothing. A round becomes the best (a round not kept only when the
+// creator made it so, checked at the request); a saved build leaves the best
 // as it is (decide.ts). Every refusal is an outcome the run records, never a
 // failure of the job.
 import * as Cause from "effect/Cause";
@@ -62,11 +63,6 @@ export const restoreBuild = (input: {
     message,
   });
   return Effect.gen(function* () {
-    if (target.kind === "round" && !target.record.kept)
-      return no(
-        "not-kept",
-        `Round ${target.record.round} was not kept; only a kept round's build can be restored.`,
-      );
     // The round a stopped run holds is abandoned once the restore lands (decide.ts).
     const abandons = abandonsRound(run, state);
     if (state.inFlight?.kind === "build" && RESUMABLE.has(run.ending ?? "") && !abandons)

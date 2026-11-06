@@ -856,6 +856,7 @@ const make = Effect.gen(function* () {
         processes: processes.list(root),
         // Status observes the preview; it never switches it.
         previewUrl: preview.url(root),
+        buildPlays: copies.plays(root),
         operation: operations.current(root),
       };
     }),

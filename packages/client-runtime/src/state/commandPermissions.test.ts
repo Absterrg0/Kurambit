@@ -71,6 +71,10 @@ describe("command permissions", () => {
           WS_METHODS.gameRunSteer,
           WS_METHODS.gameRunProfile,
           WS_METHODS.gameRunRestore,
+          WS_METHODS.gameBuildMeasure,
+          WS_METHODS.gameBuildPlay,
+          WS_METHODS.gameBuildRestore,
+          WS_METHODS.gameBuildStop,
         ] as const) {
           const command = createCommandPermissions(runtime, tag);
           registry.set(sessions(env), AsyncResult.success(grant(false)));

@@ -8,6 +8,8 @@ import {
   GameRunProfileInput,
   GameRunProfileResult,
   GameRunRoundInput,
+  GameRunRoundsInput,
+  GameRunRoundsResult,
   GameRunRoundDetail,
   GameRunPickInput,
   GameRunPickDetail,
@@ -44,6 +46,7 @@ import {
   GameBuildRefInput,
   GameBuildRestoreInput,
   GameBuildRestoreResult,
+  GameBuildStopInput,
   GameBuildsInput,
   GameBuildsResult,
 } from "./gameBuilds.ts";
@@ -375,6 +378,8 @@ export const WS_METHODS = {
   gameBuildMeasure: "game.buildMeasure",
   gameBuildPlay: "game.buildPlay",
   gameBuildRestore: "game.buildRestore",
+  gameBuildStop: "game.buildStop",
+  gameRunRounds: "game.runRounds",
   subscribeGameEvents: "subscribeGameEvents",
 
   shellOpenInEditor: "shell.openInEditor",
@@ -1547,6 +1552,16 @@ const WsGameBuildPlayRpc = Rpc.make(WS_METHODS.gameBuildPlay, {
   success: GameBuildPlayResult,
   error: gameError,
 });
+const WsGameBuildStopRpc = Rpc.make(WS_METHODS.gameBuildStop, {
+  payload: GameBuildStopInput,
+  success: Schema.Struct({}),
+  error: gameError,
+});
+const WsGameRunRoundsRpc = Rpc.make(WS_METHODS.gameRunRounds, {
+  payload: GameRunRoundsInput,
+  success: GameRunRoundsResult,
+  error: gameError,
+});
 const WsGameBuildRestoreRpc = Rpc.make(WS_METHODS.gameBuildRestore, {
   payload: GameBuildRestoreInput,
   success: GameBuildRestoreResult,
@@ -1593,6 +1608,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameBuildMeasureRpc,
   WsGameBuildPlayRpc,
   WsGameBuildRestoreRpc,
+  WsGameBuildStopRpc,
+  WsGameRunRoundsRpc,
   WsSubscribeGameEventsRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
