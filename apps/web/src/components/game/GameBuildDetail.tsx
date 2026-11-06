@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { ColumnsIcon, HistoryIcon, PlayIcon, RefreshCwIcon } from "lucide-react";
-import type {
-  GameBuild,
-  GameBuildRef,
-  GameBuildsResult,
-  ScopedThreadRef,
+import {
+  gameFactsView,
+  type GameBuild,
+  type GameBuildFacts,
+  type GameBuildRef,
+  type GameBuildsResult,
+  type ScopedThreadRef,
 } from "@kurambit/contracts";
 
 import { useDiffPanelStore } from "../../diffPanelStore";
@@ -16,6 +18,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { GameBuildFactsList } from "./GameBuildFacts";
+import { SaveMediaButton } from "./GameSavedMedia";
 import { buildName, buildSourceLabel, formatBuildTime } from "./gameBuilds.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
 
@@ -209,7 +212,10 @@ export function GameBuildDetail({
             {factsData.message.trim() === "" ? "Not measured yet." : factsData.message}
           </p>
         ) : (
-          <GameBuildFactsList threadRef={threadRef} facts={factsData} />
+          <>
+            <GameBuildFactsList threadRef={threadRef} facts={factsData} />
+            <SaveEvidence threadRef={threadRef} build={build} facts={factsData} />
+          </>
         )}
         {measureAnswer !== null && measureAnswer.text !== factsData?.message ? (
           <p
@@ -244,5 +250,48 @@ function TurnDiffButton({ threadRef, turn }: { threadRef: ScopedThreadRef; turn:
     >
       Open diff
     </Button>
+  );
+}
+
+/**
+ * The bot runs' videos and frames, each with Save: the person keeps evidence
+ * past the log cleanup in the game's saved/, the same save the agent has.
+ */
+function SaveEvidence({
+  threadRef,
+  build,
+  facts,
+}: {
+  threadRef: ScopedThreadRef;
+  build: GameBuild;
+  facts: GameBuildFacts;
+}) {
+  const name = buildName(build)
+    .replace(/'s build$/, "")
+    .toLowerCase();
+  const seen = new Set<string>();
+  const media = gameFactsView(facts).flatMap((view) =>
+    view.evidence.flatMap((item) => {
+      if (item.kind === "log" || seen.has(item.path)) return [];
+      seen.add(item.path);
+      return [{ path: item.path, fact: view.label, what: item.label }];
+    }),
+  );
+  if (media.length === 0) return null;
+  return (
+    <ul className="space-y-1">
+      {media.map((item) => (
+        <li key={item.path} className="flex flex-wrap items-center gap-2 text-2xs">
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {item.fact} · {item.what}
+          </span>
+          <SaveMediaButton
+            threadRef={threadRef}
+            source={item.path}
+            label={`${name} ${item.fact} ${item.what}`.toLowerCase()}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }
