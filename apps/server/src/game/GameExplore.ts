@@ -1102,8 +1102,14 @@ const make = Effect.gen(function* () {
           native ? { name: "Explore session start", owner: String(threadId) } : undefined,
         );
         const live = exploreLive.get(root);
+        // A session whose start cannot be recorded is closed, not left open
+        // with nothing on disk to count it.
         if (live !== undefined && live !== "starting" && live.id === started.sessionId)
-          yield* persistSession(live);
+          yield* persistSession(live).pipe(
+            Effect.tapError(() =>
+              live.lock.withPermits(1)(exploreFinalize(live, "act-failed")).pipe(Effect.ignore),
+            ),
+          );
         return started;
       }).pipe(
         Effect.onExit(() => unclaim),
