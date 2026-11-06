@@ -22,6 +22,7 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { type GameEventScope, gameEventScope } from "./gameEventScope";
+import { selectTurnBuild, type TurnBuildView } from "./gameTurnBuild";
 
 const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
   label: "game:events",
@@ -263,6 +264,39 @@ const olderBuildPagesAtom = Atom.family((key: string) => {
 });
 export const olderBuildPages = (ref: ScopedThreadRef, count: number) =>
   olderBuildPagesAtom(`${ref.environmentId}\0${ref.threadId}\0${count}`);
+
+const NO_TURN_BUILD = Atom.make<TurnBuildView | null>(null);
+
+/**
+ * One turn's build from the first page of the Builds list (selectTurnBuild).
+ * Null until the list is read, and for a turn the first page does not hold,
+ * which keeps its plain link. It moves only when what the strip draws moved, so a facts push
+ * for another build re-renders no turn's card.
+ */
+const turnBuildAtom = Atom.family((key: string) => {
+  const [environmentId = "", threadId = "", runId = ""] = key.split("\0");
+  let last: { readonly key: string; readonly view: TurnBuildView | null } = {
+    key: "",
+    view: null,
+  };
+  return Atom.make((get) => {
+    const list = get(
+      buildsQuery({
+        environmentId: EnvironmentId.make(environmentId),
+        input: { threadId: ThreadId.make(threadId) },
+      }),
+    );
+    if (!AsyncResult.isSuccess(list)) return last.view;
+    const view = selectTurnBuild(list.value, runId === "" ? null : runId);
+    const seen = view === null ? "" : JSON.stringify(view);
+    if (seen !== last.key) last = { key: seen, view };
+    return last.view;
+  }).pipe(Atom.withLabel(`game:turn-build:${key}`));
+});
+export const turnBuild = (ref: ScopedThreadRef | null, runId: string | null) =>
+  ref === null
+    ? NO_TURN_BUILD
+    : turnBuildAtom(`${ref.environmentId}\0${ref.threadId}\0${runId ?? ""}`);
 
 /** The build copies the server is playing for this game (CONTRACT A3). */
 export type GameBuildPlaying = GameStatus["buildPlays"][number];

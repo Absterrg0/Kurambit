@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
 import * as Schema from "effect/Schema";
 import {
   GameOperationError,
@@ -10,16 +11,23 @@ import {
 } from "@kurambit/contracts";
 
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
+import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { randomUUID } from "../../lib/utils";
+import { useQuietThreadShell } from "../../state/entities";
 import {
   buildRestoreSending,
   gameEnvironment,
   setBuildRestoreSending,
   setStagePlayTarget,
+  turnBuild,
 } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
-import type { GameBuildRestore } from "./gameBuilds.logic";
+import { buildName, type GameBuildRestore } from "./gameBuilds.logic";
+import { turnStripRestore } from "./gameTurnBuild.logic";
+
+const NO_PERMISSION = Atom.make(false);
+const NOT_SENDING = Atom.make(null);
 
 const isGameOperationError = Schema.is(GameOperationError);
 
@@ -31,25 +39,38 @@ export const restoreQuestion = (name: string) =>
  * returns once the restore is recorded, and the push that lands its outcome
  * rereads the list. Asking again after a lost answer is a retry of the same
  * request, so it never restores twice; the server's refusal is its answer, so
- * asking after one is a new request.
+ * asking after one is a new request. With no thread there is nothing to restore.
  */
-export function useBuildRestore(threadRef: ScopedThreadRef, latest: GameBuildRestore | null) {
+export function useBuildRestore(
+  threadRef: ScopedThreadRef | null,
+  latest: GameBuildRestore | null,
+) {
   const canRestore = useAtomValue(
-    gameEnvironment.buildRestore.permissionAtom(threadRef.environmentId),
+    threadRef === null
+      ? NO_PERMISSION
+      : gameEnvironment.buildRestore.permissionAtom(threadRef.environmentId),
   );
   const restore = useAtomCommand(gameEnvironment.buildRestore, { reportFailure: false });
   const key = useRef<{ readonly target: string; readonly id: string } | null>(null);
-  const shared = useAtomValue(buildRestoreSending(threadRef));
+  const shared = useAtomValue(threadRef === null ? NOT_SENDING : buildRestoreSending(threadRef));
   const [error, setError] = useState<{ readonly target: string; readonly text: string } | null>(
     null,
   );
   // Sent by this client and not yet in the list, which moves past `since` once it is.
   const waiting = shared !== null && (latest?.requestId ?? null) === shared.since;
   const pending = waiting || (latest !== null && latest.outcome === null);
-  /** `asBest` keeps a run round's build as the run's best (CONTRACT A1). */
-  const send = async (target: GameBuildId, question: string, asBest = false) => {
-    if (pending) return;
-    if ((await requestConfirmDialog(question)) !== true) return;
+  /**
+   * `asBest` keeps a run round's build as the run's best (CONTRACT A1). A null
+   * question sends at once: Undo and Redo are each other's way back. Answers
+   * the failure's text, or null.
+   */
+  const send = async (
+    target: GameBuildId,
+    question: string | null,
+    asBest = false,
+  ): Promise<string | null> => {
+    if (threadRef === null || pending) return null;
+    if (question !== null && (await requestConfirmDialog(question)) !== true) return null;
     const name = asBest ? `${target}:best` : target;
     if (key.current?.target !== name) key.current = { target: name, id: randomUUID() };
     const since = latest?.requestId ?? null;
@@ -69,12 +90,13 @@ export function useBuildRestore(threadRef: ScopedThreadRef, latest: GameBuildRes
       const failure = squashAtomCommandFailure(result);
       if (isGameOperationError(failure)) key.current = null;
       setError({ target, text: String(failure) });
-      return;
+      return String(failure);
     }
     key.current = null;
     // A request answered earlier is already in the list; a new one makes it move.
     if (result.value.done || result.value.requestId === since)
       setBuildRestoreSending(threadRef, null);
+    return null;
   };
   return {
     canRestore,
@@ -83,6 +105,39 @@ export function useBuildRestore(threadRef: ScopedThreadRef, latest: GameBuildRes
       (waiting && shared?.target === target) ||
       (latest !== null && latest.outcome === null && latest.target === target),
     error: (target: GameBuildId) => (error?.target === target ? error.text : null),
+    send,
+  };
+}
+
+/**
+ * One chat turn's Undo, Redo or Go back (B4), or the game's latest turn's when
+ * `runId` is null: the strip and the palette offer the same restore. It is
+ * Kurambit's build restore, never T3's conversation revert, so the agent keeps
+ * the turn in its context and the undo has its own way back.
+ */
+export function useTurnUndo(threadRef: ScopedThreadRef | null, runId: string | null) {
+  const view = useAtomValue(turnBuild(threadRef, runId));
+  // The quiet shell: a streaming turn does not re-render every card.
+  const shell = useQuietThreadShell(threadRef);
+  const restores = useBuildRestore(threadRef, view?.restore ?? null);
+  const action =
+    view === null ? null : turnStripRestore(view, threadRuntimeIsActive(shell?.runtime));
+  const send = async (): Promise<string | null> => {
+    if (view === null || action === null) return null;
+    return restores.send(
+      action.target,
+      action.kind === "go-back" ? restoreQuestion(buildName(view.build)) : null,
+    );
+  };
+  return {
+    view,
+    action,
+    /** A run's role thread sees the builds but never restores beside the run. */
+    writer: shell?.lineage.relationshipToParent !== "role",
+    canRestore: restores.canRestore,
+    pending: restores.pending,
+    restoring: action !== null && restores.restoring(action.target),
+    error: action === null ? null : restores.error(action.target),
     send,
   };
 }

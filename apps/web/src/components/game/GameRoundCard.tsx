@@ -2,12 +2,7 @@ import { AsyncResult } from "effect/reactivity";
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import * as Schema from "effect/Schema";
 import { ColumnsIcon, HistoryIcon, PlayIcon, WorkflowIcon } from "lucide-react";
-import {
-  GameBuildId,
-  type GameRunRoundRef,
-  type RunId,
-  type ScopedThreadRef,
-} from "@kurambit/contracts";
+import { GameBuildId, type GameRunRoundRef, type ScopedThreadRef } from "@kurambit/contracts";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import type { TimelineAnchoredCard } from "../../session-logic";
@@ -254,29 +249,5 @@ export function GameRoundCard({
         </p>
       ) : null}
     </section>
-  );
-}
-
-/** A changing chat turn's link to its build on the Builds tab. */
-export function GameTurnBuildLink({
-  threadRef,
-  runId,
-}: {
-  threadRef: ScopedThreadRef;
-  runId: RunId;
-}) {
-  return (
-    <Button
-      size="xs"
-      variant="ghost"
-      onClick={() =>
-        useGameWorkspaceStore.getState().showStageTab("builds", {
-          open: { _tag: "turn", threadId: threadRef.threadId, runId },
-        })
-      }
-    >
-      <HistoryIcon aria-hidden="true" />
-      Open build
-    </Button>
   );
 }
