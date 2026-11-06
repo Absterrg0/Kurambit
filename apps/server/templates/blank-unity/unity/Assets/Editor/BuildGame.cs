@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 
 // The game's scene builder: what Assets/Scenes/Game.unity holds (camera,
@@ -36,6 +37,11 @@ public static class BuildGame
             made.transform.SetPositionAndRotation(new Vector3(0f, 2f, -6f), Quaternion.Euler(12f, 0f, 0f));
             return made;
         });
+        // The pipeline's default volume (tonemapping, bloom, vignette) draws only
+        // on a camera that asks for post-processing; SMAA smooths its edges.
+        var view = camera.GetComponent<Camera>().GetUniversalAdditionalCameraData();
+        view.renderPostProcessing = true;
+        view.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
         Ensure(scene, "Directional Light", () =>
         {
             var made = new GameObject("Directional Light", typeof(Light));

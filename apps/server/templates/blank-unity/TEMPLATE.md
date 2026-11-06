@@ -44,6 +44,12 @@ or HUD.
   font, `Assets/Audio/ui_click.wav` makes every shell button click, and
   `Assets/UI/icon.png` (a placeholder until the art step replaces it) is the
   player's icon. The editor picks each up when it is imported; no wiring.
+- Post-processing comes from the pipeline's default volume,
+  `Assets/Settings/SampleSceneProfile.asset` (tonemapping, bloom, vignette),
+  and draws on the main camera, which renders post-processing with SMAA. A
+  camera made in code draws it only after
+  `cam.GetUniversalAdditionalCameraData().renderPostProcessing = true`
+  (`using UnityEngine.Rendering.Universal;`).
 - Play music with `Sound.Music(clip)` and effects with `Juice.Sfx(clip)`, so
   the volume sliders reach them.
 
