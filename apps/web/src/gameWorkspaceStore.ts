@@ -31,14 +31,6 @@ export const clampGameChatWidth = (width: number, workspaceWidth = Number.POSITI
     Math.max(GAME_CHAT_MIN_WIDTH, Math.round(width)),
   );
 
-export type GameStageTab = "play" | "run" | "builds";
-
-/** A build the Builds tab should open: one by id, a chat turn's, or a compare of two. */
-export type GameBuildRequest =
-  | { readonly open: GameBuildRef }
-  | { readonly compare: readonly [GameBuildRef, GameBuildRef] }
-  | { readonly compare: "pick" };
-
 /**
  * What another surface (the palette, a key, the timeline, a chat turn's strip)
  * asks the Stage to do. One channel, so every entry point shares the Stage's path.
@@ -63,16 +55,6 @@ interface GameWorkspaceStoreState {
   fitChatWidth: (workspaceWidth: number) => void;
   toggleChat: () => void;
   setChatCollapsed: (collapsed: boolean) => void;
-  /**
-   * A tab some other surface (the command palette, a chat turn's "Open build")
-   * asked the game stage to show, with the build to open on the Builds tab; not persisted.
-   */
-  stageTabRequest: {
-    readonly tab: GameStageTab;
-    readonly n: number;
-    readonly build?: GameBuildRequest;
-  } | null;
-  showStageTab: (tab: GameStageTab, build?: GameBuildRequest) => void;
   /** The latest Stage request; `n` makes a repeat of the same request news. Not persisted. */
   stageRequest: { readonly request: GameStageRequest; readonly n: number } | null;
   requestStage: (request: GameStageRequest) => void;
@@ -102,15 +84,6 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       stageRequest: null,
       requestStage: (request) =>
         set((state) => ({ stageRequest: { request, n: (state.stageRequest?.n ?? 0) + 1 } })),
-      stageTabRequest: null,
-      showStageTab: (tab, build) =>
-        set((state) => ({
-          stageTabRequest: {
-            tab,
-            n: (state.stageTabRequest?.n ?? 0) + 1,
-            ...(build === undefined ? {} : { build }),
-          },
-        })),
     }),
     {
       name: "kurambit:game-workspace:v2",

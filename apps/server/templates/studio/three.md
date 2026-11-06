@@ -272,8 +272,8 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    `ctx.look.sun({ follow: ctx.player, size })` and tune numbers through
    `export const LOOK = { ... }` in `main.js`. Turn on `bloom: true` only when
    glows matter to the game, with their emissive colours above 1: it costs
-   several times the plain look every frame, and bot runs and checks play in
-   a software renderer. Through an orthographic camera nothing is tone mapped
+   several times the plain look every frame, and a machine without a GPU
+   (some players', and the harness's fallback) draws it in software. Through an orthographic camera nothing is tone mapped
    unless LOOK names a toneMapping, so a 2D or pixel-art game's sprites keep
    their files' colours; it also sets `LOOK = { environment: false, shadows: false }`.
 7. Write every top-down level (rows run along x/z on the ground) as a text map with `buildLevel(ctx, rows, legend, { floor })`

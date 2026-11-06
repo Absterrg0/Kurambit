@@ -301,7 +301,7 @@ const CheckTool = Tool.make("game_check", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const ExportTool = Tool.make("game_export", {
-  description: `Import and export this thread's game for one target; a target its engine does not make is refused. ${perEngine((t) => t.export)} A release is staged and checked, then replaces the previous one only when the sources did not change while it was made, so a failed export leaves the last good build in place. Web exports to a content-addressed build the export selects for Play at once. Returns the published artifact's path and the command output, or why it failed. Use game_preview to play the latest sources.`,
+  description: `Import and export this thread's game for one target; a target its engine does not make is refused. ${perEngine((t) => t.export)} A release is staged and checked, then replaces the previous one only when the sources did not change while it was made, so a failed export leaves the last good build in place. Web exports to a content-addressed build. On an engine that plays its Web export (Godot) the export becomes Play's build at once; on an engine whose folder is served live (three.js) it is a release only, and Play keeps serving the folder. Returns the published artifact's path and the command output, or why it failed. Use game_preview to play the latest sources.`,
   parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
   success: GameActionResult,
   failure,
