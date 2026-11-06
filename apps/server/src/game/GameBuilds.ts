@@ -963,12 +963,13 @@ const make = Effect.gen(function* () {
       return result;
     });
 
-  // On the turn loop's engines the Stage plays the folder: a restore that moved
-  // it plays what it brought back, as the restoring thread's own operation,
-  // in the service's fiber so the caller has its answer at once. A folder that
-  // already held the build is fresh, so nothing rebuilds.
+  // On the turn loop's engines whose Stage plays a Web export, a restore that
+  // moved the folder plays what it brought back, as the restoring thread's own
+  // operation, in the service's fiber so the caller has its answer at once. A
+  // folder that already held the build is fresh, so nothing rebuilds. A live
+  // Stage serves the folder itself: its watch shows the restore.
   const playRestored = (threadId: ThreadId, g: Game) =>
-    engineProfile(g.engine).turnLoop
+    engineProfile(g.engine).turnLoop && engineProfile(g.engine).stage === "export"
       ? Effect.forkIn(
           game
             .playCurrent(threadId)
