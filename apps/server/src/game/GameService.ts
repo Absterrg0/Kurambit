@@ -16,6 +16,7 @@ import {
   type GameStatus,
   type GameAction,
   type GameActionResult,
+  type GameManifest,
   type GameOperationEvent,
   type GameSavedMedia,
   type GameWebPackage,
@@ -182,6 +183,13 @@ export class GameService extends Context.Service<
      * an engine whose games play as a built player gets that player prepared.
      */
     readonly preview: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
+    /**
+     * Makes the folder's Web build current, as the thread's own operation: the
+     * same freshness rule as `preview`, waiting a while behind another
+     * operation rather than refusing. A failure is the operation's news on
+     * the Stage. Nothing for an engine without a Web build.
+     */
+    readonly playCurrent: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
     /** Stop game: the caller's work, and while no run holds the game, every process of it; says what did not stop. */
     readonly stop: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
@@ -617,33 +625,48 @@ const make = Effect.gen(function* () {
       owner,
     );
   });
+  // The folder's Web build served, rebuilt only when the selected build is of
+  // other sources: an unreadable tree cannot be shown current, and a damaged
+  // selection record is no build of these sources, so both are rebuilt.
+  const currentWeb = Effect.fnUntraced(function* (
+    threadId: ThreadId,
+    root: string,
+    manifest: GameManifest,
+    waitUntil?: number,
+  ) {
+    const profile = engineProfile(manifest.engine.name);
+    const selected = yield* selectionOf(root);
+    const current = yield* statusSnapshot(
+      root,
+      manifestProject(manifest),
+      false,
+      profile.buildInputs,
+    );
+    const fresh =
+      selected !== null &&
+      selected !== "damaged" &&
+      selected.sourceId !== null &&
+      current.kind === "known" &&
+      current.sourceId === selected.sourceId;
+    if (fresh) {
+      const served = yield* exporter.serve(root);
+      if (served?.success === true) return served;
+    }
+    return yield* withRoot(threadId, "Build Web", exporter.publishWeb, String(threadId), waitUntil);
+  });
+  const playCurrent = Effect.fn("GameService.playCurrent")(function* (threadId: ThreadId) {
+    const root = yield* projects.resolve(threadId);
+    const manifest = yield* projects.read(root);
+    if (!engineProfile(manifest.engine.name).exportTargets.includes("Web")) return;
+    // A turn's own check or Play may still hold the game for a moment.
+    const waitUntil = (yield* Clock.currentTimeMillis) + 120_000;
+    yield* currentWeb(threadId, root, manifest, waitUntil);
+  });
   const gamePreview = Effect.fn("GameService.preview")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
     const profile = engineProfile(manifest.engine.name);
-    if (profile.exportTargets.includes("Web")) {
-      // A build of other sources than the folder's is rebuilt; an unreadable
-      // tree cannot be shown current, so it is rebuilt too.
-      // A damaged selection record is no build of these sources: rebuilt below.
-      const selected = yield* selectionOf(root);
-      const current = yield* statusSnapshot(
-        root,
-        manifestProject(manifest),
-        false,
-        profile.buildInputs,
-      );
-      const fresh =
-        selected !== null &&
-        selected !== "damaged" &&
-        selected.sourceId !== null &&
-        current.kind === "known" &&
-        current.sourceId === selected.sourceId;
-      if (fresh) {
-        const served = yield* exporter.serve(root);
-        if (served?.success === true) return served;
-      }
-      return yield* rebuild(threadId);
-    }
+    if (profile.exportTargets.includes("Web")) return yield* currentWeb(threadId, root, manifest);
     if (profile.play === "player") {
       yield* projects.admitWrite(
         threadId,
@@ -1018,6 +1041,7 @@ const make = Effect.gen(function* () {
     play,
     rebuild,
     preview: gamePreview,
+    playCurrent,
     stop,
   });
 });

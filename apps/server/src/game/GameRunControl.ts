@@ -8,8 +8,6 @@ import {
   CheckpointRef,
   CommandId,
   GameBuildId,
-  type GameCreateInput,
-  type GameProjectResult,
   type GameRunChecksResult,
   type GameRun,
   type GameRunDecideInput,
@@ -159,10 +157,6 @@ type FrameSheets = ReadonlyArray<{ readonly build: string; readonly path: string
 
 type Service = {
   readonly runStart: (input: GameRunStartInput) => Fails<GameRunStartResult>;
-  /** A new game is a production run: create the project, then run the brief. */
-  readonly createGame: (
-    input: GameCreateInput,
-  ) => Effect.Effect<typeof GameProjectResult.Type, GameOperationError>;
   readonly runStatus: (threadId: ThreadId) => Fails<GameRunStatusResult>;
   readonly runStop: (threadId: ThreadId, commandId?: string) => Fails<GameRunStopResult>;
   /** The creator's answer to the decision the live run waits on; refused when it does not fit. */
@@ -409,10 +403,6 @@ const make = Effect.gen(function* () {
   // its project's lock, so two chats starting the first run at once cannot
   // both find none (the decider's check runs under one thread's lock only).
   const startLock = yield* KeyedLock.make<string>();
-  // Why a new game's run did not start, until a run is recorded: the Run tab
-  // says so instead of "not started". Only for this server's lifetime: after
-  // a restart the tab offers the start as for any game without a run.
-  const startFailures = new Map<ThreadId, string>();
   const runStart: Service["runStart"] = Effect.fn("GameRunControl.runStart")(function* (
     input: GameRunStartInput,
   ) {
@@ -565,7 +555,6 @@ const make = Effect.gen(function* () {
       runtimeMode: projection.thread.runtimeMode,
       ...(earlier ? { stage: "build" as const } : {}),
     });
-    startFailures.delete(input.threadId);
     const started = (yield* recordsOf(runThread)).run;
     yield* logLine(
       root,
@@ -820,9 +809,7 @@ const make = Effect.gen(function* () {
         threads: [],
         builds: [],
         restore: null,
-        message:
-          startFailures.get(runThread) ??
-          "No run recorded for this game yet: start one with a brief.",
+        message: "No run recorded for this game yet: start one with a brief.",
         resumable: false,
       } satisfies GameRunStatusResult;
     const running = run.status !== "ended";
@@ -1371,33 +1358,6 @@ const make = Effect.gen(function* () {
     return { requestId, done: true, message: outcome.message } satisfies GameRunRestoreResult;
   });
 
-  const createGame: Service["createGame"] = Effect.fn("GameRunControl.createGame")(function* (
-    input: GameCreateInput,
-  ) {
-    const created: typeof GameProjectResult.Type = yield* projects.create(input);
-    // The game exists either way; a run that cannot start says why on the Run
-    // tab (and to game_run_status), where the creator can start it again.
-    yield* runStart({
-      threadId: created.threadId,
-      brief: input.brief,
-      ...(input.artDirection === undefined ? {} : { artDirection: input.artDirection }),
-    }).pipe(
-      Effect.catch((cause) =>
-        Effect.sync(() =>
-          startFailures.set(
-            created.threadId,
-            `The run did not start when this game was created (${plainReason(cause.detail ?? cause.message, [created.root])}); start it again with its brief.`,
-          ),
-        ).pipe(
-          Effect.andThen(
-            Effect.logWarning("game run did not start after create", { reason: cause.message }),
-          ),
-        ),
-      ),
-    );
-    return created;
-  });
-
   const runSubmit: Service["runSubmit"] = Effect.fn("GameRunControl.runSubmit")(function* (
     roleThreadId: ThreadId,
     submission: GameRunSubmission,
@@ -1430,7 +1390,6 @@ const make = Effect.gen(function* () {
 
   return GameRunControl.of({
     runStart,
-    createGame,
     runStatus,
     runStop,
     runDecide,

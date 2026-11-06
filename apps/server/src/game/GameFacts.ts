@@ -130,6 +130,8 @@ interface Job {
   readonly build: ResolvedBuild;
   /** A person asked: standing faults are tried again. */
   person: boolean;
+  /** Only a newer turn build's measure asked: a newer one drops it while it waits. */
+  supersedable: boolean;
   /** What it measures, known once it runs. */
   tiers: ReadonlySet<Tier> | null;
   running: boolean;
@@ -154,11 +156,18 @@ export class GameFacts extends Context.Service<
      * reason waiting clears, an older harness, a changed tester bot; a
      * person's also what a standing fault kept) and returns at once, or after
      * `waitFor` if it finishes sooner. A person's measure waits behind at
-     * most three others; past that it starts nothing and says so.
+     * most three others; past that it starts nothing and says so. With
+     * `supersede` (a chat turn's newest build), it drops the game's other
+     * queued measures that asked the same: only the newest turn is worth the
+     * wait. A running measure, a person's and a run's are never dropped.
      */
     readonly measure: (
       build: ResolvedBuild,
-      options?: { readonly waitFor?: Duration.Input; readonly queue?: "person" | "background" },
+      options?: {
+        readonly waitFor?: Duration.Input;
+        readonly queue?: "person" | "background";
+        readonly supersede?: boolean;
+      },
     ) => Effect.Effect<GameBuildFacts>;
     /**
      * The builds whose row still owes a tier (asked for, never measured), so
@@ -712,34 +721,66 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // A dropped job's row owes nothing anymore: one that measured nothing goes,
+  // so a restart does not measure a superseded build after all.
+  const drop = (job: Job) =>
+    Effect.gen(function* () {
+      if (job.fiber !== null) yield* Fiber.interrupt(job.fiber);
+      if (jobs.has(job.build.key)) return;
+      yield* sql`
+        DELETE FROM game_build_facts
+        WHERE facts_key = ${job.build.key} AND harness = ${harness}
+          AND json_extract(payload_json, '$.measuredAt') IS NULL
+      `.pipe(Effect.ignore);
+    });
+
   const measure: GameFacts["Service"]["measure"] = (build, options = {}) =>
     Effect.gen(function* () {
       const person = options.queue === "person";
-      // Decided and registered in one step, with nothing yielding between.
-      const job = yield* Effect.suspend((): Effect.Effect<Job | null> => {
-        const existing = jobs.get(build.key);
-        if (existing !== undefined) {
-          if (person) existing.person = true;
-          return Effect.succeed(existing);
-        }
-        if (person && waiting() >= QUEUE_LIMIT) return Effect.succeed(null);
-        const fresh: Job = {
-          build,
-          person,
-          tiers: null,
-          running: false,
-          stopped: false,
-          fiber: null,
-          done: Deferred.makeUnsafe<void>(),
-        };
-        jobs.set(build.key, fresh);
-        return Effect.forkIn(runJob(fresh), scope).pipe(
-          Effect.map((fiber) => {
-            fresh.fiber = fiber;
-            return fresh;
-          }),
-        );
-      });
+      const supersede = options.supersede === true && !person;
+      // Decided and registered in one step, with nothing yielding between: a
+      // job not yet running cannot start while it is dropped (runJob reads
+      // `stopped` and sets `running` with no yield between).
+      const asked = yield* Effect.suspend(
+        (): Effect.Effect<{ job: Job | null; dropped: ReadonlyArray<Job> }> => {
+          const existing = jobs.get(build.key);
+          if (existing !== undefined) {
+            if (person) existing.person = true;
+            if (!supersede) existing.supersedable = false;
+            return Effect.succeed({ job: existing, dropped: [] });
+          }
+          if (person && waiting() >= QUEUE_LIMIT) return Effect.succeed({ job: null, dropped: [] });
+          const dropped = supersede
+            ? [...jobs.values()].filter(
+                (job) =>
+                  job.build.root === build.root && job.supersedable && !job.person && !job.running,
+              )
+            : [];
+          for (const job of dropped) {
+            job.stopped = true;
+            jobs.delete(job.build.key);
+          }
+          const fresh: Job = {
+            build,
+            person,
+            supersedable: supersede,
+            tiers: null,
+            running: false,
+            stopped: false,
+            fiber: null,
+            done: Deferred.makeUnsafe<void>(),
+          };
+          jobs.set(build.key, fresh);
+          return Effect.forkIn(runJob(fresh), scope).pipe(
+            Effect.map((fiber) => {
+              fresh.fiber = fiber;
+              return { job: fresh, dropped };
+            }),
+          );
+        },
+      );
+      yield* Effect.forEach(asked.dropped, drop, { discard: true });
+      const job = asked.job;
       if (job === null) {
         const facts = yield* read(build);
         return {
