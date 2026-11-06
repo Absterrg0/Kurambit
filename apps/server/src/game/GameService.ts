@@ -180,7 +180,7 @@ export class GameService extends Context.Service<
     readonly rebuild: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
      * `game_preview`: a playable build of the current sources. A Web build
-     * older than the sources is rebuilt (the same export Play's Rebuild runs);
+     * older than the sources is rebuilt (the same export the Stage's Rebuild runs); a live-staged game serves its folder instead;
      * an engine whose games play as a built player gets that player prepared.
      */
     readonly preview: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
@@ -488,6 +488,10 @@ const make = Effect.gen(function* () {
     timeToLive: "30 seconds",
   });
   const toolchainOf = () => Cache.get(toolchainStatus, tools.revision());
+  // Every client rereads a live game's status when its serve opens or stops.
+  yield* Stream.runForEach(preview.liveStates, ({ root, state }) =>
+    operations.changed(root, GAME_LIVE_EVENT, state === "serving" ? "Serving" : "Stopped"),
+  ).pipe(Effect.forkScoped);
   yield* settings.subscribeChanges.pipe(
     Effect.flatMap((changes) =>
       Stream.runForEach(changes, () => Cache.invalidateAll(toolchainStatus)),
@@ -601,14 +605,15 @@ const make = Effect.gen(function* () {
   /** What a game whose engine makes no Web build answers Play with. */
   const noWebPlay = (root: string, displayName: string): GameActionResult => ({
     success: false,
-    message: `${displayName} games make no Web build to play here. Export a Linux or Windows release from the Builds panel (game_export for an agent), or explore and bot-play the game, which play its built player.`,
+    message: `${displayName} games make no Web build to play here. Export a Linux or Windows release from Export… in the Stage's More menu (game_export for an agent), or explore and bot-play the game, which play its built player.`,
     path: root,
     url: null,
     process: null,
   });
   // A live-staged game is its folder, served as its dev server: nothing is
   // built or written, so there is no operation and no write admission.
-  const playLive = (root: string, profile: GameEngineProfile) =>
+  // `message` is read by whoever asked: the person's Stage shows Play's, an agent reads game_preview's.
+  const playLive = (root: string, profile: GameEngineProfile, message: (url: string) => string) =>
     preview
       .live(root, profile.projectDirectory, (path) =>
         operations.changed(root, GAME_LIVE_EVENT, `Changed ${profile.projectDirectory}/${path}`),
@@ -616,7 +621,7 @@ const make = Effect.gen(function* () {
       .pipe(
         Effect.map((url): GameActionResult => ({
           success: true,
-          message: `The game's folder ${profile.projectDirectory}/ is served live at ${url}: it reloads on the person's Stage as files are saved. Exports are made on demand.`,
+          message: message(url),
           path: NodePath.join(root, profile.projectDirectory, "index.html"),
           url,
           process: null,
@@ -625,7 +630,12 @@ const make = Effect.gen(function* () {
   const play = Effect.fn("GameService.play")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const profile = engineProfile((yield* projects.read(root)).engine.name);
-    if (profile.stage === "live") return yield* playLive(root, profile);
+    if (profile.stage === "live")
+      return yield* playLive(
+        root,
+        profile,
+        () => "Playing live: the game reloads as its files change.",
+      );
     // Play of a build already exported only reads, so it never takes the
     // lock a run's capture or check may hold; one it must export is a write.
     const served = yield* exporter.serve(root);
@@ -722,7 +732,13 @@ const make = Effect.gen(function* () {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
     const profile = engineProfile(manifest.engine.name);
-    if (profile.stage === "live") return yield* playLive(root, profile);
+    if (profile.stage === "live")
+      return yield* playLive(
+        root,
+        profile,
+        (url) =>
+          `The game's folder ${profile.projectDirectory}/ is served live at ${url}: it reloads on the person's Stage as files are saved. Exports are made on demand.`,
+      );
     if (profile.exportTargets.includes("Web")) {
       const result = yield* currentWeb(threadId, root, manifest, { serveFresh: true });
       if (result !== null) return result;
@@ -757,7 +773,7 @@ const make = Effect.gen(function* () {
     if (hold !== null) {
       yield* operations.cancel(root, String(threadId));
       yield* explore.release(threadId, root);
-      yield* preview.stop(root);
+      yield* preview.stop(root, { markStopped: true });
       yield* copies.stopFor(root);
       return {
         success: true,
@@ -789,7 +805,7 @@ const make = Effect.gen(function* () {
         yield* Effect.logWarning("Stop game: a stop failed", { root, what, cause: exit.cause });
       }
     }
-    yield* preview.stop(root);
+    yield* preview.stop(root, { markStopped: true });
     return {
       success: notStopped.length === 0,
       message:
@@ -944,7 +960,7 @@ const make = Effect.gen(function* () {
         // Status observes the preview; it never switches it.
         previewUrl: live ? preview.liveUrl(root) : preview.url(root),
         // Phase 2 fix round (L): the serve's state, held by GamePreview.
-        live: live && preview.liveUrl(root) !== null ? ("serving" as const) : ("off" as const),
+        live: live ? preview.liveState(root) : ("off" as const),
         buildPlays: copies.plays(root),
         operation: operations.current(root),
       };

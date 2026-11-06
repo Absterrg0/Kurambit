@@ -156,14 +156,14 @@ export const packageWebRelease = async (input: {
     throw new WebPackageError(
       selected.directory,
       "invalid",
-      "The selected Web build record does not name an immutable build under builds/candidates. Build & play the game again to select a new build.",
+      "The selected Web build record does not name an immutable build under builds/candidates. Export Web again (Export… in the Stage's More menu) to select a new build.",
     );
   const atPath = await NodeFSP.lstat(buildDirectory).catch((cause) => {
     throw new WebPackageError(
       buildDirectory,
       isNotFound(cause) ? "missing" : "io",
       isNotFound(cause)
-        ? `The selected Web build ${short(selected.buildId)} is missing from ${selected.directory}. Play cannot serve it either. Build & play the game again.`
+        ? `The selected Web build ${short(selected.buildId)} is missing from ${selected.directory}. Export Web again.`
         : `The selected Web build directory could not be read: ${describe(cause)}.`,
       { cause },
     );
@@ -179,14 +179,14 @@ export const packageWebRelease = async (input: {
     throw new WebPackageError(
       buildDirectory,
       "invalid",
-      "The selected Web build directory is a link or not a real directory. Packaging only real files inside the game. Build & play the game again.",
+      "The selected Web build directory is a link or not a real directory. Packaging only real files inside the game. Export Web again.",
     );
   const hashed = await hashWebBuild(root, selected.directory);
   if (hashed === null)
     throw new WebPackageError(
       buildDirectory,
       "invalid",
-      `The selected Web build ${short(selected.buildId)} is empty, has too many files, or contains a symlink. Play cannot serve it reliably. Build & play the game again.`,
+      `The selected Web build ${short(selected.buildId)} is empty, has too many files, or contains a symlink. It cannot be served reliably. Export Web again.`,
     );
   if (hashed.buildId !== selected.buildId)
     throw notPackaged(
@@ -295,7 +295,7 @@ export const packageWebRelease = async (input: {
       throw new WebPackageError(
         archive,
         "io",
-        "The published Web package size does not match the bytes written. Build & play again and package it again.",
+        "The published Web package size does not match the bytes written. Export Web again and package it again.",
       );
     notes.push(...publication.notes);
     notes.push(...(await retireOtherPackages(root, selected.buildId)));
@@ -320,7 +320,7 @@ export const packageWebRelease = async (input: {
         cause.path,
         cause.kind,
         cause.kind === "changed"
-          ? "The selected Web build changed while it was being packaged. Build & play again and retry; any earlier package was left alone."
+          ? "The selected Web build changed while it was being packaged. Export Web again and retry; any earlier package was left alone."
           : cause.message,
         { cause },
       );

@@ -78,8 +78,8 @@ export const wayBack = (runId: string, name: string, lane: string) => {
 };
 
 /**
- * A kept build as the run's log lines name it: the Run tab's saved builds bring it
+ * A kept build as the run's log lines name it: game_run_restore brings it
  * back, and the git command is the fallback when the app cannot.
  */
 export const keptBuild = (runId: string, name: string, lane: string, sha: string) =>
-  `build ${name}${sha.length > 0 ? ` (${sha.slice(0, 8)})` : ""}; restore it from the Run tab's saved builds once the run is stopped, or run in the game folder: ${wayBack(runId, name, lane)}`;
+  `build ${name}${sha.length > 0 ? ` (${sha.slice(0, 8)})` : ""}; restore it with game_run_restore once the run is stopped, or run in the game folder: ${wayBack(runId, name, lane)}`;

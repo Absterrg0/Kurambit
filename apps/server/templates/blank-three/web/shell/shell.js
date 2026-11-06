@@ -769,7 +769,14 @@ if (Object.keys(game.ASSETS ?? {}).length > 0) {
     console.warn("look: shader warm-up failed", error);
   }
 }
-if (BOOT_INTO_PLAY || new URLSearchParams(location.search).has("play")) startRun();
+// The Stage reloads a live game with #kurambit-play once the person has
+// played it, so a save lands them back in play, as pressing Play would.
+if (
+  BOOT_INTO_PLAY ||
+  new URLSearchParams(location.search).has("play") ||
+  location.hash.includes("kurambit-play")
+)
+  startRun();
 else showTitle();
 
 let last = performance.now();

@@ -7,8 +7,10 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { GameOperationError } from "@kurambit/contracts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 
@@ -45,8 +47,25 @@ export class GamePreview extends Context.Service<
     ) => Effect.Effect<string, GameOperationError>;
     /** The URL of the game's live-served folder, or null when it is not served. */
     readonly liveUrl: (root: string) => string | null;
-    /** Closes every server of this game and its live watch; no change is pushed after it. */
-    readonly stop: (root: string) => Effect.Effect<void>;
+    /**
+     * The live serve as every client sees it: "serving", "stopped" (stopped
+     * until Play opens it again), or "off" (not opened since this server started).
+     */
+    readonly liveState: (root: string) => "off" | "serving" | "stopped";
+    /** Each change of a game's `liveState` to serving or stopped. */
+    readonly liveStates: Stream.Stream<{
+      readonly root: string;
+      readonly state: "serving" | "stopped";
+    }>;
+    /**
+     * Closes every server of this game and its live watch; no change is pushed
+     * after it. A served game reads stopped after it; `markStopped`, the game's
+     * own Stop, makes it read stopped even when it was not being served.
+     */
+    readonly stop: (
+      root: string,
+      options?: { readonly markStopped?: boolean },
+    ) => Effect.Effect<void>;
     /** Closes the servers of this game's builds other than `directories` (builds an export pruned). */
     readonly retain: (root: string, directories: ReadonlyArray<string>) => Effect.Effect<void>;
     /** The URL of the build most recently selected for Play, or null. */
@@ -58,8 +77,21 @@ const make = Effect.gen(function* () {
   // Kept apart from the builds' servers, so an export pruning its builds
   // (`retain`) or selecting one never closes the live folder's.
   const lives = new Map<string, { url: string; close: () => Promise<void> }>();
-  const livePending = new Map<string, Promise<string>>();
   const watches = new Map<string, Scope.Closeable>();
+  // A game's live open and its Stop run one at a time, so a Stop that lands
+  // while an open is in flight closes what the open made.
+  const liveLocks = yield* KeyedLock.make<string>();
+  const states = new Map<string, "serving" | "stopped">();
+  const stateChanges = yield* PubSub.unbounded<{
+    readonly root: string;
+    readonly state: "serving" | "stopped";
+  }>();
+  const setState = (root: string, state: "serving" | "stopped") =>
+    Effect.suspend(() => {
+      if (states.get(root) === state) return Effect.void;
+      states.set(root, state);
+      return PubSub.publish(stateChanges, { root, state });
+    });
   const closeWatch = (root: string) =>
     Effect.suspend(() => {
       const scope = watches.get(root);
@@ -91,16 +123,20 @@ const make = Effect.gen(function* () {
       }),
     );
     latest.delete(root);
-    await livePending.get(root)?.catch(() => undefined);
     const live = lives.get(root);
     lives.delete(root);
     await live?.close();
   };
   // The watch first, so no change is pushed for a folder no longer served.
-  const stopRoot = (root: string) =>
-    Effect.andThen(
-      closeWatch(root),
-      Effect.promise(() => closeWhere(root)),
+  const stopRoot = (root: string, options?: { readonly markStopped?: boolean }) =>
+    liveLocks.withLock(
+      root,
+      Effect.gen(function* () {
+        const serving = states.get(root) === "serving";
+        yield* closeWatch(root);
+        yield* Effect.promise(() => closeWhere(root));
+        if (serving || options?.markStopped === true) yield* setState(root, "stopped");
+      }).pipe(Effect.uninterruptible),
     );
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
@@ -117,18 +153,9 @@ const make = Effect.gen(function* () {
       try: async () => {
         const existing = lives.get(root);
         if (existing) return existing.url;
-        const inFlight = livePending.get(root);
-        if (inFlight) return inFlight;
-        const opening = serveGameDirectory(root, directory).then(({ url, close }) => {
-          lives.set(root, { url, close });
-          return url;
-        });
-        livePending.set(root, opening);
-        try {
-          return await opening;
-        } finally {
-          livePending.delete(root);
-        }
+        const opened = await serveGameDirectory(root, directory);
+        lives.set(root, opened);
+        return opened.url;
       },
       catch: (cause) =>
         new GameOperationError({
@@ -223,8 +250,17 @@ const make = Effect.gen(function* () {
   return GamePreview.of({
     url: (root) => latest.get(root)?.url ?? null,
     liveUrl: (root) => lives.get(root)?.url ?? null,
+    liveState: (root) => states.get(root) ?? "off",
+    liveStates: Stream.fromPubSub(stateChanges),
     live: (root, directory, onChange) =>
-      serveLive(root, directory).pipe(Effect.tap(() => watchLive(root, directory, onChange))),
+      liveLocks.withLock(
+        root,
+        serveLive(root, directory).pipe(
+          Effect.tap(() => watchLive(root, directory, onChange)),
+          Effect.tap(() => setState(root, "serving")),
+          Effect.uninterruptible,
+        ),
+      ),
     stop: stopRoot,
     retain: (root, directories) => Effect.promise(() => retain(root, directories)),
     // A window opened before a new selection keeps loading the build it was

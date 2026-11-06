@@ -280,14 +280,15 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   one, which in a game includes whatever the run or another chat did in between. A turn build
   counts from the newest build of the game captured before the turn began, and says so when the
   turn began while a run round was building, since concurrent edits to one folder cannot be split.
-- **Turn builds play and measure themselves.** On an engine whose profile has `turnLoop`
+- **Turn builds measure themselves.** On an engine whose profile has `turnLoop`
   (three.js; Godot and Unity are parked), `GameBuildsReactor` takes a chat turn's checkpoint
-  that changed files, measures the turn's build in the background, then makes the folder's Web
-  build current as the chat's own operation (`GameService.playCurrent`), which the Stage remounts
-  on. The trigger is the checkpoint, not a file watcher, so a half-written turn never reloads the
-  game; a stopped or cancelled turn is measured but not played. Freshness is decided inside the
-  game's lock, and a fresh build is left as it is, so a turn that changed nothing playable never
-  restarts a game the person stopped. Each thread's turns run forked, in order, off the event
+  that changed files and measures the turn's build in the background. A live-staged engine's
+  Stage already shows the folder (Play sessions, above), so nothing is built for it. An engine
+  whose Stage plays a Web export also has the folder's Web build made current, as the chat's own
+  operation (`GameService.playCurrent`), which the Stage remounts on; a stopped or cancelled turn
+  is measured but not played. Freshness is decided inside the game's lock, and a fresh build is
+  left as it is, so a turn that changed nothing playable never restarts a game the person
+  stopped. Each thread's turns run forked, in order, off the event
   stream, so one game's wait for its lock never holds another's. Role and subagent turns are the
   run's, and while a run holds the game it owns the folder, so neither is played. A newer turn's
   measure drops an earlier turn's that is still queued (`supersede`), never one running, a
@@ -299,8 +300,9 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   recorded as a ref (`game-builds/bases/<build>`) on the turn's checkpoint, the way T3 records
   checkpoints, because reading it later from the game's latest restore goes wrong once a second
   restore replaces the first. Undo is that restore, never T3's conversation revert, which is
-  refused in a game's shared folder and would make the agent forget the attempt. On the turn
-  loop's engines a restore plays what it brought back, through the same `playCurrent`.
+  refused in a game's shared folder and would make the agent forget the attempt. A live Stage shows
+  a restore through its watch; on a turn-loop engine staged from a Web export, a restore plays
+  what it brought back, through the same `playCurrent`.
   `folderEdited` compares the folder's restored paths, captured with T3's capture, against
   `current`.
 - **Copies, never the folder.** A build is played and measured in a plain copy under the

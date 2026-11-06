@@ -103,7 +103,7 @@ export const steerWhen = (state: State.RunState | null): string => {
 export const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
 /**
- * A saved build as the Run tab and the tools name it, or null for a name
+ * A saved build as the round cards and the tools name it, or null for a name
  * that is no saved build (a kept round is restored by its round instead).
  */
 export const savedBuildLabel = (

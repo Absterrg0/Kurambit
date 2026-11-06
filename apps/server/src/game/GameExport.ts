@@ -56,7 +56,7 @@ const encodeSelectedBuild = Schema.encodeSync(Schema.fromJsonString(SelectedWebB
 
 const SELECTED_BUILD_FILE = "builds/web-selected.json";
 
-/** One release a game has, as the status and the Builds panel show it. */
+/** One release a game has, as the status and the Export… dialog show it. */
 export type GameRelease = GameStatus["builds"][number];
 
 /** The game's release folder for a native target. */
@@ -680,7 +680,7 @@ const make = Effect.gen(function* () {
             path: NodePath.join(root, WEB_BUILD_DIRECTORY),
             reason: "invalid-input",
             detail:
-              "No Web build is selected for Play, so there is no build to package. Build & play the game first; packaging never exports and never packages a draft, legacy or unselected build.",
+              "No Web export is selected, so there is no build to package. Export Web first (Export… in the Stage's More menu); packaging never exports and never packages a draft, legacy or unselected build.",
           });
         // Packaging is a byte operation on the selected artifact. Comparing
         // editable sources would walk and hash up to a gigabyte of art for a
