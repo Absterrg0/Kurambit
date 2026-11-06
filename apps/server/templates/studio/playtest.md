@@ -3,6 +3,11 @@
 Adapted from OhMyGame's game-playtest skill (Apache-2.0) and Aura's
 play rules (Apache-2.0, ramenvr/autopilot).
 
+When to play: Kurambit plays and measures every chat turn's build (it boots,
+idle, random and skilled bots, frozen frames, input response), so a chat turn
+does not explore to check its own work. Explore when the person asks, when a
+fact names something the code cannot show, or when your run role is to play.
+
 1. The code says what should happen, play shows what does, and play wins.
    Start with game_explore_start, play with game_explore_act, study each
    returned frame, and release the session with game_explore_close.

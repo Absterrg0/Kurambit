@@ -8,7 +8,13 @@ modeller for props; you have no local Blender, Godot or image tools.
 `unity/assets/` is a different folder it never reads; Unity art goes under
 `unity/Assets/Art/`).
 
-1. Key art first: one image the finished game must live up to.
+The first turn is library-only: lock the look in `STYLE.json`, add the
+characters and props with `game_assets_add`, and nothing else from this
+skill. Key art, sprite renders and Blender props come in later turns, for
+what no pack has. A three.js game loads GLB and glTF only (`three.md`).
+
+1. Key art first, when the game gets its own art direction: one image the
+   finished game must live up to.
 2. Every in-game visual is a file: characters, objects, tiles, backgrounds, UI
    pieces, effects, animation frames. No code-drawn shapes, flat color
    rectangles or default UI skin on the played path. Dynamic text stays code.
@@ -30,7 +36,7 @@ modeller for props; you have no local Blender, Godot or image tools.
 look each (KayKit, Kenney low-poly, Kenney pixel, ...), its packs, each
 character pack's rig, and a pixel palette where the family has one. Look at
 a pack's contact sheet (pass `pack`) before choosing. Pick one family whose
-look fits the key art and write `STYLE.json` at the game root:
+look fits the brief (and the key art, once there is one) and write `STYLE.json` at the game root:
 
 ```json
 {
