@@ -56,6 +56,7 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  ColumnsIcon,
   HistoryIcon,
   MessageSquareDashedIcon,
   LinkIcon,
@@ -726,7 +727,7 @@ function OpenCommandPaletteDialog(props: {
   const canRestore = useAtomValue(
     activeThreadRef === null
       ? NO_PERMISSION
-      : gameEnvironment.runRestore.permissionAtom(activeThreadRef.environmentId),
+      : gameEnvironment.buildRestore.permissionAtom(activeThreadRef.environmentId),
   );
   // Each game command shows only where its own command is permitted, and a
   // run's role thread is never offered writes beside the run.
@@ -1557,6 +1558,28 @@ function OpenCommandPaletteDialog(props: {
         useGameWorkspaceStore.getState().toggleChat();
       },
     });
+    // Which build is the person's pick from the Builds tab's list.
+    if (canRestore && gameAccess === "writer" && gameRun?.active !== true)
+      actionItems.push({
+        kind: "action",
+        value: "action:game-build-restore",
+        title: "Go back to a build…",
+        searchTerms: ["restore", "undo", "back", "revert", "build", "version", "game"],
+        icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          useGameWorkspaceStore.getState().showStageTab("builds");
+        },
+      });
+    actionItems.push({
+      kind: "action",
+      value: "action:game-build-compare",
+      title: "Compare builds…",
+      searchTerms: ["compare", "diff", "versions", "builds", "side by side", "game"],
+      icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useGameWorkspaceStore.getState().showStageTab("builds", { compare: "pick" });
+      },
+    });
     // The run's own controls belong to the game's own chats, never a role's.
     if (gameAccess === "writer" && gameRun?.active === true) {
       if (canRunStop)
@@ -1588,18 +1611,6 @@ function OpenCommandPaletteDialog(props: {
               input: { threadId: threadRef.threadId, brief: "" },
             });
             if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-          },
-        });
-      // Which build to bring back is the creator's pick from the Run tab's list.
-      if (canRestore && (gameRun?.builds.length ?? 0) > 0)
-        actionItems.push({
-          kind: "action",
-          value: "action:game-run-restore",
-          title: "Restore a saved build…",
-          searchTerms: ["restore", "undo", "back", "build", "run", "game"],
-          icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
-          run: async () => {
-            useGameWorkspaceStore.getState().showStageTab("run");
           },
         });
       // A new run needs the creator's brief, which the Run tab takes.
