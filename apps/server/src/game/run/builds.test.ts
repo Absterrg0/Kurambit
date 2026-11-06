@@ -390,3 +390,43 @@ it.effect("restores a saved build by its name, keeps the folder before, and leav
     NodeFS.rmSync(root, { recursive: true, force: true });
   }).pipe(Effect.provide(layer)),
 );
+
+it.effect("a resume's first move keeps the folder it found once, and only when it differs", () =>
+  Effect.gen(function* () {
+    const { root, git } = repo();
+    const checkpoints = yield* CheckpointStore.CheckpointStore;
+    const runId = "run_resume";
+    const write = (text: string) =>
+      NodeFS.writeFileSync(NodePath.join(root, "godot", "main.gd"), text);
+    const best = yield* captureBuild({ checkpoints, lock }, root, runId, BuildName.best);
+    const save = BuildName.resumeBefore(12);
+    const move = buildStep(
+      { game, checkpoints, lock },
+      { root, runId, lane: "godot" },
+      { _tag: "restore", sha: best, keep: [], save },
+    );
+    const at = (name: string) => git("rev-parse", checkpointRefForGameRun(runId, name));
+    // The creator's edit since the stop is kept before the best comes back.
+    write("the creator's edit\n");
+    assert.isTrue((yield* move).build.ok);
+    expect(git("show", `${at(save)}:godot/main.gd`)).toBe("the creator's edit");
+    expect(NodeFS.readFileSync(NodePath.join(root, "godot", "main.gd"), "utf8")).toBe(
+      "extends Node\n",
+    );
+    // A restart runs the step again: the kept folder is not replaced by the restored one.
+    const kept = at(save);
+    assert.isTrue((yield* move).build.ok);
+    expect(at(save)).toBe(kept);
+    // A folder that already holds the build keeps nothing.
+    const other = BuildName.resumeBefore(13);
+    assert.isTrue(
+      (yield* buildStep(
+        { game, checkpoints, lock },
+        { root, runId, lane: "godot" },
+        { _tag: "restore", sha: best, keep: [], save: other },
+      )).build.ok,
+    );
+    expect(() => at(other)).toThrow();
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }).pipe(Effect.provide(layer)),
+);

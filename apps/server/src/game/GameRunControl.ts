@@ -24,6 +24,7 @@ import {
   type GameRunStartInput,
   type GameRunStartResult,
   type GameRunStatusResult,
+  type GameRunStep,
   type GameRunSteerResult,
   type GameRunStopResult,
   type GameRunSubmission,
@@ -213,6 +214,14 @@ const make = Effect.gen(function* () {
     return { root, projectId: shell.projectId, runThread: projectRun?.threadId ?? threadId };
   });
 
+  // What a resume says when its first move of the folder keeps it first (decide.ts advance).
+  const savesFolder = (step: GameRunStep | null) =>
+    step?.step.kind === "build" &&
+    step.step.op._tag === "restore" &&
+    step.step.op.save !== undefined
+      ? ' Before it moves the game folder, it saves the folder as it is now under Saved builds ("The game as it was when the run resumed"), so changes made since the run stopped are kept.'
+      : "";
+
   const recordsOf = (threadId: ThreadId) =>
     projections
       .getGameRunRecords(threadId)
@@ -340,7 +349,7 @@ const make = Effect.gen(function* () {
         root,
         stage: run.stage,
         resumed: true,
-        message: `The run resumed where it left off (${run.stage}).`,
+        message: `The run resumed where it left off (${run.stage}).${savesFolder((yield* latestOf(input.threadId)).inFlight)}`,
       } satisfies GameRunStartResult;
     }
     // A game an earlier Kurambit ran keeps its files and git history, but its
@@ -686,7 +695,7 @@ const make = Effect.gen(function* () {
       pending,
       message:
         after.run?.status !== "ended"
-          ? "The run resumes to work on this note for one round, then stops. Ask again for more."
+          ? `The run resumes to work on this note for one round, then stops. Ask again for more.${savesFolder(after.inFlight)}`
           : `Noted. The run ended (${run.ending ?? "unknown"}) and reads it when it resumes with game_run_start.`,
     } satisfies GameRunSteerResult;
   });

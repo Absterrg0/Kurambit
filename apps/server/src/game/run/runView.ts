@@ -117,6 +117,8 @@ export const savedBuildLabel = (
         ? `The game before restoring ${what}: restoring it undoes that restore`
         : `The game before restoring ${what}`;
     }
+    case "resume-before":
+      return "The game as it was when the run resumed";
     case "unfinished":
       return `Round ${saved.round}'s unfinished work`;
     case "candidate": {

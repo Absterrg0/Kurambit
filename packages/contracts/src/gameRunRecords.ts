@@ -185,8 +185,15 @@ export type GameRunRoleStep = typeof GameRunRoleStep.Type;
 export const GameRunBuildOp = Schema.Union([
   /** The game folder as the build `name`; `changed` and `lines` count game code against `base`. */
   Schema.TaggedStruct("capture", { name: Schema.String, base: Schema.String }),
-  /** The build's files back in the folder (engine project, art, ASSETS.md); `keep` names point at it too. */
-  Schema.TaggedStruct("restore", { sha: Schema.String, keep: Schema.Array(Schema.String) }),
+  /**
+   * The build's files back in the folder (engine project, art, ASSETS.md); `keep` names point at it too.
+   * With `save`, the folder as it is first becomes that build, unless it already holds the one restored.
+   */
+  Schema.TaggedStruct("restore", {
+    sha: Schema.String,
+    keep: Schema.Array(Schema.String),
+    save: Schema.optionalKey(Schema.String),
+  }),
   /** The build is kept under these names; the folder already holds it. */
   Schema.TaggedStruct("keep", { names: Schema.Array(Schema.String), sha: Schema.String }),
 ]);

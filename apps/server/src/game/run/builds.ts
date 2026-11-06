@@ -229,6 +229,17 @@ export const buildStep = (
       }
       case "restore": {
         yield* deps.game.closeLiveEditors(root);
+        // The folder a resume found is kept once under `save`: a repeat after
+        // a restart finds the name and never keeps the restored folder there.
+        // A folder that already holds the build needs no keeping.
+        if (op.save !== undefined) {
+          const saveRef = checkpointRefForGameRun(runId, op.save);
+          if (!(yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: saveRef }))) {
+            const found = yield* capture(checkpoints, root, runId, op.save);
+            if (!(yield* measureChange(checkpoints, root, isRestored(lane), found, op.sha)).changed)
+              yield* checkpoints.deleteCheckpointRefs({ cwd: root, checkpointRefs: [saveRef] });
+          }
+        }
         const restored = yield* checkpoints.withWorkspaceLock(
           root,
           checkpoints.restoreCheckpoint({

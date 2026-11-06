@@ -910,8 +910,12 @@ describe("game-run commands", () => {
     // The folder it worked on is gone, so the held round is dropped all the same.
     expect(runOf(restored)).toMatchObject({ best, inFlight: null, task: { _tag: "round", n: 2 } });
     expect(restored.rounds.map((r) => r.round)).toMatchObject([{ round: 1, abandoned: true }]);
+    // Its first move of the folder keeps what the creator left there since, as a saved build.
     const resumed = accept(restored, { type: "game-run.resume", runId }).records;
-    expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: best } });
+    const first = stepOf(resumed).step;
+    expect(first).toMatchObject({
+      op: { _tag: "restore", sha: best, save: `resumes/step-${first.id}-before` },
+    });
   });
 
   it("restoring the folder the latest restore kept undoes it, best and line too, until a round runs", () => {

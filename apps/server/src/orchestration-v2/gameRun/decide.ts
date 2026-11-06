@@ -359,6 +359,8 @@ const advance = (
   run: GameRun,
   state: State.RunState,
   existing: GameRunStep | null,
+  /** A stopped run comes back: the folder may hold the creator's own work since. */
+  resuming = false,
 ): {
   readonly state: State.RunState;
   readonly step: GameRunStep | null;
@@ -379,7 +381,14 @@ const advance = (
   const step: State.Step =
     planned.step.kind === "decide" && planned.step.sent === null
       ? { ...planned.step, sent: work.now }
-      : planned.step;
+      : resuming && planned.step.kind === "build" && planned.step.op._tag === "restore"
+        ? // A resume that moves the folder first keeps it as a saved build, so
+          // what the creator did since the run stopped is never lost.
+          {
+            ...planned.step,
+            op: { ...planned.step.op, save: BuildName.resumeBefore(planned.step.id) },
+          }
+        : planned.step;
   const next = { ...planned.state, inFlight: step };
   const record = stepRecord(work, run, step, planned.logs ?? [], existing);
   const effects =
@@ -686,7 +695,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
       profile: command.profile ?? before.profile,
       budgetEndsAt: budgetMinutes === null ? null : work.now + budgetMinutes * 60_000,
     };
-    const next = advance(work, resumed, state, inFlight);
+    const next = advance(work, resumed, state, inFlight, true);
     // The records the last landings wrote go again ahead of the next step: an
     // ending that stopped the run before they were written (an outputs effect
     // that gave up, the landing that ended it) would leave the step without them.
@@ -739,7 +748,7 @@ const steer = (work: Work, command: Command<"game-run.steer">) =>
         ...noted,
         budgetEndsAt: run.budgetMinutes === null ? null : work.now + run.budgetMinutes * 60_000,
       };
-      const next = advance(work, run, Policy.reopen(budgeted, work.now), null);
+      const next = advance(work, run, Policy.reopen(budgeted, work.now), null, true);
       return Result.succeed(
         settle(work, run, before, next.state, next.step === null ? [] : [next.step], next.effects),
       );

@@ -146,7 +146,9 @@ says "restoring it undoes that restore") also puts the run's best back, so a res
 where the run stood before. Restoring while a stopped run is in the middle of a round abandons that
 round: its work is saved with the game before the restore, the round shows as **Abandoned**, and a
 resume starts the next round from the best. Undoing that restore brings the round's work back to
-the folder, but the round itself stays abandoned.
+the folder, but the round itself stays abandoned. When a resumed run first puts a build back in
+the folder, it saves the folder as it was first ("The game as it was when the run resumed"), so
+changes you made while it was stopped are never lost.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
