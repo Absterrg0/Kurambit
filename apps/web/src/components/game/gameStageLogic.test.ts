@@ -6,6 +6,8 @@ import {
   type GamePreviewServe,
   type GameStageInput,
   nextGamePreviewFrame,
+  playHeldFrame,
+  remountOrHold,
   gameSourceFreshnessLabel,
   toolchainReadyFor,
 } from "./gameStageLogic";
@@ -18,6 +20,8 @@ const BASE: GameStageInput = {
   previewUrl: null,
   busyStartedAt: null,
   localError: null,
+  turnRunning: false,
+  turnStartedAt: null,
 };
 
 const STARTED_AT = "2026-10-20T04:00:00.000Z";
@@ -152,6 +156,67 @@ it("folds frame keys across reads so unrelated churn cannot change the iframe", 
   expect(replaced.key).not.toBe(first.key);
   const restarted = nextGamePreviewFrame(first, { previewUrl: null, servedArtifactId: null });
   expect(restarted.key).not.toBe(first.key);
+});
+
+it("shows the first build in the making while turn 1 runs, and only then", () => {
+  const turn = { ...BASE, turnRunning: true, turnStartedAt: 1_000 };
+  // The agent's own operations and failed tries inside the turn are its work in progress.
+  expect(deriveGameStagePhase({ ...turn, operation: running() })).toEqual({
+    kind: "first-build",
+    startedAt: 1_000,
+  });
+  expect(deriveGameStagePhase({ ...turn, operation: failed("Parse") })).toEqual({
+    kind: "first-build",
+    startedAt: 1_000,
+  });
+  // A game with a build, an engine to install, or the person's own action is not waiting on turn 1.
+  expect(deriveGameStagePhase({ ...PLAYING, turnRunning: true }).kind).toBe("playing");
+  expect(deriveGameStagePhase({ ...turn, hasWebBuild: true }).kind).toBe("ready");
+  expect(deriveGameStagePhase({ ...turn, toolchainReady: false }).kind).toBe("tools-missing");
+  expect(deriveGameStagePhase({ ...turn, busyStartedAt: 2_000 }).kind).toBe("building");
+  expect(deriveGameStagePhase({ ...turn, localError: "busy" }).kind).toBe("failed");
+  // When the turn ends, its build's own operation takes over until it plays.
+  expect(deriveGameStagePhase({ ...BASE, operation: running() }).kind).toBe("building");
+});
+
+// A remount restarts the game: under a player's hands it loses their progress.
+it("never reloads a new build under a player whose game has focus", () => {
+  const URL = "http://127.0.0.1:9/index.html";
+  const serve = (id: string | null, previewUrl: string | null = URL): GamePreviewServe => ({
+    previewUrl,
+    servedArtifactId: id,
+  });
+  const first = remountOrHold(null, serve("a"), true);
+  expect(first.held).toBeNull();
+  // Nothing new: the same object, so the render does not set state.
+  expect(remountOrHold(first, serve("a"), true)).toBe(first);
+  expect(remountOrHold(first, serve(null), true)).toBe(first);
+
+  // Not in the game: the new build plays at once.
+  const played = remountOrHold(first, serve("b"), false);
+  expect(played.key).not.toBe(first.key);
+  expect(played.held).toBeNull();
+
+  // In the game: the frame stays and the build waits, even after focus leaves.
+  const held = remountOrHold(first, serve("b"), true);
+  expect(held.key).toBe(first.key);
+  expect(held.held?.servedArtifactId).toBe("b");
+  expect(remountOrHold(held, serve("b"), false)).toBe(held);
+  expect(remountOrHold(held, serve(null), false)).toBe(held);
+  // Play is the one remount the person asks for.
+  const asked = playHeldFrame(held);
+  expect(asked.key).toBe(played.key);
+  expect(asked.held).toBeNull();
+  expect(playHeldFrame(first)).toBe(first);
+
+  // A newer build decides again; the build on screen served again leaves nothing waiting.
+  expect(remountOrHold(held, serve("c"), true).held?.servedArtifactId).toBe("c");
+  expect(remountOrHold(held, serve("c"), false)).toMatchObject({ held: null });
+  expect(remountOrHold(held, serve("a"), true)).toEqual({ ...first, held: null });
+
+  // A new or stopped preview session has no old frame to keep.
+  expect(remountOrHold(held, serve("b", "http://127.0.0.1:10/index.html"), true).held).toBeNull();
+  expect(remountOrHold(first, serve(null, null), true).key).not.toBe(first.key);
 });
 
 it("describes unknown source freshness and preserves selected Play", () => {

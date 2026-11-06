@@ -17,6 +17,9 @@ import {
 export const BUILD_A = GameBuildId.make("a".repeat(40));
 export const BUILD_B = GameBuildId.make("b".repeat(40));
 export const BUILD_C = GameBuildId.make("c".repeat(40));
+export const BUILD_D = GameBuildId.make("d".repeat(40));
+/** The folder before an undo of turn 5: what Redo restores. */
+export const BUILD_E = GameBuildId.make("e".repeat(40));
 
 const summary = (state: GameBuild["facts"]["state"]): GameBuild["facts"] => ({
   state,
@@ -48,8 +51,29 @@ export const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: true,
     noPlay: null,
     noRestore: null,
-    base: null,
+    // A turn's base is the build the folder held when it started: turn 4's.
+    base: BUILD_D,
     facts: summary("measuring"),
+  },
+  {
+    id: BUILD_D,
+    at: "2026-11-06T15:20:00.000Z",
+    source: {
+      _tag: "turn",
+      threadId: ThreadId.make("thread-main"),
+      threadTitle: "Main chat",
+      turn: 4,
+      runId: "run:thread:thread-main:ordinal:4",
+      request: "Add a second slime",
+    },
+    summary: "Add a second slime",
+    files: [{ path: "web/main.js", additions: 30, deletions: 2 }],
+    fileCount: 1,
+    available: true,
+    noPlay: null,
+    noRestore: null,
+    base: BUILD_B,
+    facts: summary("measured"),
   },
   {
     id: BUILD_B,
@@ -74,7 +98,7 @@ export const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: true,
     noPlay: null,
     noRestore: "Stop the run to go back to a build.",
-    base: null,
+    base: BUILD_A,
     facts: summary("measured"),
   },
   {
@@ -102,8 +126,39 @@ export const FAKE_BUILDS_RESULT: GameBuildsResult = {
     target: BUILD_B,
     label: "Round 3's build",
     requestedAt: "2026-11-06T15:00:00.000Z",
-    undo: BUILD_C,
+    // Turns 4 and 5 changed the folder since: the restore has no undo any more.
+    undo: null,
     outcome: { restored: true, message: "Round 3's build is back in the folder." },
+  },
+};
+
+/** The same game after Undo on turn 5: turn 4's build is back, and the folder before it is parked. */
+export const FAKE_UNDONE_RESULT: GameBuildsResult = {
+  ...FAKE_BUILDS_RESULT,
+  builds: [
+    {
+      id: BUILD_E,
+      at: "2026-11-06T15:50:00.000Z",
+      source: { _tag: "saved", runId: null, label: "The game before restoring turn 4's build" },
+      summary: "The game before restoring turn 4's build",
+      files: [],
+      fileCount: null,
+      available: true,
+      noPlay: null,
+      noRestore: null,
+      base: null,
+      facts: summary("never"),
+    },
+    ...FAKE_BUILDS,
+  ],
+  current: BUILD_D,
+  restore: {
+    requestId: "restore-2",
+    target: BUILD_D,
+    label: "Turn 4's build",
+    requestedAt: "2026-11-06T15:50:00.000Z",
+    undo: BUILD_E,
+    outcome: { restored: true, message: "Turn 4's build is back in the folder." },
   },
 };
 

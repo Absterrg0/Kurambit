@@ -29,6 +29,8 @@ export function toolchainReadyFor(toolchain: GameToolchainStatus, engine: GameEn
  */
 export type GameStagePhase =
   | { kind: "tools-missing" }
+  /** The agent's turn is making the game's first build: nothing to play yet, nothing to press. */
+  | { kind: "first-build"; startedAt: number | null }
   | { kind: "building"; message: string; startedAt: number | null }
   | { kind: "failed"; message: string }
   | { kind: "never-built" }
@@ -46,6 +48,9 @@ export interface GameStageInput {
   busyStartedAt: number | null;
   /** A stage action failed in this client (RPC failure), not on the server. */
   localError: string | null;
+  /** The chat's agent turn is running, and when it started. */
+  turnRunning: boolean;
+  turnStartedAt: number | null;
 }
 
 const operationStartedAt = (operation: GameStatus["operation"]) =>
@@ -54,6 +59,17 @@ const operationStartedAt = (operation: GameStatus["operation"]) =>
 export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
   const operation = input.operation;
   const playable = input.hasWebBuild && input.previewUrl !== null;
+  // The turn that will make the first build owns the stage until it ends: the
+  // agent's own checks and failed tries inside it are its work in progress,
+  // and its build plays when it lands. The person's own action still shows.
+  if (
+    input.turnRunning &&
+    !input.hasWebBuild &&
+    input.toolchainReady &&
+    input.busyStartedAt === null &&
+    input.localError === null
+  )
+    return { kind: "first-build", startedAt: input.turnStartedAt };
   // Work in flight only takes over the stage when there is nothing to play: a
   // rebuild of a game that is already on screen keeps it running, and the new
   // build reloads it when it lands.
@@ -81,11 +97,6 @@ export function buildFailurePrompt(error: string): string {
   return `The web preview build failed. Fix the error and rebuild the game.\n\n${error.trim()}`;
 }
 
-/**
- * The iframe's identity. A tab switch must not change it, or the game restarts;
- * a Stop removes the preview and a new build (or a newly served export) changes
- * the identity, which is the one intended reset.
- */
 /**
  * What the serving game decides about the iframe. The served artifact identity
  * is separate from currentness: it changes only when the bytes under builds/web
@@ -118,6 +129,49 @@ export function nextGamePreviewFrame(
   const artifactReplaced =
     serve.servedArtifactId !== null && serve.servedArtifactId !== previous.serve.servedArtifactId;
   return urlChanged || artifactReplaced ? candidate : previous;
+}
+
+/**
+ * What the play surface runs, and a newer build of the same preview session it
+ * holds back. A tab switch never changes the frame, or the game restarts.
+ */
+export interface GameFrameFold {
+  readonly key: string;
+  readonly serve: GamePreviewServe;
+  /** A replaced artifact that arrived while the person was in the game. */
+  readonly held: GamePreviewServe | null;
+}
+
+/**
+ * PURE. The frame after one status read. A new build never reloads under a
+ * player whose game frame has focus: it is held until they press Play, and a
+ * still newer build decides again. A new preview session (or none) always
+ * remounts, because the old frame's server is gone. Returns `previous` itself
+ * when nothing changed, so a render can compare by identity.
+ */
+export function remountOrHold(
+  previous: GameFrameFold | null,
+  next: GamePreviewServe,
+  gameFocused: boolean,
+): GameFrameFold {
+  if (previous === null) return { ...nextGamePreviewFrame(null, next), held: null };
+  if (previous.held !== null && frameKeyOf(previous.held) === frameKeyOf(next)) return previous;
+  const shown = nextGamePreviewFrame(previous, next);
+  if (shown === previous) {
+    // The shown build is served again (an undo of what was held): nothing is waiting.
+    const backToShown =
+      next.servedArtifactId !== null && next.servedArtifactId === previous.serve.servedArtifactId;
+    return previous.held !== null && backToShown ? { ...previous, held: null } : previous;
+  }
+  const sameSession = shown.serve.previewUrl === previous.serve.previewUrl;
+  return gameFocused && sameSession
+    ? { ...previous, held: next }
+    : { key: shown.key, serve: shown.serve, held: null };
+}
+
+/** PURE. Plays the held build: the one remount the person asked for. */
+export function playHeldFrame(fold: GameFrameFold): GameFrameFold {
+  return fold.held === null ? fold : { key: frameKeyOf(fold.held), serve: fold.held, held: null };
 }
 
 export function gameSourceFreshnessLabel(value: GameStatus["sourcesDifferFromPlay"]): string {

@@ -176,7 +176,8 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { ChangedFilesCard, type ChangedFileContextMenuHandler } from "./ChangedFilesTree";
-import { GameRoundCard, GameTurnBuildLink } from "../game/GameRoundCard";
+import { GameRoundCard } from "../game/GameRoundCard";
+import { GameTurnBuild } from "../game/GameTurnBuild";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
 import {
@@ -4048,12 +4049,12 @@ function AssistantChangedFilesSectionInner({
       onFileContextMenu={onFileContextMenuHandler}
     />
   );
-  // A game turn that changed files is a build: one link opens it on the Builds tab.
+  // A game turn that changed files is a build: its facts, Play and Undo sit under its files.
   if (!ctx.gameThread || ctx.threadRef === null) return card;
   return (
     <>
       {card}
-      <GameTurnBuildLink threadRef={ctx.threadRef} runId={turnSummary.runId} />
+      <GameTurnBuild threadRef={ctx.threadRef} runId={turnSummary.runId} />
     </>
   );
 }
