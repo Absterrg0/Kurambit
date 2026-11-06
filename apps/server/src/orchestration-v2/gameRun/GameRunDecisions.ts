@@ -201,7 +201,10 @@ const make = Effect.gen(function* () {
 
   // A settled decision leaves nothing to ask: a still-queued question is dropped,
   // and a question card the presenting agent opened is dismissed, or the stale
-  // card keeps its turn waiting and the creator's chat blocked behind it.
+  // card keeps its turn waiting and the creator's chat blocked behind it. A card
+  // only a live provider session can answer (OpenCode's questions take answers,
+  // never a cancel) cannot be dismissed, so the presenting turn is stopped: an
+  // answer sent for it would be words the creator never said.
   const dropQueuedWake = (threadId: ThreadId, step: GameRunStep) =>
     Effect.gen(function* () {
       if (step.step.kind !== "decide") return;
@@ -227,20 +230,31 @@ const make = Effect.gen(function* () {
           }),
         );
       const wakeNodes = new Set(nodes.filter((node) => node.runId === woke.id).map((n) => n.id));
-      for (const request of runtimeRequests)
-        if (
+      const open = runtimeRequests.filter(
+        (request) =>
           request.status === "pending" &&
           request.kind === "user_input" &&
-          wakeNodes.has(request.nodeId)
-        )
-          yield* settledByRefusal(
-            engine.dispatch({
-              type: "thread.user-input.dismiss",
-              commandId: CommandId.make(`${commandId}:dismiss:${request.id}`),
-              threadId,
-              requestId: request.id,
-            }),
-          );
+          wakeNodes.has(request.nodeId),
+      );
+      for (const request of open.filter((r) => r.responseCapability.type === "message"))
+        yield* settledByRefusal(
+          engine.dispatch({
+            type: "thread.user-input.dismiss",
+            commandId: CommandId.make(`${commandId}:dismiss:${request.id}`),
+            threadId,
+            requestId: request.id,
+          }),
+        );
+      if (open.some((r) => r.responseCapability.type !== "message"))
+        yield* settledByRefusal(
+          engine.dispatch({
+            type: "run.interrupt",
+            commandId: CommandId.make(`${commandId}:interrupt`),
+            threadId,
+            runId: woke.id,
+            reason: "The run's decision was settled; its question card has nothing left to ask.",
+          }),
+        );
     });
 
   const handle: GameRunDecisions["Service"]["handle"] = (event) =>
