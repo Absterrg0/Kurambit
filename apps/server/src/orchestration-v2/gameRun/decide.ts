@@ -275,7 +275,7 @@ const outputsEffect = (
  * of their own, the next step's job wrote them (walking back over decisions,
  * which have no job). Writing them again is harmless.
  */
-export const owedOutputs = (
+const owedOutputs = (
   run: GameRun,
   steps: ReadonlyArray<GameRunStep>,
 ): { readonly stepId: GameRunStepId; readonly files: GameRunStep["outputs"]["files"] } | null => {
@@ -605,6 +605,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
         id: command.runId,
         threadId: command.threadId,
         projectId: work.records.projectId,
+        ...(command.chat === undefined ? {} : { chat: command.chat }),
         lane: command.lane,
         ...(command.engine === undefined ? {} : { engine: command.engine }),
         brief: command.brief,
@@ -654,6 +655,10 @@ const start = (work: Work, command: Command<"game-run.start">) => {
   );
 };
 
+/** The run as the creator's chat that just moved it left it: its questions wake there. */
+const withChat = (run: GameRun, chat: ThreadId | undefined): GameRun =>
+  chat === undefined ? run : { ...run, chat };
+
 /** The command's run: the thread's latest, which the command must name. */
 const current = (work: Work, runId: GameRunId) => {
   const run = work.records.runs.at(-1);
@@ -689,7 +694,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
     const budgetMinutes =
       command.budgetMinutes === undefined ? run.budgetMinutes : command.budgetMinutes;
     const resumed: GameRun = {
-      ...run,
+      ...withChat(run, command.chat),
       resumeSave: BuildName.resumeBefore(work.at),
       budgetMinutes,
       ...(command.modelSelection === undefined ? {} : { modelSelection: command.modelSelection }),
@@ -749,7 +754,8 @@ const stop = (work: Work, command: Command<"game-run.stop">) =>
   });
 
 const steer = (work: Work, command: Command<"game-run.steer">) =>
-  Result.flatMap(current(work, command.runId), (run) => {
+  Result.flatMap(current(work, command.runId), (asked) => {
+    const run = withChat(asked, command.chat);
     const busy = run.status === "ended" ? settling(run) : null;
     if (busy !== null) return busy;
     if (run.status === "ended" && gitEra(run)) return gitEraRefusal(run);
@@ -854,15 +860,16 @@ const copiesSpend = (work: Work, command: Command<"game-run.copies.spend">) => {
 };
 
 const decideCommand = (work: Work, command: Command<"game-run.decide">) =>
-  Result.flatMap(live(work, command.runId), (run) =>
-    Result.flatMap(waitingDecision(work, run, command.decisionId), ({ record, step }) => {
+  Result.flatMap(live(work, command.runId), (asked) => {
+    const run = withChat(asked, command.chat);
+    return Result.flatMap(waitingDecision(work, run, command.decisionId), ({ record, step }) => {
       const checked = Policy.checkAnswer(step.decision, command.answer, command.notes ?? "");
       if ("error" in checked) return refuse("invalid-answer", checked.error);
       return Result.succeed(
         takeDecision(work, run, record, { kind: "decided", ...checked, by: "creator" }),
       );
-    }),
-  );
+    });
+  });
 
 const expire = (work: Work, command: Command<"game-run.decision.expire">) =>
   Result.flatMap(live(work, command.runId), (run) =>

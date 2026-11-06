@@ -592,6 +592,18 @@ describe("game-run commands", () => {
     expect(stepOf(resumed)).toMatchObject({ seq: vision.seq, attempt: vision.attempt + 1 });
   });
 
+  // A question wakes the chat the creator works in, never only the one that started the run.
+  it("a steer, an answer and a resume record the chat they came from", () => {
+    const other = ThreadId.make("thread:second-chat");
+    const steered = accept(started(), {
+      type: "game-run.steer",
+      runId,
+      note: "more enemies",
+      chat: other,
+    }).records;
+    expect(runOf(steered).chat).toBe(other);
+  });
+
   it("a step start from an earlier attempt is refused", () => {
     const atVision = complete(started(), gitOk());
     const vision = stepOf(atVision);

@@ -19,7 +19,7 @@ import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecisions from "./GameRunDecisions.ts";
 import { retrying } from "../../game/run/retrying.ts";
-import { gitEra, owedOutputs } from "./decide.ts";
+import { gitEra } from "./decide.ts";
 import * as GameRunJobs from "./GameRunJobs.ts";
 
 export class GameRunRecovery extends Context.Service<
@@ -142,28 +142,26 @@ const make = Effect.gen(function* () {
         });
         return;
       }
-      // Writing them again is harmless; this covers an upgrade from the walk-back.
-      const files =
-        owedOutputs(run, (yield* projections.getGameRunRecords(threadId)).gameRunSteps)?.files ??
-        [];
-      if (files.length > 0)
-        yield* jobs
-          .outputs({
-            threadId,
-            runId: run.id,
-            files,
-            release: [],
-            effectId: `recovery:${run.id}`,
-            final: false,
-          })
-          .pipe(
-            Effect.catch((error) =>
-              Effect.logWarning("a game run's owed records could not be written", {
-                threadId,
-                error,
-              }),
-            ),
-          );
+      // A decision that settled while the server was down still owes its clean-up:
+      // a wake left queued, or a card left open, would ask what is decided.
+      const settled = (yield* projections.getGameRunRecords(threadId)).gameRunSteps
+        .filter(
+          (each) =>
+            each.runId === run.id &&
+            each.kind === "decide" &&
+            each.status !== "planned" &&
+            each.status !== "running",
+        )
+        .at(-1);
+      if (settled !== undefined)
+        yield* decisions.drop(threadId, settled).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("a settled decision's wake could not be cleaned up", {
+              threadId,
+              error,
+            }),
+          ),
+        );
       if (run.inFlight === null) return;
       const step = records.gameRunSteps.find(
         (each) => each.runId === run.id && each.seq === run.inFlight,

@@ -41,6 +41,7 @@ import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -195,7 +196,14 @@ const make = Effect.gen(function* () {
           runError("resolve-game", threadId, "project-not-found", cause.message),
         ),
       );
-    const shell = yield* threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null));
+    // A read that fails is no answer: it is never "the thread is gone" or "no run".
+    const shell = yield* threads
+      .getThreadShell(threadId)
+      .pipe(
+        Effect.mapError((cause) =>
+          runError("resolve-game", threadId, "thread-read", String(cause.message)),
+        ),
+      );
     if (shell === null || shell.deletedAt !== null)
       return yield* runError("resolve-game", threadId, "project-not-found", "The thread is gone.");
     if (options.role !== "allowed") {
@@ -216,8 +224,25 @@ const make = Effect.gen(function* () {
     }
     const projectRun = yield* projections
       .getProjectGameRun(shell.projectId)
-      .pipe(Effect.orElseSucceed(() => null));
-    return { root, projectId: shell.projectId, runThread: projectRun?.threadId ?? threadId };
+      .pipe(
+        Effect.mapError((cause) =>
+          runError("resolve-game", threadId, "records-unreadable", String(cause.message)),
+        ),
+      );
+    const runThread = projectRun?.threadId ?? threadId;
+    // The run works in its own thread's folder; a chat on another checkout of
+    // the game reaches the run, never its own folder as the run's.
+    const runRoot =
+      runThread === threadId
+        ? root
+        : yield* projects
+            .resolve(runThread, { deleted: "allowed" })
+            .pipe(
+              Effect.mapError((cause) =>
+                runError("resolve-game", runThread, "project-not-found", cause.message),
+              ),
+            );
+    return { root: runRoot, projectId: shell.projectId, runThread };
   });
 
   // A resume keeps the folder before the run next moves it (decide.ts resumeSave).
@@ -272,12 +297,28 @@ const make = Effect.gen(function* () {
         : `client:${kind}:${scope.thread}:${scope.run?.id ?? "new"}:${given}`,
     );
 
+  // One run per game: every start reads the game's run and dispatches under
+  // its project's lock, so two chats starting the first run at once cannot
+  // both find none (the decider's check runs under one thread's lock only).
+  const startLock = yield* KeyedLock.make<string>();
   const runStart: Service["runStart"] = Effect.fn("GameRunControl.runStart")(function* (
     input: GameRunStartInput,
   ) {
+    const { projectId } = yield* resolveGame(input.threadId);
+    return yield* startLock.withLock(projectId, startOnce(input));
+  });
+  const startOnce = Effect.fn("GameRunControl.startOnce")(function* (input: GameRunStartInput) {
     const { root, runThread } = yield* resolveGame(input.threadId);
-    const { run } = yield* latestOf(input.threadId);
-    if (run !== null && run.status !== "ended")
+    const { run } = yield* recordsOf(runThread);
+    // A live run is the game's one run: a new brief is not quietly dropped.
+    if (run !== null && run.status !== "ended") {
+      if (input.brief.trim().length > 0)
+        return yield* runError(
+          "run-start",
+          input.threadId,
+          "run-live",
+          `A run is already going on this game (${run.stage}). Send the new brief as a note with game_run_steer, or stop the run and start again.`,
+        );
       return {
         runId: run.id,
         root,
@@ -285,6 +326,7 @@ const make = Effect.gen(function* () {
         resumed: true,
         message: `The run is already going (${run.stage}); watch it on the Run tab.`,
       } satisfies GameRunStartResult;
+    }
     // An ending still exporting or a restore still moving the folder owns it:
     // refuse before the scaffold below writes there, not after, at the decider.
     const busy = run === null ? null : settling(run);
@@ -354,6 +396,7 @@ const make = Effect.gen(function* () {
         commandId: commandId("game-run.start", input.commandId, { thread: run.threadId, run }),
         threadId: run.threadId,
         runId: run.id,
+        chat: input.threadId,
         ...(budgetMinutes === undefined ? {} : { budgetMinutes }),
         ...(input.profile === undefined ? {} : { profile: input.profile }),
         ...(overridden ? { modelSelection: selectionFor(current, chosen) } : {}),
@@ -401,6 +444,7 @@ const make = Effect.gen(function* () {
       runId,
       lane,
       engine: manifest.engine.name,
+      chat: input.threadId,
       brief,
       ...(input.artDirection === undefined ? {} : { artDirection: input.artDirection }),
       ...(budgetMinutes === undefined ? {} : { budgetMinutes }),
@@ -409,7 +453,7 @@ const make = Effect.gen(function* () {
       runtimeMode: projection.thread.runtimeMode,
       ...(earlier ? { stage: "build" as const } : {}),
     });
-    const started = (yield* latestOf(input.threadId)).run;
+    const started = (yield* recordsOf(runThread)).run;
     yield* logLine(
       root,
       run === null
@@ -487,8 +531,8 @@ const make = Effect.gen(function* () {
   const runStatus: Service["runStatus"] = Effect.fn("GameRunControl.runStatus")(function* (
     threadId: ThreadId,
   ) {
-    const { root } = yield* resolveGame(threadId);
-    const { run, state, threads } = yield* latestOf(threadId);
+    const { root, runThread } = yield* resolveGame(threadId);
+    const { run, state, threads } = yield* recordsOf(runThread);
     if (run === null || state === null)
       return {
         active: false,
@@ -590,8 +634,8 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     given?: string,
   ) {
-    yield* resolveGame(threadId);
-    const { run } = yield* latestOf(threadId);
+    const { runThread } = yield* resolveGame(threadId);
+    const { run } = yield* recordsOf(runThread);
     if (run === null || run.status === "ended")
       return { stopped: false, message: "No live run for this game." } satisfies GameRunStopResult;
     yield* dispatch("run-stop", {
@@ -629,6 +673,7 @@ const make = Effect.gen(function* () {
       runId: run.id,
       decisionId: input.decisionId,
       answer: input.answer,
+      chat: input.threadId,
       ...(input.notes === undefined ? {} : { notes: input.notes }),
     }).pipe(
       Effect.mapError((error) =>
@@ -678,11 +723,11 @@ const make = Effect.gen(function* () {
     text: string,
     given?: string,
   ) {
-    const { root } = yield* resolveGame(threadId);
+    const { root, runThread } = yield* resolveGame(threadId);
     const note = text.trim().slice(0, 4000);
     if (note.length === 0)
       return yield* runError("run-steer", root, "empty-note", "The note is empty.");
-    const { run } = yield* latestOf(threadId);
+    const { run } = yield* recordsOf(runThread);
     if (run === null)
       return yield* runError(
         "run-steer",
@@ -696,8 +741,9 @@ const make = Effect.gen(function* () {
       threadId: run.threadId,
       runId: run.id,
       note,
+      chat: threadId,
     });
-    const after = yield* latestOf(threadId);
+    const after = yield* recordsOf(runThread);
     const pending = after.run?.steer.length ?? 0;
     if (run.status !== "ended")
       return {
@@ -770,7 +816,7 @@ const make = Effect.gen(function* () {
     round: number,
   ) {
     const target = yield* resolveGame(threadId);
-    const { run, state } = yield* latestOf(threadId);
+    const { run, state } = yield* recordsOf(target.runThread);
     if (run === null || state === null)
       return yield* runError(operation, target.root, "no-run", "No run recorded for this game.");
     const record = state.rounds.find((r) => r.round === round);
@@ -827,8 +873,8 @@ const make = Effect.gen(function* () {
   const pickDetail: Service["pickDetail"] = Effect.fn("GameRunControl.pickDetail")(function* (
     threadId: ThreadId,
   ) {
-    const { root } = yield* resolveGame(threadId);
-    const { state } = yield* latestOf(threadId);
+    const { root, runThread } = yield* resolveGame(threadId);
+    const { state } = yield* recordsOf(runThread);
     if (state === null)
       return yield* runError("run-pick", root, "no-run", "No run recorded for this game.");
     const evidence: {
@@ -848,8 +894,8 @@ const make = Effect.gen(function* () {
     options: { readonly waitFor?: Duration.Input } = {},
   ) {
     const { threadId, round, build } = input;
-    const { root } = yield* resolveGame(threadId);
-    const { run, state } = yield* latestOf(threadId);
+    const { root, runThread } = yield* resolveGame(threadId);
+    const { run, state } = yield* recordsOf(runThread);
     if (run === null || state === null)
       return yield* runError("run-restore", root, "no-run", "No run recorded for this game.");
     if ((round === undefined) === (build === undefined))

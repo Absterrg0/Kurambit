@@ -2266,7 +2266,13 @@ it.effect("every chat of a game reaches its one run, and a role thread only its 
       const status = yield* control.runStatus(other);
       assert.equal(status.runId, runId);
       assert.isTrue(status.active);
-      const again = yield* control.runStart({ threadId: other, brief: "A second game here." });
+      // A new brief on the live run is refused plainly, never dropped as "already going".
+      const second = yield* control
+        .runStart({ threadId: other, brief: "A second game here." })
+        .pipe(Effect.flip);
+      assert.equal(second.reason, "run-live");
+      assert.match(second.message, /game_run_steer/);
+      const again = yield* control.runStart({ threadId: other, brief: "" });
       assert.equal(again.runId, runId);
       assert.isTrue(again.resumed);
       const projections = yield* ProjectionStore.ProjectionStoreV2;
