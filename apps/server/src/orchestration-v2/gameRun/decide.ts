@@ -12,6 +12,7 @@ import {
   type GameRunStep,
   type GameRunStepId,
   type GameRunStepResult,
+  GameBuildId,
   GameRunSubmission,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2GameRunCommand,
@@ -1022,6 +1023,8 @@ const finished = (work: Work, command: Command<"game-run.finished">) =>
  * A creator asks for a build back, a kept round's or a saved one by its name:
  * the run records it, a job moves the folder.
  */
+const isGameBuildId = Schema.is(GameBuildId);
+
 const restoreRequest = (work: Work, command: Command<"game-run.restore.request">) =>
   Result.flatMap(current(work, command.runId), (run) => {
     if (run.status !== "ended")
@@ -1031,8 +1034,10 @@ const restoreRequest = (work: Work, command: Command<"game-run.restore.request">
     const round = command.round ?? null;
     const build = command.build ?? null;
     if ((round === null) === (build === null))
-      return refuse("wrong-kind", "A restore names one kept round or one saved build.");
-    if (build !== null && savedBuildOf(build) === null)
+      return refuse("wrong-kind", "A restore names one kept round, one saved build or one build.");
+    // A build is named by its commit (any turn's or run's checkpoint of the
+    // game), or a saved build by its name; either leaves the best as it is.
+    if (build !== null && savedBuildOf(build) === null && !isGameBuildId(build))
       return refuse("wrong-kind", `${build} is not a saved build a restore brings back.`);
     const state = toState(run, work.records.rounds, inFlightOf(work, run));
     const pending: GameRun = {
