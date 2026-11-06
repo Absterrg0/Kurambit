@@ -245,6 +245,20 @@ const make = Effect.gen(function* () {
     return { root: runRoot, projectId: shell.projectId, runThread };
   });
 
+  // A pause judged nothing: it says why, and how to go on, in plain words.
+  const PAUSES: Readonly<Record<string, string>> = {
+    "tool-failed": "a program Kurambit runs kept failing while measuring the build",
+    "low-memory": "the machine stayed short of memory",
+    busy: "the game stayed busy with other work",
+  };
+  const endedMessage = (run: GameRun): string => {
+    const why = run.ending === null ? undefined : PAUSES[run.ending];
+    const failure = run.lastFailure.length > 0 ? ` Last failure: ${run.lastFailure}` : "";
+    return why === undefined
+      ? `The run ended: ${run.ending ?? "unknown"}.${failure}`
+      : `The run paused: ${why}, so nothing was judged.${failure.length > 0 ? ` ${run.lastFailure}.` : ""} Resume it with an empty brief once that is fixed.`;
+  };
+
   // A resume keeps the folder before the run next moves it (decide.ts resumeSave).
   const SAVES_FOLDER =
     ' Before it next moves the game folder, it saves the folder as it is then under Saved builds ("The game as it was when the run resumed"), so changes made while the run was stopped are kept.';
@@ -301,6 +315,10 @@ const make = Effect.gen(function* () {
   // its project's lock, so two chats starting the first run at once cannot
   // both find none (the decider's check runs under one thread's lock only).
   const startLock = yield* KeyedLock.make<string>();
+  // Why a new game's run did not start, until a run is recorded: the Run tab
+  // says so instead of "not started". Only for this server's lifetime: after
+  // a restart the tab offers the start as for any game without a run.
+  const startFailures = new Map<ThreadId, string>();
   const runStart: Service["runStart"] = Effect.fn("GameRunControl.runStart")(function* (
     input: GameRunStartInput,
   ) {
@@ -453,6 +471,7 @@ const make = Effect.gen(function* () {
       runtimeMode: projection.thread.runtimeMode,
       ...(earlier ? { stage: "build" as const } : {}),
     });
+    startFailures.delete(input.threadId);
     const started = (yield* recordsOf(runThread)).run;
     yield* logLine(
       root,
@@ -551,7 +570,9 @@ const make = Effect.gen(function* () {
         threads: [],
         builds: [],
         restore: null,
-        message: "No run recorded for this game.",
+        message:
+          startFailures.get(runThread) ??
+          "No run recorded for this game yet: start one with a brief.",
         resumable: false,
       } satisfies GameRunStatusResult;
     const running = run.status !== "ended";
@@ -622,7 +643,7 @@ const make = Effect.gen(function* () {
                     },
             },
       message: !running
-        ? `The run ended: ${run.ending ?? "unknown"}.${failure}`
+        ? endedMessage(run)
         : run.status === "waiting" && state.inFlight?.kind === "decide"
           ? `Waiting for the creator's answer on ${DECISION_LABEL[state.inFlight.decision.kind]}; answer in the game's chat.`
           : `${step ?? run.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`,
@@ -999,8 +1020,8 @@ const make = Effect.gen(function* () {
     input: GameCreateInput,
   ) {
     const created: typeof GameProjectResult.Type = yield* projects.create(input);
-    // The game exists either way; a run that cannot start shows as not
-    // started in the Run tab, where the creator can start it again.
+    // The game exists either way; a run that cannot start says why on the Run
+    // tab (and to game_run_status), where the creator can start it again.
     yield* runStart({
       threadId: created.threadId,
       brief: input.brief,
@@ -1008,7 +1029,16 @@ const make = Effect.gen(function* () {
       ...(input.profile === undefined ? {} : { profile: input.profile }),
     }).pipe(
       Effect.catch((cause) =>
-        Effect.logWarning("game run did not start after create", { reason: cause.message }),
+        Effect.sync(() =>
+          startFailures.set(
+            created.threadId,
+            `The run did not start when this game was created (${plainReason(cause.detail ?? cause.message, [created.root])}); start it again with its brief.`,
+          ),
+        ).pipe(
+          Effect.andThen(
+            Effect.logWarning("game run did not start after create", { reason: cause.message }),
+          ),
+        ),
       ),
     );
     return created;
