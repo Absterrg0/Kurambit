@@ -11,16 +11,20 @@
  *   and is stopped by group, as Playwright and execa do. Windows has no
  *   groups: every owned child joins one kill-on-close Job Object held by a
  *   helper whose stdin is this server's pipe, so a server that dies takes
- *   them with it; a tree stop is `taskkill /T /F` while the root lives.
+ *   them with it (unless it is a live editor reaped by its record); a tree
+ *   stop ends the root and its descendants pid by pid, so a `keep` filter
+ *   can spare what is the user's.
  * - Free memory is `os.freemem()`: libuv reads MemAvailable on Linux.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeReadline from "node:readline";
 import * as NodeUtil from "node:util";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 /**
@@ -150,21 +154,38 @@ const psList = async (pids?: ReadonlyArray<number>): Promise<ProcessFacts[]> => 
   return out;
 };
 
+/** The CIM query for one process or all, as one JSON array; the job helper runs the same. */
+const cimQuery = (filter: string) =>
+  `@(Get-CimInstance Win32_Process${filter} | ForEach-Object { [pscustomobject]@{ ` +
+  `pid = $_.ProcessId; ppid = $_.ParentProcessId; ` +
+  `start = if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { '' }; ` +
+  `exe = $_.ExecutablePath; command = $_.CommandLine } })`;
+
+/**
+ * The server's resident job helper answering process queries, once it runs:
+ * a PowerShell start costs 0.3-1 s, and a stop polls facts many times. Set by
+ * the one process host the server holds; null runs a one-shot PowerShell.
+ */
+let residentFacts: ((filter: string) => Promise<string | null>) | null = null;
+
 const windowsList = async (pid?: number): Promise<ProcessFacts[]> => {
   const filter = pid === undefined ? "" : ` -Filter 'ProcessId=${pid}'`;
-  const script =
-    `Get-CimInstance Win32_Process${filter} | ForEach-Object { [pscustomobject]@{ ` +
-    `pid = $_.ProcessId; ppid = $_.ParentProcessId; ` +
-    `start = if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { '' }; ` +
-    `exe = $_.ExecutablePath; command = $_.CommandLine } } | ConvertTo-Json -Compress`;
-  const stdout = await execFile(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", script],
-    { windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
-  ).then(
-    (result) => result.stdout.trim(),
-    () => "",
-  );
+  const resident = residentFacts === null ? null : await residentFacts(filter);
+  const stdout =
+    resident ??
+    (await execFile(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `ConvertTo-Json -InputObject ${cimQuery(filter)} -Compress`,
+      ],
+      { windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
+    ).then(
+      (result) => result.stdout.trim(),
+      () => "",
+    ));
   if (stdout === "") return [];
   let parsed: unknown;
   try {
@@ -271,10 +292,49 @@ const pidAlive = (pid: number): boolean => {
   }
 };
 
-const taskkillTree = (pid: number): void => {
-  NodeChildProcess.execFile("taskkill", ["/PID", String(pid), "/T", "/F"], {
+/**
+ * A Windows tree's members: descendants by parent link. Windows reuses pids
+ * and never reparents, so a process whose parent pid names a root is a
+ * member only if it started no earlier than that root (CIM's start is an
+ * ISO time, so its order is the string order).
+ */
+export const windowsDescendants = (
+  all: ReadonlyArray<ProcessFacts>,
+  roots: ReadonlyArray<ProcessFacts>,
+): ProcessFacts[] => {
+  const children = new Map<number, ProcessFacts[]>();
+  for (const facts of all) children.set(facts.ppid, [...(children.get(facts.ppid) ?? []), facts]);
+  const out: ProcessFacts[] = [];
+  const seen = new Set(roots.map((root) => root.pid));
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const parent = queue.shift()!;
+    for (const child of children.get(parent.pid) ?? []) {
+      if (seen.has(child.pid) || child.start < parent.start) continue;
+      seen.add(child.pid);
+      out.push(child);
+      queue.push(child);
+    }
+  }
+  return out;
+};
+
+const taskkill = (pid: number): void => {
+  NodeChildProcess.execFile("taskkill", ["/PID", String(pid), "/F"], {
     windowsHide: true,
   }).on("error", () => undefined);
+};
+
+/** Ends a Windows tree pid by pid, sparing what `keep` refuses; never `taskkill /T`. */
+const windowsTreeKill = async (
+  pid: number,
+  keep: ((facts: ProcessFacts) => boolean) | undefined,
+): Promise<void> => {
+  const all = await listProcesses();
+  const root = all.find((facts) => facts.pid === pid);
+  const members = root === undefined ? [] : windowsDescendants(all, [root]);
+  taskkill(pid);
+  for (const member of members) if (keep?.(member) !== false) taskkill(member.pid);
 };
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -327,13 +387,22 @@ public static class KurambitJob {
 }
 '@
 [KurambitJob]::Create()
+[Console]::Out.WriteLine('ready')
+[Console]::Out.Flush()
 while ($null -ne ($line = [Console]::In.ReadLine())) {
   $parts = $line.Split(' ')
+  if ($parts.Length -ge 2 -and $parts[0] -eq 'facts') {
+    $filter = if ($parts.Length -eq 3) { " -Filter 'ProcessId=$([uint32]$parts[2])'" } else { '' }
+    $json = try { ConvertTo-Json -InputObject (Invoke-Expression ('__CIM_QUERY__'.Replace('#FILTER#', $filter))) -Compress } catch { '[]' }
+    [Console]::Out.WriteLine("$($parts[1]) $json")
+    [Console]::Out.Flush()
+    continue
+  }
   $id = [uint32]0
   $notAfter = [int64]0
   if ($parts.Length -eq 2 -and [uint32]::TryParse($parts[0], [ref]$id) -and [int64]::TryParse($parts[1], [ref]$notAfter)) { [void][KurambitJob]::Assign($id, $notAfter) }
 }
-`;
+`.replace("__CIM_QUERY__", cimQuery("#FILTER#").replaceAll("'", "''"));
 
 /**
  * What one server's launches share: the Windows kill-on-close job its owned
@@ -345,42 +414,108 @@ export interface ProcessHostState {
   readonly joinJob: (pid: number) => void;
 }
 
-export const makeProcessHost = (): {
+export const makeProcessHost = (
+  /** Told once, with why, when the Windows job helper cannot run: owned children then outlive a crash. */
+  onHelperFailed: (reason: string) => void = () => undefined,
+): {
   readonly host: ProcessHostState;
   readonly close: () => void;
 } => {
   let jobHelper: NodeChildProcess.ChildProcess | null = null;
+  // One try: a helper that cannot run (Constrained Language Mode, an antivirus
+  // that blocks the script) is said once, never respawned for every child.
+  let failed = false;
+  let ready = false;
+  let nextQuery = 0;
+  const pending = new Map<number, (json: string | null) => void>();
+  const helper = (): NodeChildProcess.ChildProcess | null => {
+    if (!isWindows || failed) return null;
+    if (jobHelper !== null) return jobHelper;
+    const child = NodeChildProcess.spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        Buffer.from(JOB_HELPER, "utf16le").toString("base64"),
+      ],
+      { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+    );
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-2000);
+    });
+    NodeReadline.createInterface({ input: child.stdout! }).on("line", (line) => {
+      if (line === "ready") {
+        ready = true;
+        return;
+      }
+      const space = line.indexOf(" ");
+      const answer = pending.get(Number(line.slice(0, space)));
+      if (answer === undefined) return;
+      pending.delete(Number(line.slice(0, space)));
+      answer(line.slice(space + 1));
+    });
+    const lost = (reason: string) => {
+      if (jobHelper !== child) return;
+      jobHelper = null;
+      ready = false;
+      for (const answer of pending.values()) answer(null);
+      pending.clear();
+      if (residentFacts === facts) residentFacts = null;
+      if (!failed) {
+        failed = true;
+        onHelperFailed(reason);
+      }
+    };
+    child.on("error", (error) => lost(error.message));
+    child.on("exit", (code) =>
+      lost(
+        `the job helper exited with code ${code ?? "none"}${stderr === "" ? "" : `: ${stderr.trim()}`}`,
+      ),
+    );
+    child.stdin?.on("error", () => undefined);
+    // The helper must never keep the server alive; its pipe closing is its whole job.
+    child.unref();
+    for (const stream of [child.stdout, child.stderr])
+      (stream as { unref?: () => void } | null)?.unref?.();
+    jobHelper = child;
+    return child;
+  };
   const joinJob = (pid: number): void => {
-    if (!isWindows) return;
-    if (jobHelper === null || jobHelper.exitCode !== null || jobHelper.stdin?.destroyed !== false) {
-      const helper = NodeChildProcess.spawn(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-EncodedCommand",
-          Buffer.from(JOB_HELPER, "utf16le").toString("base64"),
-        ],
-        { stdio: ["pipe", "ignore", "ignore"], windowsHide: true },
-      );
-      helper.on("error", () => undefined);
-      helper.stdin?.on("error", () => undefined);
-      // The helper must never keep the server alive; its pipe closing is its whole job.
-      helper.unref();
-      jobHelper = helper;
-    }
     // FILETIME (100 ns since 1601) of now, just after the spawn returned, with a
     // little slack for clock granularity.
     const notAfter = (BigInt(Date.now() + 50) + 11_644_473_600_000n) * 10_000n;
-    jobHelper.stdin?.write(`${pid} ${notAfter}\n`);
+    helper()?.stdin?.write(`${pid} ${notAfter}\n`);
   };
+  /** One CIM query through the helper, bounded; null when it cannot answer. */
+  const facts = (filter: string): Promise<string | null> => {
+    const running = helper();
+    if (running === null || !ready) return Promise.resolve(null);
+    const pid = /ProcessId=(\d+)/.exec(filter)?.[1];
+    const id = ++nextQuery;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        resolve(null);
+      }, 5_000);
+      pending.set(id, (json) => {
+        clearTimeout(timer);
+        resolve(json);
+      });
+      running.stdin?.write(`facts ${id}${pid === undefined ? "" : ` ${pid}`}\n`);
+    });
+  };
+  if (isWindows) residentFacts = facts;
   return {
     host: { joinJob },
     close: () => {
-      jobHelper?.stdin?.end();
+      if (residentFacts === facts) residentFacts = null;
+      const child = jobHelper;
       jobHelper = null;
+      child?.stdin?.end();
     },
   };
 };
@@ -391,9 +526,24 @@ export class ProcessHost extends Context.Service<ProcessHost, ProcessHostState>(
 
 export const layer = Layer.effect(
   ProcessHost,
-  Effect.acquireRelease(Effect.sync(makeProcessHost), (made) => Effect.sync(made.close)).pipe(
-    Effect.map((made) => made.host),
-  ),
+  Effect.gen(function* () {
+    // The helper fails in a native callback; the server's log hears of it once.
+    const failures = yield* Queue.unbounded<string>();
+    yield* Queue.take(failures).pipe(
+      Effect.flatMap((reason) =>
+        Effect.logWarning(
+          "The Windows job helper cannot run, so games and tools Kurambit starts may outlive a crashed server.",
+          { reason },
+        ),
+      ),
+      Effect.forkScoped,
+    );
+    const made = yield* Effect.acquireRelease(
+      Effect.sync(() => makeProcessHost((reason) => Queue.offerUnsafe(failures, reason))),
+      (made) => Effect.sync(made.close),
+    );
+    return made.host;
+  }),
 );
 
 export interface SpawnOwnedOptions {
@@ -403,10 +553,22 @@ export interface SpawnOwnedOptions {
   readonly stdio: NodeChildProcess.StdioOptions;
   /**
    * Own the child's whole tree, so a stop takes whatever it started (a
-   * display server, workers): a process-group leader on POSIX, a taskkill
-   * /T root on Windows.
+   * display server, workers): a process-group leader on POSIX; on Windows the
+   * child and its descendants, each ended by pid.
    */
   readonly tree: boolean;
+  /**
+   * Which of a Windows tree's descendants a stop may end; all when omitted.
+   * A Unity Licensing Client the editor started is the user's, never ours.
+   */
+  readonly keep?: ((facts: ProcessFacts) => boolean) | undefined;
+  /**
+   * Whether the child joins the kill-on-close job (Windows), dying with the
+   * server however it exits. False for a child whose launch record is reaped
+   * at the next start instead (the live Unity editor): the job is inherited,
+   * and a Licensing Client the editor starts must outlive us.
+   */
+  readonly joinsJob?: boolean | undefined;
   /**
    * The child opens a window of its own (an engine or editor). Windows only:
    * such a child is not started hidden, since a hidden first show would keep
@@ -466,7 +628,7 @@ export const spawnOwned = (
     child.once("spawn", () => {
       const pid = child.pid;
       if (pid === undefined) return resolve(null);
-      host.joinJob(pid);
+      if (options.joinsJob !== false) host.joinJob(pid);
       void processFacts(pid).then(
         (facts) => resolve(facts === null ? null : { pid, start: facts.start, token }),
         () => resolve(null),
@@ -478,7 +640,7 @@ export const spawnOwned = (
     if (pid === undefined) return false;
     if (options.tree && isWindows) {
       if (!running()) return false;
-      taskkillTree(pid);
+      void windowsTreeKill(pid, options.keep);
       return true;
     }
     if (options.tree) {
@@ -545,7 +707,13 @@ export const stopRecorded = async (
   }
   if (roots.length === 0) return;
   const members = new Map<number, ProcessFacts>();
-  if (!isWindows) {
+  if (isWindows) {
+    for (const facts of windowsDescendants(
+      await listProcesses(),
+      roots.map((root) => root.facts),
+    ))
+      if (options.keep?.(facts) !== false) members.set(facts.pid, facts);
+  } else {
     const all = await listProcesses();
     const rootPids = new Set(roots.map((root) => root.facts.pid));
     const tokens = new Set(roots.map((root) => root.record.token));
@@ -569,10 +737,10 @@ export const stopRecorded = async (
     for (const [pid, facts] of members) if (options.keep?.(facts) === false) members.delete(pid);
   }
   const signalled = new Map<number, string>();
+  // Windows has no SIGTERM: process.kill ends the pid (TerminateProcess), one by one.
   for (const { facts } of roots) {
     signalled.set(facts.pid, facts.start);
-    if (isWindows) taskkillTree(facts.pid);
-    else signalPid(facts.pid, "SIGTERM");
+    signalPid(facts.pid, "SIGTERM");
   }
   for (const facts of members.values()) {
     signalled.set(facts.pid, facts.start);

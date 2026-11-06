@@ -2,7 +2,13 @@
 import type * as NodeChildProcess from "node:child_process";
 import type { GameViewport } from "@kurambit/contracts";
 import { findExecutable } from "./GameProcesses.ts";
-import { HOST_OS, spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
+import {
+  HOST_OS,
+  spawnOwned,
+  type OwnedProcess,
+  type ProcessFacts,
+  type ProcessHostState,
+} from "./processHost.ts";
 
 /**
  * What the harness needs from an OS to show a game: a window the game draws
@@ -36,6 +42,10 @@ export interface WindowCommand {
   readonly cwd?: string | undefined;
   readonly stdio: NodeChildProcess.StdioOptions;
   readonly token?: string | undefined;
+  /** See SpawnOwnedOptions: stays out of the Windows kill-on-close job. */
+  readonly joinsJob?: boolean | undefined;
+  /** See SpawnOwnedOptions: which of a Windows tree a stop may end. */
+  readonly keep?: ((facts: ProcessFacts) => boolean) | undefined;
 }
 
 export interface HostedWindow {
@@ -113,6 +123,8 @@ const xvfbHost = (host: ProcessHostState, xvfb: string): WindowHost => ({
         tree: true,
         window: true,
         token: command.token,
+        joinsJob: command.joinsJob,
+        keep: command.keep,
       },
     );
     owned.child.unref();
@@ -138,6 +150,8 @@ const offscreenHost = (host: ProcessHostState): WindowHost => ({
       tree: true,
       window: true,
       token: command.token,
+      joinsJob: command.joinsJob,
+      keep: command.keep,
     });
     owned.child.unref();
     return {
