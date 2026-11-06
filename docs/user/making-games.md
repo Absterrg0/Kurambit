@@ -88,6 +88,10 @@ sessions and bot runs play a Linux player of the current sources, built once per
 checkout of it, which takes over the one Unity editor for that build; the game's own editor reopens
 on its next Unity call.
 
+To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
+folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
+empty one.
+
 ## Style
 
 A game's look is locked in `STYLE.json` at the game's root: which family of the built-in CC0 art
@@ -97,10 +101,6 @@ music and effects. The agent writes it when it chooses the look, and its art too
 it: art from other packs, characters on another skeleton and sprites in another palette are refused
 until the file changes. To change the game's direction, edit `STYLE.json` or ask your agent to,
 then have the art redone. Delete it to lift the lock.
-
-To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
-folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
-empty one.
 
 ## Run the production loop
 
