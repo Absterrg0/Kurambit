@@ -25,6 +25,7 @@ export const GODOT_PROFILE: GameEngineProfile = {
   },
   resourcePath: (projectRelative) => `res://${projectRelative}`,
   importRoot: null,
+  importStep: true,
   groundHint: (width, height, ground) =>
     `Godot: Sprite2D offset (0, ${height / 2 - ground}) puts the node origin on the ground line (x=${width / 2} is already the origin).`,
   stripLoad: (key, resource, view) =>

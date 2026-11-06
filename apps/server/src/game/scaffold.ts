@@ -110,6 +110,46 @@ The creator can ask at any time to start or resume the run (game_run_start), sto
 `;
 
 /**
+ * What a game's own chat agent does each turn and in its first, per engine. Only
+ * three.js plays and measures every turn's build (engineProfile turnLoop), so the
+ * native lanes keep the instructions they had until they join the turn loop.
+ */
+const TURN_SECTIONS: Partial<Record<GameEngineId, string>> = {
+  three: `## Every turn
+
+- A turn that changes the game becomes a build. When your turn ends, Kurambit plays it on the person's Stage and measures its facts: whether it boots, an idle, a random and a skilled bot, frozen frames, input response. Ending the turn is how the person sees your work, so keep turns short: one visible improvement, \`game_check\` clean, then end. Do not export to show it; the build is made for you.
+- Do not play-test with \`game_explore_*\` or bots to see whether the game works: the harness measures every build. Explore only when the person asks or a fact says something you cannot see in the code. Read \`game_facts\` when the person reports a problem.
+- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (\`game_builds\` shows the restore). Do not put the change back unless they ask.
+- End every reply with one line: \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done.
+
+## The first turn
+
+Goal: the person plays the brief's core loop on the Stage within ten minutes, with library art, not primitives.
+
+1. Read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, make no key art, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.
+2. Choose the look: \`game_assets_search\` with no words lists the library by style family. Pick one that fits the brief and write \`STYLE.json\` (family, view, packs, rig; \`studio-skills/art-pipeline.md\`). Add the player character and one or two threats or props with \`game_assets_add\`, and name them in \`ASSETS\`. When no pack has the brief's exact subject, take the closest character and say so in your reply; a model of its own is a later turn.
+3. Replace the starter's gameplay in \`web/main.js\` (its sphere and beacon are placeholders) with the brief's core loop: the player moves (the recipe), the one main verb, the threat, a win and a lose through \`GameState.win\` and \`lose\`, the HUD through \`ctx.ui\`, and \`Juice\` on every action.
+4. Run \`game_check\` and fix until it is clean. End the turn with what the person can do now, plus your \`Next:\` line.
+
+More waves and levels, menu art, music and polish are later turns.
+`,
+};
+
+/**
+ * The game chat's first message: the brief, sent as the person's own, so they
+ * see exactly what the agent was told. It names AGENTS.md because some
+ * providers (Grok, Antigravity) do not load it by themselves.
+ */
+export const firstTurnMessage = (manifest: GameManifest): string => {
+  const lead =
+    TURN_SECTIONS[manifest.engine.name] === undefined
+      ? "Make this game. Read AGENTS.md first."
+      : 'Make this game. Follow "The first turn" in AGENTS.md.';
+  const art = manifest.artDirection.trim();
+  return `${lead}\n\n${manifest.brief.trim()}${art === "" ? "" : `\n\nArt direction: ${art}`}`;
+};
+
+/**
  * Files the studio owns for every game. The starter template's project tree
  * supplies the engine sources; see templates.ts.
  */
@@ -127,7 +167,7 @@ Use the game_* tools to check, play, export and package the game, and the game_u
       : engine === "three"
         ? `# Kurambit project
 
-Build BRIEF.md's game with three.js (vendored in web/vendor, no install step). web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound.
+Build BRIEF.md's game with three.js (vendored in web/vendor, no install step). web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound. A new game's first turn follows "The first turn" below.
 
 Use the game_* tools to check, play, export and package the game; never launch your own browser. Keep builds/ generated.
 `
@@ -140,14 +180,10 @@ Use the game_* tools to check, play, export and package the game; never run Godo
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,
-    "AGENTS.md": `${projectLine}\n${CREATOR_SESSION_SECTION}`,
+    "AGENTS.md": [projectLine, TURN_SECTIONS[engine], CREATOR_SESSION_SECTION]
+      .filter((section) => section !== undefined)
+      .join("\n"),
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore": `${[...GENERATED_IGNORES, ...RUN_STATE_IGNORES].join("\n")}\n`,
   };
 }
-
-// TEMPORARY stand-in (builder S) for builder M's firstTurnMessage; M's
-// definition replaces this whole block at merge.
-/** A new game's first chat message: the brief, and where the first turn's rules are. */
-export const firstTurnMessage = (manifest: GameManifest): string =>
-  `${manifest.engine.name === "three" ? 'Make this game. Follow "The first turn" in AGENTS.md.' : "Make this game. Read AGENTS.md first."}\n\n${manifest.brief}${manifest.artDirection.trim() === "" ? "" : `\n\nArt direction: ${manifest.artDirection}`}`;

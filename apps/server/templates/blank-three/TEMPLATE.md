@@ -4,6 +4,22 @@ This game started from the **Blank (browser)** template: one static three.js
 project under `web/`. It has no real gameplay yet, but it ships the shell a
 demo needs, so build the game, not the menus.
 
+## Shortest path
+
+The first playable build, in this order (the game's AGENTS.md, "The first turn"):
+
+1. The look: `game_assets_search` lists the library by style family; write
+   `STYLE.json`, then `game_assets_add` the player and one or two threats or
+   props. They land under `web/assets/library/<pack>/`; name them in `ASSETS`
+   by the path the add reports.
+2. The game: paste the recipe for your view from `studio-skills/three.md`
+   (third person, top-down, side view) over `web/main.js`, swap in your
+   models, and grow it into the brief's core loop with the kits below.
+3. A win and a lose through `GameState`, the HUD through `ctx.ui`, `Juice` on
+   every action, then `game_check` clean. Ending the turn plays the build.
+
+The rest of this file is reference: read a section when you use its kit.
+
 ## Demo shell
 
 - `web/index.html` loads `web/shell/shell.js`, which owns the page: a title
@@ -50,7 +66,7 @@ demo needs, so build the game, not the menus.
   outlive a run in `export const KEEP_ACROSS_RUNS = ["best"]`; they persist
   in localStorage between visits and Settings shows "Reset progress".
 - Name every model and texture in `export const ASSETS = { knight:
-"assets/models/knight.glb" }`: the shell loads them behind a loading bar
+"assets/library/kaykit-adventurers/Characters/gltf/Knight.glb" }`: the shell loads them behind a loading bar
   before the title, and `ctx.assets.model("knight")` returns a fresh copy
   (with `.animations`) and `ctx.assets.texture(name)` a texture, ready in
   `start`. A path that fails to load is reported as a page error.
@@ -179,5 +195,7 @@ console and page errors with file and line, so a failure in `start` cannot
 hide behind the title. Keep both clean. A clean check says the page boots; it
 cannot establish that the game is good to play.
 
-Play with the `game_explore_*` tools (target web) and study every frame. The
-game opens on the title: press `Enter` (Play is selected) or click Play.
+Kurambit plays and measures the build when a chat turn ends, so play with the
+`game_explore_*` tools (target web) only when you need to see play, and study
+every frame. The game opens on the title: press `Enter` (Play is selected) or
+click Play.

@@ -3,14 +3,212 @@
 The browser lane: one static project under `web/`, checked, played and
 exported with the same `game_*` tools as a Godot game.
 
+## The first turn
+
+- Library art from the first build. The player, threats and level pieces
+  are library models (sprites in 2D) named in `ASSETS`; the starter's sphere
+  and beacon are placeholders. A Box, Sphere or Cylinder never stands in for
+  a character, an enemy or a prop. Effects (`Juice.burst`, a glow) are fine.
+- three.js loads GLB and glTF only. Animated GLB characters are in
+  `kaykit-adventurers` and `kaykit-skeletons` (rig `kaykit-1`),
+  `kenney-mini-characters` and `kenney-mini-dungeon` (rig `kenney-mini`) and
+  `kenney-blocky-characters`; the FBX-only character packs
+  (`quaternius-knight`, `quaternius-ultimate-characters`,
+  `quaternius-monsters`, `kenney-animated-characters-1`) do not load here. Put in `ASSETS`
+  the path `game_assets_add` reports: it renames folders (Kenney's
+  `GLB format` becomes `GLB-format`). Packs differ in scale (a Kenney blocky
+  character stands several times a mini one): when you mix packs, size each
+  model with `root.scale.setScalar(n)`.
+- No Blender, no key art, no plan, no `game_explore_*` to check your work:
+  `game_check` clean is the check, and Kurambit plays and measures the build
+  when the turn ends.
+- Start from the recipe for your view below and grow it into the brief's
+  loop. Each is pasted whole over `web/main.js` and passes `game_check`.
+
+## View recipes
+
+Third person (KayKit: `kaykit-adventurers`, `kaykit-skeletons`,
+`kaykit-dungeon-remastered`). `action` attacks; the move is turned to the view.
+
+```js
+import * as THREE from "./vendor/three.module.js";
+import { animate } from "./shell/animate.js";
+import { followCamera3D } from "./shell/camera.js";
+import { buildLevel } from "./shell/level.js";
+import { Juice } from "./shell/juice.js";
+
+const LIB = "assets/library/";
+export const ASSETS = {
+  hero: LIB + "kaykit-adventurers/Characters/gltf/Knight.glb",
+  foe: LIB + "kaykit-skeletons/Characters/gltf/Skeleton_Minion.glb",
+  wall: LIB + "kaykit-dungeon-remastered/Assets/gltf/wall.gltf.glb",
+  floor: LIB + "kaykit-dungeon-remastered/Assets/gltf/floor_tile_large.gltf.glb",
+};
+export const ACTIONS = { jump: null, alt: null };
+let hero, foe, cam, level;
+
+export function start(ctx) {
+  ctx.scene.background = new THREE.Color(0x141a24);
+  // KayKit pieces are 4 m across, so the cells are too.
+  level = buildLevel(
+    ctx,
+    ["#######", "#..P..#", "#.....#", "#..E..#", "#######"],
+    { "#": "wall", P: "spawn", E: "spawn" },
+    { cell: 4, floor: "floor" },
+  );
+  hero = animate(ctx.assets.model("hero"));
+  foe = animate(ctx.assets.model("foe"));
+  hero.root.position.copy(level.spawns.P[0]);
+  foe.root.position.copy(level.spawns.E[0]);
+  ctx.scene.add(hero.root, foe.root);
+  ctx.player = hero.root;
+  ctx.look.sun({ follow: hero.root, size: 30 });
+  cam = followCamera3D(ctx, hero.root, { blockers: level.walls, distance: 8, height: 2.5 });
+}
+
+export function update(dt, ctx) {
+  const { x, y } = ctx.input.vector();
+  const s = Math.sin(cam.yaw),
+    c = Math.cos(cam.yaw);
+  const dir = new THREE.Vector3(x * c + y * s, 0, y * c - x * s); // the stick, turned to the view
+  const speed = 5 * Math.min(1, dir.length());
+  if (speed > 0.1) {
+    hero.root.rotation.y = Math.atan2(dir.x, dir.z);
+    level.move(hero.root.position, dir.setLength(speed * dt), 0.5);
+  }
+  hero.play(speed > 3 ? "run" : speed > 0.1 ? "walk" : "idle", { speed: Math.max(speed / 4, 0.6) });
+  if (ctx.input.pressed("action")) {
+    hero.play("attack");
+    Juice.shake(0.2);
+  }
+  foe.play("idle");
+}
+```
+
+Top-down (the starter's roam, with `kenney-mini-dungeon`; low walls keep the
+characters in sight).
+
+```js
+import * as THREE from "./vendor/three.module.js";
+import { animate } from "./shell/animate.js";
+import { followCamera2D } from "./shell/camera.js";
+import { buildLevel } from "./shell/level.js";
+
+const LIB = "assets/library/kenney-mini-dungeon/Models/GLB-format/";
+export const ASSETS = {
+  hero: LIB + "character-human.glb",
+  orc: LIB + "character-orc.glb",
+  wall: LIB + "wall-half.glb",
+  barrel: LIB + "barrel.glb",
+  floor: LIB + "floor.glb",
+};
+export const ACTIONS = { jump: null, alt: null };
+let hero, orc, level;
+
+export function start(ctx) {
+  ctx.scene.background = new THREE.Color(0x1a1c22);
+  level = buildLevel(
+    ctx,
+    ["##############", "#..b......b..#", "#.....P......#", "#..b......E..#", "##############"],
+    { "#": "wall", b: "barrel", P: "spawn", E: "spawn" },
+    { floor: "floor" },
+  );
+  hero = animate(ctx.assets.model("hero"));
+  orc = animate(ctx.assets.model("orc"));
+  hero.root.position.copy(level.spawns.P[0]);
+  orc.root.position.copy(level.spawns.E[0]);
+  ctx.scene.add(hero.root, orc.root);
+  ctx.player = hero.root;
+  ctx.look.sun({ follow: hero.root, size: 20 });
+  ctx.camera.position.set(hero.root.position.x, 6, hero.root.position.z + 4); // tilted, looking down
+  followCamera2D(ctx, hero.root, { plane: "xz", bounds: level.bounds });
+}
+
+export function update(dt, ctx) {
+  const { x, y } = ctx.input.vector(); // y is down the screen: +z, towards this camera
+  const speed = 3 * Math.min(1, Math.hypot(x, y));
+  if (speed > 0.1) {
+    hero.root.rotation.y = Math.atan2(x, y);
+    level.move(hero.root.position, new THREE.Vector3(x, 0, y).setLength(speed * dt), 0.3);
+  }
+  hero.play(speed > 0.1 ? "walk" : "idle");
+  orc.play("idle");
+}
+```
+
+Side view (an orthographic camera and pixel sprites from
+`kenney-pixel-platformer`; a pixel lock needs `palette` in STYLE.json). Each
+`ctx.assets.texture` is shared, so swap frames by changing the material's map.
+
+```js
+import * as THREE from "./vendor/three.module.js";
+import { followCamera2D } from "./shell/camera.js";
+import { Juice } from "./shell/juice.js";
+
+const LIB = "assets/library/kenney-pixel-platformer/Tiles/";
+export const ASSETS = {
+  stand: LIB + "Characters/tile_0000.png",
+  step: LIB + "Characters/tile_0001.png",
+  ground: LIB + "tile_0002.png",
+};
+export const LOOK = { environment: false, shadows: false };
+export const ACTIONS = { action: null, alt: null };
+let hero, frames, vy, clock;
+const sprite = (ctx, name) => {
+  const map = ctx.assets.texture(name);
+  map.magFilter = THREE.NearestFilter; // pixel art stays crisp
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map }));
+};
+
+export function start(ctx) {
+  ctx.scene.background = new THREE.Color(0x9fd8ef);
+  const half = 5,
+    aspect = innerWidth / innerHeight; // 10 tiles tall; the shell refits on resize
+  ctx.camera = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, 0.1, 100);
+  for (let x = -12; x <= 60; x++) {
+    const tile = sprite(ctx, "ground");
+    tile.position.set(x, -0.5, 0);
+    ctx.scene.add(tile);
+  }
+  hero = sprite(ctx, "stand");
+  hero.position.set(0, 0.5, 1);
+  ctx.scene.add(hero);
+  ctx.player = hero;
+  ctx.camera.position.set(hero.position.x, hero.position.y, 10); // followCamera2D keeps this offset
+  frames = [ctx.assets.texture("stand"), ctx.assets.texture("step")];
+  vy = 0;
+  clock = 0;
+  followCamera2D(ctx, hero, { bounds: { minX: -12, maxX: 60, minY: -1, maxY: 30 } });
+}
+
+export function update(dt, ctx) {
+  const run = ctx.input.axis("move_left", "move_right");
+  const grounded = hero.position.y <= 0.5;
+  if (grounded && ctx.input.pressed("jump")) {
+    vy = 12;
+    Juice.squash(hero);
+  }
+  vy -= 30 * dt;
+  hero.position.x += run * 6 * dt;
+  hero.position.y = Math.max(0.5, hero.position.y + vy * dt);
+  if (run !== 0) hero.scale.x = Math.sign(run); // face the run
+  clock += dt;
+  hero.material.map = frames[run !== 0 && grounded ? Math.floor(clock * 8) % 2 : 0];
+}
+```
+
+## Rules
+
 1. No install step, no bundler, no CDN. `web/vendor/three.module.js` is
    pinned; import it with a relative path. Keep the pin and its LICENSE.
 2. The file the browser loads is the file you edit: `web/index.html`,
    `web/main.js` (the gameplay), `web/style.css`, `web/assets/` for every
    visual and sound.
    Nothing loads from the network at runtime.
-   Models are GLB files under `web/assets/`. Name every model and texture in
-   `export const ASSETS = { knight: "assets/models/knight.glb", ... }` in
+   Models are GLB files under `web/assets/`, from the library
+   (`game_assets_add` puts them under `web/assets/library/<pack>/`) or the
+   live Blender. Name every model and texture in
+   `export const ASSETS = { knight: "assets/library/kaykit-adventurers/Characters/gltf/Knight.glb", ... }` in
    `main.js`: the shell loads them before the title, and `ctx.assets.model("knight")`
    returns a fresh copy (skinned characters included; `.animations` holds its
    clips) and `ctx.assets.texture(name)` a texture, both synchronously in
@@ -84,7 +282,9 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    instances and functions in `start(ctx)`, never on `GameState`.
    Keep the values that matter on screen too (the probe reports the overlay).
    Set `ctx.player` so the probe reports the player's position.
-10. Playtest with `game_explore_*` (target web): real keys
+10. Play-test with `game_explore_*` only when you need to see play: in a
+    chat turn when the person asks or a fact names something the code cannot
+    show, in a run when your role says so. Real keys
     (`"Enter"`, `"w"`, `"ArrowLeft"`, not Godot action names), real clicks.
     The game opens on the title: press `"Enter"` to play.
     Bots read the probe and write `clickAt(x, y)`; id-clicks have no control

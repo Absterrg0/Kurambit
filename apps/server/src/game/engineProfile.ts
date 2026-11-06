@@ -60,6 +60,8 @@ export interface GameEngineProfile {
    * project (Unity's case-sensitive Assets/); null when anywhere under it does.
    */
   readonly importRoot: string | null;
+  /** Whether game_import does work here; false when the project's files are the game as they are. */
+  readonly importStep: boolean;
   /** How a sprite's ground line `ground` rows from the top becomes the node origin. */
   readonly groundHint: (width: number, height: number, ground: number) => string;
   /** How the game loads a rendered strip's manifest; null when it reads it itself. */

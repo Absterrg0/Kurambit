@@ -110,6 +110,20 @@ export class GameAssetLibrary extends Context.Service<
   }
 >()("kurambit/game/GameAssetLibrary") {}
 
+/**
+ * The kinds a pack offers a game of this engine. A pack that ships models in no
+ * format the engine loads offers no characters, models or animations there
+ * (its PNGs are textures and previews), and a pack left with no kinds is not
+ * offered at all.
+ */
+const MODEL_KINDS: ReadonlySet<GameLibraryKind> = new Set(["character", "model", "animation"]);
+const kindsIn = (engine: GameEngineId, pack: LibraryPack): ReadonlyArray<GameLibraryKind> => {
+  const models = pack.formats.filter((format) => mediaOf(`x.${format}`) === "model");
+  return models.length > 0 && !models.some((format) => loadableIn(engine, format))
+    ? pack.kinds.filter((kind) => !MODEL_KINDS.has(kind))
+    : pack.kinds;
+};
+
 const megabytes = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1)} MB`;
 const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".");
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
@@ -636,11 +650,16 @@ const make = Effect.gen(function* () {
       const rig = (pack: LibraryPack) => (pack.rig === undefined ? "" : `; rig ${pack.rig}`);
       let hidden = 0;
       const ranked = LIBRARY_CATALOG.flatMap((pack, order) => {
+        const kinds = kindsIn(engine, pack);
         if (kind !== undefined && !pack.kinds.includes(kind)) return [];
         const score =
           2 * matchScore(words, `${pack.id} ${pack.title} ${pack.tags} ${pack.kinds.join(" ")}`) +
           matchScore(words, `${pack.style} ${pack.description}`);
         if (words.length > 0 && score === 0) return [];
+        if (kinds.length === 0 || (kind !== undefined && !kinds.includes(kind))) {
+          hidden += 1;
+          return [];
+        }
         // The game's own packs first, so the lock's look is what a search shows.
         const own = style !== null && lockPackRefusal(pack, style) === null ? 1 : 0;
         const usable = pack.formats.filter(
@@ -654,7 +673,7 @@ const make = Effect.gen(function* () {
           hidden += 1;
           return [];
         }
-        return [{ pack, score, own, order, usable }];
+        return [{ pack, kinds, score, own, order, usable }];
       }).toSorted((a, b) => b.own - a.own || b.score - a.score || a.order - b.order);
       const hiddenLine =
         hidden > 0 ? [`${hidden} more packs hold no format this ${engine} game loads.`] : [];
@@ -674,8 +693,8 @@ const make = Effect.gen(function* () {
                 : [
                     `## ${family.id}: ${family.title}. ${family.look}${family.palette === undefined ? "" : `. Pixel palette: ${family.palette}`}`,
                     ...members.map(
-                      ({ pack }) =>
-                        `- ${pack.id}: ${pack.style}; ${pack.kinds.join(", ")}${rig(pack)}${locked(pack)}${fetched(pack)}`,
+                      ({ pack, kinds }) =>
+                        `- ${pack.id}: ${pack.style}; ${kinds.join(", ")}${rig(pack)}${locked(pack)}${fetched(pack)}`,
                     ),
                   ];
             }),
@@ -685,8 +704,8 @@ const make = Effect.gen(function* () {
         };
       const shown = ranked.slice(0, input.limit ?? 8);
       const lines = shown.map(
-        ({ pack, usable }) =>
-          `- ${pack.id}: ${pack.title} by ${pack.author}. ${pack.description} Style: ${pack.style} (family ${pack.family}${rig(pack)}). Kinds: ${pack.kinds.join(", ")}. Loads here: ${usable.join(", ")}. ${megabytes(pack.bytes)}${fetched(pack)}${locked(pack)}.`,
+        ({ pack, kinds, usable }) =>
+          `- ${pack.id}: ${pack.title} by ${pack.author}. ${pack.description} Style: ${pack.style} (family ${pack.family}${rig(pack)}). Kinds: ${kinds.join(", ")}. Loads here: ${usable.join(", ")}. ${megabytes(pack.bytes)}${fetched(pack)}${locked(pack)}.`,
       );
       const text = [
         shown.length === 0
@@ -1288,7 +1307,7 @@ const make = Effect.gen(function* () {
           filesDir,
           style,
         )),
-        "Run game_import, then game_check.",
+        profile.importStep ? "Run game_import, then game_check." : "Run game_check.",
       ].join("\n");
       return { text, directory: directoryRel, added: added.length };
     });
