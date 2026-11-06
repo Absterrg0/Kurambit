@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import {
   CheckpointRef,
   CommandId,
+  GameBuildId,
   type GameCreateInput,
   type GameProjectResult,
   type GameRunChecksResult,
@@ -20,7 +21,9 @@ import {
   type GameRunRestoreInput,
   type GameRunRestoreResult,
   type GameRunSavedBuild,
+  type GameRunRound,
   type GameRunRoundDetail,
+  type GameRunRoundsResult,
   type GameRunStartInput,
   type GameRunStartResult,
   type GameRunStatusResult,
@@ -115,6 +118,42 @@ export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunErr
 }
 
 type Fails<A> = Effect.Effect<A, GameRunError>;
+
+/** A build the run keeps under a name, with its commit. */
+export interface RunNamedBuild {
+  readonly name: string;
+  readonly label: string;
+  readonly oid: string;
+  readonly at: string;
+}
+/** A run's builds by commit, for the Builds rail (GameBuilds). */
+export interface RunBuilds {
+  readonly runId: string;
+  /** The run is going (or finishing, or restoring): it holds the game folder. */
+  readonly live: boolean;
+  readonly best: string | null;
+  readonly rounds: ReadonlyArray<{
+    readonly round: number;
+    readonly build: string | null;
+    readonly move: string;
+    readonly rung: string | null;
+    readonly outcome: "kept" | "not-kept" | "abandoned";
+    readonly durationMs: number;
+    readonly linesChanged: number;
+    readonly endedAt: string | null;
+  }>;
+  /** Prototypes and stages, and an ended run's saved builds. */
+  readonly saved: ReadonlyArray<RunNamedBuild>;
+  readonly restore: {
+    readonly requestId: string;
+    readonly target: string | null;
+    readonly label: string;
+    readonly requestedAt: string;
+    readonly outcome: { readonly restored: boolean; readonly message: string } | null;
+    /** The folder before it, which restoring undoes it. */
+    readonly before: string | null;
+  } | null;
+}
 type FrameSheets = ReadonlyArray<{ readonly build: string; readonly path: string }>;
 
 type Service = {
@@ -163,6 +202,10 @@ type Service = {
     /** How long to wait for the outcome; without it the call returns once the request is recorded. */
     options?: { readonly waitFor?: Duration.Input },
   ) => Fails<GameRunRestoreResult>;
+  /** Every run whose chat is this thread, newest first (at most 10), with its rounds, for the round cards. */
+  readonly runRounds: (threadId: ThreadId) => Fails<GameRunRoundsResult>;
+  /** The game's run as the Builds rail lists it; null when the game has no run. */
+  readonly runBuilds: (threadId: ThreadId) => Fails<RunBuilds | null>;
   /** A run role's typed result; the refusal's reason comes back in-turn. */
   readonly runSubmit: (
     roleThreadId: ThreadId,
@@ -173,6 +216,8 @@ type Service = {
 export class GameRunControl extends Context.Service<GameRunControl, Service>()(
   "kurambit/game/GameRunControl",
 ) {}
+
+const isGameBuildId = Schema.is(GameBuildId);
 
 const runError = (operation: string, path: string, reason: GameRunErrorReason, detail: string) =>
   new GameRunError({ operation, path, reason, detail });
@@ -313,7 +358,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
       const run = records.gameRuns.at(-1) ?? null;
-      if (run === null) return { run, inFlight: null, state: null, threads: [] };
+      if (run === null) return { run, inFlight: null, state: null, threads: [], roundRecords: [] };
       const inFlight =
         records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
       const threads = threadRefs(yield* projections.listGameRunRoleThreads(threadId, run.id));
@@ -322,6 +367,7 @@ const make = Effect.gen(function* () {
         inFlight,
         state: toState(run, records.gameRunRounds, inFlight, threads),
         threads,
+        roundRecords: records.gameRunRounds.filter((r) => r.runId === run.id),
       };
     }).pipe(
       Effect.mapError((cause) =>
@@ -549,7 +595,15 @@ const make = Effect.gen(function* () {
     root: string,
     run: GameRun,
     state: RunState,
-  ): Effect.Effect<ReadonlyArray<GameRunSavedBuild>> => {
+  ): Effect.Effect<ReadonlyArray<GameRunSavedBuild>> =>
+    Effect.map(savedBuildList(root, run, state), (list) =>
+      list.map(({ name, label, at }) => ({ name, label, at })),
+    );
+  const savedBuildList = (
+    root: string,
+    run: GameRun,
+    state: RunState,
+  ): Effect.Effect<ReadonlyArray<GameRunSavedBuild & { readonly oid: string }>> => {
     if (run.status !== "ended") return Effect.succeed([]);
     const folder = gameRunRefsFolder(run.id);
     return checkpoints.listCheckpointRefs({ cwd: root, prefix: folder }).pipe(
@@ -573,12 +627,15 @@ const make = Effect.gen(function* () {
         return entries
           .flatMap((entry) => {
             const label = savedBuildLabel(entry.name, state, run, restored);
-            return label === null ? [] : [{ name: entry.name, label, seconds: entry.committedAt }];
+            return label === null
+              ? []
+              : [{ name: entry.name, label, seconds: entry.committedAt, oid: entry.oid }];
           })
           .toSorted((a, b) => b.seconds - a.seconds)
-          .map(({ name, label, seconds }) => ({
+          .map(({ name, label, seconds, oid }) => ({
             name,
             label,
+            oid,
             at: new Date(seconds * 1000).toISOString(),
           }));
       }),
@@ -591,13 +648,156 @@ const make = Effect.gen(function* () {
     );
   };
 
+  // A finished role thread's tokens never change, so each is read once.
+  const threadTokens = new Map<string, number | null>();
+  const tokensOf = (threadId: string) =>
+    Effect.gen(function* () {
+      const known = threadTokens.get(threadId);
+      if (known !== undefined) return known;
+      const records = yield* projections
+        .getThreadRecords(ThreadId.make(threadId), ["providerTurns"])
+        .pipe(Effect.orElseSucceed(() => null));
+      if (records === null) return null;
+      let sum: number | null = null;
+      let open = false;
+      for (const turn of records.providerTurns) {
+        if (turn.status === "pending" || turn.status === "running") open = true;
+        const usage = turn.turnTokenUsage;
+        if (usage === undefined) continue;
+        const used = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+        if (usage.inputTokens !== undefined || usage.outputTokens !== undefined)
+          sum = (sum ?? 0) + used;
+      }
+      if (!open) {
+        if (threadTokens.size > 2000) threadTokens.clear();
+        threadTokens.set(threadId, sum);
+      }
+      return sum;
+    });
+  /**
+   * What the round card needs beside a round's record: when it ended, the best
+   * it was built on (the last kept round before it), and the tokens its role
+   * threads used: every role thread started from its builder's first turn to
+   * its end, since a round's roles run one after another.
+   */
+  const roundExtras = (
+    state: RunState,
+    roundRecords: ReadonlyArray<GameRunRound>,
+    threadsOfRun: ReadonlyArray<ProjectionStore.GameRunRoleThread>,
+  ) =>
+    Effect.forEach(state.rounds, (r, i) =>
+      Effect.gen(function* () {
+        const endedAt =
+          roundRecords.find((record) => record.round.round === r.round)?.recordedAt ?? null;
+        const base =
+          state.rounds
+            .slice(0, i)
+            .findLast((earlier) => earlier.kept && earlier.build !== undefined)?.build ?? null;
+        const builders = threadsOfRun.filter(
+          (t) => t.role === `builder-${r.round}` || t.role === `builder-${r.round}b`,
+        );
+        const from = builders.map((t) => t.startedAt).toSorted()[0];
+        const inRound =
+          from === undefined || endedAt === null
+            ? []
+            : threadsOfRun.filter((t) => t.startedAt >= from && t.startedAt <= endedAt);
+        const counted = yield* Effect.forEach(
+          [...new Set(inRound.map((t) => t.threadId))],
+          tokensOf,
+        );
+        const known = counted.filter((n): n is number => n !== null);
+        return {
+          build: r.build ?? null,
+          base,
+          endedAt,
+          tokens: known.length === 0 ? null : known.reduce((a, b) => a + b, 0),
+        };
+      }),
+    );
+
+  /** A run's rounds as the Run tab and the round cards show them. */
+  const roundRefs = (
+    runThread: ThreadId,
+    run: GameRun,
+    state: RunState,
+    roundRecords: ReadonlyArray<GameRunRound>,
+  ) =>
+    Effect.gen(function* () {
+      const extras = yield* roundExtras(
+        state,
+        roundRecords,
+        yield* projections
+          .listGameRunRoleThreads(runThread, run.id)
+          .pipe(Effect.orElseSucceed(() => [])),
+      );
+      return state.rounds.map((r, i) => ({
+        ...extras[i],
+        round: r.round,
+        move: r.move,
+        branch: r.branch,
+        kept: r.kept,
+        current: r.kept && r.build !== undefined && r.build === run.best,
+        outcome: roundOutcome(r),
+        verdicts: r.verdicts.map(({ order, verdict }) => ({ order, verdict })),
+        linesChanged: r.linesChanged,
+        durationMs: r.durationMs,
+        note: r.note ?? null,
+        steer: r.steer ?? [],
+        rung:
+          r.rung === undefined
+            ? null
+            : { is: r.rung.is, checks: r.rung.checks, outcome: r.rung.outcome, why: r.rung.why },
+      }));
+    });
+
+  // The runs that talk to this chat, newest first, for its round cards.
+  const runRounds: Service["runRounds"] = Effect.fn("GameRunControl.runRounds")(function* (
+    threadId: ThreadId,
+  ) {
+    const { projectId } = yield* resolveGame(threadId);
+    const unreadable = (cause: { readonly message: string }) =>
+      runError("run-read", threadId, "records-unreadable", String(cause.message));
+    // Every run of the game whose chat is this one, on whichever thread its records live.
+    const runsOfChat = (yield* projections
+      .listProjectGameRuns(projectId, 50)
+      .pipe(Effect.mapError(unreadable)))
+      .filter((run) => (run.chat ?? run.threadId) === threadId)
+      .slice(0, 10);
+    const recordsByThread = new Map<ThreadId, ProjectionStore.GameRunThreadRecords>();
+    const candidates: Array<{ run: GameRun; records: ProjectionStore.GameRunThreadRecords }> = [];
+    for (const run of runsOfChat) {
+      const records =
+        recordsByThread.get(run.threadId) ??
+        (yield* projections
+          .getGameRunRecords(run.threadId, { steps: "in-flight" })
+          .pipe(Effect.mapError(unreadable)));
+      recordsByThread.set(run.threadId, records);
+      candidates.push({ run, records });
+    }
+    const runsOut = yield* Effect.forEach(candidates, ({ run, records }) =>
+      Effect.gen(function* () {
+        const roundRecords = records.gameRunRounds.filter((r) => r.runId === run.id);
+        const state = toState(run, roundRecords, null, []);
+        return {
+          runId: run.id,
+          active: run.status !== "ended",
+          best: run.best.length > 0 ? run.best : null,
+          rounds: yield* roundRefs(run.threadId, run, state, roundRecords),
+        };
+      }),
+    );
+    return { runs: runsOut };
+  });
+
   const runStatus: Service["runStatus"] = Effect.fn("GameRunControl.runStatus")(function* (
     threadId: ThreadId,
   ) {
     const { root, runThread } = yield* resolveGame(threadId);
-    const { run, state, threads } = yield* recordsOf(runThread);
+    const { run, state, threads, roundRecords } = yield* recordsOf(runThread);
     if (run === null || state === null)
       return {
+        chat: null,
+        best: null,
         active: false,
         runId: null,
         profile: null,
@@ -637,7 +837,10 @@ const make = Effect.gen(function* () {
           };
     const failure = run.lastFailure.length > 0 ? ` Last failure: ${run.lastFailure}` : "";
     const step = running ? currentStep(state) : null;
+    const rounds = yield* roundRefs(runThread, run, state, roundRecords);
     return {
+      chat: run.chat ?? run.threadId,
+      best: run.best.length > 0 ? run.best : null,
       active: running,
       runId: run.id,
       profile: run.profile,
@@ -649,23 +852,7 @@ const make = Effect.gen(function* () {
       progress: runProgress(state),
       pick: pickRef(state),
       ladder: ladderRefs(state),
-      rounds: state.rounds.map((r) => ({
-        round: r.round,
-        move: r.move,
-        branch: r.branch,
-        kept: r.kept,
-        current: r.kept && r.build !== undefined && r.build === run.best,
-        outcome: roundOutcome(r),
-        verdicts: r.verdicts.map(({ order, verdict }) => ({ order, verdict })),
-        linesChanged: r.linesChanged,
-        durationMs: r.durationMs,
-        note: r.note ?? null,
-        steer: r.steer ?? [],
-        rung:
-          r.rung === undefined
-            ? null
-            : { is: r.rung.is, checks: r.rung.checks, outcome: r.rung.outcome, why: r.rung.why },
-      })),
+      rounds,
       steer: [...run.steer],
       threads,
       builds: yield* savedBuilds(root, run, state),
@@ -693,6 +880,88 @@ const make = Effect.gen(function* () {
           : `${step ?? run.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`,
       resumable: !running && run.ending !== null && RESUMABLE.has(run.ending),
     } satisfies GameRunStatusResult;
+  });
+
+  const STAGE_LABELS: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) => string]> = [
+    [/^base$/, () => "The game as the run found it"],
+    [/^proto-([0-9]+)$/, (m) => `Prototype ${m[1]}`],
+    [/^stage-(.+)$/, (m) => `The run's ${m[1]} stage`],
+  ];
+  const runBuilds: Service["runBuilds"] = Effect.fn("GameRunControl.runBuilds")(function* (
+    threadId: ThreadId,
+  ) {
+    const { root, runThread } = yield* resolveGame(threadId, { role: "allowed" });
+    const { run, state, roundRecords } = yield* recordsOf(runThread);
+    if (run === null || state === null) return null;
+    const folder = gameRunRefsFolder(run.id);
+    const refs = yield* checkpoints
+      .listCheckpointRefs({ cwd: root, prefix: folder })
+      .pipe(Effect.orElseSucceed(() => []));
+    const named = (name: string) => refs.find((ref) => ref.checkpointRef === `${folder}${name}`);
+    const stages = refs.flatMap((ref): ReadonlyArray<RunNamedBuild> => {
+      const name = ref.checkpointRef.slice(folder.length);
+      for (const [pattern, label] of STAGE_LABELS) {
+        const match = pattern.exec(name);
+        if (match !== null)
+          return [
+            {
+              name,
+              label: label(match),
+              oid: ref.oid,
+              at: new Date(ref.committedAt * 1000).toISOString(),
+            },
+          ];
+      }
+      return [];
+    });
+    const saved = yield* savedBuildList(root, run, state);
+    const restore = run.restore;
+    const target =
+      restore === null
+        ? null
+        : restore.round !== null
+          ? (state.rounds.find((r) => r.round === restore.round)?.build ?? null)
+          : restore.build === null
+            ? null
+            : isGameBuildId(restore.build)
+              ? restore.build
+              : (named(restore.build)?.oid ?? null);
+    return {
+      runId: run.id,
+      live:
+        run.status !== "ended" ||
+        run.finished !== run.endedAt ||
+        (restore !== null && restore.outcome === null),
+      best: run.best.length > 0 ? run.best : null,
+      rounds: state.rounds.map((r) => ({
+        round: r.round,
+        build: r.build ?? null,
+        move: r.move,
+        rung: r.rung?.is ?? null,
+        outcome: r.abandoned === true ? "abandoned" : r.kept ? "kept" : "not-kept",
+        durationMs: r.durationMs,
+        linesChanged: r.linesChanged,
+        endedAt: roundRecords.find((record) => record.round.round === r.round)?.recordedAt ?? null,
+      })),
+      saved: [...stages, ...saved],
+      restore:
+        restore === null
+          ? null
+          : {
+              requestId: restore.requestId,
+              target,
+              label: restoreLabel(restore, state, run),
+              requestedAt: restore.requestedAt,
+              outcome:
+                restore.outcome === null
+                  ? null
+                  : {
+                      restored: restore.outcome.kind === "restored",
+                      message: restore.outcome.message,
+                    },
+              before: named(BuildName.restoreBefore(restore.requestId))?.oid ?? null,
+            },
+    } satisfies RunBuilds;
   });
 
   const runStop: Service["runStop"] = Effect.fn("GameRunControl.runStop")(function* (
@@ -976,14 +1245,42 @@ const make = Effect.gen(function* () {
         "wrong-kind",
         "Name one build: a kept round by `round`, or a saved build by `build`.",
       );
+    if (input.asBest === true && round === undefined)
+      return yield* runError(
+        "run-restore",
+        root,
+        "wrong-kind",
+        "Only a round's build can be made the run's best; name the round.",
+      );
     if (round !== undefined) {
       const { record } = yield* findRound("run-restore", threadId, round);
-      if (!record.kept)
+      // Keep on a round card makes a round that was not kept the best, by the creator's say.
+      if (!record.kept && input.asBest !== true)
         return yield* runError(
           "run-restore",
           root,
           "not-kept",
           `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. A round's build that was not kept may still be among the saved builds game_run_status lists.`,
+        );
+    } else if (build !== undefined && isGameBuildId(build)) {
+      // A build by its commit: any checkpoint Kurambit captured of this game.
+      const kept = yield* checkpoints
+        .listCheckpointRefs({ cwd: root, prefix: "refs/kurambit/" })
+        .pipe(
+          Effect.map((refs) =>
+            refs.some(
+              (ref) =>
+                ref.oid === build && !ref.checkpointRef.startsWith("refs/kurambit/capture-index/"),
+            ),
+          ),
+          Effect.orElseSucceed(() => false),
+        );
+      if (!kept)
+        return yield* runError(
+          "run-restore",
+          root,
+          "commit-missing",
+          `Build ${build.slice(0, 8)} is not one of this game's builds, or it is no longer kept.`,
         );
     } else if (!(yield* savedBuilds(root, run, state)).some((b) => b.name === build))
       return yield* runError(
@@ -1018,7 +1315,9 @@ const make = Effect.gen(function* () {
     const what =
       round !== undefined
         ? `round ${round}'s build`
-        : `"${savedBuildLabel(build ?? "", state, run) ?? build}"`;
+        : build !== undefined && isGameBuildId(build)
+          ? `build ${build.slice(0, 8)}`
+          : `"${savedBuildLabel(build ?? "", state, run) ?? build}"`;
     // A retry finds its restore already landed; a first call may wait, within its bound.
     const recorded = (yield* latestOf(threadId)).run?.restore;
     // The request is recorded, so another as the run's latest means this one was
@@ -1136,6 +1435,8 @@ const make = Effect.gen(function* () {
     roundDetail,
     pickDetail,
     runRestore,
+    runBuilds,
+    runRounds,
     runSubmit,
   });
 });

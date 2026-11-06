@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
-import type { ThreadId } from "@kurambit/contracts";
+import { GameOperationError, type ThreadId } from "@kurambit/contracts";
+import * as GameBuilds from "../../../game/GameBuilds.ts";
 import { GameCaller } from "../../../game/GameCaller.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
@@ -42,6 +43,16 @@ const withRuns = <A>(
     const scope = yield* caller;
     return yield* work(yield* GameRunControl.GameRunControl, scope.thread.threadId).pipe(
       Effect.mapError(runFailure),
+    );
+  });
+/** One tool call on the calling thread's game builds, as an agent's. */
+const withBuilds = <A, E>(
+  work: (builds: GameBuilds.GameBuilds["Service"], threadId: ThreadId) => Effect.Effect<A, E>,
+) =>
+  Effect.gen(function* () {
+    const scope = yield* caller;
+    return yield* work(yield* GameBuilds.GameBuilds, scope.thread.threadId).pipe(
+      Effect.provideService(GameCaller, { kind: "agent", runRole: scope.gameRunRole === "run" }),
     );
   });
 // Within the shortest tool-call timeout a provider gives an MCP server (Codex's is 60s).
@@ -166,6 +177,45 @@ const handlers = {
   ),
   game_run_profile: McpToolAccess.actsAsCaller((input) =>
     withRuns((runs, threadId) => runs.runProfile(threadId, input.profile, input.commandId)),
+  ),
+  game_builds: McpToolAccess.readsAsCaller((input) =>
+    withBuilds((builds, threadId) =>
+      Effect.gen(function* () {
+        if (input.compare === undefined)
+          return yield* builds.list(threadId, { before: input.before, limit: input.limit });
+        return yield* builds.compare(
+          threadId,
+          { _tag: "build", build: input.compare[0] },
+          { _tag: "build", build: input.compare[1] },
+        );
+      }),
+    ),
+  ),
+  game_facts: McpToolAccess.actsAsCaller((input) =>
+    withBuilds((builds, threadId) =>
+      Effect.gen(function* () {
+        const build = input.build ?? (yield* builds.list(threadId, { limit: 1 })).builds[0]?.id;
+        if (build === undefined)
+          return yield* new GameOperationError({
+            operation: "Build facts",
+            path: threadId,
+            reason: "invalid-input",
+            detail: "This game has no builds yet: a turn that changes the game makes one.",
+          });
+        return yield* builds.measure(
+          threadId,
+          { _tag: "build", build },
+          { waitFor: TOOL_RESTORE_WAIT, queue: "background" },
+        );
+      }),
+    ),
+  ),
+  game_build_restore: McpToolAccess.actsAsCaller((input) =>
+    withBuilds((builds, threadId) =>
+      builds.restore(threadId, { _tag: "build", build: input.build }, input.commandId, {
+        waitFor: TOOL_RESTORE_WAIT,
+      }),
+    ),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
 export const layer = McpToolAccess.toLayer(GameToolkit, handlers);

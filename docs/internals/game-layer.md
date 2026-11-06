@@ -227,6 +227,28 @@ worker and `-job-worker-count 2` (the worker count is a per-user setting in
 three import workers cost about 0.7 GB each. Packaging, preview, stop and the
 run's own status, round, steer, decide and profile tools stay outside their catalog.
 
+## Builds and facts
+
+- **A build is no record of its own.** [GameBuilds](../../apps/server/src/game/GameBuilds.ts)
+  reads the rail each time from the turn checkpoints and the run's records; a build's id is its
+  commit. Every surface (the six RPCs, the `game_builds`, `game_facts` and `game_build_restore`
+  tools) is one method of that service.
+- **Copies, never the folder.** A build is played and measured in a plain copy under the
+  worktrees folder's `game-builds/`, which is in `GIT_CEILING_DIRECTORIES` like the run's copies
+  ([GameBuildCopies](../../apps/server/src/game/GameBuildCopies.ts)). One engine step at a
+  time runs on a copy, so Play's Web export and a bot run never import into one project at
+  once. A copy is removed only when nothing leases or serves it.
+- **Facts are keyed by content.** A facts row is keyed by the git tree of the build's engine
+  folder plus a harness id, so builds with the same project share facts, and facts from another
+  harness are never compared. Owed work is data, not memory: a measure writes its row first, so
+  a startup reconcile re-measures any row that still owes a tier.
+- **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
+  `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
+  tries it again). Tier endings are read from the shell's run state, never from a bot's word.
+- **Going back with no run** makes the run's own moves (`withBuildInFolder`) under the
+  `game-builds` run-ref folder. The record is written before the folder moves, and a restart
+  settles a restore it cut short by running its moves again.
+
 ## The run as an orchestration domain
 
 The run is records of the game's creator thread (`GameRun`, `GameRunStep`, `GameRunRound` in

@@ -27,6 +27,7 @@ import * as VcsStatusBroadcaster from "../../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as ThreadLaunchService from "../../../orchestration-v2/ThreadLaunchService.ts";
+import * as GameBuilds from "../../../game/GameBuilds.ts";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as PreviewManager from "../../../preview/Manager.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
@@ -41,6 +42,7 @@ const unreadableThread = ThreadId.make("thread-unreadable");
 const layerStubServices = Layer.mergeAll(
   Layer.mock(GameService.GameService)({}),
   Layer.mock(GameRunControl.GameRunControl)({}),
+  Layer.mock(GameBuilds.GameBuilds)({}),
   Layer.mock(McpHttpServer.McpClientAuthenticator)({
     authenticate: () => Effect.succeed(undefined),
   }),

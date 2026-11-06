@@ -3,6 +3,7 @@ import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
+import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason, GameRunProfile } from "./gameRun.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
@@ -566,6 +567,10 @@ export const GameStatus = Schema.Struct({
     Schema.Struct({ pid: Schema.Number, operation: Schema.String, logPath: Schema.String }),
   ),
   previewUrl: Schema.NullOr(Schema.String),
+  /** The builds being played from copies of their own (Play of a build), with their URLs. */
+  buildPlays: Schema.Array(
+    Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),
+  ),
   operation: Schema.NullOr(
     Schema.Struct({
       name: Schema.String,

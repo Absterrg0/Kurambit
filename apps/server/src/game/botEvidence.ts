@@ -93,6 +93,26 @@ export const read = async (
 };
 
 /**
+ * The latest play-mode run any thread's record holds for the game folder
+ * `root`: the bot a build's skilled tier replays. Records that do not decode
+ * (damaged, set aside) are skipped; a folder that cannot be listed has none.
+ */
+export const latestPlay = async (dir: string, root: string): Promise<BotRun | null> => {
+  const names = await NodeFSP.readdir(dir).catch(() => [] as string[]);
+  let latest: BotRun | null = null;
+  for (const name of names) {
+    if (!/^[\w-]+\.json$/.test(name)) continue;
+    const text = await NodeFSP.readFile(NodePath.join(dir, name), "utf8").catch(() => null);
+    if (text === null) continue;
+    const decoded = decode(text);
+    if (decoded._tag !== "Some" || decoded.value.root !== root) continue;
+    const play = decoded.value.play;
+    if (play !== null && (latest === null || play.at > latest.at)) latest = play;
+  }
+  return latest;
+};
+
+/**
  * Moves a damaged record aside before a fresh one replaces it, so the count it
  * held is never silently lost and can be inspected. It keeps a `.json` name,
  * so the same age bound prunes it.

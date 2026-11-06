@@ -132,6 +132,15 @@ export class GameBot extends Context.Service<
       root: string,
       runIds: ReadonlyArray<string>,
     ) => Effect.Effect<string | null, GameOperationError>;
+    /**
+     * The latest play-mode bot any thread ran on this game folder, from the
+     * server's records (never the folder's own results file); null when none ran.
+     */
+    readonly latestPlayBot: (root: string) => Effect.Effect<{
+      readonly file: string;
+      readonly decider: "policy" | "jev";
+      readonly at: string;
+    } | null>;
     /** Stops one game's bot call by root and waits for it to end (bounded); game_stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
     /** Stops every bot call a thread started and waits for each to end (bounded): its turn is over. */
@@ -513,6 +522,8 @@ const make = Effect.gen(function* () {
           : Effect.succeed(found ?? BotEvidence.empty(threadId, root)),
       ),
     );
+  /** Each game's latest play-mode bot, read from the records once and kept as runs are recorded. */
+  const latestPlays = new Map<string, BotEvidence.BotRun | null>();
   const recordRun = (threadId: ThreadId, root: string, run: BotEvidence.BotRun) =>
     evidenceLock.withPermits(1)(
       Effect.gen(function* () {
@@ -548,6 +559,8 @@ const make = Effect.gen(function* () {
             opError("Bot run", evidenceDir, "io", "The bot run could not be recorded.", cause),
           ),
         );
+        // The game's latest play bot, as latestPlayBot answers it, follows the record.
+        if (run.mode !== "explore") latestPlays.set(root, run);
       }),
     );
 
@@ -1161,9 +1174,25 @@ const make = Effect.gen(function* () {
 
   const threadRuns = (threadId: ThreadId) => evidenceLock.withPermits(1)(loadRecord(threadId, ""));
 
+  const latestPlayBot: GameBot["Service"]["latestPlayBot"] = (root) =>
+    Effect.promise(async () => {
+      if (latestPlays.has(root)) return latestPlays.get(root) ?? null;
+      const play = await BotEvidence.latestPlay(evidenceDir, root);
+      if (latestPlays.size > 500) latestPlays.clear();
+      latestPlays.set(root, play);
+      return play;
+    }).pipe(
+      Effect.map((play) =>
+        play === null
+          ? null
+          : { file: play.file, decider: play.decider === "jev" ? "jev" : "policy", at: play.at },
+      ),
+    );
+
   return GameBot.of({
     run,
     runs: threadRuns,
+    latestPlayBot,
     view,
     stop: (root) => stopWhere((each) => each === root),
     stopOwned: (threadId) => stopWhere((_root, owner) => owner === threadId),

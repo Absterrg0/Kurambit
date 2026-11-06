@@ -85,6 +85,14 @@ export interface VcsCheckpointRefEntry {
   readonly committedAt: number;
 }
 
+export interface VcsResolveTreesInput {
+  readonly cwd: string;
+  /** Commits, such as checkpoint oids. */
+  readonly revisions: ReadonlyArray<string>;
+  /** A folder relative to `cwd`; "" for `cwd` itself. */
+  readonly path: string;
+}
+
 export interface VcsCheckpointOps {
   /** The commit oid of the checkpoint it wrote. */
   readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<string, VcsError>;
@@ -110,6 +118,13 @@ export interface VcsCheckpointOps {
   readonly materializeCheckpoint: (
     input: VcsMaterializeCheckpointInput,
   ) => Effect.Effect<boolean, VcsError>;
+  /**
+   * The tree id of `path` in each revision, in order, in one call: a content
+   * key for what a folder held. Null where the revision or the path is gone.
+   */
+  readonly resolveTrees: (
+    input: VcsResolveTreesInput,
+  ) => Effect.Effect<ReadonlyArray<string | null>, VcsError>;
 }
 
 /**

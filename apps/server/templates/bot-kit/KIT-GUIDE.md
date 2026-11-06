@@ -128,3 +128,16 @@ takes ~0.3s from sight to action, too slow for a fast hit.
   state, player position, HUD text and page errors only, and skip id-clicks
   (click at screen points). Unity games give no shape overlap and take no
   `setState` writes. A missing field reads as unknown, so guard for it.
+
+## The harness's tiers (idle and masher)
+
+`kit/idle.mjs` and `kit/masher.mjs` are the bots the harness plays every
+build with for its facts; you can run them yourself with `game_bot_run`
+(`file: ".studio/bot/kit/idle.mjs"`). Both press Enter at the title until a
+run starts, then: idle sends nothing, masher holds each direction for a
+second (its first-response probe) and then presses the shell's keys at
+random with a fixed seed. Both stop when the run ends or after their span of
+play. They read only the shell's run state (`GameState.state` and
+`result`), so a game that keeps those and starts on Enter gets its facts.
+If the masher wins in seconds, the game has no challenge; if idle wins, it
+plays itself.

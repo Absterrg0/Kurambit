@@ -206,6 +206,20 @@ export const GameRunRestoreRef = Schema.Struct({
 });
 export type GameRunRestoreRef = typeof GameRunRestoreRef.Type;
 
+/** The runs that talk to one chat, newest first, for its round cards. */
+export const GameRunRoundsInput = Schema.Struct({ threadId: ThreadId });
+export const GameRunRoundsResult = Schema.Struct({
+  runs: Schema.Array(
+    Schema.Struct({
+      runId: Schema.String,
+      active: Schema.Boolean,
+      best: Schema.NullOr(Schema.String),
+      rounds: Schema.Array(GameRunRoundRef),
+    }),
+  ),
+});
+export type GameRunRoundsResult = typeof GameRunRoundsResult.Type;
+
 export const GameRunStatusResult = Schema.Struct({
   /** The chat the run talks to (where its round cards appear). */
   chat: Schema.optionalKey(Schema.NullOr(ThreadId)),
@@ -370,6 +384,8 @@ export const GameRunRestoreInput = Schema.Struct({
   commandId: GameRunCommandKey,
   round: Schema.optionalKey(PositiveInt),
   build: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
+  /** With `round`: the round's build becomes the best even when it was not kept. */
+  asBest: Schema.optionalKey(Schema.Boolean),
 });
 export type GameRunRestoreInput = typeof GameRunRestoreInput.Type;
 

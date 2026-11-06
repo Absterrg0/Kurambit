@@ -2412,6 +2412,26 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         yield* releaseCaptureIndexes(input.cwd);
       },
     ),
+    resolveTrees: Effect.fn("GitVcsDriver.checkpoints.resolveTrees")(function* (input) {
+      if (input.revisions.length === 0) return [];
+      // `<rev>:./<path>` is relative to cwd, so a game in a subfolder of a
+      // bigger repository names its own folder. --batch-check answers every
+      // line, "missing" for one that does not resolve, in input order.
+      const folder = input.path.length === 0 ? "." : `./${input.path}`;
+      const listed = yield* execute({
+        operation: "GitVcsDriver.checkpoints.resolveTrees",
+        cwd: input.cwd,
+        args: ["cat-file", "--batch-check=%(objectname) %(objecttype)"],
+        stdin: input.revisions.map((revision) => `${revision}:${folder}\n`).join(""),
+        maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+        outputMode: "error",
+      });
+      const lines = listed.stdout.split("\n");
+      return input.revisions.map((_, i) => {
+        const [oid = "", type = ""] = (lines[i] ?? "").split(" ");
+        return type === "tree" ? oid : null;
+      });
+    }),
     listCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.listCheckpointRefs")(function* (input) {
       const listed = yield* execute({
         operation: "GitVcsDriver.checkpoints.listCheckpointRefs",

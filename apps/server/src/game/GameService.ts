@@ -71,6 +71,7 @@ import * as GameExplore from "./GameExplore.ts";
 import * as GameExport from "./GameExport.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import * as GameOperations from "./GameOperations.ts";
+import * as GameBuildCopies from "./GameBuildCopies.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -165,6 +166,14 @@ export class GameService extends Context.Service<
      * none was ever built. An engine without a Web release has nothing to serve.
      */
     readonly play: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
+    /**
+     * Play of a checkout no thread owns (a build's copy): its Web build
+     * served as it is, or exported once when it has none.
+     */
+    readonly playIn: (
+      root: string,
+      owner: string,
+    ) => Effect.Effect<GameActionResult, GameOperationError>;
     /** Exports the current sources for Web and serves that build. */
     readonly rebuild: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
@@ -367,6 +376,11 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       owner?: string,
     ) => Effect.Effect<GameCheckResult, GameOperationError>;
+    /** The boot check of a checkout no thread owns (a build's copy), as its own operation. */
+    readonly checkIn: (
+      root: string,
+      owner: string,
+    ) => Effect.Effect<GameCheckResult, GameOperationError>;
     /** Live Unity editor: the editing tools game_unity_edit may call, with input schemas. */
     readonly unityTools: (
       threadId: ThreadId,
@@ -434,6 +448,7 @@ const make = Effect.gen(function* () {
   const exporter = yield* GameExport.GameExport;
   const explore = yield* GameExplore.GameExplore;
   const players = yield* GamePlayer.GamePlayer;
+  const copies = yield* GameBuildCopies.GameBuildCopies;
   const settings = yield* ServerSettings.ServerSettingsService;
   // Status is read on every push for the thread, so its freshness answer reuses
   // hashes of files whose stat identity is unchanged. An explicit check rereads
@@ -588,6 +603,20 @@ const make = Effect.gen(function* () {
       ),
     );
   });
+  const playIn = Effect.fn("GameService.playIn")(function* (root: string, owner: string) {
+    const served = yield* exporter.serve(root);
+    if (served !== null) return served;
+    const { targets, displayName } = yield* exporter.exportTargets(root);
+    if (!targets.includes("Web")) return noWebPlay(root, displayName);
+    return yield* operations.exclusive(
+      root,
+      "Build Web",
+      Effect.flatMap(exporter.serve(root), (again) =>
+        again === null ? exporter.publishWeb(root) : Effect.succeed(again),
+      ),
+      owner,
+    );
+  });
   const gamePreview = Effect.fn("GameService.preview")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
@@ -645,6 +674,7 @@ const make = Effect.gen(function* () {
       yield* operations.cancel(root, String(threadId));
       yield* explore.release(threadId, root);
       yield* preview.stop(root);
+      yield* copies.stopFor(root);
       return {
         success: true,
         message:
@@ -660,6 +690,8 @@ const make = Effect.gen(function* () {
     }
     yield* operations.cancel(root);
     yield* processes.stop(root);
+    // Plays and measurements of the game's builds run in copies of their own.
+    yield* copies.stopFor(root);
     // Each stop is tried; one that did not end its processes is said, never reported stopped.
     const notStopped: string[] = [];
     for (const [what, stopping] of [
@@ -824,6 +856,7 @@ const make = Effect.gen(function* () {
         processes: processes.list(root),
         // Status observes the preview; it never switches it.
         previewUrl: preview.url(root),
+        buildPlays: copies.plays(root),
         operation: operations.current(root),
       };
     }),
@@ -903,6 +936,12 @@ const make = Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         return yield* gameBot.report(root);
       }),
+    checkIn: (root, owner) =>
+      Effect.gen(function* () {
+        const manifest = yield* projects.read(root);
+        const label = `${engineProfile(manifest.engine.name).displayName} check`;
+        return yield* operations.exclusive(root, label, engines.check(root), owner);
+      }),
     check: (threadId, owner) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
@@ -966,6 +1005,7 @@ const make = Effect.gen(function* () {
         discard: true,
       }),
     preparePlayer: players.prepare,
+    playIn,
     warmEditor: players.warmEditor,
     action: (threadId, action) =>
       action === "stop"
@@ -983,7 +1023,9 @@ const make = Effect.gen(function* () {
 });
 export const layer = Layer.effect(GameService, make).pipe(
   Layer.provide(GameExplore.layer),
-  Layer.provide(GameBot.layer),
+  // Shared with the builds' facts, so Stop game and the facts reach the same bot runs.
+  Layer.provideMerge(GameBuildCopies.layer),
+  Layer.provideMerge(GameBot.layer),
   Layer.provide(GameExport.layer),
   Layer.provide(GamePlayer.layer),
   Layer.provide(GameEngine.layer),

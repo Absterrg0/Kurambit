@@ -149,6 +149,8 @@ export const deriveServerPaths = Effect.fn(function* (
 
 /** Where a production run's plain copies of builds live, below the worktrees folder. */
 export const GAME_RUN_COPIES = "game-runs";
+/** Where a game's builds are copied to be played and measured, below the worktrees folder. */
+export const GAME_BUILD_COPIES = "game-builds";
 
 export const ensureServerDirectories = Effect.fn(function* (derivedPaths: ServerDerivedPaths) {
   const fs = yield* FileSystem.FileSystem;
@@ -171,7 +173,7 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
     { concurrency: "unbounded" },
   );
 
-  // A run's copies have no git of their own. If the home sits inside a
+  // A run's copies, and the copies a build is played and measured in, have no git of their own. If the home sits inside a
   // repository (a versioned home folder, a dev checkout's .kurambit), git started
   // in a copy would find that one: T3 would checkpoint and roll back the copy's
   // threads into it, and a blind player could read its history. A ceiling here
@@ -179,11 +181,13 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
   // since each inherits this environment, and leaves the user's own shells alone.
   // The server's own environment, as fixPath shapes it at startup.
   const env = yield* HostProcess.Environment;
-  const copies = path.join(derivedPaths.worktreesDir, GAME_RUN_COPIES);
   const separator = (yield* HostProcess.Platform) === "win32" ? ";" : ":";
   const ceilings = env.GIT_CEILING_DIRECTORIES;
   const entries = ceilings === undefined || ceilings === "" ? [] : ceilings.split(separator);
-  if (!entries.includes(copies)) env.GIT_CEILING_DIRECTORIES = [...entries, copies].join(separator);
+  const copies = [GAME_RUN_COPIES, GAME_BUILD_COPIES]
+    .map((folder) => path.join(derivedPaths.worktreesDir, folder))
+    .filter((folder) => !entries.includes(folder));
+  if (copies.length > 0) env.GIT_CEILING_DIRECTORIES = [...entries, ...copies].join(separator);
 
   const swept = sweepStalePendingAttachments({
     attachmentsDir: derivedPaths.attachmentsDir,

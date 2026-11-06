@@ -236,6 +236,8 @@ it.effect(
           listGameRunRoleThreads: () => Effect.die("unused game run read"),
           listGameRunThreadsToRecover: () => Effect.die("unused game run read"),
           listLiveGameRunRoleTurns: () => Effect.die("unused game run read"),
+          listProjectTurnCheckpoints: () => Effect.die("unused turn checkpoints read"),
+          listProjectGameRuns: () => Effect.die("unused game runs read"),
           getProjectGameRun: () => Effect.die("unused game run read"),
           getRuntimeRequest: () => Effect.die("unused getRuntimeRequest"),
           getRunningTurnContext: () => Effect.die("unused getRunningTurnContext"),

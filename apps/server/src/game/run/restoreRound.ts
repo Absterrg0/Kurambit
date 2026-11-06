@@ -1,12 +1,15 @@
 // A creator's restore, as its job does it: a kept round's build or a saved one
 // comes back into the game folder (engine project, art, ASSETS.md), and
 // whatever the folder held before is kept as a saved build first, so a restore
-// loses nothing. A kept round becomes the best; a saved build leaves the best
+// loses nothing. A round becomes the best (a round not kept only when the
+// creator made it so, checked at the request); a saved build leaves the best
 // as it is (decide.ts). Every refusal is an outcome the run records, never a
 // failure of the job.
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import {
+  GameBuildId,
   type GameRun,
   type GameRunRestoreOutcome,
   type GameRunRestoreRefusal,
@@ -22,6 +25,8 @@ import { engineProfile, runEngine } from "../engineProfile.ts";
 import { BuildName, restoredPaths } from "./buildNames.ts";
 import { savedBuildLabel } from "./runView.ts";
 import type { RoundRecord, RunState } from "./state.ts";
+
+const isGameBuildId = Schema.is(GameBuildId);
 
 /** What a restore brings back: a kept round, or a saved build by its name. */
 export type RestoreTarget =
@@ -44,21 +49,20 @@ export const restoreBuild = (input: {
   const lane = run.lane || engineProfile(runEngine(run)).projectDirectory;
   const isRound = target.kind === "round";
   // How the build reads in the outcome: "Round 3's build", "Round 4's unfinished work".
+  // A build named by its commit (a turn's or the run's checkpoint) is restored as a saved one.
+  const byCommit = target.kind === "saved" && isGameBuildId(target.name);
   const named =
     target.kind === "round"
       ? `Round ${target.record.round}'s build`
-      : (savedBuildLabel(target.name, state, run) ?? `The saved build ${target.name}`);
+      : byCommit
+        ? `Build ${target.name.slice(0, 8)}`
+        : (savedBuildLabel(target.name, state, run) ?? `The saved build ${target.name}`);
   const no = (reason: GameRunRestoreRefusal, message: string): GameRunRestoreOutcome => ({
     kind: "refused",
     reason,
     message,
   });
   return Effect.gen(function* () {
-    if (target.kind === "round" && !target.record.kept)
-      return no(
-        "not-kept",
-        `Round ${target.record.round} was not kept; only a kept round's build can be restored.`,
-      );
     // The round a stopped run holds is abandoned once the restore lands (decide.ts).
     const abandons = abandonsRound(run, state);
     if (state.inFlight?.kind === "build" && RESUMABLE.has(run.ending ?? "") && !abandons)
@@ -69,11 +73,14 @@ export const restoreBuild = (input: {
     const build =
       target.kind === "round"
         ? (target.record.build ?? "")
-        : ((yield* checkpoints.listCheckpointRefs({
-            cwd: root,
-            prefix: checkpointRefForGameRun(run.id, target.name),
-          })).find((entry) => entry.checkpointRef === checkpointRefForGameRun(run.id, target.name))
-            ?.oid ?? "");
+        : byCommit
+          ? target.name
+          : ((yield* checkpoints.listCheckpointRefs({
+              cwd: root,
+              prefix: checkpointRefForGameRun(run.id, target.name),
+            })).find(
+              (entry) => entry.checkpointRef === checkpointRefForGameRun(run.id, target.name),
+            )?.oid ?? "");
     if (build.length === 0)
       return no(
         "commit-missing",

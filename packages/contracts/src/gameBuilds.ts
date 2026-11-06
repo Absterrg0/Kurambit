@@ -1,17 +1,11 @@
 import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
 import { GameBotDecider } from "./gameBot.ts";
+import { GameBuildId } from "./gameBuildId.ts";
 
-/**
- * A build: a playable version of the game the person and the agent can list,
- * play, compare and go back to. Every turn that changed the game is one (its
- * T3 checkpoint), and so is every run round and saved build. The id is the
- * build's commit oid; the UI treats it as opaque.
- */
-export const GameBuildId = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
-).pipe(Schema.brand("GameBuildId"));
-export type GameBuildId = typeof GameBuildId.Type;
+// GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
+// it without importing this module, which would close an import cycle through gameBot.ts.
+export { GameBuildId } from "./gameBuildId.ts";
 
 /** Bounds of one measurement, the same for every engine. */
 export const GAME_FACTS_BOUNDS = {
@@ -234,23 +228,304 @@ export const GameFactDelta = Schema.Struct({
 });
 export type GameFactDelta = typeof GameFactDelta.Type;
 
+type Fact<A> =
+  | { readonly status: "measured"; readonly value: A }
+  | typeof GameFactNotMeasured.Type
+  | typeof GameFactPending.Type;
+type BotTier = typeof GameBotTier.Type;
+type Liveness = typeof GameLiveness.Type;
+
+const LABELS: Readonly<Record<GameFactId, string>> = {
+  boots: "Boots",
+  idle: "No input",
+  masher: "Random input",
+  skilled: "Tester's bot",
+  "winnable-without-skill": "Winnable without skill",
+  freeze: "Still stretches",
+  motion: "Motion",
+  detail: "Detail",
+  colour: "Colour",
+  "first-response": "First response",
+};
+
+const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
+const at = (tier: BotTier) => (tier.at === null ? "" : ` at ${seconds(tier.at)}`);
+
+// What each tier's ending says about the game: an idle or random player that
+// wins means no challenge, one that loses means there is pressure.
+const tierText = (id: "idle" | "masher" | "skilled", tier: BotTier) => {
+  const who = id === "idle" ? "With no input" : id === "masher" ? "Random input" : "The bot";
+  switch (tier.ending) {
+    case "won":
+      return `${who} wins${at(tier)}`;
+    case "lost":
+      return `${who} loses${at(tier)}`;
+    case "no-ending":
+      return `${who}: no ending in ${seconds(tier.played)}`;
+    case "crashed":
+      return `Crashed${at(tier)}`;
+    case "unresponsive":
+      return `Stopped answering${at(tier)}`;
+    case "did-not-boot":
+      return "Did not boot";
+  }
+};
+const tierTone = (id: "idle" | "masher" | "skilled", tier: BotTier): GameFactTone => {
+  if (tier.ending === "crashed" || tier.ending === "unresponsive" || tier.ending === "did-not-boot")
+    return "bad";
+  if (id === "skilled") return tier.ending === "won" ? "good" : "neutral";
+  return tier.ending === "won" ? "bad" : tier.ending === "lost" ? "good" : "neutral";
+};
+
+/** A bot run's evidence folder as display entries. */
+const tierEvidence = (tier: BotTier): GameFactView["evidence"] =>
+  tier.evidence === null
+    ? []
+    : [
+        { kind: "video", label: "Run video", path: `${tier.evidence}/run.mp4` },
+        { kind: "frame", label: "Last frame", path: `${tier.evidence}/frames/end.png` },
+        { kind: "log", label: "Trace", path: `${tier.evidence}/trace.json` },
+      ];
+
+interface Reading {
+  readonly text: string;
+  readonly value: number | null;
+  readonly tone: GameFactTone;
+  /** What must match for two readings to be the same kind (an ending word, a verdict). */
+  readonly kind: string;
+}
+type Read =
+  | { readonly _tag: "measured"; readonly reading: Reading }
+  | { readonly _tag: "not-measured"; readonly why: string }
+  | { readonly _tag: "pending" };
+
+const from = <A>(fact: Fact<A>, read: (value: A) => Reading): Read =>
+  fact.status === "measured"
+    ? { _tag: "measured", reading: read(fact.value) }
+    : fact.status === "pending"
+      ? { _tag: "pending" }
+      : { _tag: "not-measured", why: fact.why };
+
+const liveness = (facts: GameBuildFacts, read: (live: Liveness) => Reading) =>
+  from(facts.liveness, read);
+
+const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
+  switch (id) {
+    case "boots":
+      return from(facts.boots, (boots) => ({
+        text: boots.ok ? "Boots clean" : `Does not boot: ${boots.detail}`,
+        value: null,
+        tone: boots.ok ? "good" : "bad",
+        kind: String(boots.ok),
+      }));
+    case "idle":
+    case "masher":
+    case "skilled": {
+      const fact: Fact<BotTier> = facts[id];
+      return from(fact, (tier) => ({
+        text: tierText(id, tier),
+        value: tier.at,
+        tone: tierTone(id, tier),
+        kind: tier.ending,
+      }));
+    }
+    case "winnable-without-skill":
+      return from(facts.winnableWithoutSkill, (yes) => ({
+        text: yes ? "Won with no skill (no input or random input)" : "Needs skill to win",
+        value: null,
+        tone: yes ? "bad" : "good",
+        kind: String(yes),
+      }));
+    case "freeze":
+      return liveness(facts, (live) => ({
+        text:
+          live.freezes.length === 0
+            ? "No still stretch of 2 s or more in play"
+            : `${live.freezes.length} still stretch${live.freezes.length === 1 ? "" : "es"}, longest ${seconds(live.longestFreeze)}`,
+        value: live.longestFreeze,
+        tone: live.longestFreeze >= 3 ? "bad" : "good",
+        kind: "freeze",
+      }));
+    case "motion":
+      return liveness(facts, (live) => ({
+        text:
+          live.motion < 1
+            ? `Almost no motion (${live.motion.toFixed(1)})`
+            : `Motion ${live.motion.toFixed(1)}`,
+        value: live.motion,
+        tone: live.motion < 1 ? "bad" : "neutral",
+        kind: "motion",
+      }));
+    case "detail":
+      return liveness(facts, (live) => ({
+        text: `Detail ${Math.round(live.detail)}`,
+        value: live.detail,
+        tone: "neutral",
+        kind: "detail",
+      }));
+    case "colour":
+      return liveness(facts, (live) => ({
+        text: `One colour fills ${Math.round(live.dominantColour * 100)}%`,
+        value: live.dominantColour,
+        tone: live.dominantColour > 0.6 ? "bad" : "neutral",
+        kind: "colour",
+      }));
+    case "first-response":
+      return from(facts.firstResponse, (response) => ({
+        text:
+          response.seconds === null
+            ? `No movement answered a held key within ${seconds(response.window)}`
+            : `Moves ${response.seconds.toFixed(1)} s after a held key`,
+        value: response.seconds,
+        tone:
+          response.seconds === null || response.seconds > 0.5
+            ? "bad"
+            : response.seconds <= 0.2
+              ? "good"
+              : "neutral",
+        kind: response.seconds === null ? "none" : "moved",
+      }));
+  }
+};
+
+const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["evidence"] => {
+  const tier = (fact: Fact<BotTier>) =>
+    fact.status === "measured" ? tierEvidence(fact.value) : [];
+  switch (id) {
+    case "idle":
+    case "masher":
+    case "skilled":
+      return tier(facts[id]);
+    // Liveness and the first response are read from the random-input run.
+    case "freeze":
+    case "motion":
+    case "detail":
+    case "colour":
+    case "first-response":
+      return tier(facts.masher).filter((entry) => entry.kind === "video");
+    default:
+      return [];
+  }
+};
+
 /**
  * PURE. A build's facts as display rows, in GameFactId order. The one wording
- * every surface and the agent tools share. Foundation placeholder: builder F
- * implements it.
+ * every surface and the agent tools share.
  */
-export const gameFactsView = (_facts: GameBuildFacts): ReadonlyArray<GameFactView> => [];
+export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView> =>
+  GameFactId.literals.map((id) => {
+    const read = readFact(facts, id);
+    return {
+      id,
+      label: LABELS[id],
+      reading:
+        read._tag === "measured"
+          ? {
+              _tag: "measured",
+              text: read.reading.text,
+              value: read.reading.value,
+              tone: read.reading.tone,
+            }
+          : read._tag === "pending"
+            ? { _tag: "pending" }
+            : { _tag: "not-measured", why: read.why },
+      evidence: read._tag === "measured" ? evidenceOf(facts, id) : [],
+    };
+  });
+
+/** For these numbers lower is better; the other numbers are neutral. */
+const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["freeze", "colour", "first-response"]);
+const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
+/** How good a reading's kind is, for the facts whose kinds have an order; null for the rest. */
+const rank = (id: GameFactId, kind: string): number | null => {
+  switch (id) {
+    case "boots":
+      return kind === "true" ? 1 : 0;
+    case "winnable-without-skill":
+      return kind === "false" ? 1 : 0;
+    case "idle":
+    case "masher":
+      // A player that does nothing (or anything) should lose; winning means no challenge.
+      return BROKE.has(kind) ? 0 : kind === "won" ? 1 : kind === "no-ending" ? 2 : 3;
+    case "skilled":
+      return BROKE.has(kind) ? 0 : kind === "won" ? 2 : 1;
+    default:
+      return null;
+  }
+};
+
+const notComparable = (id: GameFactId, why: string, a: string | null, b: string | null) =>
+  ({ id, label: LABELS[id], a, b, change: "not-comparable", tone: "neutral", why }) as const;
+
+const sideWhy = (side: "A" | "B", read: Read) =>
+  read._tag === "pending"
+    ? `${side} is still measuring`
+    : read._tag === "not-measured"
+      ? `${side} not measured: ${read.why}`
+      : "";
 
 /**
  * PURE. The one diff of two builds' facts, shared by the compare view, the
  * round card and game_builds. A fact not measured on either side is
- * not-comparable with its reason, never "same". Foundation placeholder:
- * builder F implements it.
+ * not-comparable with its reason, never "same".
  */
 export const diffBuildFacts = (
-  _a: GameBuildFacts | null,
-  _b: GameBuildFacts | null,
-): ReadonlyArray<GameFactDelta> => [];
+  a: GameBuildFacts | null,
+  b: GameBuildFacts | null,
+): ReadonlyArray<GameFactDelta> =>
+  GameFactId.literals.map((id): GameFactDelta => {
+    if (a === null || b === null)
+      return notComparable(id, `${a === null ? "A" : "B"} has never been measured`, null, null);
+    const ra = readFact(a, id);
+    const rb = readFact(b, id);
+    const textA = ra._tag === "measured" ? ra.reading.text : null;
+    const textB = rb._tag === "measured" ? rb.reading.text : null;
+    if (ra._tag !== "measured" || rb._tag !== "measured")
+      return notComparable(
+        id,
+        [sideWhy("A", ra), sideWhy("B", rb)].filter((why) => why !== "").join("; "),
+        textA,
+        textB,
+      );
+    if (a.harness !== b.harness)
+      return notComparable(id, "measured by different versions of the harness", textA, textB);
+    if (
+      id === "skilled" &&
+      a.skilled.status === "measured" &&
+      b.skilled.status === "measured" &&
+      a.skilled.value.bot.hash !== b.skilled.value.bot.hash
+    )
+      return notComparable(
+        id,
+        "the tester's bot changed between the two measurements",
+        textA,
+        textB,
+      );
+    const x = ra.reading;
+    const y = rb.reading;
+    const base = { id, label: LABELS[id], a: x.text, b: y.text, why: null };
+    if (x.kind !== y.kind) {
+      const before = rank(id, x.kind);
+      const after = rank(id, y.kind);
+      const tone =
+        before === null || after === null || before === after
+          ? "neutral"
+          : after > before
+            ? "better"
+            : "worse";
+      return { ...base, change: "changed", tone };
+    }
+    if (x.value === null || y.value === null || x.text === y.text)
+      return { ...base, change: "same", tone: "neutral" };
+    const change = y.value > x.value ? "up" : y.value < x.value ? "down" : "same";
+    const tone =
+      change === "same" || !LOWER_IS_BETTER.has(id)
+        ? "neutral"
+        : change === "down"
+          ? "better"
+          : "worse";
+    return { ...base, change, tone };
+  });
 
 /** A build named by id, or a chat turn's build by the turn the client already holds. */
 export const GameBuildRef = Schema.Union([
@@ -315,7 +590,11 @@ export const GameBuildRestoreInput = Schema.Struct({
   threadId: ThreadId,
   build: GameBuildRef,
   commandId: Schema.optionalKey(Schema.String),
+  /** A round's build of a stopped run becomes the run's best (Keep on its card). */
+  asBest: Schema.optionalKey(Schema.Boolean),
 });
+/** Stops one build's play copy; the folder's own Play is never touched. */
+export const GameBuildStopInput = Schema.Struct({ threadId: ThreadId, build: GameBuildRef });
 export const GameBuildRestoreResult = Schema.Struct({
   requestId: Schema.String,
   done: Schema.Boolean,
