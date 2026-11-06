@@ -157,8 +157,7 @@ plays the whole game: if it says the game is ready, the run ends **Ready**; if n
 done** with the review's reasons, and resuming works on them for a round. A run that ends with
 set-aside steps is **Not done** too, and resuming splits them. The run never
 polishes on its own: ask for what you want polished in the chat, and the run comes back for one
-round on it. Three rounds in a row that land nothing stop the run as **Stalled**, with the last
-round's reason; fix what it names (or ask for a change), then resume. A plan that wrote no valid
+round on it. Three rounds in a row that fail for the game's own reasons (a build that does not boot, checks it fails, a step that got worse) stop the run as **Stalled**, with the last round's reason; fix what it names (or ask for a change), then resume. A plan that wrote no valid
 ladder stops the run as **No ladder**; resuming gives the plan another go. The **Ladder** list on the Run tab shows which steps landed, which one is being built and
 which were set aside and why; each round shows how many of its checks passed.
 
