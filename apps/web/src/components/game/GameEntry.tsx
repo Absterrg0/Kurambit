@@ -137,8 +137,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [brief, setBrief] = useState(draft?.brief ?? "");
   const [artDirection, setArtDirection] = useState("");
   const { toolchain, ready: engineReady } = useEngineReadiness(environmentId);
-  // three.js until the parked native lanes follow the turn loop; they stay a choice.
-  const [chosenEngine, setEngine] = useState<GameEngineId | null>(draft?.engine ?? "three");
+  const [chosenEngine, setEngine] = useState<GameEngineId | null>(draft?.engine ?? null);
   const engine = chooseEngine(chosenEngine, engineReady);
   const [editingFolder, setEditingFolder] = useState(false);
   const [busy, setBusy] = useState(false);

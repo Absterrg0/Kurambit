@@ -1,4 +1,4 @@
-import type { EnvironmentId, GameEngineId } from "@kurambit/contracts";
+import { GAME_ENGINES, type EnvironmentId, type GameEngineId } from "@kurambit/contracts";
 
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
@@ -17,11 +17,19 @@ export function useEngineReadiness(environmentId: EnvironmentId) {
   return { toolchain, ready };
 }
 
-/** The engine a form submits: the user's pick while it is ready, else Godot, else three.js. */
+/**
+ * The engine a form submits: the user's pick while it is ready, else the first
+ * ready engine that plays every turn (the lane being built), else any ready one.
+ */
 export function chooseEngine(
   chosen: GameEngineId | null,
   ready: (id: GameEngineId) => boolean,
 ): GameEngineId {
   if (chosen !== null && ready(chosen)) return chosen;
-  return ready("godot") ? "godot" : "three";
+  const ids = Object.keys(GAME_ENGINES) as GameEngineId[];
+  return (
+    ids.find((id) => GAME_ENGINES[id].turnLoop && ready(id)) ??
+    ids.find((id) => ready(id)) ??
+    "three"
+  );
 }
