@@ -67,9 +67,16 @@ export const GameBotFinding = Schema.Struct({
 export type GameBotFinding = typeof GameBotFinding.Type;
 
 export const GameBotStatus = Schema.Struct({
-  /** done | failed | stalled | budget | error: what the bot's own status said at the end. */
+  /**
+   * The bot's own word at the end (done, failed, stalled, budget, ...), or the
+   * harness's: crashed / unresponsive / not-booted (measured about the game,
+   * only while our own host was alive), bot-error (the bot played, then its own
+   * child threw or exited), stopped (a stop or cancel; not a measurement).
+   */
   state: Schema.String,
   note: Schema.String,
+  /** The bot child's structured evidence, at most 4096 bytes encoded; larger is omitted and the note says so. */
+  evidence: Schema.optionalKey(Schema.Unknown),
 });
 export type GameBotStatus = typeof GameBotStatus.Type;
 
@@ -102,6 +109,8 @@ export type GameBotPerf = typeof GameBotPerf.Type;
 
 export const GameBotRunResult = Schema.Struct({
   runId: Schema.String,
+  /** False only when the bot itself never ran (its module failed to load, its child died before tick 1); absent means true. */
+  played: Schema.optionalKey(Schema.Boolean),
   goal: Schema.String,
   status: GameBotStatus,
   ticks: Schema.Int,

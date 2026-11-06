@@ -154,7 +154,10 @@ export const GameManifest = Schema.Struct({
   gameplayScene: Schema.optionalKey(Schema.String),
   probe: Schema.optionalKey(Schema.Boolean),
   engine: Schema.Struct({ name: GameEngineId, version: Schema.String }),
-  godotProject: Schema.String,
+  /** The engine project's folder in the game (godot/, web/, unity/). */
+  project: Schema.optionalKey(Schema.String),
+  /** The same folder under its legacy name: written beside `project` for one release so older installs open new games; read only through manifestProject. */
+  godotProject: Schema.optionalKey(Schema.String),
   assets: Schema.Array(GameAsset),
   /**
    * Authored asset targets this game's inventory checks against. Each entry
@@ -164,8 +167,19 @@ export const GameManifest = Schema.Struct({
    * missing everything. At most 16 families with at most 16 paths each.
    */
   families: Schema.optionalKey(Schema.Array(GameAssetFamily).check(Schema.isMaxLength(16))),
-});
+}).check(
+  Schema.makeFilter((manifest) => (manifest.project ?? manifest.godotProject) !== undefined, {
+    description: "a game.json that names its engine project folder (project)",
+  }),
+);
 export type GameManifest = typeof GameManifest.Type;
+/** The engine project's folder in the game: the one reader of the manifest's project key. */
+export const manifestProject = (manifest: GameManifest): string =>
+  manifest.project ?? manifest.godotProject ?? "";
+/** The most files a game's sources may hold for a build: one bound for snapshots and Web builds. */
+export const GAME_SOURCE_FILE_LIMIT = 50_000;
+export const sourceLimitDetail = (project: string): string =>
+  `The game's ${project}/ holds more than ${GAME_SOURCE_FILE_LIMIT.toLocaleString("en-US")} files a build reads; remove unused files (old exports, caches, copied packs) and retry.`;
 export type GameAsset = typeof GameAsset.Type;
 export class GameOperationError extends Schema.TaggedError<GameOperationError>()(
   "GameOperationError",
@@ -196,6 +210,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "symlink",
       /** The operation was cancelled: a turn ended, a stop, a newer request. */
       "cancelled",
+      /** A program Kurambit runs failed on its own; it says nothing about the game. */
+      "tool-failed",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     /** A production run's own reason, when the failure was the run's. */
@@ -243,6 +259,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "This library pack names an unsafe path or link, or unpacks past the size limits, so nothing from it was kept. Pick another pack.",
       cancelled:
         "The operation was cancelled before it finished (a turn ended, a stop, or a newer request). Retry it if it is still wanted.",
+      "tool-failed":
+        "A program Kurambit runs (the browser, the engine's editor or its CLI, an MCP server, the private display, ffmpeg) failed on its own. This says nothing about the game. Retry once; if it fails the same way, tell the user what the detail says.",
     };
     // A run holding the game is not cleared by Stop game, which stops only the caller's work.
     const fix =
@@ -262,6 +280,64 @@ export const GameOperationFailure = Schema.Struct({
   runReason: GameOperationError.fields.runReason,
   message: Schema.String,
 });
+/**
+ * Whose fault a failed game operation is: the build's (the game's own code or
+ * content), a tool's (a program Kurambit runs, or a record it keeps), the
+ * machine's (memory, or another operation holding the game), or the request's
+ * (the caller asked for something invalid). The one place this is decided.
+ */
+export type GameOperationFault = "build" | "tool" | "machine" | "request";
+type GameOperationReason = GameOperationError["reason"];
+const FAULTS: Readonly<Record<GameOperationReason, GameOperationFault>> = {
+  busy: "machine",
+  "low-memory": "machine",
+  cancelled: "machine",
+  "command-failed": "build",
+  "invalid-project": "build",
+  symlink: "build",
+  "invalid-input": "request",
+  "invalid-path": "request",
+  "unknown-template": "request",
+  io: "tool",
+  "tool-missing": "tool",
+  "wrong-version": "tool",
+  "templates-missing": "tool",
+  "starter-templates-missing": "tool",
+  "unsupported-platform": "tool",
+  checksum: "tool",
+  download: "tool",
+  "project-not-found": "tool",
+  "thread-dispatch": "tool",
+  "license-missing": "tool",
+  "source-changed": "tool",
+  "unsafe-archive": "tool",
+  "tool-failed": "tool",
+};
+export const gameOperationFault = (reason: GameOperationReason): GameOperationFault =>
+  FAULTS[reason];
+const STANDING: ReadonlySet<GameOperationReason> = new Set([
+  "tool-missing",
+  "wrong-version",
+  "templates-missing",
+  "starter-templates-missing",
+  "unsupported-platform",
+  "license-missing",
+  "unsafe-archive",
+  "source-changed",
+]);
+/** A fault that waiting cannot clear: it needs a person, so a run pauses at once. */
+export const isStandingFault = (reason: GameOperationReason): boolean =>
+  STANDING.has(reason) || FAULTS[reason] === "request";
+/**
+ * A failure's text as a person reads it: its first line, with machine paths
+ * (the given roots, home) replaced by <path>, at most 300 characters.
+ */
+export const plainReason = (text: string, roots: ReadonlyArray<string> = []): string => {
+  let line = (text.split("\n").find((each) => each.trim() !== "") ?? "").trim();
+  for (const root of [...roots].filter((r) => r.length > 1).toSorted((a, b) => b.length - a.length))
+    line = line.split(root).join("<path>");
+  return line.length > 300 ? `${line.slice(0, 299)}…` : line;
+};
 /** Where a game tool was found, in detection order. `kurambit` is a copy an earlier Kurambit installed. */
 export const GameToolSource = Schema.Literals(["settings", "env", "unity-hub", "kurambit", "path"]);
 export type GameToolSource = typeof GameToolSource.Type;
@@ -457,6 +533,8 @@ export const GameOperationEvent = Schema.Struct({
   state: Schema.Union([GameOperationState, Schema.Literal("cancelled")]),
   message: Schema.String,
   at: Schema.String,
+  /** The thread whose work the operation is, when a thread owns it; absent for a run's or the system's own work. */
+  ownerThreadId: Schema.optionalKey(ThreadId),
 });
 export type GameOperationEvent = typeof GameOperationEvent.Type;
 export const GameCreateInput = Schema.Struct({

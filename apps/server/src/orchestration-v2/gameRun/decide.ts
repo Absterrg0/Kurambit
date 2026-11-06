@@ -1190,11 +1190,18 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
             ],
           ),
         );
-      if (command.timer.kind === "memory" || command.timer.kind === "busy") {
+      if (
+        command.timer.kind === "memory" ||
+        command.timer.kind === "busy" ||
+        command.timer.kind === "tool"
+      ) {
+        const n = command.timer.n;
         const waited: GameRunStep =
           command.timer.kind === "memory"
-            ? { ...record, memoryWaits: Math.max(record.memoryWaits ?? 0, command.timer.n) }
-            : { ...record, busyWaits: Math.max(record.busyWaits ?? 0, command.timer.n) };
+            ? { ...record, memoryWaits: Math.max(record.memoryWaits ?? 0, n) }
+            : command.timer.kind === "busy"
+              ? { ...record, busyWaits: Math.max(record.busyWaits ?? 0, n) }
+              : { ...record, toolWaits: Math.max(record.toolWaits ?? 0, n) };
         const wake = effectFor(
           {
             type: "game-run.step.wake",

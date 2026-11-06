@@ -9,6 +9,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
+import { GameEngineId } from "./game.ts";
 import { GameBotDecider, GameBotPerf } from "./gameBot.ts";
 import {
   GameRunDecisionKind,
@@ -171,6 +172,10 @@ export const GameRunRoleStep = Schema.Struct({
   sheet: Schema.String,
   // Total explore input this thread may use across its sessions; 0 sets none.
   inputCapMs: Schema.Number,
+  // A turn whose play is the evidence (a sample, the tester, the ship player):
+  // one whose play a tool or the machine refused is played again, never landed
+  // as "played nothing". Absent on older records: inputCapMs > 0 && !release.
+  plays: Schema.optionalKey(Schema.Boolean),
   // A source role's build before this turn: its landing captures the folder
   // and diffs the two for game-code change.
   since: Schema.optionalKey(Schema.String),
@@ -328,10 +333,12 @@ const BotResult = Schema.Struct({
   fact: Schema.Struct(BotFactFields),
 });
 
-// Usage limits, a provider that stays down and memory that stays short end the run resumably.
+// Usage limits, a provider that stays down, memory that stays short, a busy
+// machine and a tool of Kurambit's that keeps failing end the run resumably:
+// nothing was measured, so nothing is judged.
 const EndedResult = Schema.Struct({
   kind: Schema.Literal("ended"),
-  ending: Schema.Literals(["usage-limit", "provider-down", "low-memory", "busy"]),
+  ending: Schema.Literals(["usage-limit", "provider-down", "low-memory", "busy", "tool-failed"]),
   reason: Schema.String,
 });
 
@@ -424,7 +431,12 @@ export const GameRunPlannedStep = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("build"), id: Schema.Number, op: GameRunBuildOp }),
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GameRunGitOp }),
   Schema.Struct({ kind: Schema.Literal("boot"), id: Schema.Number }),
-  Schema.Struct({ kind: Schema.Literal("facts"), id: Schema.Number }),
+  // `bots` names the thread whose bot runs the facts state (the round's tester); absent on older records.
+  Schema.Struct({
+    kind: Schema.Literal("facts"),
+    id: Schema.Number,
+    bots: Schema.optionalKey(Schema.NullOr(ThreadId)),
+  }),
   // Score a rung's state checks on the build that is checked out now.
   Schema.Struct({ kind: Schema.Literal("checks"), id: Schema.Number, rung: Schema.Number }),
   GameRunBotStep,
@@ -704,6 +716,8 @@ export const GameRunEnding = Schema.Literals([
   "low-memory",
   /** A sample's explore start kept waiting behind other starts on this machine. */
   "busy",
+  /** A program Kurambit runs kept failing while measuring a build: nothing was judged. */
+  "tool-failed",
 ]);
 export type GameRunEnding = typeof GameRunEnding.Type;
 
@@ -714,6 +728,8 @@ export const GameRun = Schema.Struct({
   projectId: ProjectId,
   /** The engine project directory the manifest names (`godot`, `web`, `unity`). */
   lane: Schema.String,
+  /** The game's engine; absent on runs started before it was recorded (read through runEngine). */
+  engine: Schema.optionalKey(GameEngineId),
   brief: Schema.String,
   artDirection: Schema.String,
   profile: GameRunProfile,
@@ -838,7 +854,9 @@ export const GameRunStep = Schema.Struct({
   /** A pair keeps its halves' results in `step`; this is a single step's result, or an ending. */
   result: Schema.NullOr(GameRunStepResult),
   /** A pair's halves that ended the run, held until every half is in: then the first one lands. */
-  endedHalves: Schema.Array(Schema.Struct({ seq: PositiveInt, result: EndedResult })),
+  endedHalves: Schema.Array(
+    Schema.Struct({ seq: PositiveInt, result: Schema.Union([EndedResult, FailedResult]) }),
+  ),
   /**
    * What landing this step's result asked of the game folder: records to write
    * and role threads whose copies go. The game-run.outputs effect each landing
@@ -854,6 +872,8 @@ export const GameRunStep = Schema.Struct({
   memoryWaits: Schema.optionalKey(NonNegativeInt),
   /** Times this attempt's work was handed back because another operation held the game. */
   busyWaits: Schema.optionalKey(NonNegativeInt),
+  /** Times this attempt's work was handed back because a tool of Kurambit's failed in a way waiting may clear. */
+  toolWaits: Schema.optionalKey(NonNegativeInt),
   plannedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),

@@ -8,6 +8,7 @@ import {
   GameOperationError,
   type GameActionResult,
   type GameProcessResult,
+  manifestProject,
 } from "@kurambit/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameToolchain from "./GameToolchain.ts";
@@ -189,12 +190,12 @@ export const makeGodotBackend = (
         const binary = yield* tools.executable("godot");
         return {
           binary,
-          projectName: manifest.godotProject,
-          projectDir: insideGame(root, manifest.godotProject),
+          projectName: manifestProject(manifest),
+          projectDir: insideGame(root, manifestProject(manifest)),
         };
       }),
     projectSettingsFile: "project.godot",
-    projectDirectory: (manifest) => manifest.godotProject,
+    projectDirectory: (manifest) => manifestProject(manifest),
     projectSettings: (projectFileText: string) => ({
       viewport: parseGodotViewport(projectFileText),
     }),

@@ -33,7 +33,8 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
         : engine === "unity"
           ? { name: "unity", version: UNITY_MIN_VERSION }
           : { name: "godot", version: "4.7.2" },
-    // The engine project directory for every lane, despite the legacy name.
+    project: engineProfile(engine).projectDirectory,
+    // The same folder under its legacy key, for one release, so an older installed Kurambit still opens the game.
     godotProject: engineProfile(engine).projectDirectory,
     assets: [],
   };

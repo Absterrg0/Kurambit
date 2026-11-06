@@ -891,7 +891,7 @@ const layerGame = (root: string, world: World) => {
             }),
           exploreMemoryWait: () =>
             Deferred.succeed(world.capWatched, undefined).pipe(
-              Effect.as({ waitedMs: 0, refused: null, executedInputSteps: 0 }),
+              Effect.as({ waitedMs: 0, refused: null, standing: false, executedInputSteps: 0 }),
             ),
           limitExploreInput: () => Effect.void,
           botRuns: (threadId) =>
@@ -922,7 +922,7 @@ const layerGame = (root: string, world: World) => {
                   }),
                 )
               : Effect.succeed(root),
-          read: () => Effect.succeed({ godotProject: "godot" } as never),
+          read: () => Effect.succeed({ project: "godot" } as never),
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,

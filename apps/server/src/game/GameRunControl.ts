@@ -32,6 +32,7 @@ import {
   ThreadId,
   GameOperationError,
   GameRunErrorReason,
+  manifestProject,
 } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -290,18 +291,20 @@ const make = Effect.gen(function* () {
         busy.failure.message,
       );
     // The lane is the whole run's engine: a manifest that cannot be read is no Godot game.
-    const lane = (yield* projects
-      .read(root)
-      .pipe(
-        Effect.mapError((cause) =>
-          runError(
-            "run-start",
-            input.threadId,
-            "project-not-found",
-            `The game's manifest could not be read (${cause.detail ?? cause.reason}).`,
+    const lane = manifestProject(
+      yield* projects
+        .read(root)
+        .pipe(
+          Effect.mapError((cause) =>
+            runError(
+              "run-start",
+              input.threadId,
+              "project-not-found",
+              `The game's manifest could not be read (${cause.detail ?? cause.reason}).`,
+            ),
           ),
         ),
-      )).godotProject;
+    );
     const projection = yield* threads
       .getThreadProjection(input.threadId)
       .pipe(

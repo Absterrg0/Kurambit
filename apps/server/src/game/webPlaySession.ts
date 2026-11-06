@@ -120,6 +120,20 @@ export class WebBrowserLaunchFailed extends Error {
   }
 }
 
+/** The game's page crashed (Chromium's page "crash"): evidence about the build. */
+export class WebPageCrashed extends Error {
+  constructor(message = "The game's page crashed.") {
+    super(message);
+  }
+}
+
+/** Our browser went away (disconnected or closed) while the page ran: a tool fault, never the game's. */
+export class WebBrowserGone extends Error {
+  constructor(message = "Headless Chromium disconnected while the page was running.") {
+    super(message);
+  }
+}
+
 /**
  * Counts the page's animation frames: the engine-side frame counter of a
  * browser game, which stops when the page's main thread does.

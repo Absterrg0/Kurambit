@@ -416,7 +416,7 @@ const make = Effect.gen(function* () {
       const again = (kind: "retry" | "memory", after: Duration.Input) =>
         resendLater({ creator, at, stepId: turn.stepId, turn: kind, n: next, after });
       const end = (
-        ending: "usage-limit" | "provider-down" | "low-memory" | "busy",
+        ending: "usage-limit" | "provider-down" | "low-memory" | "busy" | "tool-failed",
         reason: string,
       ) =>
         report(creator, at, turn.stepId, { kind: "ended", ending, reason: reason.slice(0, 300) });

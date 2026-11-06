@@ -24,6 +24,7 @@ import {
   type GameOpenInput,
   type GameProjectResult,
   type GameSummary,
+  manifestProject,
 } from "@kurambit/contracts";
 import * as GameOperations from "./GameOperations.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -149,7 +150,7 @@ const make = Effect.gen(function* () {
         const manifest = decodeManifest(
           await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8"),
         );
-        insideGame(root, manifest.godotProject);
+        insideGame(root, manifestProject(manifest));
         for (const asset of manifest.assets)
           for (const relative of [
             asset.source,
@@ -173,7 +174,7 @@ const make = Effect.gen(function* () {
                   path: target,
                   reason: "invalid-path",
                 });
-              insideGame(root, `${manifest.godotProject}/${rest}`);
+              insideGame(root, `${manifestProject(manifest)}/${rest}`);
             } else {
               insideGame(root, target);
             }
@@ -546,7 +547,7 @@ const make = Effect.gen(function* () {
             const latestThread = newestThreadByProject.get(project.id) ?? null;
             const currentOperation = operations.current(root);
             const keyArt = yield* Effect.promise(() =>
-              findKeyArt(root, manifest.value.godotProject),
+              findKeyArt(root, manifestProject(manifest.value)),
             );
             const summary: GameSummary = {
               projectId: project.id,
@@ -606,7 +607,7 @@ const make = Effect.gen(function* () {
         try: async () => {
           const fixed = engineProfile(manifest.engine.name).viewport;
           if (fixed !== null) return { viewport: { ...fixed } };
-          const engineRoot = insideGame(root, manifest.godotProject);
+          const engineRoot = insideGame(root, manifestProject(manifest));
           const projectGodot = await NodeFSP.readFile(
             NodePath.join(engineRoot, "project.godot"),
             "utf8",

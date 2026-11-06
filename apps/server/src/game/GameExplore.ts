@@ -153,7 +153,9 @@ export class GameExplore extends Context.Service<
     readonly memoryWait: (threadId: ThreadId) => Effect.Effect<
       {
         readonly waitedMs: number;
-        readonly refused: "low-memory" | "busy" | null;
+        readonly refused: "low-memory" | "busy" | "tool-failed" | null;
+        /** The refusal is one waiting cannot clear (isStandingFault). */
+        readonly standing: boolean;
         readonly executedInputSteps: number;
       },
       GameOperationError
@@ -1314,7 +1316,7 @@ const make = Effect.gen(function* () {
       const memory = record.memory ?? { waitedMs: 0, refused: false };
       // An older record's `true` was a low-memory refusal.
       const refused = memory.refused === true ? "low-memory" : memory.refused || null;
-      return { waitedMs: memory.waitedMs, refused, executedInputSteps };
+      return { waitedMs: memory.waitedMs, refused, standing: false, executedInputSteps };
     }),
     sheet: Effect.fn("GameExplore.sheet")(function* (threadId, output) {
       const root = yield* projects.resolve(threadId);

@@ -11,6 +11,7 @@ import {
   type GameBlenderRenderSpritesResult,
   type GameEngineId,
   type GameManifest,
+  manifestProject,
 } from "@kurambit/contracts";
 import { laneAssets, laneLibrary } from "./engineProfile.ts";
 import { decodePng, measure, type Rgba } from "./run/spriteFacts.ts";
@@ -293,7 +294,7 @@ export const renderSprites = (
 ): Effect.Effect<GameBlenderRenderSpritesResult, GameOperationError> =>
   Effect.gen(function* () {
     const manifest = yield* deps.manifest(root);
-    const lane = manifest.godotProject;
+    const lane = manifestProject(manifest);
     const output = input.output.trim().replace(/\.png$/i, "");
     const issue = spriteOutputIssue(lane, output);
     if (issue !== null) return yield* fail(input.output, "invalid-path", issue);

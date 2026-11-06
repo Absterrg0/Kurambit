@@ -28,6 +28,7 @@ import {
   type GameBlenderSceneInput,
   type GameBlenderSceneResult,
   type GameManifest,
+  manifestProject,
 } from "@kurambit/contracts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
@@ -756,7 +757,7 @@ const make = Effect.gen(function* () {
 
   /** Where GLBs land in the engine project, from the manifest and its engine's layout. */
   const assetDirOf = (manifest: GameManifest) =>
-    `${manifest.godotProject}/${engineProfile(manifest.engine.name).layout.blender}`;
+    `${manifestProject(manifest)}/${engineProfile(manifest.engine.name).layout.blender}`;
   const exportDirOf = (root: string) => projects.read(root).pipe(Effect.map(assetDirOf));
 
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>
@@ -938,7 +939,7 @@ const make = Effect.gen(function* () {
           // the named objects (or every mesh) and run the glTF exporter, then
           // save the .blend source like every other scene-changing call.
           const manifest = yield* projects.read(root);
-          const engineDir = manifest.godotProject;
+          const engineDir = manifestProject(manifest);
           const file = input.file ?? `${assetDirOf(manifest)}/scene.glb`;
           if (!file.startsWith(`${engineDir}/`) || !file.endsWith(".glb") || file.includes(".."))
             return yield* opError(

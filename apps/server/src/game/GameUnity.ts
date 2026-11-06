@@ -11,7 +11,7 @@ import * as Semaphore from "effect/Semaphore";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { GameOperationError, type GameProcessResult } from "@kurambit/contracts";
+import { GameOperationError, type GameProcessResult, manifestProject } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
@@ -539,7 +539,9 @@ const make = Effect.gen(function* () {
   const projectDirOf = (root: string) =>
     projects
       .read(root)
-      .pipe(Effect.map((manifest) => GameProjectService.insideGame(root, manifest.godotProject)));
+      .pipe(
+        Effect.map((manifest) => GameProjectService.insideGame(root, manifestProject(manifest))),
+      );
 
   /**
    * Reaps one record file and removes it; a missing or unreadable record

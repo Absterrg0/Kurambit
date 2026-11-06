@@ -56,6 +56,7 @@ import {
   type GameBotReportResult,
   type GameBotViewInput,
   type GameBotViewResult,
+  manifestProject,
 } from "@kurambit/contracts";
 import { commandDetail } from "./commandDetail.ts";
 import { engineProfile } from "./engineProfile.ts";
@@ -134,7 +135,9 @@ export class GameService extends Context.Service<
     readonly exploreMemoryWait: (threadId: ThreadId) => Effect.Effect<
       {
         readonly waitedMs: number;
-        readonly refused: "low-memory" | "busy" | null;
+        readonly refused: "low-memory" | "busy" | "tool-failed" | null;
+        /** The refusal is one waiting cannot clear (isStandingFault). */
+        readonly standing: boolean;
         readonly executedInputSteps: number;
       },
       GameOperationError
@@ -327,6 +330,15 @@ export class GameService extends Context.Service<
     readonly botReport: (
       threadId: ThreadId,
     ) => Effect.Effect<GameBotReportResult, GameOperationError>;
+    /**
+     * The facts-only player report of exactly these bot runs, read-only: it
+     * never writes .studio/player-report.md. Null when none of them has a
+     * trace; an unreadable trace is skipped and counted in the text.
+     */
+    readonly botReportText: (
+      root: string,
+      runIds: ReadonlyArray<string>,
+    ) => Effect.Effect<string | null, GameOperationError>;
     /** A quick look at a finished bot run: summary, findings and evidence paths. */
     readonly botView: (
       threadId: ThreadId,
@@ -731,7 +743,7 @@ const make = Effect.gen(function* () {
       // to differ.
       const current = yield* statusSnapshot(
         root,
-        manifest.godotProject,
+        manifestProject(manifest),
         statusOptions?.checkSources === true,
       ).pipe(Effect.option);
       const currentId =
@@ -765,7 +777,7 @@ const make = Effect.gen(function* () {
         // The toolchain picks a Unity editor by the project's own version; no other engine has one per project.
         toolchain: yield* tools.status(
           manifest.engine.name === "unity"
-            ? { unityProject: GameProjectService.insideGame(root, manifest.godotProject) }
+            ? { unityProject: GameProjectService.insideGame(root, manifestProject(manifest)) }
             : undefined,
         ),
         processes: processes.list(root),
@@ -814,6 +826,8 @@ const make = Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         return yield* gameBot.view(root, input);
       }),
+    // Foundation placeholder (CONTRACT §3): builder P implements it over GameBot.
+    botReportText: () => Effect.succeed(null),
     botReport: (threadId) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);

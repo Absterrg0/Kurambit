@@ -11,6 +11,7 @@ import {
   type GameActionResult,
   type GameCheckIssue,
   type GameProcessResult,
+  manifestProject,
 } from "@kurambit/contracts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
@@ -213,16 +214,16 @@ export const makeThreeBackend = (
           });
         return {
           binary: {
-            path: NodePath.join(manifest.godotProject, "vendor", "three.module.js"),
+            path: NodePath.join(manifestProject(manifest), "vendor", "three.module.js"),
             version: THREE_PINNED_VERSION,
             templates: null,
           },
-          projectName: manifest.godotProject,
-          projectDir: insideGame(root, manifest.godotProject),
+          projectName: manifestProject(manifest),
+          projectDir: insideGame(root, manifestProject(manifest)),
         };
       }),
     projectSettingsFile: "index.html",
-    projectDirectory: (manifest) => manifest.godotProject,
+    projectDirectory: (manifest) => manifestProject(manifest),
     projectSettings: () => ({ viewport: { ...THREE_VIEWPORT } }),
     // A static copy needs no export templates and no preset.
     exportReady: () => Effect.void,

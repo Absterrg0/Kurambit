@@ -14,6 +14,7 @@ import {
   type GameAssetsSearchInput,
   type GameAssetsSearchResult,
   type GameLibraryKind,
+  manifestProject,
 } from "@kurambit/contracts";
 import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
 import { fileSha256 } from "./fileHash.ts";
@@ -894,7 +895,7 @@ const make = Effect.gen(function* () {
           `That selection holds models and comes to ${megabytes(total)} with what they load; one add of models takes at most ${megabytes(MAX_MODEL_ADD_BYTES)}, already more than a game loads well. Add the models the game uses by path, or a smaller folder.`,
         );
 
-      const lane = manifest.godotProject;
+      const lane = manifestProject(manifest);
       const directoryRel = libraryDirFor(lane, pack.id);
       const realRoot = yield* realRootOf(root, "Library add");
       // Checked before any copy, so a refusal leaves the game as it was.

@@ -151,7 +151,7 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderExportTool = Tool.make("game_blender_export", {
   description:
-    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's godotProject) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb (unity/Assets/Blender/scene.glb for Unity). The .blend source is saved in the game with the export. Run game_import after.",
+    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's project) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb (unity/Assets/Blender/scene.glb for Unity). The .blend source is saved in the game with the export. Run game_import after.",
   parameters: GameBlenderExportInput,
   success: GameBlenderExportResult,
   failure,

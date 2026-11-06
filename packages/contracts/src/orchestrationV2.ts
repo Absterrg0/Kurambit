@@ -3059,6 +3059,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     type: Schema.Literal("game-run.stop"),
     ...GameRunCommandFields,
     reason: Schema.optional(Schema.String),
+    /** The server's own stop for a tool that kept failing: the run pauses as tool-failed with `reason`, not "stopped". */
+    ending: Schema.optionalKey(Schema.Literal("tool-failed")),
   }),
   /** A creator's note for the next round; on a finished run it buys one round. */
   Schema.Struct({
@@ -3091,6 +3093,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     type: Schema.Literal("game-run.step.start"),
     ...GameRunCommandFields,
     stepId: GameRunStepId,
+    /** The attempt the start belongs to: a start from an earlier attempt is refused. Absent on commands from older servers. */
+    attempt: Schema.optionalKey(PositiveInt),
     roleThreadId: Schema.optional(ThreadId),
     /** The thread the role ran on before: a deleted or broken one is replaced by a fresh one. */
     replaces: Schema.optional(ThreadId),
@@ -3151,6 +3155,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
       }),
       Schema.Struct({ kind: Schema.Literal("memory"), n: PositiveInt }),
       Schema.Struct({ kind: Schema.Literal("busy"), n: PositiveInt }),
+      /** A tool of Kurambit's failed in a way waiting may clear: the step's work runs again later. */
+      Schema.Struct({ kind: Schema.Literal("tool"), n: PositiveInt }),
       /** Recovery runs the step again through the outbox, behind whatever its thread still owes. */
       Schema.Struct({ kind: Schema.Literal("recover") }),
     ]),

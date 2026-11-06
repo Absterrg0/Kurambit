@@ -94,6 +94,14 @@ export const engineProfile = (id: GameEngineId): GameEngineProfile => BY_ID[id];
  * lane no engine names is a hand-renamed project directory; it reads as Godot,
  * the engine whose directory was free-form before engines had their own.
  */
+/** The engine a project folder belongs to, for records written before the engine was kept beside it. */
+export const legacyLaneEngine = (lane: string): GameEngineId =>
+  (PROFILES.find((profile) => profile.projectDirectory === lane) ?? GODOT_PROFILE).id;
+/** A run's engine: the one it recorded, else the one its project folder implies. */
+export const runEngine = (run: {
+  readonly engine?: GameEngineId;
+  readonly lane: string;
+}): GameEngineId => run.engine ?? legacyLaneEngine(run.lane);
 export const laneProfile = (lane: string): GameEngineProfile =>
   PROFILES.find((profile) => profile.projectDirectory === lane) ?? GODOT_PROFILE;
 

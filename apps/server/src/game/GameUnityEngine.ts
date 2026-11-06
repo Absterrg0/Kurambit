@@ -9,6 +9,7 @@ import {
   type GameActionResult,
   type GameCheckIssue,
   type GameProcessResult,
+  manifestProject,
 } from "@kurambit/contracts";
 import type * as GameToolchain from "./GameToolchain.ts";
 import type * as GameUnity from "./GameUnity.ts";
@@ -516,16 +517,16 @@ export const makeUnityBackend = (
     profile: UNITY_PROFILE,
     resolveProject: (root, manifest) =>
       Effect.gen(function* () {
-        const projectDir = insideGame(root, manifest.godotProject);
+        const projectDir = insideGame(root, manifestProject(manifest));
         const unity = yield* tools.unity(projectDir);
         return {
           binary: { path: unity.editor, version: unity.version, templates: null },
-          projectName: manifest.godotProject,
+          projectName: manifestProject(manifest),
           projectDir,
         };
       }),
     projectSettingsFile: "ProjectSettings/ProjectSettings.asset",
-    projectDirectory: (manifest) => manifest.godotProject,
+    projectDirectory: (manifest) => manifestProject(manifest),
     projectSettings: () => ({ viewport: { ...UNITY_VIEWPORT } }),
     parseDiagnostics: (output) => parseCSharpDiagnostics(output, "unity").errors,
     importProject,
