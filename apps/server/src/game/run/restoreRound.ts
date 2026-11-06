@@ -91,7 +91,7 @@ export const restoreBuild = (input: {
     // The folder as it is, kept once per request (withBuildInFolder).
     const beforeName = BuildName.restoreBefore(input.requestId);
     // The run's pending restore is this one, so the label names what it restores.
-    const kept = ` What the folder held before is saved as "${savedBuildLabel(beforeName, state, run) ?? beforeName}"; the Run tab's saved builds bring it back.`;
+    const kept = ` What the folder held before is saved as "${savedBuildLabel(beforeName, state, run) ?? beforeName}"; game_run_restore brings it back.`;
     const task = state.task;
     const from = target.kind === "round" ? `round ${target.record.round}'s build` : "the best";
     const dropped = !abandons

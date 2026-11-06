@@ -426,7 +426,7 @@ const make = Effect.gen(function* () {
         root,
         stage: run.stage,
         resumed: true,
-        message: `The run is already going (${run.stage}); watch it on the Run tab.`,
+        message: `The run is already going (${run.stage}); its rounds show in the chat and on the build timeline.`,
       } satisfies GameRunStartResult;
     }
     // An ending still exporting or a restore still moving the folder owns it:
@@ -570,12 +570,12 @@ const make = Effect.gen(function* () {
       message: earlier
         ? "A new run started from the brief and continues from the game as it is now: no new vision or prototypes; the plan writes a ladder for this game, then rounds build it. This game's earlier run is from an older Kurambit: its rounds, ladder and decisions were not carried over, and its history stays in git."
         : started?.ladder != null && started.ladder.rungs.length > 0
-          ? `The run started on the same brief, so it builds this game's ladder again (${started.ladder.rungs.length} rungs, ${started.ladder.rungs.filter((x) => x.status === "done").length} landed); a new brief writes a new one. Watch it on the Run tab.`
-          : "The run started; watch it on the Run tab.",
+          ? `The run started on the same brief, so it builds this game's ladder again (${started.ladder.rungs.length} rungs, ${started.ladder.rungs.filter((x) => x.status === "done").length} landed); a new brief writes a new one. Its rounds show in the chat and on the build timeline.`
+          : "The run started; its rounds show in the chat and on the build timeline.",
     } satisfies GameRunStartResult;
   });
 
-  // The role threads each step ran on, each once, for the Run tab.
+  // The role threads each step ran on, each once, for Past runs.
   const threadRefs = (roles: ReadonlyArray<ProjectionStore.GameRunRoleThread>) =>
     withRoleGroups(
       roles.filter((entry, i) => roles.findIndex((r) => r.threadId === entry.threadId) === i),
@@ -710,7 +710,7 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /** A run's rounds as the Run tab and the round cards show them. */
+  /** A run's rounds as the round cards and the build timeline show them. */
   const roundRefs = (
     runThread: ThreadId,
     run: GameRun,
@@ -1220,7 +1220,7 @@ const make = Effect.gen(function* () {
   // A restore, command first: the run records the request and holds every
   // start, resume and steer until its job lands the outcome, so the folder is
   // never moved under a run. The call returns once the request is recorded; the
-  // outcome reaches the Run tab through the run's push and its status. A caller's
+  // outcome reaches the clients through the run's push and its status. A caller's
   // commandId names the request too, so its retry is the same restore.
   const runRestore: Service["runRestore"] = Effect.fn("GameRunControl.runRestore")(function* (
     input: GameRunRestoreInput,
@@ -1350,7 +1350,7 @@ const make = Effect.gen(function* () {
       return {
         requestId,
         done: false,
-        message: `Restoring ${what}: the run is moving the game folder; the Run tab and game_run_status show the outcome.`,
+        message: `Restoring ${what}: the run is moving the game folder; the build timeline and game_run_status show the outcome.`,
       } satisfies GameRunRestoreResult;
     const outcome = landed.value;
     if (outcome.kind === "refused")

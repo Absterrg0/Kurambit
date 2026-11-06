@@ -180,7 +180,7 @@ export class GameService extends Context.Service<
     readonly rebuild: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
      * `game_preview`: a playable build of the current sources. A Web build
-     * older than the sources is rebuilt (the same export Play's Rebuild runs);
+     * older than the sources is rebuilt (the same export the Stage's Rebuild runs); a live-staged game serves its folder instead;
      * an engine whose games play as a built player gets that player prepared.
      */
     readonly preview: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
@@ -605,7 +605,7 @@ const make = Effect.gen(function* () {
   /** What a game whose engine makes no Web build answers Play with. */
   const noWebPlay = (root: string, displayName: string): GameActionResult => ({
     success: false,
-    message: `${displayName} games make no Web build to play here. Export a Linux or Windows release from the Builds panel (game_export for an agent), or explore and bot-play the game, which play its built player.`,
+    message: `${displayName} games make no Web build to play here. Export a Linux or Windows release from Export… in the Stage's More menu (game_export for an agent), or explore and bot-play the game, which play its built player.`,
     path: root,
     url: null,
     process: null,
