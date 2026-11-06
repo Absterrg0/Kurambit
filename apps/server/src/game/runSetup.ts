@@ -14,7 +14,9 @@ import * as Templates from "./templates.ts";
 import { failureText } from "./run/handBack.ts";
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
-const SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
+const SKILLS_HEADING = "## Studio skills (read the ones this turn needs)";
+// A game made before chat turns carries this heading; it is renamed, never added twice.
+const ROLE_SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
 const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md.\n`;
 const STALE_SKILLS =
   /\n*## Studio skills \(read the ones your role needs\)\n\nSkill pack in \.\/studio-skills, one line each:[^\n]*\n/;
@@ -147,7 +149,7 @@ export const ensureScaffold = (
         (yield* io("Run scaffold", "AGENTS.md", () =>
           readText(NodePath.join(root, "AGENTS.md")),
         )) ?? "";
-      let agents = before.replace(STALE_SKILLS, "");
+      let agents = before.replace(STALE_SKILLS, "").replace(ROLE_SKILLS_HEADING, SKILLS_HEADING);
       if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;
       agents = withCreatorSection(agents);
       if (agents !== before)
