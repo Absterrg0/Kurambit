@@ -3,7 +3,8 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { GAME_SOURCE_FILE_LIMIT, sourceLimitDetail } from "@kurambit/contracts";
+import { GAME_SOURCE_FILE_LIMIT, GameOperationError, sourceLimitDetail } from "@kurambit/contracts";
+import { fileSha256 } from "./fileHash.ts";
 import type { GameSourceRules } from "./engineProfile.ts";
 import { GODOT_PROFILE } from "./godotProfile.ts";
 import { UNITY_PROFILE } from "./unityProfile.ts";
@@ -34,41 +35,16 @@ export type SourceSnapshot =
     };
 
 /**
- * Hashes the exact bytes read, streaming so a large imported asset never sits
- * whole in memory. The handle closes on every path; an abort destroys the
- * stream so the read does not outlive cancellation.
+ * The exact bytes read, through the one file hasher: streamed, a link at the
+ * path refused (O_NOFOLLOW, so a link swapped in fails closed), and an abort
+ * stops the read.
  */
 const hashFileContent = async (
   absolute: string,
   signal: AbortSignal | undefined,
 ): Promise<{ readonly size: number; readonly sha256: string }> => {
-  let handle: NodeFSP.FileHandle;
-  try {
-    handle = await NodeFSP.open(absolute, READ_FLAGS);
-  } catch (cause) {
-    if (signal?.aborted) signal.throwIfAborted();
-    throw cause;
-  }
-  const hash = NodeCrypto.createHash("sha256");
-  let size = 0;
-  try {
-    signal?.throwIfAborted();
-    const stream = handle.createReadStream({ autoClose: false, signal });
-    try {
-      for await (const chunk of stream) {
-        signal?.throwIfAborted();
-        const buffer = chunk as Buffer;
-        size += buffer.length;
-        hash.update(buffer);
-      }
-    } finally {
-      stream.destroy();
-    }
-    signal?.throwIfAborted();
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
-  return { size, sha256: hash.digest("hex") };
+  const hashed = await fileSha256(absolute, { signal, noFollow: true });
+  return { size: hashed.bytes, sha256: hashed.sha256 };
 };
 
 const MAX_DERIVED_ASSET_BYTES = 1 << 20;
@@ -304,3 +280,47 @@ export const comparedSource = (
     };
   return { kind: "current", sourceId: after.sourceId };
 };
+
+/**
+ * Why an operation's sources could not be identified, as the one error every
+ * consumer raises (CONTRACT A7): a link in the project is the game's
+ * (`symlink`); more files than a build reads is the game's (`command-failed`,
+ * naming the limit); a tree that changed while it was read is transient
+ * (`tool-failed`); an unreadable one is ours (`io`). Never `invalid-input`,
+ * which a run reads as its own bad request.
+ */
+export const sourceIdentityError = (
+  operation: string,
+  root: string,
+  project: string,
+  why:
+    | Extract<SourceSnapshot, { kind: "unknown" }>
+    | { readonly kind: "changed"; readonly detail: string },
+): GameOperationError =>
+  why.kind === "changed"
+    ? new GameOperationError({
+        operation,
+        path: NodePath.join(root, project),
+        reason: "tool-failed",
+        detail: `${why.detail} Something else wrote the game's files meanwhile; run it again once that work ends.`,
+      })
+    : why.reason === "symlink"
+      ? new GameOperationError({
+          operation,
+          path: NodePath.join(root, project),
+          reason: "symlink",
+          detail: `A symbolic link is in the game's sources (${why.detail ?? "unknown path"}); a build never follows one. Replace it with the real file or folder.`,
+        })
+      : why.reason === "entry-limit"
+        ? new GameOperationError({
+            operation,
+            path: NodePath.join(root, project),
+            reason: "command-failed",
+            detail: why.detail ?? sourceLimitDetail(project),
+          })
+        : new GameOperationError({
+            operation,
+            path: NodePath.join(root, project),
+            reason: "io",
+            detail: `The game's sources could not be read (${why.detail ?? "a filesystem error"}).`,
+          });

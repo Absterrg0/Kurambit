@@ -27,7 +27,7 @@ import { makeUnityBackend } from "./GameUnityEngine.ts";
 import type { GameEngineProfile, GameExportTarget } from "./engineProfile.ts";
 import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
-import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
+import { comparedSource, snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
 import type { WindowHost } from "./windowHost.ts";
 
 /**
@@ -323,6 +323,10 @@ const make = Effect.gen(function* () {
       const project = ctx.projectName;
       const imported = yield* backend.importProject(ctx);
       const before = yield* snapshot(root, project, backend);
+      // Sources that cannot be identified: a link or too many files is the
+      // game's (a check error, through asResult), an unreadable tree ours.
+      if (before.kind === "unknown")
+        return yield* sourceIdentityError(`${profile.displayName} check`, root, project, before);
       const executed = yield* backend.runCheck(ctx, {
         gameplayScene: manifest.gameplayScene ?? "",
       });
@@ -357,7 +361,12 @@ const make = Effect.gen(function* () {
           ? [{ file: "game.json", message: profile.check.withoutGameplayScene }]
           : []),
       ];
-      const comparison = comparedSource(before, yield* snapshot(root, project, backend), "check");
+      const after = yield* snapshot(root, project, backend);
+      if (after.kind === "unknown")
+        return yield* sourceIdentityError(`${profile.displayName} check`, root, project, after);
+      // Sources that moved during the check (the game may write its own
+      // folder as it runs) leave the verdict standing, with a warning.
+      const comparison = comparedSource(before, after, "check");
       if (comparison.kind !== "current")
         warnings.unshift({ file: `${project}/`, message: comparison.detail });
       return {

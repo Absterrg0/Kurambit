@@ -239,11 +239,12 @@ export const inspectWindowsBuildFiles = async (input: {
     return { handle, source };
   };
   const executable = await open(input.executable);
-  const pck = await open(input.pck).catch((cause: NodeJS.ErrnoException) => {
-    if (cause.code === "ENOENT") return null;
-    throw cause;
-  });
+  let pck: Awaited<ReturnType<typeof open>> | null = null;
   try {
+    pck = await open(input.pck).catch((cause: NodeJS.ErrnoException) => {
+      if (cause.code === "ENOENT") return null;
+      throw cause;
+    });
     return await inspectWindowsBuildSource({
       executable: executable.source,
       pck: pck?.source ?? null,

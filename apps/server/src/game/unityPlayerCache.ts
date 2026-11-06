@@ -169,7 +169,7 @@ export const reuseMainPlayer = async (
   );
   try {
     await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
-    await copyTree(source, staging);
+    await copyTree(source, staging, AbortSignal.timeout(5 * 60_000));
     const [copied, still] = await Promise.all([listing(staging), listing(source)]);
     if (copied !== still || !(await completePlayer(staging)))
       return "the main checkout's player changed while it was copied";

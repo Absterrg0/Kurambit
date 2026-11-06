@@ -38,23 +38,26 @@ export class ArchivePublishError extends Error {
 }
 
 /**
- * Windows refuses a rename while a scanner (Defender) briefly holds a file
- * that was just written; a few short retries clear that, as graceful-fs does.
- * Unverified on Windows: the retry count is a guess from that library.
+ * Windows refuses a rename while a scanner (Defender) holds a file that was
+ * just written, which for a game-sized executable can take many seconds.
+ * graceful-fs's window: retry EPERM, EACCES and EBUSY with a backoff growing
+ * by 10 ms to 100 ms, for up to 60 s. Unverified on Windows.
  */
+const RENAME_RETRY_MS = 60_000;
 const renameSettled = async (fileSystem: ArchiveFileSystem, from: string, to: string) => {
-  for (let attempt = 0; ; attempt += 1) {
+  const started = performance.now();
+  for (let backoff = 0; ; backoff = Math.min(100, backoff + 10)) {
     try {
       await fileSystem.rename(from, to);
       return;
     } catch (cause) {
       if (
         HOST_OS !== "win32" ||
-        attempt >= 3 ||
+        performance.now() - started > RENAME_RETRY_MS ||
         !["EPERM", "EBUSY", "EACCES"].includes(codeOf(cause))
       )
         throw cause;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, backoff));
     }
   }
 };

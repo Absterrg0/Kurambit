@@ -10,7 +10,7 @@ import { UNITY_PROFILE } from "./unityProfile.ts";
 export type { GameExportTarget } from "@kurambit/contracts";
 
 /** One release an engine makes: where it lands and how it ships. */
-export interface GameEngineRelease {
+export interface GameProfileRelease {
   readonly target: GameExportTarget;
   /** Game-relative file that names the published release; null for Web, whose build is the selected candidate. */
   readonly artifact: string | null;
@@ -43,7 +43,7 @@ export interface GameEngineProfile {
   /** Which export targets this engine can release (the targets of `releases`). Anything else is refused plainly. */
   readonly exportTargets: ReadonlyArray<GameExportTarget>;
   /** Every release it makes, by target. */
-  readonly releases: ReadonlyArray<GameEngineRelease>;
+  readonly releases: ReadonlyArray<GameProfileRelease>;
   /** What of the project is build input, for the source identity. */
   readonly buildInputs: GameSourceRules;
   /** A new game: the engine version the manifest records, and the folders made beside the template's. */

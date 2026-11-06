@@ -5,7 +5,12 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, describe, expect, it } from "@effect/vitest";
-import { type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
+import { gameOperationFault } from "@kurambit/contracts";
+import {
+  type SourceHashCache,
+  snapshotBuildSource,
+  sourceIdentityError,
+} from "./sourceSnapshot.ts";
 
 const roots: string[] = [];
 afterAll(() =>
@@ -96,5 +101,18 @@ describe("snapshotBuildSource with a hash cache", () => {
     const cache: SourceHashCache = new Map();
     await snapshotBuildSource(root, "godot", { cache });
     expect(cache.size).toBe(0);
+  });
+});
+
+// A run judges the build on its own content and pauses on ours: an
+// unidentifiable tree must never read as the run's own bad request.
+describe("sourceIdentityError", () => {
+  const fault = (why: Parameters<typeof sourceIdentityError>[3]) =>
+    gameOperationFault(sourceIdentityError("boot", "/g", "unity", why).reason);
+  it("reads a link and too many files as the build's, an unreadable or moving tree as ours", () => {
+    expect(fault({ kind: "unknown", reason: "symlink", detail: "unity/Assets/x" })).toBe("build");
+    expect(fault({ kind: "unknown", reason: "entry-limit" })).toBe("build");
+    expect(fault({ kind: "unknown", reason: "io" })).toBe("tool");
+    expect(fault({ kind: "changed", detail: "moved" })).toBe("tool");
   });
 });

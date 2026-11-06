@@ -22,13 +22,14 @@ import type { GameExportTarget } from "./engineProfile.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
+import { comparedSource, snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
 import {
   CANDIDATE_BUILDS_DIRECTORY,
   WEB_BUILD_DIRECTORY,
   candidateBuildDirectory,
   hashWebBuild,
   readWebBuild,
+  webBuildStatIdentity,
   webBuildProblemText,
 } from "./webBuild.ts";
 import { packageWebRelease, WebPackageError, WEB_PACKAGES_DIRECTORY } from "./webPackage.ts";
@@ -101,6 +102,7 @@ export const releaseTo = <P>(
       readonly sourceId: string;
       readonly notes: ReadonlyArray<string>;
     }
+  /** The engine made no usable release of these sources: the game's own failure. */
   | { readonly kind: "failed"; readonly result: GameActionResult },
   GameOperationError
 > => {
@@ -112,25 +114,13 @@ export const releaseTo = <P>(
     input.stagingParent,
     `.release-${input.target.toLowerCase()}-${NodeCrypto.randomUUID()}`,
   );
-  const notCurrent = (detail: string, process: GameActionResult["process"]) =>
-    ({
-      kind: "failed",
-      result: {
-        success: false,
-        message: (process === null ? detail : `${detail}\n${commandDetail(process)}`).slice(-4096),
-        path: null,
-        url: null,
-        process,
-      },
-    }) as const;
   return Effect.gen(function* () {
     // An unidentifiable tree is refused before the engine runs: the result
-    // could never be attached to the sources (too many files, a link).
+    // could never be attached to the sources. A build's own cause (a link,
+    // too many files) becomes the export's result through runExport.
     const before = yield* snapshot;
-    if (before.kind === "unknown") {
-      const refused = comparedSource(before, before, input.operation);
-      return notCurrent(refused.kind === "current" ? "" : refused.detail, null);
-    }
+    if (before.kind === "unknown")
+      return yield* sourceIdentityError(input.operation, root, projectName, before);
     yield* Effect.tryPromise({
       try: () => NodeFSP.mkdir(staging, { recursive: true }),
       catch: io(input.operation, staging),
@@ -145,8 +135,15 @@ export const releaseTo = <P>(
       return { kind: "failed", result: release.result } as const;
     // Prove the game folder did not change while the release ran: an edit
     // during it means the build no longer describes the sources.
-    const comparison = comparedSource(before, yield* snapshot, input.operation);
-    if (comparison.kind !== "current") return notCurrent(comparison.detail, release.result.process);
+    const after = yield* snapshot;
+    if (after.kind === "unknown")
+      return yield* sourceIdentityError(input.operation, root, projectName, after);
+    const comparison = comparedSource(before, after, input.operation);
+    if (comparison.kind !== "current")
+      return yield* sourceIdentityError(input.operation, root, projectName, {
+        kind: "changed",
+        detail: comparison.detail,
+      });
     const published = yield* input.publish(staging, release.artifact, comparison.sourceId);
     return {
       kind: "published",
@@ -449,18 +446,53 @@ const make = Effect.gen(function* () {
    * still hashes to its recorded id, otherwise a pre-change builds/web game, or
    * null when the game has never been built.
    */
+  /**
+   * A selection record that does not decode is no usable selection: Play and
+   * status say so and offer Rebuild, which writes a fresh one. Only
+   * `selected()`'s own callers get the typed refusal.
+   */
+  const usableSelection = (root: string) =>
+    readSelectedBuild(root).pipe(
+      Effect.catchTags({
+        GameOperationError: (error) =>
+          error.reason === "invalid-project"
+            ? Effect.succeed("damaged" as const)
+            : Effect.fail(error),
+      }),
+    );
+
+  // Play re-proves a build's bytes before serving it, but only reads them when
+  // a file's stat identity moved since the last proof: an unchanged build of
+  // thousands of files is not hashed on every Play.
+  const proven = new Map<string, { readonly identity: string; readonly buildId: string }>();
+  const servedIntact = (root: string, selected: SelectedWebBuild) =>
+    Effect.promise(async () => {
+      const directory = NodePath.join(root, selected.directory);
+      const identity = await webBuildStatIdentity(directory);
+      if (identity === null) return false;
+      const known = proven.get(directory);
+      if (known !== undefined && known.identity === identity)
+        return known.buildId === selected.buildId;
+      const hashed = await hashWebBuild(root, selected.directory);
+      if (hashed === null) return false;
+      if (proven.size > 64) proven.clear();
+      proven.set(directory, { identity, buildId: hashed.buildId });
+      return hashed.buildId === selected.buildId;
+    });
+
   const selectedPreview = (root: string) =>
     Effect.gen(function* () {
-      const selected = yield* readSelectedBuild(root);
+      const read = yield* usableSelection(root);
+      // A broken selected record must rebuild, not silently serve something else.
+      if (read === "damaged") return null;
+      const selected = read;
       if (selected !== null) {
-        const hashed = yield* Effect.promise(() => hashWebBuild(root, selected.directory));
-        if (hashed !== null && hashed.buildId === selected.buildId)
+        if (yield* servedIntact(root, selected))
           return {
             directory: selected.directory,
             selected,
             url: yield* preview.select(root, selected.directory),
           };
-        // A broken selected record must rebuild, not silently serve something else.
         return null;
       }
       // Only a game with no selection may fall back to a pre-change build.
@@ -555,7 +587,7 @@ const make = Effect.gen(function* () {
     publishWeb,
     serve: (root) =>
       Effect.gen(function* () {
-        const selected = yield* readSelectedBuild(root);
+        const selected = yield* usableSelection(root);
         const served = yield* selectedPreview(root);
         if (served !== null)
           return {
@@ -569,7 +601,9 @@ const make = Effect.gen(function* () {
           return {
             success: false,
             message:
-              "The selected build is unavailable: its served files are missing or changed. Rebuild to export the current sources.",
+              selected === "damaged"
+                ? "The record of the build Play serves is damaged. Rebuild to export the current sources and select them."
+                : "The selected build is unavailable: its served files are missing or changed. Rebuild to export the current sources.",
             path: null,
             url: null,
             process: null,

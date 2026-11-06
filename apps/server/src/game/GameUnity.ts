@@ -494,6 +494,7 @@ const seedLibrary = async (
   mainProjectDir: string,
   projectDir: string,
   scratch: string,
+  signal: AbortSignal,
 ): Promise<string | null> => {
   const target = NodePath.join(projectDir, "Library");
   if ((await NodeFSP.stat(target).catch(() => null)) !== null) return "it already has one";
@@ -504,7 +505,8 @@ const seedLibrary = async (
     return "a Unity editor has the main checkout open, so its import cache may be mid-write";
   const staging = NodePath.join(scratch, `library-${NodeCrypto.randomUUID()}`);
   try {
-    await copyTree(source, staging);
+    // Bounded, and stopped with its caller, so a cut-short open leaves no copy running.
+    await copyTree(source, staging, AbortSignal.any([signal, AbortSignal.timeout(15 * 60_000)]));
     for (const name of LIBRARY_NOT_COPIED)
       await NodeFSP.rm(NodePath.join(staging, name), { recursive: true, force: true });
     await NodeFSP.rename(staging, target);
@@ -850,11 +852,12 @@ const make = Effect.gen(function* () {
         // import cache is copied whole.
         if (checkout.kind === "linked") {
           const notSeeded = yield* Effect.tryPromise({
-            try: () =>
+            try: (signal) =>
               seedLibrary(
                 NodePath.join(checkout.main, NodePath.relative(root, projectDir)),
                 projectDir,
                 NodePath.dirname(homeDir),
+                signal,
               ),
             catch: (cause) =>
               opError(

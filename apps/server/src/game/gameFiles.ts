@@ -9,10 +9,8 @@ import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 /**
  * The shared atomic write for files the server keeps in a game folder (records,
  * the selected build, settings it rewrites), as a game operation's error. Made
- * once per service so its methods need nothing from the environment.
- *
- * Call sites switch to `followLink: false` when P's atomicWrite option lands
- * (CONTRACT §7); until then a link at the target is followed.
+ * once per service so its methods need nothing from the environment. A link an
+ * agent planted at the target is replaced, never written through (CONTRACT §7).
  */
 export const makeAtomicWriter = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -22,7 +20,7 @@ export const makeAtomicWriter = Effect.gen(function* () {
     contents: string,
     operation: string,
   ): Effect.Effect<void, GameOperationError> =>
-    writeFileStringAtomically({ filePath, contents }).pipe(
+    writeFileStringAtomically({ filePath, contents, followLink: false }).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
       Effect.mapError(

@@ -45,6 +45,8 @@ type WalkedFile = {
   readonly path: string;
   readonly absolute: string;
   readonly size: number;
+  /** Device, inode, size and times: moves whenever the bytes could have. */
+  readonly identity: string;
 };
 
 /** Why a build folder could not be read as one: too many files, a link, or the filesystem. */
@@ -69,11 +71,12 @@ const walkBuild = async (
         }
         if (!entry.isFile()) continue;
         if (files.length >= MAX_WEB_ARTIFACT_FILES) return { problem: "entry-limit" };
-        const stat = await NodeFSP.stat(absolute);
+        const stat = await NodeFSP.stat(absolute, { bigint: true });
         files.push({
           path: NodePath.relative(directory, absolute).split(NodePath.sep).join("/"),
           absolute,
-          size: stat.size,
+          size: Number(stat.size),
+          identity: `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`,
         });
       }
     }
@@ -126,6 +129,19 @@ export const webBuildProblemText = (problem: WebBuildProblem | "empty", project:
       : problem === "empty"
         ? "The export wrote no web build files."
         : "The exported web build directory could not be read back from disk.";
+
+/**
+ * The stat identity of every file in a build folder, without reading a byte:
+ * equal identities mean the bytes hashed earlier are still the ones there (the
+ * way git's index skips unchanged files). Null when the folder is not one
+ * build (a link, too many files, unreadable).
+ */
+export const webBuildStatIdentity = async (directory: string): Promise<string | null> => {
+  const walked = await walkBuild(directory);
+  return "problem" in walked
+    ? null
+    : walked.files.map((file) => `${file.path}\0${file.identity}`).join("\n");
+};
 
 const hashWebBuildDirectory = async (directory: string): Promise<HashedWebBuild | null> => {
   const read = await readWebBuild(directory);

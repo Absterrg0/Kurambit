@@ -562,6 +562,16 @@ const make = Effect.gen(function* () {
       libraryRoots.set(root, !copy);
       return !copy;
     });
+  /** The selection Play serves; one whose record does not decode reads as "damaged", never as a failure of the read. */
+  const selectionOf = (root: string) =>
+    exporter.selected(root).pipe(
+      Effect.catchTags({
+        GameOperationError: (error) =>
+          error.reason === "invalid-project"
+            ? Effect.succeed("damaged" as const)
+            : Effect.fail(error),
+      }),
+    );
   const exportAs = (threadId: ThreadId, target: "Linux" | "Windows") =>
     withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target));
   const rebuild = (threadId: ThreadId) => withRoot(threadId, "Build Web", exporter.publishWeb);
@@ -595,7 +605,8 @@ const make = Effect.gen(function* () {
     if (profile.exportTargets.includes("Web")) {
       // A build of other sources than the folder's is rebuilt; an unreadable
       // tree cannot be shown current, so it is rebuilt too.
-      const selected = yield* exporter.selected(root);
+      // A damaged selection record is no build of these sources: rebuilt below.
+      const selected = yield* selectionOf(root);
       const current = yield* statusSnapshot(
         root,
         manifestProject(manifest),
@@ -604,6 +615,7 @@ const make = Effect.gen(function* () {
       );
       const fresh =
         selected !== null &&
+        selected !== "damaged" &&
         selected.sourceId !== null &&
         current.kind === "known" &&
         current.sourceId === selected.sourceId;
@@ -757,7 +769,11 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const inventory = yield* projects.inventory(root);
       const profile = engineProfile(manifest.engine.name);
-      const selected = yield* exporter.selected(root);
+      const read = yield* selectionOf(root);
+      // A damaged selection record is a stale build (Rebuild writes a fresh
+      // one), never a reason the game cannot be shown.
+      const damaged = read === "damaged";
+      const selected = damaged ? null : read;
       const served = profile.web?.served ?? [];
       const selectedPresent =
         selected === null
@@ -792,7 +808,8 @@ const make = Effect.gen(function* () {
       // What Play would show: a good export does not make the selected build
       // fresh, and a source edit does not make the selected artifact unplayable.
       const webBuildStale =
-        selected === null ? false : selectedPresent !== true || matchesSelected === false;
+        damaged ||
+        (selected === null ? false : selectedPresent !== true || matchesSelected === false);
       const sourcesDifferFromPlay: boolean | "unknown" =
         selected === null
           ? false

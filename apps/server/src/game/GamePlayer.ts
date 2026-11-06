@@ -12,7 +12,7 @@ import * as GameEngine from "./GameEngine.ts";
 import { publishFolder, releaseTo } from "./GameExport.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import { snapshotBuildSource } from "./sourceSnapshot.ts";
+import { snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
 import { makeCheckoutOf, reuseMainPlayer, touchPlayer } from "./unityPlayerCache.ts";
 
 /** Players a game keeps under builds/logs, about 100 MB each. */
@@ -94,7 +94,7 @@ const make = Effect.gen(function* () {
       if (backend.player === null || backend.editor === null)
         return yield* invalid(root, `${engine} games play no prepared player.`);
       const { player, editor } = backend;
-      const known = (detail: string) =>
+      const known = (when: string) =>
         Effect.flatMap(
           Effect.promise((signal) =>
             snapshotBuildSource(root, ctx.projectName, {
@@ -105,7 +105,7 @@ const make = Effect.gen(function* () {
           (source) =>
             source.kind === "known"
               ? Effect.succeed(source.sourceId)
-              : Effect.fail(invalid(root, detail)),
+              : Effect.fail(sourceIdentityError(when, root, ctx.projectName, source)),
         );
       const playerOf = (sourceId: string) =>
         NodePath.join(player.cacheDir(root, sourceId), player.executable);
@@ -143,9 +143,7 @@ const make = Effect.gen(function* () {
           });
           return null;
         });
-      const before = yield* known(
-        `The game sources could not be identified before the ${engine} session ran; the result would not be current.`,
-      );
+      const before = yield* known(`${engine} play build`);
       const early = yield* ready(before);
       if (early !== null) return early;
       yield* beforeBuild;
@@ -165,9 +163,7 @@ const make = Effect.gen(function* () {
                 detail: `The ${engine} import failed, so no session was opened.
 ${imported.message}`.slice(0, 3000),
               });
-            const sourceId = yield* known(
-              `The game sources could not be identified after the ${engine} import; the result would not be current.`,
-            );
+            const sourceId = yield* known(`${engine} play build`);
             const afterImport = yield* ready(sourceId);
             if (afterImport !== null) return afterImport;
             // The most recently built or played few players are kept, so the
