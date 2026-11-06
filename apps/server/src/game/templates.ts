@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import { GameOperationError, type GameTemplateId } from "@kurambit/contracts";
+import { PROFILES } from "./engineProfile.ts";
 
 const gameNamePlaceholder = "{{GAME_NAME}}";
 /**
@@ -125,7 +126,7 @@ export const copyTemplateIntoGame = Effect.fn("GameTemplates.copyIntoGame")(func
     });
   // @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off -- A per-game project id, not a secret; the template copy needs no Crypto service for it.
   const productGuid = globalThis.crypto.randomUUID().replaceAll("-", "");
-  for (const tree of ["godot", "web", "unity"]) {
+  for (const tree of PROFILES.map((profile) => profile.projectDirectory)) {
     const treeSource = path.join(templateDirectory, tree);
     const treeExists = yield* fs.exists(treeSource).pipe(Effect.orElseSucceed(() => false));
     if (!treeExists) continue;
