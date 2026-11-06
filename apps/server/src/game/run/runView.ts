@@ -100,7 +100,7 @@ export const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.
  */
 export const savedBuildLabel = (
   name: string,
-  state: Pick<State.RunState, "rounds">,
+  state: Pick<State.RunState, "rounds" | "best">,
   run: Pick<GameRun, "ending" | "endedAt" | "restore">,
   /** What an earlier restore brought back, by its request id, when its builds tell. */
   restored: (requestId: string) => string | null = () => null,
@@ -219,7 +219,7 @@ export const summarize = (res: Policy.StepResult): string => {
 /** What a restore brings back, in words: "Round 3's build", or the saved build's label. */
 export const restoreLabel = (
   restore: NonNullable<GameRun["restore"]>,
-  state: Pick<State.RunState, "rounds">,
+  state: Pick<State.RunState, "rounds" | "best">,
   run: Pick<GameRun, "ending" | "endedAt" | "restore">,
 ): string =>
   restore.round !== null

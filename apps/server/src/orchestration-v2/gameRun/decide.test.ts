@@ -1021,6 +1021,38 @@ describe("game-run commands", () => {
     expect(runOf(restoreOf(later, "e", { build: "restores/c-before" })).best).toBe("a-sha");
   });
 
+  it("an undo never rolls the best back over a round kept since, even before it is recorded", () => {
+    const stopped = finished(
+      accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
+    );
+    const before = runOf(stopped).best;
+    const asked = accept(stopped, {
+      type: "game-run.restore.request",
+      runId,
+      requestId: "a",
+      round: 1,
+    }).records;
+    const a = accept(asked, {
+      type: "game-run.restore",
+      runId,
+      requestId: "a",
+      outcome: { kind: "restored", sha: "a-sha", message: "" },
+    }).records;
+    // A later round was kept and stopped in its review: its outcome moved the best, unrecorded yet.
+    const kept = { ...a, runs: [...a.runs.slice(0, -1), { ...runOf(a), best: "kept-sha" }] };
+    const request = { type: "game-run.restore.request", runId, requestId: "b" } as const;
+    const b = accept(kept, { ...request, build: "restores/a-before" }).records;
+    expect(runOf(b).restore?.undoes).toBeNull();
+    const landed = accept(b, {
+      type: "game-run.restore",
+      runId,
+      requestId: "b",
+      outcome: { kind: "restored", sha: "b-sha", message: "" },
+    }).records;
+    expect(runOf(landed).best).toBe("kept-sha");
+    expect(runOf(landed).best).not.toBe(before);
+  });
+
   it("a run's copies are spent once no way back reaches them", () => {
     const keepMs = 14 * 24 * 60 * MIN;
     const at = { latest: true, chatDeleted: false, now: T0 + MIN, keepMs };

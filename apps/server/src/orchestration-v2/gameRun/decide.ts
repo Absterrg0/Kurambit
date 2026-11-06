@@ -1054,22 +1054,29 @@ export const copiesSpent = (
 
 /**
  * What restoring `build` undoes: the run's latest restore, when `build` is the
- * folder it kept before itself, it moved the folder, and no round was recorded
- * since it landed. That restore's best and pending line come back with its
- * folder, so a resume goes on from where the run stood before it; a round in
- * progress it abandoned stays abandoned. Undoing an undo is the same rule.
+ * folder it kept before itself, it moved the folder, and the run has made no
+ * progress since it landed: no round recorded, and the best still the one it
+ * left (a round kept but still in its review has moved the best before it is
+ * recorded). That restore's best and pending line come back with its folder,
+ * so a resume goes on from where the run stood before it; a round in progress
+ * it abandoned stays abandoned. Undoing an undo is the same rule.
  */
 export const undoOf = (
   run: Pick<GameRun, "restore">,
-  state: Pick<State.RunState, "rounds">,
+  state: Pick<State.RunState, "rounds" | "best">,
   build: string,
 ): GameRunRestore["replaced"] => {
   const prev = run.restore;
-  return prev !== null &&
-    prev.replaced !== null &&
-    prev.outcome?.kind === "restored" &&
-    build === BuildName.restoreBefore(prev.requestId) &&
-    state.rounds.length === prev.replaced.rounds
+  if (prev === null || prev.replaced === null || prev.outcome?.kind !== "restored") return null;
+  const left =
+    prev.round !== null
+      ? prev.outcome.sha
+      : prev.undoes !== null
+        ? prev.undoes.best
+        : prev.replaced.best;
+  return build === BuildName.restoreBefore(prev.requestId) &&
+    state.rounds.length === prev.replaced.rounds &&
+    state.best === left
     ? prev.replaced
     : null;
 };
