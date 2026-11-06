@@ -83,10 +83,11 @@ const run = (
               } as unknown as Effect.Success<
                 ReturnType<ProjectionStore.ProjectionStoreV2["Service"]["getThreadShell"]>
               >),
-            getThreadRecords: () =>
+            // Generic over the fields asked; this test reads only the turn's run.
+            getThreadRecords: (() =>
               Effect.succeed({
                 runs: [{ id: "run-1", status: turnStatus }],
-              } as unknown as ProjectionStore.ProjectionRecords<"runs">),
+              })) as unknown as ProjectionStore.ProjectionStoreV2["Service"]["getThreadRecords"],
           }),
           Layer.mock(GameService.GameService)({
             playCurrent: (threadId) => Effect.sync(() => void played.push(threadId)),
