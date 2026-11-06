@@ -331,7 +331,7 @@ const BotResult = Schema.Struct({
 // Usage limits, a provider that stays down and memory that stays short end the run resumably.
 const EndedResult = Schema.Struct({
   kind: Schema.Literal("ended"),
-  ending: Schema.Literals(["usage-limit", "provider-down", "low-memory"]),
+  ending: Schema.Literals(["usage-limit", "provider-down", "low-memory", "busy"]),
   reason: Schema.String,
 });
 
@@ -702,6 +702,8 @@ export const GameRunEnding = Schema.Literals([
   "usage-limit",
   "provider-down",
   "low-memory",
+  /** A sample's explore start kept waiting behind other starts on this machine. */
+  "busy",
 ]);
 export type GameRunEnding = typeof GameRunEnding.Type;
 

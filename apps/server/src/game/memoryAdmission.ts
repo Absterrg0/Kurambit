@@ -12,7 +12,8 @@ import type * as Semaphore from "effect/Semaphore";
  * `start` runs inside the gate, so its own peak (an import, a boot) lands
  * before the next start's check. `onWaited` gets the time from entry until
  * the check passed or refused, queueing behind the gate included and `start`
- * itself excluded: the wait a caller may give back to whoever was kept waiting.
+ * itself excluded: the wait a caller may give back to whoever was kept waiting,
+ * with why it was refused, if it was.
  * The queue behind the gate counts against `maxWaitMs` too: a start that holds
  * the gate through a long import refuses the others rather than keeping them
  * waiting unseen, with a null shortfall, since that is contention: the memory
@@ -27,7 +28,7 @@ export const admitWithMemory = <A, E, R, E2>(options: {
   readonly maxWaitMs: number;
   readonly poll: `${number} seconds`;
   readonly refuse: (shortfall: string | null, waitedMs: number) => E2;
-  readonly onWaited: (waitedMs: number, refused: boolean) => void;
+  readonly onWaited: (waitedMs: number, refused: "low-memory" | "busy" | null) => void;
   readonly start: Effect.Effect<A, E, R>;
 }): Effect.Effect<A, E | E2, R> =>
   Effect.gen(function* () {
@@ -51,7 +52,7 @@ export const admitWithMemory = <A, E, R, E2>(options: {
             return Effect.gen(function* () {
               const inside = yield* options.shortfall;
               if (inside !== null) return { ok: false, short: inside } satisfies Outcome;
-              options.onWaited(yield* waited, false);
+              options.onWaited(yield* waited, null);
               return { ok: true, value: yield* options.start } satisfies Outcome;
             });
           }),
@@ -69,7 +70,7 @@ export const admitWithMemory = <A, E, R, E2>(options: {
         const admitted = yield* Effect.raceFirst(gated, expiry);
         if (admitted.ok === "expired") {
           const waitedMs = yield* waited;
-          options.onWaited(waitedMs, false);
+          options.onWaited(waitedMs, "busy");
           return yield* Effect.fail(options.refuse(null, waitedMs));
         }
         if (admitted.ok) return admitted.value;
@@ -77,7 +78,7 @@ export const admitWithMemory = <A, E, R, E2>(options: {
       }
       const waitedMs = yield* waited;
       if (waitedMs >= options.maxWaitMs) {
-        options.onWaited(waitedMs, true);
+        options.onWaited(waitedMs, "low-memory");
         return yield* Effect.fail(options.refuse(short, waitedMs));
       }
       yield* Effect.sleep(options.poll);

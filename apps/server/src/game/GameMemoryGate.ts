@@ -37,7 +37,7 @@ export class GameMemoryGate extends Context.Service<
       path: string,
       room: MemoryRoom,
       start: Effect.Effect<A, E, R>,
-      onWaited?: (waitedMs: number, refused: boolean) => void,
+      onWaited?: (waitedMs: number, refused: "low-memory" | "busy" | null) => void,
     ) => Effect.Effect<A, E | GameOperationError, R>;
   }
 >()("kurambit/game/GameMemoryGate") {}

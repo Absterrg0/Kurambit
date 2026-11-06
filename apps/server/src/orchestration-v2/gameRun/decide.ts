@@ -102,6 +102,7 @@ export const RESUMABLE: ReadonlySet<string> = new Set([
   "usage-limit",
   "provider-down",
   "low-memory",
+  "busy",
   "stopped",
   "failed",
   // A resume starts a fresh stall count (Policy.resume).

@@ -32,10 +32,17 @@ const ThreadEvidence = Schema.Struct({
   /** The input this thread may use across its sessions (a blind sample's), set by the run. */
   inputCapMs: Schema.optionalKey(Schema.Number),
   /**
-   * Since the thread's last finish: how long its starts waited for memory (the
-   * run gives that time back to its cap), and whether the latest was refused.
+   * Since the thread's last finish: how long its starts waited (the run gives
+   * that time back to its cap), and why the latest was refused (memory short,
+   * or queued behind another start), else false. An older record's `true` was
+   * memory short.
    */
-  memory: Schema.optionalKey(Schema.Struct({ waitedMs: Schema.Number, refused: Schema.Boolean })),
+  memory: Schema.optionalKey(
+    Schema.Struct({
+      waitedMs: Schema.Number,
+      refused: Schema.Union([Schema.Boolean, Schema.Literals(["low-memory", "busy"])]),
+    }),
+  ),
 });
 export type ThreadEvidence = typeof ThreadEvidence.Type;
 const ThreadEvidenceJson = Schema.fromJsonString(ThreadEvidence);

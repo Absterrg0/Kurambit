@@ -415,7 +415,10 @@ const make = Effect.gen(function* () {
       const next = Math.max(...turns.map((t) => t.turn.n)) + 1;
       const again = (kind: "retry" | "memory", after: Duration.Input) =>
         resendLater({ creator, at, stepId: turn.stepId, turn: kind, n: next, after });
-      const end = (ending: "usage-limit" | "provider-down" | "low-memory", reason: string) =>
+      const end = (
+        ending: "usage-limit" | "provider-down" | "low-memory" | "busy",
+        reason: string,
+      ) =>
         report(creator, at, turn.stepId, { kind: "ended", ending, reason: reason.slice(0, 300) });
 
       if (run.status === "failed") {
@@ -458,22 +461,21 @@ const make = Effect.gen(function* () {
         }
       }
       // A sample's play turn that did not play because its explore start was
-      // refused for memory plays again on a fresh clock; memory that never
-      // frees ends the run resumably instead of voiding the sample. Only play
-      // turns: the write-up does not play.
+      // refused for a cause not about the build (memory short, or queued
+      // behind another start) plays again on a fresh clock, every cause under
+      // one count; one that never clears ends the run resumably instead of
+      // voiding the sample. Only play turns: the write-up does not play.
       if (role.inputCapMs > 0 && !role.release) {
         // The marks count from this turn's send (the memory resend resets
         // them): a turn that played keeps its result, since a replay would
         // give one side a second turn, and one that never tried to start is
         // not the machine's fault.
         const mark = yield* game.exploreMemoryWait(roleThreadId);
-        if (mark.refused && mark.executedInputSteps === 0) {
+        if (mark.refused !== null && mark.executedInputSteps === 0) {
           const waits = turns.filter((t) => t.sent && t.turn.kind === "memory").length;
-          if (waits >= MEMORY_WAITS)
-            return yield* end("low-memory", `${role.role}: explore start refused, memory short`);
-          yield* log(
-            `${role.role}: explore start refused, memory short; waiting ${MEMORY_PAUSE} (${waits + 1} of ${MEMORY_WAITS})`,
-          );
+          const why = `${role.role}: explore start refused, ${mark.refused === "busy" ? "queued behind other starts" : "memory short"}`;
+          if (waits >= MEMORY_WAITS) return yield* end(mark.refused, why);
+          yield* log(`${why}; waiting ${MEMORY_PAUSE} (${waits + 1} of ${MEMORY_WAITS})`);
           // The marks stay until the resend starts the next turn over: a landing
           // run again before then reads the same marks and sets the same timer.
           return yield* again("memory", MEMORY_PAUSE);

@@ -891,7 +891,7 @@ const layerGame = (root: string, world: World) => {
             }),
           exploreMemoryWait: () =>
             Deferred.succeed(world.capWatched, undefined).pipe(
-              Effect.as({ waitedMs: 0, refused: false, executedInputSteps: 0 }),
+              Effect.as({ waitedMs: 0, refused: null, executedInputSteps: 0 }),
             ),
           limitExploreInput: () => Effect.void,
           botRuns: (threadId) =>

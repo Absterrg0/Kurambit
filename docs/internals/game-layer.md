@@ -375,10 +375,12 @@ Two starts at once would both pass a free-memory check made before either alloca
 and bot starts and the live Unity and Blender editor opens hold one gate (`GameMemoryGate`) from
 that check through their import and boot (a Unity open through its launch and its first minute,
 not its whole cold import). Time queued behind the gate counts against the same 75 s bound, after
-which the start is refused `busy` (contention: no memory refusal), never kept waiting unseen. No
-gated start may open an editor: the gate is one permit and does not nest. A sample's time waiting
-there for memory is given back to its clock; a play turn refused `low-memory` is played again after
-a pause, its explore marks reset only as that turn is sent. A step whose own work is refused
+which the start is refused `busy` (contention, not memory), never kept waiting unseen. No gated
+start may open an editor: the gate is one permit and does not nest. A sample's time waiting there is
+given back to its clock. A play turn whose explore start was refused `low-memory` or `busy` and that
+played nothing is played again after a pause, both causes under one count and one cap; past it the
+run ends resumably with that cause (`low-memory` or `busy`), so no sample lands unplayed. Its
+explore marks reset only as that turn is sent. A step whose own work is refused
 `low-memory`, or `busy` (another operation holds the game, or a start ahead of it holds the gate), ends its job and comes back on a
 durable `game-run.step.wake` timer, so a wait never holds one of the run jobs' shared step slots;
 each kind of wait is counted on the step record, and a cause that does not clear ends the run

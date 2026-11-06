@@ -144,7 +144,7 @@ export class GameExplore extends Context.Service<
     readonly memoryWait: (threadId: ThreadId) => Effect.Effect<
       {
         readonly waitedMs: number;
-        readonly refused: boolean;
+        readonly refused: "low-memory" | "busy" | null;
         readonly executedInputSteps: number;
       },
       GameOperationError
@@ -297,7 +297,7 @@ const make = Effect.gen(function* () {
     start: Effect.Effect<A, E, R>,
   ) =>
     Effect.suspend(() => {
-      const waited = { ms: 0, refused: null as boolean | null };
+      const waited = { ms: 0, refused: undefined as "low-memory" | "busy" | null | undefined };
       return gate
         .admit("Explore session", root, room, start, (waitedMs, refused) => {
           waited.ms += waitedMs;
@@ -306,9 +306,9 @@ const make = Effect.gen(function* () {
         .pipe(
           Effect.ensuring(
             Effect.suspend(() =>
-              waited.refused === null && waited.ms === 0
+              waited.refused === undefined
                 ? Effect.void
-                : recordMemory(threadId, root, waited.ms, waited.refused),
+                : recordMemory(threadId, root, waited.ms, waited.refused ?? false),
             ),
           ),
         );
@@ -336,12 +336,12 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
-  /** Adds a start's memory wait (and whether it was refused) to the thread's record. */
+  /** Adds a start's wait, and why it was refused if it was, to the thread's record. */
   const recordMemory = (
     threadId: ThreadId,
     root: string,
     waitedMs: number,
-    refused: boolean | null,
+    refused: "low-memory" | "busy" | false,
   ) =>
     evidenceLock.withPermits(1)(
       Effect.gen(function* () {
@@ -349,7 +349,7 @@ const make = Effect.gen(function* () {
         const prior = record.memory ?? { waitedMs: 0, refused: false };
         const next: ExploreEvidence.ThreadEvidence = {
           ...record,
-          memory: { waitedMs: prior.waitedMs + waitedMs, refused: refused ?? prior.refused },
+          memory: { waitedMs: prior.waitedMs + waitedMs, refused },
         };
         rememberEvidence(next);
         yield* writeEvidence(next);
@@ -928,8 +928,8 @@ const make = Effect.gen(function* () {
               .playerFor(String(threadId), root, admit)
               .pipe(
                 Effect.tapError((error) =>
-                  error.reason === "low-memory"
-                    ? recordMemory(threadId, root, 0, true)
+                  error.reason === "low-memory" || error.reason === "busy"
+                    ? recordMemory(threadId, root, 0, error.reason)
                     : Effect.void,
                 ),
               )
@@ -1303,7 +1303,9 @@ const make = Effect.gen(function* () {
       const record = yield* threadEvidence(threadId, root);
       const { executedInputSteps } = ExploreEvidence.totals(record);
       const memory = record.memory ?? { waitedMs: 0, refused: false };
-      return { ...memory, executedInputSteps };
+      // An older record's `true` was a low-memory refusal.
+      const refused = memory.refused === true ? "low-memory" : memory.refused || null;
+      return { waitedMs: memory.waitedMs, refused, executedInputSteps };
     }),
     sheet: Effect.fn("GameExplore.sheet")(function* (threadId, output) {
       const root = yield* projects.resolve(threadId);
