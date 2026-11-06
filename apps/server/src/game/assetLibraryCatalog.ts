@@ -1,7 +1,257 @@
-// Every pin was hashed from the bytes its URL served on 2026-11-03. Licence evidence: the
-// OpenGameArt page's licence field, uploaded by the creator's own account, or ambientCG's site
-// licence; each read CC0 1.0 that day. Re-pin only after checking the licence again.
-import type { LibraryPack } from "./assetLibraryFiles.ts";
+// Every pin was hashed from the bytes its URL served on 2026-11-03, the KayKit and new
+// Quaternius pins on 2026-11-06. Licence evidence: the OpenGameArt page's licence field,
+// uploaded by the creator's own account; ambientCG's site licence; or, for KayKit, the
+// LICENSE.txt in the pinned commit of Kay Lousberg's own repository (a GitHub commit
+// archive, the same bytes on every fetch). Each read CC0 1.0 that day. Re-pin only after
+// checking the licence again.
+//
+// A pack's rig is the skeleton its characters share, read from the skin joint names of
+// its GLBs at pin time: kaykit-1 (41 joints, Adventurers and Skeletons alike), kenney-mini
+// (7 joints, Mini Characters and Mini Dungeon), quaternius-ual1 (53 joints) and
+// quaternius-ual2 (65 joints; the two libraries do not share a rig). kenney-blocky is a
+// shared node hierarchy without a skin; kenney-character, quaternius-knight and
+// quaternius-ultimate ship as FBX and are named from the author's description.
+import type { LibraryFamily, LibraryPack } from "./assetLibraryFiles.ts";
+
+/**
+ * The bones of each rig read from its GLBs at pin time, as Blender names them after a glTF
+ * import (checked on kaykit-1 and kenney-mini): an armature on the rig holds every one. The
+ * FBX-only rigs (kenney-character, quaternius-knight, quaternius-ultimate) have no list.
+ */
+export const LIBRARY_RIG_JOINTS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  "kaykit-1": [
+    "root",
+    "hips",
+    "spine",
+    "chest",
+    "upperarm.l",
+    "lowerarm.l",
+    "wrist.l",
+    "hand.l",
+    "handslot.l",
+    "upperarm.r",
+    "lowerarm.r",
+    "wrist.r",
+    "hand.r",
+    "handslot.r",
+    "head",
+    "upperleg.l",
+    "lowerleg.l",
+    "foot.l",
+    "toes.l",
+    "upperleg.r",
+    "lowerleg.r",
+    "foot.r",
+    "toes.r",
+    "kneeIK.l",
+    "control-toe-roll.l",
+    "control-heel-roll.l",
+    "control-foot-roll.l",
+    "heelIK.l",
+    "IK-foot.l",
+    "IK-toe.l",
+    "kneeIK.r",
+    "control-toe-roll.r",
+    "control-heel-roll.r",
+    "control-foot-roll.r",
+    "heelIK.r",
+    "IK-foot.r",
+    "IK-toe.r",
+    "elbowIK.l",
+    "handIK.l",
+    "elbowIK.r",
+    "handIK.r",
+  ],
+  "kenney-mini": ["root", "leg-left", "leg-right", "torso", "arm-left", "arm-right", "head"],
+  "quaternius-ual1": [
+    "root",
+    "DEF-hips",
+    "DEF-spine.001",
+    "DEF-spine.002",
+    "DEF-spine.003",
+    "DEF-neck",
+    "DEF-head",
+    "DEF-shoulder.L",
+    "DEF-upper_arm.L",
+    "DEF-forearm.L",
+    "DEF-hand.L",
+    "DEF-f_index.01.L",
+    "DEF-f_index.02.L",
+    "DEF-f_index.03.L",
+    "DEF-f_middle.01.L",
+    "DEF-f_middle.02.L",
+    "DEF-f_middle.03.L",
+    "DEF-f_pinky.01.L",
+    "DEF-f_pinky.02.L",
+    "DEF-f_pinky.03.L",
+    "DEF-f_ring.01.L",
+    "DEF-f_ring.02.L",
+    "DEF-f_ring.03.L",
+    "DEF-thumb.01.L",
+    "DEF-thumb.02.L",
+    "DEF-thumb.03.L",
+    "DEF-shoulder.R",
+    "DEF-upper_arm.R",
+    "DEF-forearm.R",
+    "DEF-hand.R",
+    "DEF-f_index.01.R",
+    "DEF-f_index.02.R",
+    "DEF-f_index.03.R",
+    "DEF-f_middle.01.R",
+    "DEF-f_middle.02.R",
+    "DEF-f_middle.03.R",
+    "DEF-f_pinky.01.R",
+    "DEF-f_pinky.02.R",
+    "DEF-f_pinky.03.R",
+    "DEF-f_ring.01.R",
+    "DEF-f_ring.02.R",
+    "DEF-f_ring.03.R",
+    "DEF-thumb.01.R",
+    "DEF-thumb.02.R",
+    "DEF-thumb.03.R",
+    "DEF-thigh.L",
+    "DEF-shin.L",
+    "DEF-foot.L",
+    "DEF-toe.L",
+    "DEF-thigh.R",
+    "DEF-shin.R",
+    "DEF-foot.R",
+    "DEF-toe.R",
+  ],
+  "quaternius-ual2": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "spine_03",
+    "neck_01",
+    "Head",
+    "clavicle_l",
+    "upperarm_l",
+    "lowerarm_l",
+    "hand_l",
+    "index_01_l",
+    "index_02_l",
+    "index_03_l",
+    "index_04_leaf_l",
+    "middle_01_l",
+    "middle_02_l",
+    "middle_03_l",
+    "middle_04_leaf_l",
+    "pinky_01_l",
+    "pinky_02_l",
+    "pinky_03_l",
+    "pinky_04_leaf_l",
+    "ring_01_l",
+    "ring_02_l",
+    "ring_03_l",
+    "ring_04_leaf_l",
+    "thumb_01_l",
+    "thumb_02_l",
+    "thumb_03_l",
+    "thumb_04_leaf_l",
+    "clavicle_r",
+    "upperarm_r",
+    "lowerarm_r",
+    "hand_r",
+    "index_01_r",
+    "index_02_r",
+    "index_03_r",
+    "index_04_leaf_r",
+    "middle_01_r",
+    "middle_02_r",
+    "middle_03_r",
+    "middle_04_leaf_r",
+    "pinky_01_r",
+    "pinky_02_r",
+    "pinky_03_r",
+    "pinky_04_leaf_r",
+    "ring_01_r",
+    "ring_02_r",
+    "ring_03_r",
+    "ring_04_leaf_r",
+    "thumb_01_r",
+    "thumb_02_r",
+    "thumb_03_r",
+    "thumb_04_leaf_r",
+    "thigh_l",
+    "calf_l",
+    "foot_l",
+    "ball_l",
+    "ball_leaf_l",
+    "thigh_r",
+    "calf_r",
+    "foot_r",
+    "ball_r",
+    "ball_leaf_r",
+  ],
+};
+
+/** Packs that share one look; a game's STYLE.json picks one, and its packs come from it. */
+export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
+  {
+    id: "kaykit",
+    title: "KayKit",
+    look: "low-poly 3D in one small gradient texture, chunky proportions: fantasy heroes and skeletons on one rig with 76-95 clips each, dungeon, hex strategy, city, Halloween, furniture, restaurant, space base",
+  },
+  {
+    id: "kenney-lowpoly",
+    title: "Kenney low-poly 3D",
+    look: "clean low-poly 3D in flat colours or a colormap: nature, platformer, fantasy town, dungeon, space and city kits, with blocky, mini and stylised characters",
+  },
+  {
+    id: "quaternius-lowpoly",
+    title: "Quaternius low-poly 3D",
+    look: "low-poly 3D: animated knights, monsters and people, a textured medieval village and stylised nature",
+  },
+  {
+    id: "quaternius-universal",
+    title: "Quaternius universal animation",
+    look: "plain humanoid mannequins with large animation libraries; each library is its own rig (quaternius-ual1, quaternius-ual2), and a lock on that rig takes its mannequins as the game's characters",
+  },
+  {
+    id: "kenney-pixel",
+    title: "Kenney pixel art",
+    look: "16-18 px pixel-art tiles, characters and UI: platformer, dungeon, town and roguelike",
+    palette: "kenney-tiny-dungeon",
+  },
+  {
+    id: "kenney-1bit",
+    title: "Kenney 1-bit",
+    look: "monochrome 16 px pixel art",
+    palette: "kenney-1-bit-platformer",
+  },
+  {
+    id: "kenney-vector",
+    title: "Kenney vector",
+    look: "flat vector 2D in bright colours: platformer, top-down shooter, puzzle, sokoban, space shooter",
+  },
+  {
+    id: "kenney-interface",
+    title: "Kenney interface",
+    look: "UI panels, buttons, icons, fonts and particles that sit with most looks",
+  },
+  {
+    id: "photo-pbr",
+    title: "Photo-scanned PBR",
+    look: "realistic photo-scanned textures",
+  },
+  {
+    id: "kenney-audio",
+    title: "Kenney audio",
+    look: "clean UI clicks, foley, sci-fi effects and short jingles",
+  },
+  {
+    id: "rubberduck-sfx",
+    title: "Rubberduck effects",
+    look: "general game sound effects and impacts",
+  },
+  {
+    id: "chiptune",
+    title: "Chiptune",
+    look: "8-bit music",
+  },
+];
 
 export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
   {
@@ -20,6 +270,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "platformer side-view tiles characters enemies coins tilemap",
     description:
       "Side-view pixel platformer tiles, characters, enemies and pickups with a packed tilemap.",
+    family: "kenney-pixel",
   },
   {
     id: "kenney-new-platformer-pack",
@@ -37,6 +288,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "platformer side-view tiles characters enemies backgrounds hud",
     description:
       "Vector side-view platformer: terrain tiles, animated characters and enemies, backgrounds, HUD and a few sounds.",
+    family: "kenney-vector",
   },
   {
     id: "kenney-1-bit-platformer",
@@ -53,6 +305,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "1-bit pixel art, 16px tiles, monochrome",
     tags: "platformer side-view monochrome tiles characters",
     description: "Monochrome 16px platformer tiles, characters and objects.",
+    family: "kenney-1bit",
   },
   {
     id: "kenney-tiny-dungeon",
@@ -69,6 +322,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "pixel art, 16px tiles, muted",
     tags: "top-down dungeon roguelike rpg heroes monsters tiles weapons",
     description: "16px top-down dungeon tiles, heroes, monsters and items.",
+    family: "kenney-pixel",
   },
   {
     id: "kenney-tiny-town",
@@ -85,6 +339,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "pixel art, 16px tiles, muted",
     tags: "top-down town village rpg houses trees fences tiles",
     description: "16px top-down town tiles: grass, paths, houses, trees and fences.",
+    family: "kenney-pixel",
   },
   {
     id: "kenney-roguelike-rpg",
@@ -102,6 +357,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "top-down roguelike rpg tilesheet terrain buildings interior",
     description:
       "Large 16px top-down RPG tilesheet with terrain, buildings and interiors (spritesheets).",
+    family: "kenney-pixel",
   },
   {
     id: "kenney-topdown-shooter",
@@ -118,6 +374,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "flat vector, top-down, muted",
     tags: "top-down shooter soldiers zombies weapons tiles",
     description: "Top-down shooter characters with weapons, zombies, tiles and props.",
+    family: "kenney-vector",
   },
   {
     id: "kenney-puzzle-pack-2",
@@ -134,6 +391,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "flat vector, glossy, colourful",
     tags: "puzzle match blocks gems balls paddles bricks",
     description: "Puzzle pieces: blocks, gems, balls, paddles and bricks in many colours.",
+    family: "kenney-vector",
   },
   {
     id: "kenney-sokoban",
@@ -150,6 +408,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "flat vector, 64px tiles, colourful",
     tags: "puzzle sokoban top-down crates walls player tiles",
     description: "Top-down sokoban tiles: crates, targets, walls, floors and a player.",
+    family: "kenney-vector",
   },
   {
     id: "kenney-space-shooter-redux",
@@ -166,6 +425,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "flat vector, glossy, space",
     tags: "space shooter ships lasers meteors powerups shmup",
     description: "Space shooter ships, lasers, meteors, power-ups, UI bits, sounds and a font.",
+    family: "kenney-vector",
   },
   {
     id: "kenney-ui-pack",
@@ -183,6 +443,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "ui buttons panels sliders checkboxes arrows menu",
     description:
       "Buttons, panels, sliders, checkboxes and arrows in several colours, plus click sounds and fonts.",
+    family: "kenney-interface",
   },
   {
     id: "kenney-pixel-ui-pack",
@@ -199,6 +460,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "pixel art, 16px, muted",
     tags: "ui pixel buttons panels icons bars menu",
     description: "Pixel-art UI: buttons, panels, bars and icons as spritesheets.",
+    family: "kenney-pixel",
   },
   {
     id: "kenney-game-icons",
@@ -216,6 +478,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "icons ui menu buttons arrows gear audio pause",
     description:
       "White glyph icons for menus and HUDs: arrows, gear, pause, audio, trophies and more.",
+    family: "kenney-interface",
   },
   {
     id: "kenney-input-prompts-pixel",
@@ -232,6 +495,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "pixel art, 16px",
     tags: "input prompts keyboard gamepad mouse keys buttons tutorial",
     description: "16px keyboard, mouse and gamepad prompt icons for tutorials and control hints.",
+    family: "kenney-pixel",
   },
   {
     id: "kenney-particle-pack",
@@ -248,6 +512,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "soft white particles, high resolution",
     tags: "particles vfx smoke fire sparks magic flare trails",
     description: "White particle sprites (smoke, fire, sparks, magic, flares) to tint for effects.",
+    family: "kenney-interface",
   },
   {
     id: "kenney-fonts",
@@ -264,6 +529,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "game fonts: pixel, blocky, rounded",
     tags: "font ttf pixel blocky title hud",
     description: "Eleven TTF game fonts, pixel and blocky styles, for titles and HUD text.",
+    family: "kenney-interface",
   },
   {
     id: "kenney-interface-sounds",
@@ -280,6 +546,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "clean UI sound",
     tags: "sfx ui click select confirm error toggle switch menu",
     description: "100 short UI sounds: clicks, selects, confirms, errors, toggles.",
+    family: "kenney-audio",
   },
   {
     id: "kenney-ui-audio",
@@ -297,6 +564,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "clean UI sound",
     tags: "sfx ui click switch button rollover",
     description: "51 button, switch and click sounds.",
+    family: "kenney-audio",
   },
   {
     id: "kenney-rpg-audio",
@@ -313,6 +581,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "foley",
     tags: "sfx rpg footsteps door coins sword chop metal cloth book",
     description: "50 RPG foley sounds: footsteps, doors, coins, blades, cloth, books.",
+    family: "kenney-audio",
   },
   {
     id: "kenney-music-jingles",
@@ -329,6 +598,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "short jingles: 8-bit, pizzicato, steel, sax",
     tags: "music jingle win lose level complete fanfare stinger",
     description: "85 short musical jingles for wins, losses, level ends and pickups.",
+    family: "kenney-audio",
   },
   {
     id: "kenney-sci-fi-sounds",
@@ -345,6 +615,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "synthetic sci-fi",
     tags: "sfx sci-fi laser engine explosion force field computer",
     description: "Sci-fi lasers, engines, explosions, force fields and computer sounds.",
+    family: "kenney-audio",
   },
   {
     id: "rubberduck-100-sfx",
@@ -361,6 +632,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "general game sound",
     tags: "sfx jump hit pickup coin powerup explosion footsteps",
     description: "100 general game sounds: jumps, hits, pickups, power-ups, explosions.",
+    family: "rubberduck-sfx",
   },
   {
     id: "rubberduck-breaking-hit-sfx",
@@ -377,6 +649,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "impacts",
     tags: "sfx impact hit break smash fall crash glass wood",
     description: "75 impact sounds: breaking, falling, smashing and hits.",
+    family: "rubberduck-sfx",
   },
   {
     id: "juhani-chiptune-adventures",
@@ -394,6 +667,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "chiptune, 8-bit, upbeat",
     tags: "music loop chiptune 8-bit adventure level boss",
     description: "Four chiptune adventure tracks (OGG) for levels and menus.",
+    family: "chiptune",
   },
   {
     id: "kenney-animated-characters-1",
@@ -411,6 +685,8 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "3d character human rigged animated idle run jump skins",
     description:
       "Rigged low-poly humans with idle, run and jump animations and swappable skins (FBX).",
+    family: "kenney-lowpoly",
+    rig: "kenney-character",
   },
   {
     id: "kenney-blocky-characters",
@@ -428,6 +704,8 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "3d character blocky rigged animated idle walk sprint die",
     description:
       "18 blocky characters, each with about 27 animations (idle, walk, sprint, die, emotes) as GLB.",
+    family: "kenney-lowpoly",
+    rig: "kenney-blocky",
   },
   {
     id: "kenney-mini-characters",
@@ -444,6 +722,8 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "chibi low-poly, colourful",
     tags: "3d character mini chibi rigged animated idle walk accessories",
     description: "Small chibi characters with about 32 animations each, plus accessories, as GLB.",
+    family: "kenney-lowpoly",
+    rig: "kenney-mini",
   },
   {
     id: "quaternius-knight",
@@ -461,6 +741,8 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "low-poly, flat colours",
     tags: "3d character knight medieval rigged animated sword attack",
     description: "Animated low-poly knights with attack, walk and idle (FBX, OBJ, .blend).",
+    family: "quaternius-lowpoly",
+    rig: "quaternius-knight",
   },
   {
     id: "quaternius-monsters",
@@ -478,6 +760,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "low-poly, flat colours, cute",
     tags: "3d monster enemy creature rigged animated attack",
     description: "Four animated low-poly monsters for enemies (FBX, OBJ, .blend).",
+    family: "quaternius-lowpoly",
   },
   {
     id: "quaternius-ultimate-characters",
@@ -496,6 +779,8 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "3d character human people rigged animated walk run idle punch",
     description:
       "About 50 animated low-poly people with walk, run, idle, punch and more (FBX, OBJ, .blend).",
+    family: "quaternius-lowpoly",
+    rig: "quaternius-ultimate",
   },
   {
     id: "quaternius-universal-animation-library",
@@ -513,6 +798,64 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     tags: "3d animation library humanoid retarget locomotion idle walk run",
     description:
       "46 humanoid animations on a mannequin (GLB for Godot, FBX for Unity) to retarget.",
+    family: "quaternius-universal",
+    rig: "quaternius-ual1",
+  },
+  {
+    id: "quaternius-universal-animation-library-2",
+    title: "Universal Animation Library 2",
+    author: "Quaternius",
+    source: "https://opengameart.org/content/universal-animation-library-2",
+    download:
+      "https://opengameart.org/sites/default/files/universal_animation_library_2standard.zip",
+    sha256: "ec0e40d6d78fe9aaad59e322f40865a8675c22f0745e291622e54520391a9217",
+    bytes: 10257419,
+    licence: "CC0-1.0",
+    licenceEvidence: "https://opengameart.org/content/universal-animation-library-2",
+    kinds: ["animation", "character", "model"],
+    formats: ["glb", "fbx", "blend", "png"],
+    style: "humanoid mannequin",
+    tags: "3d animation library humanoid retarget combat parkour melee farming zombie",
+    description:
+      "43 more humanoid animations (combos, parkour, farming, zombie moves) on male and female mannequins (GLB for Godot, FBX for Unity); a rig of its own, not the first library's.",
+    family: "quaternius-universal",
+    rig: "quaternius-ual2",
+  },
+  {
+    id: "quaternius-medieval-village",
+    title: "Medieval Village MegaKit",
+    author: "Quaternius",
+    source: "https://opengameart.org/content/medieval-village-megakit",
+    download: "https://opengameart.org/sites/default/files/medieval_village_megakitstandard.zip",
+    sha256: "58c3e1b9713ee85749ade230c36e1195af5d96951435532b4411e993b46387bd",
+    bytes: 100025527,
+    licence: "CC0-1.0",
+    licenceEvidence: "https://opengameart.org/content/medieval-village-megakit",
+    kinds: ["model", "texture"],
+    formats: ["gltf", "bin", "fbx", "obj", "mtl", "png", "jpg"],
+    style: "low-poly, textured trims, medieval",
+    tags: "3d medieval village houses walls roofs doors windows balconies stairs modular town",
+    description:
+      "176 modular medieval village pieces: walls, roofs, doors, windows, balconies and stairs, textured (glTF, FBX, OBJ).",
+    family: "quaternius-lowpoly",
+  },
+  {
+    id: "quaternius-stylized-nature",
+    title: "Stylized Nature MegaKit",
+    author: "Quaternius",
+    source: "https://opengameart.org/content/stylized-nature-megakit",
+    download: "https://opengameart.org/sites/default/files/stylized_nature_megakitstandard.zip",
+    sha256: "298f6732b872e4cf7b30e6e7abf9641c7f6dc6b326df37ac089533ed7e3d58c9",
+    bytes: 104088529,
+    licence: "CC0-1.0",
+    licenceEvidence: "https://opengameart.org/content/stylized-nature-megakit",
+    kinds: ["model", "texture"],
+    formats: ["gltf", "bin", "fbx", "obj", "mtl", "png", "jpg"],
+    style: "low-poly, stylised textures, nature",
+    tags: "3d nature trees bushes grass flowers rocks pebbles mushrooms ferns forest",
+    description:
+      "68 stylised nature models: trees, dead trees, bushes, grass, flowers, ferns, mushrooms, rocks and pebbles (glTF, FBX, OBJ).",
+    family: "quaternius-lowpoly",
   },
   {
     id: "kenney-nature-kit",
@@ -529,6 +872,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "low-poly, flat colours",
     tags: "3d nature trees rocks plants grass flowers cliffs paths",
     description: "329 low-poly nature models: trees, rocks, plants, cliffs and paths.",
+    family: "kenney-lowpoly",
   },
   {
     id: "kenney-platformer-kit",
@@ -545,6 +889,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "low-poly, bright",
     tags: "3d platformer blocks platforms coins flags spikes",
     description: "3D platformer blocks, platforms, coins, flags, hazards and decorations.",
+    family: "kenney-lowpoly",
   },
   {
     id: "kenney-fantasy-town-kit",
@@ -561,6 +906,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "low-poly, colormap texture",
     tags: "3d fantasy town medieval buildings walls roofs market",
     description: "Modular fantasy town: walls, roofs, stalls, fences and props (GLB).",
+    family: "kenney-lowpoly",
   },
   {
     id: "kenney-modular-dungeon-kit",
@@ -577,6 +923,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "low-poly, colormap texture",
     tags: "3d dungeon modular walls floors corridors gates",
     description: "Modular dungeon rooms, corridors, gates and props (GLB).",
+    family: "kenney-lowpoly",
   },
   {
     id: "kenney-mini-dungeon",
@@ -593,6 +940,8 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "chibi low-poly, colormap texture",
     tags: "3d dungeon mini characters walls chests",
     description: "Small-scale dungeon pieces, chests and figures (GLB).",
+    family: "kenney-lowpoly",
+    rig: "kenney-mini",
   },
   {
     id: "kenney-space-kit",
@@ -609,6 +958,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "low-poly, flat colours",
     tags: "3d space station rockets craters terrain sci-fi",
     description: "Space station parts, rockets, craters and terrain (FBX, OBJ).",
+    family: "kenney-lowpoly",
   },
   {
     id: "kenney-city-kit-commercial",
@@ -625,6 +975,196 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "low-poly, colormap texture",
     tags: "3d city buildings skyscrapers shops urban",
     description: "Low-poly city buildings and skyscrapers (GLB).",
+    family: "kenney-lowpoly",
+  },
+  {
+    id: "kaykit-adventurers",
+    title: "Adventurers Character Pack",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/archive/672074b73ba276876a19e8816ecdc5241817ab47.zip",
+    sha256: "00777a7b9811a7c7f8dd3fda4e56604f6a93b33673d64557153f354d677b47af",
+    bytes: 6147593,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/LICENSE.txt",
+    kinds: ["character", "model", "animation"],
+    formats: ["glb", "gltf", "bin", "png"],
+    style: "low-poly, gradient texture, chunky fantasy",
+    tags: "3d character fantasy rpg knight mage rogue barbarian rigged animated idle walk run attack weapons shields",
+    description:
+      "Five rigged fantasy heroes (knight, mage, rogue, barbarian) with 76 animations each as GLB, plus their weapons and shields.",
+    family: "kaykit",
+    rig: "kaykit-1",
+    root: "KayKit-Character-Pack-Adventures-1.0-672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures",
+  },
+  {
+    id: "kaykit-skeletons",
+    title: "Skeletons Character Pack",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0/archive/15b62b9bad122f72926c10fb14d622c73819fa54.zip",
+    sha256: "2e3e1107009fcb1ff4b2bccfe91c7e823264e267f20124438916f21a2d6b8e6f",
+    bytes: 6661120,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0/blob/15b62b9bad122f72926c10fb14d622c73819fa54/LICENSE.txt",
+    kinds: ["character", "model", "animation"],
+    formats: ["glb", "gltf", "bin", "png"],
+    style: "low-poly, gradient texture, chunky fantasy",
+    tags: "3d character skeleton enemy undead rigged animated walk attack death spawn weapons",
+    description:
+      "Four rigged skeleton enemies with 95 animations each (spawn, awaken, attacks, deaths) as GLB, on the Adventurers' rig.",
+    family: "kaykit",
+    rig: "kaykit-1",
+    root: "KayKit-Character-Pack-Skeletons-1.0-15b62b9bad122f72926c10fb14d622c73819fa54/addons/kaykit_character_pack_skeletons",
+  },
+  {
+    id: "kaykit-dungeon-remastered",
+    title: "Dungeon Remastered",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0/archive/b0ca9bd96a8072ab36a3a5464f00ed1e06a16d07.zip",
+    sha256: "e96a65ce4040b6b630f04470a60fd523d621c124cfbad062809cf7b94ccf714b",
+    bytes: 6357418,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0/blob/b0ca9bd96a8072ab36a3a5464f00ed1e06a16d07/LICENSE.txt",
+    kinds: ["model"],
+    formats: ["glb", "obj", "mtl", "png"],
+    style: "low-poly, gradient texture, chunky fantasy",
+    tags: "3d dungeon walls floors doors stairs chests barrels torches banners props crawler roguelike",
+    description:
+      "About 200 modular dungeon pieces: walls, floors, doors, stairs, chests, barrels, torches and banners.",
+    family: "kaykit",
+    root: "KayKit-Dungeon-Remastered-1.0-b0ca9bd96a8072ab36a3a5464f00ed1e06a16d07/addons/kaykit_dungeon_remastered",
+  },
+  {
+    id: "kaykit-medieval-hexagon",
+    title: "Medieval Hexagon Pack",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/archive/84fa4e91af6a88989be7c99e0891cede11f2ca38.zip",
+    sha256: "cfa7faff403c93fb90e8eeb448c78e6192782802a532bebed0bdb853b39f7028",
+    bytes: 8428823,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0/blob/84fa4e91af6a88989be7c99e0891cede11f2ca38/LICENSE.txt",
+    kinds: ["model"],
+    formats: ["gltf", "bin", "obj", "mtl", "png"],
+    style: "low-poly, gradient texture, chunky fantasy",
+    tags: "3d hexagon hex tiles strategy medieval buildings castle terrain roads rivers units",
+    description:
+      "Hex terrain tiles, roads, rivers and medieval buildings in four team colours for hex strategy games.",
+    family: "kaykit",
+    root: "KayKit-Medieval-Hexagon-Pack-1.0-84fa4e91af6a88989be7c99e0891cede11f2ca38/addons/kaykit_medieval_hexagon_pack",
+  },
+  {
+    id: "kaykit-city-builder",
+    title: "City Builder Bits",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/archive/63976910ca04d16f0fc531b9c614244be8128713.zip",
+    sha256: "dc101668e104968509740fcad1ed2a12f6123e1a75185f050abeef76dbefd151",
+    bytes: 974356,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/blob/63976910ca04d16f0fc531b9c614244be8128713/LICENSE.txt",
+    kinds: ["model"],
+    formats: ["gltf", "bin", "obj", "mtl", "png"],
+    style: "low-poly, gradient texture, chunky",
+    tags: "3d city town buildings roads cars streetlights builder tycoon",
+    description: "Modular city pieces: buildings, roads, cars, streetlights and props.",
+    family: "kaykit",
+    root: "KayKit-City-Builder-Bits-1.0-63976910ca04d16f0fc531b9c614244be8128713/addons/kaykit_city_builder_bits",
+  },
+  {
+    id: "kaykit-halloween",
+    title: "Halloween Bits",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0/archive/6dc69bf6b2fa766a985754f35ec6a0324090e6c6.zip",
+    sha256: "17b6155ba9aab19cc0c39468c3dd6791aaa99078e44c8e76f68f7af2d1309bba",
+    bytes: 1172887,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0/blob/6dc69bf6b2fa766a985754f35ec6a0324090e6c6/LICENSE.txt",
+    kinds: ["model"],
+    formats: ["gltf", "bin", "obj", "mtl", "png"],
+    style: "low-poly, gradient texture, chunky",
+    tags: "3d halloween horror graveyard coffin pumpkin candle fence gate spooky",
+    description:
+      "Halloween and graveyard props: coffins, gravestones, pumpkins, candles, fences and gates.",
+    family: "kaykit",
+    root: "KayKit-Halloween-Bits-1.0-6dc69bf6b2fa766a985754f35ec6a0324090e6c6/addons/kaykit_halloween_bits",
+  },
+  {
+    id: "kaykit-furniture",
+    title: "Furniture Bits",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0/archive/96d5930a8dbdb363409bbc2d3341718b00e17c9c.zip",
+    sha256: "84be044ad8aa6d7b2e5e6e01ce6f2cc97133c07c04f9de7d98dc2677a0234242",
+    bytes: 683587,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0/blob/96d5930a8dbdb363409bbc2d3341718b00e17c9c/LICENSE.txt",
+    kinds: ["model"],
+    formats: ["gltf", "bin", "obj", "mtl", "png"],
+    style: "low-poly, gradient texture, chunky",
+    tags: "3d furniture interior house room bed chair table cabinet",
+    description: "Interior furniture: beds, chairs, tables, cabinets, shelves and decorations.",
+    family: "kaykit",
+    root: "KayKit-Furniture-Bits-1.0-96d5930a8dbdb363409bbc2d3341718b00e17c9c/addons/kaykit_furniture_bits",
+  },
+  {
+    id: "kaykit-restaurant",
+    title: "Restaurant Bits",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-Restaurant-Bits-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-Restaurant-Bits-1.0/archive/153c8a7535b48237854cb54ff6890679f8c574d1.zip",
+    sha256: "5d2ebd136bfe116b78d5e931e0ceb14391fac3dee29e561d962b5fff90101d0a",
+    bytes: 3174057,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-Restaurant-Bits-1.0/blob/153c8a7535b48237854cb54ff6890679f8c574d1/LICENSE.txt",
+    kinds: ["model"],
+    formats: ["gltf", "bin", "obj", "mtl", "png"],
+    style: "low-poly, gradient texture, chunky",
+    tags: "3d restaurant kitchen food cooking crates tables chairs dishes",
+    description:
+      "Restaurant and kitchen pieces with food, crates, dishes, tables and chairs for cooking games.",
+    family: "kaykit",
+    root: "KayKit-Restaurant-Bits-1.0-153c8a7535b48237854cb54ff6890679f8c574d1/addons/kaykit_restaurant_bits",
+  },
+  {
+    id: "kaykit-space-base",
+    title: "Space Base Bits",
+    author: "Kay Lousberg (KayKit)",
+    source: "https://github.com/KayKit-Game-Assets/KayKit-Space-Base-Bits-1.0",
+    download:
+      "https://github.com/KayKit-Game-Assets/KayKit-Space-Base-Bits-1.0/archive/6dfbcac9927d06283752c4defd4882cfe0d29666.zip",
+    sha256: "eaffd1436a85b07ef0dd95f68ff861b39f9a664d77e41ae276531dd316b3d484",
+    bytes: 1120643,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/KayKit-Game-Assets/KayKit-Space-Base-Bits-1.0/blob/6dfbcac9927d06283752c4defd4882cfe0d29666/LICENSE.txt",
+    kinds: ["model"],
+    formats: ["gltf", "bin", "obj", "mtl", "png"],
+    style: "low-poly, gradient texture, chunky sci-fi",
+    tags: "3d space base sci-fi modules cargo terrain rocks structures",
+    description:
+      "Modular sci-fi base pieces: habitat modules, cargo, landing pads and alien terrain.",
+    family: "kaykit",
+    root: "KayKit-Space-Base-Bits-1.0-6dfbcac9927d06283752c4defd4882cfe0d29666/addons/kaykit_space_base_bits",
   },
   {
     id: "ambientcg-grass004",
@@ -641,6 +1181,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "photo-scanned PBR",
     tags: "texture pbr grass ground terrain",
     description: "Tileable 1K PBR grass material: colour, normal, roughness, AO, displacement.",
+    family: "photo-pbr",
   },
   {
     id: "ambientcg-rock030",
@@ -657,6 +1198,7 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "photo-scanned PBR",
     tags: "texture pbr rock stone cliff",
     description: "Tileable 1K PBR rock material.",
+    family: "photo-pbr",
   },
   {
     id: "ambientcg-woodfloor041",
@@ -673,5 +1215,6 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "photo-scanned PBR",
     tags: "texture pbr wood floor planks",
     description: "Tileable 1K PBR wood-plank floor material.",
+    family: "photo-pbr",
   },
 ];

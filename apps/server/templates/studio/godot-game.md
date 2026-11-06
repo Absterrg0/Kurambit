@@ -2,7 +2,13 @@
 
 Adapted from OhMyGame's godot-game skill (Apache-2.0), plus local rules.
 
-1. Godot 4.7, GL Compatibility renderer.
+1. Godot 4.7. Native builds draw Forward+; the Web export, Play and every
+   check or play session on a private display draw Compatibility. Use only
+   what both draw (tonemap, glow, fog, sky light, directional shadows); SSAO,
+   SSR, SDFGI and volumetric fog exist only in native builds, so nobody
+   testing the game sees them. Physics is Jolt with physics interpolation:
+   move bodies in `_physics_process`, and after a teleport call
+   `reset_physics_interpolation()` on the moved node.
 2. You have no local Godot binary: never look for one or run it. Check
    with `game_check`, re-import after asset changes with `game_import`,
    play with `game_explore_*`, build with `game_export`.
@@ -14,8 +20,8 @@ Adapted from OhMyGame's godot-game skill (Apache-2.0), plus local rules.
    player's rebinding work.
 5. Export checklist before calling it done: `game_export` succeeds for Web
    and Linux, and `game_check` reports every entry clean.
-6. In a production run's role, work in ./godot plus VISION.md, PLAN.md and
-   NOTES.md, and never commit, reset git or use subagents: the run keeps
+6. In a production run's role, work in ./godot plus VISION.md, PLAN.md,
+   NOTES.md and, when your step chooses or changes the look, STYLE.json, and never commit, reset git or use subagents: the run keeps
    the builds.
 
 ## The shell and the feel kit

@@ -93,7 +93,17 @@ file shows each call.
 
 ## Project structure
 
-- `project.godot` uses the Compatibility renderer and boots `scenes/main.tscn`.
+- `project.godot` boots `scenes/main.tscn`. Native exports draw Forward+, the
+  Web export Compatibility (`rendering_method.web`), from the same project;
+  Play and every play session on a private display draw Compatibility too, so
+  keep the look to what both renderers draw.
+- Physics is Jolt with physics interpolation on: move bodies in
+  `_physics_process`, and after a teleport call `reset_physics_interpolation()`
+  on the moved node so it does not streak across the screen.
+- The 3D starter scene's `WorldEnvironment` uses `shell/look_3d.tres` (sky
+  light, AgX tonemap, glow on emissive colours above 1) and its sun casts
+  shadows. Tune the resource; give a 2D game no environment, so sprite
+  colours stay exactly the palette's.
 - Put scenes under `scenes/` and scripts under `scripts/`. Give distinct rules,
   state, player behavior and presentation clear owners as the game grows.
 - Put runtime assets under `assets/`, including imported GLB files under

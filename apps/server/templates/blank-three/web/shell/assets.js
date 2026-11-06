@@ -81,7 +81,7 @@ export async function preloadAssets(manifest, onProgress) {
     entries.map(async ([name, path]) => {
       try {
         const kind = typeof path === "string" ? kindOf(path) : null;
-        if (kind === "model") models.set(name, await gltfLoader.loadAsync(path));
+        if (kind === "model") models.set(name, withShadows(await gltfLoader.loadAsync(path)));
         else if (kind === "texture") {
           const texture = await textureLoader.loadAsync(path);
           texture.colorSpace = THREE.SRGBColorSpace;
@@ -98,4 +98,12 @@ export async function preloadAssets(manifest, onProgress) {
       onProgress(++done, entries.length);
     }),
   );
+}
+
+// Every copy of a model casts and receives the look's shadows (shell/look.js).
+function withShadows(gltf) {
+  gltf.scene.traverse((object) => {
+    if (object.isMesh) object.castShadow = object.receiveShadow = true;
+  });
+  return gltf;
 }

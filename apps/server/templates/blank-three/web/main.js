@@ -49,15 +49,12 @@ export function start(ctx) {
   scene.background = new THREE.Color(0x0b0e14);
   scene.fog = new THREE.Fog(0x0b0e14, 18, 46);
 
-  const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
-  sun.position.set(-6, 10, 4);
-  scene.add(sun, new THREE.HemisphereLight(0x8fb4ff, 0x1a2418, 0.9));
-
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(60, 60),
     new THREE.MeshStandardMaterial({ color: 0x1d3320, roughness: 1 }),
   );
   ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
   const grid = new THREE.GridHelper(60, 60, 0x3a5f43, 0x24382a);
   grid.position.y = 0.01;
   scene.add(ground, grid);
@@ -77,8 +74,12 @@ export function start(ctx) {
     new THREE.MeshStandardMaterial({ color: 0x7fd4ff, roughness: 0.4, metalness: 0.1 }),
   );
   rover.position.set(0, 0.45, 3);
+  rover.castShadow = beacon.castShadow = true;
   scene.add(beacon, rover);
   ctx.player = rover;
+  // Light comes from the shell's look (shell/look.js): its environment map, and
+  // a sun whose soft shadows follow the rover.
+  ctx.look.sun({ follow: rover, size: 24 });
   camera.position.set(0, 7, 12);
   elapsed = 0;
   dashLeft = 0;

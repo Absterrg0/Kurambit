@@ -55,6 +55,9 @@ and checked, played and exported with the same `game_*` tools as a Godot game.
    console line says which clip each state got. Camera: `FollowCamera3D`
    (`target`; move with `cam.Flat(Controls.Move())`) or `FollowCamera2D`
    (`target`, `bounds`) on the main camera. Juice.Shake applies on top.
+   Keep post-processing on for every camera that draws the game
+   (`GetUniversalAdditionalCameraData().renderPostProcessing = true`, as
+   BuildGame does): the look's tonemapping and bloom come from it.
 9. Write every grid level as a text map with `LevelMap.Build` (parent,
    rows, legend, options): walls collide, `level.Spawn('P')` places the
    player, and `level.errors` names any character the legend lacks.
@@ -95,7 +98,7 @@ and checked, played and exported with the same `game_*` tools as a Godot game.
     executable, `game_Data/` and `UnityPlayer.so` together); Windows builds
     `builds/windows/`. Web is refused. Bot runs play the same Linux player as
     `game_explore_*`, at normal speed; they take no `setState` writes.
-17. In a production run's role, work in `./unity` plus VISION.md, PLAN.md and
-    NOTES.md, and never commit, reset git or use subagents: the run keeps
+17. In a production run's role, work in `./unity` plus VISION.md, PLAN.md,
+    NOTES.md and, when your step chooses or changes the look, STYLE.json, and never commit, reset git or use subagents: the run keeps
     the builds. Never touch `Library/`, `Temp/`,
     `Logs/` or `UserSettings/`; they are the editor's caches.

@@ -76,7 +76,9 @@ brief (see below), and opens the game on its **Run** tab. The game's session sta
 your agent there about the game at any time.
 
 Engine: Godot native (default) or three.js browser. Godot is the full lane: a real Godot 4.7 project
-with Blender-made art, native play, and Web, Windows and Linux exports. three.js is the quick
+with Blender-made art, native play, and Web, Windows and Linux exports. Its Windows and Linux builds
+draw with Forward+; its Web build, Play and the agent's play sessions draw with the simpler
+Compatibility renderer, so a few effects only the native builds draw are left out of the default look. three.js is the quick
 browser lane: a static browser game with three.js vendored (no install step), played in real time
 through the same tools, with a Web export only. The run loop, Play, preview and web packaging work
 the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
@@ -89,6 +91,16 @@ on its next Unity call.
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
 empty one.
+
+## Style
+
+A game's look is locked in `STYLE.json` at the game's root: which family of the built-in CC0 art
+library it uses (KayKit, Kenney low-poly, Kenney pixel art and others), the packs its art and sound
+come from, pixel art or smooth, the view, the skeleton its characters share, and loudness targets for
+music and effects. The agent writes it when it chooses the look, and its art tools hold the game to
+it: art from other packs, characters on another skeleton and sprites in another palette are refused
+until the file changes. To change the game's direction, edit `STYLE.json` or ask your agent to,
+then have the art redone. Delete it to lift the lock.
 
 ## Run the production loop
 

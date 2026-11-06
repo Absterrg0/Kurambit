@@ -18,7 +18,15 @@ import {
   type GameLibraryKind,
   manifestProject,
 } from "@kurambit/contracts";
-import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
+import { LIBRARY_CATALOG, LIBRARY_FAMILIES } from "./assetLibraryCatalog.ts";
+import { parseEbur128 } from "./audioLoudness.ts";
+import {
+  lockPackRefusal,
+  lockRigRefusal,
+  loudnessTargets,
+  mayBeCharacter,
+  readGameStyle,
+} from "./gameStyle.ts";
 import { hashFile } from "./sourceSnapshot.ts";
 import {
   INDEX_VERSION,
@@ -70,6 +78,8 @@ const MAX_ADD_FILES = 3000;
 const MAX_ADD_BYTES = 300 * 1024 * 1024;
 /** Far more than a game loads well; a bigger model add is almost always a folder of every format. */
 const MAX_MODEL_ADD_BYTES = 100 * 1024 * 1024;
+/** Clips measured per add; each is one short ffmpeg run. */
+const MAX_LOUDNESS_CLIPS = 32;
 const PAGE = 12;
 
 const KIND_MEDIA: Record<GameLibraryKind, LibraryMedia> = {
@@ -359,12 +369,34 @@ const make = Effect.gen(function* () {
         `${pack.id}-${process.pid}-${NodeCrypto.randomUUID()}`,
       );
       const files = NodePath.join(staging, "files");
+      // A pack inside a deeper folder (a GitHub commit archive's <repo>-<commit>/...)
+      // unpacks whole beside files/, and that folder becomes files/.
+      const unpacked = pack.root === undefined ? files : NodePath.join(staging, "archive");
       const index = yield* Effect.gen(function* () {
         yield* Effect.tryPromise({
-          try: () => NodeFSP.mkdir(files, { recursive: true }),
+          try: () => NodeFSP.mkdir(unpacked, { recursive: true }),
           catch: io("Library unpack", staging),
         });
-        yield* unpackArchive(archive, files, UNPACK_LIMITS);
+        yield* unpackArchive(archive, unpacked, UNPACK_LIMITS);
+        if (pack.root !== undefined) {
+          const inner = NodePath.join(unpacked, ...pack.root.split("/"));
+          yield* Effect.tryPromise({
+            try: () => NodeFSP.rename(inner, files),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "Library unpack",
+                path: pack.download,
+                reason: "invalid-input",
+                detail: `The ${pack.id} archive has no ${pack.root} folder.`,
+                cause,
+              }),
+          });
+          // The rest of the archive is not the pack; only files/ and the index are placed.
+          yield* Effect.tryPromise({
+            try: () => NodeFSP.rm(unpacked, { recursive: true, force: true }),
+            catch: io("Library unpack", unpacked),
+          });
+        }
         return yield* Effect.tryPromise({
           try: async () => {
             const built = await indexPack(pack, files);
@@ -584,13 +616,24 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const searchPacks = (engine: GameEngineId, input: GameAssetsSearchInput) =>
+  const searchPacks = (
+    engine: GameEngineId,
+    input: GameAssetsSearchInput,
+    style: Parameters<typeof lockPackRefusal>[1],
+  ) =>
     Effect.gen(function* () {
       const words = queryWords(input.query);
       const cached = yield* cachedIds;
       const kind = input.kind;
       const wanted = kind === undefined ? undefined : KIND_MEDIA[kind];
       const fetched = (pack: LibraryPack) => (cached.has(packKey(pack)) ? ", fetched" : "");
+      const locked = (pack: LibraryPack) =>
+        style === null
+          ? ""
+          : lockPackRefusal(pack, style) === null
+            ? ", in STYLE.json"
+            : ", outside STYLE.json";
+      const rig = (pack: LibraryPack) => (pack.rig === undefined ? "" : `; rig ${pack.rig}`);
       let hidden = 0;
       const ranked = LIBRARY_CATALOG.flatMap((pack, order) => {
         if (kind !== undefined && !pack.kinds.includes(kind)) return [];
@@ -598,6 +641,8 @@ const make = Effect.gen(function* () {
           2 * matchScore(words, `${pack.id} ${pack.title} ${pack.tags} ${pack.kinds.join(" ")}`) +
           matchScore(words, `${pack.style} ${pack.description}`);
         if (words.length > 0 && score === 0) return [];
+        // The game's own packs first, so the lock's look is what a search shows.
+        const own = style !== null && lockPackRefusal(pack, style) === null ? 1 : 0;
         const usable = pack.formats.filter(
           (format) =>
             loadableIn(engine, format) &&
@@ -609,26 +654,39 @@ const make = Effect.gen(function* () {
           hidden += 1;
           return [];
         }
-        return [{ pack, score, order, usable }];
-      }).toSorted((a, b) => b.score - a.score || a.order - b.order);
+        return [{ pack, score, own, order, usable }];
+      }).toSorted((a, b) => b.own - a.own || b.score - a.score || a.order - b.order);
       const hiddenLine =
         hidden > 0 ? [`${hidden} more packs hold no format this ${engine} game loads.`] : [];
-      // Browsing: every pack on one short line each, so a style can be chosen from the whole library.
+      // Browsing: every pack on one short line each, grouped by style family, so a look can be
+      // chosen from the whole library and locked in STYLE.json.
       if (words.length === 0 && kind === undefined)
         return {
           text: [
-            `The library's ${ranked.length} CC0 packs this ${engine} game loads (id: style; kinds):`,
-            ...ranked.map(
-              ({ pack }) => `- ${pack.id}: ${pack.style}; ${pack.kinds.join(", ")}${fetched(pack)}`,
-            ),
+            style === null
+              ? "No STYLE.json yet: choose one family's look, write STYLE.json (studio-skills/art-pipeline.md), then take the game's art from its packs."
+              : `STYLE.json locks this game to ${style.family === undefined ? "" : `the ${style.family} family, `}packs ${style.packs.join(", ")}${style.rig === undefined ? "" : `, rig ${style.rig}`}.`,
+            `The library's ${ranked.length} CC0 packs this ${engine} game loads, by style family (id: style; kinds; rig):`,
+            ...LIBRARY_FAMILIES.flatMap((family) => {
+              const members = ranked.filter(({ pack }) => pack.family === family.id);
+              return members.length === 0
+                ? []
+                : [
+                    `## ${family.id}: ${family.title}. ${family.look}${family.palette === undefined ? "" : `. Pixel palette: ${family.palette}`}`,
+                    ...members.map(
+                      ({ pack }) =>
+                        `- ${pack.id}: ${pack.style}; ${pack.kinds.join(", ")}${rig(pack)}${locked(pack)}${fetched(pack)}`,
+                    ),
+                  ];
+            }),
             ...hiddenLine,
-            "Search with words or a kind for each pack's details, or pass pack to look inside one. Every pack is CC0 1.0. Keep one style per game.",
+            "Search with words or a kind for each pack's details, or pass pack to look inside one. Every pack is CC0 1.0. One family per game; characters from one rig.",
           ].join("\n"),
         };
       const shown = ranked.slice(0, input.limit ?? 8);
       const lines = shown.map(
         ({ pack, usable }) =>
-          `- ${pack.id}: ${pack.title} by ${pack.author}. ${pack.description} Style: ${pack.style}. Kinds: ${pack.kinds.join(", ")}. Loads here: ${usable.join(", ")}. ${megabytes(pack.bytes)}${fetched(pack)}.`,
+          `- ${pack.id}: ${pack.title} by ${pack.author}. ${pack.description} Style: ${pack.style} (family ${pack.family}${rig(pack)}). Kinds: ${pack.kinds.join(", ")}. Loads here: ${usable.join(", ")}. ${megabytes(pack.bytes)}${fetched(pack)}${locked(pack)}.`,
       );
       const text = [
         shown.length === 0
@@ -819,11 +877,111 @@ const make = Effect.gen(function* () {
       };
     });
 
+  /**
+   * Each added clip's loudness, measured once with ffmpeg on the pack's own
+   * copy, against the lock's targets: music by integrated loudness, effects by
+   * true peak. A machine without ffmpeg, or a clip it cannot read, says so.
+   */
+  const loudnessLines = (
+    root: string,
+    clips: ReadonlyArray<LibraryFile>,
+    filesDir: string,
+    style: Parameters<typeof loudnessTargets>[0],
+  ) =>
+    Effect.gen(function* () {
+      if (clips.length === 0) return [];
+      const targets = loudnessTargets(style);
+      const head = `Loudness against ${targets.fromLock ? "STYLE.json's targets" : "the default targets (set audio.musicLufs and audio.sfxPeakDbtp in STYLE.json to change them)"}: music ${targets.musicLufs} LUFS, effects peaking at most ${targets.sfxPeakDbtp} dBTP.`;
+      const ffmpeg = yield* Effect.promise(() =>
+        GameProcesses.findExecutable("ffmpeg", {
+          pathEnv: process.env.PATH,
+          override: process.env.KURAMBIT_FFMPEG,
+        }),
+      );
+      if (ffmpeg === null)
+        return [
+          "Loudness not measured: ffmpeg is not installed (install it from https://ffmpeg.org/download.html or set KURAMBIT_FFMPEG).",
+        ];
+      const measured: string[] = [];
+      for (const clip of clips.slice(0, MAX_LOUDNESS_CLIPS)) {
+        const result = yield* processes
+          .run({
+            root,
+            executable: ffmpeg,
+            args: [
+              "-hide_banner",
+              "-nostats",
+              "-i",
+              NodePath.join(filesDir, clip.path),
+              "-af",
+              "ebur128=peak=true",
+              "-f",
+              "null",
+              "-",
+            ],
+            operation: "library-loudness",
+            timeoutMs: 30_000,
+            envMode: "replace",
+            env: GameProcesses.engineChildEnv(),
+          })
+          .pipe(Effect.option);
+        const name = nameOf(clip.path);
+        if (result._tag === "None") {
+          measured.push(`- ${name}: not measured (ffmpeg could not be run)`);
+          continue;
+        }
+        if (result.value.timedOut) {
+          measured.push(`- ${name}: not measured (ffmpeg took longer than 30 s)`);
+          continue;
+        }
+        const loudness = result.value.exitCode === 0 ? parseEbur128(result.value.stderr) : null;
+        if (loudness === null) {
+          measured.push(`- ${name}: not measured (ffmpeg could not read it)`);
+          continue;
+        }
+        const lufs = loudness.integratedLufs;
+        const peak = loudness.truePeakDbtp;
+        const level = `${lufs === null ? "too short for integrated loudness" : `${lufs.toFixed(1)} LUFS`}, peak ${peak === null ? "silent" : `${peak.toFixed(1)} dBTP`}`;
+        // A clip of 8 s or more is music, judged by its loudness; shorter ones are effects,
+        // judged by their peak. A clip of unknown length is measured and not judged.
+        const seconds = clip.seconds ?? loudness.seconds;
+        if (seconds === null) {
+          measured.push(`- ${name}, length unknown: ${level} (not judged against a target)`);
+          continue;
+        }
+        const music = seconds >= 8;
+        const verdict = music
+          ? lufs === null
+            ? ""
+            : Math.abs(lufs - targets.musicLufs) <= 2
+              ? " (on target)"
+              : ` (${Math.abs(lufs - targets.musicLufs).toFixed(1)} dB ${lufs > targets.musicLufs ? "louder" : "quieter"} than the music target)`
+          : peak !== null && peak > targets.sfxPeakDbtp
+            ? ` (peaks ${(peak - targets.sfxPeakDbtp).toFixed(1)} dB over the effects ceiling)`
+            : " (within the effects ceiling)";
+        measured.push(`- ${name}, ${music ? "music" : "effect"}: ${level}${verdict}`);
+      }
+      return [
+        head,
+        ...measured,
+        ...(clips.length > MAX_LOUDNESS_CLIPS
+          ? [
+              `… and ${clips.length - MAX_LOUDNESS_CLIPS} more clips not measured; add fewer at once to measure each.`,
+            ]
+          : []),
+      ];
+    });
+
   const search = (root: string, input: GameAssetsSearchInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const engine = manifest.engine.name;
-      if (input.pack === undefined) return yield* searchPacks(engine, input);
+      if (input.pack === undefined)
+        return yield* searchPacks(
+          engine,
+          input,
+          yield* readGameStyle(yield* realRootOf(root, "Library search")),
+        );
       return yield* searchFiles(root, engine, yield* packOf(input.pack), input);
     });
 
@@ -832,6 +990,10 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const engine = manifest.engine.name;
       const pack = yield* packOf(input.pack);
+      // The lock is read before the pack is fetched, so a refused pack costs no download.
+      const style = yield* readGameStyle(yield* realRootOf(root, "Library add"));
+      const outside = lockPackRefusal(pack, style);
+      if (outside !== null) return yield* fail("Library add", pack.id, "invalid-input", outside);
       const index = yield* ensure(pack);
       const byPath = new Map(index.files.map((file) => [file.path, file]));
       const folderNames = new Set<string>();
@@ -937,6 +1099,11 @@ const make = Effect.gen(function* () {
           )
             chosen.set(file.path, file);
         }
+      // Props from a pack on another rig are fine; its characters, or any model whose clips
+      // could not be read, are not.
+      const offRig = lockRigRefusal(pack, style);
+      if (offRig !== null && [...chosen.values()].some(mayBeCharacter))
+        return yield* fail("Library add", pack.id, "invalid-input", offRig);
       const total = [...chosen.values()].reduce((sum, file) => sum + file.bytes, 0);
       if (chosen.size > MAX_ADD_FILES || total > MAX_ADD_BYTES)
         return yield* fail(
@@ -1115,6 +1282,12 @@ const make = Effect.gen(function* () {
         assetsLine,
         ...lines.slice(0, 12),
         ...(lines.length > 12 ? [`… and ${lines.length - 12} more lines.`] : []),
+        ...(yield* loudnessLines(
+          root,
+          [...chosen.values()].filter((file) => file.media === "audio"),
+          filesDir,
+          style,
+        )),
         "Run game_import, then game_check.",
       ].join("\n");
       return { text, directory: directoryRel, added: added.length };
