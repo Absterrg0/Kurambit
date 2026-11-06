@@ -11,6 +11,7 @@ import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
 import { CREATOR_SESSION_SECTION, RUN_STATE_IGNORES } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
+import { failureText } from "./run/handBack.ts";
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
@@ -161,14 +162,5 @@ export const ensureScaffold = (
     );
   });
 
-export const causeText = (cause: Cause.Cause<unknown>): string => {
-  // A wrapper error (a tagged one carries no message of its own) says what
-  // broke only through its cause.
-  const text = (error: unknown, depth: number): string => {
-    if (error instanceof Error && error.message !== "") return error.message;
-    if (depth < 4 && typeof error === "object" && error !== null && "cause" in error)
-      return text(error.cause, depth + 1);
-    return error instanceof Error ? error.name : "unrecognized failure";
-  };
-  return text(Cause.squash(cause), 0).slice(0, 300);
-};
+export const causeText = (cause: Cause.Cause<unknown>): string =>
+  failureText(Cause.squash(cause)).slice(0, 300);

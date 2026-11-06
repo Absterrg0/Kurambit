@@ -86,12 +86,38 @@ const isRunCause = (error: unknown): error is NotMeasured | GameRunBuildFault | 
   error instanceof GameRunToolFailed ||
   error instanceof GameRunBuildFault;
 
-// A wrapper error (a tagged one carries no message of its own) says what broke only through its cause.
-const messageOf = (error: unknown, depth: number): string => {
+/**
+ * A failure in words, whatever shape it came in: text passed as the cause, an
+ * error's message, a wrapper's cause (a tagged error carries no message of its
+ * own), a `detail` or `reason` field, else its tag and value. A pause shows
+ * this, so it never reads as a failure without a cause.
+ */
+export const failureText = (error: unknown, depth = 0): string => {
+  if (typeof error === "string") return error.trim() === "" ? "no detail given" : error;
   if (error instanceof Error && error.message !== "") return error.message;
-  if (depth < 4 && typeof error === "object" && error !== null && "cause" in error)
-    return messageOf(error.cause, depth + 1);
-  return error instanceof Error ? error.name : "unrecognized failure";
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    const field = (name: string): string | null => {
+      const value = record[name];
+      return typeof value === "string" && value !== "" ? value : null;
+    };
+    const detail = field("detail");
+    if (detail !== null) return detail;
+    if (depth < 4 && record.cause !== undefined && record.cause !== null)
+      return failureText(record.cause, depth + 1);
+    const said = field("reason") ?? field("message");
+    if (said !== null) return said;
+    const tag = field("_tag") ?? (error instanceof Error ? error.name : "");
+    let value = "";
+    try {
+      value = JSON.stringify(error) ?? "";
+    } catch {
+      value = "";
+    }
+    const shown = value === "{}" ? "" : value.slice(0, 200);
+    return [tag, shown].filter((x) => x !== "").join(" ") || "a failure with no detail";
+  }
+  return error === undefined || error === null ? "no detail given" : String(error);
 };
 
 /** A tool fault in plain words. */
@@ -103,7 +129,7 @@ export const toolFailed = (
   new GameRunToolFailed({
     what,
     reason: plainReason(
-      isGameOperationError(cause) ? (cause.detail ?? cause.message) : messageOf(cause, 0),
+      isGameOperationError(cause) ? (cause.detail ?? cause.message) : failureText(cause),
       options.roots ?? [],
     ),
     standing: options.standing ?? false,
