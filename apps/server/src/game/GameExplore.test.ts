@@ -18,7 +18,7 @@ import * as GameExplore from "./GameExplore.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProcesses from "./GameProcesses.ts";
-import * as GameProjectService from "./GameProjectService.ts";
+import { gameProjectWorld, layerGameProjectFake } from "./testing/gameProjectFake.ts";
 import { ProcessHost } from "./processHost.ts";
 
 const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
@@ -30,7 +30,7 @@ const layer = GameExplore.layer.pipe(
     Layer.mergeAll(
       Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
       Layer.succeed(ProcessHost, { joinJob: () => undefined, displays: new Set<number>() }),
-      Layer.mock(GameProjectService.GameProjectService)({ resolve: () => Effect.succeed("/g") }),
+      layerGameProjectFake(gameProjectWorld()),
       Layer.mock(GameProcesses.GameProcesses)({ list: () => [] }),
       Layer.mock(PreviewBrowser.PreviewBrowser)({}),
       Layer.mock(GameEngine.GameEngine)({}),
