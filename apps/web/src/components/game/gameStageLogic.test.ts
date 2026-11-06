@@ -2,9 +2,7 @@ import { expect, it } from "vite-plus/test";
 
 import {
   buildFailurePrompt,
-  countGamePreviewRemounts,
   deriveGameStagePhase,
-  gamePreviewFrameKey,
   type GamePreviewServe,
   type GameStageInput,
   nextGamePreviewFrame,
@@ -142,30 +140,6 @@ it("carries the error into the message it asks the agent to fix", () => {
   expect(buildFailurePrompt("boom")).toContain("Fix the error and rebuild the game.");
 });
 
-it("remounts the game only for a real reset, never for status churn", () => {
-  const URL = "http://127.0.0.1:9/index.html";
-  const playing: GamePreviewServe = { previewUrl: URL, servedArtifactId: "artifact:one" };
-  // First sight of a serve mounts the game.
-  expect(countGamePreviewRemounts([playing])).toBe(1);
-  // The same serve read again (another status push, a tab switch) never remounts.
-  expect(countGamePreviewRemounts([playing, playing, { ...playing }])).toBe(1);
-  // A new preview session is a reset the user chose: Stop, then Play again.
-  expect(
-    countGamePreviewRemounts([
-      playing,
-      { previewUrl: null, servedArtifactId: playing.servedArtifactId },
-    ]),
-  ).toBe(2);
-  // A replaced web artifact is the intended reset of a successful rebuild.
-  expect(
-    countGamePreviewRemounts([playing, { ...playing, servedArtifactId: "artifact:two" }]),
-  ).toBe(2);
-  // A source edit or a failed rebuild cannot replace the artifact, and a null
-  // identity means the read cannot vouch for the bytes: neither remounts, so
-  // the honest state is "what is on disk is uncertain", not a reset on screen.
-  expect(countGamePreviewRemounts([playing, { ...playing, servedArtifactId: null }])).toBe(1);
-});
-
 it("folds frame keys across reads so unrelated churn cannot change the iframe", () => {
   const URL = "http://127.0.0.1:9/index.html";
   const first = nextGamePreviewFrame(null, { previewUrl: URL, servedArtifactId: "a" });
@@ -178,10 +152,6 @@ it("folds frame keys across reads so unrelated churn cannot change the iframe", 
   expect(replaced.key).not.toBe(first.key);
   const restarted = nextGamePreviewFrame(first, { previewUrl: null, servedArtifactId: null });
   expect(restarted.key).not.toBe(first.key);
-  // An explicit key read still exists for content that shows one serve at a
-  // time, and it carries both halves of the identity.
-  expect(gamePreviewFrameKey({ previewUrl: URL, servedArtifactId: "b" })).toBe(`${URL}#b`);
-  expect(gamePreviewFrameKey({ previewUrl: null, servedArtifactId: null })).toBe("#");
 });
 
 it("describes unknown source freshness and preserves selected Play", () => {

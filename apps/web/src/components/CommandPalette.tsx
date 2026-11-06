@@ -118,6 +118,7 @@ import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { gameEnvironment } from "../state/game";
 import { useGameWorkspaceStore } from "../gameWorkspaceStore";
+import { useGameStageAccess } from "../hooks/useGameStageAccess";
 import { useIsGameThread } from "../hooks/useIsGameThread";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { sourceControlEnvironment } from "../state/sourceControl";
@@ -723,6 +724,24 @@ function OpenCommandPaletteDialog(props: {
       ? NO_PERMISSION
       : gameEnvironment.runRestore.permissionAtom(activeThreadRef.environmentId),
   );
+  // Each game command shows only where its own command is permitted, and a
+  // run's role thread is never offered writes beside the run.
+  const canGameAction = useAtomValue(
+    activeThreadRef === null
+      ? NO_PERMISSION
+      : gameEnvironment.action.permissionAtom(activeThreadRef.environmentId),
+  );
+  const canRunStart = useAtomValue(
+    activeThreadRef === null
+      ? NO_PERMISSION
+      : gameEnvironment.runStart.permissionAtom(activeThreadRef.environmentId),
+  );
+  const canRunStop = useAtomValue(
+    activeThreadRef === null
+      ? NO_PERMISSION
+      : gameEnvironment.runStop.permissionAtom(activeThreadRef.environmentId),
+  );
+  const gameAccess = useGameStageAccess(activeThreadRef);
   const gameRun = useEnvironmentQuery(
     isGameThread && activeThreadRef !== null
       ? gameEnvironment.runStatus({
@@ -1496,60 +1515,64 @@ function OpenCommandPaletteDialog(props: {
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       if (!result.value.success) throw new Error(result.value.message);
     };
-    actionItems.push(
-      {
+    if (canGameAction)
+      actionItems.push({
         kind: "action",
         value: "action:game-play",
         title: "Play game",
         searchTerms: ["play", "run", "preview", "game"],
         icon: <PlayIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("preview"),
-      },
-      {
-        kind: "action",
-        value: "action:game-rebuild",
-        title: "Rebuild game",
-        searchTerms: ["rebuild", "build", "export", "game"],
-        icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
-        run: runGameAction("rebuild"),
-      },
-      {
-        kind: "action",
-        value: "action:game-stop",
-        title: "Stop game",
-        searchTerms: ["stop", "close", "quit", "game"],
-        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
-        run: runGameAction("stop"),
-      },
-      {
-        kind: "action",
-        value: "action:game-toggle-chat",
-        title: "Toggle chat",
-        searchTerms: ["chat", "hide", "show", "stage", "game"],
-        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-        shortcutCommand: "game.chat.toggle",
-        run: async () => {
-          useGameWorkspaceStore.getState().toggleChat();
-        },
-      },
-    );
-    if (gameRun?.active === true)
-      actionItems.push({
-        kind: "action",
-        value: "action:game-run-stop",
-        title: "Stop production run",
-        searchTerms: ["stop", "run", "production", "game"],
-        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          const result = await runStop({
-            environmentId: threadRef.environmentId,
-            input: { threadId: threadRef.threadId },
-          });
-          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        },
       });
-    else {
-      if (gameRun?.resumable === true)
+    if (canGameAction && gameAccess === "writer")
+      actionItems.push(
+        {
+          kind: "action",
+          value: "action:game-rebuild",
+          title: "Rebuild game",
+          searchTerms: ["rebuild", "build", "export", "game"],
+          icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
+          run: runGameAction("rebuild"),
+        },
+        {
+          kind: "action",
+          value: "action:game-stop",
+          title: "Stop game",
+          searchTerms: ["stop", "close", "quit", "game"],
+          icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+          run: runGameAction("stop"),
+        },
+      );
+    actionItems.push({
+      kind: "action",
+      value: "action:game-toggle-chat",
+      title: "Toggle chat",
+      searchTerms: ["chat", "hide", "show", "stage", "game"],
+      icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "game.chat.toggle",
+      run: async () => {
+        useGameWorkspaceStore.getState().toggleChat();
+      },
+    });
+    // The run's own controls belong to the game's own chats, never a role's.
+    if (gameAccess === "writer" && gameRun?.active === true) {
+      if (canRunStop)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-run-stop",
+          title: "Stop production run",
+          searchTerms: ["stop", "run", "production", "game"],
+          icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            const result = await runStop({
+              environmentId: threadRef.environmentId,
+              input: { threadId: threadRef.threadId },
+            });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          },
+        });
+    } else if (gameAccess === "writer") {
+      if (canRunStart && gameRun?.resumable === true)
         actionItems.push({
           kind: "action",
           value: "action:game-run-resume",
@@ -1577,16 +1600,17 @@ function OpenCommandPaletteDialog(props: {
           },
         });
       // A new run needs the creator's brief, which the Run tab takes.
-      actionItems.push({
-        kind: "action",
-        value: "action:game-run-start",
-        title: "Start production run…",
-        searchTerms: ["start", "new", "run", "production", "brief", "game"],
-        icon: <PlayIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          useGameWorkspaceStore.getState().showStageTab("run");
-        },
-      });
+      if (canRunStart)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-run-start",
+          title: "Start production run…",
+          searchTerms: ["start", "new", "run", "production", "brief", "game"],
+          icon: <PlayIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            useGameWorkspaceStore.getState().showStageTab("run");
+          },
+        });
     }
   }
   for (const [mode, title] of [

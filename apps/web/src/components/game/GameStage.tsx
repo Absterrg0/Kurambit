@@ -19,13 +19,14 @@ import {
   XIcon,
 } from "lucide-react";
 import type { GameAction, ScopedThreadRef } from "@kurambit/contracts";
-import { GAME_TEMPLATES } from "@kurambit/contracts";
+import { GAME_ENGINES, GAME_TEMPLATES } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
+import { useGameStageAccess } from "../../hooks/useGameStageAccess";
+import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import {
   clampGameChatWidth,
   type GameStageTab,
@@ -98,7 +99,10 @@ export function GameStage({
 }) {
   const navigate = useNavigate();
   const query = useIsGameThreadStatus(threadRef);
-  const canOperate = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
+  const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
+  // A run's role thread shows the game but never writes beside the run.
+  const access = useGameStageAccess(threadRef);
+  const canOperate = canAct && access === "writer";
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const chatWidth = useGameWorkspaceStore((state) => state.chatWidth);
   const chatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
@@ -170,7 +174,18 @@ export function GameStage({
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
-  if (!data) return null;
+  if (!data)
+    return query.error !== null && isGameStatusFailure(query.failure) ? (
+      <section className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+        <span className="flex max-w-prose items-start gap-2">
+          <TriangleAlertIcon
+            className="mt-0.5 size-4 shrink-0 text-destructive"
+            aria-hidden="true"
+          />
+          <span className="min-w-0 break-words">The game could not be read: {query.error}</span>
+        </span>
+      </section>
+    ) : null;
   const tabs = PLAY_TABS;
   const activeTab = tab ?? (runStatus.data?.active === true ? "run" : "play");
   const webBuild = data.builds.find((build) => build.target === "Web");
@@ -187,16 +202,26 @@ export function GameStage({
   const building = busy !== null || operationState === "running";
   // Play only starts a preview when none is running; a started game can always
   // be brought back to Stage.
-  const playEnabled = canOperate && (data.previewUrl !== null || !building);
+  // Play of a build that exists only reads, so a run's role thread may play it.
+  const webPlay = data.exportTargets.includes("Web");
+  const playEnabled =
+    webPlay &&
+    canAct &&
+    (access === "writer" || webBuild !== undefined) &&
+    (data.previewUrl !== null || !building);
   const stagingEnabled = canOperate && !building;
+  const rebuildEnabled = stagingEnabled && webPlay;
   const buildingStartedAt =
     busy?.startedAt ??
     (operationState === "running" && data.operation !== null
       ? Date.parse(data.operation.at)
       : null);
   const operation = data.operation;
+  // Only this thread's own operations land as news here: a production run's
+  // captures and checks on the game are its own work, not this chat's.
   const operationVisible =
     operation !== null &&
+    operation.ownerThreadId === threadRef.threadId &&
     operation.revision !== dismissedRevision &&
     seenRevision !== null &&
     operation.revision > seenRevision;
@@ -297,7 +322,9 @@ export function GameStage({
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const templateName = template?.name ?? `Godot ${data.manifest.engine.version}`;
+  const templateName =
+    template?.name ??
+    `${GAME_ENGINES[data.manifest.engine.name].name} ${data.manifest.engine.version}`;
   const stageSubtitle =
     stagePhaseLabel === null
       ? templateName
@@ -347,7 +374,7 @@ export function GameStage({
         <Button
           size="xs"
           variant="warning-outline"
-          disabled={!stagingEnabled}
+          disabled={!rebuildEnabled}
           onClick={() => void perform("rebuild")}
         >
           Rebuild
@@ -389,10 +416,8 @@ export function GameStage({
             </div>
             {building ? (
               <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
-                <RefreshCwIcon
-                  className="size-3 shrink-0 animate-spin motion-reduce:animate-none"
-                  aria-hidden="true"
-                />
+                {/* Static: the elapsed timer already shows it is live. */}
+                <RefreshCwIcon className="size-3 shrink-0" aria-hidden="true" />
                 <TruncatedText text={buildingMessage} />
                 {buildingStartedAt === null ? null : (
                   <GameElapsed since={buildingStartedAt} className="shrink-0" />
@@ -475,7 +500,7 @@ export function GameStage({
                     variant="ghost"
                     aria-label="Rebuild the web build"
                     className="hidden @[46rem]/stage-header:inline-flex"
-                    disabled={!stagingEnabled}
+                    disabled={!rebuildEnabled}
                     onClick={() => void perform("rebuild")}
                   />
                 }
@@ -515,7 +540,7 @@ export function GameStage({
                 <MoreHorizontalIcon className="size-4" aria-hidden="true" />
               </MenuTrigger>
               <MenuPopup align="end">
-                <MenuItem disabled={!stagingEnabled} onClick={() => void perform("rebuild")}>
+                <MenuItem disabled={!rebuildEnabled} onClick={() => void perform("rebuild")}>
                   <RefreshCwIcon />
                   Rebuild the web build
                 </MenuItem>
@@ -526,14 +551,21 @@ export function GameStage({
                   <SquareIcon />
                   Stop the game
                 </MenuItem>
-                <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-windows")}>
-                  <MonitorIcon />
-                  Export Windows build
-                </MenuItem>
-                <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-linux")}>
-                  <DownloadIcon />
-                  Export Linux build
-                </MenuItem>
+                {data.exportTargets.includes("Windows") ? (
+                  <MenuItem
+                    disabled={!stagingEnabled}
+                    onClick={() => void perform("export-windows")}
+                  >
+                    <MonitorIcon />
+                    Export Windows build
+                  </MenuItem>
+                ) : null}
+                {data.exportTargets.includes("Linux") ? (
+                  <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-linux")}>
+                    <DownloadIcon />
+                    Export Linux build
+                  </MenuItem>
+                ) : null}
                 <MenuSeparator />
                 <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">View</div>
                 <MenuRadioGroup
@@ -610,6 +642,16 @@ export function GameStage({
           frameKey={frameKey}
           hidden={hidden || activeTab !== "play"}
           canOperate={canOperate}
+          operation={
+            busy !== null
+              ? { name: BUSY_LABELS[busy.action], own: true }
+              : operationState === "running" && data.operation !== null
+                ? {
+                    name: data.operation.name,
+                    own: data.operation.ownerThreadId === threadRef.threadId,
+                  }
+                : null
+          }
           onPlay={() => void perform("preview")}
           onRebuild={() => void perform("rebuild")}
           onStop={() => void perform("stop")}
@@ -622,6 +664,7 @@ export function GameStage({
           key={threadRef.threadId}
           threadRef={threadRef}
           builds={data.builds}
+          exportTargets={data.exportTargets}
           webBuildStale={data.webBuildStale}
           sourcesDifferFromPlay={data.sourcesDifferFromPlay}
           canOperate={canOperate}

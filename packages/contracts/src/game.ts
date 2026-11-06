@@ -168,8 +168,7 @@ export const GAME_ENGINES: Readonly<
     tool: null,
     picker: {
       title: "three.js browser",
-      description:
-        "A static three.js game that plays in the browser. Nothing to install; Web export only.",
+      description: "A quick static browser game, nothing to install. Web export only.",
     },
   },
   unity: {

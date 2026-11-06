@@ -120,28 +120,6 @@ export function nextGamePreviewFrame(
   return urlChanged || artifactReplaced ? candidate : previous;
 }
 
-/** How many reloads a run of status reads causes, first mount included. */
-export function countGamePreviewRemounts(serves: readonly GamePreviewServe[]): number {
-  let frame = null as null | { readonly key: string; readonly serve: GamePreviewServe };
-  let remounts = 0;
-  for (const serve of serves) {
-    const next = nextGamePreviewFrame(frame, serve);
-    if (frame !== null && next.key !== frame.key) remounts++;
-    frame = next;
-  }
-  if (frame !== null) remounts++;
-  return remounts;
-}
-
-/**
- * The iframe's identity from a full status read. Content must call
- * {@link nextGamePreviewFrame} repeatedly (the stage folds it across renders)
- * so unrelated status churn can never change the key.
- */
-export function gamePreviewFrameKey(serve: GamePreviewServe): string {
-  return frameKeyOf(serve);
-}
-
 export function gameSourceFreshnessLabel(value: GameStatus["sourcesDifferFromPlay"]): string {
   return value === "unknown"
     ? "Source freshness unknown. Check to compare with the selected build."

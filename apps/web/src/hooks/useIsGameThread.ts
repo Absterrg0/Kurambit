@@ -12,8 +12,22 @@ import { useEnvironmentQuery } from "../state/query";
  * Pass `null` on routes with no thread (home, drafts).
  */
 export function useIsGameThread(threadRef: ScopedThreadRef | null): boolean {
-  return useIsGameThreadStatus(threadRef).data !== null;
+  const status = useIsGameThreadStatus(threadRef);
+  return status.data !== null || isGameStatusFailure(status.failure);
 }
+
+/**
+ * A status read that failed for a game (unreadable, busy, a tool) is still a
+ * game thread, shown with its error; only "not a game" answers are not.
+ */
+export const isGameStatusFailure = (failure: unknown): boolean =>
+  typeof failure === "object" &&
+  failure !== null &&
+  "_tag" in failure &&
+  failure._tag === "GameOperationError" &&
+  "reason" in failure &&
+  failure.reason !== "project-not-found" &&
+  failure.reason !== "invalid-project";
 
 /**
  * The game status query every game surface shares. Callers that need the
