@@ -2,12 +2,37 @@
 // play, which harness duties apply and the engine's own prompt lines. No I/O, so the run's
 // pure policy reads it too. Engine behaviour (processes, editors, exports) is the
 // backend's, in GameEngine.ts; each backend carries its engine's profile.
-import type { GameEngineId, GameViewport } from "@kurambit/contracts";
+import type { GameEngineId, GameExportTarget, GameViewport } from "@kurambit/contracts";
 import { GODOT_PROFILE } from "./godotProfile.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
 import { UNITY_PROFILE } from "./unityProfile.ts";
 
-export type GameExportTarget = "Web" | "Linux" | "Windows";
+export type { GameExportTarget } from "@kurambit/contracts";
+
+/** One release an engine makes: where it lands and how it ships. */
+export interface GameEngineRelease {
+  readonly target: GameExportTarget;
+  /** Game-relative file that names the published release; null for Web, whose build is the selected candidate. */
+  readonly artifact: string | null;
+  /** One file, or a folder whose files ship together. */
+  readonly ships: "file" | "folder";
+  /** Whether Kurambit packages it as a download. */
+  readonly packageable: boolean;
+}
+
+/** What of an engine project is build input; everything else is the engine's own output. */
+export interface GameSourceRules {
+  /** Directory names never walked, anywhere in the tree. */
+  readonly skipDirs: ReadonlyArray<string>;
+  /** Directory names at the project root the engine writes. */
+  readonly rootOutputDirs: ReadonlyArray<string>;
+  /** File suffixes the engine generates beside real sources. */
+  readonly sidecarSuffixes: ReadonlyArray<string>;
+  /** Files at the project root the engine or its IDE writes; null when none. */
+  readonly rootOutputFiles: RegExp | null;
+  /** Small `.asset` files are read through the URP settings normalisation (see sourceSnapshot). */
+  readonly derivedAssets: boolean;
+}
 
 export interface GameEngineProfile {
   readonly id: GameEngineId;
@@ -15,14 +40,40 @@ export interface GameEngineProfile {
   readonly displayName: string;
   /** The engine project directory a new game gets; the run calls it the lane. */
   readonly projectDirectory: string;
-  /** Which export targets this engine can release. Anything else is refused plainly. */
+  /** Which export targets this engine can release (the targets of `releases`). Anything else is refused plainly. */
   readonly exportTargets: ReadonlyArray<GameExportTarget>;
+  /** Every release it makes, by target. */
+  readonly releases: ReadonlyArray<GameEngineRelease>;
+  /** What of the project is build input, for the source identity. */
+  readonly buildInputs: GameSourceRules;
+  /** A new game: the engine version the manifest records, and the folders made beside the template's. */
+  readonly scaffold: { readonly version: string; readonly directories: ReadonlyArray<string> };
+  /** The path a game's code loads a project-relative file by (res://x, ./x, Assets/x). */
+  readonly resourcePath: (projectRelative: string) => string;
+  /**
+   * Where art must sit for the engine to import it at all, relative to the
+   * project (Unity's case-sensitive Assets/); null when anywhere under it does.
+   */
+  readonly importRoot: string | null;
+  /** How a sprite's ground line `ground` rows from the top becomes the node origin. */
+  readonly groundHint: (width: number, height: number, ground: number) => string;
+  /** How the game loads a rendered strip's manifest; null when it reads it itself. */
+  readonly stripLoad: ((key: string, resource: string, view: string) => string) | null;
+  /** One sentence each for the game tools whose behaviour differs by engine. */
+  readonly tools: {
+    readonly import: string;
+    readonly check: string;
+    readonly export: string;
+    readonly explore: string;
+  };
   /** Under the engine project directory: the game's art, its icon and title art, library packs and Blender exports. */
   readonly layout: {
     readonly assets: string;
     readonly ui: string;
     readonly library: string;
     readonly blender: string;
+    /** Where rendered sprite strips go, under assets. */
+    readonly sprites: string;
   };
   /** The fixed resolution its games boot, explore and bot-play at; null when the project settings declare it. */
   readonly viewport: GameViewport | null;
@@ -85,16 +136,29 @@ const BY_ID: Readonly<Record<GameEngineId, GameEngineProfile>> = {
   three: THREE_PROFILE,
   unity: UNITY_PROFILE,
 };
-const PROFILES = Object.values(BY_ID);
+export const PROFILES: ReadonlyArray<GameEngineProfile> = Object.values(BY_ID);
 
 export const engineProfile = (id: GameEngineId): GameEngineProfile => BY_ID[id];
 
+/** A game's folders, game-relative with forward slashes, from its engine and its project folder. */
+export const gamePaths = (engine: GameEngineId, project: string) => {
+  const { layout } = BY_ID[engine];
+  const assets = `${project}/${layout.assets}`;
+  return {
+    assets,
+    ui: `${assets}/${layout.ui}`,
+    library: `${assets}/${layout.library}`,
+    blender: `${project}/${layout.blender}`,
+    sprites: `${assets}/${layout.sprites}`,
+  };
+};
+
 /**
- * The profile of the engine whose project directory the run's lane names. A
- * lane no engine names is a hand-renamed project directory; it reads as Godot,
- * the engine whose directory was free-form before engines had their own.
+ * The engine a project folder belongs to, for run records written before the
+ * engine was kept beside it. A folder no engine names is a hand-renamed
+ * project directory; it reads as Godot, the engine whose directory was
+ * free-form before engines had their own.
  */
-/** The engine a project folder belongs to, for records written before the engine was kept beside it. */
 export const legacyLaneEngine = (lane: string): GameEngineId =>
   (PROFILES.find((profile) => profile.projectDirectory === lane) ?? GODOT_PROFILE).id;
 /** A run's engine: the one it recorded, else the one its project folder implies. */
@@ -102,6 +166,7 @@ export const runEngine = (run: {
   readonly engine?: GameEngineId;
   readonly lane: string;
 }): GameEngineId => run.engine ?? legacyLaneEngine(run.lane);
+/** Kept until E's and P's code reads `engineProfile(runEngine(run))`; deleted at the merge. */
 export const laneProfile = (lane: string): GameEngineProfile =>
   PROFILES.find((profile) => profile.projectDirectory === lane) ?? GODOT_PROFILE;
 

@@ -1,4 +1,4 @@
-import { UNITY_VIEWPORT, UNITY_PROJECT_DIRECTORY } from "@kurambit/contracts";
+import { UNITY_MIN_VERSION, UNITY_VIEWPORT, UNITY_PROJECT_DIRECTORY } from "@kurambit/contracts";
 import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const UNITY_PROFILE: GameEngineProfile = {
@@ -6,8 +6,45 @@ export const UNITY_PROFILE: GameEngineProfile = {
   displayName: "Unity",
   projectDirectory: UNITY_PROJECT_DIRECTORY,
   exportTargets: ["Linux", "Windows"],
+  // A Unity player is a folder (executable, game_Data/, the engine runtime): it ships whole.
+  releases: [
+    { target: "Linux", artifact: "builds/linux/game.x86_64", ships: "folder", packageable: false },
+    { target: "Windows", artifact: "builds/windows/game.exe", ships: "folder", packageable: false },
+  ],
+  // A Unity project's own caches sit at its root beside Assets/ and are rewritten by every
+  // editor start; Mono's crash dumps land there whenever an editor is stopped.
+  buildInputs: {
+    skipDirs: [],
+    rootOutputDirs: ["Library", "Temp", "Logs", "UserSettings", "obj", "Build", "Builds"],
+    sidecarSuffixes: [],
+    rootOutputFiles: /(?:\.csproj|\.sln)$|^mono_crash\./,
+    derivedAssets: true,
+  },
+  scaffold: { version: UNITY_MIN_VERSION, directories: [] },
+  resourcePath: (projectRelative) => projectRelative,
+  importRoot: "Assets",
+  groundHint: (_width, height, ground) => {
+    const up = Number(((height - ground) / height).toFixed(4));
+    return `Unity: set the sprite's Pivot to Custom (0.5, ${up}) in its import settings (Pixels Per Unit is yours to match the tiles) to put the transform on the ground line.`;
+  },
+  stripLoad: null,
+  tools: {
+    import: "Unity games refresh assets and recompile scripts in the game's live Unity editor.",
+    check:
+      "Unity games recompile, then play the first enabled build scene and the gameplay scene game.json declares in the live editor for 120 frames each and read its console errors; a scene that never lets play mode advance is an error (the game froze), one that runs below speed is a warning with its frame rate.",
+    export:
+      "Unity games export Linux or Windows players built in the live editor: builds/linux/ or builds/windows/ is the whole player folder (game.x86_64 or game.exe with game_Data/ and the runtime library beside it); ship the folder. Web is refused.",
+    explore:
+      "Unity games play a player of the current sources, built once per source identity, in a window the user never sees.",
+  },
   // Unity imports only what sits under Assets/, and its template's folders are capitalised.
-  layout: { assets: "Assets", ui: "UI", library: "Library", blender: "Assets/Blender" },
+  layout: {
+    assets: "Assets",
+    ui: "UI",
+    library: "Library",
+    blender: "Assets/Blender",
+    sprites: "Art/Sprites",
+  },
   viewport: UNITY_VIEWPORT,
   play: "player",
   web: null,

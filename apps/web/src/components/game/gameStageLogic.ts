@@ -1,33 +1,24 @@
-import type {
-  GameEngineId,
-  GameStatus,
-  GameToolStatus,
-  GameToolchainStatus,
+import {
+  GAME_ENGINES,
+  type GameEngineId,
+  type GameStatus,
+  type GameToolStatus,
+  type GameToolchainStatus,
 } from "@kurambit/contracts";
-
-/**
- * The installed engine a game of this engine plays and builds with. three.js
- * needs nothing installed; Blender only serves the art tools, which say so
- * themselves when it is missing.
- */
-const ENGINE_TOOL: Record<GameEngineId, GameToolStatus["tool"] | null> = {
-  godot: "godot",
-  three: null,
-  unity: "unity",
-};
 
 /** The engine's own status; null for an engine that needs nothing installed. */
 export function engineToolFor(
   toolchain: GameToolchainStatus,
   engine: GameEngineId,
 ): GameToolStatus | null {
-  const name = ENGINE_TOOL[engine];
+  // three.js needs nothing installed; Blender only serves the art tools, which say so themselves.
+  const name = GAME_ENGINES[engine].tool;
   return name === null ? null : (toolchain.tools.find((tool) => tool.tool === name) ?? null);
 }
 
 /** A warning is usable: it names a gap (a missing Windows module) rather than a blocker. */
 export function toolchainReadyFor(toolchain: GameToolchainStatus, engine: GameEngineId): boolean {
-  if (ENGINE_TOOL[engine] === null) return true;
+  if (GAME_ENGINES[engine].tool === null) return true;
   const tool = engineToolFor(toolchain, engine);
   return tool !== null && tool.status !== "error";
 }

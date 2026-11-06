@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- This backend owns the Unity editor boundary: CLI arguments (JSON-valued Pipeline parameters), build outputs and log parsing.
-import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import {
   GameOperationError,
@@ -12,33 +12,35 @@ import {
   manifestProject,
 } from "@kurambit/contracts";
 import type * as GameToolchain from "./GameToolchain.ts";
-import type * as GameUnity from "./GameUnity.ts";
+import * as GameUnity from "./GameUnity.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { consoleIssues, parseCSharpDiagnostics } from "./unityDiagnostics.ts";
 import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
 import * as GameProcesses from "./GameProcesses.ts";
-import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
 import { UNITY_PROFILE } from "./unityProfile.ts";
 import { HOST_OS } from "./processHost.ts";
-import { UNITY_PLAY } from "./unityPlayerCache.ts";
+import {
+  completePlayer,
+  isPlayerDirectory,
+  UNITY_PLAY,
+  unityPlayerDirectory,
+} from "./unityPlayerCache.ts";
 
-/** Frames the check lets the main scene run in play mode before it reads the console. */
+/** Frames the check lets each entry run in play mode before it reads the console. */
 const CHECK_FRAMES = 120;
+/** A game that advances no frame in this long froze; one that advances some is given up to SLOW_WAIT_S. */
+const FROZEN_WAIT_S = 60;
+const SLOW_WAIT_S = 180;
+/**
+ * A frame-count read runs on the editor's main thread, which a game stuck in
+ * Start() or an endless Update() never gives back: past this, it froze.
+ */
+const MAIN_THREAD_ANSWER_MS = 30_000;
 const BUILD_TIMEOUT_MS = 30 * 60_000;
-/** The Linux player's file inside a player folder. */
-const PLAYER_EXECUTABLE = "game.x86_64";
 
 const unityTarget = (target: string) =>
   target === "Windows" ? "StandaloneWindows64" : "StandaloneLinux64";
-
-/** A `unity command` envelope's command result. */
-const resultOf = (result: GameUnity.UnityCliResult): Record<string, unknown> | null => {
-  const data = result.data as { readonly result?: unknown } | null;
-  return data !== null && typeof data.result === "object" && data.result !== null
-    ? (data.result as Record<string, unknown>)
-    : null;
-};
 
 const asResult = (
   run: GameProcessResult,
@@ -65,11 +67,14 @@ const buildErrors = (errors: unknown): string =>
         .join("\n")
     : "no errors reported";
 
+const toolFailed = (operation: string, path: string, detail: string) =>
+  new GameOperationError({ operation, path, reason: "tool-failed", detail: detail.slice(0, 4000) });
+
 /**
  * The Unity backend. Every editor operation goes through the game's one live
  * editor (GameUnity), because Unity refuses a second editor on an open
  * project: import refreshes and recompiles there, check recompiles then
- * plays the main scene for a few frames, export builds a player there.
+ * plays the entries for a few frames, a release builds a player there.
  */
 export const makeUnityBackend = (
   live: GameUnity.GameUnity["Service"],
@@ -122,26 +127,38 @@ export const makeUnityBackend = (
         `${result.process.stdout}\n${result.process.stderr}`,
         projectName,
       );
-      const errors = issues(data.errors);
-      return {
-        result,
-        errors: errors.length > 0 ? errors : fallback.errors,
-        warnings: issues(data.warnings),
-      };
+      const reported = issues(data.errors);
+      const errors = reported.length > 0 ? reported : fallback.errors;
+      const answer = GameUnity.answerOf(result);
+      // A recompile that failed without naming one compiler error cannot be
+      // told apart from the editor's own failure, so it is not the scripts'.
+      if (answer.kind !== "answered" && errors.length === 0)
+        return yield* toolFailed(
+          "unity-recompile",
+          root,
+          `The live Unity editor ${answer.kind === "silent" ? `did not answer the recompile${answer.timedOut ? " in time" : ""}` : `refused the recompile (${answer.message})`} and named no compile error.\n${commandDetail(result.process)}`,
+        );
+      return { result, errors, warnings: issues(data.warnings) };
     });
 
   const importProject: GameEngineBackend["importProject"] = (ctx) =>
     Effect.gen(function* () {
       // There is no Pipeline refresh command; AssetDatabase.Refresh imports
       // files written outside the editor (scripts, GLB, PNG, audio).
-      yield* command(
+      const refreshed = yield* command(
         ctx.root,
         ["script", "eval", "UnityEditor.AssetDatabase.Refresh(); return true;"],
         "unity-refresh",
         600_000,
       );
+      if (GameUnity.answerOf(refreshed).kind === "silent")
+        return yield* toolFailed(
+          "unity-refresh",
+          ctx.root,
+          `The live Unity editor did not answer the asset refresh.\n${commandDetail(refreshed.process)}`,
+        );
       const compiled = yield* recompile(ctx.root, ctx.projectName);
-      const success = compiled.result.ok && compiled.errors.length === 0;
+      const success = compiled.errors.length === 0;
       return {
         result: asResult(
           compiled.result.process,
@@ -157,107 +174,244 @@ export const makeUnityBackend = (
       };
     }).pipe(live.hold(ctx.root));
 
+  /** The scenes the player boots: the first enabled build scene, as the editor reads its build settings. */
+  const firstBuildScene = (root: string) =>
+    Effect.gen(function* () {
+      const read = yield* command(
+        root,
+        [
+          "script",
+          "eval",
+          'foreach (var scene in UnityEditor.EditorBuildSettings.scenes) if (scene.enabled) return scene.path; return "";',
+        ],
+        "unity-build-scenes",
+        MAIN_THREAD_ANSWER_MS,
+      );
+      const answer = GameUnity.answerOf(read);
+      if (answer.kind !== "answered")
+        return yield* toolFailed(
+          "unity-build-scenes",
+          root,
+          `The live Unity editor did not say which scene the player boots.\n${commandDetail(read.process)}`,
+        );
+      const path = answer.result?.["result"];
+      return typeof path === "string" && path !== "" ? path : null;
+    });
+
+  /**
+   * Plays one entry and reads what the game did. A game that never lets play
+   * mode run is measured (an error); a Pipeline that does not answer what the
+   * check must read is not (tool-failed). Returns whether the editor is still
+   * usable, so a frozen one is closed instead of reused.
+   */
+  const playEntry = (
+    ctx: GameEngineContext,
+    scene: string,
+    label: string,
+    out: {
+      readonly entries: string[];
+      readonly errors: GameCheckIssue[];
+      readonly warnings: GameCheckIssue[];
+    },
+  ) =>
+    Effect.gen(function* () {
+      const file = `${ctx.projectName}/${scene}`;
+      const froze = (detail: string) =>
+        Effect.gen(function* () {
+          out.errors.push({ file, message: detail });
+          yield* live.wedged(ctx.root, "the game froze the editor's main thread");
+          return "wedged" as const;
+        });
+      const opened = GameUnity.answerOf(
+        yield* command(ctx.root, ["scene", "open", "--", "--path", scene], "unity-scene-open"),
+      );
+      if (opened.kind === "refused") {
+        out.errors.push({ file, message: `The ${label} scene did not open: ${opened.message}.` });
+        return "usable" as const;
+      }
+      if (opened.kind === "silent")
+        return yield* toolFailed(
+          "unity-scene-open",
+          file,
+          `The live Unity editor did not answer opening ${scene}.`,
+        );
+      for (const [args, operation] of [
+        [["editor", "set_auto_tick"], "unity-auto-tick"],
+        [["console", "clear"], "unity-console-clear"],
+      ] as const)
+        if (GameUnity.answerOf(yield* command(ctx.root, args, operation)).kind === "silent")
+          return yield* toolFailed(
+            operation,
+            file,
+            "The live Unity editor did not answer before play mode.",
+          );
+      const started = yield* command(ctx.root, ["editor.playmode", "start"], "unity-play");
+      const start = GameUnity.answerOf(started);
+      if (start.kind === "silent")
+        return start.timedOut
+          ? yield* froze(
+              `Entering play mode never returned in 120 s: Awake, OnEnable or Start of ${scene} never finished (an endless loop or a blocking wait).`,
+            )
+          : yield* toolFailed(
+              "unity-play",
+              file,
+              "The live Unity editor did not answer the play mode start.",
+            );
+      if (start.kind === "refused") {
+        out.errors.push({ file, message: `Play mode did not start: ${start.message}.` });
+        return "usable" as const;
+      }
+      out.entries.push(label);
+      const ready = yield* live.cli(ctx.root, ["status", "--until-ready", "--timeout", "120"], {
+        operation: "unity-play-ready",
+        timeoutMs: 150_000,
+      });
+      if (ready.process.timedOut)
+        return yield* froze(
+          `The editor never became ready after play mode started in ${scene}: the game froze its main thread.`,
+        );
+      const frame = Effect.gen(function* () {
+        const read = GameUnity.answerOf(
+          yield* command(
+            ctx.root,
+            ["script", "eval", "return UnityEngine.Time.frameCount;"],
+            "unity-frame",
+            MAIN_THREAD_ANSWER_MS,
+          ),
+        );
+        if (read.kind !== "answered") return null;
+        const value = Number(read.result?.["result"]);
+        return Number.isFinite(value) ? value : null;
+      });
+      const waitFrames = (target: number, seconds: number) =>
+        command(
+          ctx.root,
+          [
+            "job",
+            "wait",
+            "--",
+            "--condition",
+            JSON.stringify({
+              member: "UnityEngine.Time.frameCount",
+              op: "greaterThan",
+              value: target,
+            }),
+            "--timeout",
+            String(seconds),
+          ],
+          "unity-play-frames",
+          (seconds + 30) * 1000,
+        );
+      const startedAt = yield* Clock.currentTimeMillis;
+      const first = yield* frame;
+      if (first === null)
+        return yield* froze(
+          `The game froze: the editor's main thread stopped answering once play mode started in ${scene}.`,
+        );
+      yield* waitFrames(first + CHECK_FRAMES, FROZEN_WAIT_S);
+      let after = yield* frame;
+      if (after === null)
+        return yield* froze(
+          `The game froze: the editor's main thread stopped answering within ${FROZEN_WAIT_S} s of play in ${scene}.`,
+        );
+      if (after - first <= 0)
+        return yield* froze(
+          `Play mode advanced 0 of ${CHECK_FRAMES} frames in ${FROZEN_WAIT_S} s in ${scene}: the game froze.`,
+        );
+      // Slow is not frozen: a heavy scene on software rendering gets more time.
+      if (after - first < CHECK_FRAMES) {
+        yield* waitFrames(first + CHECK_FRAMES, SLOW_WAIT_S - FROZEN_WAIT_S);
+        const later = yield* frame;
+        if (later === null)
+          return yield* froze(
+            `The game froze: the editor's main thread stopped answering during play in ${scene}.`,
+          );
+        after = later;
+      }
+      const advanced = after - first;
+      if (advanced < CHECK_FRAMES) {
+        const seconds = Math.max(1, ((yield* Clock.currentTimeMillis) - startedAt) / 1000);
+        out.warnings.push({
+          file,
+          message: `Play mode advanced ${advanced} of ${CHECK_FRAMES} frames in ${Math.round(seconds)} s in ${scene} (about ${(advanced / seconds).toFixed(1)} fps): the game runs far below speed here, and runtime errors after that were not exercised.`,
+        });
+      }
+      // The console answers from a background thread, so it reads even past a stall.
+      const consoleRead = yield* command(
+        ctx.root,
+        ["console", "get", "--", "--level", "error", "--tail", "50"],
+        "unity-console",
+      );
+      const consoleAnswer = GameUnity.answerOf(consoleRead);
+      const logged =
+        consoleAnswer.kind === "answered" ? consoleAnswer.result?.["entries"] : undefined;
+      if (!Array.isArray(logged))
+        return yield* toolFailed(
+          "unity-console",
+          file,
+          `The live Unity editor's console did not answer, so the check cannot say the game ran cleanly.\n${commandDetail(consoleRead.process)}`,
+        );
+      // The Pipeline logs its own failed commands as console errors; they are not the game's.
+      out.errors.push(
+        ...consoleIssues(
+          logged.filter(
+            (entry) =>
+              !String((entry as Record<string, unknown>)?.["message"] ?? "").startsWith(
+                "Command '",
+              ),
+          ),
+          ctx.projectName,
+        ),
+      );
+      return "usable" as const;
+    }).pipe(
+      Effect.tap((state) =>
+        state === "usable"
+          ? // Play mode is left even when a read fails; a stop that does not answer wedges the editor.
+            command(ctx.root, ["editor.playmode", "stop"], "unity-stop", 60_000).pipe(
+              Effect.flatMap((stopped) =>
+                GameUnity.answerOf(stopped).kind === "silent"
+                  ? live.wedged(ctx.root, "play mode would not stop")
+                  : Effect.void,
+              ),
+              Effect.ignore,
+            )
+          : Effect.void,
+      ),
+    );
+
   const runCheck: GameEngineBackend["runCheck"] = (ctx, input) =>
     Effect.gen(function* () {
       const compiled = yield* recompile(ctx.root, ctx.projectName);
-      const entries: string[] = [];
-      const errors: GameCheckIssue[] = [...compiled.errors];
-      const warnings: GameCheckIssue[] = [...compiled.warnings];
-      let run = compiled.result.process;
-      if (compiled.result.ok && compiled.errors.length === 0) {
-        const scene = input.gameplayScene === "" ? "Assets/Scenes/Main.unity" : input.gameplayScene;
-        const opened = yield* command(
-          ctx.root,
-          ["scene", "open", "--", "--path", scene],
-          "unity-scene-open",
-        );
-        if (!opened.ok)
-          errors.push({
-            file: `${ctx.projectName}/${scene}`,
-            message: `The main scene did not open: ${opened.errorMessage ?? "no answer"}.`,
+      const out = {
+        entries: [] as string[],
+        errors: [...compiled.errors] as GameCheckIssue[],
+        warnings: [...compiled.warnings] as GameCheckIssue[],
+      };
+      if (compiled.errors.length === 0) {
+        // The scene the player boots first (the shell's menu), then the gameplay
+        // scene when it differs, as Godot and three.js run both entries.
+        const main = yield* firstBuildScene(ctx.root);
+        const gameplay = input.gameplayScene === "" ? null : input.gameplayScene;
+        if (main === null)
+          out.warnings.push({
+            file: `${ctx.projectName}/ProjectSettings/EditorBuildSettings.asset`,
+            message:
+              "No scene is enabled in the build settings, so the player boots nothing; the check ran only the gameplay scene.",
           });
-        yield* command(ctx.root, ["editor", "set_auto_tick"], "unity-auto-tick");
-        yield* command(ctx.root, ["console", "clear"], "unity-console-clear");
-        const started = opened.ok
-          ? yield* command(ctx.root, ["editor.playmode", "start"], "unity-play")
-          : null;
-        if (started !== null && !started.ok)
-          errors.push({
-            file: `${ctx.projectName}/${scene}`,
-            message: `Play mode did not start: ${started.errorMessage ?? "no answer"}.`,
-          });
-        if (started?.ok === true) {
-          entries.push("main");
-          // Play mode is left even when a read fails or the check is cancelled.
-          run = yield* Effect.gen(function* () {
-            yield* live.cli(ctx.root, ["status", "--until-ready", "--timeout", "120"], {
-              operation: "unity-play-ready",
-              timeoutMs: 150_000,
-            });
-            const frame = yield* command(
-              ctx.root,
-              ["script", "eval", "return UnityEngine.Time.frameCount;"],
-              "unity-frame",
-            );
-            const first = Number(resultOf(frame)?.["result"] ?? 0);
-            const waited = yield* command(
-              ctx.root,
-              [
-                "job",
-                "wait",
-                "--",
-                "--condition",
-                JSON.stringify({
-                  member: "UnityEngine.Time.frameCount",
-                  op: "greaterThan",
-                  value: first + CHECK_FRAMES,
-                }),
-                "--timeout",
-                "60",
-              ],
-              "unity-play-frames",
-              90_000,
-            );
-            void waited;
-            const after = yield* command(
-              ctx.root,
-              ["script", "eval", "return UnityEngine.Time.frameCount;"],
-              "unity-frame",
-            );
-            const advanced = Number(resultOf(after)?.["result"] ?? 0) - first;
-            if (!(advanced >= CHECK_FRAMES))
-              warnings.push({
-                file: ctx.projectName,
-                message: `Play mode advanced ${Number.isFinite(advanced) ? advanced : 0} of ${CHECK_FRAMES} frames within 60 s; runtime errors after that were not exercised.`,
-              });
-            const consoleRead = yield* command(
-              ctx.root,
-              ["console", "get", "--", "--level", "error", "--tail", "50"],
-              "unity-console",
-            );
-            // The Pipeline logs its own failed commands as console errors; they are not the game's.
-            const logged = (resultOf(consoleRead)?.["entries"] ?? []) as ReadonlyArray<unknown>;
-            errors.push(
-              ...consoleIssues(
-                logged.filter(
-                  (entry) =>
-                    !String((entry as Record<string, unknown>)?.["message"] ?? "").startsWith(
-                      "Command '",
-                    ),
-                ),
-                ctx.projectName,
-              ),
-            );
-            return consoleRead.process;
-          }).pipe(
-            Effect.ensuring(
-              command(ctx.root, ["editor.playmode", "stop"], "unity-stop").pipe(Effect.ignore),
-            ),
-          );
-        }
+        const entries = [
+          ...(main === null ? [] : [[main, "main"] as const]),
+          ...(gameplay === null || gameplay === main ? [] : [[gameplay, "gameplay"] as const]),
+        ];
+        for (const [scene, label] of entries)
+          if ((yield* playEntry(ctx, scene, label, out)) === "wedged") break;
       }
       // The process is the last CLI call's own; the issues above carry the verdict.
-      return { reported: { entries, errors, warnings }, issues: [], run };
+      return {
+        reported: { entries: out.entries, errors: out.errors, warnings: out.warnings },
+        issues: [],
+        run: compiled.result.process,
+      };
     }).pipe(live.hold(ctx.root));
 
   /**
@@ -266,7 +420,10 @@ export const makeUnityBackend = (
    * `queued` and `building` states (it reports idle | queued | building |
    * completed, retained until the next build).
    */
-  const runExportRelease: GameEngineBackend["runExportRelease"] = (ctx, input) =>
+  const buildPlayer = (
+    ctx: GameEngineContext,
+    input: { readonly target: string; readonly outputPath: string; readonly operation: string },
+  ) =>
     Effect.gen(function* () {
       const queued = yield* command(
         ctx.root,
@@ -275,7 +432,7 @@ export const makeUnityBackend = (
           "run",
           "--",
           "--target",
-          unityTarget(input.preset),
+          unityTarget(input.target),
           "--outputPath",
           input.outputPath,
           "--confirm",
@@ -283,13 +440,13 @@ export const makeUnityBackend = (
         ],
         input.operation,
       );
-      const queuedResult = resultOf(queued);
-      if (!queued.ok || queuedResult?.["status"] !== "queued")
-        return asResult(
-          queued.process,
-          false,
-          `The Unity ${input.preset} build did not start: ${String(queuedResult?.["message"] ?? queued.errorMessage ?? queuedResult?.["status"] ?? "no answer")}.`,
+      const queuedAnswer = GameUnity.answerOf(queued);
+      const queuedResult = queuedAnswer.kind === "answered" ? queuedAnswer.result : null;
+      if (queuedResult?.["status"] !== "queued")
+        return yield* toolFailed(
+          input.operation,
           input.outputPath,
+          `The Unity ${input.target} build did not start: ${String(queuedResult?.["message"] ?? (queuedAnswer.kind === "refused" ? queuedAnswer.message : "no answer"))}.\n${commandDetail(queued.process)}`,
         );
       const buildId = queuedResult["buildId"];
       // A report is this build's only by its id (or, without one, its output
@@ -307,7 +464,8 @@ export const makeUnityBackend = (
         for (let waited = 0; waited < BUILD_TIMEOUT_MS && !finished; waited += 15_000) {
           yield* Effect.sleep("15 seconds");
           last = yield* command(ctx.root, ["build", "status"], `${input.operation}-status`);
-          const status = resultOf(last)?.["status"];
+          const answer = GameUnity.answerOf(last);
+          const status = answer.kind === "answered" ? answer.result?.["status"] : undefined;
           // An unanswered poll says nothing. Every state but these two is final,
           // except an idle editor that has not picked the build up yet: that
           // gets a minute before the wait gives up on it.
@@ -315,18 +473,24 @@ export const makeUnityBackend = (
           else if (typeof status === "string")
             finished = status !== "idle" || seen || (idleUnseen += 1) >= 4;
         }
+        const lastAnswer = GameUnity.answerOf(last);
+        const report = (lastAnswer.kind === "answered" ? lastAnswer.result : null) ?? {};
         if (!finished) {
           // Unity has no build cancel here; the editor would keep writing into
           // a staging folder the caller is about to delete, so it is closed.
           yield* live.stop(ctx.root);
-          return asResult(
-            last.process,
-            false,
-            `The Unity ${input.preset} build did not finish within ${BUILD_TIMEOUT_MS / 60_000} minutes (last status: ${String(resultOf(last)?.["status"] ?? "none")}); the live editor was closed to stop it, and the next Unity call reopens it.`,
+          return yield* toolFailed(
+            input.operation,
             input.outputPath,
+            `The Unity ${input.target} build did not finish within ${BUILD_TIMEOUT_MS / 60_000} minutes (last status: ${String(report["status"] ?? "none")}); the live editor was closed to stop it, and the next Unity call reopens it.`,
           );
         }
-        const report = resultOf(last) ?? {};
+        if (!ours(report))
+          return yield* toolFailed(
+            input.operation,
+            input.outputPath,
+            `The Unity ${input.target} build ended without its own report (status ${String(report["status"] ?? "none")}, build ${String(report["buildId"] ?? "none")}, expected ${String(buildId ?? input.outputPath)}).`,
+          );
         const present = yield* Effect.promise(() =>
           NodeFSP.stat(input.outputPath).then(
             (stat) => stat.isFile() && stat.size > 0,
@@ -344,7 +508,6 @@ export const makeUnityBackend = (
           : [];
         const succeeded =
           report["status"] === "completed" &&
-          ours(report) &&
           report["result"] === "Succeeded" &&
           present &&
           detached.length === 0;
@@ -352,12 +515,10 @@ export const makeUnityBackend = (
           last.process,
           succeeded,
           succeeded
-            ? `Unity ${input.preset} player built.`
-            : detached.length > 0 && ours(report) && report["result"] === "Succeeded"
-              ? `The Unity ${input.preset} build lost scripts on ${detached.length} scene object(s), so the player would not run them; fix the scripts or their references and rebuild:\n${[...new Set(detached)].slice(0, 6).join("\n")}`
-              : !ours(report)
-                ? `The Unity ${input.preset} build ended without its own report (status ${String(report["status"] ?? "none")}, build ${String(report["buildId"] ?? "none")}, expected ${String(buildId ?? input.outputPath)}).`
-                : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${buildErrors(report["errors"]).slice(0, 1500)}`,
+            ? `Unity ${input.target} player built.`
+            : detached.length > 0 && report["result"] === "Succeeded"
+              ? `The Unity ${input.target} build lost scripts on ${detached.length} scene object(s), so the player would not run them; fix the scripts or their references and rebuild:\n${[...new Set(detached)].slice(0, 6).join("\n")}`
+              : `The Unity ${input.target} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${buildErrors(report["errors"]).slice(0, 1500)}`,
           input.outputPath,
         );
       }).pipe(
@@ -369,141 +530,79 @@ export const makeUnityBackend = (
 
   /**
    * A Unity player is a folder (the executable, its `game_Data/` and the
-   * engine runtime library), so it builds into a staging folder and replaces
-   * the destination only once its files check out and the sources did not
-   * change during the build. The caller imports first.
+   * engine runtime library). It builds into the core's staging folder and is
+   * checked for those three before the core compares the sources and
+   * publishes it. The caller imports first, in the same editor hold.
    */
-  const buildPlayer: NonNullable<GameEngineBackend["player"]>["build"] = (ctx, input) =>
+  const release: GameEngineBackend["release"] = (ctx, input) =>
     Effect.gen(function* () {
-      const { root, projectName } = ctx;
-      const { target, destination, operation } = input;
-      const snapshot = Effect.promise((signal) =>
-        snapshotBuildSource(root, projectName, { signal }),
+      if (input.target === "Web")
+        return yield* new GameOperationError({
+          operation: input.operation,
+          path: ctx.root,
+          reason: "invalid-input",
+          detail: "Unity games make no Web release.",
+        });
+      const executable = input.target === "Windows" ? "game.exe" : "game.x86_64";
+      const runtime = input.target === "Windows" ? "UnityPlayer.dll" : "UnityPlayer.so";
+      const result = yield* buildPlayer(ctx, {
+        target: input.target,
+        outputPath: NodePath.join(input.staging, executable),
+        operation: input.operation,
+      });
+      if (!result.success) return { result, artifact: null, notes: [] };
+      // Unity names this debug-symbol folder itself: it is never shipped.
+      const debugSymbols = NodePath.join(
+        input.staging,
+        "game_BackUpThisFolder_ButDontShipItWithYourGame",
       );
-      const executable = target === "Windows" ? "game.exe" : PLAYER_EXECUTABLE;
-      const staging = NodePath.join(
-        NodePath.dirname(destination),
-        `.${NodePath.basename(destination)}-${NodeCrypto.randomUUID()}`,
-      );
-      return yield* Effect.gen(function* () {
-        const before = yield* snapshot;
-        // An interrupted build leaves its staging folder; only this build's own name prefix is cleared.
-        yield* Effect.promise(async () => {
-          const parent = NodePath.dirname(destination);
-          const prefix = `.${NodePath.basename(destination)}-`;
-          for (const name of await NodeFSP.readdir(parent).catch(() => [] as string[]))
-            if (name.startsWith(prefix))
-              await NodeFSP.rm(NodePath.join(parent, name), { recursive: true, force: true });
-        });
-        yield* Effect.tryPromise({
-          try: () => NodeFSP.mkdir(staging, { recursive: true }),
-          catch: (cause) =>
-            new GameOperationError({ operation, path: staging, reason: "io", cause }),
-        });
-        const result = yield* runExportRelease(ctx, {
-          preset: target,
-          outputPath: NodePath.join(staging, executable),
-          operation,
-        });
-        if (!result.success) return { result, sourceId: null };
-        // Unity names this debug-symbol folder itself: it is never shipped.
-        yield* Effect.promise(() =>
-          NodeFSP.rm(NodePath.join(staging, "game_BackUpThisFolder_ButDontShipItWithYourGame"), {
-            recursive: true,
-            force: true,
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.rm(debugSymbols, { recursive: true, force: true }),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: input.operation,
+            path: debugSymbols,
+            reason: "io",
+            cause,
           }),
-        );
-        const runtime = target === "Windows" ? "UnityPlayer.dll" : "UnityPlayer.so";
-        const missing = yield* Effect.promise(async () => {
-          const absent: string[] = [];
-          for (const [name, kind] of [
-            [executable, "file"],
-            ["game_Data", "directory"],
-            [runtime, "file"],
-          ] as const) {
-            const stat = await NodeFSP.stat(NodePath.join(staging, name)).catch(() => null);
-            if (
-              stat === null ||
-              (kind === "file" ? !stat.isFile() || stat.size === 0 : !stat.isDirectory())
-            )
-              absent.push(name);
-          }
-          return absent;
-        });
-        if (missing.length > 0)
-          return {
-            result: {
-              ...result,
-              success: false,
-              message:
-                `The Unity ${target} build is missing ${missing.join(", ")}; nothing was replaced.\n${result.message}`.slice(
-                  -4096,
-                ),
-            },
-            sourceId: null,
-          };
-        const comparison = comparedSource(before, yield* snapshot, "export");
-        if (comparison.kind !== "current")
-          return {
-            result: { ...result, success: false, message: comparison.detail },
-            sourceId: null,
-          };
-        yield* Effect.tryPromise({
-          try: async () => {
-            const old = `${destination}.old-${NodeCrypto.randomUUID()}`;
-            const existing = await NodeFSP.stat(destination).catch(() => null);
-            if (existing !== null) await NodeFSP.rename(destination, old);
-            try {
-              await NodeFSP.rename(staging, destination);
-            } catch (cause) {
-              // The previous build goes back rather than leaving no build at all.
-              if (existing !== null) await NodeFSP.rename(old, destination).catch(() => undefined);
-              throw cause;
-            }
-            await NodeFSP.rm(old, { recursive: true, force: true });
-          },
-          catch: (cause) =>
-            new GameOperationError({
-              operation,
-              path: destination,
-              reason: "io",
-              detail: "The checked Unity build could not be moved into place.",
-              cause,
-            }),
-        });
+      });
+      const missing = yield* Effect.promise(async () => {
+        const absent: string[] = [];
+        for (const [name, kind] of [
+          [executable, "file"],
+          ["game_Data", "directory"],
+          [runtime, "file"],
+        ] as const) {
+          const stat = await NodeFSP.stat(NodePath.join(input.staging, name)).catch(() => null);
+          if (
+            stat === null ||
+            (kind === "file" ? !stat.isFile() || stat.size === 0 : !stat.isDirectory())
+          )
+            absent.push(name);
+        }
+        return absent;
+      });
+      if (missing.length > 0)
         return {
-          result: { ...result, path: NodePath.join(destination, executable) },
-          sourceId: comparison.sourceId,
+          result: {
+            ...result,
+            success: false,
+            message:
+              `The Unity ${input.target} build is missing ${missing.join(", ")}; nothing was replaced.\n${result.message}`.slice(
+                -4096,
+              ),
+          },
+          artifact: null,
+          notes: [],
         };
-      }).pipe(
-        Effect.ensuring(
-          Effect.promise(() => NodeFSP.rm(staging, { recursive: true, force: true })),
-        ),
-      );
-    });
-
-  const exportPlayer: NonNullable<GameEngineBackend["player"]>["export"] = (ctx, target) =>
-    Effect.gen(function* () {
-      const directory = target === "Windows" ? "builds/windows" : "builds/linux";
-      // One hold for import and build: another game cannot take the editor between them.
-      const built = yield* live.hold(ctx.root)(
-        Effect.gen(function* () {
-          const imported = (yield* importProject(ctx)).result;
-          if (!imported.success) return { result: imported, sourceId: null };
-          return yield* buildPlayer(ctx, {
-            target,
-            destination: NodePath.join(ctx.root, directory),
-            operation: `export-${target.toLowerCase()}`,
-          });
-        }),
-      );
-      if (!built.result.success) return built.result;
       return {
-        ...built.result,
-        message:
-          target === "Windows"
+        result,
+        artifact: executable,
+        notes: [
+          input.target === "Windows"
             ? "Unity Windows x86_64 build ready at builds/windows/game.exe with game_Data/, UnityPlayer.dll and MonoBleedingEdge/ beside it; ship the whole folder. This machine did not run it on Windows."
             : "Unity Linux x86_64 build ready at builds/linux/game.x86_64 with game_Data/ and UnityPlayer.so beside it; ship the whole folder.",
+        ],
       };
     });
 
@@ -525,16 +624,22 @@ export const makeUnityBackend = (
           projectDir,
         };
       }),
+    // The toolchain picks a Unity editor by the project's own version.
+    toolStatus: (root, manifest) =>
+      Effect.map(
+        tools.status({ unityProject: insideGame(root, manifestProject(manifest)) }),
+        (status) => status.tools.find((tool) => tool.tool === "unity") ?? null,
+      ),
+    viewport: () => Effect.succeed({ ...UNITY_VIEWPORT }),
     projectSettingsFile: "ProjectSettings/ProjectSettings.asset",
     projectDirectory: (manifest) => manifestProject(manifest),
     projectSettings: () => ({ viewport: { ...UNITY_VIEWPORT } }),
-    parseDiagnostics: (output) => parseCSharpDiagnostics(output, "unity").errors,
     importProject,
     runCheck,
-    // Players build in the live editor (player.export): no export templates and no preset.
+    // Players build in the live editor: no export templates and no preset.
     exportReady: () => Effect.void,
     exportPreset: (_ctx, target) => Effect.succeed({ name: target, added: false }),
-    runExportRelease,
+    release,
     editor: {
       hold: live.hold,
       close: live.stop,
@@ -546,7 +651,18 @@ export const makeUnityBackend = (
           ),
         ),
       open: (ctx) =>
-        live.hold(ctx.root)(Effect.promise(() => NodeFSP.writeFile(warmMarker(ctx), "warm\n"))),
+        live.hold(ctx.root)(
+          Effect.tryPromise({
+            try: () => NodeFSP.writeFile(warmMarker(ctx), "warm\n"),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "unity-warm",
+                path: warmMarker(ctx),
+                reason: "io",
+                cause,
+              }),
+          }),
+        ),
     },
     // The prepared player of the current sources plays; the editor is not needed again.
     playProcess: (input) =>
@@ -626,10 +742,11 @@ export const makeUnityBackend = (
         };
       }),
     player: {
-      build: buildPlayer,
-      export: exportPlayer,
       playTarget: UNITY_PLAY.target,
       executable: UNITY_PLAY.executable,
+      cacheDir: unityPlayerDirectory,
+      isCacheDir: isPlayerDirectory,
+      complete: (directory) => Effect.promise(() => completePlayer(directory)),
     },
   };
 };

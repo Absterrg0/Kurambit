@@ -1,13 +1,11 @@
 /**
- * Shared bounded layout-visibility probe for the Godot checker and the
- * scenario runner. It is a GDScript string, not an asset, so the packed
- * server archive carries it without a second asset-copy rule. Both scripts
- * concatenate it after `extends SceneTree` and call
- * `gs_layout_scan_entry(entry, root, report, state)`; `report` is a Callable
- * taking `(kind, subject, detail, node_path)` so neither script's own
- * warning/finding channel leaks into the shared geometry. `state` is a
- * Dictionary of counters (`warnings`, `pairs`, `inspected`) the scan reads
- * and mutates, plus a `truncated` flag it sets when a cap stops the scan.
+ * The Godot checker's bounded layout-visibility probe. It is a GDScript
+ * string, not an asset, so the packed server archive carries it without a
+ * second asset-copy rule. The checker concatenates it after `extends
+ * SceneTree` and calls `gs_layout_scan_entry(entry, root, report, state)`;
+ * `report` is the checker's warning channel, taking `(kind, subject, detail,
+ * node_path)`. `state` is a Dictionary of counters (`warnings`, `pairs`,
+ * `inspected`) the scan reads and mutates.
  *
  * Geometry alone never proves visual occlusion: a sibling may be
  * transparent, so overlaps report as `overlap-risk`, never as definite.
@@ -19,7 +17,7 @@
  * occluders under transparent ancestors, and occluders living in another
  * canvas coordinate space.
  */
-export const GODOT_LAYOUT_SCANNER = `# Bounded layout-visibility probe shared by the checker and the scenario runner.
+export const GODOT_LAYOUT_SCANNER = `# Bounded layout-visibility probe for the checker.
 const GS_LAYOUT_MAX_WARNINGS := 10
 const GS_LAYOUT_MAX_NODES := 600
 const GS_LAYOUT_MAX_CONTROLS := 48
@@ -178,7 +176,6 @@ func gs_layout_collect_controls(entry: Node, out: Array, state: Dictionary) -> v
 	var seen := 0
 	while not stack.is_empty():
 		if seen >= GS_LAYOUT_MAX_NODES or out.size() >= GS_LAYOUT_MAX_CONTROLS:
-			state['truncated'] = true
 			return
 		var current: Node = stack.pop_back()
 		seen += 1
@@ -193,7 +190,6 @@ func gs_layout_scan_entry(entry: Node, root_node: Node, report: Callable, state:
 	gs_layout_collect_controls(entry, controls, state)
 	for target in controls:
 		if int(state.get('warnings', 0)) >= GS_LAYOUT_MAX_WARNINGS or int(state.get('pairs', 0)) >= GS_LAYOUT_MAX_PAIRS:
-			state['truncated'] = true
 			return
 		gs_layout_scan_target(target, root_node, report, state)
 
@@ -300,7 +296,6 @@ func gs_layout_scan_overlap(control: Control, rect: Rect2, subject: String, subj
 	var depth := 0
 	while level != null and depth < GS_LAYOUT_MAX_DEPTH:
 		if int(state.get('warnings', 0)) >= GS_LAYOUT_MAX_WARNINGS or int(state.get('pairs', 0)) >= GS_LAYOUT_MAX_PAIRS:
-			state['truncated'] = true
 			return
 		var parent := level.get_parent()
 		if parent == null or parent is Viewport:
@@ -309,7 +304,6 @@ func gs_layout_scan_overlap(control: Control, rect: Rect2, subject: String, subj
 		var index := siblings.find(level) + 1
 		while index < siblings.size():
 			if int(state.get('warnings', 0)) >= GS_LAYOUT_MAX_WARNINGS or int(state.get('pairs', 0)) >= GS_LAYOUT_MAX_PAIRS:
-				state['truncated'] = true
 				return
 			if gs_layout_scan_occluder(siblings[index], parent, rect, area, control_z, view, canvas_home, subject, subject_path, root_node, report, state):
 				return
@@ -324,10 +318,8 @@ func gs_layout_scan_occluder(candidate: Node, stop_parent: Node, rect: Rect2, ar
 	var seen := 0
 	while not stack.is_empty():
 		if int(state.get('warnings', 0)) >= GS_LAYOUT_MAX_WARNINGS or int(state.get('pairs', 0)) >= GS_LAYOUT_MAX_PAIRS:
-			state['truncated'] = true
 			return false
 		if seen >= GS_LAYOUT_MAX_OCCLUDER_NODES:
-			state['truncated'] = true
 			return false
 		var node: Node = stack.pop_back()
 		seen += 1

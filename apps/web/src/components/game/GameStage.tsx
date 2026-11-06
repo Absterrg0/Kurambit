@@ -54,7 +54,6 @@ import {
   deriveGameStagePhase,
   nextGamePreviewFrame,
   type GamePreviewServe,
-  toolchainReadyFor,
 } from "./gameStageLogic";
 
 const BUSY_LABELS: Record<GameAction, string> = {
@@ -176,7 +175,8 @@ export function GameStage({
   const activeTab = tab ?? (runStatus.data?.active === true ? "run" : "play");
   const webBuild = data.builds.find((build) => build.target === "Web");
   const phase = deriveGameStagePhase({
-    toolchainReady: toolchainReadyFor(data.toolchain, data.manifest.engine.name),
+    // The game's own engine tool, as the server resolved it for this project.
+    toolchainReady: data.engineTool === null || data.engineTool.status !== "error",
     operation: data.operation,
     hasWebBuild: webBuild !== undefined,
     webBuildStale: data.webBuildStale,

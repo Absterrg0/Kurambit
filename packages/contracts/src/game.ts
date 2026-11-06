@@ -138,9 +138,57 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
   },
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "blank";
+/** What a client says about each engine: keyed by every engine id, so a new engine does not compile without its entry. */
+export const GAME_ENGINES: Readonly<
+  Record<
+    GameEngineId,
+    {
+      /** Short human name ("Godot", "three.js", "Unity"). */
+      readonly name: string;
+      readonly template: GameTemplateId;
+      /** The installed tool its games build and play with; null when it needs none. */
+      readonly tool: "godot" | "unity" | null;
+      readonly picker: { readonly title: string; readonly description: string };
+    }
+  >
+> = {
+  godot: {
+    name: "Godot",
+    template: "blank",
+    tool: "godot",
+    picker: {
+      title: "Godot native",
+      description:
+        "A real Godot 4.7 project with Blender-made art. The full lane: native play, Windows and Linux exports.",
+    },
+  },
+  three: {
+    name: "three.js",
+    template: "blank-three",
+    tool: null,
+    picker: {
+      title: "three.js browser",
+      description:
+        "A static three.js game that plays in the browser. Nothing to install; Web export only.",
+    },
+  },
+  unity: {
+    name: "Unity",
+    template: "blank-unity",
+    tool: "unity",
+    picker: {
+      title: "Unity native",
+      description:
+        "A Unity 6 project in C#. Linux and Windows builds. Needs a Unity 6 editor from Unity Hub and a Unity Personal licence.",
+    },
+  },
+};
 /** The starter template a create request's engine maps to. */
 export const gameTemplateForEngine = (engine: GameEngineId): GameTemplateId =>
-  engine === "three" ? "blank-three" : engine === "unity" ? "blank-unity" : "blank";
+  GAME_ENGINES[engine].template;
+/** The release targets an engine may export. */
+export const GameExportTarget = Schema.Literals(["Web", "Linux", "Windows"]);
+export type GameExportTarget = typeof GameExportTarget.Type;
 export const GameManifest = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   name: Schema.String,
@@ -485,7 +533,10 @@ export type GameOperationState = typeof GameOperationState.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
   manifest: GameManifest,
-  toolchain: GameToolchainStatus,
+  /** The one tool this game's engine needs, for this project (Unity: by its version); null when it needs none. */
+  engineTool: Schema.NullOr(GameToolStatus),
+  /** The release targets this game's engine exports; anything else is refused. */
+  exportTargets: Schema.Array(GameExportTarget),
   /**
    * The resolution from `godot/project.godot`, in which the web preview
    * is framed. Falls back to Godot's own default when the project does not set one.
@@ -502,7 +553,15 @@ export const GameStatus = Schema.Struct({
    */
   sourcesDifferFromPlay: Schema.Union([Schema.Boolean, Schema.Literal("unknown")]),
   builds: Schema.Array(
-    Schema.Struct({ target: Schema.String, path: Schema.String, updatedAt: Schema.String }),
+    Schema.Struct({
+      target: Schema.String,
+      path: Schema.String,
+      updatedAt: Schema.String,
+      /** Whether Kurambit can package this release as a download. */
+      packageable: Schema.Boolean,
+      /** A release that is one file, or a whole folder to ship together. */
+      ships: Schema.Literals(["file", "folder"]),
+    }),
   ),
   processes: Schema.Array(
     Schema.Struct({ pid: Schema.Number, operation: Schema.String, logPath: Schema.String }),
@@ -517,6 +576,8 @@ export const GameStatus = Schema.Struct({
       at: Schema.String,
       /** The revision of the push that last changed it: later news has a higher one. */
       revision: Schema.Number,
+      /** The thread whose work it is, when a thread owns it; absent for a run's or the system's own work. */
+      ownerThreadId: Schema.optionalKey(ThreadId),
     }),
   ),
 });

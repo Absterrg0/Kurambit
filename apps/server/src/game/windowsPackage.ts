@@ -191,60 +191,6 @@ export const publishWindowsArchive = async (
   }
 };
 
-export interface WindowsArchiveRetirement {
-  readonly backup: string;
-  /** Puts the incumbent archive back after a publication that did not commit. */
-  restore(): Promise<void>;
-  /** Removes the retired incumbent after the new release committed. */
-  discard(): Promise<readonly string[]>;
-}
-
-/**
- * Moves the incumbent package out of its download path before a new Windows
- * release is published. A publication failure restores it; a success discards
- * it, so the package URL can never resolve to bytes from the previous release.
- */
-export const retireWindowsArchive = async (
-  input: { readonly archive: string },
-  fileSystem: WindowsPackageFileSystem = nativeFileSystem,
-): Promise<WindowsArchiveRetirement | null> => {
-  const backup = `${input.archive}.${NodeCrypto.randomUUID()}.retired`;
-  try {
-    await fileSystem.rename(input.archive, backup);
-  } catch (cause) {
-    if (isNotFound(cause)) return null;
-    throw new WindowsPackageError(
-      input.archive,
-      "io",
-      `The previous Windows package could not be moved aside, so the new release was not published: ${describe(cause)}`,
-      { cause },
-    );
-  }
-  return {
-    backup,
-    async restore() {
-      try {
-        await fileSystem.rename(backup, input.archive);
-      } catch (cause) {
-        throw new WindowsPackageError(
-          backup,
-          "io",
-          `The previous Windows package is preserved at ${backup} but could not be restored to ${input.archive}: ${describe(cause)}`,
-          { cause },
-        );
-      }
-    },
-    async discard() {
-      try {
-        await fileSystem.rm(backup, { force: true });
-        return [];
-      } catch {
-        return [`An older Windows package remains at ${backup} because it could not be removed.`];
-      }
-    },
-  };
-};
-
 export const packageWindowsRelease = async (input: {
   readonly root: string;
   readonly signal?: AbortSignal | undefined;

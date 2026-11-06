@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import type { ThreadId } from "@kurambit/contracts";
+import { GameCaller } from "../../../game/GameCaller.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -16,13 +17,19 @@ const caller = McpInvocationContext.McpInvocationContext.pipe(
 );
 const runFailure = (cause: GameRunControl.GameRunError) =>
   GameRunControl.GameRunError.toOperationError(`game-${cause.operation}`, cause);
-/** One tool call: the calling thread's work on the game service. */
+/**
+ * One tool call: the calling thread's work on the game service, as an agent's.
+ * Whether it is a production run's own role comes from the MCP session, never
+ * from the thread a person may be viewing.
+ */
 const withGame = <A, E>(
   work: (game: GameService.GameService["Service"], threadId: ThreadId) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
     const scope = yield* caller;
-    return yield* work(yield* GameService.GameService, scope.thread.threadId);
+    return yield* work(yield* GameService.GameService, scope.thread.threadId).pipe(
+      Effect.provideService(GameCaller, { kind: "agent", runRole: scope.gameRunRole === "run" }),
+    );
   });
 /** One tool call on the calling thread's production run, its refusals as operation errors. */
 const withRuns = <A>(
@@ -103,11 +110,9 @@ const handlers = {
     withGame((game, threadId) => game.deleteSaved(threadId, input.name).pipe(Effect.as({}))),
   ),
   game_preview: McpToolAccess.actsAsCaller(() =>
-    withGame((game, threadId) => game.action(threadId, "preview")),
+    withGame((game, threadId) => game.preview(threadId)),
   ),
-  game_stop: McpToolAccess.actsAsCaller(() =>
-    withGame((game, threadId) => game.action(threadId, "stop")),
-  ),
+  game_stop: McpToolAccess.actsAsCaller(() => withGame((game, threadId) => game.stop(threadId))),
   game_explore_start: McpToolAccess.actsAsCaller((input) =>
     withGame((game, threadId) => game.exploreStart(threadId, input)),
   ),

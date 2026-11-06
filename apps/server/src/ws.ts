@@ -1905,7 +1905,8 @@ const layerWsRpc = (
         [WS_METHODS.gameSavedDelete]: ({ threadId, name }) =>
           game.deleteSaved(threadId, name).pipe(Effect.as({})),
         [WS_METHODS.subscribeGameEvents]: (input) =>
-          input.threadId === undefined ? game.events : game.threadEvents(input.threadId),
+          // The library listens to games' own folders only; a thread to its game.
+          input.threadId === undefined ? game.libraryEvents : game.threadEvents(input.threadId),
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status(),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({

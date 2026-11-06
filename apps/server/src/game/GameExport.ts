@@ -1,20 +1,24 @@
-// @effect-diagnostics nodeBuiltinImport:off -- This service owns the native filesystem boundary of exports and their packages.
+// @effect-diagnostics nodeBuiltinImport:off -- This service owns the native filesystem boundary of releases, the Web build Play serves and their packages.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   type GameActionResult,
+  type GameStatus,
   type GameWebPackage,
   type GameWindowsPackage,
 } from "@kurambit/contracts";
+import { ArchivePublishError, publishStaged, sweepPublished } from "./archivePublication.ts";
 import { commandDetail } from "./commandDetail.ts";
 import * as GameEngine from "./GameEngine.ts";
 import type { GameExportTarget } from "./engineProfile.ts";
+import { makeAtomicWriter } from "./gameFiles.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
@@ -22,19 +26,12 @@ import {
   CANDIDATE_BUILDS_DIRECTORY,
   WEB_BUILD_DIRECTORY,
   candidateBuildDirectory,
-  describeWebArtifacts,
   hashWebBuild,
-  hashWebBuildDirectory,
+  readWebBuild,
+  webBuildProblemText,
 } from "./webBuild.ts";
-import { inspectWindowsBuild, type WindowsBuildInspection } from "./windowsExport.ts";
-import { publishWindowsBuild } from "./windowsPublication.ts";
-import { packageWebRelease, WebPackageError } from "./webPackage.ts";
-import {
-  packageWindowsRelease,
-  retireWindowsArchive,
-  WindowsPackageError,
-  windowsPackageArchivePath,
-} from "./windowsPackage.ts";
+import { packageWebRelease, WebPackageError, WEB_PACKAGES_DIRECTORY } from "./webPackage.ts";
+import { packageWindowsRelease, WindowsPackageError } from "./windowsPackage.ts";
 
 /** Short confirmation the creator reads after an export lands. */
 const WEB_READY_MESSAGE = "Web game is ready to play. Open it with Play.";
@@ -45,21 +42,155 @@ const SelectedWebBuild = Schema.Struct({
   directory: Schema.String.check(Schema.isMinLength(1)),
   sourceId: Schema.NullOr(Schema.String),
   entry: Schema.String.check(Schema.isMinLength(1)),
+  /** The build selected before this one, kept so a window opened on it keeps playing. */
+  previous: Schema.optionalKey(Schema.String),
 });
-interface SelectedWebBuild extends Schema.Schema.Type<typeof SelectedWebBuild> {}
-const decodeSelectedBuild = Schema.decodeUnknownSync(
+export interface SelectedWebBuild extends Schema.Schema.Type<typeof SelectedWebBuild> {}
+/** The selection record's codec, for readers outside this service (the run's finish). */
+export const decodeSelectedBuild = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.NullOr(SelectedWebBuild)),
 );
 const encodeSelectedBuild = Schema.encodeSync(Schema.fromJsonString(SelectedWebBuild));
 
+const SELECTED_BUILD_FILE = "builds/web-selected.json";
+
+/** One release a game has, as the status and the Builds panel show it. */
+export type GameRelease = GameStatus["builds"][number];
+
+/** The game's release folder for a native target. */
+const releaseDirectory = (target: GameExportTarget) => `builds/${target.toLowerCase()}`;
+
+/** Staging names a crash may leave behind, by folder; each is swept before the next export. */
+const STAGING = /^\.release-|^\.staging-|\.partial$|^\.game-[0-9a-f-]{36}\.(?:exe|pck)$/;
+/** Leftovers of earlier publication code: Unity's `<dest>.old-*` and `.dest-*`, the old Windows backups. */
+const LEGACY_LEFTOVER =
+  /^(?:linux|windows)\.old-[0-9a-f-]{36}$|^\.(?:linux|windows)-[0-9a-f-]{36}$|^game\.(?:exe|pck)\.[0-9a-f-]{36}\.backup$/;
+const io = (operation: string, path: string) => (cause: unknown) =>
+  new GameOperationError({ operation, path, reason: "io", cause });
+
+/**
+ * Stages one release beside its destination, has the engine write and check
+ * it, proves the sources did not move under it, then publishes it. The one
+ * path every release takes (an export, a Web build, a player a game keeps by
+ * source identity), so staging, the source comparison and publication are
+ * written once. Callers hold the game's operation lock (and the live editor,
+ * where the engine has one, for the import before it).
+ */
+export const releaseTo = <P>(
+  backend: GameEngine.GameEngineBackend,
+  ctx: GameEngine.GameEngineContext,
+  input: {
+    readonly target: GameExportTarget;
+    readonly preset: string;
+    readonly operation: string;
+    /** The folder the staging folder is made in: the destination's own parent. */
+    readonly stagingParent: string;
+    /** Publishes the checked staging folder for the sources it was built from. */
+    readonly publish: (
+      staging: string,
+      artifact: string,
+      sourceId: string,
+    ) => Effect.Effect<P, GameOperationError>;
+  },
+): Effect.Effect<
+  | {
+      readonly kind: "published";
+      readonly result: GameActionResult;
+      readonly published: P;
+      readonly sourceId: string;
+      readonly notes: ReadonlyArray<string>;
+    }
+  | { readonly kind: "failed"; readonly result: GameActionResult },
+  GameOperationError
+> => {
+  const { root, projectName } = ctx;
+  const snapshot = Effect.promise((signal) =>
+    snapshotBuildSource(root, projectName, { signal, rules: backend.profile.buildInputs }),
+  );
+  const staging = NodePath.join(
+    input.stagingParent,
+    `.release-${input.target.toLowerCase()}-${NodeCrypto.randomUUID()}`,
+  );
+  const notCurrent = (detail: string, process: GameActionResult["process"]) =>
+    ({
+      kind: "failed",
+      result: {
+        success: false,
+        message: (process === null ? detail : `${detail}\n${commandDetail(process)}`).slice(-4096),
+        path: null,
+        url: null,
+        process,
+      },
+    }) as const;
+  return Effect.gen(function* () {
+    // An unidentifiable tree is refused before the engine runs: the result
+    // could never be attached to the sources (too many files, a link).
+    const before = yield* snapshot;
+    if (before.kind === "unknown") {
+      const refused = comparedSource(before, before, input.operation);
+      return notCurrent(refused.kind === "current" ? "" : refused.detail, null);
+    }
+    yield* Effect.tryPromise({
+      try: () => NodeFSP.mkdir(staging, { recursive: true }),
+      catch: io(input.operation, staging),
+    });
+    const release = yield* backend.release(ctx, {
+      target: input.target,
+      preset: input.preset,
+      staging,
+      operation: input.operation,
+    });
+    if (!release.result.success || release.artifact === null)
+      return { kind: "failed", result: release.result } as const;
+    // Prove the game folder did not change while the release ran: an edit
+    // during it means the build no longer describes the sources.
+    const comparison = comparedSource(before, yield* snapshot, input.operation);
+    if (comparison.kind !== "current") return notCurrent(comparison.detail, release.result.process);
+    const published = yield* input.publish(staging, release.artifact, comparison.sourceId);
+    return {
+      kind: "published",
+      result: release.result,
+      published,
+      sourceId: comparison.sourceId,
+      notes: release.notes,
+    } as const;
+  }).pipe(
+    Effect.ensuring(
+      // Nothing is left once published; a release that failed leaves no staging.
+      Effect.promise(() =>
+        NodeFSP.rm(staging, { recursive: true, force: true }).catch(() => undefined),
+      ),
+    ),
+  );
+};
+
+/** Publishes a checked staging folder over a release folder, as a game operation's error. */
+export const publishFolder = (operation: string, staging: string, destination: string) =>
+  Effect.tryPromise({
+    try: () => publishStaged([{ staged: staging, final: destination }]),
+    catch: (cause) =>
+      new GameOperationError({
+        operation,
+        path: destination,
+        reason: "io",
+        detail:
+          cause instanceof ArchivePublishError
+            ? cause.message
+            : "The checked release could not be moved into place.",
+        cause,
+      }),
+  });
+
 /**
  * Release exports, the Web build Play serves, and the packages made from
- * them. The engine's backend makes each release; this service stages,
- * checks, hashes and publishes it. Callers hold the game's operation lock.
+ * them. The engine's driver writes and checks each release; this service
+ * stages, compares, publishes, selects and prunes. Callers hold the game's
+ * operation lock.
  */
 export class GameExport extends Context.Service<
   GameExport,
   {
+    /** success ⇒ `path` is the absolute published artifact; a build's own failure is success:false. */
     readonly export: (
       root: string,
       target: GameExportTarget,
@@ -71,8 +202,19 @@ export class GameExport extends Context.Service<
      * none was ever selected, so Play must export one first.
      */
     readonly serve: (root: string) => Effect.Effect<GameActionResult | null, GameOperationError>;
-    /** The Web build Play serves, as its export recorded it. */
-    readonly selected: (root: string) => Effect.Effect<SelectedWebBuild | null>;
+    /** The Web build Play serves, as its export recorded it; null only when no record exists. */
+    readonly selected: (root: string) => Effect.Effect<SelectedWebBuild | null, GameOperationError>;
+    /** The releases the game has now, by its engine's targets: stat-only, no lock. */
+    readonly releases: (
+      root: string,
+    ) => Effect.Effect<ReadonlyArray<GameRelease>, GameOperationError>;
+    /** The targets this game's engine releases, read from its profile without any lock. */
+    readonly exportTargets: (
+      root: string,
+    ) => Effect.Effect<
+      { readonly targets: ReadonlyArray<GameExportTarget>; readonly displayName: string },
+      GameOperationError
+    >;
     /**
      * Packages the already exported Windows release as a ZIP. It never exports;
      * a missing or unusable release is an error and leaves earlier files alone.
@@ -92,33 +234,126 @@ const make = Effect.gen(function* () {
   const engines = yield* GameEngine.GameEngine;
   const preview = yield* GamePreview.GamePreview;
   const projects = yield* GameProjectService.GameProjectService;
-  const snapshot = (root: string, project: string) =>
-    Effect.promise((signal) => snapshotBuildSource(root, project, { signal }));
-  const SELECTED_BUILD_FILE = "builds/web-selected.json";
-  const readSelectedBuild = (root: string): Effect.Effect<SelectedWebBuild | null> =>
-    Effect.promise(() =>
-      NodeFSP.readFile(NodePath.join(root, SELECTED_BUILD_FILE), "utf8")
-        .then((text) => decodeSelectedBuild(text))
-        .catch(() => null),
-    );
-  const writeSelectedBuild = (
+  const writeAtomic = yield* makeAtomicWriter;
+
+  const readSelectedBuild = (
     root: string,
-    selected: SelectedWebBuild,
-  ): Effect.Effect<void, GameOperationError> =>
-    Effect.tryPromise({
-      try: () =>
-        NodeFSP.writeFile(
-          NodePath.join(root, SELECTED_BUILD_FILE),
-          `${encodeSelectedBuild(selected)}\n`,
-        ),
-      catch: (cause) =>
-        new GameOperationError({
-          operation: "export",
-          path: NodePath.join(root, SELECTED_BUILD_FILE),
-          reason: "io",
-          cause,
-        }),
+  ): Effect.Effect<SelectedWebBuild | null, GameOperationError> => {
+    const file = NodePath.join(root, SELECTED_BUILD_FILE);
+    return Effect.tryPromise({
+      try: async () => {
+        let text: string;
+        try {
+          text = await NodeFSP.readFile(file, "utf8");
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code === "ENOENT") return { text: null };
+          throw cause;
+        }
+        return { text };
+      },
+      catch: io("Read the selected Web build", file),
+    }).pipe(
+      Effect.flatMap(({ text }) =>
+        text === null
+          ? Effect.succeed(null)
+          : Effect.try({
+              try: () => decodeSelectedBuild(text),
+              catch: (cause) =>
+                new GameOperationError({
+                  operation: "Read the selected Web build",
+                  path: file,
+                  reason: "invalid-project",
+                  detail: `${SELECTED_BUILD_FILE} is not a selection record Kurambit wrote; Rebuild to export the current sources and select them.`,
+                  cause,
+                }),
+            }),
+      ),
+    );
+  };
+
+  const exists = (path: string) =>
+    Effect.promise(() =>
+      NodeFSP.stat(path).then(
+        (stat) => stat,
+        () => null,
+      ),
+    );
+
+  /** What a crash or a cut-short release left in the game's builds; runs under the export's lock. */
+  const sweepLeftovers = (root: string) =>
+    Effect.promise(async () => {
+      const builds = NodePath.join(root, "builds");
+      const leftover = (name: string) => STAGING.test(name) || LEGACY_LEFTOVER.test(name);
+      for (const directory of [
+        builds,
+        NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY),
+        NodePath.join(root, "builds/linux"),
+        NodePath.join(root, "builds/windows"),
+        NodePath.join(root, WEB_PACKAGES_DIRECTORY),
+      ])
+        await sweepPublished(directory, leftover);
     });
+
+  /**
+   * Keeps the selected Web build and the one selected before it, so a window
+   * opened on that one keeps playing; every other candidate goes, with its
+   * preview server. Runs under the export's lock, so nothing selects meanwhile.
+   */
+  const pruneCandidates = (root: string, keep: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      yield* preview.retain(root, keep);
+      yield* Effect.promise(async () => {
+        const candidates = NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY);
+        for (const name of await NodeFSP.readdir(candidates).catch(() => [] as string[]))
+          if (/^[0-9a-f]{64}$/.test(name) && !keep.includes(candidateBuildDirectory(name)))
+            // A folder another process still holds open (Windows) goes next time.
+            await NodeFSP.rm(NodePath.join(candidates, name), {
+              recursive: true,
+              force: true,
+            }).catch(() => undefined);
+      });
+    });
+
+  /** A checked staging folder becomes the content-addressed candidate it hashes to, then Play's selection. */
+  const publishCandidate = (root: string, project: string, staging: string, sourceId: string) =>
+    Effect.gen(function* () {
+      const hashed = yield* Effect.promise(() => readWebBuild(staging));
+      if ("problem" in hashed)
+        return { ok: false, message: webBuildProblemText(hashed.problem, project) } as const;
+      const directory = candidateBuildDirectory(hashed.buildId);
+      const final = NodePath.join(root, directory);
+      if ((yield* exists(final)) === null)
+        yield* Effect.tryPromise({
+          try: () => NodeFSP.rename(staging, final),
+          catch: io("export-web", final),
+        });
+      else {
+        // The hash is the folder's name, so an existing one is the same build
+        // unless it was damaged: then it is replaced, never served.
+        const there = yield* Effect.promise(() => readWebBuild(final));
+        if (!("problem" in there) && there.buildId === hashed.buildId)
+          yield* Effect.promise(() => NodeFSP.rm(staging, { recursive: true, force: true }));
+        else yield* publishFolder("export-web", staging, final);
+      }
+      const prior = yield* readSelectedBuild(root).pipe(Effect.orElseSucceed(() => null));
+      const previous =
+        prior !== null && prior.directory !== directory ? prior.directory : prior?.previous;
+      const selected: SelectedWebBuild = {
+        buildId: hashed.buildId,
+        directory,
+        sourceId,
+        entry: "index.html",
+        ...(previous === undefined ? {} : { previous }),
+      };
+      yield* writeAtomic(
+        NodePath.join(root, SELECTED_BUILD_FILE),
+        `${encodeSelectedBuild(selected)}\n`,
+        "export-web",
+      );
+      yield* pruneCandidates(root, previous === undefined ? [directory] : [directory, previous]);
+      return { ok: true, path: NodePath.join(final, "index.html") } as const;
+    });
+
   const runExport = Effect.fnUntraced(function* (root: string, target: GameExportTarget) {
     const { backend, ctx } = yield* engines.context(root);
     const { profile } = backend;
@@ -129,241 +364,70 @@ const make = Effect.gen(function* () {
         reason: "invalid-input",
         detail: `${profile.displayName} games export ${profile.exportTargets.join(", ")} only; ${target} is refused for this engine.`,
       });
-    // A player folder is the engine's own build; Web is never a player target.
-    if (backend.player !== null && target !== "Web")
-      return yield* backend.player.export(ctx, target);
-    yield* backend.exportReady(ctx.binary, target);
-    // Import first: Godot's import writes engine-generated sidecars (*.import,
-    // *.uid and .godot/) inside the project. The source identity is taken after
-    // that import and never counts those files, so a fresh tree imports
-    // cleanly and a snapshot never carries engine output.
-    const imported = (yield* backend.importProject(ctx)).result;
-    if (!imported.success) return imported;
-    // The preset is part of the exported sources, so it is settled before the
-    // source identity is taken.
-    const preset = yield* backend.exportPreset(ctx, target);
-    // Web exports stage in a hidden directory under the candidate root, never in
-    // the served tree. A partial or failed export therefore cannot change what
-    // Play loads; only a complete, hashed artifact is moved into place.
-    const staging =
-      target === "Web"
-        ? NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY, `.staging-${NodeCrypto.randomUUID()}`)
-        : null;
-    const windowsOutput =
-      target === "Windows" ? NodePath.join(root, "builds/windows/game.exe") : null;
-    // A failed Windows export must leave the previous game.exe usable, so the
-    // engine writes beside it and the artifact is moved into place only after
-    // its PE and pack check out.
-    const windowsStaging =
-      windowsOutput === null
-        ? null
-        : NodePath.join(NodePath.dirname(windowsOutput), `.game-${NodeCrypto.randomUUID()}.exe`);
-    const output =
-      staging !== null
-        ? NodePath.join(staging, "index.html")
-        : (windowsOutput ?? NodePath.join(root, "builds/linux/game.x86_64"));
-    const exportOutput = windowsStaging ?? output;
-    const cleanedUp = Effect.ensuring(
-      Effect.promise(async () => {
-        if (staging !== null) await NodeFSP.rm(staging, { recursive: true, force: true });
-        if (windowsStaging !== null) {
-          await NodeFSP.rm(windowsStaging, { force: true });
-          await NodeFSP.rm(windowsStaging.replace(/\.exe$/, ".pck"), { force: true });
-        }
-      }),
-    );
-    return yield* Effect.gen(function* () {
-      const before = yield* snapshot(root, ctx.projectName);
-      yield* Effect.tryPromise({
-        try: () => NodeFSP.mkdir(NodePath.dirname(exportOutput), { recursive: true }),
-        catch: (cause) =>
-          new GameOperationError({ operation: "export", path: exportOutput, reason: "io", cause }),
-      });
-      const exportResult = yield* backend.runExportRelease(ctx, {
-        preset: preset.name,
-        outputPath: exportOutput,
-        operation: `export-${target.toLowerCase()}`,
-      });
-      // The engine writes beside the previous build; the reported path is the
-      // published artifact the inspection below moves into place.
-      const result =
-        windowsOutput !== null ? { ...exportResult, path: windowsOutput } : exportResult;
-      if (!result.success) return result;
-      const expectedFiles =
-        target === "Web"
-          ? (profile.web?.exported ?? []).map((name) => NodePath.join(staging!, name))
-          : [exportOutput];
-      yield* Effect.tryPromise({
-        try: async () => {
-          for (const file of expectedFiles) {
-            const stat = await NodeFSP.stat(file);
-            if (!stat.isFile() || stat.size === 0) throw new Error(`Empty export: ${file}`);
-          }
-        },
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "export-output",
-            path: exportOutput,
-            reason: "command-failed",
-            detail:
-              `Expected nonempty export files were missing.\n${commandDetail(result.process!)}`.slice(
-                -4096,
-              ),
-            cause,
-          }),
-      });
-      let windowsMessage: string | null = null;
-      let checkedWindows: {
-        readonly inspection: WindowsBuildInspection;
-        readonly stagedPck: string;
-      } | null = null;
-      if (windowsOutput !== null && windowsStaging !== null) {
-        const stagedPck = windowsStaging.replace(/\.exe$/, ".pck");
-        const inspection = yield* Effect.tryPromise({
-          try: async () => {
-            const executable = await NodeFSP.readFile(windowsStaging);
-            const pck = await NodeFSP.readFile(stagedPck).catch(() => null);
-            return await inspectWindowsBuild({ executable, pck });
-          },
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "export-windows",
-              path: windowsStaging,
-              reason: "command-failed",
-              detail: "The exported Windows executable could not be read back.",
-              cause,
-            }),
+    yield* sweepLeftovers(root);
+    const operation = `export-${target.toLowerCase()}`;
+    const work = Effect.gen(function* () {
+      yield* backend.exportReady(ctx.binary, target);
+      // Import first: Godot's import writes engine-generated sidecars (*.import,
+      // *.uid and .godot/) inside the project. The source identity is taken after
+      // that import and never counts those files, so a fresh tree imports
+      // cleanly and a snapshot never carries engine output.
+      const imported = (yield* backend.importProject(ctx)).result;
+      if (!imported.success) return imported;
+      // The preset is part of the exported sources, so it is settled before the
+      // source identity is taken.
+      const preset = yield* backend.exportPreset(ctx, target);
+      const presetNote = preset.added ? [`A standard ${target} export preset was added.`] : [];
+      if (target === "Web") {
+        // Web builds stage under the candidate root, never in the served tree,
+        // so a partial or failed export cannot change what Play loads.
+        const candidates = NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY);
+        yield* Effect.tryPromise({
+          try: () => NodeFSP.mkdir(candidates, { recursive: true }),
+          catch: io(operation, candidates),
         });
-        if (inspection.issues.length > 0)
+        const released = yield* releaseTo(backend, ctx, {
+          target,
+          preset: preset.name,
+          operation,
+          stagingParent: candidates,
+          publish: (staging, _artifact, sourceId) =>
+            publishCandidate(root, ctx.projectName, staging, sourceId),
+        });
+        if (released.kind === "failed") return released.result;
+        if (!released.published.ok)
           return {
-            ...result,
+            ...released.result,
             success: false,
-            message:
-              `The Windows export did not produce a usable x86_64 executable with the game's pack: ${inspection.issues.join(" ")}\n${commandDetail(result.process!)}`.slice(
-                -4096,
-              ),
+            path: null,
+            message: released.published.message,
           };
-        checkedWindows = { inspection, stagedPck };
+        return { ...released.result, path: released.published.path, message: WEB_READY_MESSAGE };
       }
-      // Hash the staged artifact before it becomes visible. The hash is the
-      // directory name, so an immutable build can never be overwritten later
-      // with different bytes under the same identity.
-      const hashed =
-        staging === null ? null : yield* Effect.promise(() => hashWebBuildDirectory(staging));
-      if (target === "Web" && hashed === null)
-        return {
-          ...result,
-          success: false,
-          message: "The exported web build directory could not be read back.",
-        };
-      // Prove the game folder did not change while the export ran: an edit
-      // during the export means the build no longer describes the sources.
-      const comparison = comparedSource(before, yield* snapshot(root, ctx.projectName), "export");
-      if (comparison.kind !== "current") {
-        const detail = comparison.detail;
-        return {
-          ...result,
-          success: false,
-          message: `${detail}\n${commandDetail(result.process!)}`.slice(-4096),
-        };
-      }
-      // The checked artifact stays staged until the source comparison accepts
-      // it. Only then may it replace a build the creator already had.
-      if (windowsOutput !== null && windowsStaging !== null && checkedWindows !== null) {
-        const { inspection, stagedPck } = checkedWindows;
-        const publication = yield* Effect.tryPromise({
-          try: async () => {
-            const retirement = await retireWindowsArchive({
-              archive: windowsPackageArchivePath(root),
-            });
-            try {
-              const published = await publishWindowsBuild({
-                stagedExecutable: windowsStaging,
-                stagedPck: inspection.embeddedPck ? null : stagedPck,
-                executable: windowsOutput,
-                pck: windowsOutput.replace(/\.exe$/, ".pck"),
-              });
-              const retirementNotes = retirement === null ? [] : await retirement.discard();
-              return { ...published, notes: [...published.notes, ...retirementNotes] };
-            } catch (cause) {
-              if (retirement !== null) await retirement.restore();
-              throw cause;
-            }
-          },
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "export-windows",
-              path: windowsOutput,
-              reason: "io",
-              detail:
-                cause instanceof Error
-                  ? cause.message
-                  : "The checked Windows build could not be moved into builds/windows.",
-              cause,
-            }),
-        });
-        windowsMessage =
-          (inspection.embeddedPck
-            ? `Windows x86_64 build ready at builds/windows/game.exe with its game data embedded (${Math.round(inspection.executableBytes / (1024 * 1024))} MB).`
-            : `Windows x86_64 build ready at builds/windows/game.exe with builds/windows/game.pck beside it (${Math.round(inspection.executableBytes / (1024 * 1024))} MB). Keep both files together.`) +
-          (preset.added ? " A standard Windows export preset was added." : "") +
-          (publication.notes.length === 0 ? "" : ` ${publication.notes.join(" ")}`) +
-          " This machine did not run it on Windows.";
-      }
-      const directory = hashed === null ? null : candidateBuildDirectory(hashed.buildId);
-      if (hashed !== null && directory !== null) {
-        const final = NodePath.join(root, directory);
-        const existing = yield* Effect.promise(() =>
-          NodeFSP.stat(NodePath.join(final, "index.html")).then(
-            () => true,
-            () => false,
-          ),
-        );
-        const staged = staging!;
-        const same =
-          existing &&
-          (yield* Effect.promise(() => hashWebBuildDirectory(final)))?.buildId === hashed.buildId;
-        if (same) yield* Effect.promise(() => NodeFSP.rm(staged, { recursive: true, force: true }));
-        else {
-          // A directory under our own hash that does not hash to it is
-          // corruption; replace it rather than serve bytes the id did not name.
-          if (existing)
-            yield* Effect.promise(() => NodeFSP.rm(final, { recursive: true, force: true }));
-          yield* Effect.promise(() => NodeFSP.rename(staged, final));
-        }
-      }
-      // The record names every served file, not just index.html: a deleted or
-      // replaced .pck must force a rebuild before anyone plays it.
-      const artifacts =
-        directory === null
-          ? null
-          : yield* Effect.promise(() => describeWebArtifacts(root, directory));
-      if (target === "Web" && (artifacts === null || hashed === null || directory === null))
-        return {
-          ...result,
-          success: false,
-          message: "The exported web build directory could not be read back.",
-        };
-      if (hashed !== null && directory !== null) {
-        const after = yield* snapshot(root, ctx.projectName);
-        const selected: SelectedWebBuild = {
-          buildId: hashed.buildId,
-          directory,
-          sourceId: after !== null && after.kind === "known" ? after.sourceId : null,
-          entry: "index.html",
-        };
-        yield* writeSelectedBuild(root, selected);
-        return {
-          ...result,
-          path: NodePath.join(root, directory, "index.html"),
-          message: WEB_READY_MESSAGE,
-        };
-      }
-      return windowsMessage === null
-        ? result
-        : { ...result, path: windowsOutput ?? result.path, message: windowsMessage };
-    }).pipe(cleanedUp);
+      const destination = NodePath.join(root, releaseDirectory(target));
+      const released = yield* releaseTo(backend, ctx, {
+        target,
+        preset: preset.name,
+        operation,
+        stagingParent: NodePath.dirname(destination),
+        publish: (staging, artifact) =>
+          Effect.map(publishFolder(operation, staging, destination), (published) => ({
+            path: NodePath.join(destination, artifact),
+            notes: published.notes,
+          })),
+      });
+      if (released.kind === "failed") return released.result;
+      return {
+        ...released.result,
+        path: released.published.path,
+        message: [...released.notes, ...presetNote, ...released.published.notes].join(" "),
+      };
+    });
+    // One hold for import and release where the engine has a live editor:
+    // another game cannot take the editor between them.
+    return yield* backend.editor === null ? work : backend.editor.hold(root)(work);
   });
+
   /**
    * The build Play should show: the selected one while its immutable directory
    * still hashes to its recorded id, otherwise a pre-change builds/web game, or
@@ -380,17 +444,11 @@ const make = Effect.gen(function* () {
             selected,
             url: yield* preview.select(root, selected.directory),
           };
+        // A broken selected record must rebuild, not silently serve something else.
+        return null;
       }
-      // Only a game with no selection may fall back to a pre-change build; a
-      // broken selected record must rebuild, not silently serve something else.
-      if (selected !== null) return null;
-      const legacy = yield* Effect.promise(() =>
-        NodeFSP.stat(NodePath.join(root, WEB_BUILD_DIRECTORY, "index.html")).then(
-          () => true,
-          () => false,
-        ),
-      );
-      if (legacy)
+      // Only a game with no selection may fall back to a pre-change build.
+      if ((yield* exists(NodePath.join(root, WEB_BUILD_DIRECTORY, "index.html"))) !== null)
         return {
           directory: WEB_BUILD_DIRECTORY,
           selected: null,
@@ -398,7 +456,7 @@ const make = Effect.gen(function* () {
         };
       return null;
     });
-  /** Builds and publishes the current sources, then serves that build. */
+
   const publishWeb = (root: string) =>
     Effect.gen(function* () {
       const exported = yield* runExport(root, "Web");
@@ -406,12 +464,76 @@ const make = Effect.gen(function* () {
       const served = yield* selectedPreview(root);
       return served === null
         ? exported
-        : {
-            ...exported,
-            message: WEB_READY_MESSAGE,
-            url: served.url,
-          };
+        : { ...exported, message: WEB_READY_MESSAGE, url: served.url };
     });
+
+  const profileOf = (root: string) =>
+    Effect.flatMap(projects.read(root), (manifest) =>
+      Effect.map(engines.backendFor(manifest.engine.name), (backend) => backend.profile),
+    );
+
+  const releases = Effect.fn("GameExport.releases")(function* (root: string) {
+    const profile = yield* profileOf(root);
+    const found: GameRelease[] = [];
+    const iso = (date: Date) => DateTime.formatIso(DateTime.fromDateUnsafe(date));
+    for (const release of profile.releases) {
+      const shape = { packageable: release.packageable, ships: release.ships };
+      if (release.artifact !== null) {
+        const stat = yield* exists(NodePath.join(root, release.artifact));
+        if (stat !== null && stat.isFile() && stat.size > 0)
+          found.push({
+            target: release.target,
+            path: release.artifact,
+            updatedAt: iso(stat.mtime),
+            ...shape,
+          });
+        continue;
+      }
+      // Web: the selection Play serves, dated by when it was selected; with
+      // none, a build from before selections existed.
+      const selected = yield* readSelectedBuild(root).pipe(Effect.orElseSucceed(() => null));
+      const recorded = yield* exists(NodePath.join(root, SELECTED_BUILD_FILE));
+      if (selected !== null && recorded !== null) {
+        found.push({
+          target: release.target,
+          path: `${selected.directory}/${selected.entry}`,
+          updatedAt: iso(recorded.mtime),
+          ...shape,
+        });
+        continue;
+      }
+      const legacy = yield* exists(NodePath.join(root, WEB_BUILD_DIRECTORY, "index.html"));
+      if (legacy !== null)
+        found.push({
+          target: release.target,
+          path: `${WEB_BUILD_DIRECTORY}/index.html`,
+          updatedAt: iso(legacy.mtime),
+          ...shape,
+        });
+    }
+    return found;
+  });
+
+  /** A package refusal for a release this engine does not package, worded from its profile. */
+  const unpackaged = (root: string, target: GameExportTarget, operation: string) =>
+    Effect.gen(function* () {
+      const profile = yield* profileOf(root);
+      const release = profile.releases.find((each) => each.target === target);
+      if (release?.packageable === true) return;
+      return yield* new GameOperationError({
+        operation,
+        path: NodePath.join(
+          root,
+          target === "Web" ? WEB_BUILD_DIRECTORY : releaseDirectory(target),
+        ),
+        reason: "invalid-input",
+        detail:
+          release === undefined
+            ? `${profile.displayName} games make no ${target} release, so there is nothing to package.`
+            : `A ${profile.displayName} ${target} release is the whole ${releaseDirectory(target)} folder; Kurambit does not package it. Ship that folder as it is.`,
+      });
+    });
+
   return GameExport.of({
     export: runExport,
     publishWeb,
@@ -431,7 +553,7 @@ const make = Effect.gen(function* () {
           return {
             success: false,
             message:
-              "The selected build is unavailable: its served files are missing or empty. Rebuild to export the current sources.",
+              "The selected build is unavailable: its served files are missing or changed. Rebuild to export the current sources.",
             path: null,
             url: null,
             process: null,
@@ -439,17 +561,16 @@ const make = Effect.gen(function* () {
         return null;
       }),
     selected: readSelectedBuild,
+    releases,
+    exportTargets: (root) =>
+      Effect.map(profileOf(root), (profile) => ({
+        targets: profile.exportTargets,
+        displayName: profile.displayName,
+      })),
     packageWindows: (root) =>
       Effect.gen(function* () {
         // Packaging reads files only, so it never resolves the engine's executable.
-        const backend = yield* engines.backendFor((yield* projects.read(root)).engine.name);
-        if (backend.player !== null)
-          return yield* new GameOperationError({
-            operation: "Package Windows build",
-            path: NodePath.join(root, "builds/windows"),
-            reason: "invalid-input",
-            detail: `Windows packaging reads a Godot executable and pack. A ${backend.profile.displayName} Windows build is the whole builds/windows folder; zip that folder to ship it.`,
-          });
+        yield* unpackaged(root, "Windows", "Package Windows build");
         const packaged = yield* Effect.tryPromise({
           try: (signal) => packageWindowsRelease({ root, signal }),
           catch: (cause) =>
@@ -501,6 +622,7 @@ const make = Effect.gen(function* () {
       }),
     packageWeb: (root) =>
       Effect.gen(function* () {
+        yield* unpackaged(root, "Web", "Package Web build");
         const selected = yield* readSelectedBuild(root);
         if (selected === null)
           return yield* new GameOperationError({
@@ -530,7 +652,7 @@ const make = Effect.gen(function* () {
                 })
               : new GameOperationError({
                   operation: "Package Web build",
-                  path: NodePath.join(root, "builds/web-packages"),
+                  path: NodePath.join(root, WEB_PACKAGES_DIRECTORY),
                   reason: "io",
                   detail:
                     cause instanceof Error

@@ -5,9 +5,8 @@
  * `builds/logs/` tree and passes the result path and the game's declared
  * gameplay scene after `--`. Layout visibility diagnostics ride the same
  * warnings channel: clipped or overlapped interactive controls warn, never fail.
- * The geometry probe itself lives in godotLayoutScanner.ts and is shared with
- * the scenario runner; this script keeps its warning channel, its viewport
- * init and its font diagnostics.
+ * The geometry probe itself lives in godotLayoutScanner.ts; this script keeps
+ * its warning channel, its viewport init and its font diagnostics.
  */
 import { GODOT_LAYOUT_SCANNER } from "./godotLayoutScanner.ts";
 
@@ -30,8 +29,8 @@ const FONT_MAX_SOURCE_CHARS := 20000
 # by an ancestor, hang off the viewport, or sit under a later sibling warn but
 # never fail the check. Fully scrolled-out ScrollContainer children are normal
 # and stay silent; hidden, disabled, rotated/mirrored, and zero-size controls
-# are skipped as unknown rather than claimed covered or broken. The geometry
-# probe is shared with the scenario runner (see godotLayoutScanner.ts).
+# are skipped as unknown rather than claimed covered or broken (see
+# godotLayoutScanner.ts).
 
 var _errors: Array = []
 var _warnings: Array = []
@@ -58,7 +57,7 @@ func _initialize() -> void:
 	_main_scene = str(ProjectSettings.get_setting("application/run/main_scene", ""))
 	var scripts: Array = []
 	var resources: Array = []
-	_collect_files("res://", scripts, resources)
+	_collect_files("res://", scripts, resources, _excluded_everywhere())
 	for file in scripts:
 		var script := load(file)
 		if script == null:
@@ -78,7 +77,42 @@ func _initialize() -> void:
 	_write_result()
 	quit(0 if _errors.is_empty() else 1)
 
-func _collect_files(path: String, scripts: Array, resources: Array) -> void:
+# Godot's own reading of what is part of the project: a folder holding
+# .gdignore is invisible to the editor, and a file every export preset
+# excludes never ships, so neither can fail the check.
+func _excluded_everywhere() -> Array:
+	var presets := ConfigFile.new()
+	if presets.load("res://export_presets.cfg") != OK:
+		return []
+	var lists: Array = []
+	for section in presets.get_sections():
+		if not (section.begins_with("preset.") and section.count(".") == 1):
+			continue
+		var patterns: Array = []
+		for each in str(presets.get_value(section, "exclude_filter", "")).split(",", false):
+			var pattern := each.strip_edges()
+			if not pattern.is_empty():
+				patterns.append(pattern)
+		lists.append(patterns)
+	return lists
+
+func _excluded(full: String, name: String, lists: Array) -> bool:
+	if lists.is_empty():
+		return false
+	var relative := full.trim_prefix("res://")
+	for patterns in lists:
+		var hit := false
+		for pattern in patterns:
+			if relative.matchn(pattern) or name.matchn(pattern):
+				hit = true
+				break
+		if not hit:
+			return false
+	return true
+
+func _collect_files(path: String, scripts: Array, resources: Array, excluded: Array) -> void:
+	if FileAccess.file_exists(path.path_join(".gdignore")):
+		return
 	var directory := DirAccess.open(path)
 	if directory == null:
 		return
@@ -91,7 +125,9 @@ func _collect_files(path: String, scripts: Array, resources: Array) -> void:
 			continue
 		var full := path.path_join(name)
 		if directory.current_is_dir():
-			_collect_files(full, scripts, resources)
+			_collect_files(full, scripts, resources, excluded)
+		elif _excluded(full, name, excluded):
+			continue
 		elif name.ends_with(".gd"):
 			scripts.append(full)
 		elif name.ends_with(".tscn") or name.ends_with(".tres"):
