@@ -37,6 +37,17 @@ import {
   GameWindowsPackageResult,
 } from "./game.ts";
 import {
+  GameBuildCompareInput,
+  GameBuildComparison,
+  GameBuildFacts,
+  GameBuildPlayResult,
+  GameBuildRefInput,
+  GameBuildRestoreInput,
+  GameBuildRestoreResult,
+  GameBuildsInput,
+  GameBuildsResult,
+} from "./gameBuilds.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -358,6 +369,12 @@ export const WS_METHODS = {
   gameMediaSave: "game.mediaSave",
   gameSavedList: "game.savedList",
   gameSavedDelete: "game.savedDelete",
+  gameBuilds: "game.builds",
+  gameBuildCompare: "game.buildCompare",
+  gameBuildFacts: "game.buildFacts",
+  gameBuildMeasure: "game.buildMeasure",
+  gameBuildPlay: "game.buildPlay",
+  gameBuildRestore: "game.buildRestore",
   subscribeGameEvents: "subscribeGameEvents",
 
   shellOpenInEditor: "shell.openInEditor",
@@ -1505,6 +1522,36 @@ const WsGameSavedListRpc = Rpc.make(WS_METHODS.gameSavedList, {
   success: GameSavedListResult,
   error: gameError,
 });
+const WsGameBuildsRpc = Rpc.make(WS_METHODS.gameBuilds, {
+  payload: GameBuildsInput,
+  success: GameBuildsResult,
+  error: gameError,
+});
+const WsGameBuildCompareRpc = Rpc.make(WS_METHODS.gameBuildCompare, {
+  payload: GameBuildCompareInput,
+  success: GameBuildComparison,
+  error: gameError,
+});
+const WsGameBuildFactsRpc = Rpc.make(WS_METHODS.gameBuildFacts, {
+  payload: GameBuildRefInput,
+  success: GameBuildFacts,
+  error: gameError,
+});
+const WsGameBuildMeasureRpc = Rpc.make(WS_METHODS.gameBuildMeasure, {
+  payload: GameBuildRefInput,
+  success: GameBuildFacts,
+  error: gameError,
+});
+const WsGameBuildPlayRpc = Rpc.make(WS_METHODS.gameBuildPlay, {
+  payload: GameBuildRefInput,
+  success: GameBuildPlayResult,
+  error: gameError,
+});
+const WsGameBuildRestoreRpc = Rpc.make(WS_METHODS.gameBuildRestore, {
+  payload: GameBuildRestoreInput,
+  success: GameBuildRestoreResult,
+  error: gameError,
+});
 const WsGameSavedDeleteRpc = Rpc.make(WS_METHODS.gameSavedDelete, {
   payload: GameSavedDeleteInput,
   success: Schema.Struct({}),
@@ -1540,6 +1587,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameMediaSaveRpc,
   WsGameSavedListRpc,
   WsGameSavedDeleteRpc,
+  WsGameBuildsRpc,
+  WsGameBuildCompareRpc,
+  WsGameBuildFactsRpc,
+  WsGameBuildMeasureRpc,
+  WsGameBuildPlayRpc,
+  WsGameBuildRestoreRpc,
   WsSubscribeGameEventsRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

@@ -122,6 +122,14 @@ export const GameRunRoundRef = Schema.Struct({
   steer: Schema.Array(Schema.String),
   /** The ladder rung this round built; null for a finish round or an older record. */
   rung: Schema.NullOr(GameRunRungResult),
+  /** The round's candidate build (a commit oid); absent before builds were listed. */
+  build: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** The best build it was judged against. */
+  base: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** When the round ended (ISO): where its card sits in the chat. */
+  endedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** Tokens its role turns used, summed from the providers' own usage; null when none was reported. */
+  tokens: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 });
 export type GameRunRoundRef = typeof GameRunRoundRef.Type;
 
@@ -199,6 +207,10 @@ export const GameRunRestoreRef = Schema.Struct({
 export type GameRunRestoreRef = typeof GameRunRestoreRef.Type;
 
 export const GameRunStatusResult = Schema.Struct({
+  /** The chat the run talks to (where its round cards appear). */
+  chat: Schema.optionalKey(Schema.NullOr(ThreadId)),
+  /** The run's best build (a commit oid). */
+  best: Schema.optionalKey(Schema.NullOr(Schema.String)),
   active: Schema.Boolean,
   /** The run ended where game-run.resume continues it: a start without a new brief resumes it. */
   resumable: Schema.Boolean,

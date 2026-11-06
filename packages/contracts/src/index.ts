@@ -70,6 +70,7 @@ export * from "./gameAssets.ts";
 export * from "./gameExplore.ts";
 export * from "./gamePlaySession.ts";
 export * from "./gameBot.ts";
+export * from "./gameBuilds.ts";
 export * from "./gameRun.ts";
 export * from "./gameRunRecords.ts";
 export * from "./gameBlender.ts";

@@ -276,6 +276,17 @@ const signPackage = <P extends { readonly archivePath: string; readonly fileName
     ),
   );
 
+// Foundation placeholder for the Slice 1 build RPCs until builder F's GameBuilds lands.
+const buildsPending = (threadId: string) =>
+  Effect.fail(
+    new GameOperationError({
+      operation: "Builds",
+      path: threadId,
+      reason: "tool-failed",
+      detail: "Builds are not available in this server yet.",
+    }),
+  );
+
 // The frame sheets a blind comparison's players made, signed the same way.
 const signComparisonSheets = (
   threadId: ThreadId,
@@ -1903,6 +1914,13 @@ const layerWsRpc = (
         [WS_METHODS.gameSavedList]: ({ threadId }) => game.listSaved(threadId),
         [WS_METHODS.gameSavedDelete]: ({ threadId, name }) =>
           game.deleteSaved(threadId, name).pipe(Effect.as({})),
+        // Foundation placeholders (Slice 1 CONTRACT): builder F replaces each with one GameBuilds call.
+        [WS_METHODS.gameBuilds]: ({ threadId }) => buildsPending(threadId),
+        [WS_METHODS.gameBuildCompare]: ({ threadId }) => buildsPending(threadId),
+        [WS_METHODS.gameBuildFacts]: ({ threadId }) => buildsPending(threadId),
+        [WS_METHODS.gameBuildMeasure]: ({ threadId }) => buildsPending(threadId),
+        [WS_METHODS.gameBuildPlay]: ({ threadId }) => buildsPending(threadId),
+        [WS_METHODS.gameBuildRestore]: ({ threadId }) => buildsPending(threadId),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined ? game.libraryEvents : game.threadEvents(input.threadId),
