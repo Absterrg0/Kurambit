@@ -182,3 +182,29 @@ export const measureVideo = (
     ]);
     return signalsOf(siti.toString("utf8"), freeze.toString("utf8"), colour);
   });
+
+/**
+ * PURE. The longest wall time, in seconds, the engine's own frame counter did
+ * not advance within the span of play (game seconds `from` to `to`), from the
+ * video's sidecar; 0 when the span holds fewer than two frames.
+ */
+export const stallWithin = (
+  frames: ReadonlyArray<readonly [number, number, number]>,
+  from: number,
+  to: number,
+): number => {
+  const inside = frames.filter(([, t]) => t >= from && t <= to);
+  const first = inside[0];
+  if (first === undefined) return 0;
+  let counter = first[0];
+  let since = first[2];
+  let longest = 0;
+  for (const [frame, , wall] of inside) {
+    if (frame !== counter) {
+      counter = frame;
+      since = wall;
+    }
+    longest = Math.max(longest, wall - since);
+  }
+  return round(longest / 1000, 1);
+};

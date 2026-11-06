@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { playSpan, signalsOf } from "./videoSignals.ts";
+import { playSpan, signalsOf, stallWithin } from "./videoSignals.ts";
 
 // Real ffmpeg 8 `metadata=mode=print` output (trimmed) from a Godot run video.
 const SITI = `frame:0    pts:0       pts_time:0
@@ -51,5 +51,19 @@ describe("playSpan", () => {
     ] as const;
     expect(playSpan(frames, 1, 5)).toEqual({ start: 1.5, end: 4.1 });
     expect(playSpan(frames, 10, null)).toBeNull();
+  });
+});
+
+describe("stallWithin", () => {
+  it("measures the longest stall of the engine's counter inside the span only", () => {
+    const frames = [
+      [1, 0, 0],
+      [1, 0.5, 3000],
+      [2, 1, 3100],
+      [2, 1.2, 3600],
+      [3, 1.4, 3700],
+    ] as const;
+    expect(stallWithin(frames, 1, 2)).toBe(0.5);
+    expect(stallWithin(frames, 0, 2)).toBe(3);
   });
 });

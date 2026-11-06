@@ -18,26 +18,49 @@ import {
 
 type Facts = GameBuildFacts;
 type TierFact = Facts["idle"];
+/**
+ * Not measured, and why. `retry`: waiting can clear it, so any measure tries
+ * again. `standing`: a tool or the machine that waiting will not fix (a
+ * missing program, a game too slow for the budget); a person's measure tries
+ * again, since they may have fixed it. Neither: the build's own reason (it
+ * reports no run state), measured again only by a new harness.
+ */
 type NotMeasured = {
   readonly status: "not-measured";
   readonly why: string;
   readonly retry: boolean;
+  readonly standing?: true;
 };
 
-export const notMeasured = (why: string, retry: boolean): NotMeasured => ({
+export const notMeasured = (why: string, retry: boolean, standing = false): NotMeasured => ({
   status: "not-measured",
   why: why.slice(0, 300),
   retry,
+  ...(standing && !retry ? { standing: true as const } : {}),
 });
 
+/** Whether a stored reading is a standing fault a person's measure tries again. */
+export const isStanding = (fact: unknown): boolean =>
+  typeof fact === "object" && fact !== null && "standing" in fact && fact.standing === true;
+
 /** A game operation that kept a fact from being measured; null when it is the build's own. */
-export const faultOf = (error: GameOperationError): NotMeasured | null =>
-  gameOperationFault(error.reason) === "build"
-    ? null
-    : notMeasured(
-        `${error.operation}: ${(error.detail ?? error.reason).split("\n")[0]}`,
-        !isStandingFault(error.reason),
-      );
+export const faultOf = (error: GameOperationError): NotMeasured | null => {
+  if (gameOperationFault(error.reason) === "build") return null;
+  const retry = !isStandingFault(error.reason);
+  return notMeasured(
+    `${error.operation}: ${(error.detail ?? error.reason).split("\n")[0]}`,
+    retry,
+    !retry,
+  );
+};
+
+/** A game below real time: its span of play did not fit the wall budget. Standing, never re-run in the background. */
+const tooSlow = (result: GameBotRunResult, playSeconds: number) =>
+  notMeasured(
+    `the game ran at ${result.timeRatio.toFixed(2)}× real time, so ${playSeconds} s of play did not fit the run's wall budget`,
+    false,
+    true,
+  );
 
 /** What a tier bot reports in its status evidence (templates/bot-kit/tier.mjs). */
 interface TierEvidence {
@@ -115,10 +138,7 @@ export const tierFact = (
     case "never-started":
       return notMeasured(note, false);
     case "budget":
-      return notMeasured(
-        "the game ran slower than real time, so the span of play did not fit the run's wall budget",
-        true,
-      );
+      return tooSlow(result, playSeconds);
     case "done": {
       const final = result.finalState;
       if (typeof final["state"] !== "string")
@@ -161,13 +181,24 @@ export const firstResponseOf = (result: GameBotRunResult): Facts["firstResponse"
   };
 };
 
-/** Won without skill: either the idle or the random player won; false only when both were measured. */
+const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
+
+/**
+ * Won without skill: the idle or the random player won. False only when both
+ * played to a loss or to no ending; a run that broke says nothing about skill.
+ */
 export const winnableOf = (idle: TierFact, masher: TierFact): Facts["winnableWithoutSkill"] => {
   const won = (fact: TierFact) => fact.status === "measured" && fact.value.ending === "won";
   if (won(idle) || won(masher)) return { status: "measured", value: true };
   if (idle.status === "pending" || masher.status === "pending") return { status: "pending" };
-  if (idle.status === "measured" && masher.status === "measured")
+  if (idle.status === "measured" && masher.status === "measured") {
+    if (BROKE.has(idle.value.ending) || BROKE.has(masher.value.ending))
+      return notMeasured(
+        "the no-input or random-input run broke (crashed, stopped answering or did not boot)",
+        false,
+      );
     return { status: "measured", value: false };
+  }
   const missing = idle.status === "not-measured" ? idle : masher;
   return notMeasured(
     `needs both the no-input and the random-input run: ${missing.status === "not-measured" ? missing.why : "not measured"}`,
@@ -248,6 +279,7 @@ export const skilledFact = (
   if (status === "not-booted") return value("did-not-boot", null);
   if (status === "stopped") return notMeasured("the measurement was stopped", true);
   if (status === "bot-error") return notMeasured(`the bot itself failed: ${note}`, false);
+  if (status === "budget") return tooSlow(result, GAME_FACTS_BOUNDS.skilledSeconds);
   const final = result.finalState;
   if (final["state"] === "ended" && (final["result"] === "won" || final["result"] === "lost"))
     return value(final["result"], null);

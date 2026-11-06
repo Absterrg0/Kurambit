@@ -67,6 +67,19 @@ describe("tierFact", () => {
   });
 });
 
+describe("budget", () => {
+  it("is a standing not-measured, never an ending, for the tiers and the skilled bot", () => {
+    const slow = { ...run("budget", { state: "playing" }), timeRatio: 0.4 };
+    expect(tierFact(slow, 60, null)).toMatchObject({
+      status: "not-measured",
+      retry: false,
+      standing: true,
+    });
+    const bot = { file: ".studio/bot/win.mjs", hash: "h", decider: "policy" } as const;
+    expect(skilledFact(slow, bot, null)).toMatchObject({ status: "not-measured", retry: false });
+  });
+});
+
 describe("faultOf", () => {
   it("is not measured for a tool or the machine, and null for the build's own failure", () => {
     const error = (reason: GameOperationError["reason"]) =>
@@ -91,6 +104,11 @@ describe("winnableOf", () => {
     });
     expect(winnableOf(measured("lost"), missing).status).toBe("not-measured");
     expect(winnableOf(missing, measured("won"))).toEqual({ status: "measured", value: true });
+    const crashed = {
+      status: "measured",
+      value: { ending: "crashed", at: 1, played: 1, note: "", evidence: null },
+    } as const;
+    expect(winnableOf(crashed, measured("lost")).status).toBe("not-measured");
   });
 });
 

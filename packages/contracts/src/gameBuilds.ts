@@ -374,7 +374,7 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
       return from(facts.firstResponse, (response) => ({
         text:
           response.seconds === null
-            ? `Nothing moved within ${seconds(response.window)} of a held key`
+            ? `No movement answered a held key within ${seconds(response.window)}`
             : `Moves ${response.seconds.toFixed(1)} s after a held key`,
         value: response.seconds,
         tone:
