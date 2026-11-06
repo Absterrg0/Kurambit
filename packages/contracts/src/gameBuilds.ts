@@ -18,6 +18,8 @@ export const GAME_FACTS_BOUNDS = {
 /** Push names on the game's operation stream: the list changed, or a build's facts did. */
 export const GAME_BUILDS_EVENT = "builds";
 export const GAME_FACTS_EVENT = "facts";
+/** A push: files under the live-served folder changed and settled. Its message is "Changed <path>". */
+export const GAME_LIVE_EVENT = "live";
 
 export const GameBuildSource = Schema.Union([
   Schema.TaggedStruct("turn", {

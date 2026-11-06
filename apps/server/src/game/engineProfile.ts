@@ -2,7 +2,12 @@
 // play, which harness duties apply and the engine's own prompt lines. No I/O, so the run's
 // pure policy reads it too. Engine behaviour (processes, editors, exports) is the
 // backend's, in GameEngine.ts; each backend carries its engine's profile.
-import type { GameEngineId, GameExportTarget, GameViewport } from "@kurambit/contracts";
+import type {
+  GameEngineId,
+  GameExportTarget,
+  GameStageKind,
+  GameViewport,
+} from "@kurambit/contracts";
 import { GODOT_PROFILE } from "./godotProfile.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
 import { UNITY_PROFILE } from "./unityProfile.ts";
@@ -41,6 +46,8 @@ export interface GameEngineProfile {
    * for an engine whose build is too slow to follow every turn (parked lanes).
    */
   readonly turnLoop: boolean;
+  /** How the Stage shows this engine's game (GAME_ENGINES' own answer). */
+  readonly stage: GameStageKind;
   /** Short human name for honest operation messages ("Godot", "three.js", "Unity"). */
   readonly displayName: string;
   /** The engine project directory a new game gets; the run calls it the lane. */
