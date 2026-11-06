@@ -91,7 +91,8 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
  * run's builder edits it and the run restores builds into it, which would
  * overwrite the session's edits.
  */
-export const CREATOR_SESSION_SECTION = `## The creator's session and the production run
+export const CREATOR_HEADING = "## The creator's session and the production run";
+export const CREATOR_SESSION_SECTION = `${CREATOR_HEADING}
 
 This section is for the creator's own session on this game. A session the production run launched for one of its roles follows its prompt instead.
 
@@ -109,30 +110,45 @@ Record the answer with game_run_decide: choose the answer that fits what they sa
 The creator can ask at any time to start or resume the run (game_run_start), stop it (game_run_stop), switch it between Guided and Autopilot (game_run_profile), steer it (game_run_steer) or put the game back to a kept round (game_run_restore).
 `;
 
+const EVERY_TURN_HEADING = "## Every turn";
+
 /**
- * What a game's own chat agent does each turn and in its first, per engine. Only
- * three.js plays and measures every turn's build (engineProfile turnLoop), so the
- * native lanes keep the instructions they had until they join the turn loop.
+ * How a chat turn ends where Kurambit plays and measures every turn's build
+ * (engineProfile turnLoop); the other engines' agents keep checking their own work.
  */
-const TURN_SECTIONS: Partial<Record<GameEngineId, string>> = {
-  three: `## Every turn
+const EVERY_TURN_SECTION = `## Every turn
 
 - A turn that changes the game becomes a build. When your turn ends, Kurambit plays it on the person's Stage and measures its facts: whether it boots, an idle, a random and a skilled bot, frozen frames, input response. Ending the turn is how the person sees your work, so keep turns short: one visible improvement, \`game_check\` clean, then end. Do not export to show it; the build is made for you.
 - Do not play-test with \`game_explore_*\` or bots to see whether the game works: the harness measures every build. Explore only when the person asks or a fact says something you cannot see in the code. Read \`game_facts\` when the person reports a problem.
 - The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (\`game_builds\` shows the restore). Do not put the change back unless they ask.
 - End every reply with one line: \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done.
+`;
 
-## The first turn
+/** A new game's first turn, per engine; an engine without one gets the brief alone. */
+const FIRST_TURN_SECTIONS: Partial<Record<GameEngineId, string>> = {
+  three: `## The first turn
 
 Goal: the person plays the brief's core loop on the Stage within ten minutes, with library art, not primitives.
 
 1. Read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, make no key art, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.
-2. Choose the look: \`game_assets_search\` with no words lists the library by style family. Pick one that fits the brief and write \`STYLE.json\` (family, view, packs, rig; \`studio-skills/art-pipeline.md\`). Add the player character and one or two threats or props with \`game_assets_add\`, and name them in \`ASSETS\`. When no pack has the brief's exact subject, take the closest character and say so in your reply; a model of its own is a later turn.
+2. Choose the look: \`game_assets_search\` with no words lists the library by style family. Pick one that fits the brief and write \`STYLE.json\` (family, view, packs, rig; \`studio-skills/art-pipeline.md\`). Add the player character and one or two threats or props with \`game_assets_add\`, and name them in \`ASSETS\`: the shell loads them, and compiles what draws them, behind its loading screen. Keep the default look (\`LOOK\` as it is, no lights besides \`ctx.look.sun\`): builds are played in a software renderer, where bloom and extra lights stall the start. Glows are a later turn. When no pack has the brief's exact subject, take the closest character and say so in your reply; a model of its own is a later turn.
 3. Replace the starter's gameplay in \`web/main.js\` (its sphere and beacon are placeholders) with the brief's core loop: the player moves (the recipe), the one main verb, the threat, a win and a lose through \`GameState.win\` and \`lose\`, the HUD through \`ctx.ui\`, and \`Juice\` on every action.
 4. Run \`game_check\` and fix until it is clean. End the turn with what the person can do now, plus your \`Next:\` line.
 
 More waves and levels, menu art, music and polish are later turns.
 `,
+};
+
+/**
+ * An existing game's AGENTS.md with its engine's "Every turn" section, added
+ * once before the creator section, so a game made before the turn loop learns
+ * that its turns are played and can be undone. Pure; unchanged when present.
+ */
+export const withEveryTurn = (agents: string, engine: GameEngineId): string => {
+  if (!engineProfile(engine).turnLoop || agents.includes(EVERY_TURN_HEADING)) return agents;
+  const at = agents.indexOf(CREATOR_HEADING);
+  if (at < 0) return `${agents.trimEnd()}\n\n${EVERY_TURN_SECTION}`;
+  return `${agents.slice(0, at)}${EVERY_TURN_SECTION}\n${agents.slice(at)}`;
 };
 
 /**
@@ -142,7 +158,7 @@ More waves and levels, menu art, music and polish are later turns.
  */
 export const firstTurnMessage = (manifest: GameManifest): string => {
   const lead =
-    TURN_SECTIONS[manifest.engine.name] === undefined
+    FIRST_TURN_SECTIONS[manifest.engine.name] === undefined
       ? "Make this game. Read AGENTS.md first."
       : 'Make this game. Follow "The first turn" in AGENTS.md.';
   const art = manifest.artDirection.trim();
@@ -180,7 +196,12 @@ Use the game_* tools to check, play, export and package the game; never run Godo
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,
-    "AGENTS.md": [projectLine, TURN_SECTIONS[engine], CREATOR_SESSION_SECTION]
+    "AGENTS.md": [
+      projectLine,
+      engineProfile(engine).turnLoop ? EVERY_TURN_SECTION : undefined,
+      FIRST_TURN_SECTIONS[engine],
+      CREATOR_SESSION_SECTION,
+    ]
       .filter((section) => section !== undefined)
       .join("\n"),
     "CLAUDE.md": "@AGENTS.md\n",

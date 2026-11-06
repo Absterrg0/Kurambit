@@ -9,7 +9,12 @@ import type * as Path from "effect/Path";
 import { GameOperationError, type GameEngineId } from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
-import { CREATOR_SESSION_SECTION, RUN_STATE_IGNORES } from "./scaffold.ts";
+import {
+  CREATOR_HEADING,
+  CREATOR_SESSION_SECTION,
+  RUN_STATE_IGNORES,
+  withEveryTurn,
+} from "./scaffold.ts";
 import * as Templates from "./templates.ts";
 import { failureText } from "./run/handBack.ts";
 
@@ -32,7 +37,6 @@ export const logLine = (root: string, line: string): Effect.Effect<void> =>
   Effect.logInfo(line).pipe(Effect.annotateLogs({ game: root }));
 
 // A game made before the decision protocol has the older creator section; it is replaced whole.
-const CREATOR_HEADING = "## The creator's session and the production run";
 const withCreatorSection = (agents: string): string => {
   if (agents.includes("game_run_decide")) return agents;
   const at = agents.indexOf(CREATOR_HEADING);
@@ -151,7 +155,7 @@ export const ensureScaffold = (
         )) ?? "";
       let agents = before.replace(STALE_SKILLS, "").replace(ROLE_SKILLS_HEADING, SKILLS_HEADING);
       if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;
-      agents = withCreatorSection(agents);
+      agents = withEveryTurn(withCreatorSection(agents), engine);
       if (agents !== before)
         yield* writeFileStringAtomically({
           filePath: NodePath.join(root, "AGENTS.md"),
@@ -163,6 +167,28 @@ export const ensureScaffold = (
       ),
     );
   });
+
+/**
+ * A game made before the turn loop gets its engine's "Every turn" section in
+ * AGENTS.md, once, so its agent knows its turns are played and can be undone.
+ * Called whenever the game is opened; a write that fails is logged, never the
+ * open's failure.
+ */
+export const ensureTurnSections = (
+  root: string,
+  engine: GameEngineId,
+): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const path = NodePath.join(root, "AGENTS.md");
+    const before = yield* Effect.tryPromise(() => readText(path));
+    if (before === null) return;
+    const agents = withEveryTurn(before, engine);
+    if (agents !== before) yield* writeFileStringAtomically({ filePath: path, contents: agents });
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("the game's AGENTS.md could not be updated", { game: root, cause }),
+    ),
+  );
 
 export const causeText = (cause: Cause.Cause<unknown>): string =>
   failureText(Cause.squash(cause)).slice(0, 300);
