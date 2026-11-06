@@ -2,12 +2,14 @@ import * as Schema from "effect/Schema";
 import {
   EnvironmentId,
   GameBuildId,
+  ProjectId,
   type GameAction,
   type GameStatus,
   type GameBuildPlayResult,
   type GameBuildRef,
   type GameBuildsResult,
   type GameRunRoundRef,
+  type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadId,
   WS_METHODS,
@@ -21,7 +23,9 @@ import {
 import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { type GameEventScope, gameEventScope } from "./gameEventScope";
+import { environmentThreadShells } from "./threads";
 import { selectTurnBuild, type TurnBuildView } from "./gameTurnBuild";
 
 const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
@@ -71,10 +75,14 @@ export interface GameLiveChange {
   readonly at: string;
 }
 
+/** A live push about the serve itself (A4), not a change under the folder. */
+const LIVE_SERVE_MESSAGES: ReadonlySet<string> = new Set(["Serving", "Stopped"]);
+
 /**
  * Each live push for one thread's game (D1): files under the served folder
  * changed and settled. Only the Stage's frame reads it; no query rereads on
- * it. `revision` counts pushes seen here, so it starts at 0 with none.
+ * it. `revision` counts pushes seen here, so it starts at 0 with none. The
+ * serve opening or closing is the status's news, not a change to show.
  */
 const liveSignalAtom = Atom.family((key: string) => {
   const [environmentId = "", threadId = ""] = key.split("\0");
@@ -89,6 +97,7 @@ const liveSignalAtom = Atom.family((key: string) => {
     );
     if (!AsyncResult.isSuccess(result) || gameEventScope(result.value) !== "live") return last;
     const event = result.value;
+    if (LIVE_SERVE_MESSAGES.has(event.message)) return last;
     const id = `${event.revision ?? ""}\0${event.at}`;
     if (id !== lastEvent) {
       lastEvent = id;
@@ -99,6 +108,52 @@ const liveSignalAtom = Atom.family((key: string) => {
 });
 export const liveSignal = (ref: ScopedThreadRef) =>
   liveSignalAtom(`${ref.environmentId}\0${ref.threadId}`);
+
+/**
+ * Whether any chat of a game's project has a turn running: someone may be
+ * mid-edit in the live folder. A boolean, so a streaming turn re-renders
+ * nothing until it starts or ends.
+ */
+const projectTurnRunningAtom = Atom.family((key: string) => {
+  const [environmentId = "", projectId = ""] = key.split("\0");
+  const ref: ScopedProjectRef = {
+    environmentId: EnvironmentId.make(environmentId),
+    projectId: ProjectId.make(projectId),
+  };
+  return Atom.make((get) =>
+    get(environmentThreadShells.threadShellsForProjectRefsAtom([ref])).some((shell) =>
+      threadRuntimeIsActive(shell.runtime),
+    ),
+  ).pipe(Atom.withLabel(`game:project-turn-running:${key}`));
+});
+const NO_TURN_RUNNING = Atom.make(false);
+export const projectTurnRunning = (ref: ScopedProjectRef | null) =>
+  ref === null ? NO_TURN_RUNNING : projectTurnRunningAtom(`${ref.environmentId}\0${ref.projectId}`);
+
+/**
+ * What rereads a game's status: its operations and builds, and its live serve
+ * opening or closing (A4), from any client, the palette or an agent. A
+ * "Changed <path>" push rereads nothing.
+ */
+const statusSignalAtom = Atom.family((key: string) => {
+  const [environmentId = "", threadId = ""] = key.split("\0");
+  let serve = "";
+  return Atom.make((get) => {
+    const result = get(
+      gameEvents({
+        environmentId: EnvironmentId.make(environmentId),
+        input: { threadId: ThreadId.make(threadId) },
+      }),
+    );
+    if (
+      AsyncResult.isSuccess(result) &&
+      gameEventScope(result.value) === "live" &&
+      LIVE_SERVE_MESSAGES.has(result.value.message)
+    )
+      serve = `${result.value.at}\0${result.value.revision ?? ""}`;
+    return `${get(threadScopeSignal(`${key}\0operation|builds`))}\0${serve}`;
+  }).pipe(Atom.withLabel(`game:status-signal:${key}`));
+});
 
 /**
  * Changes only when a game's run or operation changes state, which is all a
@@ -113,7 +168,8 @@ const gameListSignal = Atom.family((environmentId: string) => {
     // A card shows no saved media, builds or facts, so their pushes never reread the list.
     if (!AsyncResult.isSuccess(result)) return changes;
     const scope = gameEventScope(result.value);
-    if (scope === "saved" || scope === "builds" || scope === "facts") return changes;
+    if (scope === "saved" || scope === "builds" || scope === "facts" || scope === "live")
+      return changes;
     const event = result.value;
     // A run event's message is its current step, which the card shows.
     const state =
@@ -371,7 +427,8 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
     // A build copy starting or stopping (A3) is a builds push; the status lists the copies.
-    refreshTrigger: threadSignal("operation", "builds"),
+    refreshTrigger: (target) =>
+      statusSignalAtom(`${target.environmentId}\0${target.input.threadId}`),
   }),
   list: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:list",
