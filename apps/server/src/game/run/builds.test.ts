@@ -14,7 +14,8 @@ import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
-import type * as GameOperations from "../GameOperations.ts";
+import * as Fiber from "effect/Fiber";
+import * as GameOperations from "../GameOperations.ts";
 import type * as GameService from "../GameService.ts";
 import { BuildName } from "./buildNames.ts";
 import { buildStep, captureBuild, pruneBuilds } from "./builds.ts";
@@ -22,13 +23,17 @@ import * as Policy from "./policy.ts";
 import { restoreBuild } from "./restoreRound.ts";
 import { type RunState, freshState } from "./state.ts";
 
-const layer = CheckpointStore.layer.pipe(
-  Layer.provide(
-    VcsDriverRegistry.layer.pipe(
-      Layer.provide(VcsProcess.layer.pipe(Layer.provide(NodeServices.layer))),
+const layer = Layer.mergeAll(
+  CheckpointStore.layer.pipe(
+    Layer.provide(
+      VcsDriverRegistry.layer.pipe(
+        Layer.provide(VcsProcess.layer.pipe(Layer.provide(NodeServices.layer))),
+      ),
     ),
+    Layer.provide(NodeServices.layer),
   ),
-  Layer.provide(NodeServices.layer),
+  // The game's real operation lock: another owner's work holds the folder as it would live.
+  GameOperations.layer,
 );
 
 const repo = () => {
@@ -49,17 +54,16 @@ const repo = () => {
 const game = {
   closeLiveEditors: () => Effect.void,
 } as unknown as GameService.GameService["Service"];
-// The run's own moves pass through the game's operation lock, held by nothing else here.
-const lock = {
-  operations: {
-    exclusive: <A, E>(_root: string, _name: string, work: Effect.Effect<A, E>) => work,
-  } as unknown as GameOperations.GameOperations["Service"],
+// The run's own moves pass through the game's operation lock.
+const lockOf = Effect.map(GameOperations.GameOperations, (operations) => ({
+  operations,
   owner: "game-run:test",
   waitUntil: null,
-};
+}));
 
 it.effect("keeps a round beside its candidate, under names git can store, again and again", () =>
   Effect.gen(function* () {
+    const lock = yield* lockOf;
     const { root, git } = repo();
     const checkpoints = yield* CheckpointStore.CheckpointStore;
     const runId = "run_mzx1:a";
@@ -234,6 +238,7 @@ it.effect(
   "a budget leave's work is still there, under the name the log gave, after the finish prunes",
   () =>
     Effect.gen(function* () {
+      const lock = yield* lockOf;
       const { root, git } = repo();
       const checkpoints = yield* CheckpointStore.CheckpointStore;
       const runId = "run_leave";
@@ -314,6 +319,7 @@ it.effect(
 
 it.effect("restores a saved build by its name, keeps the folder before, and leaves the best", () =>
   Effect.gen(function* () {
+    const lock = yield* lockOf;
     const { root, git } = repo();
     const checkpoints = yield* CheckpointStore.CheckpointStore;
     const runId = "run_saved";
@@ -405,6 +411,7 @@ it.effect("restores a saved build by its name, keeps the folder before, and leav
 
 it.effect("a resume's first move keeps the folder it found once, and only when it differs", () =>
   Effect.gen(function* () {
+    const lock = yield* lockOf;
     const { root, git } = repo();
     const checkpoints = yield* CheckpointStore.CheckpointStore;
     const runId = "run_resume";
@@ -441,4 +448,27 @@ it.effect("a resume's first move keeps the folder it found once, and only when i
     expect(() => at(other)).toThrow();
     NodeFS.rmSync(root, { recursive: true, force: true });
   }).pipe(Effect.provide(layer)),
+);
+
+// The run is the folder's one writer only through the game's real lock: a move
+// while another owner's operation holds the game is refused as busy, never run
+// beside it, so the step waits for it instead of capturing a folder in motion.
+it.effect(
+  "a build move while another owner holds the game is refused busy, not run beside it",
+  () =>
+    Effect.gen(function* () {
+      const lock = yield* lockOf;
+      const { root } = repo();
+      const checkpoints = yield* CheckpointStore.CheckpointStore;
+      const held = yield* Effect.forkChild(
+        lock.operations.exclusive(root, "Export Linux", Effect.never, "thread:creator"),
+      );
+      yield* Effect.yieldNow;
+      const refused = yield* captureBuild({ checkpoints, lock }, root, "run_busy", "proto-1").pipe(
+        Effect.flip,
+      );
+      expect(refused).toMatchObject({ _tag: "GameOperationError", reason: "busy" });
+      yield* Fiber.interrupt(held);
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }).pipe(Effect.provide(layer)),
 );

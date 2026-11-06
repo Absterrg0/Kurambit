@@ -54,6 +54,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { engineProfile, runEngine } from "./engineProfile.ts";
 import { BuildName } from "./run/buildNames.ts";
 import { withRoleGroups } from "./run/roleGroup.ts";
 import * as GameService from "./GameService.ts";
@@ -848,7 +849,13 @@ const make = Effect.gen(function* () {
         "round-not-found",
         `Round ${round} is not recorded; the run has ${state.rounds.length} finished round${state.rounds.length === 1 ? "" : "s"}.`,
       );
-    return { ...target, run, state, record, lane: run.lane || "godot" };
+    return {
+      ...target,
+      run,
+      state,
+      record,
+      lane: run.lane || engineProfile(runEngine(run)).projectDirectory,
+    };
   });
 
   const roundDetail: Service["roundDetail"] = Effect.fn("GameRunControl.roundDetail")(function* (

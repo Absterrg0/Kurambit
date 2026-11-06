@@ -327,7 +327,7 @@ describe("rounds", () => {
     const samples: Array<string | null> = [];
     const respond = roundResponder("A", "B");
     const { state, steps, logs } = drive(
-      atRound({ lane: "unity" }),
+      atRound({ lane: "unity", engine: "unity" }),
       (step, s) => {
         if (step.kind === "role" && step.role.startsWith("sample")) samples.push(step.at);
         return respond(step, s);
@@ -675,7 +675,7 @@ describe("parallel samples", () => {
 
   it("keeps Unity samples one at a time", () => {
     const { pairs } = drive(
-      atRound({ lane: "unity" }),
+      atRound({ lane: "unity", engine: "unity" }),
       roundResponder("A", "B"),
       (s) => s.rounds.length === 1,
     );

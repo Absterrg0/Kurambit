@@ -24,6 +24,7 @@ import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import { legacyLaneEngine, runEngine } from "../../game/engineProfile.ts";
 import { BuildName, savedBuildOf } from "../../game/run/buildNames.ts";
 import * as Policy from "../../game/run/policy.ts";
 import * as State from "../../game/run/state.ts";
@@ -148,6 +149,7 @@ export const toState = (
   seq: run.seq,
   budgetEndsAt: run.budgetEndsAt,
   lane: run.lane,
+  engine: runEngine(run),
   best: run.best,
   protos: run.protos,
   pickNotes: run.pickNotes,
@@ -596,6 +598,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
     next: prior?.ledger ?? "",
     creator: command.threadId,
     lane: command.lane,
+    engine: command.engine ?? legacyLaneEngine(command.lane),
     budgetEndsAt:
       command.budgetMinutes === undefined ? null : work.now + command.budgetMinutes * 60_000,
   };

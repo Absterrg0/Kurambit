@@ -7,7 +7,7 @@ import type {
   GameRunSubmissionKind,
   ThreadId,
 } from "@kurambit/contracts";
-import { laneProfile } from "../engineProfile.ts";
+import { engineProfile } from "../engineProfile.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
 import * as Roles from "./roles.ts";
 import type * as State from "./state.ts";
@@ -1004,7 +1004,7 @@ const compareStep = (
   state: RunState,
 ): { cmp: Compare; step: Step; logs: string[] } => {
   const move = compareMove(c);
-  const parallel = laneProfile(state.lane).run.parallelSamples;
+  const parallel = engineProfile(state.engine).run.parallelSamples;
   if (move.kind === "bots") {
     // Decided here, after the plays and their replays: the runs still owed
     // must fit and leave both verdicts their time.

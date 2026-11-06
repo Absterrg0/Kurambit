@@ -36,6 +36,7 @@ import {
   type GameRunStepResult,
   GameRunTask,
   GameRunVerdict,
+  GameEngineId,
 } from "@kurambit/contracts";
 import { MAX_INPUT_MS, inputMs, parseExpect } from "./checks.ts";
 
@@ -184,6 +185,8 @@ const RunState = Schema.Struct({
   seq: Schema.Number,
   budgetEndsAt: Schema.NullOr(Schema.Number),
   lane: Schema.String,
+  // The run's engine (runEngine of its record): every engine question the policy has.
+  engine: GameEngineId,
   best: Schema.String,
   protos: Schema.Array(
     Schema.Struct({
@@ -239,6 +242,7 @@ export const freshState = (
   seq: 0,
   budgetEndsAt: null,
   lane: "",
+  engine: "godot",
   best: "",
   protos: [],
   pickNotes: "",
