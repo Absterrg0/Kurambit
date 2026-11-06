@@ -75,7 +75,7 @@ const TERMINAL: ReadonlySet<string> = new Set([
 export const isSettledRun = (run: OrchestrationV2Run): boolean => TERMINAL.has(run.status);
 
 /** The role turn a step or pair half runs, by its number. */
-export const roleAt = (step: Step, seq: number): RoleStep | null => {
+const roleAt = (step: Step, seq: number): RoleStep | null => {
   if (step.kind === "role") return step.id === seq ? step : null;
   if (step.kind !== "pair") return null;
   const half = step.halves.find((h) => h.id === seq);

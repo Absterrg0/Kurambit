@@ -357,6 +357,14 @@ const emptyGameRunRecords: GameRunThreadRecords = {
   gameRunSteps: [],
   gameRunRounds: [],
 };
+/** A role thread a run's step recorded, without the step's prompts: what status views list. */
+export interface GameRunRoleThread {
+  /** The role's name, or the step's kind when the step names none. */
+  readonly role: string;
+  readonly threadId: ThreadId;
+  /** When the step started, or was planned. */
+  readonly startedAt: string;
+}
 export interface GameRunRecordFilter {
   /**
    * The steps a run holds in flight, or these steps; every step otherwise.
@@ -428,6 +436,11 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
     filter?: GameRunRecordFilter,
   ) => Effect.Effect<GameRunThreadRecords, ProjectionStoreV2Error>;
+  /** The role threads of one run's steps, in step order: a run's step records carry whole prompts. */
+  readonly listGameRunRoleThreads: (
+    threadId: ThreadId,
+    runId: GameRun["id"],
+  ) => Effect.Effect<ReadonlyArray<GameRunRoleThread>, ProjectionStoreV2Error>;
   /** Creator threads with a game run that has not ended or whose ending's finish is owed, for startup recovery. */
   readonly listGameRunThreadsToRecover: () => Effect.Effect<
     ReadonlyArray<ThreadId>,
@@ -5125,6 +5138,46 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           Effect.mapError(controlReadError(threadId)),
         );
 
+    // The role's name is a pair half's or the role step's own, read in SQL so
+    // no step's prompts are decoded.
+    const listGameRunRoleThreads: ProjectionStoreV2Shape["listGameRunRoleThreads"] = (
+      threadId,
+      runId,
+    ) =>
+      sql<{ readonly role: string; readonly role_thread_id: string; readonly started_at: string }>`
+        SELECT
+          COALESCE(
+            (SELECT json_extract(half.value, '$.role')
+              FROM json_each(step.payload_json, '$.step.halves') AS half
+              WHERE json_extract(half.value, '$.kind') = 'role'
+                AND json_extract(half.value, '$.id') = json_extract(entry.value, '$.seq')),
+            CASE WHEN json_extract(step.payload_json, '$.step.kind') = 'role'
+                AND json_extract(step.payload_json, '$.step.id') = json_extract(entry.value, '$.seq')
+              THEN json_extract(step.payload_json, '$.step.role') END,
+            step.kind
+          ) AS role,
+          json_extract(entry.value, '$.threadId') AS role_thread_id,
+          COALESCE(
+            json_extract(step.payload_json, '$.startedAt'),
+            json_extract(step.payload_json, '$.plannedAt')
+          ) AS started_at
+        FROM orchestration_v2_projection_game_run_steps AS step,
+          json_each(step.payload_json, '$.roles') AS entry
+        WHERE step.thread_id = ${threadId}
+          AND step.game_run_id = ${runId}
+          AND json_extract(entry.value, '$.threadId') IS NOT NULL
+        ORDER BY step.seq ASC, entry.key ASC
+      `.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            role: row.role,
+            threadId: ThreadId.make(row.role_thread_id),
+            startedAt: row.started_at,
+          })),
+        ),
+        Effect.mapError(controlReadError(threadId)),
+      );
+
     const getProjectGameRun: ProjectionStoreV2Shape["getProjectGameRun"] = (projectId) =>
       sql<PayloadRow & { readonly deleted_at: string | null }>`
         SELECT run.payload_json, thread.deleted_at
@@ -6416,6 +6469,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getTurnItem,
       getThreadRecords,
       getGameRunRecords,
+      listGameRunRoleThreads,
       listGameRunThreadsToRecover,
       listLiveGameRunRoleTurns,
       getProjectGameRun,
@@ -6792,6 +6846,29 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ),
           };
         }),
+      listGameRunRoleThreads: (threadId, runId) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            (state.gameRunRecords.get(threadId)?.gameRunSteps ?? [])
+              .filter((step) => step.runId === runId)
+              .toSorted((a, b) => a.seq - b.seq)
+              .flatMap(({ step, roles, kind, startedAt, plannedAt }) =>
+                roles.flatMap(({ seq, threadId: roleThreadId }) => {
+                  const own = step.kind === "pair" ? step.halves : [step];
+                  const named = own.find((h) => h.kind === "role" && h.id === seq);
+                  return roleThreadId === null
+                    ? []
+                    : [
+                        {
+                          role: named?.kind === "role" ? named.role : kind,
+                          threadId: roleThreadId,
+                          startedAt: startedAt ?? plannedAt,
+                        },
+                      ];
+                }),
+              ),
+          ),
+        ),
       getProjectGameRun: (projectId) =>
         Ref.get(replayState).pipe(
           Effect.map((state) => {

@@ -108,15 +108,6 @@ const isJobBroke = (error: unknown): error is GameRunJobBroke => error instanceo
 const needed = <A, E, R>(work: Effect.Effect<A, E, R>) =>
   work.pipe(Effect.mapError((cause) => new GameRunJobBroke({ cause })));
 
-/** Every thread the run's steps ran a role on, each once. */
-const runRoleThreads = (records: ProjectionStore.GameRunThreadRecords, runId: GameRun["id"]) => [
-  ...new Set(
-    records.gameRunSteps
-      .filter((s) => s.runId === runId)
-      .flatMap((s) => s.roles.flatMap((r) => (r.threadId === null ? [] : [r.threadId]))),
-  ),
-];
-
 export class GameRunStepRunner extends Context.Service<
   GameRunStepRunner,
   {
@@ -146,6 +137,14 @@ const make = Effect.gen(function* () {
   const jobs = yield* GameRunJobs.GameRunJobs;
   const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
   const deps: RoleDeps = { launches, threads, game, checkpoints };
+  // Jobs read the run's step in flight and its role threads, never every step's prompts.
+  const inFlightOf = (threadId: ThreadId) =>
+    projections.getGameRunRecords(threadId, { steps: "in-flight" });
+  /** Every thread the run's steps ran a role on, each once. */
+  const runRoleThreads = (threadId: ThreadId, runId: GameRun["id"]) =>
+    projections
+      .listGameRunRoleThreads(threadId, runId)
+      .pipe(Effect.map((roles) => [...new Set(roles.map((r) => r.threadId))]));
 
   /**
    * The record that frees an ended run from "finishing" or "restoring": until it
@@ -334,7 +333,7 @@ const make = Effect.gen(function* () {
 
   /** The run and its step in flight, if this job's attempt still holds it. */
   const current = (job: GameRunJobs.GameRunStepJob) =>
-    projections.getGameRunRecords(job.threadId).pipe(
+    inFlightOf(job.threadId).pipe(
       Effect.map((records) => {
         const run = records.gameRuns.at(-1);
         if (run === undefined || run.id !== job.runId || run.status === "ended") return null;
@@ -344,7 +343,7 @@ const make = Effect.gen(function* () {
         if (record === undefined || record.id !== job.stepId || record.attempt !== job.attempt)
           return null;
         if (record.status !== "planned" && record.status !== "running") return null;
-        return { run, record, records };
+        return { run, record };
       }),
       // A read that fails is no answer: null would read as "the step moved on".
       Effect.mapError((cause) => new GameRunJobBroke({ cause })),
@@ -427,8 +426,7 @@ const make = Effect.gen(function* () {
    */
   const releaseCopies = (job: { readonly threadId: ThreadId; readonly runId: GameRun["id"] }) =>
     Effect.gen(function* () {
-      const records = yield* projections.getGameRunRecords(job.threadId);
-      const roleThreads = runRoleThreads(records, job.runId);
+      const roleThreads = yield* runRoleThreads(job.threadId, job.runId);
       const root = yield* projects
         .resolve(job.threadId, { deleted: "allowed" })
         .pipe(Effect.option);
@@ -829,8 +827,9 @@ const make = Effect.gen(function* () {
               );
               // A record that cannot be read breaks the job: the reviewer is
               // never told no bot ran because a read failed.
-              const bots = yield* Effect.forEach(runRoleThreads(found.records, run.id), (thread) =>
-                needed(game.botRuns(thread)),
+              const bots = yield* Effect.forEach(
+                yield* needed(runRoleThreads(run.threadId, run.id)),
+                (thread) => needed(game.botRuns(thread)),
               );
               const code = yield* Effect.promise(() =>
                 reviewerFacts(
@@ -1035,7 +1034,7 @@ const make = Effect.gen(function* () {
   // restart cut short runs again whole; game-run.finished records it done.
   const finish = (job: GameRunJobs.GameRunFinishJob) =>
     Effect.gen(function* () {
-      const records = yield* projections.getGameRunRecords(job.threadId);
+      const records = yield* inFlightOf(job.threadId);
       const run = records.gameRuns.at(-1);
       if (
         run === undefined ||
@@ -1045,10 +1044,12 @@ const make = Effect.gen(function* () {
         run.finished === job.endedAt
       )
         return;
+      // Read up front with the run: a read that breaks tries the finish again whole.
+      const roleThreads = yield* runRoleThreads(run.threadId, run.id);
       // The ending is recorded however its work went: a run left unfinished
       // refuses every resume, steer and restore until a restart. Only an
       // interrupt (a shutdown) leaves it to recovery, which finishes it again.
-      yield* finishWork(job, run, records).pipe(
+      yield* finishWork(job, run, records, roleThreads).pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.failCause(cause)
@@ -1082,6 +1083,7 @@ const make = Effect.gen(function* () {
     job: GameRunJobs.GameRunFinishJob,
     run: GameRun,
     records: ProjectionStore.GameRunThreadRecords,
+    roleThreads: ReadonlyArray<ThreadId>,
   ) =>
     Effect.gen(function* () {
       // The run's jobs, then its live role turns, before anything that can
@@ -1117,7 +1119,6 @@ const make = Effect.gen(function* () {
       yield* log(
         `run ended: ${run.ending ?? "unknown"}${run.lastFailure ? ` (${run.lastFailure})` : ""}`,
       );
-      const roleThreads = runRoleThreads(records, run.id);
       if (run.ending !== null && !NO_EXPORT.has(run.ending)) {
         // An ending mid-round (a usage limit, a provider outage) leaves the
         // round's unfinished work in the folder. The exports are of the best
@@ -1209,7 +1210,7 @@ const make = Effect.gen(function* () {
   // made against the folder now, so a restore a restart cut short runs again safely.
   const restore = (job: GameRunJobs.GameRunRestoreJob) =>
     Effect.gen(function* () {
-      const records = yield* projections.getGameRunRecords(job.threadId);
+      const records = yield* inFlightOf(job.threadId);
       const run = records.gameRuns.at(-1);
       const pending = run?.restore;
       if (run === undefined || run.id !== job.runId || pending?.requestId !== job.requestId) return;
@@ -1279,7 +1280,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const root = yield* projects.resolve(run.threadId);
       if (run.status === "ended") return yield* operations.runChanged(root, null);
-      const records = yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" });
+      const records = yield* inFlightOf(run.threadId);
       const held =
         records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
       yield* operations.runChanged(root, currentStep(toState(run, records.gameRunRounds, held)));

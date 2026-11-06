@@ -28,7 +28,6 @@ import {
   type GameRunStopResult,
   type GameRunSubmission,
   type GameRunSubmitResult,
-  type GameRunThreadRef,
   type OrchestrationV2GameRunCommand,
   ThreadId,
   GameOperationError,
@@ -55,7 +54,7 @@ import { withRoleGroups } from "./run/roleGroup.ts";
 import * as GameService from "./GameService.ts";
 import { runStateChecks } from "./run/checkRunner.ts";
 import { presentable } from "./run/decisionEvidence.ts";
-import { roleAt, roleTurns } from "./run/GameRunRoleReactor.ts";
+import { roleTurns } from "./run/GameRunRoleReactor.ts";
 import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
 import {
   readPickEvidence,
@@ -219,38 +218,29 @@ const make = Effect.gen(function* () {
   const SAVES_FOLDER =
     ' Before it next moves the game folder, it saves the folder as it is then under Saved builds ("The game as it was when the run resumed"), so changes made while the run was stopped are kept.';
 
+  // The game's latest run as the policy sees it, with its step in flight and its
+  // role threads: narrow reads, since every run push rereads the status.
   const recordsOf = (threadId: ThreadId) =>
-    projections
-      .getGameRunRecords(threadId)
-      .pipe(
-        Effect.mapError((cause) =>
-          runError("run-read", threadId, "records-unreadable", String(cause.message)),
-        ),
-      );
-
-  /** The game's latest run as the policy sees it, with its step in flight. */
-  const latestOf = (callerThreadId: ThreadId) =>
-    Effect.flatMap(resolveGame(callerThreadId), ({ runThread }) => recordsOf(runThread)).pipe(
-      Effect.flatMap((records) => recordsView(records)),
-    );
-  const recordsView = (records: ProjectionStore.GameRunThreadRecords) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
+      const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
       const run = records.gameRuns.at(-1) ?? null;
+      if (run === null) return { run, inFlight: null, state: null, threads: [] };
       const inFlight =
-        run === null
-          ? null
-          : (records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ??
-            null);
+        records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
+      const threads = threadRefs(yield* projections.listGameRunRoleThreads(threadId, run.id));
       return {
-        records,
         run,
         inFlight,
-        state:
-          run === null
-            ? null
-            : toState(run, records.gameRunRounds, inFlight, threadRefs(records, run.id)),
+        state: toState(run, records.gameRunRounds, inFlight, threads),
+        threads,
       };
-    });
+    }).pipe(
+      Effect.mapError((cause) =>
+        runError("run-read", threadId, "records-unreadable", String(cause.message)),
+      ),
+    );
+  const latestOf = (callerThreadId: ThreadId) =>
+    Effect.flatMap(resolveGame(callerThreadId), ({ runThread }) => recordsOf(runThread));
 
   const dispatch = (operation: string, command: OrchestrationV2GameRunCommand) =>
     engine.dispatch(command).pipe(
@@ -408,29 +398,11 @@ const make = Effect.gen(function* () {
     } satisfies GameRunStartResult;
   });
 
-  // The role threads each step ran on, for the Run tab.
-  const threadRefs = (
-    records: ProjectionStore.GameRunThreadRecords,
-    runId: string,
-  ): GameRunThreadRef[] => {
-    const seen = new Set<string>();
-    const refs = records.gameRunSteps.flatMap((step) =>
-      step.runId !== runId
-        ? []
-        : step.roles.flatMap((entry) => {
-            if (entry.threadId === null || seen.has(entry.threadId)) return [];
-            seen.add(entry.threadId);
-            return [
-              {
-                role: roleAt(step.step, entry.seq)?.role ?? step.kind,
-                threadId: entry.threadId,
-                startedAt: step.startedAt ?? step.plannedAt,
-              },
-            ];
-          }),
+  // The role threads each step ran on, each once, for the Run tab.
+  const threadRefs = (roles: ReadonlyArray<ProjectionStore.GameRunRoleThread>) =>
+    withRoleGroups(
+      roles.filter((entry, i) => roles.findIndex((r) => r.threadId === entry.threadId) === i),
     );
-    return withRoleGroups(refs);
-  };
 
   /**
    * An ended run's saved builds, latest first, read from its refs: what a
@@ -487,7 +459,7 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
   ) {
     const { root } = yield* resolveGame(threadId);
-    const { run, state, records } = yield* latestOf(threadId);
+    const { run, state, threads } = yield* latestOf(threadId);
     if (run === null || state === null)
       return {
         active: false,
@@ -557,7 +529,7 @@ const make = Effect.gen(function* () {
             : { is: r.rung.is, checks: r.rung.checks, outcome: r.rung.outcome, why: r.rung.why },
       })),
       steer: [...run.steer],
-      threads: threadRefs(records, run.id),
+      threads,
       builds: yield* savedBuilds(root, run, state),
       restore:
         run.restore === null
@@ -718,7 +690,7 @@ const make = Effect.gen(function* () {
     // The run's builder scores its rung in its own folder (its worktree, when it
     // has one), against the rung the run's records hold open.
     const { root, runThread } = yield* resolveGame(threadId, { role: "allowed" });
-    const { state } = yield* recordsOf(runThread).pipe(Effect.flatMap(recordsView));
+    const { state } = yield* recordsOf(runThread);
     const ladder = state?.ladder ?? null;
     // The rung the round in progress builds, else the next open one.
     const building =

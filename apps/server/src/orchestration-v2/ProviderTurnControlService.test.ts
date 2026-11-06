@@ -233,6 +233,7 @@ it.effect(
           getTurnItem: () => Effect.die("unused turn item read"),
           getThreadRecords: () => Effect.die("unused record read"),
           getGameRunRecords: () => Effect.die("unused game run read"),
+          listGameRunRoleThreads: () => Effect.die("unused game run read"),
           listGameRunThreadsToRecover: () => Effect.die("unused game run read"),
           listLiveGameRunRoleTurns: () => Effect.die("unused game run read"),
           getProjectGameRun: () => Effect.die("unused game run read"),
