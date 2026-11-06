@@ -376,10 +376,16 @@ function BuildRows({
               <span className="min-w-0 truncate">· {buildSourceLabel(build.source)}</span>
             </span>
             <span className="line-clamp-2 text-xs">{build.summary}</span>
-            <span className="text-2xs text-muted-foreground">
-              {build.fileCount === 1 ? "1 file" : `${build.fileCount} files`}
-              {build.available ? "" : " · history only"}
-            </span>
+            {build.fileCount !== null || !build.available ? (
+              <span className="text-2xs text-muted-foreground">
+                {build.fileCount === null
+                  ? ""
+                  : build.fileCount === 1
+                    ? "1 file"
+                    : `${build.fileCount} files`}
+                {build.available ? "" : `${build.fileCount === null ? "" : " · "}history only`}
+              </span>
+            ) : null}
             <GameBuildFactChips summary={build.facts} />
           </button>
         </li>
@@ -670,7 +676,11 @@ function GameBuildDetail({
       <section className="space-y-1.5">
         <h4 className="text-xs font-medium">What changed</h4>
         {build.files.length === 0 ? (
-          <p className="text-2xs text-muted-foreground">No file list for this build.</p>
+          <p className="text-2xs text-muted-foreground">
+            {build.fileCount === null
+              ? "Its changes were not counted."
+              : "No file list for this build."}
+          </p>
         ) : (
           <ul className="space-y-0.5">
             {build.files.map((file) => (
@@ -682,7 +692,7 @@ function GameBuildDetail({
             ))}
           </ul>
         )}
-        {build.fileCount > build.files.length ? (
+        {build.fileCount !== null && build.fileCount > build.files.length ? (
           <p className="text-2xs text-muted-foreground">
             and {build.fileCount - build.files.length} more
           </p>
