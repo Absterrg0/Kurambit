@@ -140,22 +140,25 @@ round's reason; fix what it names (or ask for a change), then resume. A plan tha
 ladder stops the run as **No ladder**; resuming gives the plan another go. The **Ladder** list on the Run tab shows which steps landed, which one is being built and
 which were set aside and why; each round shows how many of its checks passed.
 
-Every round's build is on the **Builds** tab (see [Builds](#builds)), and each round in the Run tab
-has **Open build**. Going back to a kept round's build makes it the run's best again, so a resumed
-run judges its next round against it. Going back to any other build (a round that was not kept, the
-game as the run left it, unfinished work, the game before a restore) brings it back to the folder
-but leaves the run's best as it was, so a resume starts from the best. The exception is an undo:
-while no round has run since your latest restore, **Undo this restore** also puts the run's best
-back. Going back while a stopped run is in the middle of a round abandons that round: its work is
-saved as a build, the round shows as **Abandoned**, and a resume starts the next round from the
-best. When a resumed run first puts a build back in the folder, it saves the folder as it was first
-("The game as it was when the run resumed"), so changes you made while it was stopped are never
-lost. Going back refuses while a run is live.
+To go back to an earlier kept round, stop the run, open the round and choose **Restore this
+round**, or ask your agent to restore it. The engine project, the art sources under `art/` and `ASSETS.md` return to that build in the
+game folder, and restoring a later kept round goes forward again. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`,
+bots and the run's records stay as they are. A resumed run judges its next round against the
+restored build. Restore refuses while a run is live.
 
-After each round, the run's chat shows a round card: the round's build, what changed, its facts
-against the build before it, the minutes and tokens it took, and **Revert** (for a kept round that
-is still the best) or **Keep this build instead** (for one that was not kept). While the run is
-live the card shows the run's own decision; stop the run to change it.
+A stopped run also lists its **Saved builds** on the Run tab: the game as the run left it, work a
+round left unfinished, a round's build that was not kept, and the game before each restore. What
+the folder held before a restore is always saved first, so a restore never discards work. Restoring
+a saved build brings it back to the folder but leaves the run's best as it was: those builds were
+never judged better, so a resume starts its next round from the best. The one exception is an
+undo: while no round has run since your latest restore, restoring the game from before it (the row
+says "restoring it undoes that restore") also puts the run's best back, so a resume goes on from
+where the run stood before. Restoring while a stopped run is in the middle of a round abandons that
+round: its work is saved with the game before the restore, the round shows as **Abandoned**, and a
+resume starts the next round from the best. Undoing that restore brings the round's work back to
+the folder, but the round itself stays abandoned. When a resumed run first puts a build back in
+the folder, it saves the folder as it was first ("The game as it was when the run resumed"), so
+changes you made while it was stopped are never lost.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
@@ -168,8 +171,8 @@ and your agent's editing tools are refused; Play still opens the last exported b
 A game has one run at a time: every chat of the game sees and steers the same run, and starting a
 run from another chat continues the one already there. While a run is live, **Stop game** stops
 only your own work on the game and your Play of it; stop the run to stop its builds and players.
-The command palette can also start, resume and stop a game's run, and opens the Builds tab to go
-back to a build or compare two.
+The command palette can also start, resume and stop a game's run, and opens the Run tab to restore
+a saved build.
 
 ## Play and revise
 
@@ -187,8 +190,8 @@ its right.
   the stage says so and offers to rebuild.
 - **Stop** ends only the processes Kurambit
   started for this game, and closes its preview server.
-- **Export Windows** writes a 64-bit build to `builds/windows/` (Godot and Unity games; **Now** on the
-  Builds tab shows only the targets a game's engine makes, and three.js games export Web only). A Godot
+- **Export Windows** writes a 64-bit build to `builds/windows/` (Godot and Unity games; the Builds
+  tab shows only the targets a game's engine makes, and three.js games export Web only). A Godot
   build is `game.exe`: the standard preset embeds the game data, so you can copy that one file to a
   Windows PC; a preset that does not embed it also writes `game.pck`, and both files must be copied
   together. A Unity build is the whole `builds/windows/` folder (`game.exe` with its `game_Data/`
@@ -200,9 +203,9 @@ its right.
   failed or interrupted export leaves the last good build in place. Kurambit checks the
   Windows executable it produced but does not run it, so try it on Windows before sharing it. If
   Godot's Windows export templates are missing, add them in the Godot editor under **Editor →
-  Manage Export Templates**. **Now** on
-  the Builds tab lists every export with its time, folder and logs, and a freshness check against
-  the current sources.
+  Manage Export Templates**. The **Builds**
+  tab lists every target with its time, folder and logs, and a freshness check against the current
+  sources.
 - **Download package** on the Web card zips the exact build Play serves, without exporting or
   rebuilding. Kurambit keeps the build Play serves and the one before it; older web builds are
   removed as new ones land. Later source edits are not included; only a new export changes what a new package
@@ -234,12 +237,18 @@ its exports.
   touched. **Back to the current game** returns to the folder's own game, and **Stop** ends the
   copies too. Unity builds cannot be played this way yet; the build says so.
 - **Compare with…** shows two builds side by side, each playable, with their facts in a table:
-  ↑ and ↓ show which way a fact moved and are coloured when that is better or worse, = means
-  unchanged. A fact that was not measured on one side reads "not comparable" with the reason.
+  ↑ and ↓ show which way a fact moved, ≠ that it changed without a direction (an ending that
+  became another), and = that it did not change; a change is coloured when it is better or worse. A fact that was not measured on one side reads "not comparable" with the reason.
   Only the side you are playing runs; the other is paused and muted.
 - **Go back to this build** puts it in the game folder: the engine project, `art/` and `ASSETS.md`
   return to that build, and notes, `PLAN.md`, `VISION.md`, bots and run records stay as they are.
-  What the folder held is saved as a build first, and **Undo this restore** puts it back.
+  What the folder held is saved as a build first, and **Undo this restore** puts it back. Going back
+  waits for a live run to be stopped and for the agent's turn to end.
+- After each round of a production run, the run's chat shows a round card: the round's build, what
+  changed, its facts against the build before it, and the minutes and tokens it took. On a stopped
+  run, **Keep this build as the run's best** puts a round that was not kept in the folder and makes
+  it the best, so a resume continues from it; **Revert to the build before it** puts back the best a
+  kept round was judged against. While the run is live, the card shows the run's own decision.
 
 **Facts** are what Kurambit measured by playing the build: whether it boots, what happens when a
 player does nothing (idle) or presses keys at random (masher), what the game's own bot does
@@ -255,7 +264,7 @@ Bot videos, explore screenshots and the blind players' frame sheets live with th
 **Settings → Storage** deletes after a while (14 days by default). To keep one, choose **Save** under
 it, in a round of the Run tab or in the prototype pick, or ask your agent to save it. The copy goes
 into the game's `saved/` folder under a dated name such as `2026-11-05 round 2 bot run.mp4`; open it
-or show it in its folder from there. The **Saved** list under **Now** on the Builds tab shows everything saved and
+or show it in its folder from there. The **Saved** list in the Builds tab shows everything saved and
 deletes a copy you no longer want. `saved/` is not committed to the game repository, and saving never
 replaces a file already there.
 
