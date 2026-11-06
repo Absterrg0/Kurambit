@@ -79,6 +79,8 @@ The rest of this file is reference: read a section when you use its kit.
   the game reads it.
 - To boot straight into play while building, set `BOOT_INTO_PLAY = true` in
   `web/shell/shell.js` (or open `index.html?play`). Ship with it `false`.
+  The Stage reloads a game the person is playing with `#kurambit-play`,
+  which starts the run the same way, so a save lands them back in play.
 - `web/credits.txt` is what the credits screen shows. ASSETS.md stays the
   full record of every file's source and licence; every asset whose licence
   asks for attribution also gets a line in `credits.txt`.
