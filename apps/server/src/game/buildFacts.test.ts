@@ -129,6 +129,16 @@ describe("turnChangeBase", () => {
   it("keeps T3's own diff when the thread's previous turn is the newest build before it", () => {
     expect(turnChangeBase(turn, [t1])).toBeNull();
   });
+  it("keeps T3's list for a thread's first turn, and when its previous turn was not read", () => {
+    const restoreBefore = {
+      id: "before",
+      at: "2026-11-06T11:00:00.000Z",
+      thread: null,
+      turn: null,
+    };
+    expect(turnChangeBase({ ...turn, turn: 1 }, [restoreBefore])).toBeNull();
+    expect(turnChangeBase(turn, [restoreBefore])).toBeNull();
+  });
   it("counts from the run's build when the run changed the folder between the two turns", () => {
     const round = { id: "r3", at: "2026-11-06T11:00:00.000Z", thread: null, turn: null };
     const later = { id: "r4", at: "2026-11-06T12:30:00.000Z", thread: null, turn: null };

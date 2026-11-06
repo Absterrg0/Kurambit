@@ -287,6 +287,19 @@ const make = Effect.gen(function* () {
       const prefix = yield* repoPrefix(g.root);
       const inGame = (path: string) =>
         prefix === "" ? path : path.startsWith(prefix) ? path.slice(prefix.length) : null;
+      const noRun = yield* noRunRestoreOf(g.root);
+      const runRestore = g.run?.restore ?? null;
+      const restoreTargets = [
+        ...(noRun?.outcome?.restored === true ? [{ id: noRun.target, at: noRun.requestedAt }] : []),
+        ...(runRestore?.outcome?.restored === true && runRestore.target !== null
+          ? [{ id: runRestore.target, at: runRestore.requestedAt }]
+          : []),
+      ];
+      const restoreBefore = (e: Entry) =>
+        e.source._tag === "saved" &&
+        (("build" in e.handle && /^restores\/.+-before$/.test(e.handle.build)) ||
+          noRun?.before === e.id ||
+          e.source.label === "The game before a restore");
       const captures = rows.flatMap((row) => {
         const oid = refs.get(row.checkpoint.ref);
         return row.cwd !== g.root || oid === undefined || !isGameBuildId(oid)
@@ -301,10 +314,15 @@ const make = Effect.gen(function* () {
           thread: c.row.threadId,
           turn: c.row.runOrdinal,
         })),
-        // A build with no known time (EPOCH) is never taken as what came just before a turn.
+        // A build with no known time (EPOCH) is never taken as what came just
+        // before a turn, nor is a restore's "before": the folder became the
+        // restore's target then, which stands in for it at that time.
         ...fromRun.flatMap((e) =>
-          e.at === EPOCH ? [] : [{ id: e.id, at: e.at, thread: null, turn: null }],
+          e.at === EPOCH || restoreBefore(e)
+            ? []
+            : [{ id: e.id, at: e.at, thread: null, turn: null }],
         ),
+        ...restoreTargets.map((t) => ({ id: t.id, at: t.at, thread: null, turn: null })),
       ];
       const spans = (g.run?.rounds ?? []).flatMap((r) =>
         r.endedAt === null
@@ -408,13 +426,27 @@ const make = Effect.gen(function* () {
           : null;
       const beforeRestores = noRunSaved.flatMap((build) => saved(build, false) ?? []);
       if (run === null) return beforeRestores;
-      // The first round's change is from the game as the run found it.
-      let base: string | null = run.saved.find((b) => b.name === "base")?.oid ?? null;
+      // A round is built on the best before it: the last kept round's build, or
+      // the build the run's stages left (a new run's capture of the game as it
+      // found it, then each stage's), whichever came last.
+      const stageBuilds = run.saved.filter((b) => b.name === "base" || b.name.startsWith("stage-"));
+      let kept: { readonly id: string; readonly at: string } | null = null;
+      const baseBefore = (at: string | null): string | null => {
+        if (at === null) return kept?.id ?? null;
+        const stage = stageBuilds
+          .filter((b) => b.at <= at)
+          .reduce<GameRunControl.RunNamedBuild | null>(
+            (newest, b) => (newest === null || b.at > newest.at ? b : newest),
+            null,
+          );
+        if (stage === null) return kept?.id ?? null;
+        return kept !== null && kept.at >= stage.at ? kept.id : stage.oid;
+      };
       const rounds: Entry[] = [];
       for (const r of run.rounds) {
         const build = r.build;
         if (build !== null && isGameBuildId(build)) {
-          const change = yield* changeOf(g.root, g.lane, base, build);
+          const change = yield* changeOf(g.root, g.lane, baseBefore(r.endedAt), build);
           rounds.push({
             id: build,
             at: r.endedAt ?? EPOCH,
@@ -435,7 +467,7 @@ const make = Effect.gen(function* () {
             handle: r.outcome === "kept" ? { round: r.round } : { build },
           });
         }
-        if (r.outcome === "kept" && build !== null) base = build;
+        if (r.outcome === "kept" && build !== null) kept = { id: build, at: r.endedAt ?? EPOCH };
       }
       return [
         ...rounds,

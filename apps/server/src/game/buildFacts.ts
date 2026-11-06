@@ -294,9 +294,12 @@ export interface EarlierBuild {
   readonly turn: number | null;
 }
 /**
- * What a turn's changes are counted from: the newest build of the game
- * captured before the turn began. Null when that is the turn's own thread's
- * previous checkpoint (T3's own diff is exact then) or when none is known.
+ * What a turn's changes are counted from, when T3's own list would be wrong:
+ * the newest build of the game captured after the thread's previous turn and
+ * before this turn began (the run's, another chat's). Null keeps T3's list,
+ * which is exact for a thread's first turn (T3 captures its baseline as the
+ * turn starts) and the best known when the previous turn is not among the
+ * builds read (a page ends there): no base older than T3's proves anything.
  */
 export const turnChangeBase = (
   turn: {
@@ -307,13 +310,14 @@ export const turnChangeBase = (
   },
   earlier: ReadonlyArray<EarlierBuild>,
 ): string | null => {
+  if (turn.turn <= 1) return null;
+  const previous = earlier.find((e) => e.thread === turn.thread && e.turn === turn.turn - 1);
+  if (previous === undefined) return null;
   const base = earlier
-    .filter((e) => e.id !== turn.id && e.at <= turn.startedAt)
+    .filter((e) => e.id !== turn.id && e.at > previous.at && e.at <= turn.startedAt)
     .reduce<EarlierBuild | null>(
       (newest, e) => (newest === null || e.at > newest.at ? e : newest),
       null,
     );
-  return base === null || (base.thread === turn.thread && base.turn === turn.turn - 1)
-    ? null
-    : base.id;
+  return base === null ? null : base.id;
 };
