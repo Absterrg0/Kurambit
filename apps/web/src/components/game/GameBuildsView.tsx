@@ -1,4 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/reactivity";
 import * as Schema from "effect/Schema";
 import {
   ArrowLeftIcon,
@@ -24,7 +26,7 @@ import type { GameBuildRequest } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { useDiffPanelStore } from "../../diffPanelStore";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { gameEnvironment, setStagePlayTarget } from "../../state/game";
+import { gameEnvironment, olderBuildPages, setStagePlayTarget } from "../../state/game";
 import { useThreadCheckpointSummaries } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
@@ -104,19 +106,48 @@ export function GameBuildsView({
   const [picking, setPicking] = useState<GameBuildRef | "any" | null>(() =>
     asked !== undefined && "compare" in asked && asked.compare === "pick" ? "any" : null,
   );
-  const [older, setOlder] = useState<ReadonlyArray<string>>([]);
+  const [olderCount, setOlderCount] = useState(0);
   // A compact workbench shows the list or one detail, never both.
   const [compactDetail, setCompactDetail] = useState(
     () => asked !== undefined && !("compare" in asked && asked.compare === "pick"),
   );
-  const measure = useMeasureOnOpen(threadRef);
   const list = first.data;
-  // A requested build by id is the list's row once the list is read.
-  if (selection.kind === "ref" && selection.ref._tag === "build" && list !== null) {
+  const olderPages = useAtomValue(olderBuildPages(threadRef, olderCount));
+  // Every loaded row, first page and older pages together, each build once.
+  const seen = new Set<string>();
+  const loaded: Array<GameBuild> = [];
+  for (const build of [
+    ...(list?.builds ?? []),
+    ...olderPages.flatMap((page) => (AsyncResult.isSuccess(page) ? page.value.builds : [])),
+  ])
+    if (!seen.has(build.id)) {
+      seen.add(build.id);
+      loaded.push(build);
+    }
+  const lastPage = olderPages.at(-1);
+  const olderNext =
+    olderCount === 0
+      ? (list?.next ?? null)
+      : lastPage !== undefined && AsyncResult.isSuccess(lastPage)
+        ? lastPage.value.next
+        : null;
+  const olderWaiting = lastPage !== undefined && !AsyncResult.isSuccess(lastPage);
+  // The tab shown again rereads the list: the folder may have changed without a push.
+  const wasHidden = useRef(hidden);
+  const refreshList = first.refresh;
+  useEffect(() => {
+    const before = wasHidden.current;
+    wasHidden.current = hidden;
+    if (before && !hidden) refreshList();
+  }, [hidden, refreshList]);
+  // A requested build by id is a loaded row once the list holds it.
+  if (selection.kind === "ref" && selection.ref._tag === "build") {
     const id = selection.ref.build;
-    const found = list.builds.find((build) => build.id === id);
+    const found = loaded.find((build) => build.id === id);
     if (found !== undefined) setSelection({ kind: "build", build: found });
   }
+  // Opening a build (a row, a link, the palette) mounts its detail, which
+  // measures it once if it never was; hovering or focusing never does.
   const open = (build: GameBuild) => {
     if (picking !== null) {
       if (picking === "any") setPicking(refOf(build));
@@ -125,17 +156,14 @@ export function GameBuildsView({
         setPicking(null);
         setCompactDetail(true);
       }
-      if (build.facts.state === "never" && build.available) void measure.send(build.id);
       return;
     }
     setSelection({ kind: "build", build });
     setCompare(null);
     setCompactDetail(true);
-    // Opening a build measures it once if it never was; hovering or focusing never does.
-    if (build.facts.state === "never" && build.available) void measure.send(build.id);
   };
-  // The list's latest copy of the open build: its play and restore answers can change.
-  const fresh = (build: GameBuild) => list?.builds.find((entry) => entry.id === build.id) ?? build;
+  // The latest loaded copy of the open build: its play and restore answers can change.
+  const fresh = (build: GameBuild) => loaded.find((entry) => entry.id === build.id) ?? build;
   const startCompare = (a: GameBuildRef, b: GameBuildRef | null) => {
     if (b === null) setPicking(a);
     else {
@@ -148,26 +176,27 @@ export function GameBuildsView({
 
   const detail =
     compare !== null ? (
-      <GameBuildCompare
-        threadRef={threadRef}
-        pair={compare}
-        viewport={viewport}
-        gameName={gameName}
-        compact={compact}
-        hidden={hidden}
-        onClose={() => setCompare(null)}
-      />
+      // Hidden, the compare unmounts: no game of it keeps running behind another tab.
+      hidden ? null : (
+        <GameBuildCompare
+          threadRef={threadRef}
+          pair={compare}
+          viewport={viewport}
+          gameName={gameName}
+          compact={compact}
+          onClose={() => setCompare(null)}
+        />
+      )
     ) : selection.kind === "build" ? (
       <GameBuildDetail
         key={selection.build.id}
         threadRef={threadRef}
         build={fresh(selection.build)}
         list={list}
+        loaded={loaded}
         writer={writer}
         turnRunning={turnRunning}
         runActive={runActive}
-        onMeasureAgain={() => void measure.send(selection.build.id, true)}
-        measureError={measure.error(selection.build.id)}
         onCompare={(b) => startCompare(refOf(selection.build), b)}
         onShowStage={onShowStage}
       />
@@ -175,7 +204,7 @@ export function GameBuildsView({
       <GameBuildRefDetail
         threadRef={threadRef}
         buildRef={selection.ref}
-        list={list}
+        loaded={loaded}
         onOpen={open}
       />
     ) : (
@@ -234,7 +263,13 @@ export function GameBuildsView({
             </span>
           </button>
           {list?.restore != null ? (
-            <RestoreLine threadRef={threadRef} list={list} writer={writer} runActive={runActive} />
+            <RestoreLine
+              threadRef={threadRef}
+              list={list}
+              writer={writer}
+              runActive={runActive}
+              turnRunning={turnRunning}
+            />
           ) : null}
           {list === null ? (
             <p className="px-3 py-3 text-2xs text-muted-foreground">
@@ -252,22 +287,35 @@ export function GameBuildsView({
               onOpen={open}
             />
           )}
-          {list !== null
-            ? older.map((cursor, index) => (
-                <OlderPage
-                  key={cursor}
-                  threadRef={threadRef}
-                  before={cursor}
-                  current={list.current}
-                  selected={selection.kind === "build" ? selection.build.id : null}
-                  last={index === older.length - 1}
-                  onOpen={open}
-                  onMore={(next) => setOlder([...older, next])}
-                />
-              ))
-            : null}
-          {list?.next != null && older.length === 0 ? (
-            <ShowOlder onClick={() => setOlder([list.next ?? ""])} />
+          {olderPages.map((page, index) =>
+            AsyncResult.isSuccess(page) ? (
+              <BuildRows
+                // oxlint-disable-next-line react/no-array-index-key -- pages only grow at the end
+                key={index}
+                builds={page.value.builds}
+                current={list?.current ?? null}
+                selected={
+                  selection.kind === "build" && compare === null ? selection.build.id : null
+                }
+                onOpen={open}
+              />
+            ) : null,
+          )}
+          {olderWaiting ? (
+            <p className="px-3 py-2 text-2xs text-muted-foreground">
+              {lastPage !== undefined && AsyncResult.isFailure(lastPage)
+                ? "Older builds could not be read."
+                : "Reading older builds…"}
+            </p>
+          ) : olderNext !== null ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="m-2 self-start"
+              onClick={() => setOlderCount(olderCount + 1)}
+            >
+              Show older
+            </Button>
           ) : null}
         </nav>
       ) : null}
@@ -288,52 +336,6 @@ export function GameBuildsView({
         </section>
       ) : null}
     </div>
-  );
-}
-
-function ShowOlder({ onClick }: { onClick: () => void }) {
-  return (
-    <Button size="xs" variant="ghost" className="m-2 self-start" onClick={onClick}>
-      Show older
-    </Button>
-  );
-}
-
-function OlderPage({
-  threadRef,
-  before,
-  current,
-  selected,
-  last,
-  onOpen,
-  onMore,
-}: {
-  threadRef: ScopedThreadRef;
-  before: string;
-  current: GameBuildsResult["current"];
-  selected: string | null;
-  last: boolean;
-  onOpen: (build: GameBuild) => void;
-  onMore: (next: string) => void;
-}) {
-  const page = useEnvironmentQuery(
-    gameEnvironment.builds({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, before },
-    }),
-  );
-  const data = page.data;
-  if (data === null)
-    return (
-      <p className="px-3 py-2 text-2xs text-muted-foreground">
-        {page.error ?? "Reading older builds…"}
-      </p>
-    );
-  return (
-    <>
-      <BuildRows builds={data.builds} current={current} selected={selected} onOpen={onOpen} />
-      {last && data.next !== null ? <ShowOlder onClick={() => onMore(data.next ?? "")} /> : null}
-    </>
   );
 }
 
@@ -365,10 +367,10 @@ function BuildRows({
           >
             <span className="flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
               {current === build.id ? (
-                <span
-                  className="size-1.5 shrink-0 rounded-full bg-success"
-                  aria-label="The folder's build"
-                />
+                <>
+                  <span className="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />
+                  <span className="sr-only">The folder's build.</span>
+                </>
               ) : null}
               <span className="shrink-0">{formatBuildTime(build.at)}</span>
               <span className="min-w-0 truncate">· {buildSourceLabel(build.source)}</span>
@@ -418,11 +420,13 @@ function RestoreLine({
   list,
   writer,
   runActive,
+  turnRunning,
 }: {
   threadRef: ScopedThreadRef;
   list: GameBuildsResult;
   writer: boolean;
   runActive: boolean;
+  turnRunning: boolean;
 }) {
   const latest = list.restore;
   const restores = useBuildRestore(threadRef, latest);
@@ -447,7 +451,7 @@ function RestoreLine({
           <Button
             size="xs"
             variant="outline"
-            disabled={!restores.canRestore || restores.pending || runActive}
+            disabled={!restores.canRestore || restores.pending || runActive || turnRunning}
             onClick={() =>
               void restores.send(
                 undo,
@@ -458,6 +462,13 @@ function RestoreLine({
             <Undo2Icon aria-hidden="true" />
             {restores.restoring(undo) ? "Undoing…" : "Undo this restore"}
           </Button>
+          {runActive || turnRunning ? (
+            <p>
+              {runActive
+                ? "Stop the run to undo; while it is live, steer it."
+                : "Wait for the agent's turn to end to undo."}
+            </p>
+          ) : null}
           {restores.error(undo) ? (
             <p role="alert" className="text-destructive-foreground">
               {restores.error(undo)}
@@ -469,16 +480,19 @@ function RestoreLine({
   );
 }
 
-/** A build named by a chat turn, resolved through its facts to the list's row. */
+/**
+ * A build named by a link (a chat turn's, a round's), resolved through its
+ * facts to a loaded row and opened like a row click, so it measures the same way.
+ */
 function GameBuildRefDetail({
   threadRef,
   buildRef,
-  list,
+  loaded,
   onOpen,
 }: {
   threadRef: ScopedThreadRef;
   buildRef: GameBuildRef;
-  list: GameBuildsResult | null;
+  loaded: ReadonlyArray<GameBuild>;
   onOpen: (build: GameBuild) => void;
 }) {
   const facts = useEnvironmentQuery(
@@ -488,22 +502,18 @@ function GameBuildRefDetail({
     }),
   );
   const id = facts.data?.build ?? null;
-  const found = id === null ? undefined : list?.builds.find((build) => build.id === id);
-  if (found !== undefined)
-    return (
-      <div className="space-y-2">
-        <p className="text-xs">{found.summary}</p>
-        <Button size="sm" variant="outline" onClick={() => onOpen(found)}>
-          Open this build
-        </Button>
-      </div>
-    );
+  const found = id === null ? undefined : loaded.find((build) => build.id === id);
+  useEffect(() => {
+    if (found !== undefined) onOpen(found);
+  }, [found, onOpen]);
   return (
     <p className="text-xs text-muted-foreground">
       {facts.error ??
         (id === null
           ? "Finding the build…"
-          : "This build is older than the list shows; scroll to it with Show older.")}
+          : found === undefined
+            ? "This build is older than the list shows; Show older reaches it."
+            : "Opening the build…")}
     </p>
   );
 }
@@ -512,22 +522,21 @@ function GameBuildDetail({
   threadRef,
   build,
   list,
+  loaded,
   writer,
   turnRunning,
   runActive,
-  measureError,
-  onMeasureAgain,
   onCompare,
   onShowStage,
 }: {
   threadRef: ScopedThreadRef;
   build: GameBuild;
   list: GameBuildsResult | null;
+  /** Every loaded row, older pages too. */
+  loaded: ReadonlyArray<GameBuild>;
   writer: boolean;
   turnRunning: boolean;
   runActive: boolean;
-  measureError: string | null;
-  onMeasureAgain: () => void;
   onCompare: (b: GameBuildRef | null) => void;
   onShowStage: () => void;
 }) {
@@ -541,6 +550,13 @@ function GameBuildDetail({
   );
   const plays = useBuildPlay(threadRef);
   const restores = useBuildRestore(threadRef, list?.restore ?? null);
+  const measure = useMeasureOnOpen(threadRef);
+  // Opened, by a row or a link: a build that never was measured is, once.
+  const neverMeasured = build.available && build.facts.state === "never";
+  const sendMeasure = measure.send;
+  useEffect(() => {
+    if (neverMeasured) void sendMeasure(build.id);
+  }, [neverMeasured, build.id, sendMeasure]);
   const [windowMessage, setWindowMessage] = useState<string | null>(null);
   const ref = refOf(build);
   const isCurrent = list?.current === build.id && list.folderEdited === false;
@@ -562,10 +578,11 @@ function GameBuildDetail({
         : turnRunning
           ? "Wait for the agent's turn to end."
           : null);
-  const previous = list?.builds[list.builds.findIndex((entry) => entry.id === build.id) + 1];
-  const best =
-    list?.builds.find((entry) => entry.source._tag === "round" && entry.source.best) ?? null;
+  const index = loaded.findIndex((entry) => entry.id === build.id);
+  const previous = index === -1 ? undefined : loaded[index + 1];
+  const best = loaded.find((entry) => entry.source._tag === "round" && entry.source.best) ?? null;
   const factsData = facts.data;
+  const measureAnswer = measure.answer(build.id);
   const turnSource = build.source._tag === "turn" ? build.source : null;
   return (
     <div className="space-y-4">
@@ -608,9 +625,7 @@ function GameBuildDetail({
             <MenuItem onClick={() => onCompare(null)}>Pick in the list…</MenuItem>
           </MenuPopup>
         </Menu>
-        {isCurrent ? (
-          <span className="text-2xs text-muted-foreground">The folder is this build.</span>
-        ) : writer ? (
+        {writer ? (
           <Button
             size="sm"
             variant="outline"
@@ -630,7 +645,12 @@ function GameBuildDetail({
       {build.noPlay !== null ? (
         <p className="text-2xs text-muted-foreground">{build.noPlay}</p>
       ) : null}
-      {!isCurrent && writer && restoreBlocked !== null ? (
+      {isCurrent ? (
+        <p className="text-2xs text-muted-foreground">
+          The folder was this build when the list was last read.
+        </p>
+      ) : null}
+      {writer && restoreBlocked !== null ? (
         <p className="text-2xs text-muted-foreground">{restoreBlocked}</p>
       ) : null}
       {plays.error(ref) ? (
@@ -675,11 +695,12 @@ function GameBuildDetail({
       <section className="space-y-1.5">
         <div className="flex items-center gap-2">
           <h4 className="text-xs font-medium">Facts</h4>
-          {factsData !== null &&
+          {measure.canMeasure &&
+          factsData !== null &&
           (factsData.state === "never" ||
             factsData.state === "stale" ||
             factsData.state === "incomplete") ? (
-            <Button size="xs" variant="ghost" onClick={onMeasureAgain}>
+            <Button size="xs" variant="ghost" onClick={() => void measure.send(build.id, true)}>
               <RefreshCwIcon aria-hidden="true" />
               {factsData.state === "never" ? "Measure" : "Measure again"}
             </Button>
@@ -692,13 +713,21 @@ function GameBuildDetail({
         ) : factsData === null ? (
           <p className="text-2xs text-muted-foreground">{facts.error ?? "Reading the facts…"}</p>
         ) : factsData.state === "never" ? (
-          <p className="text-2xs text-muted-foreground">Not measured yet.</p>
+          <p className="text-2xs text-muted-foreground">
+            {factsData.message.trim() === "" ? "Not measured yet." : factsData.message}
+          </p>
         ) : (
           <GameBuildFactsList threadRef={threadRef} facts={factsData} />
         )}
-        {measureError !== null ? (
-          <p role="alert" className="text-2xs text-destructive-foreground">
-            {measureError}
+        {measureAnswer !== null && measureAnswer.text !== factsData?.message ? (
+          <p
+            role={measureAnswer.failed ? "alert" : undefined}
+            className={cn(
+              "text-2xs",
+              measureAnswer.failed ? "text-destructive-foreground" : "text-muted-foreground",
+            )}
+          >
+            {measureAnswer.text}
           </p>
         ) : null}
       </section>
@@ -732,7 +761,6 @@ function GameBuildCompare({
   viewport,
   gameName,
   compact,
-  hidden,
   onClose,
 }: {
   threadRef: ScopedThreadRef;
@@ -740,7 +768,6 @@ function GameBuildCompare({
   viewport: GameViewport;
   gameName: string;
   compact: boolean;
-  hidden: boolean;
   onClose: () => void;
 }) {
   const query = useEnvironmentQuery(
@@ -787,6 +814,7 @@ function GameBuildCompare({
               key={side.id}
               size="xs"
               variant={focused === index ? "secondary" : "ghost"}
+              aria-pressed={focused === index}
               onClick={() => setFocused(index === 0 ? 0 : 1)}
             >
               {index === 0 ? "A" : "B"}
@@ -804,7 +832,7 @@ function GameBuildCompare({
               label={labels[index] ?? ""}
               viewport={viewport}
               gameName={gameName}
-              focused={!hidden && focused === index}
+              focused={focused === index}
               onFocus={() => setFocused(index === 0 ? 0 : 1)}
             />
           ),

@@ -12,7 +12,12 @@ import {
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { randomUUID } from "../../lib/utils";
-import { buildRestoreSending, gameEnvironment, setBuildRestoreSending } from "../../state/game";
+import {
+  buildRestoreSending,
+  gameEnvironment,
+  setBuildRestoreSending,
+  setStagePlayTarget,
+} from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { GameBuildRestore } from "./gameBuilds.logic";
 
@@ -41,10 +46,12 @@ export function useBuildRestore(threadRef: ScopedThreadRef, latest: GameBuildRes
   // Sent by this client and not yet in the list, which moves past `since` once it is.
   const waiting = shared !== null && (latest?.requestId ?? null) === shared.since;
   const pending = waiting || (latest !== null && latest.outcome === null);
-  const send = async (target: GameBuildId, question: string) => {
+  /** `asBest` keeps a run round's build as the run's best (CONTRACT A1). */
+  const send = async (target: GameBuildId, question: string, asBest = false) => {
     if (pending) return;
     if ((await requestConfirmDialog(question)) !== true) return;
-    if (key.current?.target !== target) key.current = { target, id: randomUUID() };
+    const name = asBest ? `${target}:best` : target;
+    if (key.current?.target !== name) key.current = { target: name, id: randomUUID() };
     const since = latest?.requestId ?? null;
     setBuildRestoreSending(threadRef, { target, since });
     setError(null);
@@ -54,6 +61,8 @@ export function useBuildRestore(threadRef: ScopedThreadRef, latest: GameBuildRes
         threadId: threadRef.threadId,
         build: { _tag: "build", build: target },
         commandId: key.current.id,
+        // CONTRACT A1's field arrives with builder F's branch; the merge types it directly.
+        ...(asBest ? { asBest: true } : {}),
       },
     });
     if (result._tag === "Failure") {
@@ -126,9 +135,12 @@ export function useMeasureOnOpen(threadRef: ScopedThreadRef) {
   );
   const measure = useAtomCommand(gameEnvironment.buildMeasure, { reportFailure: false });
   const asked = useRef(new Set<string>());
-  const [error, setError] = useState<{ readonly build: string; readonly text: string } | null>(
-    null,
-  );
+  // The server's answer to the last ask: its refusal, or its word on the queue.
+  const [answer, setAnswer] = useState<{
+    readonly build: string;
+    readonly text: string;
+    readonly failed: boolean;
+  } | null>(null);
   const send = async (build: GameBuildId, again = false) => {
     if (!canMeasure || (!again && asked.current.has(build))) return;
     asked.current.add(build);
@@ -136,13 +148,30 @@ export function useMeasureOnOpen(threadRef: ScopedThreadRef) {
       environmentId: threadRef.environmentId,
       input: { threadId: threadRef.threadId, build: { _tag: "build", build } },
     });
-    setError(
-      result._tag === "Failure" ? { build, text: String(squashAtomCommandFailure(result)) } : null,
-    );
+    if (result._tag === "Failure") {
+      // Only the Measure button asks again: an open never retries a refusal.
+      setAnswer({ build, text: String(squashAtomCommandFailure(result)), failed: true });
+    } else
+      setAnswer(
+        result.value.message.trim() === ""
+          ? null
+          : { build, text: result.value.message, failed: false },
+      );
   };
   return {
     canMeasure,
-    error: (build: GameBuildId) => (error?.build === build ? error.text : null),
+    answer: (build: GameBuildId) => (answer?.build === build ? answer : null),
     send,
+  };
+}
+
+/**
+ * Stops one build's copy, never the folder's own preview (CONTRACT A3,
+ * `game.buildStop`). Until builder F's branch lands that RPC, the stage can
+ * only stop following the copy; the server's idle shutdown ends it.
+ */
+export function useBuildStop(threadRef: ScopedThreadRef) {
+  return async (_build: GameBuildId) => {
+    setStagePlayTarget(threadRef, null);
   };
 }
