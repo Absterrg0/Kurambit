@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import { GameBuildId } from "@kurambit/contracts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
@@ -43,6 +44,7 @@ describe("GameFacts supersede", () => {
               changed: () => Effect.void,
             }),
             Layer.mock(GameService.GameService)({}),
+            Layer.mock(PreviewBrowser.PreviewBrowser)({}),
             Layer.mock(GameProcesses.GameProcesses)({ list: () => [] }),
             SqlitePersistence.layerMemory,
             NodeServices.layer,

@@ -65,6 +65,8 @@ export interface MachineLoad {
   readonly cores: number;
   readonly stalled: number | null;
   readonly load: number;
+  /** The harness's browser drew on the CPU (no GPU backend on this machine). */
+  readonly software?: boolean;
 }
 const BUSY_STALLED = 0.2;
 const BUSY_LOAD_PER_CORE = 0.75;
@@ -77,21 +79,28 @@ export const machineBusy = (machine: MachineLoad | null): boolean =>
     : machine.load / Math.max(1, machine.cores) >= BUSY_LOAD_PER_CORE);
 
 /**
- * A run below real time: its span of play did not fit the wall budget. On a
- * busy machine that says nothing about the game, so it is retried; only a
- * slow game on an idle machine is standing (a person's measure tries again).
+ * A run below real time: its span of play did not fit the wall budget. In a
+ * browser drawing on the CPU it says nothing about the game; on a busy
+ * machine neither, so it is retried; only a slow game on an idle machine,
+ * drawing on its GPU, is standing (a person's measure tries again).
  */
 const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: MachineLoad | null) =>
-  machineBusy(machine)
+  machine?.software === true
     ? notMeasured(
-        `the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
-        true,
-      )
-    : notMeasured(
-        `the game ran at ${result.timeRatio.toFixed(2)}× real time on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
+        `the harness renders in software here, so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
         false,
         true,
-      );
+      )
+    : machineBusy(machine)
+      ? notMeasured(
+          `the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
+          true,
+        )
+      : notMeasured(
+          `the game ran at ${result.timeRatio.toFixed(2)}× real time on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
+          false,
+          true,
+        );
 
 /** What a tier bot reports in its status evidence (templates/bot-kit/tier.mjs). */
 interface TierEvidence {

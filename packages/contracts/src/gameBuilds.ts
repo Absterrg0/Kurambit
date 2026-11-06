@@ -498,6 +498,14 @@ export const diffBuildFacts = (
       );
     if (a.harness !== b.harness)
       return notComparable(id, "measured by different versions of the harness", textA, textB);
+    // A GPU and a CPU renderer play a game at different speeds.
+    if (a.renderer !== b.renderer)
+      return notComparable(
+        id,
+        `measured on different renderers (A: ${a.renderer ?? "not recorded"}; B: ${b.renderer ?? "not recorded"})`,
+        textA,
+        textB,
+      );
     if (
       id === "skilled" &&
       a.skilled.status === "measured" &&
