@@ -27,6 +27,10 @@ import {
   unityPlayerDirectory,
 } from "./unityPlayerCache.ts";
 
+/** What the CLI answers when the editor cannot be reached (its main thread held, or gone). */
+const UNREACHABLE =
+  /unreachable|not ready|EDITOR_NOT_READY|No Pipeline instance|ECONNREFUSED|ECONNRESET/i;
+
 /** Frames the check lets each entry run in play mode before it reads the console. */
 const CHECK_FRAMES = 120;
 /** A game that advances no frame in this long froze; one that advances some is given up to SLOW_WAIT_S. */
@@ -85,7 +89,8 @@ export const makeUnityBackend = (
     args: ReadonlyArray<string>,
     operation: string,
     timeoutMs = 120_000,
-  ) => live.cli(root, ["command", ...args], { operation, timeoutMs });
+    retryReload = true,
+  ) => live.cli(root, ["command", ...args], { operation, timeoutMs, retryReload });
 
   /** `unity recompile` reports compiler errors as structured entries with file and line. */
   const recompile = (root: string, projectName: string) =>
@@ -283,11 +288,17 @@ export const makeUnityBackend = (
             ["script", "eval", "return UnityEngine.Time.frameCount;"],
             "unity-frame",
             MAIN_THREAD_ANSWER_MS,
+            // During play, an editor that is not ready is held by the game:
+            // the answer itself, never waited out and asked again.
+            false,
           ),
         );
-        // Silence on the main thread is the game's freeze; a refusal or an
-        // unreadable answer is the Pipeline's, which says nothing about the game.
+        // Silence on the main thread, or an editor unreachable once play
+        // started, is the game's freeze; another refusal or an unreadable
+        // answer is the Pipeline's, which says nothing about the game.
         if (read.kind === "silent") return null;
+        if (read.kind === "refused" && UNREACHABLE.test(`${read.code ?? ""} ${read.message}`))
+          return null;
         const value = read.kind === "answered" ? Number(read.result?.["result"]) : Number.NaN;
         if (!Number.isFinite(value))
           return yield* toolFailed(
@@ -315,6 +326,7 @@ export const makeUnityBackend = (
           ],
           "unity-play-frames",
           (seconds + 30) * 1000,
+          false,
         );
       const startedAt = yield* Clock.currentTimeMillis;
       const first = yield* frame;

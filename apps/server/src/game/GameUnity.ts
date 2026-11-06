@@ -541,6 +541,12 @@ export class GameUnity extends Context.Service<
          * build's status): its timeout then does not mark the editor stuck.
          */
         readonly unansweredIsNews?: boolean;
+        /**
+         * False when "not ready" is itself the answer the caller reads (a
+         * readiness wait, a probe during play): the call is never waited out
+         * and run again. Readiness waits (`--until-ready`) are never retried.
+         */
+        readonly retryReload?: boolean;
       },
     ) => Effect.Effect<UnityCliResult, GameOperationError>;
     /** One `unity mcp` tool call against this game's live editor. */
@@ -1144,6 +1150,23 @@ const make = Effect.gen(function* () {
       ["status", "--until-ready", "--project-path", session.projectDir, "--timeout", "180"],
       { operation: "unity-ready", timeoutMs: 200_000 },
     );
+  /**
+   * The one domain-reload courtesy: after a call failed because the editor
+   * was reloading, wait for it once and run the call again. Never for a
+   * session already marked unusable, and an editor that does not come back
+   * from the wait is marked unusable instead of being asked again, so a
+   * frozen editor is never waited out twice or replayed within one hold.
+   */
+  const afterReload = <A>(session: Session, retry: Effect.Effect<A, GameOperationError>) =>
+    Effect.gen(function* () {
+      if (session.broken !== null) return null;
+      const ready = yield* waitReady(session.root, session);
+      if (answerOf(ready).kind !== "answered") {
+        breakSession(session, "the live Unity editor did not become ready again");
+        return null;
+      }
+      return yield* retry;
+    });
   const RELOADING =
     /socket hang up|No Pipeline instance found|ECONNREFUSED|ECONNRESET|EDITOR_NOT_READY|not ready/i;
 
@@ -1191,10 +1214,8 @@ const make = Effect.gen(function* () {
         let result = yield* attempt(session, name, args, timeoutMs);
         // One retry after the editor is ready again: a domain reload is not
         // the agent's error, and the call never reached the editor.
-        if (result.isError === true && RELOADING.test(textOf(result))) {
-          yield* waitReady(root, session);
-          result = yield* attempt(session, name, args, timeoutMs);
-        }
+        if (result.isError === true && RELOADING.test(textOf(result)))
+          result = (yield* afterReload(session, attempt(session, name, args, timeoutMs))) ?? result;
         if (result.isError === true)
           return yield* opError(
             "unity-live",
@@ -1379,13 +1400,13 @@ const make = Effect.gen(function* () {
             return result;
           }
           if (
+            options.retryReload !== false &&
+            !args.includes("--until-ready") &&
             !result.ok &&
             (result.process.exitCode === 12 ||
               RELOADING.test(`${result.errorCode} ${result.errorMessage}`))
-          ) {
-            yield* waitReady(root, session);
-            result = yield* run();
-          }
+          )
+            result = (yield* afterReload(session, run())) ?? result;
           if (result.process.timedOut && options.unansweredIsNews !== false)
             breakSession(
               session,
