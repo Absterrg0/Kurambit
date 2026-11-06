@@ -6,7 +6,9 @@ import {
   type GamePreviewServe,
   type GameStageInput,
   nextGamePreviewFrame,
+  LIVE_TURN_WINDOW_MS,
   liveServe,
+  liveToShow,
   playHeldFrame,
   reloadFrame,
   remountOrHold,
@@ -310,6 +312,67 @@ it("reloads on request, with what is held or the same serve again", () => {
   expect(remountOrHold(again, liveServe(URL, 0), WATCHING)).toBe(again);
   const held = remountOrHold(first, liveServe(URL, 1), IN_GAME);
   expect(reloadFrame(held, 2)).toMatchObject({ held: null, serve: liveServe(URL, 1) });
+});
+
+it("says a closed live serve is stopped, and names an export as one", () => {
+  const live = { ...BASE, stage: "live" as const, webBuildStale: false };
+  // The server closed it (the palette, another client, the agent): never "Live".
+  expect(
+    deriveGameStagePhase({ ...live, previewUrl: "http://127.0.0.1:1/", liveServe: "stopped" }),
+  ).toEqual({ kind: "stopped" });
+  expect(deriveGameStagePhase({ ...live, busyStartedAt: 1, busyAction: "rebuild" })).toMatchObject({
+    kind: "building",
+    message: "Exporting the game…",
+  });
+  expect(
+    deriveGameStagePhase({ ...live, localError: "disk full", errorAction: "rebuild" }),
+  ).toMatchObject({ kind: "failed", what: "build" });
+});
+
+// A reload into the title after every save makes a live game unplayable; one into play
+// after the person's own Reload hides the title they asked for.
+it("lands a live remount in play, and a first load, new session or Reload on the title", () => {
+  const URL = "http://127.0.0.1:9/";
+  const first = remountOrHold(null, liveServe(URL, 0), WATCHING);
+  expect(first.intoPlay).toBe(false);
+  const changed = remountOrHold(first, liveServe(URL, 1), WATCHING);
+  expect(changed.intoPlay).toBe(true);
+  expect(reloadFrame(changed, 1).intoPlay).toBe(false);
+  expect(playHeldFrame(remountOrHold(first, liveServe(URL, 1), IN_GAME)).intoPlay).toBe(true);
+  const hidden = remountOrHold(first, liveServe(URL, 1), HIDDEN);
+  expect(remountOrHold(hidden, liveServe(URL, 1), WATCHING).intoPlay).toBe(true);
+  expect(remountOrHold(changed, liveServe("http://127.0.0.1:10/", 1), WATCHING).intoPlay).toBe(
+    false,
+  );
+});
+
+// Thirty saves in a turn must not restart the game thirty times.
+it("applies live changes at most once a window while the turn runs, and at once after", () => {
+  const shown = { revision: 1, at: 1_000 };
+  const soon = { revision: 2, at: 4_000 };
+  // No turn: at once.
+  expect(liveToShow({ latest: soon, shown, turnRunning: false, now: 4_000 }).show.revision).toBe(2);
+  // In a turn, inside the window: it waits, with one wake at the window's end.
+  expect(liveToShow({ latest: soon, shown, turnRunning: true, now: 4_000 })).toEqual({
+    show: shown,
+    wakeAt: 1_000 + LIVE_TURN_WINDOW_MS,
+  });
+  // The latest wins at the wake, and a push past the window applies at once.
+  const later = { revision: 5, at: 9_000 };
+  expect(
+    liveToShow({ latest: later, shown, turnRunning: true, now: 1_000 + LIVE_TURN_WINDOW_MS }),
+  ).toEqual({ show: { revision: 5, at: 11_000 }, wakeAt: null });
+  expect(
+    liveToShow({ latest: { revision: 2, at: 12_000 }, shown, turnRunning: true, now: 12_000 }).show
+      .revision,
+  ).toBe(2);
+  // The turn ends: what waits applies.
+  expect(liveToShow({ latest: soon, shown, turnRunning: false, now: 5_000 }).wakeAt).toBeNull();
+  // Nothing new, nothing to wake for.
+  expect(liveToShow({ latest: shown, shown, turnRunning: true, now: 2_000 })).toEqual({
+    show: shown,
+    wakeAt: null,
+  });
 });
 
 it("describes unknown source freshness and preserves selected Play", () => {
