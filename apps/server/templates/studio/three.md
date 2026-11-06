@@ -12,10 +12,13 @@ exported with the same `game_*` tools as a Godot game.
 - three.js loads GLB and glTF only. Animated GLB characters are in
   `kaykit-adventurers` and `kaykit-skeletons` (rig `kaykit-1`),
   `kenney-mini-characters` and `kenney-mini-dungeon` (rig `kenney-mini`) and
-  `kenney-blocky-characters`; FBX-only packs (the Quaternius characters and
-  monsters, `kenney-animated-characters-1`) do not load here. Put in `ASSETS`
+  `kenney-blocky-characters`; the FBX-only character packs
+  (`quaternius-knight`, `quaternius-ultimate-characters`,
+  `quaternius-monsters`, `kenney-animated-characters-1`) do not load here. Put in `ASSETS`
   the path `game_assets_add` reports: it renames folders (Kenney's
-  `GLB format` becomes `GLB-format`).
+  `GLB format` becomes `GLB-format`). Packs differ in scale (a Kenney blocky
+  character stands several times a mini one): when you mix packs, size each
+  model with `root.scale.setScalar(n)`.
 - No Blender, no key art, no plan, no `game_explore_*` to check your work:
   `game_check` clean is the check, and Kurambit plays and measures the build
   when the turn ends.
