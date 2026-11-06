@@ -6,7 +6,6 @@ import {
   READ_STUDIO_READY,
   READ_STUDIO_STATE,
   STUDIO_SET_STATE,
-  chromiumLaunchArgs,
   toPlaywrightKey,
   type GameBrowser,
 } from "./gameChromium.ts";
@@ -203,7 +202,7 @@ export const openWebPlaySession = async (input: {
       executablePath: input.browser.executable,
       headless: true,
       chromiumSandbox: input.browser.sandbox,
-      args: [...chromiumLaunchArgs()],
+      args: [...input.browser.args],
       env: chromiumChildEnv(),
     })
     .catch(async (cause: unknown) => {

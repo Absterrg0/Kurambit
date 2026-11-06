@@ -1,10 +1,11 @@
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
-import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { GameOperationError } from "@kurambit/contracts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
+import { chromiumChildEnv } from "./gameWebServer.ts";
 
 export interface GameBrowser {
   readonly executable: string;
@@ -15,7 +16,122 @@ export interface GameBrowser {
    * stopped it when that is known, else the launch error and what to try.
    */
   readonly launchFailure: (cause: unknown) => Promise<string>;
+  /** Every launch's arguments, with the render backend this machine was probed for. */
+  readonly args: ReadonlyArray<string>;
+  /** WebGL's renderer string the browser draws with; null when the probe could not read it. */
+  readonly renderer: string | null;
+  /** The browser draws on the CPU (SwiftShader): play speed then says nothing about the game. */
+  readonly software: boolean;
 }
+
+const BASE_ARGS = [
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--mute-audio",
+  "--hide-scrollbars",
+  "--disable-dev-shm-usage",
+] as const;
+/** Chrome's own CPU renderer: works everywhere, and costs several cores on a 3D scene. */
+const SOFTWARE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] as const;
+
+/**
+ * The hardware backends tried on Linux, in order: EGL on the GPU's render
+ * node, then Vulkan. Neither needs a display. Elsewhere Chrome's default
+ * already draws on the GPU, so it is only probed for its renderer.
+ */
+export const backendCandidates = (
+  platform: NodeJS.Platform,
+): ReadonlyArray<ReadonlyArray<string>> =>
+  platform === "linux"
+    ? [["--use-angle=gl-egl"], ["--use-angle=vulkan", "--enable-features=Vulkan"]]
+    : [[]];
+
+/** The renderer line the probe page prints in the dumped DOM; null when it printed none or no WebGL. */
+export const parseProbeRenderer = (dom: string): string | null => {
+  const found = /RENDERER=([^<\n]+)/.exec(dom)?.[1]?.trim();
+  return found === undefined || found === "" || found === "no-webgl" ? null : found;
+};
+
+/** A renderer that draws on the CPU. */
+export const isSoftwareRenderer = (renderer: string): boolean =>
+  /swiftshader|llvmpipe|softpipe|software/i.test(renderer);
+
+export interface RenderBackend {
+  readonly args: ReadonlyArray<string>;
+  readonly renderer: string | null;
+  readonly software: boolean;
+}
+
+/**
+ * The first candidate that drew on hardware; else Chrome's CPU renderer. Off
+ * Linux the default is kept whatever it reports, with its renderer recorded.
+ */
+export const chooseBackend = (
+  platform: NodeJS.Platform,
+  probed: ReadonlyArray<{ readonly args: ReadonlyArray<string>; readonly renderer: string | null }>,
+): RenderBackend => {
+  const hardware = probed.find(
+    (each) => each.renderer !== null && !isSoftwareRenderer(each.renderer),
+  );
+  if (hardware !== undefined)
+    return { args: hardware.args, renderer: hardware.renderer, software: false };
+  if (platform !== "linux") {
+    const renderer = probed[0]?.renderer ?? null;
+    return { args: [], renderer, software: renderer !== null && isSoftwareRenderer(renderer) };
+  }
+  return { args: SOFTWARE_ARGS, renderer: null, software: true };
+};
+
+const PROBE_PAGE = `data:text/html,${encodeURIComponent(
+  "<!doctype html><body><script>const c=document.createElement('canvas');const gl=c.getContext('webgl2')||c.getContext('webgl');let r='no-webgl';if(gl){const e=gl.getExtension('WEBGL_debug_renderer_info');r=e?gl.getParameter(e.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER);}document.body.textContent='RENDERER='+r;</script></body>",
+)}`;
+const PROBE_TIMEOUT = "15 seconds" as const;
+
+/**
+ * Once per server process and browser: the backend every game browser
+ * launches with. Each candidate draws one WebGL canvas in the same headless
+ * shell, with no display in its environment; one that fails or hangs counts
+ * as no hardware. Shared by every service that makes a game browser.
+ */
+const backends = new Map<string, Promise<RenderBackend>>();
+const probeBackend = (executable: string, sandbox: boolean) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const platform = yield* HostProcess.Platform;
+    const env = chromiumChildEnv();
+    delete env.DISPLAY;
+    delete env.WAYLAND_DISPLAY;
+    const probed = [];
+    for (const args of backendCandidates(platform)) {
+      const dom = yield* spawner
+        .string(
+          ChildProcess.make(
+            executable,
+            [
+              ...BASE_ARGS,
+              ...args,
+              "--headless",
+              ...(sandbox ? [] : ["--no-sandbox"]),
+              "--dump-dom",
+              PROBE_PAGE,
+            ],
+            { env, extendEnv: false, stdin: "ignore", stderr: "ignore" },
+          ),
+        )
+        .pipe(
+          Effect.timeout(PROBE_TIMEOUT),
+          Effect.orElseSucceed(() => ""),
+        );
+      const renderer = parseProbeRenderer(dom);
+      probed.push({ args, renderer });
+      if (renderer !== null && !isSoftwareRenderer(renderer)) break;
+    }
+    const chosen = chooseBackend(platform, probed);
+    yield* chosen.software
+      ? Effect.logInfo("Game browsers render in software: no GPU backend drew.", { probed })
+      : Effect.logInfo("Game browsers render on the GPU.", { renderer: chosen.renderer });
+    return chosen;
+  });
 
 /**
  * Kurambit's own headless browser for game pages: T3's pinned, verified
@@ -29,6 +145,7 @@ export interface GameBrowser {
 export const makeGameBrowser = Effect.gen(function* () {
   const preview = yield* PreviewBrowser.PreviewBrowser;
   const services = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
+  const platform = yield* HostProcess.Platform;
   const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
   const sandbox = !PreviewBrowserHost.sandboxDisabled(yield* HostProcess.Environment);
   const launchFailure = async (executable: string, cause: unknown): Promise<string> => {
@@ -64,23 +181,35 @@ export const makeGameBrowser = Effect.gen(function* () {
             cause: error,
           }),
       ),
-      Effect.map((executable) => ({
-        executable,
-        sandbox,
-        launchFailure: (cause) => launchFailure(executable, cause),
-      })),
+      Effect.flatMap((executable) => {
+        let backend = backends.get(executable);
+        if (backend === undefined) {
+          backend = Effect.runPromiseWith(services)(
+            probeBackend(executable, sandbox).pipe(
+              Effect.provideService(HostProcess.Platform, platform),
+              Effect.catchCause((cause) =>
+                Effect.logInfo("Game browsers render in software: the GPU probe failed.", {
+                  cause,
+                }).pipe(Effect.as(chooseBackend(platform, []))),
+              ),
+            ),
+          );
+          backends.set(executable, backend);
+        }
+        return Effect.map(
+          Effect.promise(() => backend),
+          (chosen) => ({
+            executable,
+            sandbox,
+            launchFailure: (cause: unknown) => launchFailure(executable, cause),
+            args: [...BASE_ARGS, ...chosen.args],
+            renderer: chosen.renderer,
+            software: chosen.software,
+          }),
+        );
+      }),
     );
 });
-
-export const chromiumLaunchArgs = (): readonly string[] => [
-  "--no-first-run",
-  "--no-default-browser-check",
-  "--mute-audio",
-  "--hide-scrollbars",
-  "--disable-dev-shm-usage",
-  "--use-angle=swiftshader",
-  "--enable-unsafe-swiftshader",
-];
 
 /**
  * The `window.__studio` probe every three.js game ships. Reads the ready
