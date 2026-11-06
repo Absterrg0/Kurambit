@@ -29,6 +29,25 @@ it.layer(NodeServices.layer)("writeFileStringAtomically", (it) => {
     }),
   );
 
+  it.effect("with followLink false replaces a link at the target and leaves its destination", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-atomic-write-" });
+      const outside = path.join(root, "outside.txt");
+      const planted = path.join(root, "game", "saves.json");
+      yield* fs.makeDirectory(path.dirname(planted), { recursive: true });
+      yield* fs.writeFileString(outside, "untouched");
+      yield* fs.symlink(outside, planted);
+
+      yield* writeFileStringAtomically({ filePath: planted, contents: "saved", followLink: false });
+
+      assert.strictEqual(yield* fs.readFileString(outside), "untouched");
+      assert.strictEqual(yield* fs.readFileString(planted), "saved");
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(fs.readLink(planted))));
+    }),
+  );
+
   it.effect("keeps a dangling symlink linked and creates its destination", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
