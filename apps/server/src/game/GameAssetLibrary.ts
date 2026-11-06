@@ -3,12 +3,14 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import {
   GameOperationError,
+  type GameEngineId,
   type GameAssetsAddInput,
   type GameAssetsAddResult,
   type GameAssetsSearchInput,
@@ -31,7 +33,6 @@ import {
   queryWords,
   safePath,
   unpackArchive,
-  type LibraryEngine,
   type LibraryFile,
   type LibraryIndex,
   type LibraryMedia,
@@ -40,7 +41,7 @@ import {
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { toolsDirectory } from "./GameToolchain.ts";
-import { laneLibrary } from "./engineProfile.ts";
+import { engineProfile, gamePaths } from "./engineProfile.ts";
 import { templateDirectoryCandidates } from "./templates.ts";
 
 /** Beside the pinned tools, shared by every game on this machine. */
@@ -123,11 +124,24 @@ const describe = (file: LibraryFile) => {
   return parts.join(", ");
 };
 
-const engineOf = (name: string): LibraryEngine =>
-  name === "three" ? "three" : name === "unity" ? "unity" : "godot";
+/** Sheets of earlier searches a game keeps under builds/library. */
+const SHEETS_KEPT = 20;
+/** Pack folders of another index version are left alone until this old, in case a running older server reads them. */
+const STALE_PACK_MS = 24 * 60 * 60_000;
 
-/** Game-relative directory a pack's files land in, under the lane's own asset dir. */
-const libraryDirFor = (lane: string, pack: string) => `${laneLibrary(lane)}/${pack}`;
+/** Removes all but the `keep` most recently modified entries of a folder that `pick` names. */
+const keepNewest = async (directory: string, keep: number, pick: (name: string) => boolean) => {
+  const entries: Array<{ readonly path: string; readonly mtimeMs: number }> = [];
+  for (const name of await NodeFSP.readdir(directory).catch(() => [] as string[])) {
+    if (!pick(name)) continue;
+    const path = NodePath.join(directory, name);
+    const stat = await NodeFSP.lstat(path).catch(() => null);
+    if (stat !== null && stat.isFile()) entries.push({ path, mtimeMs: stat.mtimeMs });
+  }
+  entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const { path } of entries.slice(keep))
+    await NodeFSP.rm(path, { force: true }).catch(() => undefined);
+};
 
 /** Scratch names carry the pid of the server that made them, so a sweep spares a live server's fetch. */
 const SCRATCH_NAME =
@@ -209,6 +223,24 @@ const make = Effect.gen(function* () {
       await NodeFSP.rm(NodePath.join(scratch, name), { recursive: true, force: true }).catch(
         () => undefined,
       );
+    }
+  });
+
+  // Pack folders keyed by an older index version (or none) are dead to this
+  // server; the cache is shared with older servers, so only ones untouched
+  // for a day go. Their pinned archives stay, so an older server refetches
+  // from its own cache.
+  const startedAt = yield* Clock.currentTimeMillis;
+  yield* Effect.promise(async () => {
+    const packs = NodePath.join(directory, "packs");
+    const now = startedAt;
+    for (const name of await NodeFSP.readdir(packs).catch(() => [] as string[])) {
+      const version = /-i(\d+)$/.exec(name);
+      if (version !== null && Number(version[1]) >= INDEX_VERSION) continue;
+      const path = NodePath.join(packs, name);
+      const stat = await NodeFSP.stat(path).catch(() => null);
+      if (stat === null || now - stat.mtimeMs < STALE_PACK_MS) continue;
+      await NodeFSP.rm(path, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 
@@ -417,7 +449,7 @@ const make = Effect.gen(function* () {
   }
 
   /** Tiles the images into one numbered PNG with ffmpeg; undefined when nothing has a picture. */
-  const contactSheet = (root: string, name: string, tiles: ReadonlyArray<Tile>, big: boolean) =>
+  const drawSheet = (root: string, name: string, tiles: ReadonlyArray<Tile>, big: boolean) =>
     Effect.gen(function* () {
       const drawn = tiles.filter((tile) => tile.image !== undefined || tile.font !== undefined);
       if (drawn.length === 0) return undefined;
@@ -513,6 +545,10 @@ const make = Effect.gen(function* () {
         try: () => NodeFSP.readFile(output),
         catch: io("Library contact sheet", output),
       });
+      // One sheet per distinct search: the newest few are kept.
+      yield* Effect.promise(() =>
+        keepNewest(sheets, SHEETS_KEPT, (entry) => entry.endsWith(".png")),
+      );
       const rows = Math.ceil(drawn.length / columns);
       return {
         relative,
@@ -526,7 +562,29 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const searchPacks = (engine: LibraryEngine, input: GameAssetsSearchInput) =>
+  /**
+   * The contact sheet is a picture beside the text listing, which is what
+   * add needs (exact paths): a machine without ffmpeg, an ffmpeg without
+   * drawtext, or one image that fails to decode costs only the picture.
+   */
+  const contactSheet = (root: string, name: string, tiles: ReadonlyArray<Tile>, big: boolean) =>
+    drawSheet(root, name, tiles, big).pipe(
+      Effect.map((sheet) => ({ sheet, unavailable: undefined })),
+      Effect.catchTags({
+        GameOperationError: (error) =>
+          error.reason === "symlink" || error.reason === "invalid-path"
+            ? Effect.fail(error)
+            : Effect.succeed({
+                sheet: undefined,
+                unavailable:
+                  error.reason === "tool-missing"
+                    ? "No contact sheet: ffmpeg is not installed (it draws pack pictures; install it from https://ffmpeg.org/download.html or set KURAMBIT_FFMPEG). The list below is complete without it."
+                    : `No contact sheet: ffmpeg could not draw it (${(error.detail ?? error.reason).split("\n")[0]?.slice(0, 200)}). The list below is complete without it.`,
+              }),
+      }),
+    );
+
+  const searchPacks = (engine: GameEngineId, input: GameAssetsSearchInput) =>
     Effect.gen(function* () {
       const words = queryWords(input.query);
       const cached = yield* cachedIds;
@@ -585,7 +643,7 @@ const make = Effect.gen(function* () {
 
   const searchFiles = (
     root: string,
-    engine: LibraryEngine,
+    engine: GameEngineId,
     pack: LibraryPack,
     input: GameAssetsSearchInput,
   ) =>
@@ -617,7 +675,7 @@ const make = Effect.gen(function* () {
                 `- ${folder}/ ${[...formats.entries()].map(([format, count]) => `${count} ${format}`).join(", ")}${pictureOnly.get(folder) === true ? " (pictures of the models, to look at; a 3D game adds the models)" : ""}`,
             );
           const pictures = index.previews.slice(0, 2);
-          const sheet = yield* contactSheet(
+          const { sheet, unavailable } = yield* contactSheet(
             root,
             `${pack.id}-overview`,
             pictures.map((path, i) => ({
@@ -632,7 +690,7 @@ const make = Effect.gen(function* () {
               head,
               ...(note === undefined ? [] : [note]),
               sheet === undefined
-                ? "The pack ships no overview picture."
+                ? (unavailable ?? "The pack ships no overview picture.")
                 : `Contact sheet ${sheet.relative}: the pack's own overview pictures (${pictures.map((path, i) => `${i + 1} ${path}`).join(", ")}).`,
               `Folders with files this ${engine} game loads:`,
               ...folderLines,
@@ -717,7 +775,7 @@ const make = Effect.gen(function* () {
       const pictured = tiles
         .slice(0, shown.length)
         .filter((tile) => tile.image !== undefined || tile.font !== undefined).length;
-      const sheet = yield* contactSheet(
+      const { sheet, unavailable } = yield* contactSheet(
         root,
         `${pack.id}-${NodeCrypto.createHash("sha256")
           .update(`${input.query ?? ""}|${input.kind ?? ""}|${input.limit ?? ""}|${offset}`)
@@ -751,7 +809,7 @@ const make = Effect.gen(function* () {
           sheet === undefined
             ? audio
               ? "Audio has no picture; pick by name and length."
-              : "No picture: these files ship no preview image."
+              : (unavailable ?? "No picture: these files ship no preview image.")
             : pictured === 0
               ? `These files have no picture of their own; contact sheet ${sheet.relative} shows the pack's own preview (${packPicture}). Look at it before adding.`
               : `Contact sheet ${sheet.relative} shows ${pictured} of them, ${numbering}${pictured < shown.length ? "; the rest have no picture of their own" : ""}${packPicture === undefined ? "" : `, then, unnumbered, the pack's own preview (${packPicture})`}. Look at it before adding.`,
@@ -764,7 +822,7 @@ const make = Effect.gen(function* () {
   const search = (root: string, input: GameAssetsSearchInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const engine = engineOf(manifest.engine.name);
+      const engine = manifest.engine.name;
       if (input.pack === undefined) return yield* searchPacks(engine, input);
       return yield* searchFiles(root, engine, yield* packOf(input.pack), input);
     });
@@ -772,7 +830,7 @@ const make = Effect.gen(function* () {
   const add = (root: string, input: GameAssetsAddInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const engine = engineOf(manifest.engine.name);
+      const engine = manifest.engine.name;
       const pack = yield* packOf(input.pack);
       const index = yield* ensure(pack);
       const byPath = new Map(index.files.map((file) => [file.path, file]));
@@ -895,8 +953,9 @@ const make = Effect.gen(function* () {
           `That selection holds models and comes to ${megabytes(total)} with what they load; one add of models takes at most ${megabytes(MAX_MODEL_ADD_BYTES)}, already more than a game loads well. Add the models the game uses by path, or a smaller folder.`,
         );
 
-      const lane = manifestProject(manifest);
-      const directoryRel = libraryDirFor(lane, pack.id);
+      const profile = engineProfile(engine);
+      const project = manifestProject(manifest);
+      const directoryRel = `${gamePaths(engine, project).library}/${pack.id}`;
       const realRoot = yield* realRootOf(root, "Library add");
       // Checked before any copy, so a refusal leaves the game as it was.
       const assetsPath = NodePath.join(realRoot, "ASSETS.md");
@@ -910,6 +969,23 @@ const make = Effect.gen(function* () {
               "ASSETS.md is a symbolic link; the library writes credits only into a real ASSETS.md in the game.",
             )
           : fail("Library add", "ASSETS.md", "invalid-path", "ASSETS.md is not a file.");
+      // Copies are written whole under the game's ignored builds/logs and
+      // renamed into place, so a crash never leaves a truncated asset that a
+      // retried add would skip as "a different file"; an earlier add's
+      // leftovers go first (adds run under the game's operation lock).
+      const logs = yield* realDir(realRoot, "builds/logs", "Library add");
+      yield* Effect.promise(async () => {
+        for (const name of await NodeFSP.readdir(logs).catch(() => [] as string[]))
+          if (name.startsWith("library-add-"))
+            await NodeFSP.rm(NodePath.join(logs, name), { recursive: true, force: true }).catch(
+              () => undefined,
+            );
+      });
+      const staging = NodePath.join(logs, `library-add-${NodeCrypto.randomUUID()}`);
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(staging),
+        catch: io("Library add", staging),
+      });
       const added: string[] = [];
       const present: string[] = [];
       const targets = new Set<string>();
@@ -932,13 +1008,23 @@ const make = Effect.gen(function* () {
             if (there !== null) {
               if (there.isSymbolicLink()) return "link" as const;
               if (!there.isFile()) return "occupied" as const;
+              // A different size is a different file, without reading either.
+              if (there.size !== (await NodeFSP.stat(source)).size) return "occupied" as const;
               const [mine, theirs] = await Promise.all([
                 fileSha256(source),
                 fileSha256(destination),
               ]);
               return mine.sha256 === theirs.sha256 ? ("same" as const) : ("occupied" as const);
             }
-            await NodeFSP.copyFile(source, destination, NodeFSP.constants.COPYFILE_EXCL);
+            const part = NodePath.join(staging, NodeCrypto.randomUUID());
+            await NodeFSP.copyFile(source, part, NodeFSP.constants.COPYFILE_EXCL);
+            // Checked again just before the rename, which would replace a file
+            // written there meanwhile (a one-syscall window under the game's lock).
+            if ((await NodeFSP.lstat(destination).catch(() => null)) !== null) {
+              await NodeFSP.rm(part, { force: true });
+              return "occupied" as const;
+            }
+            await NodeFSP.rename(part, destination);
             return "copied" as const;
           },
           catch: io("Library add", relative),
@@ -951,6 +1037,9 @@ const make = Effect.gen(function* () {
         else added.push(relative);
       }
 
+      yield* Effect.promise(() =>
+        NodeFSP.rm(staging, { recursive: true, force: true }).catch(() => undefined),
+      );
       // Provenance for every file now in place, new or already there, so a rewritten ASSETS.md gets its lines back.
       const current =
         assetsStat === null
@@ -1008,12 +1097,7 @@ const make = Effect.gen(function* () {
           catch: io("Library add", "ASSETS.md"),
         });
       }
-      const loadPath =
-        lane === "godot"
-          ? `res://${directoryRel.slice("godot/".length)}/…`
-          : lane === "web"
-            ? `./${directoryRel.slice("web/".length)}/…`
-            : `Assets/${directoryRel.slice("unity/Assets/".length)}/…`;
+      const loadPath = `${profile.resourcePath(directoryRel.slice(project.length + 1))}/…`;
       const credited = single.length;
       const assetsLine =
         lines.length > 0

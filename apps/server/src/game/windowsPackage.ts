@@ -153,7 +153,11 @@ const writeArchive = async (input: {
         path: entry.file.path,
         size: entry.file.size,
         mtimeMs: Number(entry.file.stat.mtimeMs),
-        read: (offset, length) => readSourceChunk(entry.file, offset, length),
+        // The release's two files are already open and fingerprinted for the whole package.
+        open: async () => ({
+          read: (offset: number, length: number) => readSourceChunk(entry.file, offset, length),
+          close: async () => undefined,
+        }),
       })),
     });
   } catch (cause) {

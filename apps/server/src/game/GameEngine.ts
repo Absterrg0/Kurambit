@@ -221,6 +221,8 @@ export interface GameEngineBackend {
   } | null;
 }
 
+const TOOL_STATUS_TTL_MS = 30_000;
+
 const unsupportedEngine = (engineName: string) =>
   new GameOperationError({
     operation: "resolve-engine",
@@ -397,10 +399,23 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.catchTags({ GameOperationError: asResult }));
   });
 
+  // Status asks this on every push for a game; the toolchain probe reads
+  // settings, PATH and Unity Hub, so an answer is kept briefly per game.
+  // P's cached GameService.toolchain replaces it at the merge (CONTRACT A1).
+  const toolAnswers = new Map<
+    string,
+    { readonly at: number; readonly tool: GameToolStatus | null }
+  >();
   const toolStatus = Effect.fn("GameEngine.toolStatus")(function* (root: string) {
+    const now = yield* Clock.currentTimeMillis;
+    const kept = toolAnswers.get(root);
+    if (kept !== undefined && now - kept.at < TOOL_STATUS_TTL_MS) return kept.tool;
     const manifest = yield* projects.read(root);
     const backend = yield* backendFor(manifest.engine.name);
-    return yield* backend.toolStatus(root, manifest);
+    const tool = yield* backend.toolStatus(root, manifest);
+    if (toolAnswers.size > 256) toolAnswers.clear();
+    toolAnswers.set(root, { at: now, tool });
+    return tool;
   });
 
   const viewport = Effect.fn("GameEngine.viewport")(function* (root: string) {

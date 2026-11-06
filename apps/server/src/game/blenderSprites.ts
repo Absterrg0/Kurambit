@@ -13,7 +13,7 @@ import {
   type GameManifest,
   manifestProject,
 } from "@kurambit/contracts";
-import { laneAssets, laneLibrary } from "./engineProfile.ts";
+import { engineProfile, gamePaths } from "./engineProfile.ts";
 import { decodePng, measure, type Rgba } from "./run/spriteFacts.ts";
 import { walkFiles } from "./walkFiles.ts";
 import {
@@ -43,6 +43,8 @@ const OP = "blender-render-sprites";
 const TOOL = "game_blender_render_sprites";
 const BLEND_REL = "art/blender/live.blend";
 const SCRATCH = "builds/logs/sprite-render";
+/** Sprite contact sheets a game keeps; older ones go as new renders land. */
+const CONTACT_SHEETS_KEPT = 20;
 /**
  * The first Blender command's renders, before per-render time is known: the pinned server gives
  * each command 180 s, and a render costs about a second or two before its pixels count.
@@ -76,20 +78,25 @@ const cleanRelative = (path: string) =>
   path.split("/").every((s) => SEGMENT.test(s) && s !== "." && s !== "..");
 
 /**
- * Why `output` (trimmed, no .png) is no place for this lane's sprites, or null.
- * Unity imports only what sits under Assets/, and on Linux `assets/` is
- * another folder Unity never reads.
+ * Why `output` (trimmed, no .png) is no place for this game's sprites, or
+ * null. An engine that imports only one folder (Unity's case-sensitive
+ * Assets/; on Linux `assets/` is another folder it never reads) takes them
+ * only there.
  */
-export const spriteOutputIssue = (lane: string, output: string): string | null => {
-  const assets = laneAssets(lane);
-  const example = `${assets}/${lane === "unity" ? "Art/Sprites" : "sprites"}/hero_walk`;
-  const under = lane === "unity" ? `${assets}/` : `${lane}/`;
+export const spriteOutputIssue = (
+  engine: GameEngineId,
+  project: string,
+  output: string,
+): string | null => {
+  const { importRoot } = engineProfile(engine);
+  const example = `${gamePaths(engine, project).sprites}/hero_walk`;
+  const under = importRoot === null ? `${project}/` : `${project}/${importRoot}/`;
   if (output.startsWith(under) && cleanRelative(output)) return null;
   const miscased =
-    lane === "unity" && output.toLowerCase().startsWith(`${assets.toLowerCase()}/`)
-      ? ` Unity imports only ${assets}/ (capital A) and never loads ${output.slice(0, assets.length)}/; use ${assets}/${output.slice(assets.length + 1)}.`
-      : lane === "unity" && output.startsWith("unity/")
-        ? ` Unity imports nothing outside ${assets}/.`
+    importRoot !== null && output.toLowerCase().startsWith(under.toLowerCase())
+      ? ` ${engineProfile(engine).displayName} imports only ${under} (as written) and never loads ${output.slice(0, under.length - 1)}/; use ${under}${output.slice(under.length)}.`
+      : importRoot !== null && output.startsWith(`${project}/`)
+        ? ` ${engineProfile(engine).displayName} imports nothing outside ${under}.`
         : "";
   return `output must be a game-relative path prefix under ${under} such as ${example} (letters, digits, _ . -).${miscased}`;
 };
@@ -139,10 +146,9 @@ const writeOwn = (path: string, bytes: Buffer) =>
   });
 
 /** The palette's opaque colours, most used first: a PNG, a folder of PNGs, or a pack id added to this game. */
-const paletteOf = (realRoot: string, lane: string, spec: string) =>
+const paletteOf = (realRoot: string, library: string, spec: string) =>
   Effect.gen(function* () {
-    const relative =
-      spec.includes("/") || /\.png$/i.test(spec) ? spec : `${laneLibrary(lane)}/${spec}`;
+    const relative = spec.includes("/") || /\.png$/i.test(spec) ? spec : `${library}/${spec}`;
     if (!cleanRelative(relative))
       return yield* fail(
         spec,
@@ -224,9 +230,10 @@ const suffixOf = (line: string) => {
 };
 
 /** One provenance line per strip, replaced in place when the same strip is rendered again, keeping what the agent filled in. */
-const recordProvenance = (
+export const recordProvenance = (
   realRoot: string,
   lines: ReadonlyArray<{ first: string; line: string }>,
+  tool: string = TOOL,
 ) =>
   Effect.gen(function* () {
     const path = NodePath.join(realRoot, "ASSETS.md");
@@ -245,7 +252,7 @@ const recordProvenance = (
     const added: string[] = [];
     for (const { first, line } of lines) {
       const at = kept.findIndex(
-        (l) => l.includes(TOOL) && (l.includes(`\`${first}\``) || l.includes(`\`${first} `)),
+        (l) => l.includes(tool) && (l.includes(`\`${first}\``) || l.includes(`\`${first} `)),
       );
       if (at < 0) {
         added.push(line);
@@ -268,16 +275,6 @@ const recordProvenance = (
       : "ASSETS.md records the provenance.";
   });
 
-/** How this game's engine puts a node's origin on the ground line `ground` rows from the top. */
-const groundHint = (engine: GameEngineId, width: number, height: number, ground: number) => {
-  const up = Number(((height - ground) / height).toFixed(4));
-  if (engine === "three")
-    return `three.js: sprite.center.set(0.5, ${up}) on a THREE.Sprite, or geometry.translate(0, ${Number((0.5 - up).toFixed(4))} * planeHeight, 0) on a plane, puts the object's position on the ground line.`;
-  if (engine === "unity")
-    return `Unity: set the sprite's Pivot to Custom (0.5, ${up}) in its import settings (Pixels Per Unit is yours to match the tiles) to put the transform on the ground line.`;
-  return `Godot: Sprite2D offset (0, ${height / 2 - ground}) puts the node origin on the ground line (x=${width / 2} is already the origin).`;
-};
-
 export interface SpriteDeps {
   readonly callText: (
     root: string,
@@ -295,8 +292,9 @@ export const renderSprites = (
   Effect.gen(function* () {
     const manifest = yield* deps.manifest(root);
     const lane = manifestProject(manifest);
+    const profile = engineProfile(manifest.engine.name);
     const output = input.output.trim().replace(/\.png$/i, "");
-    const issue = spriteOutputIssue(lane, output);
+    const issue = spriteOutputIssue(manifest.engine.name, lane, output);
     if (issue !== null) return yield* fail(input.output, "invalid-path", issue);
     const dirRel = NodePath.posix.dirname(output);
     const base = NodePath.posix.basename(output);
@@ -334,7 +332,9 @@ export const renderSprites = (
     });
     // Checked before anything renders, so a bad palette costs no Blender time.
     const palette =
-      pixel?.palette === undefined ? null : yield* paletteOf(realRoot, lane, pixel.palette);
+      pixel?.palette === undefined
+        ? null
+        : yield* paletteOf(realRoot, gamePaths(manifest.engine.name, lane).library, pixel.palette);
     const scratch = yield* realDir(realRoot, SCRATCH);
     const rawDir = NodePath.join(scratch, "raw");
     yield* Effect.tryPromise({
@@ -615,7 +615,20 @@ export const renderSprites = (
       try: () => writeOwn(NodePath.join(scratch, `${base}-contact.png`), contactPng),
       catch: io(contactRel),
     });
-    yield* Effect.promise(() => NodeFSP.rm(raw, { recursive: true, force: true }));
+    yield* Effect.promise(async () => {
+      await NodeFSP.rm(raw, { recursive: true, force: true }).catch(() => undefined);
+      // Every render writes a sheet; the newest few are kept.
+      const sheets: Array<{ readonly path: string; readonly mtimeMs: number }> = [];
+      for (const name of await NodeFSP.readdir(scratch).catch(() => [] as string[])) {
+        if (!name.endsWith("-contact.png")) continue;
+        const stat = await NodeFSP.lstat(NodePath.join(scratch, name)).catch(() => null);
+        if (stat?.isFile() === true)
+          sheets.push({ path: NodePath.join(scratch, name), mtimeMs: stat.mtimeMs });
+      }
+      sheets.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      for (const { path } of sheets.slice(CONTACT_SHEETS_KEPT))
+        await NodeFSP.rm(path, { force: true }).catch(() => undefined);
+    });
 
     // Honest numbers on what was written, so a dark or empty render is visible without opening it.
     const measured = all.map((img) => measure(img));
@@ -674,9 +687,13 @@ export const renderSprites = (
         (_, vi) => `- ${spanText(files.slice(vi * frames.length, (vi + 1) * frames.length))}`,
       ),
       `Manifest: ${manifestRel} (frame size, ${spriteManifest.fps} fps, ${spriteManifest.loop ? "loop" : "once"}, anchor per view): ${
-        manifest.engine.name === "godot"
-          ? `SpriteStrips.apply($AnimatedSprite2D, {${JSON.stringify(stripKey)}: "res://${manifestRel.slice(lane.length + 1)}"}, "${views[0]!.name}") loads it`
-          : "read it for the frame rate and anchor"
+        profile.stripLoad === null
+          ? "read it for the frame rate and anchor"
+          : profile.stripLoad(
+              stripKey,
+              profile.resourcePath(manifestRel.slice(lane.length + 1)),
+              views[0]!.name,
+            )
       }.`,
       ...(sheetRel === undefined
         ? []
@@ -691,11 +708,13 @@ export const renderSprites = (
         const a = framing.anchors[vi]!;
         const column = `x=${a.x} is ${a.onOrigin && fit.anchorObject !== null ? `${fit.anchorObject}'s origin` : "the middle of the subject"}`;
         return a.kind === "feet"
-          ? `Anchor (${v.name}): ground line y=${groundOf(a)} (the red line on the contact sheet), ${column}, fixed in every frame: the lowest point across all frames rests on it, so any bob or lifted foot is the animation's own. ${groundHint(manifest.engine.name, width, height, groundOf(a))}`
+          ? `Anchor (${v.name}): ground line y=${groundOf(a)} (the red line on the contact sheet), ${column}, fixed in every frame: the lowest point across all frames rests on it, so any bob or lifted foot is the animation's own. ${profile.groundHint(width, height, groundOf(a))}`
           : `Anchor (${v.name}): ${a.x},${a.y}, the canvas centre (${column}), in every frame: the engine's default centred sprite puts the node origin there.`;
       }),
       ...(paletteText === "" ? [] : [paletteText]),
-      `Measured: ${colours} colours over the strip; mean luminance of visible pixels ${Math.round(Math.min(...lumas))}-${Math.round(Math.max(...lumas))} (0-255)${empty > 0 ? `; ${empty} frames are empty` : ""}.`,
+      lumas.length === 0
+        ? "Measured: every frame is empty (nothing visible was rendered); check the objects, the camera views and the frames before using them."
+        : `Measured: ${colours} colours over the strip; mean luminance of visible pixels ${Math.round(Math.min(...lumas))}-${Math.round(Math.max(...lumas))} (0-255)${empty > 0 ? `; ${empty} frames are empty` : ""}.`,
       `Contact sheet: ${contactRel} (attached; frames at ${contact.zoom}x). Look at it before you use the frames.`,
       `${provenance} Add what the frames depict and where the game loads them. Run game_import after.`,
     ].join("\n");
