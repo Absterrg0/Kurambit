@@ -28,11 +28,11 @@ import { ensureTurnSections } from "./runSetup.ts";
  *
  * A chat turn's build has its base recorded as it lands. The turn loop: on
  * an engine whose profile has `turnLoop`, the build is measured in the
- * background, replacing an earlier turn's measure still queued, then played
- * (the folder's Web build made current, as the chat's own operation, which
- * the Stage remounts on). The trigger is the turn's checkpoint, never a file
- * watcher, so a half-written turn never reloads the game; a turn the person
- * stopped, or one cancelled, is measured but not played.
+ * background, replacing an earlier turn's measure still queued. An engine
+ * whose Stage plays a Web export then has it played (the folder's Web build
+ * made current, as the chat's own operation, which the Stage remounts on);
+ * a live-staged engine's Stage already shows the folder, so nothing is
+ * built. A turn the person stopped, or one cancelled, is measured but not played.
  */
 export class GameBuildsReactor extends Context.Service<
   GameBuildsReactor,
@@ -88,7 +88,8 @@ const make = Effect.gen(function* () {
       yield* builds.recordTurn(event.threadId, ref);
       const root = yield* pushTo(event, "A turn changed the game.");
       const manifest = yield* projects.read(root);
-      if (!engineProfile(manifest.engine.name).turnLoop) return;
+      const profile = engineProfile(manifest.engine.name);
+      if (!profile.turnLoop) return;
       // A game made before the turn loop learns of it by its next turn, however it was opened.
       yield* ensureTurnSections(root, manifest.engine.name).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -99,6 +100,7 @@ const make = Effect.gen(function* () {
         .listCheckpointRefs({ cwd: root, prefix: ref })
         .pipe(Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid));
       if (build !== undefined) yield* builds.measureIn(root, build, { supersede: true });
+      if (profile.stage !== "export") return;
       const stopped = yield* projections
         .getThreadRecords(event.threadId, ["runs"], { runIds: [runId] })
         .pipe(
