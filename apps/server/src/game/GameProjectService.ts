@@ -43,8 +43,23 @@ import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
+import { ensureScaffold } from "./runSetup.ts";
 import { createEngine, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
+
+/**
+ * Stand-in for scaffold.ts's `firstTurnMessage` (builder M, loop phase 1)
+ * until it merges: the brief as the chat's first message, naming AGENTS.md
+ * for providers that do not load it themselves.
+ */
+const firstTurnMessage = (manifest: GameManifest): string =>
+  [
+    'Make this game. Follow "The first turn" in AGENTS.md.',
+    manifest.brief.trim(),
+    ...(manifest.artDirection.trim() === ""
+      ? []
+      : [`Art direction: ${manifest.artDirection.trim()}`]),
+  ].join("\n\n");
 
 export const insideGame = (root: string, relative: string) => {
   const target = NodePath.resolve(root, relative);
@@ -257,8 +272,7 @@ const make = Effect.gen(function* () {
   const register = Effect.fnUntraced(function* (
     root: string,
     input: Pick<GameCreateInput, "modelSelection" | "runtimeMode">,
-    message?: string,
-    options?: { readonly resume?: boolean },
+    options: { readonly resume?: boolean; readonly firstTurn?: boolean } = {},
   ) {
     const lexicalRoot = NodePath.resolve(root);
     const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
@@ -295,7 +309,7 @@ const make = Effect.gen(function* () {
     );
     // Opening a folder is "continue this game", not "start another chat": the
     // project's newest session already has the history and the context.
-    if (options?.resume === true) {
+    if (options.resume === true) {
       const existingThreads = yield* threads
         .listProjectThreads({ projectId: project.id, includeSubagents: false })
         .pipe(
@@ -324,7 +338,10 @@ const make = Effect.gen(function* () {
         runtimeMode: input.runtimeMode ?? "full-access",
         interactionMode: "default",
         workspaceStrategy: { type: "root" },
-        ...(message ? { initialMessage: { text: message, attachments: [] } } : {}),
+        // A new game's chat opens with its brief, sent atomically with the thread.
+        ...(options.firstTurn === true
+          ? { initialMessage: { text: firstTurnMessage(manifest), attachments: [] } }
+          : {}),
         createdBy: "user",
         creationSource: "web",
       })
@@ -440,6 +457,12 @@ const make = Effect.gen(function* () {
           Effect.provideService(Path.Path, path),
         );
         root = yield* resolveCanonicalRoot(root, "create-game");
+        // The skills and the bot kit ride in the first commit, so no turn's
+        // build counts them as its change.
+        yield* ensureScaffold(root, createEngine(input), true).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        );
         // The first commit is Kurambit's own, through git's plumbing: the
         // user's signing config and hooks never apply to it. The marker sits
         // under the ignored builds/, so it never rides in that commit.
@@ -452,10 +475,8 @@ const make = Effect.gen(function* () {
           catch: (cause) =>
             new GameOperationError({ operation: "create-game", path: root, reason: "io", cause }),
         });
-        // The creator thread starts empty: GameRun.createGame starts the
-        // production run with this brief, and the thread stays the creator's
-        // own conversation with the game.
-        return yield* register(root, input);
+        // No run starts: the chat's first turn makes the first playable build.
+        return yield* register(root, input, { firstTurn: true });
       }).pipe(
         // A create that fails or is interrupted must not leave a half-made folder behind.
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : rollback)),
@@ -665,12 +686,9 @@ const make = Effect.gen(function* () {
       });
     }),
     open: (input) =>
-      register(
-        NodePath.resolve(input.path.replace(/^~(?=\/|$)/, NodeOS.homedir())),
-        input,
-        undefined,
-        { resume: true },
-      ),
+      register(NodePath.resolve(input.path.replace(/^~(?=\/|$)/, NodeOS.homedir())), input, {
+        resume: true,
+      }),
     resolve,
     read,
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
