@@ -7,23 +7,53 @@ import { GameState, SHELL_KEYS } from "./run-state.js";
 const MAX_KEYS = 64;
 const MAX_HUD_CHARS = 2000;
 
+// The Stage that frames this page hears of its first error and of its boot,
+// so a save that breaks the game is said there. The game runs on its own
+// origin, so these two messages are all the Stage learns of it; a page
+// opened on its own posts nothing.
+const framed = window.parent !== window;
+const toStage = (message) => {
+  if (framed) window.parent.postMessage(message, "*");
+};
+// "http://127.0.0.1:PORT/main.js:42:7" names main.js and line 42.
+const whereFrom = (url, line) => {
+  const found = /^(\S+?):(\d+)(?::\d+)?$/.exec(String(url ?? ""));
+  const source = (found?.[1] ?? String(url ?? "")).replace(`${location.origin}/`, "");
+  return { source: source.slice(0, 500), line: Number(line ?? found?.[2] ?? 0) || 0 };
+};
+const firstFrame = (stack) =>
+  /\((\S+:\d+:\d+)\)|at (\S+:\d+:\d+)|@(\S+:\d+:\d+)/.exec(String(stack ?? ""));
+
 // Installed when this module first evaluates, before the game module runs,
 // so errors while the game loads land here too.
 const errors = [];
-const record = (message, stack) => {
+let told = false;
+const record = (message, stack, where) => {
   if (errors.length < 50)
     errors.push({
       message: String(message).slice(0, 500),
       stack: String(stack ?? "").slice(0, 500),
       t: performance.now() / 1000,
     });
+  if (told) return;
+  told = true;
+  toStage({ type: "studio-error", message: String(message).slice(0, 500), ...where });
 };
 window.addEventListener("error", (event) =>
-  record(event.message ?? "unknown error", event.error?.stack),
+  record(
+    event.message ?? "unknown error",
+    event.error?.stack,
+    whereFrom(event.filename, event.lineno),
+  ),
 );
-window.addEventListener("unhandledrejection", (event) =>
-  record(event.reason?.message ?? event.reason ?? "unhandled rejection", event.reason?.stack),
-);
+window.addEventListener("unhandledrejection", (event) => {
+  const frame = firstFrame(event.reason?.stack);
+  record(
+    event.reason?.message ?? event.reason ?? "unhandled rejection",
+    event.reason?.stack,
+    whereFrom(frame?.[1] ?? frame?.[2] ?? frame?.[3] ?? "", undefined),
+  );
+});
 
 function gameStateValues() {
   const values = {};
@@ -56,10 +86,18 @@ function position(player) {
  * and sound while the stage tab is hidden and returns whether sound is muted.
  */
 export function installStudio({ ui, player, setState, hold }) {
+  let ready = false;
   const studio = {
     engine: "three",
     version: 1,
-    ready: false,
+    // The shell sets it once a frame has drawn; the first time, the Stage hears it.
+    get ready() {
+      return ready;
+    },
+    set ready(value) {
+      if (value === true && !ready) toStage({ type: "studio-ready" });
+      ready = value === true;
+    },
     errors,
     getState() {
       // innerText skips hidden screens, so this is the text on screen now.
