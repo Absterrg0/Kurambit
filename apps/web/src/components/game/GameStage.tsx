@@ -313,7 +313,8 @@ export function GameStage({
       previewUrl: data.previewUrl,
       servedArtifactId: webBuild === undefined ? null : `${webBuild.path}#${webBuild.updatedAt}`,
     },
-    gameFocused,
+    // A frame hidden by another view or pane may keep focus without a blur.
+    gameFocused && activeTab === "play" && !hidden && playTarget === null,
   );
   if (frame !== frameFold) setFrameFold(frame);
   const frameKey = frame.key;
