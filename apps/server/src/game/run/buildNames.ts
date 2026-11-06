@@ -29,8 +29,8 @@ export const BuildName = {
   /** The folder before and after a creator's restore. */
   restoreBefore: (requestId: string) => `restores/${part(requestId)}-before`,
   restoreAfter: (requestId: string) => `restores/${part(requestId)}-after`,
-  /** The folder as a resume found it, kept by the resume's first move of the folder. */
-  resumeBefore: (stepId: number) => `resumes/step-${stepId}-before`,
+  /** The folder as a resume found it, kept by the run's next move of the folder; one per resume. */
+  resumeBefore: (resumedAt: string) => `resumes/${part(resumedAt)}-before`,
 } as const;
 
 /**

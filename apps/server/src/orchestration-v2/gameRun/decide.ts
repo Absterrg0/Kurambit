@@ -359,8 +359,6 @@ const advance = (
   run: GameRun,
   state: State.RunState,
   existing: GameRunStep | null,
-  /** A stopped run comes back: the folder may hold the creator's own work since. */
-  resuming = false,
 ): {
   readonly state: State.RunState;
   readonly step: GameRunStep | null;
@@ -381,13 +379,13 @@ const advance = (
   const step: State.Step =
     planned.step.kind === "decide" && planned.step.sent === null
       ? { ...planned.step, sent: work.now }
-      : resuming && planned.step.kind === "build" && planned.step.op._tag === "restore"
-        ? // A resume that moves the folder first keeps it as a saved build, so
-          // what the creator did since the run stopped is never lost.
-          {
-            ...planned.step,
-            op: { ...planned.step.op, save: BuildName.resumeBefore(planned.step.id) },
-          }
+      : run.resumeSave !== null &&
+          planned.step.kind === "build" &&
+          planned.step.op._tag === "restore"
+        ? // The first move of the folder since a resume keeps it as a saved
+          // build first, wherever that move falls, so what the creator did while
+          // the run was stopped is never lost. settle clears the flag with it.
+          { ...planned.step, op: { ...planned.step.op, save: run.resumeSave } }
         : planned.step;
   const next = { ...planned.state, inFlight: step };
   const record = stepRecord(work, run, step, planned.logs ?? [], existing);
@@ -450,7 +448,16 @@ const settle = (
   effects: ReadonlyArray<GameRunEffect>,
   created = false,
 ): GameRunDecision => {
-  const settled = fromState(run, state, work.at);
+  // A step that took the resume's save carries it from here (its restart finds it there).
+  const saved =
+    run.resumeSave !== null &&
+    steps.some(
+      (s) =>
+        s.step.kind === "build" &&
+        s.step.op._tag === "restore" &&
+        s.step.op.save === run.resumeSave,
+    );
+  const settled = fromState(saved ? { ...run, resumeSave: null } : run, state, work.at);
   // The commit that ends a run owes its finish: an effect, so a restart cannot lose it.
   const ends = settled.status === "ended" && (created || run.status !== "ended");
   const record: GameRun = ends ? { ...settled, endedAt: work.at, finished: null } : settled;
@@ -633,6 +640,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
         endedAt: null,
         finished: null,
         restore: null,
+        resumeSave: null,
         versions: "checkpoints",
         startedAt: work.at,
         updatedAt: work.at,
@@ -683,6 +691,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
       command.budgetMinutes === undefined ? run.budgetMinutes : command.budgetMinutes;
     const resumed: GameRun = {
       ...run,
+      resumeSave: BuildName.resumeBefore(work.at),
       budgetMinutes,
       ...(command.modelSelection === undefined ? {} : { modelSelection: command.modelSelection }),
       ...(command.runtimeMode === undefined ? {} : { runtimeMode: command.runtimeMode }),
@@ -695,7 +704,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
       profile: command.profile ?? before.profile,
       budgetEndsAt: budgetMinutes === null ? null : work.now + budgetMinutes * 60_000,
     };
-    const next = advance(work, resumed, state, inFlight, true);
+    const next = advance(work, resumed, state, inFlight);
     // The records the last landings wrote go again ahead of the next step: an
     // ending that stopped the run before they were written (an outputs effect
     // that gave up, the landing that ended it) would leave the step without them.
@@ -748,9 +757,17 @@ const steer = (work: Work, command: Command<"game-run.steer">) =>
         ...noted,
         budgetEndsAt: run.budgetMinutes === null ? null : work.now + run.budgetMinutes * 60_000,
       };
-      const next = advance(work, run, Policy.reopen(budgeted, work.now), null, true);
+      const reopened: GameRun = { ...run, resumeSave: BuildName.resumeBefore(work.at) };
+      const next = advance(work, reopened, Policy.reopen(budgeted, work.now), null);
       return Result.succeed(
-        settle(work, run, before, next.state, next.step === null ? [] : [next.step], next.effects),
+        settle(
+          work,
+          reopened,
+          before,
+          next.state,
+          next.step === null ? [] : [next.step],
+          next.effects,
+        ),
       );
     }
     // A live run reads it at its next round; a stopped or interrupted one keeps it for its resume.

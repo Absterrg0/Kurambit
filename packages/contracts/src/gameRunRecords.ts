@@ -777,6 +777,14 @@ export const GameRun = Schema.Struct({
   /** The creator's latest restore of a kept round: pending while its job moves the folder. */
   restore: Schema.NullOr(GameRunRestore).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   /**
+   * Set by a resume (or a note that reopens the run): the name the folder is
+   * kept under by the run's next step that moves it, so the creator's edits
+   * while the run was stopped are never lost. Cleared by that step's commit.
+   */
+  resumeSave: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
+  /**
    * How the run keeps its builds: "checkpoints" under its own refs. Absent on a
    * run from before, which versioned on git branches: such a run is history,
    * read but never continued.

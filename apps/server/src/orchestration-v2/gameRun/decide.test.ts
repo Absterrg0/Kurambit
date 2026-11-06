@@ -21,6 +21,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 
+import { BuildName } from "../../game/run/buildNames.ts";
 import * as Policy from "../../game/run/policy.ts";
 import * as State from "../../game/run/state.ts";
 import * as Decide from "./decide.ts";
@@ -912,10 +913,43 @@ describe("game-run commands", () => {
     expect(restored.rounds.map((r) => r.round)).toMatchObject([{ round: 1, abandoned: true }]);
     // Its first move of the folder keeps what the creator left there since, as a saved build.
     const resumed = accept(restored, { type: "game-run.resume", runId }).records;
-    const first = stepOf(resumed).step;
-    expect(first).toMatchObject({
-      op: { _tag: "restore", sha: best, save: `resumes/step-${first.id}-before` },
+    expect(stepOf(resumed).step).toMatchObject({
+      op: {
+        _tag: "restore",
+        sha: best,
+        save: BuildName.resumeBefore(DateTime.formatIso(DateTime.makeUnsafe(T0))),
+      },
     });
+    expect(runOf(resumed).resumeSave).toBeNull();
+  });
+
+  it("a resume keeps the folder before the run's next move of it, wherever that falls", () => {
+    // Resumed with no ladder: the plan writes one first, and only then does a round restore the best.
+    const atLadder = resumedAt(complete(started(), gitOk()), {
+      task: { _tag: "ladder", phase: "write", thread: null, error: "" },
+    });
+    const save = BuildName.resumeBefore(DateTime.formatIso(DateTime.makeUnsafe(T0)));
+    const write = stepOf(atLadder);
+    expect(write.step.kind).toBe("role");
+    expect(runOf(atLadder).resumeSave).toBe(save);
+    const asked = accept(atLadder, {
+      type: "game-run.step.start",
+      runId,
+      stepId: write.id,
+      roleThreadId: planner,
+    }).records;
+    const rungs = ladder.rungs.map(({ is, checks }) => ({ is, checks }));
+    const submitted = accept(asked, {
+      type: "game-run.submit",
+      runId,
+      stepId: write.id,
+      roleThreadId: planner,
+      submission: { _tag: "ladder", rungs },
+    }).records;
+    const roundStart = complete(submitted, roleDone(planner));
+    expect(stepOf(roundStart).step).toMatchObject({ op: { _tag: "restore", save } });
+    // The step carries it from here; the flag is spent in the same commit.
+    expect(runOf(roundStart).resumeSave).toBeNull();
   });
 
   it("restoring the folder the latest restore kept undoes it, best and line too, until a round runs", () => {

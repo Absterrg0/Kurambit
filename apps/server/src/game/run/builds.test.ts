@@ -399,7 +399,7 @@ it.effect("a resume's first move keeps the folder it found once, and only when i
     const write = (text: string) =>
       NodeFS.writeFileSync(NodePath.join(root, "godot", "main.gd"), text);
     const best = yield* captureBuild({ checkpoints, lock }, root, runId, BuildName.best);
-    const save = BuildName.resumeBefore(12);
+    const save = BuildName.resumeBefore("2026-11-06T10:00:00.000Z");
     const move = buildStep(
       { game, checkpoints, lock },
       { root, runId, lane: "godot" },
@@ -418,7 +418,7 @@ it.effect("a resume's first move keeps the folder it found once, and only when i
     assert.isTrue((yield* move).build.ok);
     expect(at(save)).toBe(kept);
     // A folder that already holds the build keeps nothing.
-    const other = BuildName.resumeBefore(13);
+    const other = BuildName.resumeBefore("2026-11-06T11:00:00.000Z");
     assert.isTrue(
       (yield* buildStep(
         { game, checkpoints, lock },
