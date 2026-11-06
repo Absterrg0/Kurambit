@@ -15,8 +15,8 @@ import {
   GameOperationError,
   GameStyle,
 } from "@kurambit/contracts";
-import type { LibraryPack } from "./assetLibraryFiles.ts";
-import { LIBRARY_CATALOG, LIBRARY_FAMILIES } from "./assetLibraryCatalog.ts";
+import type { LibraryFile, LibraryPack } from "./assetLibraryFiles.ts";
+import { LIBRARY_CATALOG, LIBRARY_FAMILIES, LIBRARY_RIG_JOINTS } from "./assetLibraryCatalog.ts";
 
 /** A lock is a few hundred bytes; anything this large is not one. */
 const MAX_STYLE_BYTES = 64 * 1024;
@@ -42,6 +42,8 @@ const near = (wanted: string, ids: ReadonlyArray<string>) => {
   return close.length > 0 ? `; did you mean ${close.slice(0, 4).join(", ")}?` : "";
 };
 
+const PACK_ID = /^[a-z0-9][a-z0-9-]{1,63}$/;
+
 /** What in a decoded lock names nothing in the library, or null. */
 export const styleProblem = (style: GameStyle): string | null => {
   const packIds = LIBRARY_CATALOG.map((pack) => pack.id);
@@ -55,6 +57,13 @@ export const styleProblem = (style: GameStyle): string | null => {
   const familyIds = LIBRARY_FAMILIES.map((family) => family.id);
   if (style.family !== undefined && !familyIds.includes(style.family))
     return `family: no library family "${style.family}"; the families are ${familyIds.join(", ")}`;
+  // A palette named like a pack is a pack id, not a path (a path has a slash or a .png).
+  if (
+    style.palette !== undefined &&
+    PACK_ID.test(style.palette) &&
+    !packIds.includes(style.palette)
+  )
+    return `palette: no library pack "${style.palette}"${near(style.palette, packIds)}; a palette is a pack id or a PNG or folder in the game`;
   const rigs = [...new Set(LIBRARY_CATALOG.flatMap((pack) => (pack.rig ? [pack.rig] : [])))];
   if (style.rig !== undefined && !rigs.includes(style.rig))
     return `rig: no library rig "${style.rig}"; the rigs are ${rigs.join(", ")}`;
@@ -175,22 +184,41 @@ export const lockSpriteInput = (
 const soundOnly = (pack: LibraryPack) =>
   pack.kinds.every((kind) => kind === "sfx" || kind === "music");
 
-/** Why the lock refuses a pack before anything is fetched, or null. */
+/**
+ * Why the lock refuses a pack before anything is fetched, or null. A pixel
+ * lock's palette pack is part of the look; sound is locked only once the lock
+ * lists audio.packs, as characters are only once it names a rig.
+ */
 export const lockPackRefusal = (pack: LibraryPack, style: GameStyle | null): string | null => {
   if (style === null) return null;
+  if (style.packs.includes(pack.id) || style.palette === pack.id) return null;
+  if (soundOnly(pack) && style.audio?.packs === undefined) return null;
   const audio = style.audio?.packs ?? [];
-  if (style.packs.includes(pack.id) || audio.includes(pack.id)) return null;
+  if (audio.includes(pack.id)) return null;
   const list = soundOnly(pack) ? "audio.packs" : "packs";
   const holds = soundOnly(pack) ? audio : style.packs;
   return `${GAME_STYLE_FILE} locks this game's ${soundOnly(pack) ? "sound" : "look"} to ${holds.length === 0 ? "no sound packs yet" : holds.join(", ")}; ${pack.id} (${pack.style}) is outside it. If it fits the game, add "${pack.id}" to ${GAME_STYLE_FILE}'s ${list} and add again; to change the game's ${soundOnly(pack) ? "sound" : "look"}, change ${GAME_STYLE_FILE} first.`;
 };
 
-/** Why the lock refuses a pack's characters (models with clips) on another rig, or null. */
+/**
+ * Whether a model may be an animated character: it has clips, or its clips
+ * could not be read (an FBX, .blend or .dae, or a glTF too large to read).
+ * Only a model known to have no clips is a prop.
+ */
+export const mayBeCharacter = (file: LibraryFile) =>
+  file.media === "model" &&
+  ((file.clipCount ?? 0) > 0 ||
+    file.clipsUnread === true ||
+    file.format === "fbx" ||
+    file.format === "blend" ||
+    file.format === "dae");
+
+/** Why the lock refuses a pack's characters on another rig, or null. */
 export const lockRigRefusal = (pack: LibraryPack, style: GameStyle | null): string | null => {
   if (style?.rig === undefined || pack.rig === undefined || pack.rig === style.rig) return null;
   const same = LIBRARY_CATALOG.filter((other) => other.rig === style.rig).map((other) => other.id);
   const from = same.length > 1 ? `${same.slice(0, -1).join(", ")} or ${same.at(-1)}` : same[0];
-  return `${pack.id}'s characters are on the ${pack.rig} rig and ${GAME_STYLE_FILE}'s rig is ${style.rig}, so their clips would not fit the game's other characters. Take characters from ${from}, add only this pack's props, or change ${GAME_STYLE_FILE}'s rig to move every character to ${pack.rig}.`;
+  return `${pack.id}'s characters are on the ${pack.rig} rig and ${GAME_STYLE_FILE}'s rig is ${style.rig}, so their clips would not fit the game's other characters. Take characters from ${from}; from this pack add only props known to have no clips (glTF without animations: an FBX's clips cannot be read, so it counts as a character); or change ${GAME_STYLE_FILE}'s rig to move every character to ${pack.rig}.`;
 };
 
 /** The loudness targets a lock sets, or the defaults without one. */
@@ -199,3 +227,36 @@ export const loudnessTargets = (style: GameStyle | null) => ({
   sfxPeakDbtp: style?.audio?.sfxPeakDbtp ?? GAME_STYLE_DEFAULT_SFX_PEAK_DBTP,
   fromLock: style?.audio?.musicLufs !== undefined || style?.audio?.sfxPeakDbtp !== undefined,
 });
+
+/** Why the lock refuses an import from an outside source, or null. */
+export const lockImportRefusal = (
+  source: "polyhaven" | "sketchfab" | "polypizza",
+  style: GameStyle | null,
+): string | null =>
+  style === null || (style.imports ?? []).includes(source)
+    ? null
+    : `${GAME_STYLE_FILE} locks this game's look to its library packs (${style.packs.join(", ")}) and allows no imports from ${source}. If ${source} models fit that look, add "${source}" to ${GAME_STYLE_FILE}'s imports and import again; otherwise take the piece from the lock's packs or build it in Blender in their style.`;
+
+/**
+ * Why the lock refuses armatures about to enter the game (name to bone names),
+ * or null: a lock with a rig takes only armatures holding every bone of that
+ * rig (when its bones are known); a lock without one takes no armature.
+ */
+export const lockArmatureRefusal = (
+  armatures: Readonly<Record<string, ReadonlyArray<string>>>,
+  style: GameStyle | null,
+): string | null => {
+  const names = Object.keys(armatures);
+  if (style === null || names.length === 0) return null;
+  if (style.rig === undefined)
+    return `${names.join(", ")} ${names.length === 1 ? "is an armature" : "are armatures"}, and ${GAME_STYLE_FILE} names no rig: its characters are not rigged. Characters come from the lock's packs; to bring rigged characters in, set ${GAME_STYLE_FILE}'s rig to the rig they share first.`;
+  const joints = LIBRARY_RIG_JOINTS[style.rig];
+  if (joints === undefined) return null;
+  const off = names.filter((name) => {
+    const bones = new Set(armatures[name]);
+    return joints.some((joint) => !bones.has(joint));
+  });
+  if (off.length === 0) return null;
+  const packs = LIBRARY_CATALOG.filter((pack) => pack.rig === style.rig).map((pack) => pack.id);
+  return `${off.join(", ")} ${off.length === 1 ? "is not" : "are not"} on ${GAME_STYLE_FILE}'s rig ${style.rig}, so ${off.length === 1 ? "its" : "their"} clips would not fit the game's other characters. Characters come from ${packs.join(", ")}; build only props in Blender, or change ${GAME_STYLE_FILE}'s rig to move every character.`;
+};

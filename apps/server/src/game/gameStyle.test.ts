@@ -6,8 +6,16 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import type { GameStyle } from "@kurambit/contracts";
-import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
-import { lockPackRefusal, lockRigRefusal, lockSpriteInput, readGameStyle } from "./gameStyle.ts";
+import { LIBRARY_CATALOG, LIBRARY_RIG_JOINTS } from "./assetLibraryCatalog.ts";
+import {
+  lockArmatureRefusal,
+  lockImportRefusal,
+  lockPackRefusal,
+  lockRigRefusal,
+  lockSpriteInput,
+  mayBeCharacter,
+  readGameStyle,
+} from "./gameStyle.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -74,10 +82,37 @@ it("refuses packs outside the lock and characters on another rig, never props", 
   );
   expect(lockPackRefusal(pack("kaykit-adventurers"), kaykit)).toBeNull();
   expect(lockPackRefusal(pack("kenney-pixel-platformer"), null)).toBeNull();
-  expect(lockPackRefusal(pack("rubberduck-100-sfx"), kaykit)).toMatch(/audio.packs/);
+  // Sound is locked only once the lock lists audio.packs.
+  expect(lockPackRefusal(pack("rubberduck-100-sfx"), kaykit)).toBeNull();
+  const withSound = { ...kaykit, audio: { packs: ["kenney-rpg-audio"] } };
+  expect(lockPackRefusal(pack("rubberduck-100-sfx"), withSound)).toMatch(/audio.packs/);
+  // A pixel lock's palette pack is part of the look without being listed.
+  const pixel = { ...kaykit, mode: "pixel" as const, tile: 16, palette: "kenney-tiny-dungeon" };
+  expect(lockPackRefusal(pack("kenney-tiny-dungeon"), pixel)).toBeNull();
   // Listed, but its characters are on another rig: the add refuses them, though its props may come.
   expect(lockRigRefusal(pack("kenney-mini-characters"), kaykit)).toMatch(/kaykit-adventurers/);
   expect(lockRigRefusal(pack("kaykit-dungeon-remastered"), kaykit)).toBeNull();
+  // A model whose clips cannot be read is a possible character; only a model known to have none is a prop.
+  const model = { path: "a", bytes: 1, media: "model" as const };
+  expect(mayBeCharacter({ ...model, format: "fbx" })).toBe(true);
+  expect(mayBeCharacter({ ...model, format: "glb", clipsUnread: true })).toBe(true);
+  expect(mayBeCharacter({ ...model, format: "glb", clipCount: 3 })).toBe(true);
+  expect(mayBeCharacter({ ...model, format: "glb" })).toBe(false);
+  expect(mayBeCharacter({ ...model, format: "obj" })).toBe(false);
+});
+
+it("refuses imports the lock does not list, and armatures off its rig", () => {
+  expect(lockImportRefusal("polyhaven", kaykit)).toMatch(/imports/);
+  expect(lockImportRefusal("polyhaven", { ...kaykit, imports: ["polyhaven"] })).toBeNull();
+  expect(lockImportRefusal("sketchfab", null)).toBeNull();
+  const kaykitBones = [...LIBRARY_RIG_JOINTS["kaykit-1"]!, "extra_prop_bone"];
+  expect(lockArmatureRefusal({ Rig: kaykitBones }, kaykit)).toBeNull();
+  expect(lockArmatureRefusal({ Hero: ["root", "spine", "arm"] }, kaykit)).toMatch(
+    /not on STYLE.json's rig kaykit-1/,
+  );
+  const { rig: _, ...noRig } = kaykit;
+  expect(lockArmatureRefusal({ Hero: ["root"] }, noRig)).toMatch(/names no rig/);
+  expect(lockArmatureRefusal({}, noRig)).toBeNull();
 });
 
 it("fills sprite renders from a pixel lock and refuses a palette it does not hold", () => {

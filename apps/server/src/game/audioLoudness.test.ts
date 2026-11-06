@@ -2,21 +2,24 @@ import { expect, it } from "@effect/vitest";
 import { parseEbur128 } from "./audioLoudness.ts";
 
 const summary = (integrated: string, peak: string) =>
-  `[Parsed_ebur128_0 @ 0x1] t: 1.2 M: -20.0 S: -21.0 I: -18.0 LUFS\n[Parsed_ebur128_0 @ 0x1] Summary:\n\n  Integrated loudness:\n    I:         ${integrated} LUFS\n    Threshold: -27.2 LUFS\n\n  True peak:\n    Peak:       ${peak} dBFS\n`;
+  `Input #0, mp3, from 'loop.mp3':\n  Duration: 00:01:02.50, start: 0.025057, bitrate: 128 kb/s\n[Parsed_ebur128_0 @ 0x1] t: 1.2 M: -20.0 S: -21.0 I: -18.0 LUFS\n[Parsed_ebur128_0 @ 0x1] Summary:\n\n  Integrated loudness:\n    I:         ${integrated} LUFS\n    Threshold: -27.2 LUFS\n\n  True peak:\n    Peak:       ${peak} dBFS\n`;
 
 it("reads the closing summary, and never reports a gate floor or silence as a level", () => {
   expect(parseEbur128(summary("-11.8", "0.6"))).toEqual({
     integratedLufs: -11.8,
     truePeakDbtp: 0.6,
+    seconds: 62.5,
   });
   // ffmpeg prints -70 when a clip is too short to gate: that is no measurement.
-  expect(parseEbur128(summary("-70.0", "-4.0"))).toEqual({
+  expect(parseEbur128(summary("-70.0", "-4.0"))).toMatchObject({
     integratedLufs: null,
     truePeakDbtp: -4,
   });
-  expect(parseEbur128(summary("-70.0", "-inf"))).toEqual({
+  expect(parseEbur128(summary("-70.0", "-inf"))).toMatchObject({
     integratedLufs: null,
     truePeakDbtp: null,
   });
   expect(parseEbur128("Invalid data found when processing input")).toBeNull();
+  // No Duration line: the length is unknown, never zero.
+  expect(parseEbur128(summary("-20.0", "-3.0").replace(/.*Duration.*\n/, ""))?.seconds).toBeNull();
 });

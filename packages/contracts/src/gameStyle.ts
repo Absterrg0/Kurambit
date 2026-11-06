@@ -28,11 +28,17 @@ export const GameStyle = Schema.Struct({
   view: GameStyleView,
   /** The rig every character shares, so every clip fits every character; omitted when none is rigged. */
   rig: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
-  /** The library packs the game's visuals come from. */
+  /** The library packs the game's visuals come from; a pack-id palette is allowed without listing it. */
   packs: Schema.Array(GameLibraryPackId).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
+  /** Outside sources the live Blender may import from; none when omitted. */
+  imports: Schema.optionalKey(
+    Schema.Array(Schema.Literals(["polyhaven", "sketchfab", "polypizza"])).check(
+      Schema.isMaxLength(3),
+    ),
+  ),
   audio: Schema.optionalKey(
     Schema.Struct({
-      /** The library packs the game's sounds and music come from. */
+      /** The library packs the game's sounds and music come from; omitted, sound is not locked. */
       packs: Schema.optionalKey(Schema.Array(GameLibraryPackId).check(Schema.isMaxLength(16))),
       /** Integrated loudness of the music, in LUFS. Default -23. */
       musicLufs: Schema.optionalKey(

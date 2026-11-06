@@ -5,6 +5,8 @@ export interface Loudness {
   readonly integratedLufs: number | null;
   /** True peak; null for digital silence (-inf). */
   readonly truePeakDbtp: number | null;
+  /** The input's length from ffmpeg's Duration line; null when it gives none. */
+  readonly seconds: number | null;
 }
 
 /** The summary of `ffmpeg -i clip -af ebur128=peak=true -f null -`, or null when there is none. */
@@ -17,7 +19,13 @@ export const parseEbur128 = (stderr: string): Loudness | null => {
   if (integrated === undefined) return null;
   const lufs = integrated === "-inf" ? null : Number(integrated);
   const dbtp = peak === undefined || peak === "-inf" ? null : Number(peak);
+  const duration = /Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/.exec(stderr);
+  const seconds =
+    duration === null
+      ? null
+      : Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]);
   return {
+    seconds: seconds !== null && Number.isFinite(seconds) ? seconds : null,
     integratedLufs: lufs === null || !Number.isFinite(lufs) || lufs <= -69.9 ? null : lufs,
     truePeakDbtp: dbtp === null || !Number.isFinite(dbtp) ? null : dbtp,
   };

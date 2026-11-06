@@ -20,7 +20,13 @@ import {
 } from "@kurambit/contracts";
 import { LIBRARY_CATALOG, LIBRARY_FAMILIES } from "./assetLibraryCatalog.ts";
 import { parseEbur128 } from "./audioLoudness.ts";
-import { lockPackRefusal, lockRigRefusal, loudnessTargets, readGameStyle } from "./gameStyle.ts";
+import {
+  lockPackRefusal,
+  lockRigRefusal,
+  loudnessTargets,
+  mayBeCharacter,
+  readGameStyle,
+} from "./gameStyle.ts";
 import { hashFile } from "./sourceSnapshot.ts";
 import {
   INDEX_VERSION,
@@ -384,6 +390,11 @@ const make = Effect.gen(function* () {
                 detail: `The ${pack.id} archive has no ${pack.root} folder.`,
                 cause,
               }),
+          });
+          // The rest of the archive is not the pack; only files/ and the index are placed.
+          yield* Effect.tryPromise({
+            try: () => NodeFSP.rm(unpacked, { recursive: true, force: true }),
+            catch: io("Library unpack", unpacked),
           });
         }
         return yield* Effect.tryPromise({
@@ -915,19 +926,30 @@ const make = Effect.gen(function* () {
           })
           .pipe(Effect.option);
         const name = nameOf(clip.path);
-        const loudness =
-          result._tag === "Some" && result.value.exitCode === 0
-            ? parseEbur128(result.value.stderr)
-            : null;
+        if (result._tag === "None") {
+          measured.push(`- ${name}: not measured (ffmpeg could not be run)`);
+          continue;
+        }
+        if (result.value.timedOut) {
+          measured.push(`- ${name}: not measured (ffmpeg took longer than 30 s)`);
+          continue;
+        }
+        const loudness = result.value.exitCode === 0 ? parseEbur128(result.value.stderr) : null;
         if (loudness === null) {
           measured.push(`- ${name}: not measured (ffmpeg could not read it)`);
           continue;
         }
-        // A clip of 8 s or more is music; shorter ones are effects, judged by their peak.
-        const music = (clip.seconds ?? 0) >= 8;
         const lufs = loudness.integratedLufs;
         const peak = loudness.truePeakDbtp;
         const level = `${lufs === null ? "too short for integrated loudness" : `${lufs.toFixed(1)} LUFS`}, peak ${peak === null ? "silent" : `${peak.toFixed(1)} dBTP`}`;
+        // A clip of 8 s or more is music, judged by its loudness; shorter ones are effects,
+        // judged by their peak. A clip of unknown length is measured and not judged.
+        const seconds = clip.seconds ?? loudness.seconds;
+        if (seconds === null) {
+          measured.push(`- ${name}, length unknown: ${level} (not judged against a target)`);
+          continue;
+        }
+        const music = seconds >= 8;
         const verdict = music
           ? lufs === null
             ? ""
@@ -1077,9 +1099,10 @@ const make = Effect.gen(function* () {
           )
             chosen.set(file.path, file);
         }
-      // Props from a pack on another rig are fine; its animated characters are not.
+      // Props from a pack on another rig are fine; its characters, or any model whose clips
+      // could not be read, are not.
       const offRig = lockRigRefusal(pack, style);
-      if (offRig !== null && [...chosen.values()].some((file) => (file.clipCount ?? 0) > 0))
+      if (offRig !== null && [...chosen.values()].some(mayBeCharacter))
         return yield* fail("Library add", pack.id, "invalid-input", offRig);
       const total = [...chosen.values()].reduce((sum, file) => sum + file.bytes, 0);
       if (chosen.size > MAX_ADD_FILES || total > MAX_ADD_BYTES)
