@@ -648,7 +648,11 @@ export const makeUnityBackend = (
         };
       }),
     // The toolchain picks a Unity editor by the project's own version.
-    toolchainProject: (root, manifest) => insideGame(root, manifestProject(manifest)),
+    toolStatus: (root, manifest) =>
+      Effect.map(
+        tools.status({ unityProject: insideGame(root, manifestProject(manifest)) }),
+        (status) => status.tools.find((tool) => tool.tool === "unity") ?? null,
+      ),
     viewport: () => Effect.succeed({ ...UNITY_VIEWPORT }),
     projectSettingsFile: "ProjectSettings/ProjectSettings.asset",
     importProject,

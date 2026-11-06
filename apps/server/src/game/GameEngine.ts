@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The check reads the source tree around the engine's run.
+import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -12,6 +13,7 @@ import {
   type GameCheckIssue,
   type GameCheckResult,
   type GameProcessResult,
+  type GameToolStatus,
   type GameViewport,
 } from "@kurambit/contracts";
 import { commandDetail } from "./commandDetail.ts";
@@ -120,11 +122,11 @@ export interface GameEngineBackend {
     root: string,
     manifest: GameManifest,
   ) => Effect.Effect<Omit<GameEngineContext, "root">, GameOperationError>;
-  /**
-   * The project the toolchain resolves this engine's tool by (Unity picks its
-   * editor by the project's version); null when the tool is the same for every game.
-   */
-  readonly toolchainProject: ((root: string, manifest: GameManifest) => string) | null;
+  /** The one tool this game's engine needs, for this project (Unity's editor by its version); null when it needs none. */
+  readonly toolStatus: (
+    root: string,
+    manifest: GameManifest,
+  ) => Effect.Effect<GameToolStatus | null>;
   /** The resolution the game boots, explores and bot-plays at, from the project folder alone. */
   readonly viewport: (projectDir: string) => Effect.Effect<GameViewport, GameOperationError>;
   /** The project's settings file, relative to the project: where a check names project-wide errors. */
@@ -253,6 +255,11 @@ export class GameEngine extends Context.Service<
      * made: a tool or the machine.
      */
     readonly check: (root: string) => Effect.Effect<GameCheckResult, GameOperationError>;
+    /**
+     * The one tool this game's engine needs, as the toolchain sees it for this
+     * project. Asked on every status read, so an answer is kept briefly per game.
+     */
+    readonly toolStatus: (root: string) => Effect.Effect<GameToolStatus | null, GameOperationError>;
     /** The resolution the game boots, explores and bot-plays at. */
     readonly viewport: (root: string) => Effect.Effect<GameViewport, GameOperationError>;
   }
@@ -395,6 +402,18 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.catchTags({ GameOperationError: asResult }));
   });
 
+  const toolAnswers = yield* Cache.make({
+    lookup: (root: string) =>
+      Effect.gen(function* () {
+        const manifest = yield* projects.read(root);
+        const backend = yield* backendFor(manifest.engine.name);
+        return yield* backend.toolStatus(root, manifest);
+      }),
+    capacity: 256,
+    timeToLive: "30 seconds",
+  });
+  const toolStatus = (root: string) => Cache.get(toolAnswers, root);
+
   const viewport = Effect.fn("GameEngine.viewport")(function* (root: string) {
     const manifest = yield* projects.read(root);
     const backend = yield* backendFor(manifest.engine.name);
@@ -402,7 +421,7 @@ const make = Effect.gen(function* () {
     return yield* backend.viewport(GameProjectService.insideGame(root, manifestProject(manifest)));
   });
 
-  return GameEngine.of({ backendFor, context, importProject, check, viewport });
+  return GameEngine.of({ backendFor, context, importProject, check, toolStatus, viewport });
 });
 
 export const layer = Layer.effect(GameEngine, make);

@@ -19,7 +19,7 @@ import {
   manifestProject,
 } from "@kurambit/contracts";
 import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
-import { fileSha256 } from "./fileHash.ts";
+import { hashFile } from "./sourceSnapshot.ts";
 import {
   INDEX_VERSION,
   UNPACK_LIMITS,
@@ -307,7 +307,7 @@ const make = Effect.gen(function* () {
       const archive = NodePath.join(archives, `${pack.id}-${pack.sha256.slice(0, 12)}.zip`);
       if (yield* exists(archive)) {
         const cached = yield* Effect.tryPromise({
-          try: () => fileSha256(archive),
+          try: () => hashFile(archive),
           catch: io("Library fetch", archive),
         });
         if (pinProblem(pack, cached) !== null) {
@@ -336,7 +336,7 @@ const make = Effect.gen(function* () {
               ),
           });
           const fetched = yield* Effect.tryPromise({
-            try: () => fileSha256(part),
+            try: () => hashFile(part),
             catch: io("Library fetch", part),
           });
           const problem = pinProblem(pack, fetched);
@@ -1010,10 +1010,7 @@ const make = Effect.gen(function* () {
               if (!there.isFile()) return "occupied" as const;
               // A different size is a different file, without reading either.
               if (there.size !== (await NodeFSP.stat(source)).size) return "occupied" as const;
-              const [mine, theirs] = await Promise.all([
-                fileSha256(source),
-                fileSha256(destination),
-              ]);
+              const [mine, theirs] = await Promise.all([hashFile(source), hashFile(destination)]);
               return mine.sha256 === theirs.sha256 ? ("same" as const) : ("occupied" as const);
             }
             const part = NodePath.join(staging, NodeCrypto.randomUUID());

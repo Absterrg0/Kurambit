@@ -1906,7 +1906,7 @@ const layerWsRpc = (
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined ? game.libraryEvents : game.threadEvents(input.threadId),
-        [WS_METHODS.gameToolchainStatus]: () => game.toolchain(),
+        [WS_METHODS.gameToolchainStatus]: ({ threadId }) => game.toolchain(threadId),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

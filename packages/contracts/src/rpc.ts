@@ -1449,7 +1449,8 @@ const WsGameWebPackageRpc = Rpc.make(WS_METHODS.gameWebPackage, {
   error: gameError,
 });
 const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
-  payload: Schema.Struct({}),
+  /** With a thread, its game's own engine tool (Unity's editor by the project's version). */
+  payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
   success: GameToolchainStatus,
   error: gameError,
 });

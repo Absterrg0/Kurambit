@@ -9,10 +9,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
-  GAME_ENGINES,
   GameOperationError,
   gameOperationFault,
-  type GameManifest,
   type GameToolchainStatus,
   type GameCheckResult,
   type GameStatus,
@@ -564,17 +562,6 @@ const make = Effect.gen(function* () {
             : Effect.fail(error),
       }),
     );
-  const engineToolOf = (root: string, manifest: GameManifest) =>
-    Effect.gen(function* () {
-      const tool = GAME_ENGINES[manifest.engine.name].tool;
-      if (tool === null) return null;
-      const backend = yield* engines.backendFor(manifest.engine.name);
-      const status = yield* Cache.get(
-        toolchainStatus,
-        backend.toolchainProject?.(root, manifest) ?? "",
-      );
-      return status.tools.find((entry) => entry.tool === tool) ?? null;
-    });
   const exportAs = (threadId: ThreadId, target: "Linux" | "Windows") =>
     withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target));
   const rebuild = (threadId: ThreadId) => withRoot(threadId, "Build Web", exporter.publishWeb);
@@ -832,8 +819,8 @@ const make = Effect.gen(function* () {
         // on, which is the normal state after an export.
         webBuildStale,
         sourcesDifferFromPlay,
-        // The game's own engine tool, from the toolchain's cached answer for this project.
-        engineTool: yield* engineToolOf(root, manifest),
+        // The game's own engine tool, kept briefly per game by the engine service.
+        engineTool: yield* engines.toolStatus(root),
         processes: processes.list(root),
         // Status observes the preview; it never switches it.
         previewUrl: preview.url(root),

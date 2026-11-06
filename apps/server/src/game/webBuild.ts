@@ -3,7 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { GAME_SOURCE_FILE_LIMIT, sourceLimitDetail } from "@kurambit/contracts";
-import { fileSha256 } from "./fileHash.ts";
+import { hashFile } from "./sourceSnapshot.ts";
 
 /** The legacy mutable build directory. A new export never writes here. */
 export const WEB_BUILD_DIRECTORY = "builds/web";
@@ -111,7 +111,7 @@ export const readWebBuild = async (
   const files: WebBuildFile[] = [];
   try {
     for (const file of walked.files) {
-      const { sha256, bytes } = await fileSha256(file.absolute);
+      const { sha256, bytes } = await hashFile(file.absolute);
       files.push({ path: file.path, size: bytes, sha256 });
     }
   } catch {

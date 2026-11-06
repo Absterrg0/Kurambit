@@ -4,7 +4,6 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { GAME_SOURCE_FILE_LIMIT, GameOperationError, sourceLimitDetail } from "@kurambit/contracts";
-import { fileSha256 } from "./fileHash.ts";
 import type { GameSourceRules } from "./engineProfile.ts";
 
 /**
@@ -33,15 +32,52 @@ export type SourceSnapshot =
     };
 
 /**
- * The exact bytes read, through the one file hasher: streamed, a link at the
- * path refused (O_NOFOLLOW, so a link swapped in fails closed), and an abort
- * stops the read.
+ * SHA-256 and byte count of a file, streamed so a large build never sits whole
+ * in memory: the game layer's one file hasher (snapshots, Web builds, library
+ * packs). `noFollow` refuses a link at the path (O_NOFOLLOW, where it exists),
+ * so a link swapped in fails closed; an abort stops the read.
  */
+export const hashFile = async (
+  path: string,
+  options: { readonly signal?: AbortSignal | undefined; readonly noFollow?: boolean } = {},
+): Promise<{ readonly sha256: string; readonly bytes: number }> => {
+  const { signal } = options;
+  let handle: NodeFSP.FileHandle;
+  try {
+    handle = await NodeFSP.open(
+      path,
+      options.noFollow === true ? READ_FLAGS : NodeFS.constants.O_RDONLY,
+    );
+  } catch (cause) {
+    if (signal?.aborted) signal.throwIfAborted();
+    throw cause;
+  }
+  const hash = NodeCrypto.createHash("sha256");
+  let bytes = 0;
+  try {
+    signal?.throwIfAborted();
+    const stream = handle.createReadStream({ autoClose: false, ...(signal ? { signal } : {}) });
+    try {
+      for await (const chunk of stream) {
+        signal?.throwIfAborted();
+        hash.update(chunk as Buffer);
+        bytes += (chunk as Buffer).byteLength;
+      }
+    } finally {
+      stream.destroy();
+    }
+    signal?.throwIfAborted();
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+  return { sha256: hash.digest("hex"), bytes };
+};
+
 const hashFileContent = async (
   absolute: string,
   signal: AbortSignal | undefined,
 ): Promise<{ readonly size: number; readonly sha256: string }> => {
-  const hashed = await fileSha256(absolute, { signal, noFollow: true });
+  const hashed = await hashFile(absolute, { signal, noFollow: true });
   return { size: hashed.bytes, sha256: hashed.sha256 };
 };
 

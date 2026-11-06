@@ -119,7 +119,7 @@ import { threadEnvironment } from "../state/threads";
 import { gameEnvironment } from "../state/game";
 import { useGameWorkspaceStore } from "../gameWorkspaceStore";
 import { useGameStageAccess } from "../hooks/useGameStageAccess";
-import { useIsGameThread } from "../hooks/useIsGameThread";
+import { useIsGameThread, useIsGameThreadStatus } from "../hooks/useIsGameThread";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -716,6 +716,10 @@ function OpenCommandPaletteDialog(props: {
   // The same signal the game stage uses: the palette only leads with game
   // commands where the workspace has a game.
   const isGameThread = useIsGameThread(activeThreadRef);
+  // The same status read the stage mounts: Play and Rebuild exist only for an
+  // engine that makes a Web build.
+  const gameWebBuild =
+    useIsGameThreadStatus(activeThreadRef).data?.exportTargets.includes("Web") === true;
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const runStart = useAtomCommand(gameEnvironment.runStart, { reportFailure: false });
   const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
@@ -1515,7 +1519,7 @@ function OpenCommandPaletteDialog(props: {
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       if (!result.value.success) throw new Error(result.value.message);
     };
-    if (canGameAction)
+    if (canGameAction && gameWebBuild)
       actionItems.push({
         kind: "action",
         value: "action:game-play",
@@ -1524,25 +1528,24 @@ function OpenCommandPaletteDialog(props: {
         icon: <PlayIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("preview"),
       });
+    if (canGameAction && gameAccess === "writer" && gameWebBuild)
+      actionItems.push({
+        kind: "action",
+        value: "action:game-rebuild",
+        title: "Rebuild game",
+        searchTerms: ["rebuild", "build", "export", "game"],
+        icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
+        run: runGameAction("rebuild"),
+      });
     if (canGameAction && gameAccess === "writer")
-      actionItems.push(
-        {
-          kind: "action",
-          value: "action:game-rebuild",
-          title: "Rebuild game",
-          searchTerms: ["rebuild", "build", "export", "game"],
-          icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
-          run: runGameAction("rebuild"),
-        },
-        {
-          kind: "action",
-          value: "action:game-stop",
-          title: "Stop game",
-          searchTerms: ["stop", "close", "quit", "game"],
-          icon: <SquareIcon className={ITEM_ICON_CLASS} />,
-          run: runGameAction("stop"),
-        },
-      );
+      actionItems.push({
+        kind: "action",
+        value: "action:game-stop",
+        title: "Stop game",
+        searchTerms: ["stop", "close", "quit", "game"],
+        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+        run: runGameAction("stop"),
+      });
     actionItems.push({
       kind: "action",
       value: "action:game-toggle-chat",

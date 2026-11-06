@@ -240,7 +240,7 @@ export const makeThreeBackend = (
         projectDir: insideGame(root, manifestProject(manifest)),
       })),
     // three.js is vendored in the game: nothing to install.
-    toolchainProject: null,
+    toolStatus: () => Effect.succeed(null),
     viewport: () => Effect.succeed({ ...THREE_VIEWPORT }),
     projectSettingsFile: "index.html",
     // A static copy needs no export templates and no preset.

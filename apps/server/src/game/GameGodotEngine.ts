@@ -346,7 +346,11 @@ export const makeGodotBackend = (
           projectDir: insideGame(root, manifestProject(manifest)),
         };
       }),
-    toolchainProject: null,
+    toolStatus: () =>
+      Effect.map(
+        tools.status(),
+        (status) => status.tools.find((tool) => tool.tool === "godot") ?? null,
+      ),
     viewport: (projectDir) =>
       Effect.tryPromise({
         try: () =>
