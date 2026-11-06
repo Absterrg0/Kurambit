@@ -259,8 +259,40 @@ const make = Effect.gen(function* () {
     };
   };
 
+  // Evidence follows the game-logs cleanup; a fact whose evidence was cleaned
+  // keeps its reading and says where its evidence went.
+  const withEvidence = (root: string, facts: GameBuildFacts) =>
+    Effect.promise(async () => {
+      const exists = (relative: string) =>
+        NodeFSP.access(NodePath.join(root, relative)).then(
+          () => true,
+          () => false,
+        );
+      const tier = async <F extends GameBuildFacts["idle"] | GameBuildFacts["skilled"]>(
+        fact: F,
+      ): Promise<F> =>
+        fact.status !== "measured" ||
+        fact.value.evidence === null ||
+        (await exists(fact.value.evidence))
+          ? fact
+          : ({
+              ...fact,
+              value: {
+                ...fact.value,
+                evidence: null,
+                note: `${fact.value.note} (evidence removed by cleanup)`.trim(),
+              },
+            } as F);
+      return {
+        ...facts,
+        idle: await tier(facts.idle),
+        masher: await tier(facts.masher),
+        skilled: await tier(facts.skilled),
+      };
+    });
+
   const read: GameFacts["Service"]["read"] = (build) =>
-    Effect.map(load(build.key), (found) => view(build, found));
+    Effect.flatMap(load(build.key), (found) => withEvidence(build.root, view(build, found)));
 
   const readMany: GameFacts["Service"]["readMany"] = (builds) =>
     Effect.gen(function* () {

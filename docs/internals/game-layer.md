@@ -265,7 +265,11 @@ tools are one method each on that service. Pushes are the game operation stream'
   build is named by its commit and restored like a saved build, so the run's best stays. A game
   with no run makes the same moves (`withBuildInFolder`: the folder parked as a build first, the
   scoped restore, the check). Its latest restore goes in `game_build_restores`. Either way the
-  parked folder is the undo.
+  parked folder is the undo. Keep on a round card (`asBest`) restores a stopped run's round as a
+  kept round's restore does, so it becomes the best even when the gate did not keep it.
+- **Plays are visible.** `GameStatus.buildPlays` lists the copies serving a build now. Every
+  start and stop (Stop game, `game.buildStop`, an evicted copy) pushes `builds`, and stopping one
+  build's Play never touches the folder's own Play or a measurement of the same build.
 
 ## The run as an orchestration domain
 
