@@ -54,22 +54,28 @@ export function GameExports({
   threadRef,
   builds,
   exportTargets,
+  live,
   webBuildStale,
   sourcesDifferFromPlay,
   canOperate,
   operationRunning,
   onPlay,
+  onExportWeb,
   onExport,
 }: {
   threadRef: ScopedThreadRef;
   builds: readonly BuildEntry[];
   /** The release targets this game's engine exports; the panel offers only those. */
   exportTargets: GameStatus["exportTargets"];
+  /** The Stage plays the folder itself: the Web export is a release, never what Play serves. */
+  live: boolean;
   webBuildStale: boolean;
   sourcesDifferFromPlay: GameStatus["sourcesDifferFromPlay"];
   canOperate: boolean;
   operationRunning: boolean;
   onPlay: () => void;
+  /** Writes a fresh Web export (a live game's Web release). */
+  onExportWeb: () => void;
   onExport: (target: ExportTarget) => void;
 }) {
   const check = useAtomCommand(gameEnvironment.checkSources, { reportFailure: false });
@@ -180,15 +186,30 @@ export function GameExports({
   };
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>{gameSourceFreshnessLabel(checked ?? sourcesDifferFromPlay)}</span>
-        <Button size="xs" variant="outline" disabled={checking} onClick={() => void checkSources()}>
-          Check
-        </Button>
-        {checkError ? <span role="alert">{checkError}</span> : null}
-      </div>
+      {/* A live game plays its folder, so no build can be older than what plays. */}
+      {live ? null : (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>{gameSourceFreshnessLabel(checked ?? sourcesDifferFromPlay)}</span>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={checking}
+            onClick={() => void checkSources()}
+          >
+            Check
+          </Button>
+          {checkError ? <span role="alert">{checkError}</span> : null}
+        </div>
+      )}
       {BUILD_TARGETS.filter((target) => exportTargets.includes(target)).map((target) => {
-        const meta = BUILD_META[target];
+        const meta =
+          live && target === "Web"
+            ? {
+                ...BUILD_META.Web,
+                body: "A static copy of the game for any web host. The Stage plays the game folder live, not this export.",
+                play: false,
+              }
+            : BUILD_META[target];
         const build = builds.find((entry) => entry.target === target);
         const canPackage =
           canOperate &&
@@ -228,7 +249,7 @@ export function GameExports({
                   ? `${build.path} · updated ${new Date(build.updatedAt).toLocaleString()}`
                   : "Not built yet"}
               </p>
-              {target === "Web" ? (
+              {target === "Web" && !live ? (
                 <p className="text-2xs text-muted-foreground">
                   Packages the export Play serves; later source edits are not included.
                 </p>
@@ -266,15 +287,15 @@ export function GameExports({
                     </>
                   ) : (
                     <>
-                      {target === "Windows" && build.packageable ? (
+                      {(target === "Windows" || target === "Web") && build.packageable ? (
                         <Button
                           size="sm"
                           disabled={!canPackage || operationRunning || packaging !== null}
-                          aria-busy={packaging === "Windows"}
-                          onClick={() => void downloadPackage("Windows")}
+                          aria-busy={packaging === target}
+                          onClick={() => void downloadPackage(target === "Web" ? "Web" : "Windows")}
                         >
                           <DownloadIcon className="size-3.5" aria-hidden="true" />
-                          {packaging === "Windows" ? "Packaging…" : "Download package"}
+                          {packaging === target ? "Packaging…" : "Download package"}
                         </Button>
                       ) : null}
                       <Button
@@ -282,7 +303,8 @@ export function GameExports({
                         variant="outline"
                         disabled={!canOperate || operationRunning || packaging !== null}
                         onClick={() => {
-                          if (target !== "Web") onExport(target);
+                          if (target === "Web") onExportWeb();
+                          else onExport(target);
                         }}
                       >
                         <DownloadIcon className="size-3.5" aria-hidden="true" />
@@ -314,7 +336,8 @@ export function GameExports({
                   variant="outline"
                   disabled={!canOperate || operationRunning || packaging !== null}
                   onClick={() => {
-                    if (target !== "Web") onExport(target);
+                    if (target === "Web") onExportWeb();
+                    else onExport(target);
                   }}
                 >
                   <DownloadIcon className="size-3.5" aria-hidden="true" />

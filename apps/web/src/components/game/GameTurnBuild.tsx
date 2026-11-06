@@ -1,14 +1,11 @@
-import { useState } from "react";
 import { ArrowUpRightIcon, HistoryIcon, PlayIcon, Redo2Icon, Undo2Icon } from "lucide-react";
 import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
-import { setStagePlayTarget } from "../../state/game";
 import { Button } from "../ui/button";
 import { GameBuildFactChips } from "./GameBuildFacts";
-import { buildName } from "./gameBuilds.logic";
 import { turnBuildIsFolder } from "./gameTurnBuild.logic";
-import { useBuildPlay, useTurnUndo } from "./useBuildActions";
+import { useTurnUndo } from "./useBuildActions";
 
 const RESTORE_LABEL = {
   undo: { idle: "Undo", busy: "Undoing…", Icon: Undo2Icon },
@@ -23,29 +20,18 @@ const RESTORE_LABEL = {
  */
 export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef; runId: RunId }) {
   const undo = useTurnUndo(threadRef, runId);
-  const plays = useBuildPlay(threadRef);
-  const [windowMessage, setWindowMessage] = useState<string | null>(null);
   const view = undo.view;
   if (view === null) return <OpenTurnBuild threadRef={threadRef} runId={runId} />;
   const build = view.build;
-  const ref = { _tag: "build", build: build.id } as const;
-  const play = async () => {
-    const stage = useGameWorkspaceStore.getState();
-    // The folder is this build: the Stage's own game is it, so no copy starts.
-    if (turnBuildIsFolder(view)) {
-      setStagePlayTarget(threadRef, null);
-      stage.showStageTab("play");
-      return;
-    }
-    const result = await plays.send(ref);
-    if (result === null) return;
-    if (result._tag === "window") {
-      setWindowMessage(result.message);
-      return;
-    }
-    setStagePlayTarget(threadRef, { build: build.id, label: buildName(build), result });
-    stage.showStageTab("play");
-  };
+  // The Stage plays it: the folder's own game when the folder is this build, else a copy.
+  const play = () =>
+    useGameWorkspaceStore
+      .getState()
+      .requestStage(
+        turnBuildIsFolder(view)
+          ? { kind: "live" }
+          : { kind: "play", build: { _tag: "build", build: build.id } },
+      );
   const action = undo.writer ? undo.action : null;
   const label = action === null ? null : RESTORE_LABEL[action.kind];
   return (
@@ -66,13 +52,11 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
         <Button
           size="xs"
           variant="outline"
-          disabled={
-            !build.available || build.noPlay !== null || !plays.canPlay || plays.playing(ref)
-          }
-          onClick={() => void play()}
+          disabled={!build.available || build.noPlay !== null}
+          onClick={play}
         >
           <PlayIcon className="fill-current" aria-hidden="true" />
-          {plays.playing(ref) ? "Starting…" : "Play"}
+          Play
         </Button>
         {action?.kind === "redo" ? (
           <span className="text-2xs text-muted-foreground">Undone</span>
@@ -98,27 +82,20 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
           {undo.error}
         </p>
       ) : null}
-      {plays.error(ref) ? (
-        <p role="alert" className="text-2xs text-destructive-foreground">
-          {plays.error(ref)}
-        </p>
-      ) : null}
-      {windowMessage !== null ? (
-        <p className="text-2xs text-muted-foreground">{windowMessage}</p>
-      ) : null}
     </div>
   );
 }
 
-/** The turn's build on the Builds tab: its facts in full, compare, and history. */
+/** The turn's build on the timeline, its detail open: facts in full, compare, its diff. */
 function OpenTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef; runId: RunId }) {
   return (
     <Button
       size="xs"
       variant="ghost"
       onClick={() =>
-        useGameWorkspaceStore.getState().showStageTab("builds", {
-          open: { _tag: "turn", threadId: threadRef.threadId, runId },
+        useGameWorkspaceStore.getState().requestStage({
+          kind: "detail",
+          build: { _tag: "turn", threadId: threadRef.threadId, runId },
         })
       }
     >

@@ -64,6 +64,42 @@ const threadSignal =
   }) =>
     threadScopeSignal(`${target.environmentId}\0${target.input.threadId}\0${scopes.join("|")}`);
 
+/** The last settled change under a live game's served folder: its count, message and time. */
+export interface GameLiveChange {
+  readonly revision: number;
+  readonly message: string;
+  readonly at: string;
+}
+
+/**
+ * Each live push for one thread's game (D1): files under the served folder
+ * changed and settled. Only the Stage's frame reads it; no query rereads on
+ * it. `revision` counts pushes seen here, so it starts at 0 with none.
+ */
+const liveSignalAtom = Atom.family((key: string) => {
+  const [environmentId = "", threadId = ""] = key.split("\0");
+  let last: GameLiveChange = { revision: 0, message: "", at: "" };
+  let lastEvent = "";
+  return Atom.make((get) => {
+    const result = get(
+      gameEvents({
+        environmentId: EnvironmentId.make(environmentId),
+        input: { threadId: ThreadId.make(threadId) },
+      }),
+    );
+    if (!AsyncResult.isSuccess(result) || gameEventScope(result.value) !== "live") return last;
+    const event = result.value;
+    const id = `${event.revision ?? ""}\0${event.at}`;
+    if (id !== lastEvent) {
+      lastEvent = id;
+      last = { revision: last.revision + 1, message: event.message, at: event.at };
+    }
+    return last;
+  }).pipe(Atom.withLabel(`game:live-signal:${key}`));
+});
+export const liveSignal = (ref: ScopedThreadRef) =>
+  liveSignalAtom(`${ref.environmentId}\0${ref.threadId}`);
+
 /**
  * Changes only when a game's run or operation changes state, which is all a
  * library card shows; progress messages within one state do not reread the list.
