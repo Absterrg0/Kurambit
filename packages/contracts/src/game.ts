@@ -528,7 +528,8 @@ export type GamePlaytestStep = typeof GamePlaytestStep.Type;
  * replace polling: a stage opened while idle learns about a later agent build
  * from the push, not from a two-second status loop.
  */
-export const GameOperationState = Schema.Literals(["running", "succeeded", "failed"]);
+/** A cancelled operation was stopped, by its owner or the creator: not a failure of the game. */
+export const GameOperationState = Schema.Literals(["running", "succeeded", "failed", "cancelled"]);
 export type GameOperationState = typeof GameOperationState.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
@@ -595,7 +596,7 @@ export const GameOperationEvent = Schema.Struct({
   revision: Schema.optionalKey(Schema.Number),
   root: Schema.String,
   name: Schema.String,
-  state: Schema.Union([GameOperationState, Schema.Literal("cancelled")]),
+  state: GameOperationState,
   message: Schema.String,
   at: Schema.String,
   /** The thread whose work the operation is, when a thread owns it; absent for a run's or the system's own work. */

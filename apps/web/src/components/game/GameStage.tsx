@@ -219,7 +219,10 @@ export function GameStage({
       ? asked
       : null;
   const tabs = PLAY_TABS;
-  const activeTab = tab ?? (runStatus.data?.active === true ? "run" : "play");
+  // A live run brings the creator to the Run view once; its stopping or ending
+  // later never moves them off it.
+  if (tab === null && runStatus.data?.active === true) setTab("run");
+  const activeTab = tab ?? "play";
   // The Builds tab stays mounted once opened, so going to the stage to play a
   // build and coming back keeps what was open there.
   if (activeTab === "builds" && !buildsSeen) setBuildsSeen(true);
@@ -227,7 +230,12 @@ export function GameStage({
   const phase = deriveGameStagePhase({
     // The game's own engine tool, as the server resolved it for this project.
     toolchainReady: data.engineTool === null || data.engineTool.status !== "error",
-    operation: data.operation,
+    // A failure becomes the stage's own only when this chat's work failed: a
+    // run's or a role's operation is that work's news, not this game's build.
+    operation:
+      data.operation?.state === "failed" && data.operation.ownerThreadId !== threadRef.threadId
+        ? null
+        : data.operation,
     hasWebBuild: webBuild !== undefined,
     webBuildStale: data.webBuildStale,
     previewUrl: data.previewUrl,

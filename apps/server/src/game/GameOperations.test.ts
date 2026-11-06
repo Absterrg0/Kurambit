@@ -44,9 +44,9 @@ it.effect("no interrupt or cancel, waiting or running, leaves a game busy", () =
     yield* TestClock.adjust("2 seconds");
     assert.strictEqual((yield* Fiber.join(late).pipe(Effect.flip)).reason, "busy");
 
-    // Interrupting the holder frees the game, and its end is recorded.
+    // Interrupting the holder frees the game, and its end is recorded as cancelled, not failed.
     yield* Fiber.interrupt(holder);
-    assert.strictEqual(operations.current("/g")?.state, "failed");
+    assert.strictEqual(operations.current("/g")?.state, "cancelled");
     assert.strictEqual(
       yield* operations.exclusive("/g", "Import", Effect.succeed("ran"), "thread-b"),
       "ran",

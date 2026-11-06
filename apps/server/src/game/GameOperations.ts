@@ -32,10 +32,7 @@ export class GameOperations extends Context.Service<
   {
     /** The operation running now, or the last one this server ran. */
     readonly current: (root: string) => GameOperation | null;
-    /**
-     * Sets the status record and publishes the matching event. `eventState`
-     * also carries "cancelled", which the status field does not.
-     */
+    /** Sets the status record and publishes the matching event. */
     readonly record: (
       root: string,
       operation: Omit<GameOperation, "revision">,
@@ -227,20 +224,19 @@ export const layer = Layer.effect(
             return Effect.gen(function* () {
               const wasCancelled = yield* Deferred.isDone(entry.cancelled);
               const failure = Cause.findErrorOption(exit.cause);
+              const state = wasCancelled || Option.isNone(failure) ? "cancelled" : "failed";
               yield* record(
                 root,
                 {
                   name,
-                  // The status field has no cancelled state; Stop reads as a
-                  // failed run with an honest message.
-                  state: "failed",
+                  state,
                   message:
-                    Option.isSome(failure) && !wasCancelled
+                    state === "failed" && Option.isSome(failure)
                       ? errorMessage(failure.value)
                       : `${name} was cancelled.`,
                   at,
                 },
-                wasCancelled || Option.isNone(failure) ? "cancelled" : "failed",
+                state,
                 owner,
               );
             });
