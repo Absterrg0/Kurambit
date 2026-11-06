@@ -116,7 +116,7 @@ export const toolFailed = (
  * asked for it), anything else (a checkpoint, a record, a defect) as a tool
  * fault. A cause already read passes as it is.
  */
-const classify = (
+export const classify = (
   what: string,
   error: unknown,
   roots: ReadonlyArray<string> = [],

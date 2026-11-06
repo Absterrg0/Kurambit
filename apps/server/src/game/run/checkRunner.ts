@@ -136,11 +136,15 @@ export const runStateChecks = (
           verdict.missing.length === 0
             ? ""
             : `; the game reports no ${verdict.missing.join(", ")} (expose it in its game state)`;
+        const cut =
+          (seen.cut ?? []).length === 0
+            ? ""
+            : `; the report cut ${(seen.cut ?? []).join(", ")} to its first 60 characters (lists and objects are read as their JSON text)`;
         return {
           k,
           what: c.what,
           pass: verdict.pass,
-          evidence: `${setup}${title}${verdict.detail}${missing}`.slice(0, 600),
+          evidence: `${setup}${title}${verdict.detail}${missing}${cut}`.slice(0, 600),
           frame,
         };
       }),

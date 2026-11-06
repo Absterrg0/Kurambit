@@ -9,46 +9,8 @@ import type * as Path from "effect/Path";
 import { GameOperationError, type GameEngineId } from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
-import { CHECK_BOT_DIR } from "./run/checkRunner.ts";
-import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
+import { CREATOR_SESSION_SECTION, RUN_STATE_IGNORES } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
-
-// Run notes and reports are harness output, never game content: ignoring them
-// keeps every build the run captures free of them. The list keeps the files
-// earlier runs wrote (run.json, rounds.jsonl, stop, steer, profile, run.log),
-// so an older game's leftovers never ride in a build.
-export const RUN_STATE_IGNORES = [
-  ".studio/run.json",
-  ".studio/rounds.jsonl",
-  ".studio/stop",
-  ".studio/steer.jsonl",
-  ".studio/profile",
-  ".studio/run.log",
-  ".studio/bot-results.jsonl",
-  ".studio/player-report.md",
-  ".studio/pick.txt",
-  ".studio/next.md",
-  ".studio/ship.md",
-  ".studio/art-review.md",
-  ".studio/ladder.json",
-  `${CHECK_BOT_DIR}/`,
-  ".studio/rung-change.json",
-  ".studio/exports.json",
-  ".studio/final-video.json",
-  ".studio/tester-*.md",
-  ".studio/reviewer-*.md",
-  ".studio/worktrees/",
-  ".studio/comparisons/",
-  ".studio/saves/",
-  // The creator's saved videos and images (gameSavedMedia.ts).
-  "saved/",
-  ".studio/play-*.md",
-  ".studio/proto-*.md",
-  ".studio/proto-*-frames.jpg",
-  ".studio/round-state.json",
-  "PICK-NOTES.md",
-  "JUDGE-NOTES.md",
-] as const;
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
@@ -164,8 +126,21 @@ export const ensureScaffold = (
         await NodeFSP.writeFile(index, kept);
       });
     yield* copy(NodePath.join(templates, "bot-kit"), NodePath.join(root, ".studio", "bot", "kit"));
-    // The game's AGENTS.md section and ignores are a courtesy to people and
-    // the creator's agent; the start goes on without them.
+    // The run-state ignores keep every build the run captures free of its
+    // notes and records: a start that cannot write them fails, as for the pack.
+    const ignore =
+      (yield* io("Run scaffold", ".gitignore", () =>
+        readText(NodePath.join(root, ".gitignore")),
+      )) ?? "";
+    const present = new Set(ignore.split("\n").map((line) => line.trim()));
+    const missing = RUN_STATE_IGNORES.filter((line) => !present.has(line));
+    if (missing.length > 0)
+      yield* writeFileStringAtomically({
+        filePath: NodePath.join(root, ".gitignore"),
+        contents: `${ignore}${ignore === "" || ignore.endsWith("\n") ? "" : "\n"}${missing.join("\n")}\n`,
+      }).pipe(Effect.mapError((cause) => ioError("Run scaffold", ".gitignore", cause)));
+    // The game's AGENTS.md section is a courtesy to people and the creator's
+    // agent; the start goes on without it.
     yield* Effect.gen(function* () {
       const before =
         (yield* io("Run scaffold", "AGENTS.md", () =>
@@ -179,23 +154,9 @@ export const ensureScaffold = (
           filePath: NodePath.join(root, "AGENTS.md"),
           contents: agents,
         });
-      const ignore =
-        (yield* io("Run scaffold", ".gitignore", () =>
-          readText(NodePath.join(root, ".gitignore")),
-        )) ?? "";
-      const present = new Set(ignore.split("\n").map((line) => line.trim()));
-      const missing = RUN_STATE_IGNORES.filter((line) => !present.has(line));
-      if (missing.length > 0)
-        yield* writeFileStringAtomically({
-          filePath: NodePath.join(root, ".gitignore"),
-          contents: `${ignore}${ignore === "" || ignore.endsWith("\n") ? "" : "\n"}${missing.join("\n")}\n`,
-        });
     }).pipe(
       Effect.catchCause((cause) =>
-        Effect.logWarning("the game's AGENTS.md or .gitignore could not be updated", {
-          game: root,
-          cause,
-        }),
+        Effect.logWarning("the game's AGENTS.md could not be updated", { game: root, cause }),
       ),
     );
   });

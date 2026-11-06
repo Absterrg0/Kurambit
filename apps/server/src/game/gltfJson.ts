@@ -61,6 +61,7 @@ interface AccessorDoc {
 
 const FLOAT = 5126;
 const MAT4_BYTES = 64;
+const MAX_ACCESSOR_BYTES = 16 * 1024;
 
 /**
  * One FLOAT MAT4 accessor's matrices (a skin's inverse bind matrices), read
@@ -83,9 +84,17 @@ export const readMat4Accessor = async (
   if (count > maxMatrices) return { notRead: `its skeleton has more than ${maxMatrices} joints` };
   const view = doc.bufferViews?.[accessor.bufferView ?? -1];
   if (view === undefined) return { notRead: "its inverse bind matrices have no buffer view" };
+  // The stride comes from the file: one a float matrix cannot have is refused
+  // before anything is allocated, and the read never passes 16 KB.
   const stride = view.byteStride ?? MAT4_BYTES;
+  if (!Number.isInteger(stride) || stride % 4 !== 0 || stride < MAT4_BYTES || stride > 252)
+    return { notRead: "its inverse bind matrices have an impossible stride" };
   const start = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+  if (!Number.isInteger(start) || start < 0)
+    return { notRead: "its inverse bind matrices have an impossible offset" };
   const length = count === 0 ? 0 : stride * (count - 1) + MAT4_BYTES;
+  if (length > MAX_ACCESSOR_BYTES)
+    return { notRead: "its inverse bind matrices are larger than this read takes" };
   const bytes = await readBufferRange(path, doc, view.buffer ?? 0, start, length);
   if (typeof bytes === "string") return { notRead: bytes };
   const matrices: number[][] = [];

@@ -21,6 +21,7 @@ import {
   type ThreadId,
   gameRunStepCommandId,
   gameRunStepId,
+  plainReason,
 } from "@kurambit/contracts";
 import { latestRootProviderFailure } from "@kurambit/shared/orchestrationV2ThreadError";
 import * as Cause from "effect/Cause";
@@ -56,7 +57,7 @@ import * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
 import { BuildName } from "./buildNames.ts";
 import { captureBuild, freeBy, isGameCode, measureChange } from "./builds.ts";
-import { MEMORY_PAUSE, MEMORY_WAITS, handBack, toolFailed } from "./handBack.ts";
+import { MEMORY_PAUSE, MEMORY_WAITS, classify, handBack, toolFailed } from "./handBack.ts";
 import { causeText } from "../runSetup.ts";
 import { RETRIES as LANDING_RETRIES, retrying } from "./retrying.ts";
 import { lastPlay } from "../botEvidence.ts";
@@ -297,6 +298,39 @@ const make = Effect.gen(function* () {
    * step nothing will move: nothing was measured, so nothing is judged. A
    * refusal means the step moved on already.
    */
+  /** The build's own fault where the step has no verdict form for it: the step fails with it. */
+  const failStep = (input: {
+    readonly creator: ThreadId;
+    readonly runId: GameRun["id"];
+    readonly stepId: GameRunStepId;
+    readonly attempt: number;
+    readonly reason: string;
+  }) =>
+    engine
+      .dispatch({
+        type: "game-run.step.fail",
+        commandId: gameRunStepCommandId(input.stepId, input.attempt, "fail"),
+        threadId: input.creator,
+        runId: input.runId,
+        stepId: input.stepId,
+        attempt: input.attempt,
+        reason: input.reason.slice(0, 300),
+      })
+      .pipe(
+        Effect.asVoid,
+        Effect.catchTags({
+          OrchestratorGameRunRefusedError: () => Effect.void,
+          OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+        }),
+        retrying,
+        Effect.catch((cause) =>
+          Effect.logWarning("game run step could not be failed; recovery owes it", {
+            stepId: input.stepId,
+            cause,
+          }),
+        ),
+      );
+
   const pauseStep = (input: {
     readonly creator: ThreadId;
     readonly runId: GameRun["id"];
@@ -510,6 +544,11 @@ const make = Effect.gen(function* () {
         (yield* threads.getCommandReceipt(roleCapCommandId(turn.stepId, turn.attempt, run.id)))
           ?.status === "accepted";
       const budgetCut = timedOut && at.run.budgetEndsAt !== null && now >= at.run.budgetEndsAt;
+      // The role's play stops before anything is read or captured (P-E10): a
+      // bot run or an operation of the turn still going would write the folder
+      // under the capture, or hold the game against the next step. Bounded,
+      // and it cancels queued operations, explore sessions and bots too.
+      yield* game.cancelThread(roleThreadId);
       // Evidence is cumulative per thread; closing here also releases the
       // thread's explorer so nothing stays open between roles.
       once.evidence ??= yield* readEvidence(roleThreadId);
@@ -628,14 +667,33 @@ const make = Effect.gen(function* () {
             const at = yield* locate(creator, turn.stepId, turn.attempt).pipe(
               Effect.orElseSucceed(() => null),
             );
-            const cause = toolFailed(
-              `${at?.role?.role ?? "a role"}'s landing`,
-              Cause.squash(Cause.fail(error)),
-              {
-                standing:
-                  isGameOperationError(error) && /evidence record damaged/.test(error.detail ?? ""),
-              },
-            );
+            // Read once, as every step's work is: the build's own fault fails
+            // the step with it, a fault waiting cannot clear pauses at once.
+            const what = `${at?.role?.role ?? "a role"}'s landing`;
+            const read = classify(what, error);
+            // A damaged evidence record is gone: no wait brings the play back.
+            const cause =
+              read._tag === "GameRunToolFailed" &&
+              isGameOperationError(error) &&
+              /evidence record damaged/.test(error.detail ?? "")
+                ? toolFailed(what, error, { standing: true })
+                : read;
+            if (cause._tag === "GameRunJobBroke")
+              return yield* pauseStep({
+                creator,
+                runId: turn.runId,
+                stepId: turn.stepId,
+                attempt: turn.attempt,
+                reason: `its turn could not be landed after ${LANDING_RETRIES + 1} tries (${causeText(Cause.fail(error))})`,
+              }).pipe(Effect.as(null));
+            if (cause._tag === "GameRunBuildFault")
+              return yield* failStep({
+                creator,
+                runId: turn.runId,
+                stepId: turn.stepId,
+                attempt: turn.attempt,
+                reason: `the build cannot be kept: ${plainReason(cause.error.detail ?? cause.error.reason)}`,
+              }).pipe(Effect.as(null));
             if (at === null)
               return yield* pauseStep({
                 creator,

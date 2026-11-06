@@ -28,6 +28,8 @@ export type Observed = {
   readonly start: Record<string, unknown>;
   readonly end: Record<string, unknown>;
   readonly hud: string;
+  /** Keys whose value the report cut to its first 60 characters (lists and objects among them). */
+  readonly cut?: ReadonlyArray<string>;
   /** Enter presses when a scenario meant to start in a run never left the title, else 0. */
   readonly stuckOnTitle?: number;
 };
@@ -171,13 +173,20 @@ export const needlesOf = (terms: ReadonlyArray<Term>): ReadonlyArray<string> =>
  */
 export const readReport = (evidence: unknown): Observed | null => {
   if (evidence === null || typeof evidence !== "object") return null;
-  const { s, e, h, title } = evidence as { s?: unknown; e?: unknown; h?: unknown; title?: unknown };
+  const { s, e, h, title, cut } = evidence as {
+    s?: unknown;
+    e?: unknown;
+    h?: unknown;
+    title?: unknown;
+    cut?: unknown;
+  };
   if (s === null || typeof s !== "object" || e === null || typeof e !== "object") return null;
   return {
     start: s as Record<string, unknown>,
     end: e as Record<string, unknown>,
     hud: typeof h === "string" ? h : "",
     stuckOnTitle: typeof title === "number" ? title : 0,
+    cut: Array.isArray(cut) ? cut.filter((key): key is string => typeof key === "string") : [],
   };
 };
 
@@ -289,11 +298,22 @@ const read = (state, key) => {
   for (const part of key.split(".")) at = at !== null && typeof at === "object" ? at[part] : undefined;
   return at === undefined ? null : at;
 };
+// The report fits the bot status's 4096-byte evidence whatever the game holds:
+// at most 4 keys of at most 64 characters, each value a number, a boolean or
+// text of at most 60 characters. A list or an object becomes the start of its
+// JSON text, and the report names every value it cut.
+const cut = new Set();
 const pick = (state) => {
   const out = {};
   for (const key of keys) {
     const v = read(state, key);
-    if (v !== null) out[key] = typeof v === "string" ? v.slice(0, 60) : v;
+    if (v === null) continue;
+    if (typeof v === "number" || typeof v === "boolean") out[key] = Number.isFinite(v) || typeof v === "boolean" ? v : String(v);
+    else {
+      const text = typeof v === "string" ? v : JSON.stringify(v) ?? String(v);
+      if (text.length > 60 || typeof v !== "string") cut.add(key);
+      out[key] = text.slice(0, 60);
+    }
   }
   return out;
 };
@@ -301,6 +321,8 @@ export function status(obs) {
   if (obs.phase !== "report") return { state: "running", note: \`stopped at \${obs.phase}\${obs.phase === "input" ? \` step \${step + 1} of \${input.length}\` : ""}\` };
   const lines = hud.split("\\n").filter((l) => needles.some((n) => l.toLowerCase().includes(n)));
   const h = (lines.length > 0 ? lines.join("\\n") : hud).slice(0, 200);
-  return { state: "done", note: "scenario reported", evidence: { s: pick(start), e: pick(end), h, title: onTitleAtStart ? titlePresses : 0 } };
+  const s = pick(start);
+  const e = pick(end);
+  return { state: "done", note: "scenario reported", evidence: { s, e, h, title: onTitleAtStart ? titlePresses : 0, cut: [...cut] } };
 }
 `;

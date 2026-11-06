@@ -131,4 +131,30 @@ describe("the generated check bot", () => {
     expect(sent.presses).toEqual([]);
     expect(evaluate(t0, readReport(status.evidence)!).pass).toBe(true);
   });
+
+  // Whatever the game holds, the report fits the bot status's 4096-byte evidence:
+  // a check never pauses the run because a game's state is large.
+  it("bounds its report by construction and says what it cut", async () => {
+    const t0 = terms('inventory contains "key" and player.name == "x" and hud contains "Hp"');
+    const { status } = await drive(
+      {
+        what: "x",
+        from: "title",
+        setup: null,
+        input: [],
+        keys: keysOf(t0),
+        needles: needlesOf(t0),
+      },
+      () => ({
+        gameState: {
+          state: "title",
+          inventory: Array.from({ length: 5000 }, (_, i) => ({ id: i, name: `item-${i}` })),
+          player: { name: "y".repeat(10_000) },
+        },
+        hudText: `Hp ${"z".repeat(10_000)}`,
+      }),
+    );
+    expect(JSON.stringify(status.evidence).length).toBeLessThan(4096);
+    expect(readReport(status.evidence)!.cut).toEqual(["inventory", "player.name"]);
+  });
 });

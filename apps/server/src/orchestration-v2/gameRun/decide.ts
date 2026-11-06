@@ -97,20 +97,39 @@ interface GameRunRefusal {
   readonly message: string;
 }
 
-/** Endings a run continues from with game-run.resume; the run's status says so to clients. */
-export const RESUMABLE: ReadonlySet<string> = new Set([
-  "budget",
-  "usage-limit",
-  "provider-down",
-  "low-memory",
-  "busy",
-  "stopped",
-  "failed",
+/**
+ * What each ending allows, total over the endings so a new one cannot be
+ * left out: whether game-run.resume continues it, and whether its finish
+ * exports the best build. A pause (a machine or a tool that kept failing, a
+ * stop, a failure) exports nothing: it is no end, and its exports would meet
+ * the same cause.
+ */
+const ENDINGS: Readonly<
+  Record<GameRunEnding, { readonly resumable: boolean; readonly exports: boolean }>
+> = {
+  ready: { resumable: false, exports: true },
+  done: { resumable: false, exports: true },
+  budget: { resumable: true, exports: true },
+  "usage-limit": { resumable: true, exports: true },
+  "provider-down": { resumable: true, exports: true },
   // A resume starts a fresh stall count (Policy.resume).
-  "stalled",
+  stalled: { resumable: true, exports: true },
   // A resume plans the ladder again.
-  "no-ladder",
-]);
+  "no-ladder": { resumable: true, exports: true },
+  stopped: { resumable: true, exports: false },
+  failed: { resumable: true, exports: false },
+  "low-memory": { resumable: true, exports: false },
+  busy: { resumable: true, exports: false },
+  "tool-failed": { resumable: true, exports: false },
+};
+const endingsWhere = (pick: (e: (typeof ENDINGS)[GameRunEnding]) => boolean) =>
+  new Set(
+    (Object.keys(ENDINGS) as GameRunEnding[]).filter((ending) => pick(ENDINGS[ending])),
+  ) as ReadonlySet<string>;
+/** Endings a run continues from with game-run.resume; the run's status says so to clients. */
+export const RESUMABLE = endingsWhere((e) => e.resumable);
+/** Endings whose finish exports nothing. */
+export const NO_EXPORT = endingsWhere((e) => !e.exports);
 // A run with no rung left to build comes back for a creator's note, one round per note.
 const REOPENED_BY_NOTE: ReadonlySet<string> = new Set(["done", "ready", "no-ladder"]);
 
@@ -608,7 +627,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
         id: command.runId,
         threadId: command.threadId,
         projectId: work.records.projectId,
-        ...(command.chat === undefined ? {} : { chat: command.chat }),
+        ...(command.chat === undefined ? {} : { chat: command.chat, chats: [command.chat] }),
         lane: command.lane,
         ...(command.engine === undefined ? {} : { engine: command.engine }),
         brief: command.brief,
@@ -660,7 +679,13 @@ const start = (work: Work, command: Command<"game-run.start">) => {
 
 /** The run as the creator's chat that just moved it left it: its questions wake there. */
 const withChat = (run: GameRun, chat: ThreadId | undefined): GameRun =>
-  chat === undefined ? run : { ...run, chat };
+  chat === undefined
+    ? run
+    : {
+        ...run,
+        chat,
+        chats: [...(run.chats ?? []).filter((each) => each !== chat), chat].slice(-16),
+      };
 
 /** The command's run: the thread's latest, which the command must name. */
 const current = (work: Work, runId: GameRunId) => {

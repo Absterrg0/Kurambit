@@ -116,7 +116,7 @@ const make = Effect.gen(function* () {
       if (
         decision.kind !== "ladder" &&
         run !== undefined &&
-        !(yield* jobs.showable(effect.threadId, run.lane, decision))
+        !(yield* jobs.showable(effect.threadId, run, decision))
       )
         return yield* settledByRefusal(
           engine.dispatch({
@@ -211,7 +211,13 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (step.step.kind !== "decide") return null;
       const { messageId } = decisionWakeIds(run.id, step.step.decision.id, step.attempt);
-      for (const threadId of new Set([run.chat ?? run.threadId, run.threadId])) {
+      // Every chat the run's questions may have gone to: the creator may have
+      // moved the run from another chat since this one was woken.
+      for (const threadId of new Set([
+        ...(run.chats ?? []),
+        run.chat ?? run.threadId,
+        run.threadId,
+      ])) {
         const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
         const root = runs.find((each) => each.userMessageId === messageId);
         if (root === undefined) continue;

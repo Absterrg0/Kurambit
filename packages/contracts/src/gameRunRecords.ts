@@ -731,6 +731,8 @@ export const GameRun = Schema.Struct({
    * the run's own thread.
    */
   chat: Schema.optionalKey(ThreadId),
+  /** Every chat the run's questions may have gone to (the latest 16), so a wake is found wherever it was sent. */
+  chats: Schema.optionalKey(Schema.Array(ThreadId)),
   projectId: ProjectId,
   /** The engine project directory the manifest names (`godot`, `web`, `unity`). */
   lane: Schema.String,

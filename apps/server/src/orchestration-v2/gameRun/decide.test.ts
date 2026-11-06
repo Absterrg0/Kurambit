@@ -604,6 +604,45 @@ describe("game-run commands", () => {
     expect(runOf(steered).chat).toBe(other);
   });
 
+  // A pause judged nothing: it resumes, and its step runs as a new attempt that waits afresh.
+  it("a run paused as tool-failed resumes, and its step waits afresh", () => {
+    const atVision = complete(started(), gitOk());
+    const vision = stepOf(atVision);
+    const waited = accept(atVision, {
+      type: "game-run.step.schedule",
+      runId,
+      stepId: vision.id,
+      attempt: vision.attempt,
+      at: T0 + 2 * MIN,
+      timer: { kind: "tool", n: 3 },
+    }).records;
+    expect(stepOf(waited).toolWaits).toBe(3);
+    const paused = accept(waited, {
+      type: "game-run.step.complete",
+      runId,
+      stepId: vision.id,
+      attempt: vision.attempt,
+      result: { kind: "ended", ending: "tool-failed", reason: "vision's turn: the launch failed" },
+    }).records;
+    expect(runOf(paused)).toMatchObject({ ending: "tool-failed", inFlight: vision.seq });
+    expect(Decide.RESUMABLE.has("tool-failed")).toBe(true);
+    expect(Decide.NO_EXPORT.has("tool-failed")).toBe(true);
+    const resumed = accept(finished(paused), { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed)).toMatchObject({
+      seq: vision.seq,
+      attempt: vision.attempt + 1,
+      toolWaits: 0,
+    });
+  });
+
+  it("keeps every chat the run was moved from, so a question is found wherever it went", () => {
+    const x = ThreadId.make("thread:chat-x");
+    const y = ThreadId.make("thread:chat-y");
+    let records = accept(started(), { type: "game-run.steer", runId, note: "a", chat: x }).records;
+    records = accept(records, { type: "game-run.steer", runId, note: "b", chat: y }).records;
+    expect(runOf(records)).toMatchObject({ chat: y, chats: [x, y] });
+  });
+
   it("a step start from an earlier attempt is refused", () => {
     const atVision = complete(started(), gitOk());
     const vision = stepOf(atVision);

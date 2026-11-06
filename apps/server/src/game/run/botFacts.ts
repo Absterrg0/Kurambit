@@ -103,16 +103,20 @@ export const runBotFact = (
   return play.pipe(
     Effect.catchTags({
       // A game that would not boot under the bot is measured, about this build.
+      // The copy is the run's own folder: a game.json or a link the copy did
+      // not get right is ours, never the build's (boot read the root's).
       GameRunBuildFault: (fault) =>
-        Effect.succeed<BotResult>({
-          kind: "bot",
-          fact: {
-            ending: "did not boot",
-            seconds: 0,
-            final: {},
-            note: plain(fault.error.detail ?? fault.error.reason, ctx.root),
-          },
-        }),
+        fault.error.reason !== "command-failed"
+          ? Effect.fail(toolFailed(what, fault.error, { roots }))
+          : Effect.succeed<BotResult>({
+              kind: "bot",
+              fact: {
+                ending: "did not boot",
+                seconds: 0,
+                final: {},
+                note: plain(fault.error.detail ?? fault.error.reason, ctx.root),
+              },
+            }),
     }),
   );
 };
