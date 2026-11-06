@@ -142,8 +142,16 @@ export class GameBuilds extends Context.Service<
     ) => Effect.Effect<GameBuildFacts, GameOperationError>;
     /** Measures the work owed by data (rows owing tiers, live runs' rounds) and settles cut-short restores. */
     readonly reconcile: Effect.Effect<void>;
-    /** A run's own measure of a build it made: no thread asks. */
-    readonly measureIn: (root: string, build: string) => Effect.Effect<void>;
+    /**
+     * A measure no thread waits for: a run's round as it lands, or a chat
+     * turn's build, which with `supersede` replaces the game's earlier turn
+     * builds still queued.
+     */
+    readonly measureIn: (
+      root: string,
+      build: string,
+      options?: { readonly supersede?: boolean },
+    ) => Effect.Effect<void>;
     /** Plays the build from its copy; the game folder is never touched. Measures it if it never was. */
     readonly play: (
       threadId: ThreadId,
@@ -767,7 +775,7 @@ const make = Effect.gen(function* () {
       return yield* facts.measure(build, options);
     });
 
-  const measureIn: GameBuilds["Service"]["measureIn"] = (root, build) =>
+  const measureIn: GameBuilds["Service"]["measureIn"] = (root, build, options = {}) =>
     Effect.gen(function* () {
       if (!isGameBuildId(build)) return;
       const manifest = yield* projects.read(root);
@@ -779,7 +787,7 @@ const make = Effect.gen(function* () {
       if (tree === null || tree === undefined) return;
       yield* facts.measure(
         { root, build, key: `${engine}:${tree}`, engine },
-        { queue: "background" },
+        { queue: "background", ...(options.supersede === true ? { supersede: true } : {}) },
       );
     }).pipe(Effect.ignore);
 
