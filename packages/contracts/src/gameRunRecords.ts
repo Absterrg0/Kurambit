@@ -649,6 +649,16 @@ export const GameRunRestoreOutcome = Schema.Union([
   }),
 ]);
 export type GameRunRestoreOutcome = typeof GameRunRestoreOutcome.Type;
+/** What a restore replaced in the run's state, so restoring its folder before undoes it. */
+export const GameRunRestoreReplaced = Schema.Struct({
+  best: Schema.String,
+  pending: Schema.NullOr(GameRunPending),
+  /** Rounds recorded once the restore landed; any later round makes it no undo. */
+  rounds: Schema.Number,
+  /** The round in progress the restore abandoned, which an undo cannot bring back. */
+  abandoned: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+});
+export type GameRunRestoreReplaced = typeof GameRunRestoreReplaced.Type;
 export const GameRunRestore = Schema.Struct({
   requestId: Schema.String,
   /** A kept round's build, which becomes the run's judged best; null for a saved build. */
@@ -658,6 +668,13 @@ export const GameRunRestore = Schema.Struct({
   requestedAt: IsoDateTime,
   /** Null while the job is moving the folder. */
   outcome: Schema.NullOr(GameRunRestoreOutcome),
+  replaced: Schema.NullOr(GameRunRestoreReplaced).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
+  /** The earlier restore this one undoes, by what that one replaced; null when it undoes none. */
+  undoes: Schema.NullOr(GameRunRestoreReplaced).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
 });
 export type GameRunRestore = typeof GameRunRestore.Type;
 

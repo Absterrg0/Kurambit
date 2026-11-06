@@ -6,6 +6,7 @@ import {
   CommandId,
   type GameRun,
   GameRunId,
+  type GameRunRoundId,
   type GameRunRound,
   type GameRunStep,
   type GameRunStepResult,
@@ -911,6 +912,51 @@ describe("game-run commands", () => {
     expect(restored.rounds.map((r) => r.round)).toMatchObject([{ round: 1, abandoned: true }]);
     const resumed = accept(restored, { type: "game-run.resume", runId }).records;
     expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: best } });
+  });
+
+  it("restoring the folder the latest restore kept undoes it, best and line too, until a round runs", () => {
+    const stopped = finished(
+      accept(comparing(), { type: "game-run.stop", runId, reason: "go back" }).records,
+    );
+    const before = runOf(stopped);
+    const restoreOf = (
+      records: Records,
+      requestId: string,
+      input: { readonly round?: number; readonly build?: string },
+    ) => {
+      const asked = accept(records, {
+        type: "game-run.restore.request",
+        runId,
+        requestId,
+        ...input,
+      }).records;
+      return accept(asked, {
+        type: "game-run.restore",
+        runId,
+        requestId,
+        outcome: { kind: "restored", sha: `${requestId}-sha`, message: "" },
+      }).records;
+    };
+    // A restores round 1's build, abandoning round 1 the stopped run was playing.
+    const a = restoreOf(stopped, "a", { round: 1 });
+    expect(runOf(a)).toMatchObject({ best: "a-sha", pending: null });
+    // B restores the folder A kept: the run stands where it stood before A.
+    const b = restoreOf(a, "b", { build: "restores/a-before" });
+    expect(runOf(b)).toMatchObject({ best: before.best, pending: before.pending });
+    expect(runOf(a).restore?.replaced).toMatchObject({ best: before.best, abandoned: 1 });
+    expect(b.rounds.map((r) => r.round)).toMatchObject([{ round: 1, abandoned: true }]);
+    const resumed = accept(b, { type: "game-run.resume", runId }).records;
+    expect(stepOf(resumed).step).toMatchObject({ op: { _tag: "restore", sha: before.best } });
+    // C undoes B, back to A's best; an older folder brings back only its folder.
+    const c = restoreOf(b, "c", { build: "restores/b-before" });
+    expect(runOf(c).best).toBe("a-sha");
+    expect(runOf(restoreOf(c, "d", { build: "restores/a-before" })).best).toBe("a-sha");
+    // A round recorded since the restore makes its folder no undo: newer progress stays.
+    const later = {
+      ...c,
+      rounds: [...c.rounds, { ...c.rounds[0]!, id: "round-later" as GameRunRoundId }],
+    };
+    expect(runOf(restoreOf(later, "e", { build: "restores/c-before" })).best).toBe("a-sha");
   });
 
   it("a run's copies are spent once no way back reaches them", () => {

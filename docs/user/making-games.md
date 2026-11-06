@@ -138,12 +138,15 @@ restored build. Restore refuses while a run is live.
 
 A stopped run also lists its **Saved builds** on the Run tab: the game as the run left it, work a
 round left unfinished, a round's build that was not kept, and the game before each restore. What
-the folder held before a restore is always saved first, so a restore never discards work, and
-restoring "The game before restoring round 3" undoes that restore. Restoring a saved build brings
-it back to the folder but leaves the run's best as it was: those builds were never judged better,
-so a resume starts its next round from the best. Restoring while a stopped run is in the middle
-of a round abandons that round: its work is saved with the game before the restore, the round shows
-as **Abandoned**, and a resume starts the next round from the best.
+the folder held before a restore is always saved first, so a restore never discards work. Restoring
+a saved build brings it back to the folder but leaves the run's best as it was: those builds were
+never judged better, so a resume starts its next round from the best. The one exception is an
+undo: while no round has run since your latest restore, restoring the game from before it (the row
+says "restoring it undoes that restore") also puts the run's best back, so a resume goes on from
+where the run stood before. Restoring while a stopped run is in the middle of a round abandons that
+round: its work is saved with the game before the restore, the round shows as **Abandoned**, and a
+resume starts the next round from the best. Undoing that restore brings the round's work back to
+the folder, but the round itself stays abandoned.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to

@@ -87,6 +87,7 @@ export const restoreBuild = (input: {
           )
         : no("commit-missing", `${named} is no longer kept.`);
     const log = (line: string) => logLine(root, line);
+    const ctx = { root, runId: run.id, lane };
     const what = restoredPaths(lane).join(", ");
     const logged = target.kind === "round" ? `round ${target.record.round}` : target.name;
     // The folder as it is, kept once per request: a restore a restart cut
@@ -105,13 +106,30 @@ export const restoreBuild = (input: {
     const dropped = !abandons
       ? ""
       : ` ${task._tag === "round" ? `Round ${task.n}` : "The round"}, in progress when the run stopped, is abandoned: a resume starts the next round from ${from}, and the abandoned round's work is saved with the folder before.`;
+    // An undo of the latest restore puts back the best and pending line it replaced (decide.ts).
+    const undoes =
+      target.kind === "saved" && run.restore?.requestId === input.requestId
+        ? run.restore.undoes
+        : null;
     // A saved build was never judged better than the best, so the run goes on from the best.
     const judged = isRound
       ? ""
-      : " The run's judged best stays as it was: a resume starts its next round from the best, not from this build, which stays saved.";
+      : undoes !== null
+        ? ` This undoes the latest restore: the run's best and the line it was continuing are back as they were before it, so a resume goes on from there.${undoes.abandoned === null ? "" : ` Round ${undoes.abandoned}, which that restore abandoned, stays abandoned: an undo cannot bring a round in progress back, but its work is in this build.`}`
+        : " The run's judged best stays as it was: a resume starts its next round from the best, not from this build, which stays saved.";
+    // The best's build name follows the run's state.
+    const keepBest =
+      undoes === null || undoes.best.length === 0
+        ? Effect.succeed(true)
+        : Effect.map(
+            buildStep(deps, ctx, { _tag: "keep", names: [BuildName.best], sha: undoes.best }),
+            (kept) => kept.build.ok,
+          );
     const abandoned = abandons ? "; the round in progress is abandoned" : "";
     const restorePaths = isRestored(lane);
     if (!(yield* measureChange(checkpoints, root, restorePaths, beforeRef, build)).changed) {
+      if (!(yield* keepBest))
+        return no("commit-missing", "The best build the undo puts back is gone.");
       if (abandons)
         yield* log(
           `creator restored ${logged}, already the current build${abandoned}; the folder before is ${before}`,
@@ -122,7 +140,6 @@ export const restoreBuild = (input: {
         message: `${named} (${what}) is already the game's current build.${judged}${dropped.length > 0 ? `${dropped}${kept}` : ""}`,
       } satisfies GameRunRestoreOutcome;
     }
-    const ctx = { root, runId: run.id, lane };
     const afterName = BuildName.restoreAfter(input.requestId);
     // From here the folder moves; any refusal puts the folder before back first.
     const moving = Effect.gen(function* () {
@@ -136,6 +153,8 @@ export const restoreBuild = (input: {
       const after = yield* captureBuild(deps, root, run.id, afterName);
       if ((yield* measureChange(checkpoints, root, restorePaths, build, after)).changed)
         return no("restore-incomplete", `Restoring ${named} did not reproduce it.`);
+      if (!(yield* keepBest))
+        return no("commit-missing", "The best build the undo puts back is gone.");
       return null;
     }).pipe(Effect.catchCause(refusedOn("git-failed", "The restore could not finish")));
     const refused = yield* moving;

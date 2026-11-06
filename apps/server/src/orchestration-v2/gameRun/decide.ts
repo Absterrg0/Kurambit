@@ -4,6 +4,7 @@
 // this module only folds the records into its state and its answers back out.
 import {
   type GameRun,
+  type GameRunRestore,
   GameRunEnding,
   type GameRunId,
   type GameRunRefusalReason,
@@ -970,7 +971,22 @@ const restoreRequest = (work: Work, command: Command<"game-run.restore.request">
     const state = toState(run, work.records.rounds, inFlightOf(work, run));
     const pending: GameRun = {
       ...run,
-      restore: { requestId: command.requestId, round, build, requestedAt: work.at, outcome: null },
+      restore: {
+        requestId: command.requestId,
+        round,
+        build,
+        requestedAt: work.at,
+        outcome: null,
+        // Its rounds count is set again when it lands, past any round it abandons.
+        replaced: {
+          best: state.best,
+          pending: state.pending,
+          rounds: state.rounds.length,
+          abandoned: null,
+        },
+        // Read before this request takes the earlier one's place.
+        undoes: build === null ? null : undoOf(run, state, build),
+      },
     };
     return Result.succeed(
       settle(
@@ -1010,6 +1026,28 @@ export const copiesSpent = (
   return DateTime.toEpochMillis(DateTime.makeUnsafe(run.endedAt)) < input.now - input.keepMs;
 };
 
+/**
+ * What restoring `build` undoes: the run's latest restore, when `build` is the
+ * folder it kept before itself, it moved the folder, and no round was recorded
+ * since it landed. That restore's best and pending line come back with its
+ * folder, so a resume goes on from where the run stood before it; a round in
+ * progress it abandoned stays abandoned. Undoing an undo is the same rule.
+ */
+export const undoOf = (
+  run: Pick<GameRun, "restore">,
+  state: Pick<State.RunState, "rounds">,
+  build: string,
+): GameRunRestore["replaced"] => {
+  const prev = run.restore;
+  return prev !== null &&
+    prev.replaced !== null &&
+    prev.outcome?.kind === "restored" &&
+    build === BuildName.restoreBefore(prev.requestId) &&
+    state.rounds.length === prev.replaced.rounds
+    ? prev.replaced
+    : null;
+};
+
 /** A restore on a stopped run abandons the round it holds; a resume would continue it otherwise. */
 export const abandonsRound = (run: GameRun, state: State.RunState): boolean =>
   run.ending !== null && RESUMABLE.has(run.ending) && Policy.holdsRound(state);
@@ -1017,27 +1055,52 @@ export const abandonsRound = (run: GameRun, state: State.RunState): boolean =>
 /**
  * The restore job's outcome. A restored round becomes the run's judged best; a
  * saved build was never judged better than the best, so the best stays and a
- * resume goes on from it. Either way the round a stopped run held is dropped,
- * its step with it: the folder it worked on is gone.
+ * resume goes on from it, unless it undoes the latest restore, whose best and
+ * pending line then come back. Either way the round a stopped run held is
+ * dropped, its step with it: the folder it worked on is gone.
  */
 const restore = (work: Work, command: Command<"game-run.restore">) =>
   Result.flatMap(current(work, command.runId), (run) => {
-    if (run.restore?.requestId !== command.requestId || run.restore.outcome !== null)
+    const asked = run.restore;
+    if (asked?.requestId !== command.requestId || asked.outcome !== null)
       return refuse("stale-step", `Restore ${command.requestId} is not the one pending.`);
-    const landed: GameRun = { ...run, restore: { ...run.restore, outcome: command.outcome } };
     const held = inFlightOf(work, run);
     const state = toState(run, work.records.rounds, held);
+    // What an undo of this restore puts back is fixed by where it leaves the run.
+    const landedAs = (next: State.RunState, abandoned: number | null): GameRun => ({
+      ...run,
+      restore: {
+        ...asked,
+        outcome: command.outcome,
+        replaced:
+          asked.replaced === null
+            ? null
+            : { ...asked.replaced, rounds: next.rounds.length, abandoned },
+      },
+    });
     if (command.outcome.kind !== "restored")
-      return Result.succeed(settle(work, landed, state, state, [], []));
-    const round = run.restore.round;
-    const best = round === null ? state : { ...state, best: command.outcome.sha, pending: null };
+      return Result.succeed(settle(work, landedAs(state, null), state, state, [], []));
+    const round = asked.round;
+    const undoes = asked.undoes;
+    const best =
+      round !== null
+        ? { ...state, best: command.outcome.sha, pending: null }
+        : undoes !== null
+          ? { ...state, best: undoes.best, pending: undoes.pending }
+          : state;
     if (!abandonsRound(run, state))
-      return Result.succeed(settle(work, landed, state, best, [], []));
+      return Result.succeed(settle(work, landedAs(best, null), state, best, [], []));
     const dropped = Policy.abandonRound(
       best,
-      `the creator restored ${round === null ? `the saved build ${run.restore.build ?? ""}` : `round ${round}`} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
+      `the creator restored ${round === null ? `the saved build ${asked.build ?? ""}` : `round ${round}`} (the folder before is build ${BuildName.restoreBefore(command.requestId)})`,
       work.now,
     );
+    // Only a round that was under way is recorded as dropped; one not yet started simply starts again.
+    const abandoned =
+      state.task._tag === "round" && dropped.state.rounds.length > state.rounds.length
+        ? state.task.n
+        : null;
+    const landed = landedAs(dropped.state, abandoned);
     if (held === null) return Result.succeed(settle(work, landed, state, dropped.state, [], []));
     // The dropped round's copies go with this commit, as a landing's do: the
     // comparison's threads, and the held step's own roles (a blind player still

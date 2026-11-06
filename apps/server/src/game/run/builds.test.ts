@@ -332,21 +332,30 @@ it.effect("restores a saved build by its name, keeps the folder before, and leav
       best,
     };
     // The run as its pending restore holds it; the job reads only these.
-    const runFor = (requestId: string, build: string) =>
+    const runFor = (requestId: string, build: string, undoes: string | null) =>
       ({
         id: runId,
         lane: "godot",
         ending: "stopped",
         endedAt,
-        restore: { requestId, round: null, build, requestedAt: endedAt, outcome: null },
+        restore: {
+          requestId,
+          round: null,
+          build,
+          requestedAt: endedAt,
+          outcome: null,
+          replaced: null,
+          undoes:
+            undoes === null ? null : { best: undoes, pending: null, rounds: 0, abandoned: null },
+        },
       }) as unknown as GameRun;
-    const restore = (requestId: string, name: string) =>
+    const restore = (requestId: string, name: string, undoes: string | null = null) =>
       restoreBuild({
         game,
         checkpoints,
         lock,
         root,
-        run: runFor(requestId, name),
+        run: runFor(requestId, name, undoes),
         state,
         target: { kind: "saved", name },
         requestId,
@@ -362,11 +371,12 @@ it.effect("restores a saved build by its name, keeps the folder before, and leav
     expect(git("show", `${at(BuildName.restoreBefore("r1"))}:godot/main.gd`)).toBe("edited since");
     expect(at(BuildName.best)).toBe(best);
 
-    // Restoring the folder before undoes the restore the same way.
-    const undone = yield* restore("r2", BuildName.restoreBefore("r1"));
+    // Restoring the folder before undoes the restore; an undo moves the best's name to the best it puts back.
+    const undone = yield* restore("r2", BuildName.restoreBefore("r1"), left);
     expect(undone.kind).toBe("restored");
+    expect(undone.kind === "restored" ? undone.message : "").toContain("undoes the latest restore");
     expect(read()).toBe("edited since\n");
-    expect(at(BuildName.best)).toBe(best);
+    expect(at(BuildName.best)).toBe(left);
 
     // A name the run never kept is refused, and the folder stays as it is.
     const gone = yield* restore("r3", BuildName.unfinished("round-9", 1));

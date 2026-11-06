@@ -10,6 +10,7 @@ import {
   type GameRunDecision,
   type ModelSelection,
 } from "@kurambit/contracts";
+import { undoOf } from "../../orchestration-v2/gameRun/decide.ts";
 import { BuildName, savedBuildOf } from "./buildNames.ts";
 import type * as Policy from "./policy.ts";
 import type * as State from "./state.ts";
@@ -110,9 +111,11 @@ export const savedBuildLabel = (
       const last = run.restore;
       if (last === null || name !== BuildName.restoreBefore(last.requestId))
         return "The game before an earlier restore";
-      return last.round !== null
-        ? `The game before restoring round ${last.round}`
-        : "The game before restoring a saved build";
+      const what = last.round !== null ? `round ${last.round}` : "a saved build";
+      // Only an undo that still fits puts the run's best back too (decide.ts undoOf).
+      return undoOf(run, state, name) !== null
+        ? `The game before restoring ${what}: restoring it undoes that restore`
+        : `The game before restoring ${what}`;
     }
     case "unfinished":
       return `Round ${saved.round}'s unfinished work`;
