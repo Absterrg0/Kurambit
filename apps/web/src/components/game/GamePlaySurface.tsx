@@ -240,12 +240,16 @@ export function GameFrame({
     return () => window.removeEventListener("message", onMessage);
   }, [onStudioMessage]);
 
+  // A request is consumed by the frame on screen when it came: a frame mounted
+  // later (a live reload, a copy, Back to the current game) never takes the
+  // keyboard from the composer for an old one.
+  const [mountFocusRequest] = useState(focusRequest);
   useEffect(() => {
-    if (focusRequest === 0) return;
+    if (focusRequest === 0 || focusRequest === mountFocusRequest) return;
     // The frame's own focus event takes the "Click to play" cover down.
     frameRef.current?.focus();
     frameRef.current?.contentWindow?.focus();
-  }, [focusRequest]);
+  }, [focusRequest, mountFocusRequest]);
 
   useEffect(() => {
     // The outstanding-hide accounting IS the hint: a hide request is in flight

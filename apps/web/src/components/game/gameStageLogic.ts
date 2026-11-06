@@ -1,5 +1,6 @@
 import {
   GAME_ENGINES,
+  type GameAction,
   type GameEngineId,
   type GameStageKind,
   type GameStatus,
@@ -54,6 +55,12 @@ export interface GameStageInput {
   previewUrl: string | null;
   /** A stage action is in flight in this client, before the server reports it. */
   busyStartedAt: number | null;
+  /** Which one: a live game's stage reads differently for an open and an export. */
+  busyAction?: GameAction | null;
+  /** The action whose failure `localError` is. */
+  errorAction?: GameAction | null;
+  /** The server's word on a live game's serve (`GameStatus.live`). */
+  liveServe?: GameStatus["live"];
   /** A stage action failed in this client (RPC failure), not on the server. */
   localError: string | null;
   /** The engine plays each changing turn's build (`GAME_ENGINES[engine].turnLoop`); export engines only. */
@@ -121,10 +128,22 @@ export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
  * Only the person's own Play in flight, or its failure, shows instead of it.
  */
 function deriveLivePhase(input: GameStageInput): GameStagePhase {
-  if (input.previewUrl !== null) return { kind: "playing", stale: false };
+  // A closed serve is stopped even before the stale URL is reread.
+  if (input.previewUrl !== null && input.liveServe !== "stopped")
+    return { kind: "playing", stale: false };
+  const opening = input.busyAction == null || input.busyAction === "preview";
   if (input.busyStartedAt !== null)
-    return { kind: "building", message: "Opening the game…", startedAt: input.busyStartedAt };
-  if (input.localError !== null) return { kind: "failed", message: input.localError, what: "open" };
+    return {
+      kind: "building",
+      message: opening ? "Opening the game…" : "Exporting the game…",
+      startedAt: input.busyStartedAt,
+    };
+  if (input.localError !== null)
+    return {
+      kind: "failed",
+      message: input.localError,
+      what: input.errorAction == null || input.errorAction === "preview" ? "open" : "build",
+    };
   return { kind: "stopped" };
 }
 
@@ -188,15 +207,21 @@ export const liveServe = (previewUrl: string | null, liveRevision: number): Game
 export interface GameFrameFold {
   readonly key: string;
   readonly serve: GamePreviewServe;
+  /**
+   * The load lands in play, not on the title (A5): a remount for a change the
+   * person was watching. The first load, a new session and Reload go to the title.
+   */
+  readonly intoPlay: boolean;
   /** A newer serve the frame did not load yet. */
   readonly held: GamePreviewServe | null;
   /** Why: the person is in the game (the chip asks), or the Stage is hidden (it loads when shown). */
   readonly heldFor: "focus" | "hidden" | null;
 }
 
-const showing = (serve: GamePreviewServe): GameFrameFold => ({
+const showing = (serve: GamePreviewServe, intoPlay: boolean): GameFrameFold => ({
   key: frameKeyOf(serve),
   serve,
+  intoPlay,
   held: null,
   heldFor: null,
 });
@@ -215,10 +240,10 @@ export function remountOrHold(
   next: GamePreviewServe,
   view: { readonly focused: boolean; readonly hidden: boolean },
 ): GameFrameFold {
-  if (previous === null) return showing(next);
+  if (previous === null) return showing(next, false);
   if (previous.held !== null && frameKeyOf(previous.held) === frameKeyOf(next)) {
     if (previous.heldFor !== "hidden" || view.hidden) return previous;
-    return view.focused ? { ...previous, heldFor: "focus" } : showing(next);
+    return view.focused ? { ...previous, heldFor: "focus" } : showing(next, true);
   }
   const shown = nextGamePreviewFrame(previous, next);
   if (shown === previous) {
@@ -229,21 +254,58 @@ export function remountOrHold(
       ? { ...previous, held: null, heldFor: null }
       : previous;
   }
-  if (shown.serve.previewUrl !== previous.serve.previewUrl) return showing(next);
+  if (shown.serve.previewUrl !== previous.serve.previewUrl) return showing(next, false);
   if (view.hidden) return { ...previous, held: next, heldFor: "hidden" };
   if (view.focused) return { ...previous, held: next, heldFor: "focus" };
-  return showing(next);
+  return showing(next, true);
 }
 
-/** PURE. Loads what is held: the one remount the person asked for. */
+/** PURE. Loads what is held: the one remount the person asked for, back into play. */
 export function playHeldFrame(fold: GameFrameFold): GameFrameFold {
-  return fold.held === null ? fold : showing(fold.held);
+  return fold.held === null ? fold : showing(fold.held, true);
 }
 
-/** PURE. Reloads the frame now, even with nothing new: the header's Reload. */
+/** PURE. Reloads the frame now, even with nothing new: the header's Reload, to the title. */
 export function reloadFrame(fold: GameFrameFold, at: number): GameFrameFold {
   const serve = fold.held ?? fold.serve;
-  return { ...showing(serve), key: `${frameKeyOf(serve)}#reload:${at}` };
+  return { ...showing(serve, false), key: `${frameKeyOf(serve)}#reload:${at}` };
+}
+
+/** The hash the three.js shell reads to skip its title and start the run (A5). */
+export const LIVE_PLAY_HASH = "#kurambit-play";
+
+/** A live change the Stage has applied: its push count and when it applied it (ms). */
+export interface LiveShown {
+  readonly revision: number;
+  readonly at: number;
+}
+
+/** While this chat's turn runs, a live change applies at most this often (A6). */
+export const LIVE_TURN_WINDOW_MS = 10_000;
+
+/**
+ * PURE (A6). Which live change the frame shows. With no turn running, the
+ * latest at once. While this chat's turn runs, at most one change per window
+ * (the latest wins); `wakeAt` is when the waiting one may apply, for one
+ * timeout. A turn that ends applies what waits at once.
+ */
+export function liveToShow(input: {
+  readonly latest: LiveShown;
+  readonly shown: LiveShown | null;
+  readonly turnRunning: boolean;
+  /** The latest moment this render knows of: a push's time or a wake's. */
+  readonly now: number;
+}): { readonly show: LiveShown; readonly wakeAt: number | null } {
+  const { latest, shown } = input;
+  if (shown === null) return { show: latest, wakeAt: null };
+  if (latest.revision === shown.revision) return { show: shown, wakeAt: null };
+  const due = shown.at + LIVE_TURN_WINDOW_MS;
+  if (!input.turnRunning || input.now >= due)
+    return {
+      show: { revision: latest.revision, at: Math.max(input.now, latest.at) },
+      wakeAt: null,
+    };
+  return { show: shown, wakeAt: due };
 }
 
 export function gameSourceFreshnessLabel(value: GameStatus["sourcesDifferFromPlay"]): string {
