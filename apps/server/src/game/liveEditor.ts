@@ -36,16 +36,25 @@ const identityOf = (path: string): Promise<string | null> =>
 
 /**
  * The source files a live editor holds in memory and saves without reading
- * the disk first (Blender's live.blend, Unity's open scene). When one changed
- * on disk since the session last opened or saved it (a file restore, the
- * user's own git), the session is stale: saving would write the old scene
- * over the restored one.
+ * the disk first (Blender's live.blend, Unity's scenes). When one changed on
+ * disk while the session sat idle (a file restore, the user's own git), the
+ * session is stale: saving would write the old scene over the restored one.
+ * The session takes the identities again whenever its own work ends, so its
+ * own saves (by any route: an edit, an eval, a build) never count.
  */
 export class HeldSources {
-  readonly #identities = new Map<string, string | null>();
-  /** Records the files as the session now holds them (after an open or a save). */
-  async hold(paths: ReadonlyArray<string>): Promise<void> {
-    for (const path of paths) this.#identities.set(path, await identityOf(path));
+  readonly #list: () => Promise<ReadonlyArray<string>>;
+  #identities = new Map<string, string | null>();
+  /** `list` names the files the session may hold now. */
+  constructor(list: () => Promise<ReadonlyArray<string>>) {
+    this.#list = list;
+  }
+  /** Records the files as they are on disk now, as the session holds them. */
+  async hold(): Promise<void> {
+    const next = new Map<string, string | null>();
+    for (const path of await this.#list().catch(() => [] as string[]))
+      next.set(path, await identityOf(path));
+    this.#identities = next;
   }
   /** The first held file whose disk copy is no longer the one the session holds, or null. */
   async changed(): Promise<string | null> {
@@ -54,6 +63,13 @@ export class HeldSources {
     return null;
   }
 }
+
+/** Every `.unity` scene under a project's Assets/: what a Unity editor may hold open. */
+export const unityScenes = async (projectDir: string): Promise<ReadonlyArray<string>> => {
+  const assets = NodePath.join(projectDir, "Assets");
+  const names = await NodeFSP.readdir(assets, { recursive: true });
+  return names.filter((name) => name.endsWith(".unity")).map((name) => NodePath.join(assets, name));
+};
 
 /**
  * A kind of live editor's launch records: the game folder's copy (read only

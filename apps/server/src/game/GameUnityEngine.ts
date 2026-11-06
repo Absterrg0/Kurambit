@@ -94,11 +94,13 @@ export const makeUnityBackend = (
         operation: "unity-recompile",
         timeoutMs: 660_000,
       });
-      // A successful compile reloads the domain; the next command must wait for it.
-      yield* live.cli(root, ["status", "--until-ready", "--timeout", "180"], {
-        operation: "unity-ready",
-        timeoutMs: 200_000,
-      });
+      // A compile reloads the domain; the next command must wait for it. A
+      // recompile that never answered left the editor stuck, so no more is asked of it.
+      if (!result.process.timedOut)
+        yield* live.cli(root, ["status", "--until-ready", "--timeout", "180"], {
+          operation: "unity-ready",
+          timeoutMs: 200_000,
+        });
       const data = (result.data ?? {}) as {
         readonly errors?: ReadonlyArray<unknown>;
         readonly warnings?: ReadonlyArray<unknown>;
@@ -279,9 +281,17 @@ export const makeUnityBackend = (
             MAIN_THREAD_ANSWER_MS,
           ),
         );
-        if (read.kind !== "answered") return null;
-        const value = Number(read.result?.["result"]);
-        return Number.isFinite(value) ? value : null;
+        // Silence on the main thread is the game's freeze; a refusal or an
+        // unreadable answer is the Pipeline's, which says nothing about the game.
+        if (read.kind === "silent") return null;
+        const value = read.kind === "answered" ? Number(read.result?.["result"]) : Number.NaN;
+        if (!Number.isFinite(value))
+          return yield* toolFailed(
+            "unity-frame",
+            file,
+            `The live Unity editor did not report the frame count (${read.kind === "refused" ? read.message : "no number"}).`,
+          );
+        return value;
       });
       const waitFrames = (target: number, seconds: number) =>
         command(
@@ -308,7 +318,11 @@ export const makeUnityBackend = (
         return yield* froze(
           `The game froze: the editor's main thread stopped answering once play mode started in ${scene}.`,
         );
-      yield* waitFrames(first + CHECK_FRAMES, FROZEN_WAIT_S);
+      // A wait the editor never answered found its main thread stuck: the game froze.
+      if ((yield* waitFrames(first + CHECK_FRAMES, FROZEN_WAIT_S)).process.timedOut)
+        return yield* froze(
+          `The game froze: the editor stopped answering while play ran in ${scene}.`,
+        );
       let after = yield* frame;
       if (after === null)
         return yield* froze(
@@ -320,7 +334,10 @@ export const makeUnityBackend = (
         );
       // Slow is not frozen: a heavy scene on software rendering gets more time.
       if (after - first < CHECK_FRAMES) {
-        yield* waitFrames(first + CHECK_FRAMES, SLOW_WAIT_S - FROZEN_WAIT_S);
+        if ((yield* waitFrames(first + CHECK_FRAMES, SLOW_WAIT_S - FROZEN_WAIT_S)).process.timedOut)
+          return yield* froze(
+            `The game froze: the editor stopped answering while play ran in ${scene}.`,
+          );
         const later = yield* frame;
         if (later === null)
           return yield* froze(
@@ -463,7 +480,13 @@ export const makeUnityBackend = (
       return yield* Effect.gen(function* () {
         for (let waited = 0; waited < BUILD_TIMEOUT_MS && !finished; waited += 15_000) {
           yield* Effect.sleep("15 seconds");
-          last = yield* command(ctx.root, ["build", "status"], `${input.operation}-status`);
+          // A poll may go unanswered while the build holds the editor's main
+          // thread: it says nothing, never that the editor is stuck.
+          last = yield* live.cli(ctx.root, ["command", "build", "status"], {
+            operation: `${input.operation}-status`,
+            timeoutMs: 120_000,
+            unansweredIsNews: false,
+          });
           const answer = GameUnity.answerOf(last);
           const status = answer.kind === "answered" ? answer.result?.["status"] : undefined;
           // An unanswered poll says nothing. Every state but these two is final,

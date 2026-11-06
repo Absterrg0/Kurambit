@@ -65,7 +65,13 @@ import {
 } from "./unityToolchain.ts";
 import { makeCheckoutOf } from "./unityPlayerCache.ts";
 import { copyTree, makeAtomicWriter } from "./gameFiles.ts";
-import { breakSession, HeldSources, type LiveHealth, makeLiveRecords } from "./liveEditor.ts";
+import {
+  breakSession,
+  HeldSources,
+  type LiveHealth,
+  makeLiveRecords,
+  unityScenes,
+} from "./liveEditor.ts";
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 /**
@@ -137,10 +143,8 @@ interface Session extends LiveHealth {
   readonly window: HostedWindow;
   readonly client: Client;
   readonly logPath: string;
-  /** The open scene as the editor holds it in memory; a change on disk makes the session stale. */
+  /** The project's scenes as the editor holds them; a change on disk while it sits idle makes it stale. */
   readonly scene: HeldSources;
-  /** Project-relative path of the scene the session opened. */
-  readonly scenePath: string;
   lastActive: number;
   /** Calls and operations holding this editor right now; only an idle editor is ever evicted or swept. */
   inFlight: number;
@@ -204,6 +208,12 @@ export const answerOf = (result: UnityCliResult): UnityAnswer => {
     };
   return { kind: "silent", timedOut: false };
 };
+
+/** A rejected MCP call the editor never answered: a timeout, or the connection gone. */
+const mcpUnanswered = (cause: unknown) =>
+  !(cause instanceof McpError) ||
+  cause.code === ErrorCode.RequestTimeout ||
+  cause.code === ErrorCode.ConnectionClosed;
 
 const opError = (
   operation: string,
@@ -521,7 +531,15 @@ export class GameUnity extends Context.Service<
     readonly cli: (
       root: string,
       args: ReadonlyArray<string>,
-      options: { readonly operation: string; readonly timeoutMs: number },
+      options: {
+        readonly operation: string;
+        readonly timeoutMs: number;
+        /**
+         * False for a poll the editor may leave unanswered while it works (a
+         * build's status): its timeout then does not mark the editor stuck.
+         */
+        readonly unansweredIsNews?: boolean;
+      },
     ) => Effect.Effect<UnityCliResult, GameOperationError>;
     /** One `unity mcp` tool call against this game's live editor. */
     readonly call: (
@@ -732,6 +750,16 @@ const make = Effect.gen(function* () {
         // A held session is reused as it is; an idle one only while it is
         // usable and its scene on disk is still the one it holds in memory
         // (a file restore beside it would otherwise be saved over).
+        // A broken session still held is never replaced under its holder: the
+        // holder's next call fails at once, and the session is replaced when
+        // the hold ends.
+        if (existing !== undefined && existing.inFlight > 0 && existing.broken !== null)
+          return yield* opError(
+            "unity-live",
+            root,
+            "tool-failed",
+            `The live Unity editor stopped answering (${existing.broken}); it is closed when this operation ends, and the next Unity call reopens it.`,
+          );
         const stale =
           existing === undefined || existing.inFlight > 0
             ? null
@@ -907,6 +935,11 @@ const make = Effect.gen(function* () {
                     env: unityEditorEnv({ LIBGL_ALWAYS_SOFTWARE: "1" }),
                     stdio: "ignore",
                     token: editorToken,
+                    // On Windows the editor starts the user's Licensing
+                    // Client, which other editors share: the editor stays out
+                    // of the kill-on-close job, and a stop never ends that client.
+                    joinsJob: false,
+                    keep: (facts) => facts.exe !== null && !isUnityLicensingClient(facts.exe),
                   },
                   EDITOR_WINDOW,
                 ),
@@ -993,8 +1026,8 @@ const make = Effect.gen(function* () {
           ["command", "scene", "open", "--project-path", projectDir, "--", "--path", scenePath],
           { operation: "unity-open-scene", timeoutMs: 120_000 },
         );
-        const scene = new HeldSources();
-        yield* Effect.promise(() => scene.hold([NodePath.join(projectDir, scenePath)]));
+        const scene = new HeldSources(() => unityScenes(projectDir));
+        yield* Effect.promise(() => scene.hold());
         const mcpLog = NodeFS.openSync(NodePath.join(homeDir, "mcp.log"), "w");
         const mcpToken = launchToken();
         const transport = new StdioClientTransport({
@@ -1036,7 +1069,6 @@ const make = Effect.gen(function* () {
           client,
           logPath,
           scene,
-          scenePath,
           broken: null,
           lastActive: yield* Clock.currentTimeMillis,
           inFlight: 0,
@@ -1070,6 +1102,11 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const session: Session | null = held;
             if (session === null) return;
+            // The last holder's work (an edit, an eval that saved, a build) is
+            // the session's own: what is on disk now is what it holds. Taken
+            // before the count drops, so no acquire sees it idle in between.
+            if (session.inFlight === 1 && session.broken === null)
+              yield* Effect.promise(() => session.scene.hold());
             session.inFlight -= 1;
             session.lastActive = yield* Clock.currentTimeMillis;
             // A session something showed unusable closes when its last holder lets go.
@@ -1121,6 +1158,16 @@ const make = Effect.gen(function* () {
           onprogress: () => undefined,
         }) as Promise<McpContent>,
       catch: (cause) => {
+        // An answered JSON-RPC error (an unknown tool, bad arguments) is the
+        // caller's request; only silence or a lost connection is the editor's.
+        if (!mcpUnanswered(cause))
+          return opError(
+            "unity-live",
+            name,
+            "invalid-input",
+            `The Unity editor refused '${name}': ${cause instanceof Error ? cause.message : String(cause)}`,
+            cause,
+          );
         // An editor that does not answer at all will not answer the next call either.
         breakSession(session, `the live Unity editor did not answer '${name}'`);
         return opError(
@@ -1170,6 +1217,7 @@ const make = Effect.gen(function* () {
             .map(([root, session]) => ({
               root,
               lastActive: session.lastActive,
+              alive: Effect.sync(() => session.broken === null && session.editor.running()),
               // Re-read under the lock: a call may have taken it meanwhile.
               close: openLock.withPermits(1)(
                 Effect.suspend(() =>
@@ -1259,10 +1307,6 @@ const make = Effect.gen(function* () {
                 ),
             }),
           );
-          // What the editor holds now is what is on disk.
-          yield* Effect.promise(() =>
-            session.scene.hold([NodePath.join(session.projectDir, session.scenePath)]),
-          );
           return { text: `${textOf(result).slice(0, 8000)}\n${textOf(saved)}` };
         }),
       );
@@ -1322,10 +1366,13 @@ const make = Effect.gen(function* () {
           // A call that hung past its bound found the editor stuck (on its main
           // thread for most commands): it is not retried and not reused.
           if (result.process.timedOut) {
-            breakSession(
-              session,
-              `the live Unity editor did not answer \`${args.join(" ")}\` in time`,
-            );
+            // A poll that may go unanswered while the editor works (a build's
+            // status) says nothing about the editor; any other call does.
+            if (options.unansweredIsNews !== false)
+              breakSession(
+                session,
+                `the live Unity editor did not answer \`${args.join(" ")}\` in time`,
+              );
             return result;
           }
           if (
@@ -1336,7 +1383,7 @@ const make = Effect.gen(function* () {
             yield* waitReady(root, session);
             result = yield* run();
           }
-          if (result.process.timedOut)
+          if (result.process.timedOut && options.unansweredIsNews !== false)
             breakSession(
               session,
               `the live Unity editor did not answer \`${args.join(" ")}\` in time`,

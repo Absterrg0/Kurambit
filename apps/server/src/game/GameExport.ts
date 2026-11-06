@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
   GameOperationError,
+  gameOperationFault,
   type GameActionResult,
   type GameStatus,
   type GameWebPackage,
@@ -424,8 +425,23 @@ const make = Effect.gen(function* () {
       };
     });
     // One hold for import and release where the engine has a live editor:
-    // another game cannot take the editor between them.
-    return yield* backend.editor === null ? work : backend.editor.hold(root)(work);
+    // another game cannot take the editor between them. A failure the game's
+    // own files cause (an editor that will not open the project for its
+    // compile errors) is the export's result, never an error about the export.
+    return yield* (backend.editor === null ? work : backend.editor.hold(root)(work)).pipe(
+      Effect.catchTags({
+        GameOperationError: (error) =>
+          gameOperationFault(error.reason) === "build"
+            ? Effect.succeed<GameActionResult>({
+                success: false,
+                message: `${error.operation}: ${error.detail ?? error.reason}`.slice(0, 4096),
+                path: null,
+                url: null,
+                process: null,
+              })
+            : Effect.fail(error),
+      }),
+    );
   });
 
   /**

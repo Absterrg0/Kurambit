@@ -795,8 +795,8 @@ const make = Effect.gen(function* () {
       const mcpLaunch = yield* Effect.promise(() => adoptLaunch(processHost, mcpPid, mcpToken));
       if (mcpLaunch !== null) yield* remember({ mcpLaunch });
       const startedAt = yield* Clock.currentTimeMillis;
-      const blend = new HeldSources();
-      yield* Effect.promise(() => blend.hold([blendPath]));
+      const blend = new HeldSources(async () => [blendPath]);
+      yield* Effect.promise(() => blend.hold());
       const session: Session = {
         root,
         port,
@@ -837,6 +837,20 @@ const make = Effect.gen(function* () {
             onprogress: () => undefined,
           }),
         catch: (cause) => {
+          // An answered JSON-RPC error (an unknown tool, bad arguments) is the
+          // caller's request; only silence or a lost connection is Blender's.
+          if (
+            cause instanceof McpError &&
+            cause.code !== ErrorCode.RequestTimeout &&
+            cause.code !== ErrorCode.ConnectionClosed
+          )
+            return opError(
+              "blender-live",
+              name,
+              "invalid-input",
+              `Blender refused '${name}': ${cause.message}`,
+              cause,
+            );
           // A Blender that does not answer at all will not answer the next call either.
           breakSession(session, `Blender did not answer '${name}'`);
           return opError(
@@ -895,7 +909,7 @@ const make = Effect.gen(function* () {
         return yield* opError("blender-live", BLEND_REL, "command-failed", text.slice(0, 1000));
       // What the session holds is now what is on disk.
       const session = sessions.get(root);
-      if (session !== undefined) yield* Effect.promise(() => session.blend.hold([absolute]));
+      if (session !== undefined) yield* Effect.promise(() => session.blend.hold());
       return BLEND_REL;
     });
 
@@ -914,6 +928,7 @@ const make = Effect.gen(function* () {
             .map(([root, session]) => ({
               root,
               lastActive: session.lastActive,
+              alive: Effect.sync(() => session.broken === null && session.blender.running()),
               close: Effect.suspend(() => (idle(root) ? reap(root, take(root)) : Effect.void)),
             })),
       }),
