@@ -4,7 +4,8 @@
 // through it; main.js tunes it with one export:
 //
 //   export const LOOK = {
-//     toneMapping: "neutral", // "neutral" keeps base colours, "agx" is filmic, "none" is raw
+//     toneMapping: "neutral", // "neutral" shifts base colours little and rolls highlights off,
+//                             // "agx" is filmic, "none" leaves colours exact
 //     exposure: 1,
 //     environment: "sky",     // "sky": light from above and the ground; "room": an image-based
 //                             // light that metals reflect (heavier); false: none
@@ -19,8 +20,10 @@
 // renderer (the browser the harness plays in) and on weak GPUs. Turn it on for
 // a game whose glows matter, and keep emissive colours above 1 so only they glow.
 //
-// A 2D or pixel-art game keeps its sprites' colours exact with
-//   export const LOOK = { toneMapping: "none", environment: false, shadows: false };
+// Through an orthographic camera (a 2D or pixel-art game) nothing is tone
+// mapped unless LOOK names a toneMapping, so a sprite draws its file's exact
+// colours. A 2D game also drops the 3D lighting with
+//   export const LOOK = { environment: false, shadows: false };
 //
 // A sun that casts soft shadows wherever the player goes (its shadow camera
 // follows the target, so shadows never end at the edge of a fixed box):
@@ -28,12 +31,8 @@
 //   sun.intensity = 2.5;
 // Models from ASSETS already cast and receive shadows; a mesh you build needs
 // mesh.castShadow = true (and receiveShadow for the ground).
+// The bloom and room-light add-ons load only when LOOK asks for them.
 import * as THREE from "../vendor/three.module.js";
-import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
-import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const TONE = {
   neutral: THREE.NeutralToneMapping,
@@ -44,8 +43,13 @@ const TONE = {
 const BLOOM = { strength: 0.5, radius: 0.4, threshold: 1 };
 const ENVIRONMENTS = new Set(["sky", "room", false]);
 
-export function createLook(renderer, options = {}) {
+export async function createLook(renderer, options = {}) {
   const tone = TONE[options.toneMapping ?? "neutral"];
+  // An orthographic camera draws sprites; they keep their colours unless LOOK says otherwise.
+  const toneFor = (camera) =>
+    options.toneMapping === undefined && camera.isOrthographicCamera === true
+      ? THREE.NoToneMapping
+      : tone;
   if (tone === undefined)
     throw new Error(`LOOK.toneMapping must be one of ${Object.keys(TONE).join(", ")}.`);
   const environment = options.environment ?? "sky";
@@ -60,6 +64,7 @@ export function createLook(renderer, options = {}) {
 
   let room = null;
   if (environment === "room") {
+    const { RoomEnvironment } = await import("three/addons/environments/RoomEnvironment.js");
     const pmrem = new THREE.PMREMGenerator(renderer);
     room = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
@@ -70,6 +75,13 @@ export function createLook(renderer, options = {}) {
   let composer = null;
   let scenePass = null;
   if (options.bloom !== undefined && options.bloom !== false) {
+    const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] =
+      await Promise.all([
+        import("three/addons/postprocessing/EffectComposer.js"),
+        import("three/addons/postprocessing/RenderPass.js"),
+        import("three/addons/postprocessing/UnrealBloomPass.js"),
+        import("three/addons/postprocessing/OutputPass.js"),
+      ]);
     const bloom = { ...BLOOM, ...(options.bloom === true ? {} : options.bloom) };
     const size = renderer.getSize(new THREE.Vector2());
     // Half-float keeps colours above 1 for the bloom; the canvas's own
@@ -103,6 +115,7 @@ export function createLook(renderer, options = {}) {
       }
     },
     render(scene, camera) {
+      renderer.toneMapping = toneFor(camera);
       if (composer === null) {
         renderer.render(scene, camera);
         return;

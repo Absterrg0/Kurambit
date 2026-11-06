@@ -95,7 +95,7 @@ const screens = {
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio ?? 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-const look = createLook(renderer, game.LOOK);
+const look = await createLook(renderer, game.LOOK);
 
 let run = null;
 let openScreen = null;

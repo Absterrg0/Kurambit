@@ -69,11 +69,12 @@ export const restoredPaths = (lane: string) => [lane, "art", "ASSETS.md", "STYLE
 /**
  * How a person puts a kept build's engine project and art back, run in the
  * game folder. It names only the paths the build holds, since git refuses a
- * restore naming any it lacks.
+ * restore naming any it lacks; a build made before its game had a style lock
+ * holds none, so the lock is removed as the app's restore removes it.
  */
 export const wayBack = (runId: string, name: string, lane: string) => {
   const ref = checkpointRefForGameRun(runId, name);
-  return `git restore --source ${ref} -- $(git ls-tree --name-only ${ref} -- ${restoredPaths(lane).join(" ")})`;
+  return `git restore --source ${ref} -- $(git ls-tree --name-only ${ref} -- ${restoredPaths(lane).join(" ")}) && { git cat-file -e ${ref}:STYLE.json 2>/dev/null || rm -f STYLE.json; }`;
 };
 
 /**

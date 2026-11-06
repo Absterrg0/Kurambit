@@ -20,8 +20,8 @@ Adapted from OhMyGame's godot-game skill (Apache-2.0), plus local rules.
    player's rebinding work.
 5. Export checklist before calling it done: `game_export` succeeds for Web
    and Linux, and `game_check` reports every entry clean.
-6. In a production run's role, work in ./godot plus VISION.md, PLAN.md and
-   NOTES.md, and never commit, reset git or use subagents: the run keeps
+6. In a production run's role, work in ./godot plus VISION.md, PLAN.md,
+   NOTES.md and, when your step chooses or changes the look, STYLE.json, and never commit, reset git or use subagents: the run keeps
    the builds.
 
 ## The shell and the feel kit

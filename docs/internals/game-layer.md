@@ -74,14 +74,19 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   within one process, scratch names carry the fetching server's pid (a start-up sweep spares live
   ones), and placing a pack accepts a complete copy another server placed first.
 - Every pack belongs to a style family (`LIBRARY_FAMILIES`), and a pack with rigged characters
-  names its rig, read from its GLBs' skin joints when it is pinned: a game whose characters share
+  names its rig, read from its GLBs' skin joints when it is pinned (`LIBRARY_RIG_JOINTS`; the
+  FBX-only rigs are named from their authors' descriptions): a game whose characters share
   one rig can play any clip on any character, so the art guide takes characters from one rig
   family and builds only props in Blender. Weak models given a box-built example character
   copy it.
 - `STYLE.json` at the game root is the style lock (`packages/contracts/src/gameStyle.ts`), read
-  by `gameStyle.ts` on every art-tool call and never cached, so an edit takes effect at once. The
-  tools refuse what drifts rather than warn: an add outside its packs (checked before the pack is
-  fetched) or of characters on another rig, a sprite render in another palette or mode. Each
+  by `gameStyle.ts` on every call of every tool that brings art in, and never cached, so an edit
+  takes effect at once. The tools refuse what drifts rather than warn: a library add outside its
+  packs (checked before the pack is fetched) or of a possible character on another rig (any model
+  whose clips cannot be read counts), a sprite render in another palette or mode, a Blender
+  import from a source it does not list, and an import or export carrying an armature whose
+  bones are not the lock's rig. A lock without `rig` says nothing is rigged, so no armature
+  enters; one without `audio.packs` leaves sound unlocked. Each
   refusal names the one edit that changes direction on purpose. A lock that is a link, not JSON
   or names unknown library ids fails every art tool with the field, so a broken lock is never
   silently lifted. It is a game file, so checkpoints carry it and a run's restore brings it back

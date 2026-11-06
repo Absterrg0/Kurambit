@@ -8,8 +8,9 @@ Original to this studio, kept short.
 3. Library first: `game_assets_search` with `kind` sfx or music finds CC0
    packs of clicks, hits, pickups, footsteps, jingles and chiptune loops with
    their lengths; `game_assets_add` copies the ones you pick and credits them
-   in ASSETS.md. Keep one sound family per game: STYLE.json's `audio.packs`
-   lists them (art-pipeline), and an add outside it is refused.
+   in ASSETS.md. Keep one effects family and one music source per game:
+   STYLE.json's `audio.packs` lists them (art-pipeline), and once it does,
+   an add outside it is refused.
 4. Synthesize what the library lacks with numpy and Python's `wave` module
    inside the live Blender (`game_blender_code`). Record each file as
    synthesized in ASSETS.md. Placeholders are silence, never engine beeps
