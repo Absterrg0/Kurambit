@@ -19,7 +19,8 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
-import type { GameAction, ScopedThreadRef } from "@kurambit/contracts";
+import { AsyncResult } from "effect/reactivity";
+import type { GameAction, GameBuildsResult, ScopedThreadRef } from "@kurambit/contracts";
 import { GAME_ENGINES, GAME_TEMPLATES } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 
@@ -29,7 +30,8 @@ import {
   stageAfterGameAction,
   stagePlayTarget,
 } from "../../state/game";
-import { useEnvironmentQuery } from "../../state/query";
+import { useThreadShell } from "../../state/entities";
+import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
@@ -61,8 +63,9 @@ import { GameRunPanel } from "./GameRunPanel";
 import {
   buildFailurePrompt,
   deriveGameStagePhase,
-  nextGamePreviewFrame,
-  type GamePreviewServe,
+  playHeldFrame,
+  remountOrHold,
+  type GameFrameFold,
 } from "./gameStageLogic";
 
 const BUSY_LABELS: Record<GameAction, string> = {
@@ -72,6 +75,17 @@ const BUSY_LABELS: Record<GameAction, string> = {
   "export-linux": "Exporting for Linux",
   "export-windows": "Exporting for Windows",
 };
+
+// The turn whose build the folder holds, for the held build's chip.
+const folderBuildTurn = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (!AsyncResult.isSuccess(result)) return null;
+  const source = result.value.builds.find((build) => build.id === result.value.current)?.source;
+  return source?._tag === "turn" ? source.turn : null;
+};
+
+/** The folder's own game frame, not a build copy's. */
+const isFolderGameFrame = (target: EventTarget) =>
+  target instanceof HTMLIFrameElement && target.closest('[data-game-play-surface="true"]') !== null;
 
 const PLAY_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
   // The stage is the game itself; "Play" is the action, not the tab, so the
@@ -154,10 +168,21 @@ export function GameStage({
   const [dragging, setDragging] = useState(false);
   // The fold of what the play surface runs across status reads; state, so the
   // render below can pin this serve without touching refs.
-  const [frameFold, setFrameFold] = useState<{
-    readonly key: string;
-    readonly serve: GamePreviewServe;
-  } | null>(null);
+  const [frameFold, setFrameFold] = useState<GameFrameFold | null>(null);
+  // The person is in the game: its frame is the document's focused element.
+  const [gameFocused, setGameFocused] = useState(false);
+  const latestRun = useThreadShell(threadRef)?.latestRun ?? null;
+  const turnStartedAt = latestRun?.startedAt ?? latestRun?.requestedAt ?? null;
+  // Read only while a build is held: the Builds list names its turn.
+  const heldTurn = useEnvironmentQuerySelector(
+    frameFold?.held == null
+      ? null
+      : gameEnvironment.builds({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId },
+        }),
+    folderBuildTurn,
+  );
   const stageRef = useRef<HTMLElement | null>(null);
   // A compact switch unmounts nothing, but focus would die with the hidden
   // pane's button. Move it to the stage when the stage comes back.
@@ -241,6 +266,8 @@ export function GameStage({
     previewUrl: data.previewUrl,
     busyStartedAt: busy?.startedAt ?? null,
     localError: error,
+    turnRunning,
+    turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
   });
   const building = busy !== null || operationState === "running";
   // Play only starts a preview when none is running; a started game can always
@@ -275,7 +302,24 @@ export function GameStage({
       : null);
   const noticeVisible =
     (message ?? (operation !== null && operationVisible ? operation.message : "")).trim() || null;
-  // One status line, and a failure outranks the staleness it just caused.
+  // Fold the served identity across status reads: remount the game only when
+  // its preview session or served artifact really changed — a source edit and a
+  // failed rebuild leave both running untouched, and a new build waits behind a
+  // chip while the person is in the game. Absorbed reads return the same
+  // object, so this only adjusts state when the fold advanced.
+  const frame = remountOrHold(
+    frameFold,
+    {
+      previewUrl: data.previewUrl,
+      servedArtifactId: webBuild === undefined ? null : `${webBuild.path}#${webBuild.updatedAt}`,
+    },
+    gameFocused,
+  );
+  if (frame !== frameFold) setFrameFold(frame);
+  const frameKey = frame.key;
+  // One status line, and a failure outranks the staleness it just caused. A
+  // held build outranks the notice of the operation that made it.
+  const heldVisible = failureVisible === null && frame.held !== null && playTarget === null;
   const staleChipVisible =
     failureVisible === null &&
     (phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false);
@@ -288,13 +332,15 @@ export function GameStage({
         ? data.webBuildStale
           ? "Ready · older than the game"
           : "Ready to play"
-        : phase.kind === "never-built"
-          ? "No build yet"
-          : phase.kind === "failed"
-            ? "Build failed"
-            : phase.kind === "tools-missing"
-              ? "Engine not ready"
-              : null;
+        : phase.kind === "first-build"
+          ? "Making the first build"
+          : phase.kind === "never-built"
+            ? "No build yet"
+            : phase.kind === "failed"
+              ? "Build failed"
+              : phase.kind === "tools-missing"
+                ? "Engine not ready"
+                : null;
   const runningSomething =
     busy !== null ||
     operationState === "running" ||
@@ -307,19 +353,6 @@ export function GameStage({
       ? data.operation.message
       : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
   const template = GAME_TEMPLATES.find((entry) => entry.id === data.manifest.template);
-  // Fold the served identity across status reads: remount the game only when
-  // its preview session or served artifact really changed — a source edit and a
-  // failed rebuild leave both running untouched. Absorbed reads return the
-  // same object, so this only adjusts state when the fold advanced.
-  const frame = nextGamePreviewFrame(frameFold, {
-    previewUrl: data.previewUrl,
-    // The served build's identity: a new build (or a rebuilt legacy one)
-    // remounts the game, while source edits and failed rebuilds leave it
-    // running untouched.
-    servedArtifactId: webBuild === undefined ? null : `${webBuild.path}#${webBuild.updatedAt}`,
-  });
-  if (frame !== frameFold) setFrameFold(frame);
-  const frameKey = frame.key;
   const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
   const perform = async (stageAction: GameAction) => {
     if (stageAction === "preview") stageAfterGameAction(threadRef, stageAction);
@@ -395,6 +428,17 @@ export function GameStage({
           Ask agent to fix
         </Button>
       </div>
+    ) : heldVisible ? (
+      <div className="flex items-center gap-2 border-t border-info/20 bg-info/8 px-3 py-1.5 text-xs text-info-foreground">
+        <HistoryIcon className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">
+          {heldTurn === null ? "New build" : `New build from turn ${heldTurn}`}
+        </span>
+        <Button size="xs" variant="ghost" onClick={() => setFrameFold(playHeldFrame(frame))}>
+          <PlayIcon className="fill-current" aria-hidden="true" />
+          Play
+        </Button>
+      </div>
     ) : noticeVisible !== null ? (
       <div className="flex items-center gap-2 border-t border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
         <span className="min-w-0 flex-1">
@@ -437,6 +481,10 @@ export function GameStage({
       aria-hidden={hidden}
       inert={hidden}
       tabIndex={-1}
+      onFocus={(event) => setGameFocused(isFolderGameFrame(event.target))}
+      onBlur={(event) => {
+        if (isFolderGameFrame(event.target)) setGameFocused(false);
+      }}
       className={cn(
         "relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background outline-none",
         hidden ? "hidden" : "flex",

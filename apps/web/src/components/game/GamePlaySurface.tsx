@@ -1,6 +1,13 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { PlayIcon, RefreshCwIcon, SquareIcon, TriangleAlertIcon, WrenchIcon } from "lucide-react";
+import {
+  HammerIcon,
+  PlayIcon,
+  RefreshCwIcon,
+  SquareIcon,
+  TriangleAlertIcon,
+  WrenchIcon,
+} from "lucide-react";
 import type { GameViewport } from "@kurambit/contracts";
 import { Button } from "../ui/button";
 import { GameElapsed } from "./GameElapsed";
@@ -288,6 +295,24 @@ function StageStateCard({
               <PlayIcon className="size-4 fill-current" aria-hidden="true" />
               Build & play
             </Button>
+          </>
+        ) : null}
+        {phase.kind === "first-build" ? (
+          <>
+            <StageIcon tone="quiet">
+              <HammerIcon className="size-5" aria-hidden="true" />
+            </StageIcon>
+            <StageCopy
+              title="Your agent is making the first playable build"
+              body={
+                <span className="inline-flex items-center gap-1.5">
+                  <span>It plays here when the turn ends.</span>
+                  {phase.startedAt === null ? null : (
+                    <GameElapsed since={phase.startedAt} className="shrink-0 text-stage-muted" />
+                  )}
+                </span>
+              }
+            />
           </>
         ) : null}
         {phase.kind === "building" ? (
