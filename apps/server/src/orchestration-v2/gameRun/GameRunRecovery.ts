@@ -19,7 +19,7 @@ import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecisions from "./GameRunDecisions.ts";
 import { retrying } from "../../game/run/retrying.ts";
-import { owedOutputs } from "./decide.ts";
+import { gitEra, owedOutputs } from "./decide.ts";
 import * as GameRunJobs from "./GameRunJobs.ts";
 
 export class GameRunRecovery extends Context.Service<
@@ -111,6 +111,23 @@ const make = Effect.gen(function* () {
           !(yield* owes(threadId, ["game-run.restore.execute"]))
         )
           yield* jobs.restore({ threadId, runId: run.id, requestId: run.restore.requestId });
+        return;
+      }
+      // A run an older Kurambit left live on git branches cannot go on: it stops
+      // without touching the folder ("stopped" exports nothing), so the work
+      // its round left checked out stays exactly where it is.
+      if (gitEra(run)) {
+        yield* Effect.logWarning("stopping a game run that kept its builds on git branches", {
+          threadId,
+          runId: run.id,
+          stage: run.stage,
+        });
+        yield* engine.dispatch({
+          type: "game-run.stop",
+          commandId: CommandId.make(`server:game-run-git-era:${run.id}`),
+          threadId,
+          runId: run.id,
+        });
         return;
       }
       // A live run on a chat deleted before deletion stopped its run: nothing
