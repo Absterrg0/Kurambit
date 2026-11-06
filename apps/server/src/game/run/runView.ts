@@ -91,6 +91,9 @@ export const steerWhen = (state: State.RunState | null): string => {
   return `The run is still making its first build; ${first} starts with it.`;
 };
 
+/** A label inside another one: "The game before restoring round 4's unfinished work". */
+export const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
 /**
  * A saved build as the Run tab and the tools name it, or null for a name
  * that is no saved build (a kept round is restored by its round instead).
@@ -99,6 +102,8 @@ export const savedBuildLabel = (
   name: string,
   state: Pick<State.RunState, "rounds">,
   run: Pick<GameRun, "ending" | "endedAt" | "restore">,
+  /** What an earlier restore brought back, by its request id, when its builds tell. */
+  restored: (requestId: string) => string | null = () => null,
 ): string | null => {
   const saved = savedBuildOf(name);
   if (saved === null) return null;
@@ -109,9 +114,20 @@ export const savedBuildLabel = (
         : "The game as an earlier stop of the run left it";
     case "restore-before": {
       const last = run.restore;
-      if (last === null || name !== BuildName.restoreBefore(last.requestId))
-        return "The game before an earlier restore";
-      const what = last.round !== null ? `round ${last.round}` : "a saved build";
+      if (last === null || name !== BuildName.restoreBefore(last.requestId)) {
+        const what = restored(name.slice("restores/".length, -"-before".length));
+        return what === null
+          ? "The game before an earlier restore"
+          : `The game before an earlier restore of ${what}`;
+      }
+      const saved =
+        last.build === null ? null : savedBuildLabel(last.build, state, { ...run, restore: null });
+      const what =
+        last.round !== null
+          ? `round ${last.round}`
+          : saved === null
+            ? "a saved build"
+            : lowerFirst(saved);
       // Only an undo that still fits puts the run's best back too (decide.ts undoOf).
       return undoOf(run, state, name) !== null
         ? `The game before restoring ${what}: restoring it undoes that restore`

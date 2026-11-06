@@ -1419,6 +1419,11 @@ it.effect(
         const next = yield* control.runRestore({ ...ask, commandId: "restore-2" });
         assert.notEqual(next.requestId, first.requestId);
         assert.isNull((yield* inFlight).run.restore?.outcome);
+        // The first id again, now behind a later restore: answered as handled, never "restoring".
+        const stale = yield* control.runRestore(ask);
+        assert.equal(stale.requestId, first.requestId);
+        assert.include(stale.message, "handled earlier");
+        assert.equal((yield* inFlight).run.restore?.requestId, next.requestId);
       }),
     ),
 );

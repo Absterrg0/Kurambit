@@ -21,7 +21,7 @@ import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime
 import { resolveAssetUrl } from "../../assets/assetUrls";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { cn, randomUUID } from "../../lib/utils";
-import { gameEnvironment } from "../../state/game";
+import { gameEnvironment, runRestoreSending, setRunRestoreSending } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { usePreparedConnection } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -102,25 +102,28 @@ function useRunRestore(threadRef: ScopedThreadRef, latest: GameRunRestoreRef | n
   );
   const runRestore = useAtomCommand(gameEnvironment.runRestore, { reportFailure: false });
   const key = useRef<{ readonly target: string; readonly id: string } | null>(null);
-  const [sending, setSending] = useState<string | null>(null);
+  const shared = useAtomValue(runRestoreSending(threadRef));
   const [sent, setSent] = useState<{ readonly target: string; readonly requestId: string } | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
-  const pending = latest !== null && latest.outcome === null;
+  // Sent by this client and not yet in the run's status, which moves past `since` once it is.
+  const waiting = shared !== null && (latest?.requestId ?? null) === shared.since;
+  const pending = waiting || (latest !== null && latest.outcome === null);
   const send = async (target: RestoreTarget, question: string) => {
-    if (sending !== null || pending) return;
+    if (pending) return;
     if ((await requestConfirmDialog(question)) !== true) return;
     const name = targetKey(target);
     if (key.current?.target !== name) key.current = { target: name, id: randomUUID() };
-    setSending(name);
+    const since = latest?.requestId ?? null;
+    setRunRestoreSending(threadRef, { target: name, since });
     setError(null);
     const result = await runRestore({
       environmentId: threadRef.environmentId,
       input: { threadId: threadRef.threadId, commandId: key.current.id, ...target },
     });
-    setSending(null);
     if (result._tag === "Failure") {
+      setRunRestoreSending(threadRef, null);
       const failure = squashAtomCommandFailure(result);
       // The run's refusal is its answer to this id; asking again is a new request.
       if (isGameOperationError(failure) && failure.runReason !== undefined) key.current = null;
@@ -128,6 +131,9 @@ function useRunRestore(threadRef: ScopedThreadRef, latest: GameRunRestoreRef | n
       return;
     }
     key.current = null;
+    // A request answered earlier is already in the status; a new one makes it move.
+    if (result.value.done || result.value.requestId === since)
+      setRunRestoreSending(threadRef, null);
     setSent({ target: name, requestId: result.value.requestId });
   };
   // The outcome of the restore this view asked for, once the run's status holds it.
@@ -135,8 +141,9 @@ function useRunRestore(threadRef: ScopedThreadRef, latest: GameRunRestoreRef | n
   return {
     canRestore,
     pending,
+    waiting,
     restoring: (target: RestoreTarget) =>
-      sending === targetKey(target) ||
+      (waiting && shared?.target === targetKey(target)) ||
       (pending && mine !== null && sent?.target === targetKey(target)),
     outcome: mine?.outcome ?? null,
     error,
@@ -147,9 +154,12 @@ function useRunRestore(threadRef: ScopedThreadRef, latest: GameRunRestoreRef | n
 function RestoreOutcome({
   outcome,
   error,
+  label,
 }: {
   outcome: GameRunRestoreRef["outcome"];
   error: string | null;
+  /** Names the restore when the outcome may be another client's or an agent's. */
+  label?: string | undefined;
 }) {
   if (error !== null)
     return (
@@ -166,6 +176,7 @@ function RestoreOutcome({
         outcome.restored ? "text-muted-foreground" : "text-destructive-foreground",
       )}
     >
+      {label === undefined ? null : <span className="font-medium">Last restore, {label}: </span>}
       {outcome.message}
     </p>
   );
@@ -708,10 +719,17 @@ export function GameRunSavedBuilds({
           </li>
         ))}
       </ul>
-      {restores.pending && latestRestore !== null ? (
+      {restores.waiting ? (
+        <p className="text-2xs text-muted-foreground">Asking the run to restore…</p>
+      ) : latestRestore !== null && latestRestore.outcome === null ? (
         <p className="text-2xs text-muted-foreground">Restoring {latestRestore.label}…</p>
       ) : null}
-      <RestoreOutcome outcome={restores.outcome} error={restores.error} />
+      {/* The latest restore's outcome, whoever asked for it: this view, a round, another client, an agent. */}
+      <RestoreOutcome
+        outcome={restores.waiting ? null : (latestRestore?.outcome ?? null)}
+        error={restores.error}
+        label={latestRestore?.label}
+      />
     </section>
   );
 }

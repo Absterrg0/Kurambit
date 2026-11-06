@@ -86,6 +86,7 @@ import {
 } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
 
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
@@ -308,6 +309,9 @@ function errorMessage(error: unknown): string {
   }
   return "An error occurred.";
 }
+
+// What a permission reads as with no thread to ask about.
+const NO_PERMISSION = Atom.make(false);
 
 const OVERLAY_MODE_BY_COMMAND = {
   "commandPalette.toggle": "command",
@@ -714,6 +718,11 @@ function OpenCommandPaletteDialog(props: {
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const runStart = useAtomCommand(gameEnvironment.runStart, { reportFailure: false });
   const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
+  const canRestore = useAtomValue(
+    activeThreadRef === null
+      ? NO_PERMISSION
+      : gameEnvironment.runRestore.permissionAtom(activeThreadRef.environmentId),
+  );
   const gameRun = useEnvironmentQuery(
     isGameThread && activeThreadRef !== null
       ? gameEnvironment.runStatus({
@@ -1556,7 +1565,7 @@ function OpenCommandPaletteDialog(props: {
           },
         });
       // Which build to bring back is the creator's pick from the Run tab's list.
-      if ((gameRun?.builds.length ?? 0) > 0)
+      if (canRestore && (gameRun?.builds.length ?? 0) > 0)
         actionItems.push({
           kind: "action",
           value: "action:game-run-restore",

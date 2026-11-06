@@ -1,4 +1,10 @@
-import { EnvironmentId, GAME_SAVED_MEDIA_EVENT, ThreadId, WS_METHODS } from "@kurambit/contracts";
+import {
+  EnvironmentId,
+  GAME_SAVED_MEDIA_EVENT,
+  type ScopedThreadRef,
+  ThreadId,
+  WS_METHODS,
+} from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -6,6 +12,7 @@ import {
 } from "@kurambit/client-runtime/state/runtime";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 
 const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
   label: "game:events",
@@ -118,6 +125,26 @@ const savedMediaSignal = Atom.family((key: string) => {
     return changes;
   }).pipe(Atom.withLabel(`game:saved-media:${key}`));
 });
+
+/**
+ * A restore this client is sending for one thread's game: which build, and the
+ * run's latest restore when it was sent. Every restore button of the game reads
+ * it, so none can send a second one before the run's status shows the first.
+ */
+export interface RunRestoreSending {
+  readonly target: string;
+  readonly since: string | null;
+}
+const runRestoreSendingAtom = Atom.family((key: string) =>
+  Atom.make<RunRestoreSending | null>(null).pipe(
+    Atom.keepAlive,
+    Atom.withLabel(`game:run-restore-sending:${key}`),
+  ),
+);
+export const runRestoreSending = (ref: ScopedThreadRef) =>
+  runRestoreSendingAtom(`${ref.environmentId}\0${ref.threadId}`);
+export const setRunRestoreSending = (ref: ScopedThreadRef, value: RunRestoreSending | null) =>
+  appAtomRegistry.set(runRestoreSending(ref), value);
 
 export const gameEnvironment = {
   toolchain: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {

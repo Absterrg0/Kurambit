@@ -51,6 +51,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { BuildName } from "./run/buildNames.ts";
 import { withRoleGroups } from "./run/roleGroup.ts";
 import * as GameService from "./GameService.ts";
 import { runStateChecks } from "./run/checkRunner.ts";
@@ -67,6 +68,7 @@ import {
   DECISION_LABEL,
   currentStep,
   decisionOf,
+  lowerFirst,
   restoreLabel,
   savedBuildLabel,
   selectionFor,
@@ -448,20 +450,35 @@ const make = Effect.gen(function* () {
     if (run.status !== "ended" || gitEra(run)) return Effect.succeed([]);
     const folder = gameRunRefsFolder(run.id);
     return checkpoints.listCheckpointRefs({ cwd: root, prefix: folder }).pipe(
-      Effect.map((entries) =>
-        entries
+      Effect.map((listed) => {
+        const entries = listed.map((entry) => ({
+          ...entry,
+          name: entry.checkpointRef.slice(folder.length),
+        }));
+        // An earlier restore is named by what its folder after it held: a kept
+        // round's build, or another saved build's.
+        const known = new Map<string, string>();
+        for (const r of state.rounds) if (r.kept && r.build) known.set(r.build, `round ${r.round}`);
+        for (const entry of entries) {
+          const label = savedBuildLabel(entry.name, state, run);
+          if (label !== null && !known.has(entry.oid)) known.set(entry.oid, lowerFirst(label));
+        }
+        const restored = (requestId: string) => {
+          const after = entries.find((e) => e.name === BuildName.restoreAfter(requestId));
+          return after === undefined ? null : (known.get(after.oid) ?? null);
+        };
+        return entries
           .flatMap((entry) => {
-            const name = entry.checkpointRef.slice(folder.length);
-            const label = savedBuildLabel(name, state, run);
-            return label === null ? [] : [{ name, label, seconds: entry.committedAt }];
+            const label = savedBuildLabel(entry.name, state, run, restored);
+            return label === null ? [] : [{ name: entry.name, label, seconds: entry.committedAt }];
           })
           .toSorted((a, b) => b.seconds - a.seconds)
           .map(({ name, label, seconds }) => ({
             name,
             label,
             at: new Date(seconds * 1000).toISOString(),
-          })),
-      ),
+          }));
+      }),
       Effect.catch((error) =>
         Effect.logWarning("A run's saved builds could not be listed.", {
           runId: run.id,
@@ -891,6 +908,14 @@ const make = Effect.gen(function* () {
         : `"${savedBuildLabel(build ?? "", state, run) ?? build}"`;
     // A retry finds its restore already landed; a first call may wait, within its bound.
     const recorded = (yield* latestOf(threadId)).run?.restore;
+    // The request is recorded, so another as the run's latest means this one was
+    // handled before it: a retry of a request answered long ago.
+    if (recorded != null && recorded.requestId !== requestId)
+      return {
+        requestId,
+        done: true,
+        message: `This request was handled earlier, and a later restore (${restoreLabel(recorded, state, run)}) has run since; game_run_status shows where the game stands.`,
+      } satisfies GameRunRestoreResult;
     const known =
       recorded?.requestId === requestId && recorded.outcome !== null
         ? Option.some(recorded.outcome)

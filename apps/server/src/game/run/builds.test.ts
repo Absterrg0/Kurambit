@@ -365,7 +365,7 @@ it.effect("restores a saved build by its name, keeps the folder before, and leav
 
     const back = yield* restore("r1", BuildName.ending(endedAt));
     expect(back).toMatchObject({ kind: "restored", sha: left });
-    expect(back.message).toContain("The game before restoring a saved build");
+    expect(back.message).toContain("The game before restoring the game as the run left it");
     expect(read()).toBe("left at the stop\n");
     // The creator's edit is a saved build of its own, and the run's best never moved.
     expect(git("show", `${at(BuildName.restoreBefore("r1"))}:godot/main.gd`)).toBe("edited since");
