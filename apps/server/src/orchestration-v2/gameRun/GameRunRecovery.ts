@@ -144,15 +144,13 @@ const make = Effect.gen(function* () {
       }
       // A decision that settled while the server was down still owes its clean-up:
       // a wake left queued, or a card left open, would ask what is decided.
-      const settled = (yield* projections.getGameRunRecords(threadId)).gameRunSteps
-        .filter(
-          (each) =>
-            each.runId === run.id &&
-            each.kind === "decide" &&
-            each.status !== "planned" &&
-            each.status !== "running",
-        )
-        .at(-1);
+      const settled = (yield* projections.getGameRunRecords(threadId)).gameRunSteps.findLast(
+        (each) =>
+          each.runId === run.id &&
+          each.kind === "decide" &&
+          each.status !== "planned" &&
+          each.status !== "running",
+      );
       if (settled !== undefined)
         yield* decisions.drop(threadId, settled).pipe(
           Effect.catch((error) =>

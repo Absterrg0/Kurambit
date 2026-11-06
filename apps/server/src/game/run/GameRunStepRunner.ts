@@ -339,8 +339,21 @@ const make = Effect.gen(function* () {
       const root = yield* projects
         .resolve(job.threadId, { deleted: "allowed" })
         .pipe(Effect.option);
-      for (const thread of job.release)
-        yield* releaseCopy(deps, { copies: copiesOf(job.runId), log: Effect.logInfo }, thread);
+      // Removing a copy (and closing an editor on it) takes seconds to minutes:
+      // it is a job's, never this effect's, which holds a slot every thread's
+      // effects share. One a restart cuts short is the finish's or storage
+      // cleanup's to remove.
+      if (job.release.length > 0)
+        yield* jobs.fork(
+          `release:${job.effectId}`,
+          job.runId,
+          Effect.forEach(
+            job.release,
+            (thread) =>
+              releaseCopy(deps, { copies: copiesOf(job.runId), log: Effect.logInfo }, thread),
+            { discard: true },
+          ),
+        );
       if (job.files.length === 0) return;
       const writes = Effect.gen(function* () {
         if (Option.isNone(root))
@@ -403,6 +416,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const roleThreads = yield* runRoleThreads(job.threadId, job.runId);
       const ctx = { copies: copiesOf(job.runId), log: Effect.logInfo };
+      // A resume queues behind this effect and makes fresh copies after it, so
+      // the removal stays the effect's own: a job would race the resume's copies.
       yield* dropRunCopies(deps, ctx, roleThreads, false);
     });
 
@@ -1056,6 +1071,8 @@ const make = Effect.gen(function* () {
           waitUntil,
           roleThreads,
         ).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, pathService),
           // Total, defects included: an export that breaks is not the swap
           // breaking, which would put the work back and export it instead.
           Effect.catchCause((cause) =>

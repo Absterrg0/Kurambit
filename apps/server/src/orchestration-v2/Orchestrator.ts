@@ -10565,7 +10565,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         // A production run lives on its creator chat: deleting the chat stops
         // the run in the same commit, so its finish stops its roles and no run
         // stays live where no chat can reach it.
-        const runStop = yield* GameRunPlan.planDeletedChatRunStop(gameRunPlanDeps, command);
+        const runStop = yield* GameRunPlan.planDeletedChatRunStop(gameRunPlanDeps, command).pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
         const projection = yield* projectionStore
           .getThreadRecords(command.threadId, [
             "runs",
