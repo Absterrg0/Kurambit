@@ -14,6 +14,7 @@ import type { GameStageRequest } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { gameEnvironment, olderBuildPages } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -97,7 +98,8 @@ export function GameBuildTimeline({
   const [open, setOpen] = useState<string | null>(null);
   // The first side of a compare waiting for the mark that picks the second.
   const [picking, setPicking] = useState<GameBuildRef | "any" | null>(null);
-  const [seenRequest, setSeenRequest] = useState(request?.n ?? 0);
+  // A request made before the timeline mounted was answered, or was for another one.
+  const [mountRequest] = useState(request?.n ?? 0);
   const restores = useBuildRestore(threadRef, first.data?.restore ?? null);
   const marksRef = useRef<HTMLDivElement | null>(null);
   const list = first.data;
@@ -142,9 +144,8 @@ export function GameBuildTimeline({
     if (list !== null && list.current === build.id && list.folderEdited !== true) onLive();
     else onPlay(build);
   };
-  if (request !== null && request.n !== seenRequest) {
-    setSeenRequest(request.n);
-    const asked = request.request;
+  // Answered after the render that received it: playing reaches the Stage's own state.
+  const answer = useStableCallback((asked: GameTimelineRequest["request"]) => {
     if (asked.kind === "step") {
       const to = stepMark(order, selected, asked.by);
       const build = marks.find((entry) => entry.id === to);
@@ -166,7 +167,12 @@ export function GameBuildTimeline({
       setPicking(
         selected !== null && selected !== "now" ? { _tag: "build", build: selected } : "any",
       );
-  }
+  });
+  const requestN = request?.n ?? 0;
+  const asked = request?.request ?? null;
+  useEffect(() => {
+    if (asked !== null && requestN !== mountRequest) answer(asked);
+  }, [requestN, asked, mountRequest, answer]);
 
   const latestTurn = loaded.find((build) => build.source._tag === "turn") ?? null;
   const shown =
