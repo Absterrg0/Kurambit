@@ -96,6 +96,13 @@ describe("budget", () => {
       retry: false,
       standing: true,
     });
+    // In a software renderer a slow run says nothing about the game, busy or not.
+    expect(
+      tierFact(slow, 60, null, { cores: 12, stalled: 0.01, load: 1, software: true }),
+    ).toMatchObject({
+      status: "not-measured",
+      why: expect.stringContaining("the harness renders in software here"),
+    });
     const bot = { file: ".studio/bot/win.mjs", hash: "h", decider: "policy" } as const;
     expect(skilledFact(slow, bot, null, busy)).toMatchObject({ retry: true });
   });
