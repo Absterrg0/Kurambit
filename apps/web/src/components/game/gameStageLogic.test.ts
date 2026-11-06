@@ -20,8 +20,10 @@ const BASE: GameStageInput = {
   previewUrl: null,
   busyStartedAt: null,
   localError: null,
+  turnLoop: true,
   turnRunning: false,
   turnStartedAt: null,
+  turnBuildPending: false,
 };
 
 const STARTED_AT = "2026-10-20T04:00:00.000Z";
@@ -177,6 +179,27 @@ it("shows the first build in the making while turn 1 runs, and only then", () =>
   expect(deriveGameStagePhase({ ...turn, localError: "busy" }).kind).toBe("failed");
   // When the turn ends, its build's own operation takes over until it plays.
   expect(deriveGameStagePhase({ ...BASE, operation: running() }).kind).toBe("building");
+});
+
+it("keeps the first build in the making until the turn's build plays, with nothing to race it", () => {
+  const ended = { ...BASE, turnBuildPending: true, turnStartedAt: 1_000 };
+  // Between the turn's end and its play, there is no Build & play, and an
+  // earlier failure inside the turn is not the game's state.
+  expect(deriveGameStagePhase(ended)).toEqual({ kind: "first-build", startedAt: 1_000 });
+  expect(deriveGameStagePhase({ ...ended, operation: failed("Parse") }).kind).toBe("first-build");
+  // Its play started: the build's own progress, then the game.
+  expect(deriveGameStagePhase({ ...ended, operation: running() }).kind).toBe("building");
+  expect(deriveGameStagePhase({ ...ended, ...PLAYING, turnBuildPending: true }).kind).toBe(
+    "playing",
+  );
+  // A turn that changed nothing has no build coming.
+  expect(deriveGameStagePhase(BASE).kind).toBe("never-built");
+});
+
+it("shows the first build in the making only on an engine that plays every turn", () => {
+  const parked = { ...BASE, turnLoop: false, turnStartedAt: 1_000 };
+  expect(deriveGameStagePhase({ ...parked, turnRunning: true }).kind).toBe("never-built");
+  expect(deriveGameStagePhase({ ...parked, turnBuildPending: true }).kind).toBe("never-built");
 });
 
 // A remount restarts the game: under a player's hands it loses their progress.

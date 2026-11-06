@@ -83,7 +83,7 @@ game), it is not reloaded under you: the stage shows **New build from turn N** w
 instead. The stage never switches views by itself. Godot and Unity games are not rebuilt by
 themselves; **Rebuild** and **Play** work as before.
 
-Engine: Godot native (default) or three.js browser. Godot is the full lane: a real Godot 4.7 project
+Engine: three.js browser (default), Godot native or Unity native. Godot is the full native lane: a real Godot 4.7 project
 with Blender-made art, native play, and Web, Windows and Linux exports. Its Windows and Linux builds
 draw with Forward+; its Web build, Play and the agent's play sessions draw with the simpler
 Compatibility renderer, so a few effects only the native builds draw are left out of the default look. three.js is the quick
@@ -114,8 +114,9 @@ then have the art redone. Delete it to lift the lock.
 
 The **Run** tab in the stage drives the whole build: vision, prototypes, a blind pick, plan, art,
 then round after round of building, playtesting and judging until the ladder is done and a ship
-review has played the game, the budget ends, the run stalls, or you stop it. A new game starts its run on its own. To run again, or to run a game you
-opened, give a one-line brief and an optional budget in minutes, then **Start run**. The status
+review has played the game, the budget ends, the run stalls, or you stop it. A new game does not
+start a run; to run one on any game, give a one-line brief and an optional budget in minutes, then
+**Start run**. The status
 line says what the run is doing, how long it has been going and what comes next; the sidebar and
 **Your games** say a game's run is working and on which step. The timeline starts with the
 prototype pick: which prototype the game continued from, the comparator's reasoning and each blind

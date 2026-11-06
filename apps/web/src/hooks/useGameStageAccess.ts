@@ -1,6 +1,6 @@
 import type { ScopedThreadRef } from "@kurambit/contracts";
 
-import { useThreadShell } from "../state/entities";
+import { useQuietThreadShell } from "../state/entities";
 
 /**
  * Who may act on a game from this thread's view. A production run's role
@@ -12,6 +12,6 @@ import { useThreadShell } from "../state/entities";
 export type GameStageAccess = "writer" | "run-role";
 
 export function useGameStageAccess(threadRef: ScopedThreadRef | null): GameStageAccess {
-  const shell = useThreadShell(threadRef);
+  const shell = useQuietThreadShell(threadRef);
   return shell?.lineage.relationshipToParent === "role" ? "run-role" : "writer";
 }

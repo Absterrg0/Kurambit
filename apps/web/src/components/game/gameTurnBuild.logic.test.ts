@@ -9,7 +9,7 @@ import {
   FAKE_BUILDS_RESULT,
   FAKE_UNDONE_RESULT,
 } from "./gameBuilds.fixtures";
-import { turnStripRestore } from "./gameTurnBuild.logic";
+import { turnBuildIsFolder, turnStripRestore } from "./gameTurnBuild.logic";
 
 const TURN_4 = "run:thread:thread-main:ordinal:4";
 const TURN_5 = "run:thread:thread-main:ordinal:5";
@@ -81,6 +81,11 @@ describe("a turn's strip", () => {
     expect(turnStripRestore(view(FAKE_UNDONE_RESULT, TURN_4), false)).toBeNull();
     const edited = { ...FAKE_UNDONE_RESULT, folderEdited: true as const };
     expect(turnStripRestore(view(edited, TURN_4), false)?.kind).toBe("go-back");
+    // Not known to be edited: still the folder's build, so no restore that changes nothing.
+    const unknown = { ...FAKE_UNDONE_RESULT, folderEdited: "unknown" as const };
+    expect(turnStripRestore(view(unknown, TURN_4), false)).toBeNull();
+    expect(turnBuildIsFolder(view(unknown, TURN_4))).toBe(true);
+    expect(turnBuildIsFolder(view(edited, TURN_4))).toBe(false);
     const older = view(FAKE_BUILDS_RESULT, TURN_4);
     expect(turnStripRestore({ ...older, build: { ...older.build, available: false } }, false)).toBe(
       null,

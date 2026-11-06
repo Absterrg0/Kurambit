@@ -29,8 +29,9 @@ import {
   gameEnvironment,
   stageAfterGameAction,
   stagePlayTarget,
+  turnBuild,
 } from "../../state/game";
-import { useThreadShell } from "../../state/entities";
+import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
@@ -171,8 +172,20 @@ export function GameStage({
   const [frameFold, setFrameFold] = useState<GameFrameFold | null>(null);
   // The person is in the game: its frame is the document's focused element.
   const [gameFocused, setGameFocused] = useState(false);
-  const latestRun = useThreadShell(threadRef)?.latestRun ?? null;
+  // The quiet shell: streamed tokens do not re-render the stage.
+  const latestRun = useQuietThreadShell(threadRef)?.latestRun ?? null;
   const turnStartedAt = latestRun?.startedAt ?? latestRun?.requestedAt ?? null;
+  // Whether this stage watched the chat's turn end, and that turn's build is listed.
+  const [seenTurnRunning, setSeenTurnRunning] = useState(turnRunning);
+  const [sawTurnEnd, setSawTurnEnd] = useState(false);
+  if (turnRunning !== seenTurnRunning) {
+    setSeenTurnRunning(turnRunning);
+    setSawTurnEnd(!turnRunning);
+  }
+  const endedTurnBuilt =
+    useAtomValue(
+      turnBuild(sawTurnEnd && latestRun !== null ? threadRef : null, latestRun?.runId ?? null),
+    ) !== null;
   // Read only while a build is held: the Builds list names its turn.
   const heldTurn = useEnvironmentQuerySelector(
     frameFold?.held == null
@@ -252,6 +265,9 @@ export function GameStage({
   // build and coming back keeps what was open there.
   if (activeTab === "builds" && !buildsSeen) setBuildsSeen(true);
   const webBuild = data.builds.find((build) => build.target === "Web");
+  const turnEndedAt = latestRun?.completedAt == null ? null : Date.parse(latestRun.completedAt);
+  const operationSinceTurnEnd =
+    data.operation !== null && turnEndedAt !== null && Date.parse(data.operation.at) >= turnEndedAt;
   const phase = deriveGameStagePhase({
     // The game's own engine tool, as the server resolved it for this project.
     toolchainReady: data.engineTool === null || data.engineTool.status !== "error",
@@ -266,21 +282,26 @@ export function GameStage({
     previewUrl: data.previewUrl,
     busyStartedAt: busy?.startedAt ?? null,
     localError: error,
+    turnLoop: GAME_ENGINES[data.manifest.engine.name].turnLoop,
     turnRunning,
     turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
+    turnBuildPending: sawTurnEnd && endedTurnBuilt && !operationSinceTurnEnd,
   });
+  // The turn's own build is coming: a Build & play now would race it and be refused.
+  const awaitingTurnBuild = phase.kind === "first-build";
   const building = busy !== null || operationState === "running";
   // Play only starts a preview when none is running; a started game can always
   // be brought back to Stage.
   // Play of a build that exists only reads, so a run's role thread may play it.
   const webPlay = data.exportTargets.includes("Web");
   const playEnabled =
+    !awaitingTurnBuild &&
     webPlay &&
     canAct &&
     (access === "writer" || webBuild !== undefined) &&
     (data.previewUrl !== null || !building);
   const stagingEnabled = canOperate && !building;
-  const rebuildEnabled = stagingEnabled && webPlay;
+  const rebuildEnabled = stagingEnabled && webPlay && !awaitingTurnBuild;
   const buildingStartedAt =
     busy?.startedAt ??
     (operationState === "running" && data.operation !== null
