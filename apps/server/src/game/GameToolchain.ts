@@ -167,6 +167,8 @@ export class GameToolchain extends Context.Service<
      */
     readonly unityExecutables: Effect.Effect<UnityExecutables>;
     /** Per-tool status. With a Unity project, Unity's entry speaks for that project's editor version. */
+    /** Grows each time Kurambit fetches a tool, so a cached status of the toolchain knows it moved. */
+    readonly revision: () => number;
     readonly status: (options?: {
       readonly unityProject?: string | undefined;
     }) => Effect.Effect<GameToolchainStatus>;
@@ -201,6 +203,7 @@ const make = Effect.gen(function* () {
   const directory = toolsDirectory();
   const logRoot = NodePath.join(directory, ".operations");
   const fetchLock = Semaphore.makeUnsafe(1);
+  let revision = 0;
   // A probe that answered is kept while the binary is the same file; one that
   // failed or timed out (a cold start under memory pressure) only briefly, so
   // a passing hiccup never reads as a broken tool for the server's life.
@@ -590,6 +593,7 @@ const make = Effect.gen(function* () {
       if (found.kind === "ok") return found.path;
       if (!fetchesUv(found)) return (yield* executable("uv")).path;
       yield* fetchUv;
+      revision += 1;
       return (yield* executable("uv")).path;
     }),
   );
@@ -655,6 +659,7 @@ const make = Effect.gen(function* () {
           detail: `KURAMBIT_UNITY_CLI names ${cli}, which is not an executable file.`,
         });
       yield* fetchUnityCli;
+      revision += 1;
       return cli;
     }),
   );
@@ -853,7 +858,14 @@ const make = Effect.gen(function* () {
     });
   const dropStage = (stage: string) =>
     Effect.promise(() => NodeFSP.rm(stage, { recursive: true, force: true }));
-  return GameToolchain.of({ executable, uv, unity, unityExecutables, status });
+  return GameToolchain.of({
+    executable,
+    uv,
+    unity,
+    unityExecutables,
+    status,
+    revision: () => revision,
+  });
 });
 const isExecutable = async (file: string) => {
   try {
