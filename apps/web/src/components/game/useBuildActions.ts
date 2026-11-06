@@ -61,7 +61,6 @@ export function useBuildRestore(threadRef: ScopedThreadRef, latest: GameBuildRes
         threadId: threadRef.threadId,
         build: { _tag: "build", build: target },
         commandId: key.current.id,
-        // CONTRACT A1's field arrives with builder F's branch; the merge types it directly.
         ...(asBest ? { asBest: true } : {}),
       },
     });
@@ -165,13 +164,14 @@ export function useMeasureOnOpen(threadRef: ScopedThreadRef) {
   };
 }
 
-/**
- * Stops one build's copy, never the folder's own preview (CONTRACT A3,
- * `game.buildStop`). Until builder F's branch lands that RPC, the stage can
- * only stop following the copy; the server's idle shutdown ends it.
- */
+/** Stops one build's copy, never the folder's own preview (CONTRACT A3, `game.buildStop`). */
 export function useBuildStop(threadRef: ScopedThreadRef) {
-  return async (_build: GameBuildId) => {
+  const stop = useAtomCommand(gameEnvironment.buildStop, { reportFailure: true });
+  return async (build: GameBuildId) => {
     setStagePlayTarget(threadRef, null);
+    await stop({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, build: { _tag: "build", build } },
+    });
   };
 }

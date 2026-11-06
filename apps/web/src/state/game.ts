@@ -11,6 +11,7 @@ import {
   type ScopedThreadRef,
   ThreadId,
   WS_METHODS,
+  type GameRunRoundsResult,
 } from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
@@ -263,53 +264,24 @@ const olderBuildPagesAtom = Atom.family((key: string) => {
 export const olderBuildPages = (ref: ScopedThreadRef, count: number) =>
   olderBuildPagesAtom(`${ref.environmentId}\0${ref.threadId}\0${count}`);
 
-/**
- * Slice 1 CONTRACT A3: the build copies a game is playing, as `GameStatus.buildPlays`.
- * Builder F's branch adds the field; until it lands, a status without it says
- * nothing, and `null` here means the server does not report copies.
- */
-const GameBuildPlays = Schema.Array(
-  Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),
-);
-export type GameBuildPlaying = (typeof GameBuildPlays.Type)[number];
-const isGameBuildPlays = Schema.is(GameBuildPlays);
-export const buildPlaysOf = (status: GameStatus): ReadonlyArray<GameBuildPlaying> | null => {
-  const plays = (status as { readonly buildPlays?: unknown }).buildPlays;
-  return isGameBuildPlays(plays) ? plays : null;
-};
+/** The build copies the server is playing for this game (CONTRACT A3). */
+export type GameBuildPlaying = GameStatus["buildPlays"][number];
+export const buildPlaysOf = (status: GameStatus): ReadonlyArray<GameBuildPlaying> =>
+  status.buildPlays;
 
-/**
- * Slice 1 CONTRACT A4's shape (`game.runRounds`): every run whose chat is this
- * thread, newest first. Until builder F's branch lands that read, it is the
- * one run the run status names, when this thread is its chat.
- */
-export interface GameChatRun {
-  readonly runId: string;
-  readonly active: boolean;
-  readonly best: string | null;
-  readonly rounds: ReadonlyArray<GameRunRoundRef>;
-}
+/** Every run whose chat is this thread, newest first (CONTRACT A4, `game.runRounds`). */
+export type GameChatRun = GameRunRoundsResult["runs"][number];
 const chatRunsAtom = Atom.family((key: string) => {
   const [environmentId = "", threadId = ""] = key.split("\0");
   return Atom.make((get) =>
     AsyncResult.map(
       get(
-        gameEnvironment.runStatus({
+        gameEnvironment.runRounds({
           environmentId: EnvironmentId.make(environmentId),
           input: { threadId: ThreadId.make(threadId) },
         }),
       ),
-      (status): ReadonlyArray<GameChatRun> =>
-        status.runId === null || (status.chat ?? null) !== threadId
-          ? []
-          : [
-              {
-                runId: status.runId,
-                active: status.active,
-                best: status.best ?? null,
-                rounds: status.rounds,
-              },
-            ],
+      (result): ReadonlyArray<GameChatRun> => result.runs,
     ),
   ).pipe(Atom.withLabel(`game:chat-runs:${key}`));
 });
@@ -407,6 +379,18 @@ export const gameEnvironment = {
   buildRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:buildRestore",
     tag: WS_METHODS.gameBuildRestore,
+  }),
+  buildStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:buildStop",
+    tag: WS_METHODS.gameBuildStop,
+  }),
+  // Every run whose chat is this thread, for the round cards: reread on run pushes only.
+  runRounds: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:runRounds",
+    tag: WS_METHODS.gameRunRounds,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: threadSignal("run"),
   }),
   saveMedia: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:saveMedia",
