@@ -3,7 +3,9 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError, type GameSaves } from "@kurambit/contracts";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { isPathInside } from "./gameNativeUserDir.ts";
+import type { KeptStorage } from "./webPlaySession.ts";
 
 /** Game-relative home of kept saves; run state, ignored and never merged. */
 export const KEPT_SAVES_DIR = ".studio/saves";
@@ -67,3 +69,18 @@ export const keptSavesFor = (input: {
             cause,
           }),
       });
+
+/**
+ * Writes a kept page's storage back into the game's saves, replacing a link
+ * planted at its name rather than writing through it.
+ */
+export const writeKeptStorage = (kept: KeptStorage) =>
+  writeFileStringAtomically({
+    filePath: kept.path,
+    contents: kept.contents,
+    followLink: false,
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("A kept session's saves could not be written back.", { cause }),
+    ),
+  );

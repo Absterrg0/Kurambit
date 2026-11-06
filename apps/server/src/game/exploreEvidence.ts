@@ -10,6 +10,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 
 const Frame = Schema.Struct({ step: Schema.Number, path: Schema.String });
 const SessionEvidence = Schema.Struct({
@@ -40,9 +41,20 @@ const ThreadEvidence = Schema.Struct({
   memory: Schema.optionalKey(
     Schema.Struct({
       waitedMs: Schema.Number,
-      refused: Schema.Union([Schema.Boolean, Schema.Literals(["low-memory", "busy"])]),
+      refused: Schema.Union([
+        Schema.Boolean,
+        Schema.Literals(["low-memory", "busy", "tool-failed"]),
+      ]),
+      /** The refusal is one waiting cannot clear (isStandingFault). */
+      standing: Schema.optionalKey(Schema.Boolean),
     }),
   ),
+  /**
+   * The thread's earlier record could not be decoded and was set aside: what
+   * it counted is lost, so its totals are not to be trusted until the
+   * thread's next explore start begins a fresh count.
+   */
+  damaged: Schema.optionalKey(Schema.Boolean),
 });
 export type ThreadEvidence = typeof ThreadEvidence.Type;
 const ThreadEvidenceJson = Schema.fromJsonString(ThreadEvidence);
@@ -115,33 +127,43 @@ export const recordPath = (dir: string, threadId: string) =>
   NodePath.join(dir, `${keyOf(threadId)}.json`);
 export const framesDir = (dir: string, threadId: string) => NodePath.join(dir, keyOf(threadId));
 
-/** The record on disk, or null when it is missing, unreadable or another thread's. */
-export const read = async (dir: string, threadId: string): Promise<ThreadEvidence | null> => {
-  const text = await NodeFSP.readFile(recordPath(dir, threadId), "utf8").catch(() => null);
+/**
+ * The record on disk: null when there is none. A record that does not decode,
+ * or is another thread's, no server write made: it reads as `damaged`. Any
+ * other read failure is thrown, so it is never taken for "no play".
+ */
+export const read = async (
+  dir: string,
+  threadId: string,
+): Promise<ThreadEvidence | null | "damaged"> => {
+  const text = await NodeFSP.readFile(recordPath(dir, threadId), "utf8").catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    },
+  );
   if (text === null) return null;
   const decoded = decode(text);
-  return decoded._tag === "Some" && decoded.value.threadId === threadId ? decoded.value : null;
+  return decoded._tag === "Some" && decoded.value.threadId === threadId ? decoded.value : "damaged";
 };
 
 /**
- * A thread's record file under `dir`, written to a fresh name then renamed, so
- * a crash mid-write leaves the previous record whole. Bot evidence keeps its
- * records the same way.
+ * Moves a damaged record aside before a fresh one replaces it, so what it
+ * held is never silently lost and can be inspected. It keeps a `.json` name,
+ * so the same age bound prunes it.
  */
-export const writeRecordFile = async (dir: string, threadId: string, text: string) => {
-  await NodeFSP.mkdir(dir, { recursive: true });
-  const target = recordPath(dir, threadId);
-  const temporary = `${target}.${NodeCrypto.randomUUID()}.tmp`;
-  try {
-    await NodeFSP.writeFile(temporary, text);
-    await NodeFSP.rename(temporary, target);
-  } finally {
-    await NodeFSP.rm(temporary, { force: true });
-  }
+export const setAside = async (dir: string, threadId: string, nowMs: number) => {
+  const aside = NodePath.join(dir, `${keyOf(threadId)}.damaged-${nowMs}.json`);
+  await NodeFSP.rename(recordPath(dir, threadId), aside);
+  return aside;
 };
 
+/** Written whole to a fresh name then renamed, so a crash mid-write leaves the previous record whole. */
 export const write = (dir: string, record: ThreadEvidence) =>
-  writeRecordFile(dir, record.threadId, encode(record));
+  writeFileStringAtomically({
+    filePath: recordPath(dir, record.threadId),
+    contents: encode(record),
+  });
 
 /**
  * Copies a kept frame next to the record; explore scratch sits in the temp
@@ -170,8 +192,10 @@ export const prune = async (dir: string, nowMs: number) => {
     const file = NodePath.join(dir, name);
     const stat = await NodeFSP.stat(file).catch(() => null);
     if (stat === null || nowMs - stat.mtimeMs < RETAIN_MS) continue;
-    // A write cut short by a crash leaves its temporary name behind.
-    if (name.endsWith(".tmp")) await NodeFSP.rm(file, { force: true });
+    // A write cut short by a crash leaves its temporary name behind: a file
+    // from older servers, a directory from the atomic writer.
+    if (name.endsWith(".tmp") || (stat.isDirectory() && /\.json\.[^.]+$/.test(name)))
+      await NodeFSP.rm(file, { recursive: true, force: true });
     if (!name.endsWith(".json")) continue;
     await NodeFSP.rm(NodePath.join(dir, name.slice(0, -".json".length)), {
       recursive: true,

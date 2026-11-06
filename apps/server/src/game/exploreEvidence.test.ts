@@ -7,6 +7,16 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 
+// The record as the atomic writer leaves it (its own tests cover the write).
+const writeRecord = async (dir: string, record: ExploreEvidence.ThreadEvidence) => {
+  NodeFS.mkdirSync(dir, { recursive: true });
+  NodeFS.writeFileSync(ExploreEvidence.recordPath(dir, record.threadId), JSON.stringify(record));
+};
+const readRecord = async (dir: string, threadId: string) => {
+  const found = await ExploreEvidence.read(dir, threadId);
+  return found === "damaged" ? null : found;
+};
+
 const session = (id: string, actions: number, nominalMs: number, closed = false) => ({
   id,
   actions,
@@ -62,8 +72,8 @@ describe("explore evidence", () => {
         inputCapMs: 120_000,
         memory: { waitedMs: 45_000, refused: "busy" },
       };
-      await ExploreEvidence.write(dir, record);
-      const reloaded = await ExploreEvidence.read(dir, "t");
+      await writeRecord(dir, record);
+      const reloaded = await readRecord(dir, "t");
       expect(reloaded?.inputCapMs).toBe(120_000);
       expect(reloaded?.memory).toEqual({ waitedMs: 45_000, refused: "busy" });
       // A record an older server wrote, with a refusal count and a plain flag, still reads.
@@ -71,10 +81,26 @@ describe("explore evidence", () => {
         ExploreEvidence.recordPath(dir, "t"),
         JSON.stringify({ ...record, memory: { waitedMs: 1, refusals: 1, refused: true } }),
       );
-      expect((await ExploreEvidence.read(dir, "t"))?.memory).toEqual({
+      expect((await readRecord(dir, "t"))?.memory).toEqual({
         waitedMs: 1,
         refused: true,
       });
+    } finally {
+      NodeFS.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never takes an unreadable record for no play, and tells damaged from missing", async () => {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "explore-evidence-"));
+    try {
+      expect(await ExploreEvidence.read(dir, "t")).toBeNull();
+      NodeFS.writeFileSync(ExploreEvidence.recordPath(dir, "t"), "{not json");
+      expect(await ExploreEvidence.read(dir, "t")).toBe("damaged");
+      const aside = await ExploreEvidence.setAside(dir, "t", 1);
+      expect(NodeFS.existsSync(aside)).toBe(true);
+      // A record that cannot be read at all is an error, never "none".
+      NodeFS.mkdirSync(ExploreEvidence.recordPath(dir, "t"));
+      await expect(ExploreEvidence.read(dir, "t")).rejects.toThrow();
     } finally {
       NodeFS.rmSync(dir, { recursive: true, force: true });
     }

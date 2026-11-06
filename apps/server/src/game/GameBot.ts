@@ -4,11 +4,17 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Semaphore from "effect/Semaphore";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import {
   GAME_BOT_BOUNDS,
   GameOperationError,
@@ -37,19 +43,40 @@ import { makeGameBrowser } from "./gameChromium.ts";
 import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
 import * as GameProcesses from "./GameProcesses.ts";
-import { openPagePlay, openRunnerPlay } from "./playLaunch.ts";
-import { keptSavesFor, keptWebStorage } from "./gameKeptSaves.ts";
-import { playBot } from "./gameBotPlay.ts";
+import { PlayDidNotBoot, openPagePlay, openRunnerPlay } from "./playLaunch.ts";
+import { keptSavesFor, keptWebStorage, writeKeptStorage } from "./gameKeptSaves.ts";
+import { playBot, runWithoutPlay } from "./gameBotPlay.ts";
 import {
-  BOOT_TIMEOUT_MS,
   botEnding,
   botFinalState,
+  cellOf,
   makeJev,
+  medianOf,
   opError,
   type Session,
 } from "./gameBotRuntime.ts";
+import * as GameMemoryGate from "./GameMemoryGate.ts";
+import type { MemoryRoom } from "./GameMemoryGate.ts";
+import { isPathInside } from "./gameNativeUserDir.ts";
+import { PLAY_BOUNDS, bounded } from "./playSession.ts";
 
 const GAME_BOT_JEV_BASE_SECRET = "game-bot-jev-base-url";
+
+/**
+ * A Godot bot peaked at 710 MB in its import and 505 MB playing (Godot,
+ * ffmpeg recording, its display, bot child); a Chromium bot at 630 MB. Each
+ * run's import and boot hold the memory gate, so the next start's check sees
+ * what this one took.
+ */
+const BOT_ROOM: MemoryRoom = {
+  what: "bot run",
+  neededMb: 1536,
+  env: "KURAMBIT_BOT_MEMORY_MB",
+};
+
+/** How long a stop waits for a bot call to end: its run's teardown is bounded well inside. */
+const STOP_WAIT_MS = 60_000;
+const STOP_WAIT = Duration.millis(STOP_WAIT_MS);
 const JEV_DEFAULT_BASE = "https://api.typesafe.ai";
 
 export class GameBot extends Context.Service<
@@ -74,8 +101,15 @@ export class GameBot extends Context.Service<
     ) => Effect.Effect<GameBotViewResult, GameOperationError>;
     /** Rebuild the facts-only player report across recorded runs. */
     readonly report: (root: string) => Effect.Effect<GameBotReportResult, GameOperationError>;
-    /** Stop one game's live bot session by root; game_stop calls this. */
+    /** The report of exactly these runs, read-only; null when none has a trace. */
+    readonly reportText: (
+      root: string,
+      runIds: ReadonlyArray<string>,
+    ) => Effect.Effect<string | null, GameOperationError>;
+    /** Stops one game's bot call by root and waits for it to end (bounded); game_stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
+    /** Stops every bot call a thread started and waits for each to end (bounded): its turn is over. */
+    readonly stopOwned: (threadId: ThreadId) => Effect.Effect<void>;
   }
 >()("kurambit/game/GameBot") {}
 
@@ -116,34 +150,43 @@ interface RunTrace {
   videoPath?: string;
 }
 
-/** Newest-first run traces under each builds-logs game-bot run dir (at most 20). */
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const traceFile = (root: string, runId: string) =>
+  NodePath.join(root, "builds/logs", `game-bot-${runId}`, "trace.json");
+
+/** One run's trace, or null when it is missing, unreadable or another run's. */
+const readTrace = async (root: string, runId: string): Promise<RunTrace | null> => {
+  if (!RUN_ID.test(runId)) return null;
+  try {
+    const trace = JSON.parse(await NodeFSP.readFile(traceFile(root, runId), "utf8")) as RunTrace;
+    return trace?.runId === runId ? trace : null;
+  } catch {
+    return null;
+  }
+};
+
+/** The newest run traces under builds/logs (at most 20), found by stat before any is read. */
 const listRunTraces = async (
   root: string,
 ): Promise<Array<{ runId: string; trace: RunTrace; mtime: number }>> => {
   const logs = NodePath.join(root, "builds/logs");
   const entries = await NodeFSP.readdir(logs).catch(() => [] as string[]);
-  const out: Array<{ runId: string; trace: RunTrace; mtime: number }> = [];
+  const stamped: Array<{ runId: string; mtime: number }> = [];
   for (const entry of entries) {
     if (!entry.startsWith("game-bot-")) continue;
-    const tracePath = NodePath.join(logs, entry, "trace.json");
-    try {
-      const stat = await NodeFSP.stat(tracePath);
-      if (!stat.isFile()) continue;
-      const trace = JSON.parse(await NodeFSP.readFile(tracePath, "utf8")) as RunTrace;
-      if (typeof trace?.runId !== "string") continue;
-      out.push({ runId: trace.runId, trace, mtime: stat.mtimeMs });
-    } catch {
-      // One bad trace never breaks the report.
-    }
+    const runId = entry.slice("game-bot-".length);
+    const stat = await NodeFSP.stat(traceFile(root, runId)).catch(() => null);
+    if (stat?.isFile() === true) stamped.push({ runId, mtime: stat.mtimeMs });
   }
-  out.sort((a, b) => b.mtime - a.mtime);
-  return out.slice(0, 20);
-};
-
-const medianOf = (xs: number[]): number | null => {
-  if (xs.length === 0) return null;
-  const sorted = [...xs].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)]!;
+  stamped.sort((a, b) => b.mtime - a.mtime);
+  const out: Array<{ runId: string; trace: RunTrace; mtime: number }> = [];
+  for (const { runId, mtime } of stamped) {
+    if (out.length >= 20) break;
+    const trace = await readTrace(root, runId);
+    // One bad trace never breaks the report.
+    if (trace !== null) out.push({ runId, trace, mtime });
+  }
+  return out;
 };
 
 const fmtT = (t: number): string => `${t.toFixed(1)}s`;
@@ -156,25 +199,18 @@ const shortId = (runId: string): string => runId.slice(0, 8);
  * happened (positions, times, counts, clusters) and interprets nothing:
  * no causes, no fixes, no recommendations.
  */
-const buildPlayerReport = async (
-  root: string,
-  wanted: string[] | null,
-): Promise<{ rel: string; runs: string[] } | null> => {
-  const found = await listRunTraces(root);
-  const picked =
-    wanted === null || wanted.length === 0
-      ? found
-      : wanted.flatMap((runId) => {
-          const direct = found.find((entry) => entry.runId === runId);
-          return direct === undefined ? [] : [direct];
-        });
+const playerReportText = (
+  picked: ReadonlyArray<{ runId: string; trace: RunTrace; mtime: number }>,
+  unreadable: number,
+): { text: string; runs: string[] } | null => {
   // Oldest first so the report reads in play order.
   const ordered = [...picked].sort((a, b) => a.mtime - b.mtime);
   if (ordered.length === 0) return null;
   const lines: string[] = [
     "# Player report (facts only, by code)",
     "",
-    `Runs: ${ordered.length}. No interpretation: positions, times and counts only.`,
+    `Runs: ${ordered.length}. No interpretation: positions, times and counts only.` +
+      (unreadable > 0 ? ` ${unreadable} run's trace could not be read and is left out.` : ""),
     "",
     "## Runs",
     "",
@@ -383,14 +419,23 @@ const buildPlayerReport = async (
     const randomised = (trace.picks ?? []).filter((pick) => pick.randomized === true).length;
     if (randomised > 0) lines.push(`  randomised policy picks: ${randomised} (no key: not Jev).`);
   }
-  const rel = ".studio/player-report.md";
-  try {
-    await NodeFSP.mkdir(NodePath.join(root, ".studio"), { recursive: true });
-    await NodeFSP.writeFile(NodePath.join(root, rel), `${lines.join("\n")}\n`);
-  } catch {
-    return null;
+  return { text: `${lines.join("\n")}\n`, runs: ordered.map((entry) => entry.runId) };
+};
+
+/** The traces of exactly these runs, with how many could not be read. */
+const tracesOf = async (root: string, runIds: ReadonlyArray<string>) => {
+  const picked: Array<{ runId: string; trace: RunTrace; mtime: number }> = [];
+  let unreadable = 0;
+  for (const runId of runIds) {
+    const trace = await readTrace(root, runId);
+    if (trace === null) {
+      unreadable += 1;
+      continue;
+    }
+    const stat = await NodeFSP.stat(traceFile(root, runId)).catch(() => null);
+    picked.push({ runId, trace, mtime: stat?.mtimeMs ?? 0 });
   }
-  return { rel, runs: ordered.map((entry) => entry.runId) };
+  return { picked, unreadable };
 };
 
 const make = Effect.gen(function* () {
@@ -403,8 +448,14 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const gameBrowser = yield* makeGameBrowser;
   const scheduler = yield* Scheduler.Scheduler;
-  const sessions = new Map<string, Session>();
-  const runs = new Map<string, { root: string; result: GameBotRunResult }>();
+  const gate = yield* GameMemoryGate.GameMemoryGate;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const fileServices = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
+    effect.pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+    );
   const evidenceDir = NodePath.join((yield* ServerConfig.ServerConfig).stateDir, "bot-evidence");
   const evidenceLock = Semaphore.makeUnsafe(1);
   // Records untouched as long as explore evidence's belong to runs long finished.
@@ -465,21 +516,46 @@ const make = Effect.gen(function* () {
           root,
           run,
         );
-        yield* Effect.tryPromise({
-          try: () => BotEvidence.write(evidenceDir, next),
-          catch: (cause) =>
+        yield* fileServices(BotEvidence.write(evidenceDir, next)).pipe(
+          Effect.mapError((cause) =>
             opError("Bot run", evidenceDir, "io", "The bot run could not be recorded.", cause),
-        });
+          ),
+        );
       }),
     );
 
-  const drop = (root: string): void => {
-    const session = sessions.get(root);
-    if (session === undefined) return;
-    sessions.delete(root);
-    session.stopped = true;
-    for (const owned of session.processes) void owned.stop();
+  /** One bot call per checkout root, with whose it is and when it has ended. */
+  const sessions = new Map<
+    string,
+    {
+      readonly session: Session;
+      readonly owner: ThreadId | undefined;
+      readonly done: Deferred.Deferred<void>;
+    }
+  >();
+  const botLocks = yield* KeyedLock.make<string>();
+  // A stop flips the flag before it ends anything, so the run reads its end
+  // as stopped, never as the game crashing.
+  const drop = (root: string) => {
+    const entry = sessions.get(root);
+    if (entry === undefined) return null;
+    entry.session.stopped = true;
+    for (const owned of entry.session.processes) void owned.stop();
+    return entry.done;
   };
+  /** Stops the calls `which` picks and waits for each to end, bounded. */
+  const stopWhere = (which: (root: string, owner: ThreadId | undefined) => boolean) =>
+    Effect.gen(function* () {
+      const ending = [...sessions.entries()]
+        .filter(([root, entry]) => which(root, entry.owner))
+        .map(([root]) => drop(root))
+        .filter((done) => done !== null);
+      for (const done of ending) {
+        const ended = yield* Deferred.await(done).pipe(Effect.timeoutOption(STOP_WAIT));
+        if (Option.isNone(ended))
+          yield* Effect.logWarning("A stopped bot run did not end within its bound.");
+      }
+    });
 
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -501,19 +577,12 @@ const make = Effect.gen(function* () {
 
   const isGameOperationError = Schema.is(GameOperationError);
 
-  const run = (root: string, input: GameBotRunInput, owner?: ThreadId) =>
+  const runLocked = (root: string, input: GameBotRunInput, owner?: ThreadId) =>
     Effect.gen(function* () {
-      if (sessions.has(root))
-        return yield* opError(
-          "Bot run",
-          root,
-          "busy",
-          "A bot run is already in progress for this game. Stop it with game_stop first.",
-        );
       // A bot is a game file under .studio/bot/*.mjs; anything else is refused.
       const botDir = NodePath.resolve(root, ".studio/bot");
       const botFile = NodePath.resolve(root, input.file);
-      if (!botFile.startsWith(`${botDir}/`) || !botFile.endsWith(".mjs"))
+      if (!isPathInside(botFile, botDir) || botFile === botDir || !botFile.endsWith(".mjs"))
         return yield* opError(
           "Bot run",
           input.file,
@@ -601,6 +670,19 @@ const make = Effect.gen(function* () {
               : "No Jev key is set in Settings → Game tools; this run used the bot's own policy.";
       }
       const jevLive = decider === "jev" && jevKey !== null;
+      // The game's runner imports into its sources first, and that is a write
+      // of the folder: under the game's operation lock, then the memory gate,
+      // through the boot (GameMemoryGate fixes the order). A browser page and
+      // a prepared player write nothing.
+      const writesFolder = profile.play === "native";
+      const startLock = writesFolder
+        ? {
+            lock: {
+              name: "Bot run start",
+              owner: owner === undefined ? "system bot run" : String(owner),
+            },
+          }
+        : undefined;
       // One session object spans the whole call: drop() flips its flag, so
       // a stop between runs ends the call with the runs it has. A per-run
       // entry in the map would vanish with each run's cleanup and the loop
@@ -611,220 +693,263 @@ const make = Effect.gen(function* () {
         stopped: false,
         processes: [],
       };
-      sessions.set(root, session);
-      const each = yield* Effect.gen(function* () {
-        const out: GameBotRunResult[] = [];
-        // What earlier runs of this call covered, told to each next run so
-        // runs differ instead of collapsing onto one trajectory.
-        const priorRuns: Array<{ topOptions: string; cells: number; ending: string }> = [];
-        for (let index = 0; index < count; index++) {
-          if (session.stopped) break;
-          const runId = NodeCrypto.randomUUID();
-          const runDir = NodePath.join(root, "builds/logs", `game-bot-${runId}`);
-          const childPath = NodePath.join(runDir, "child.mjs");
-          const videoPath = NodePath.join(runDir, "run.mp4");
-          const tracePath = NodePath.join(runDir, "trace.json");
-          yield* Effect.tryPromise({
-            try: () => NodeFSP.mkdir(runDir, { recursive: true }),
-            catch: (cause) => opError("Bot run", runDir, "io", undefined, cause),
-          });
-          yield* Effect.tryPromise({
-            try: () => NodeFSP.writeFile(childPath, GAME_BOT_CHILD_JS),
-            catch: (cause) => opError("Bot run", childPath, "io", undefined, cause),
-          });
-          const failed = (cause: unknown) =>
-            isGameOperationError(cause)
-              ? cause
-              : opError(
-                  "Bot run",
-                  root,
-                  "command-failed",
-                  cause instanceof Error
-                    ? cause.message.slice(0, 2000)
-                    : String(cause).slice(0, 2000),
-                  cause,
-                );
-          const open = isWeb
-            ? openPagePlay({
-                operation: "Bot run",
-                root,
-                projectDir,
-                browser: browser!,
-                viewport,
-                bootTimeoutMs: BOOT_TIMEOUT_MS,
-                keptStorage: keptWebStorage(saves),
-              })
-            : openRunnerPlay(processes, {
-                operation: "Bot run",
-                process: "bot-play",
-                root,
-                backend,
-                projectDir,
-                player,
-                viewport,
-                host,
-                scriptDir: runDir,
-                traceDir: runDir,
-                saves,
-                timeoutMs: BOOT_TIMEOUT_MS + (seconds + 300) * 1000,
-                bootTimeoutMs: BOOT_TIMEOUT_MS,
-                what: "The game's runner",
+      const each = yield* Effect.acquireUseRelease(
+        Effect.gen(function* () {
+          const done = yield* Deferred.make<void>();
+          sessions.set(root, { session, owner, done });
+          return done;
+        }),
+        () =>
+          Effect.gen(function* () {
+            const out: GameBotRunResult[] = [];
+            // What earlier runs of this call covered, told to each next run so
+            // runs differ instead of collapsing onto one trajectory.
+            const priorRuns: Array<{ topOptions: string; cells: number; ending: string }> = [];
+            for (let index = 0; index < count; index++) {
+              if (session.stopped) break;
+              const runId = NodeCrypto.randomUUID();
+              const runDir = NodePath.join(root, "builds/logs", `game-bot-${runId}`);
+              const childPath = NodePath.join(runDir, "child.mjs");
+              const videoPath = NodePath.join(runDir, "run.mp4");
+              const tracePath = NodePath.join(runDir, "trace.json");
+              yield* Effect.tryPromise({
+                try: () => NodeFSP.mkdir(runDir, { recursive: true }),
+                catch: (cause) => opError("Bot run", runDir, "io", undefined, cause),
               });
-          // An interrupt does not wait for the play promise, and its finally
-          // still stops the bot child and the video encoder: the launch ends
-          // only once that settled (bounded), so nothing writes into the run's
-          // folder once the call returns and its caller removes it.
-          let playing: Promise<unknown> = Promise.resolve();
-          // A stop during boot interrupts the launch, which ends what it started.
-          const one = yield* Effect.acquireUseRelease(
-            open.pipe(
-              Effect.interruptible,
-              Effect.mapError((error) =>
-                session.stopped
-                  ? opError("Bot run", root, "command-failed", "Bot run stopped.")
-                  : error,
-              ),
-            ),
-            (opened) =>
-              Effect.tryPromise({
-                try: (signal) => {
-                  const run = playBot(jevApi, opened, {
-                    host: processHost,
+              yield* Effect.tryPromise({
+                try: () => NodeFSP.writeFile(childPath, GAME_BOT_CHILD_JS),
+                catch: (cause) => opError("Bot run", childPath, "io", undefined, cause),
+              });
+              // Anything the run loop throws that is not already ours to name is
+              // a fault of our own side: the game's ends are results.
+              const failed = (cause: unknown) =>
+                isGameOperationError(cause)
+                  ? cause
+                  : opError(
+                      "Bot run",
+                      root,
+                      "tool-failed",
+                      cause instanceof Error
+                        ? cause.message.slice(0, 2000)
+                        : String(cause).slice(0, 2000),
+                      cause,
+                    );
+              const launch = isWeb
+                ? openPagePlay({
+                    operation: "Bot run",
                     root,
-                    runId,
-                    runDir,
-                    childPath,
-                    videoPath,
-                    tracePath,
-                    botFile,
-                    decider,
-                    mode,
-                    jevLive,
-                    seconds,
-                    ffmpeg,
-                    jevKey,
-                    jevBase,
-                    policyNote,
-                    session,
-                    signal,
-                    runIndex: index,
-                    runTotal: count,
-                    seed: NodeCrypto.randomInt(1_000_000_000),
-                    priorRuns: [...priorRuns],
+                    projectDir,
+                    browser: browser!,
+                    viewport,
+                    bootTimeoutMs: PLAY_BOUNDS.bootMs,
+                    keptStorage: keptWebStorage(saves),
+                  })
+                : openRunnerPlay(processes, {
+                    operation: "Bot run",
+                    process: "bot-play",
+                    root,
+                    backend,
+                    projectDir,
+                    player,
+                    viewport,
+                    host,
+                    scriptDir: runDir,
+                    traceDir: runDir,
+                    saves,
+                    timeoutMs: PLAY_BOUNDS.bootMs + (seconds + 300) * 1000,
+                    bootTimeoutMs: PLAY_BOUNDS.bootMs,
+                    what: "The game's runner",
                   });
-                  playing = run;
-                  return run;
-                },
-                catch: failed,
-              }),
-            (opened) =>
-              Effect.promise(async () => {
-                let timer: ReturnType<typeof setTimeout> | undefined;
-                await Promise.race([
-                  playing.catch(() => undefined),
-                  new Promise((resolve) => (timer = setTimeout(resolve, 30_000))),
-                ]);
-                clearTimeout(timer);
-                await opened.stop();
-              }),
-          );
-          out.push(one);
-          runs.set(runId, { root, result: one });
-          if (runs.size > GAME_BOT_BOUNDS.maxRuns) {
-            const oldest = runs.keys().next();
-            if (!oldest.done) runs.delete(oldest.value);
-          }
-          const at = new Date().toISOString();
-          // A run that played is recorded even when a stop lands right after it.
-          if (owner !== undefined)
-            yield* Effect.uninterruptible(
-              recordRun(owner, root, {
-                runId,
-                file: NodePath.relative(root, botFile),
-                mode,
-                decider,
-                won: one.status.state === "done",
-                ending: botEnding(one.status.state),
-                seconds: one.gameSeconds,
-                findings: one.findings.length,
-                at,
-              }),
-            );
-          // A copy for people reading the game folder; the run decides by the record above.
-          yield* Effect.promise(() =>
-            NodeFSP.appendFile(
-              NodePath.join(root, ".studio", "bot-results.jsonl"),
-              `${JSON.stringify({
-                runId,
-                seconds: one.gameSeconds,
-                won: one.status.state === "done",
-                ending: botEnding(one.status.state),
-                note: one.status.note.slice(0, 160),
-                final: botFinalState(one.finalState),
-                video: videoPath,
-                findings: one.findings.length,
-                mode,
-                decider,
-                file: NodePath.relative(root, botFile),
-                at,
-              })}\n`,
-            ).catch(() => undefined),
-          );
-          // Tell the next run what this one covered: top options by picks,
-          // visited 4 m cells, and how it ended. Best effort, never fatal.
-          yield* Effect.promise(async () => {
-            try {
-              const trace = JSON.parse(await NodeFSP.readFile(tracePath, "utf8")) as {
-                picks?: Array<{ name?: unknown }>;
-                samples?: Array<{ pos?: [number, number, number] | null }>;
-                status?: { state?: unknown };
-              };
-              const counts = new Map<string, number>();
-              for (const pick of trace.picks ?? []) {
-                const name = String(pick?.name ?? "");
-                if (name !== "") counts.set(name, (counts.get(name) ?? 0) + 1);
+              const imported = writesFolder
+                ? Effect.flatMap(engines.importProject(root), (result) =>
+                    result.success
+                      ? Effect.void
+                      : Effect.fail(
+                          new PlayDidNotBoot({
+                            detail:
+                              `The ${profile.displayName} import failed before the bot run started.\n${result.message}`.slice(
+                                -2000,
+                              ),
+                          }),
+                        ),
+                  )
+                : Effect.void;
+              // The boot is the start's own memory peak, so it runs inside the gate.
+              const open = gate.admit(
+                "Bot run",
+                root,
+                BOT_ROOM,
+                Effect.andThen(imported, launch),
+                undefined,
+                startLock,
+              );
+              // An interrupt does not wait for the play promise, and its finally
+              // still stops the bot child and the video encoder: the launch ends
+              // only once that settled (bounded), so nothing writes into the run's
+              // folder once the call returns and its caller removes it.
+              let playing: Promise<unknown> = Promise.resolve();
+              // A stop during boot interrupts the launch, which ends what it started.
+              const one = yield* Effect.acquireUseRelease(
+                open.pipe(
+                  Effect.interruptible,
+                  Effect.mapError((error) =>
+                    session.stopped
+                      ? opError("Bot run", root, "cancelled", "Bot run stopped.")
+                      : error,
+                  ),
+                ),
+                (opened) =>
+                  Effect.tryPromise({
+                    try: (signal) => {
+                      const run = playBot(jevApi, opened, {
+                        host: processHost,
+                        root,
+                        runId,
+                        runDir,
+                        childPath,
+                        videoPath,
+                        tracePath,
+                        botFile,
+                        decider,
+                        mode,
+                        jevLive,
+                        seconds,
+                        ffmpeg,
+                        jevKey,
+                        jevBase,
+                        policyNote,
+                        session,
+                        signal,
+                        runIndex: index,
+                        runTotal: count,
+                        seed: NodeCrypto.randomInt(1_000_000_000),
+                        priorRuns: [...priorRuns],
+                      });
+                      playing = run;
+                      return run;
+                    },
+                    catch: failed,
+                  }).pipe(
+                    // The backstop behind every per-call bound: a run past it is
+                    // our own side hung, never the game.
+                    Effect.timeoutOrElse({
+                      duration: Duration.millis(PLAY_BOUNDS.bootMs + (seconds + 300) * 1000),
+                      orElse: () =>
+                        Effect.fail(
+                          opError("Bot run", root, "tool-failed", "The bot run overran its bound."),
+                        ),
+                    }),
+                  ),
+                (opened) =>
+                  Effect.gen(function* () {
+                    yield* Effect.promise(() =>
+                      bounded(
+                        playing.catch(() => undefined),
+                        STOP_WAIT_MS / 2,
+                      ),
+                    );
+                    const stopped = yield* Effect.promise(() => opened.stop());
+                    if (stopped.keptStorage !== null)
+                      yield* fileServices(writeKeptStorage(stopped.keptStorage));
+                  }),
+              ).pipe(
+                // The game never booted: measured, and a run on the record.
+                Effect.catchTags({
+                  PlayDidNotBoot: (error) =>
+                    Effect.promise(() =>
+                      runWithoutPlay(
+                        { root, runId, botFile, decider, mode, tracePath, videoPath },
+                        { goal: "play the game", state: "not-booted", note: error.detail },
+                      ),
+                    ),
+                }),
+              );
+              out.push(one);
+              // A bot that never ran is not a bot run: nothing is recorded.
+              if (one.played === false) continue;
+              const at = new Date().toISOString();
+              // A run that played is recorded even when a stop lands right after it.
+              if (owner !== undefined)
+                yield* Effect.uninterruptible(
+                  recordRun(owner, root, {
+                    runId,
+                    file: NodePath.relative(root, botFile),
+                    mode,
+                    decider,
+                    won: one.status.state === "done",
+                    ending: botEnding(one.status.state),
+                    seconds: one.gameSeconds,
+                    findings: one.findings.length,
+                    at,
+                  }),
+                );
+              // A copy for people reading the game folder; the run decides by the record above.
+              yield* Effect.promise(() =>
+                NodeFSP.appendFile(
+                  NodePath.join(root, ".studio", "bot-results.jsonl"),
+                  `${JSON.stringify({
+                    runId,
+                    seconds: one.gameSeconds,
+                    won: one.status.state === "done",
+                    ending: botEnding(one.status.state),
+                    note: one.status.note.slice(0, 160),
+                    final: botFinalState(one.finalState),
+                    video: videoPath,
+                    findings: one.findings.length,
+                    mode,
+                    decider,
+                    file: NodePath.relative(root, botFile),
+                    at,
+                  })}\n`,
+                ).catch(() => undefined),
+              );
+              // Tell the next run what this one covered: top options by picks,
+              // visited 4 m cells, and how it ended. Best effort, never fatal.
+              const trace = yield* Effect.promise(() => readTrace(root, runId));
+              if (trace !== null) {
+                const counts = new Map<string, number>();
+                for (const pick of trace.picks ?? []) {
+                  const name = String(pick?.name ?? "");
+                  if (name !== "") counts.set(name, (counts.get(name) ?? 0) + 1);
+                }
+                const top = [...counts.entries()]
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 3)
+                  .map(([name, n]) => `${name} x${n}`)
+                  .join(", ");
+                const cells = new Set<string>();
+                for (const sample of trace.samples ?? []) {
+                  const pos = sample?.pos ?? null;
+                  if (pos !== null && Number.isFinite(pos[0]) && Number.isFinite(pos[2]))
+                    cells.add(cellOf(pos));
+                }
+                priorRuns.push({
+                  topOptions: top === "" ? "no picks" : top,
+                  cells: cells.size,
+                  ending: String(trace.status?.state ?? "unknown"),
+                });
               }
-              const top = [...counts.entries()]
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 3)
-                .map(([name, n]) => `${name} x${n}`)
-                .join(", ");
-              const cells = new Set<string>();
-              for (const sample of trace.samples ?? []) {
-                const pos = sample?.pos ?? null;
-                if (pos !== null && Number.isFinite(pos[0]) && Number.isFinite(pos[2]))
-                  cells.add(`${Math.floor(pos[0] / 4) * 4},${Math.floor(pos[2] / 4) * 4}`);
-              }
-              priorRuns.push({
-                topOptions: top === "" ? "no picks" : top,
-                cells: cells.size,
-                ending: String(trace.status?.state ?? "unknown"),
-              });
-            } catch {
-              /* one bad trace never breaks the loop */
             }
-          });
-        }
-        return out;
-      }).pipe(
+            return out;
+          }),
         // The map entry spans the whole call: one game's runs never overlap,
         // and a stop between runs still releases the game for the next call.
-        Effect.ensuring(
+        (done) =>
           Effect.sync(() => {
-            if (sessions.get(root) === session) sessions.delete(root);
-          }),
-        ),
+            if (sessions.get(root)?.session === session) sessions.delete(root);
+          }).pipe(Effect.andThen(Deferred.succeed(done, undefined))),
       );
       if (each.length === 0)
-        return yield* opError("Bot run", root, "command-failed", "The run was stopped.");
+        return yield* opError("Bot run", root, "cancelled", "The run was stopped.");
       const last = each[each.length - 1]!;
       const runIds = each.map((entry) => entry.runId);
       let reportPath: string | null = null;
       if (mode === "explore" || each.length > 1) {
-        const built = yield* Effect.promise(() =>
-          buildPlayerReport(root, runIds).catch(() => null),
+        const written = yield* writeReport(
+          root,
+          yield* Effect.promise(() => tracesOf(root, runIds)),
         );
-        if (built !== null) reportPath = built.rel;
+        if (written !== null) reportPath = written.rel;
       }
       if (each.length === 1) return { ...last, runIds, reportPath };
       const ticks = each.reduce((sum, entry) => sum + entry.ticks, 0);
@@ -835,6 +960,8 @@ const make = Effect.gen(function* () {
       const states = each.map((entry) => entry.status.state).join("/");
       return {
         ...last,
+        // The call played if any of its runs did.
+        ...(each.some((entry) => entry.played !== false) ? { played: true } : { played: false }),
         ticks,
         decisions,
         findings,
@@ -849,36 +976,80 @@ const make = Effect.gen(function* () {
       };
     });
 
+  const run = (root: string, input: GameBotRunInput, owner?: ThreadId) =>
+    botLocks
+      .tryWithLock(root, 0, runLocked(root, input, owner))
+      .pipe(
+        Effect.flatMap((ran) =>
+          Option.isSome(ran)
+            ? Effect.succeed(ran.value)
+            : Effect.fail(
+                opError(
+                  "Bot run",
+                  root,
+                  "busy",
+                  "A bot run is already in progress for this game. Stop it with game_stop first.",
+                ),
+              ),
+        ),
+      );
+
+  /** The report of these traces at .studio/player-report.md; null when there is none to write. */
+  const writeReport = (
+    root: string,
+    traces: {
+      readonly picked: Parameters<typeof playerReportText>[0];
+      readonly unreadable: number;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const report = playerReportText(traces.picked, traces.unreadable);
+      if (report === null) return null;
+      const rel = ".studio/player-report.md";
+      // In the game folder, where an agent can plant a link: replaced, never written through.
+      const written = yield* fileServices(
+        writeFileStringAtomically({
+          filePath: NodePath.join(root, rel),
+          contents: report.text,
+          followLink: false,
+        }),
+      ).pipe(Effect.option);
+      return Option.isSome(written) ? { rel, runs: report.runs } : null;
+    });
+
   const view = (root: string, input: GameBotViewInput) =>
     Effect.gen(function* () {
-      const found = runs.get(input.runId);
-      if (found === undefined || found.root !== root)
+      // Read from the run's own trace, so a view after a restart still works.
+      const trace = yield* Effect.promise(() => readTrace(root, input.runId));
+      if (trace === null)
         return yield* opError(
           "Bot view",
           input.runId,
           "invalid-input",
           "No bot run with that id for this game.",
         );
-      const result = found.result;
+      const kept = trace as RunTrace & Partial<GameBotViewResult>;
       return {
-        runId: result.runId,
-        goal: result.goal,
-        status: result.status,
-        ticks: result.ticks,
-        tickHz: result.tickHz,
-        timeRatio: result.timeRatio,
-        decisions: result.decisions,
-        jev: result.jev,
-        usedSetState: result.usedSetState,
-        findings: result.findings,
-        tracePath: result.tracePath,
-        videoPath: result.videoPath,
-        frames: result.frames,
-        message: result.message,
+        runId: trace.runId,
+        goal: trace.goal,
+        status: kept.status ?? { state: "unknown", note: "" },
+        ticks: trace.ticks,
+        tickHz: kept.tickHz ?? 0,
+        timeRatio: kept.timeRatio ?? 0,
+        decisions: trace.decisions,
+        jev:
+          trace.jev === null || trace.jev === undefined
+            ? null
+            : { calls: trace.jev.calls, failures: trace.jev.failures },
+        usedSetState: trace.usedSetState ?? false,
+        ...(kept.refusedStates === undefined ? {} : { refusedStates: kept.refusedStates }),
+        findings: trace.findings ?? [],
+        tracePath: traceFile(root, trace.runId),
+        videoPath: kept.videoPath ?? "",
+        frames: kept.frames ?? [],
+        message: kept.message ?? `Bot run ${trace.runId}: ${kept.status?.state ?? "unknown"}.`,
       } satisfies GameBotViewResult;
     });
-
-  const stop = (root: string) => Effect.sync(() => drop(root));
 
   const report = (root: string) =>
     Effect.gen(function* () {
@@ -890,24 +1061,32 @@ const make = Effect.gen(function* () {
           "invalid-input",
           "No bot run traces recorded for this game yet.",
         );
-      const built = yield* Effect.promise(() =>
-        buildPlayerReport(
-          root,
-          traces.map((entry) => entry.runId),
-        ),
-      );
-      if (built === null)
+      const written = yield* writeReport(root, { picked: traces, unreadable: 0 });
+      if (written === null)
         return yield* opError("Bot report", root, "io", "The player report could not be written.");
       return {
-        path: built.rel,
-        runs: built.runs,
-        message: `Player report across ${built.runs.length} run(s): ${built.rel}.`,
+        path: written.rel,
+        runs: written.runs,
+        message: `Player report across ${written.runs.length} run(s): ${written.rel}.`,
       } satisfies GameBotReportResult;
     });
 
+  const reportText = (root: string, runIds: ReadonlyArray<string>) =>
+    Effect.promise(() => tracesOf(root, runIds)).pipe(
+      Effect.map((traces) => playerReportText(traces.picked, traces.unreadable)?.text ?? null),
+    );
+
   const threadRuns = (threadId: ThreadId) => evidenceLock.withPermits(1)(loadRecord(threadId, ""));
 
-  return GameBot.of({ run, runs: threadRuns, view, stop, report });
+  return GameBot.of({
+    run,
+    runs: threadRuns,
+    view,
+    stop: (root) => stopWhere((each) => each === root),
+    stopOwned: (threadId) => stopWhere((_root, owner) => owner === threadId),
+    report,
+    reportText,
+  });
 });
 
 export const layer = Layer.effect(GameBot, make);

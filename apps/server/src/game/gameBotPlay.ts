@@ -2,10 +2,11 @@
 import type * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import {
   GAME_BOT_BOUNDS,
+  GameOperationError,
   type GameBotFinding,
   type GameBotMode,
   type GameBotRunResult,
@@ -14,30 +15,38 @@ import {
   CHILD_EXTRA_MS,
   CHILD_FIRST_INPUT_MS,
   FRACTION_RE,
-  RUNNER_MISS_LIMIT,
-  RUNNER_OBS_TIMEOUT_MS,
   asGameState,
   asNumber,
-  createLineReader,
+  botChildEnv,
+  boundEvidence,
   END_FRAME,
   extractRunFrames,
-  frozenScreenFinding,
+  medianOf,
   perfFrom,
   posOf,
   sleep,
   type Jev,
-  type LineReader,
   type Session,
 } from "./gameBotRuntime.ts";
-import { parseLine } from "./playSession.ts";
+import {
+  PLAY_BOUNDS,
+  TIMED_OUT,
+  bounded,
+  createLineReader,
+  parseLine,
+  type LineReader,
+} from "./playSession.ts";
 import { spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 import { VIDEO_FPS, VIDEO_WIDTH, openFrameVideo, type FrameVideo } from "./frameVideo.ts";
 import type { PlayLaunch } from "./playLaunch.ts";
 
 const END_SETTLE_MS = 1500;
 
-/** What the launch hands the bot run: the session, and how to end what it started. */
-export type BotLaunch = Pick<PlayLaunch, "play" | "stop">;
+/** What the launch hands the bot run: the session, how it ended, and how to end what it started. */
+export type BotLaunch = Pick<PlayLaunch, "play" | "stop" | "ended">;
+
+/** A stall this long in the engine's own frames is a frozen screen. */
+const FROZEN_MS = 5_000;
 
 export interface BotRunArgs {
   readonly host: ProcessHostState;
@@ -127,44 +136,68 @@ export const playBot = async (
     // The bot child: allowlisted environment only, so no key or display
     // route can reach it. Game data reaches it only through our messages.
     const childLog = NodeFS.openSync(NodePath.join(args.runDir, "child-stderr.log"), "w");
+    // The bot file as a file URL: Node's ESM loader refuses a bare C:\ path.
     const owned = spawnOwned(
       args.host,
       process.execPath,
-      [args.childPath, args.botFile, args.decider, args.mode, args.jevLive ? "jev-live" : "no-jev"],
-      {
-        env: {
-          PATH: process.env.PATH ?? "",
-          ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
-          NODE_OPTIONS: "--max-old-space-size=1536",
-          HOME: NodeOS.homedir(),
-          LANG: process.env.LANG ?? "C.UTF-8",
-        },
-        cwd: args.root,
-        stdio: ["pipe", "pipe", childLog],
-        tree: false,
-      },
+      [
+        args.childPath,
+        NodeURL.pathToFileURL(args.botFile).href,
+        args.decider,
+        args.mode,
+        args.jevLive ? "jev-live" : "no-jev",
+      ],
+      { env: botChildEnv(), cwd: args.root, stdio: ["pipe", "pipe", childLog], tree: false },
     );
+    NodeFS.closeSync(childLog);
     botProcess = owned;
     botChild = owned.child;
     args.session.processes.push(owned);
+    // Attached at once: a child that dies before its first line is never
+    // mistaken for a bot that played its whole budget without input.
+    let childGone = false;
+    const childExited = new Promise<void>((resolve) => {
+      botChild!.once("exit", () => {
+        childGone = true;
+        resolve();
+      });
+      botChild!.once("error", () => {
+        childGone = true;
+        resolve();
+      });
+    });
+    const spawned = await new Promise<boolean>((resolve) => {
+      botChild!.once("spawn", () => resolve(true));
+      botChild!.once("error", () => resolve(false));
+    });
+    if (!spawned)
+      throw new GameOperationError({
+        operation: "Bot run",
+        path: process.execPath,
+        reason: "tool-failed",
+        detail: "The bot launcher could not start.",
+      });
     const childLines = createLineReader(botChild.stdout!);
     readers.push(childLines);
     let goal = "play the game";
     let childDone: { state: string; note: string; evidence: unknown } | null = null;
     const firstLine = await childLines.next(10_000);
-    const first = firstLine === null ? null : parseLine(firstLine);
-    if (first !== null && first["op"] === "hello" && typeof first["goal"] === "string")
-      goal = first["goal"].slice(0, 500);
-    else if (first !== null && first["op"] === "status")
-      childDone = {
-        state: String(first["state"] ?? "error"),
-        note: String(first["note"] ?? "").slice(0, 500),
-        evidence: first["evidence"] ?? {},
-      };
-    let childGone = false;
-    botChild.on("exit", () => {
-      childGone = true;
-    });
+    const first =
+      typeof firstLine === "string" && firstLine !== "timeout" && firstLine !== "closed"
+        ? parseLine(firstLine)
+        : null;
+    const hello = first !== null && first["op"] === "hello";
+    if (hello && typeof first["goal"] === "string") goal = first["goal"].slice(0, 500);
+    // The bot itself never ran: its module would not load, or its child died first.
+    if (!hello) {
+      const note =
+        first !== null && first["op"] === "status"
+          ? String(first["note"] ?? "").slice(0, 500)
+          : firstLine === "timeout"
+            ? "The bot did not start within 10 s."
+            : "The bot's child exited before it started.";
+      return runWithoutPlay(args, { goal, state: "bot-error", note });
+    }
     const findings: GameBotFinding[] = [];
     const seen = new Set<string>();
     const picks: Array<{ t: number; name: string; via: string; randomized: boolean }> = [];
@@ -274,15 +307,43 @@ export const playBot = async (
     } else await play.realtime();
     const wallStart = Date.now();
     const budgetMs = args.seconds * 1000;
+    // How the game ended, when it ended before the bot did: measured, the
+    // game's, only while our own side (display, browser) is alive.
+    let gameEnd: { state: "crashed" | "unresponsive"; note: string } | null = null;
     while (!stopped()) {
       if (childDone !== null || childGone) break;
       if (Date.now() - wallStart > budgetMs) break;
-      const msg = await play.nextTick(RUNNER_OBS_TIMEOUT_MS);
-      if (msg === null) {
+      const tick = await play.nextTick(PLAY_BOUNDS.tickMs);
+      if (tick.kind === "timeout") {
         misses += 1;
-        if (misses > RUNNER_MISS_LIMIT) throw new Error("The game stopped answering mid-run.");
+        if (misses > PLAY_BOUNDS.tickMisses) {
+          gameEnd = {
+            state: "unresponsive",
+            note: `The game stopped answering at ${lastT.toFixed(1)} s: no tick for ${((PLAY_BOUNDS.tickMisses * PLAY_BOUNDS.tickMs) / 1000).toFixed(0)} s.`,
+          };
+          break;
+        }
         continue;
       }
+      if (tick.kind === "closed") {
+        // A stop ends the game too: it is checked first, so it never reads as a crash.
+        if (stopped()) break;
+        const end = await bounded(launch.ended, PLAY_BOUNDS.endedMs);
+        if (stopped()) break;
+        if (end !== TIMED_OUT && end.by === "host")
+          throw new GameOperationError({
+            operation: "Bot run",
+            path: args.root,
+            reason: "tool-failed",
+            detail: end.detail,
+          });
+        gameEnd = {
+          state: "crashed",
+          note: `${end === TIMED_OUT ? "The game closed its session" : end.detail} at ${lastT.toFixed(1)} s.`,
+        };
+        break;
+      }
+      const msg = tick.observation;
       misses = 0;
       ticks += 1;
       const wallNow = Date.now();
@@ -425,7 +486,7 @@ export const playBot = async (
       } | null = null;
       for (let i = 0; i < 8; i++) {
         const line = await childLines.next(i === 0 ? CHILD_FIRST_INPUT_MS : CHILD_EXTRA_MS);
-        if (line === null) break;
+        if (line === "timeout" || line === "closed") break;
         const childMsg = parseLine(line);
         if (childMsg === null) continue;
         if (childMsg["op"] === "input") {
@@ -568,15 +629,42 @@ export const playBot = async (
     const tickHz = ticks / wallSeconds;
     const gameSeconds = lastT;
     const timeRatio = gameSeconds / wallSeconds;
-    const status = childDone ?? {
-      state: stopped() ? "error" : "budget",
-      note: stopped() ? "The run was stopped." : `Wall budget of ${args.seconds}s ended.`,
-      evidence: {},
+    // The harness's words where the game or a stop ended the run; else the bot's
+    // own, with its plain "error" said as the bot's, never the game's.
+    const childStatus =
+      childDone === null
+        ? null
+        : childDone.state === "error"
+          ? { ...childDone, state: "bot-error" }
+          : childDone;
+    const status: { state: string; note: string; evidence: unknown } = stopped()
+      ? { state: "stopped", note: "The run was stopped.", evidence: undefined }
+      : gameEnd !== null
+        ? { ...gameEnd, evidence: undefined }
+        : (childStatus ??
+          (childGone
+            ? {
+                state: "bot-error",
+                note: `The bot's child exited at ${lastT.toFixed(1)} s.`,
+                evidence: undefined,
+              }
+            : {
+                state: "budget",
+                note: `Wall budget of ${args.seconds}s ended.`,
+                evidence: undefined,
+              }));
+    const evidence = boundEvidence(status.evidence);
+    const resultStatus = {
+      state: status.state,
+      note: evidence.dropped
+        ? `${status.note} (its evidence passed 4 KB and was left out)`
+        : status.note,
+      ...(evidence.value === undefined ? {} : { evidence: evidence.value }),
     };
     // The run's last screen (often its ending) is kept before the game quits: the
     // video's tail is recorded after the window is gone. A bot that reported an
     // outcome gets a moment first, since games show their end screen after a beat.
-    if (childDone !== null) await sleep(END_SETTLE_MS);
+    if (childStatus !== null && gameEnd === null) await sleep(END_SETTLE_MS);
     await NodeFSP.mkdir(NodePath.join(args.runDir, "frames"), { recursive: true }).catch(
       () => undefined,
     );
@@ -600,16 +688,27 @@ export const playBot = async (
       /* closed */
     }
     await launch.stop();
-    await waitExit(botChild, 3000);
+    await bounded(childExited, 3000);
+    if (!childGone) botProcess.signal("SIGTERM");
     const usedSetState = setStates.length > 0;
     const frames = await extractRunFrames(args.host, args.ffmpeg, args.videoPath, args.runDir);
-    const frozen = await frozenScreenFinding(frames, lastT, lastPos);
-    const allFindings = frozen === null ? findings : [...findings, frozen];
-    const median = (xs: number[]): number | null => {
-      if (xs.length === 0) return null;
-      const sorted = [...xs].sort((a, b) => a - b);
-      return sorted[Math.floor(sorted.length / 2)]!;
-    };
+    // The engine's own frame counter, measured by the video, is the one source
+    // of a frozen screen.
+    const allFindings =
+      videoFacts !== null && videoFacts.longestStallMs >= FROZEN_MS
+        ? [
+            ...findings,
+            {
+              detector: "frozen",
+              severity: "error",
+              summary: `The game drew no new frame for ${(videoFacts.longestStallMs / 1000).toFixed(1)} s`,
+              t: videoFacts.longestStallAt,
+              pos: null,
+              detail: "measured from the engine's own frame counter",
+            } satisfies GameBotFinding,
+          ]
+        : findings;
+    const median = medianOf;
     const jev: GameBotRunResult["jev"] =
       args.decider === "jev" && args.jevKey !== null
         ? {
@@ -645,7 +744,7 @@ export const playBot = async (
       ...(can.has("ui") ? {} : { skippedIdClicks }),
       picks,
       offered: offered.slice(0, 400),
-      status,
+      status: { state: status.state, note: status.note },
       findings: allFindings,
       samples,
       finalPos: lastPos,
@@ -653,11 +752,6 @@ export const playBot = async (
       ...(perf === null ? {} : { perf }),
       video: videoFacts,
     };
-    await NodeFSP.writeFile(args.tracePath, JSON.stringify(trace, null, 2));
-    await NodeFSP.writeFile(
-      NodePath.join(args.runDir, "summary.json"),
-      JSON.stringify({ ...trace, samples: trace.samples.length }, null, 2),
-    );
     const jevLine =
       jev === null
         ? ""
@@ -690,10 +784,25 @@ export const playBot = async (
           (videoFacts.longestStallMs >= 2000
             ? `; the game drew no new frame for ${(videoFacts.longestStallMs / 1000).toFixed(1)} s at its longest.`
             : "."));
+    // The trace carries what game_bot_view shows, so a view after a restart reads it from disk.
+    const kept = {
+      ...trace,
+      ...(refusedStates.length > 0 ? { refusedStates } : {}),
+      status: resultStatus,
+      tracePath: args.tracePath,
+      videoPath: args.videoPath,
+      frames,
+      message,
+    };
+    await NodeFSP.writeFile(args.tracePath, JSON.stringify(kept, null, 2));
+    await NodeFSP.writeFile(
+      NodePath.join(args.runDir, "summary.json"),
+      JSON.stringify({ ...kept, samples: trace.samples.length }, null, 2),
+    );
     return {
       runId: args.runId,
       goal,
-      status: { state: status.state, note: status.note },
+      status: resultStatus,
       ticks,
       tickHz: Number(tickHz.toFixed(2)),
       timeRatio: Number(timeRatio.toFixed(3)),
@@ -722,14 +831,57 @@ export const playBot = async (
   }
 };
 
-const waitExit = async (child: NodeChildProcess.ChildProcess, ms: number): Promise<void> => {
-  if (child.exitCode !== null) return;
-  const end = Date.now() + ms;
-  while (child.exitCode === null && Date.now() < end) await sleep(100);
-  if (child.exitCode === null)
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      /* gone */
-    }
+/**
+ * A run that never got to play: its bot never ran (its module did not load,
+ * or its child died before its first line), which says nothing about the game
+ * and is not a bot run on the record; or the game never booted, which is
+ * measured. Its trace still says which, for game_bot_view.
+ */
+export const runWithoutPlay = async (
+  args: Pick<
+    BotRunArgs,
+    "root" | "runId" | "botFile" | "decider" | "mode" | "tracePath" | "videoPath"
+  >,
+  input: {
+    readonly goal: string;
+    readonly state: "bot-error" | "not-booted";
+    readonly note: string;
+  },
+): Promise<GameBotRunResult> => {
+  const file = NodePath.relative(args.root, args.botFile);
+  const played = input.state !== "bot-error";
+  const status = { state: input.state, note: input.note };
+  const message = played
+    ? `Bot "${file}": the game did not boot. ${input.note}`
+    : `Bot "${file}" never played: ${input.note} Fix the bot file under .studio/bot/ and run it again; this run is not on the record.`;
+  const result: GameBotRunResult = {
+    runId: args.runId,
+    ...(played ? {} : { played: false }),
+    goal: input.goal,
+    status,
+    ticks: 0,
+    tickHz: 0,
+    timeRatio: 0,
+    gameSeconds: 0,
+    decisions: 0,
+    jev: null,
+    policyNote: null,
+    usedSetState: false,
+    findings: [],
+    finalState: {},
+    finalPos: null,
+    mode: args.mode,
+    runIds: [args.runId],
+    reportPath: null,
+    tracePath: args.tracePath,
+    videoPath: args.videoPath,
+    frames: [],
+    message,
+  };
+  await NodeFSP.mkdir(NodePath.dirname(args.tracePath), { recursive: true }).catch(() => undefined);
+  await NodeFSP.writeFile(
+    args.tracePath,
+    JSON.stringify({ ...result, file, decider: args.decider, samples: [] }, null, 2),
+  ).catch(() => undefined);
+  return result;
 };

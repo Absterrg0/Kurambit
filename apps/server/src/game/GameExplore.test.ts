@@ -29,7 +29,7 @@ const layer = GameExplore.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
-      Layer.succeed(ProcessHost, { joinJob: () => undefined, displays: new Set<number>() }),
+      Layer.succeed(ProcessHost, { joinJob: () => undefined }),
       layerGameProjectFake(gameProjectWorld()),
       Layer.mock(GameProcesses.GameProcesses)({ list: () => [] }),
       Layer.mock(PreviewBrowser.PreviewBrowser)({}),
@@ -59,6 +59,6 @@ it.effect("a cap whose write failed is written by the retry, never taken from me
     NodeFS.rmSync(dir, { force: true });
     yield* explore.limitInput(thread, 60_000, "/game");
     const onDisk = yield* Effect.promise(() => ExploreEvidence.read(dir, thread));
-    assert.equal(onDisk?.inputCapMs, 60_000);
+    assert.equal(onDisk === "damaged" ? null : onDisk?.inputCapMs, 60_000);
   }).pipe(Effect.provide(layer)),
 );

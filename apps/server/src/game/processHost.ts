@@ -337,18 +337,12 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 
 /**
  * What one server's launches share: the Windows kill-on-close job its owned
- * children join, and the private displays it claimed. The server holds one
+ * children join. The server holds one
  * for its life; closing it ends the job helper, which takes the job's
  * children with it.
  */
 export interface ProcessHostState {
   readonly joinJob: (pid: number) => void;
-  /**
-   * Displays this server picked and has not let go: two launches at once (a
-   * blind comparison's bots on both builds) both see a number free before
-   * either's Xvfb writes its lock, and the second would then share the first's.
-   */
-  readonly displays: Set<number>;
 }
 
 export const makeProcessHost = (): {
@@ -383,7 +377,7 @@ export const makeProcessHost = (): {
     jobHelper.stdin?.write(`${pid} ${notAfter}\n`);
   };
   return {
-    host: { joinJob, displays: new Set() },
+    host: { joinJob },
     close: () => {
       jobHelper?.stdin?.end();
       jobHelper = null;

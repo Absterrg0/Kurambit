@@ -1,8 +1,6 @@
 // @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off preferSchemaOverJson:off -- This module owns headless Chromium for browser play sessions: wall-clock boot polling and real-time input.
-import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
-import * as NodePath from "node:path";
 import type { GameConsoleMessage, GameExploreStep } from "@kurambit/contracts";
 import {
   READ_STUDIO_READY,
@@ -14,7 +12,17 @@ import {
 } from "./gameChromium.ts";
 import { asGameState } from "./gameBotRuntime.ts";
 import { chromiumChildEnv } from "./gameWebServer.ts";
-import { parseLine, sanitizeProbe, type PlaySession } from "./playSession.ts";
+import {
+  PLAY_BOUNDS,
+  PlayUnresponsive,
+  TIMED_OUT,
+  bounded,
+  parseLine,
+  sanitizeProbe,
+  type PlayEnd,
+  type PlayFrame,
+  type PlaySession,
+} from "./playSession.ts";
 
 // Playwright needs its files on disk; createRequire also resolves it from a Node SEA executable.
 const requirePlaywright = NodeModule.createRequire(import.meta.url);
@@ -69,22 +77,6 @@ const readKeptStorage = async (path: string): Promise<KeptEntries> => {
   );
 };
 
-/** Written whole then renamed, so a session killed mid-write keeps the last good saves. */
-const writeKeptStorage = async (path: string, entries: KeptEntries): Promise<void> => {
-  // A name of its own, created exclusively: two sessions never share it, and a
-  // link planted under that name is refused rather than followed.
-  const partial = NodePath.join(
-    NodePath.dirname(path),
-    `.${NodePath.basename(path)}.${NodeCrypto.randomUUID()}.partial`,
-  );
-  await NodeFSP.writeFile(partial, `${JSON.stringify({ localStorage: entries }, null, 2)}\n`, {
-    flag: "wx",
-  });
-  await NodeFSP.rename(partial, path);
-};
-
-export type WebPlaySession = PlaySession;
-
 export type WebPageEvent =
   | {
       readonly kind: "console";
@@ -135,19 +127,41 @@ export class WebBrowserGone extends Error {
 }
 
 /**
- * Counts the page's animation frames: the engine-side frame counter of a
- * browser game, which stops when the page's main thread does.
+ * Counts the page's animation frames and its own clock: the engine-side frame
+ * counter of a browser game, and seconds of play (each frame's delta, clamped
+ * the way games clamp dt, so a page that stalls gains no time for the stall).
+ * Both stop when the page's main thread does.
  */
 const FRAME_COUNTER = `(() => {
   let frames = 0;
+  let seconds = 0;
+  let last = null;
   const raf = window.requestAnimationFrame.bind(window);
-  const count = () => {
+  const count = (now) => {
     frames += 1;
+    if (last !== null) seconds += Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
     raf(count);
   };
   raf(count);
   Object.defineProperty(window, "__kurambitFrames", { get: () => frames });
+  Object.defineProperty(window, "__kurambitTime", { get: () => seconds });
 })()`;
+
+const READY = "window.__studio?.ready === true";
+
+/** What a kept session's page left in its storage, for the caller to write back. */
+export interface KeptStorage {
+  readonly path: string;
+  readonly contents: string;
+}
+
+export interface WebPlaySession extends PlaySession {
+  /** Settles when the page crashed (the game's) or our browser went away (ours). */
+  readonly ended: Promise<PlayEnd>;
+  /** After `close`: the kept session's storage to write back, or null. */
+  readonly keptStorage: () => KeptStorage | null;
+}
 
 /**
  * The browser host of the play-session protocol: headless Chromium on a
@@ -155,7 +169,9 @@ const FRAME_COUNTER = `(() => {
  * page's read-only `window.__studio` bridge (ready, getState, setState) for
  * what the game sees. A page is never held: the game runs between acts, and
  * waits and holds advance it as they run. Pages read no control tree, so the
- * session has no ui or inspect steps; the caller owns the served URL.
+ * session has no ui or inspect steps; the caller owns the served URL. Every
+ * call into the page is bounded (PLAY_BOUNDS): a game whose main thread is
+ * stuck never holds a caller.
  */
 export const openWebPlaySession = async (input: {
   readonly browser: GameBrowser;
@@ -166,7 +182,7 @@ export const openWebPlaySession = async (input: {
   readonly signal?: AbortSignal | undefined;
   /**
    * A kept session's localStorage file: restored before the page loads and
-   * written back when the session closes. Omitted, the page starts with none.
+   * read back when the session closes. Omitted, the page starts with none.
    */
   readonly keptStorage?: string | null | undefined;
   /** Sees each console message, page error and failed script as the page reports it. */
@@ -192,12 +208,30 @@ export const openWebPlaySession = async (input: {
       if (input.signal?.aborted) throw new Error("aborted");
       throw new WebBrowserLaunchFailed(await input.browser.launchFailure(cause), cause);
     });
+  let closing = false;
+  const closeBrowser = async () => {
+    closing = true;
+    await bounded(browser.close(), PLAY_BOUNDS.browserCloseMs);
+  };
   if (input.signal?.aborted) {
-    await browser.close().catch(() => undefined);
+    await closeBrowser();
     throw new Error("aborted");
   }
+  let endedWith: PlayEnd | null = null;
+  let settleEnded: (end: PlayEnd) => void = () => undefined;
+  const ended = new Promise<PlayEnd>((resolve) => {
+    settleEnded = (end) => {
+      if (endedWith !== null) return;
+      endedWith = end;
+      resolve(end);
+    };
+  });
+  // Our browser leaving while we are not closing it is ours, never the game's.
+  browser.on("disconnected", () => {
+    if (!closing) settleEnded({ by: "host", detail: new WebBrowserGone().message });
+  });
   // page.goto takes no signal: an abort mid-boot ends the browser, which ends the wait.
-  const abortBoot = () => void browser.close().catch(() => undefined);
+  const abortBoot = () => void closeBrowser();
   input.signal?.addEventListener("abort", abortBoot, { once: true });
   try {
     const origin = new URL(input.url).origin;
@@ -215,6 +249,7 @@ export const openWebPlaySession = async (input: {
     });
     await context.addInitScript(FRAME_COUNTER);
     const page = await context.newPage();
+    page.on("crash", () => settleEnded({ by: "game", detail: new WebPageCrashed().message }));
     const pending: GameConsoleMessage[] = [];
     let dropped = 0;
     const record = (level: GameConsoleMessage["level"], text: string): void => {
@@ -238,9 +273,14 @@ export const openWebPlaySession = async (input: {
     // A page error or a script that failed to load: either can stop the
     // modules for good, so the bridge never appears.
     let pageErrored = false;
+    let onPageErrored: () => void = () => undefined;
+    const errored = () => {
+      pageErrored = true;
+      onPageErrored();
+    };
     page.on("response", (response) => {
       if (response.status() < 400 || response.request().resourceType() !== "script") return;
-      pageErrored = true;
+      errored();
       record("error", `script failed to load: ${response.url()} (${response.status()})`);
       notify({ kind: "script-failed", url: response.url(), status: response.status() });
     });
@@ -265,7 +305,7 @@ export const openWebPlaySession = async (input: {
       if (type === "error") pageError(message.text(), undefined);
     });
     page.on("pageerror", (error) => {
-      pageErrored = true;
+      errored();
       notify({
         kind: "pageerror",
         text: error instanceof Error ? error.message : String(error),
@@ -284,14 +324,26 @@ export const openWebPlaySession = async (input: {
       dropped = 0;
       return { messages, truncated };
     };
-    // The page's frame count as of the last state read; frames carry it.
+    /** Our side gone, or the page crashed: the error that says whose. */
+    const endError = (end: PlayEnd) =>
+      end.by === "host" ? new WebBrowserGone(end.detail) : new WebPageCrashed(end.detail);
+    // The page's frame count and clock as of the last state read; frames carry them.
     let pageFrames = 0;
-    const readState = async (): Promise<Record<string, unknown> | null> => {
-      const raw: unknown = await page
-        .evaluate(`[${READ_STUDIO_STATE}, window.__kurambitFrames ?? 0]`)
-        .catch(() => null);
+    let pageSeconds = 0;
+    /** The page's state; TIMED_OUT when its main thread did not answer in `ms`. */
+    const readState = async (ms: number) => {
+      const raw = await bounded(
+        page
+          .evaluate(
+            `[${READ_STUDIO_STATE}, window.__kurambitFrames ?? 0, window.__kurambitTime ?? 0]`,
+          )
+          .catch(() => null),
+        ms,
+      );
+      if (raw === TIMED_OUT) return TIMED_OUT;
       if (!Array.isArray(raw)) return null;
       if (typeof raw[1] === "number") pageFrames = raw[1];
+      if (typeof raw[2] === "number") pageSeconds = raw[2];
       return typeof raw[0] === "string" ? parseLine(raw[0]) : null;
     };
     try {
@@ -310,34 +362,59 @@ export const openWebPlaySession = async (input: {
             return true;
           },
         );
+      // Top-level await can delay the bridge past load, so only an error and
+      // no bridge together end the wait early, and only for the check.
+      let watchErrors = input.stopOnPageError === true;
       for (;;) {
-        if (!loaded || Date.now() >= bootDeadline)
-          throw new WebPageNotReady(true, input.bootTimeoutMs, navigation);
-        let ready: unknown = null;
-        try {
-          ready = await page.evaluate(READ_STUDIO_READY);
-        } catch {
-          // Evaluations race the page navigation; keep polling until the deadline.
+        if (endedWith !== null) throw endError(endedWith);
+        const left = bootDeadline - Date.now();
+        if (!loaded || left <= 0) throw new WebPageNotReady(true, input.bootTimeoutMs, navigation);
+        const outcome = await Promise.race([
+          page.waitForFunction(READY, undefined, { timeout: left, polling: 250 }).then(
+            () => "ready" as const,
+            (cause: unknown) =>
+              cause instanceof Error && cause.name === "TimeoutError"
+                ? ("timeout" as const)
+                : // Evaluations race the page's navigation; wait again on the new page.
+                  ("retry" as const),
+          ),
+          ended.then(() => "ended" as const),
+          new Promise<"errored">((resolve) => {
+            onPageErrored = () => watchErrors && resolve("errored");
+            if (watchErrors && pageErrored) resolve("errored");
+          }),
+        ]);
+        onPageErrored = () => undefined;
+        if (outcome === "ready") break;
+        if (outcome === "timeout") throw new WebPageNotReady(true, input.bootTimeoutMs, navigation);
+        if (outcome === "errored") {
+          const bridge = await bounded(
+            page.evaluate(READ_STUDIO_READY).catch(() => null),
+            PLAY_BOUNDS.webCallMs,
+          );
+          if (bridge === null || bridge === TIMED_OUT)
+            throw new WebPageNotReady(false, input.bootTimeoutMs, navigation);
+          // The bridge is there and booting: an error after it is the game's to report.
+          watchErrors = false;
         }
-        if (ready === true) break;
-        // Top-level await can delay the bridge past load, so only an error
-        // and no bridge together end the wait early, and only for the check.
-        if (input.stopOnPageError === true && pageErrored && ready === null)
-          throw new WebPageNotReady(false, input.bootTimeoutMs, navigation);
-        await sleep(500, input.signal);
+        if (outcome === "retry") await sleep(100, input.signal);
       }
     } catch (cause) {
-      await browser.close().catch(() => undefined);
+      await closeBrowser();
       throw cause;
     } finally {
       input.signal?.removeEventListener("abort", abortBoot);
     }
-    const bootProbe = sanitizeProbe(await readState());
+    const bootState = await readState(PLAY_BOUNDS.webCallMs);
+    const bootProbe = sanitizeProbe(bootState === TIMED_OUT ? null : bootState);
     const bootConsole = drain();
     let pointer: { x: number; y: number } | null = null;
     const centre = () => ({ x: Math.round(input.width / 2), y: Math.round(input.height / 2) });
-    const act: PlaySession["act"] = async (steps, screenshotPath, signal) => {
-      signal?.throwIfAborted();
+    const actBody = async (
+      steps: readonly GameExploreStep[],
+      screenshotPath: string | null,
+      signal: AbortSignal | undefined,
+    ) => {
       let executedInputSteps = 0;
       const held: string[] = [];
       // Each step releases its own keys, as the process runners do: a key held
@@ -357,7 +434,7 @@ export const openWebPlaySession = async (input: {
         executedInputSteps += 1;
       };
       try {
-        for (const step of steps as readonly GameExploreStep[]) {
+        for (const step of steps) {
           signal?.throwIfAborted();
           if ("waitMs" in step) {
             await sleep(step.waitMs, signal);
@@ -409,13 +486,21 @@ export const openWebPlaySession = async (input: {
           signal?.throwIfAborted();
         }
       } finally {
-        for (const key of held.splice(0)) await page.keyboard.up(key).catch(() => undefined);
+        for (const key of held.splice(0))
+          await bounded(page.keyboard.up(key), PLAY_BOUNDS.webCallMs);
       }
-      const probe = sanitizeProbe(await readState());
+      const state = await readState(PLAY_BOUNDS.webCallMs);
+      if (state === TIMED_OUT) throw unresponsive();
+      const probe = sanitizeProbe(state);
       const shot =
-        screenshotPath === null ? null : await page.screenshot({ type: "png" }).catch(() => null);
+        screenshotPath === null
+          ? null
+          : await bounded(
+              page.screenshot({ type: "png" }).catch(() => null),
+              PLAY_BOUNDS.stillMs,
+            );
       const saved =
-        shot !== null && screenshotPath !== null
+        shot !== null && shot !== TIMED_OUT && screenshotPath !== null
           ? await NodeFSP.writeFile(screenshotPath, shot).then(
               () => true,
               () => false,
@@ -430,136 +515,211 @@ export const openWebPlaySession = async (input: {
         consoleTruncated: drained.truncated,
       };
     };
+    const unresponsive = () =>
+      new PlayUnresponsive(
+        `The game's page stopped answering (its main thread did not respond within ${PLAY_BOUNDS.webCallMs / 1000} s).`,
+      );
+    const act: PlaySession["act"] = async (steps, screenshotPath, signal) => {
+      signal?.throwIfAborted();
+      if (endedWith !== null) throw endError(endedWith);
+      const stepMs = steps.reduce(
+        (sum, step) =>
+          sum +
+          ("waitMs" in step ? step.waitMs : "holdMs" in step ? step.holdMs : 0) +
+          ("press" in step ? 50 : 0),
+        0,
+      );
+      const done = await Promise.race([
+        bounded(actBody(steps, screenshotPath, signal), stepMs + PLAY_BOUNDS.webActGraceMs),
+        ended.then((end) => ({ end })),
+      ]);
+      if (done === TIMED_OUT) throw unresponsive();
+      if ("end" in done) throw endError(done.end);
+      return done;
+    };
     // Real-time play: the host paces the ticks, since the page streams nothing.
     let tickStart = 0;
-    let realtimeStart = 0;
+    let realtimeSeconds = 0;
     let ticks = 0;
     const keysDown = new Set<string>();
     const refused: Array<{ target: string; error: string }> = [];
     let screencast: Awaited<ReturnType<typeof context.newCDPSession>> | null = null;
+    // The compositor sends a picture only when the page drew a different one,
+    // so a static screen sends none; the host repeats the last picture with the
+    // page's advanced frame counter, and only a page that stopped drawing stalls.
+    let frameSink: ((frame: PlayFrame) => void) | null = null;
+    let lastJpeg: Buffer | null = null;
+    let lastSentFrame = -1;
+    const gameT = () => Math.max(0, pageSeconds - realtimeSeconds);
+    let kept: KeptStorage | null = null;
     const session: WebPlaySession = {
       protocol: 2,
       capabilities: new Set(["realtime", "setState", "frames"]),
       boot: { probe: bootProbe, consoleMessages: bootConsole.messages },
       bootPerf: null,
+      ended,
+      keptStorage: () => kept,
       act,
       realtime: async (frames) => {
-        realtimeStart = Date.now();
+        realtimeSeconds = pageSeconds;
         tickStart = 0;
         if (frames === undefined) return;
-        // The compositor's own frames, as the page drew them; a page that
-        // draws nothing new sends none, and the video repeats its last one.
-        const cdp = await context.newCDPSession(page);
+        frameSink = frames.onFrame;
+        const cdp = await bounded(context.newCDPSession(page), PLAY_BOUNDS.webCallMs);
+        if (cdp === TIMED_OUT) return;
         screencast = cdp;
         cdp.on("Page.screencastFrame", (event) => {
           void cdp
             .send("Page.screencastFrameAck", { sessionId: event.sessionId })
             .catch(() => undefined);
-          frames.onFrame({
-            frame: pageFrames,
-            t: (Date.now() - realtimeStart) / 1000,
-            jpeg: Buffer.from(event.data, "base64"),
-          });
+          lastJpeg = Buffer.from(event.data, "base64");
+          lastSentFrame = pageFrames;
+          frames.onFrame({ frame: pageFrames, t: gameT(), jpeg: lastJpeg });
         });
         const width = Math.min(frames.width, input.width);
-        await cdp.send("Page.startScreencast", {
-          format: "jpeg",
-          quality: 75,
-          maxWidth: width,
-          maxHeight: Math.round((input.height * width) / input.width),
-        });
+        await bounded(
+          cdp.send("Page.startScreencast", {
+            format: "jpeg",
+            quality: 75,
+            maxWidth: width,
+            maxHeight: Math.round((input.height * width) / input.width),
+          }),
+          PLAY_BOUNDS.webCallMs,
+        );
       },
-      nextTick: async () => {
+      nextTick: async (timeoutMs) => {
+        if (endedWith !== null) return { kind: "closed" };
         const wait = tickStart + TICK_MS - Date.now();
         if (wait > 0) await sleep(wait);
         tickStart = Date.now();
-        const state = await readState();
-        if (state === null) return null;
+        const state = await Promise.race([
+          readState(timeoutMs),
+          ended.then(() => "ended" as const),
+        ]);
+        if (state === "ended") return { kind: "closed" };
+        if (state === TIMED_OUT) return { kind: "timeout" };
+        if (state === null) return { kind: "timeout" };
         ticks += 1;
+        if (frameSink !== null && lastJpeg !== null && pageFrames > lastSentFrame) {
+          lastSentFrame = pageFrames;
+          frameSink({ frame: pageFrames, t: gameT(), jpeg: lastJpeg });
+        }
         const errors = pageErrors
           .slice(pageErrorsSeen)
           .map((entry) => ({ ...entry, kind: "page" as const }));
         pageErrorsSeen = pageErrors.length;
         const player = sanitizeProbe({ gameState: {}, player: state["player"] })?.player ?? null;
         return {
-          op: "tick",
-          tick: ticks,
-          t: (Date.now() - realtimeStart) / 1000,
-          probe: {
-            gameState: asGameState(state["gameState"]),
-            player,
-            hudText: typeof state["hudText"] === "string" ? state["hudText"] : "",
+          kind: "tick",
+          observation: {
+            op: "tick",
+            tick: ticks,
+            t: gameT(),
+            probe: {
+              gameState: asGameState(state["gameState"]),
+              player,
+              hudText: typeof state["hudText"] === "string" ? state["hudText"] : "",
+            },
+            errors,
           },
-          errors,
         };
       },
+      // A stuck page's input never lands; the next tick reads it as not answering.
       input: async ({ held, taps, clicks }) => {
+        const call = (work: Promise<unknown>) =>
+          bounded(
+            work.catch(() => undefined),
+            PLAY_BOUNDS.webCallMs,
+          );
         const wanted = new Set(held);
         for (const key of wanted)
           if (!keysDown.has(key)) {
-            await page.keyboard.down(toPlaywrightKey(key)).catch(() => undefined);
+            if ((await call(page.keyboard.down(toPlaywrightKey(key)))) === TIMED_OUT) return;
             keysDown.add(key);
           }
         for (const key of keysDown)
           if (!wanted.has(key)) {
-            await page.keyboard.up(toPlaywrightKey(key)).catch(() => undefined);
+            if ((await call(page.keyboard.up(toPlaywrightKey(key)))) === TIMED_OUT) return;
             keysDown.delete(key);
           }
         for (const tap of taps) {
-          await page.keyboard.down(toPlaywrightKey(tap)).catch(() => undefined);
+          if ((await call(page.keyboard.down(toPlaywrightKey(tap)))) === TIMED_OUT) return;
           await sleep(15);
-          await page.keyboard.up(toPlaywrightKey(tap)).catch(() => undefined);
+          if ((await call(page.keyboard.up(toPlaywrightKey(tap)))) === TIMED_OUT) return;
         }
         for (const click of clicks)
           if ("x" in click)
-            await page.mouse.click(Math.round(click.x), Math.round(click.y)).catch(() => undefined);
+            if (
+              (await call(page.mouse.click(Math.round(click.x), Math.round(click.y)))) === TIMED_OUT
+            )
+              return;
       },
       setState: async (target, values) => {
         // Playwright evaluates a string as an expression and never calls it, so the
         // call and its JSON argument are part of the expression.
         const call = `(${STUDIO_SET_STATE})(${JSON.stringify({ target, values })})`;
-        const ok = await page.evaluate(call).catch(() => false);
+        const ok = await bounded(
+          page.evaluate(call).catch(() => false),
+          PLAY_BOUNDS.webCallMs,
+        );
         if (ok !== true && refused.length < 20)
           refused.push({
             target,
-            error: `Unknown setState target ${target}: the game's setState in web/main.js did not accept it.`,
+            error:
+              ok === TIMED_OUT
+                ? `The page did not answer the write to ${target} within ${PLAY_BOUNDS.webCallMs / 1000} s.`
+                : `Unknown setState target ${target}: the game's setState in web/main.js did not accept it.`,
           });
       },
       refusedStates: () => refused,
-      still: (path) =>
-        page.screenshot({ path }).then(
-          () => true,
-          () => false,
-        ),
+      still: async (path) =>
+        (await bounded(
+          page.screenshot({ path }).then(
+            () => true,
+            () => false,
+          ),
+          PLAY_BOUNDS.stillMs,
+        )) === true,
       close: async () => {
-        await screencast?.send("Page.stopScreencast").catch(() => undefined);
+        frameSink = null;
+        if (screencast !== null)
+          await bounded(screencast.send("Page.stopScreencast"), PLAY_BOUNDS.webCallMs);
         try {
-          if (keptStorage !== null) {
+          if (keptStorage !== null && endedWith === null) {
             // Leaving the page fires pagehide as closing the tab would, so a game
             // that saves then (the starter shell's progress does) has written it.
-            await page.goto("about:blank", { timeout: 5_000 }).catch(() => undefined);
+            await page
+              .goto("about:blank", { timeout: PLAY_BOUNDS.webLeaveMs })
+              .catch(() => undefined);
             // storageState has no timeout and reads through the page, so a game
             // whose main thread is stuck would hold the close forever.
-            const state = await Promise.race([
+            const state = await bounded(
               context.storageState().catch(() => null),
-              sleep(3_000).then(() => null),
-            ]);
+              PLAY_BOUNDS.webStorageMs,
+            );
             // A page that never answered keeps the last saves rather than erasing them.
-            if (state !== null)
-              await writeKeptStorage(
-                keptStorage,
-                state.origins.find((entry) => entry.origin === origin)?.localStorage ?? [],
-              ).catch(() => undefined);
+            if (state !== null && state !== TIMED_OUT)
+              kept = {
+                path: keptStorage,
+                contents: `${JSON.stringify(
+                  {
+                    localStorage:
+                      state.origins.find((entry) => entry.origin === origin)?.localStorage ?? [],
+                  },
+                  null,
+                  2,
+                )}\n`,
+              };
           }
         } finally {
-          await browser.close().catch(() => undefined);
+          await closeBrowser();
         }
       },
     };
     return session;
   } catch (cause) {
     input.signal?.removeEventListener("abort", abortBoot);
-    await browser.close().catch(() => undefined);
+    await closeBrowser();
     throw cause;
   }
 };

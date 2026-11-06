@@ -57,13 +57,13 @@ export class GameOperations extends Context.Service<
      * (epoch ms) queues behind it until then. `owner` is the thread whose
      * call started it.
      */
-    readonly exclusive: <A, E extends { readonly message: string } = GameOperationError>(
+    readonly exclusive: <A, E = GameOperationError, R = never>(
       root: string,
       name: string,
-      work: Effect.Effect<A, E>,
+      work: Effect.Effect<A, E, R>,
       owner: string,
       options?: { readonly waitUntil?: number },
-    ) => Effect.Effect<A, E | GameOperationError>;
+    ) => Effect.Effect<A, E | GameOperationError, R>;
     /**
      * Cancels the game's operations, running or still queued; with `owner`,
      * only that owner's. Resolves once each has ended.
@@ -88,6 +88,11 @@ const operationMessage = (result: unknown, name: string): string => {
   if (typeof result !== "object" || result === null) return `${name} completed.`;
   return "message" in result ? String(result.message) : `${name} completed.`;
 };
+/** A failed operation's message, whatever its error. */
+const errorMessage = (error: unknown): string =>
+  typeof error === "object" && error !== null && "message" in error
+    ? String(error.message)
+    : String(error);
 /** The thread an owner names; a run's or the system's own work has none. */
 const ownerThread = (owner: string | undefined): ThreadId | undefined =>
   owner === undefined || isGameRunOperationOwner(owner) || !/^[\w.-]+$/.test(owner)
@@ -151,13 +156,13 @@ export const layer = Layer.effect(
         reason: "busy",
         detail: `${[...(entries.get(root) ?? [])].find((entry) => entry.running)?.name ?? "Another operation"} is running on this game.`,
       });
-    const exclusive = <A, E extends { readonly message: string } = GameOperationError>(
+    const exclusive = <A, E = GameOperationError, R = never>(
       root: string,
       name: string,
-      work: Effect.Effect<A, E>,
+      work: Effect.Effect<A, E, R>,
       owner: string,
       options?: { readonly waitUntil?: number },
-    ): Effect.Effect<A, E | GameOperationError> =>
+    ): Effect.Effect<A, E | GameOperationError, R> =>
       Effect.gen(function* () {
         const entry: Entry = {
           name,
@@ -213,7 +218,7 @@ export const layer = Layer.effect(
                   state: "failed",
                   message:
                     Option.isSome(failure) && !wasCancelled
-                      ? failure.value.message
+                      ? errorMessage(failure.value)
                       : `${name} was cancelled.`,
                   at,
                 },

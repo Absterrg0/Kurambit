@@ -1,14 +1,7 @@
 // @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off globalFetch:off preferSchemaOverJson:off -- Shared by bot runs: pids, child lines, run frames and the Jev call.
-import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeReadline from "node:readline";
-import {
-  GAME_BOT_BOUNDS,
-  GameOperationError,
-  type GameBotFinding,
-  type GameBotPerf,
-} from "@kurambit/contracts";
+import { GAME_BOT_BOUNDS, GameOperationError, type GameBotPerf } from "@kurambit/contracts";
 import { engineChildEnv } from "./GameProcesses.ts";
 import { runOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 
@@ -18,11 +11,8 @@ const JEV_TIMEOUT_MS = 4000;
 // past this long, a light call goes out before the next decision needs it.
 const JEV_WARM_AFTER_MS = 15_000;
 const JEV_WARM_TIMEOUT_MS = 5000;
-export const RUNNER_OBS_TIMEOUT_MS = 3000;
-export const RUNNER_MISS_LIMIT = 20;
 export const CHILD_FIRST_INPUT_MS = 400;
 export const CHILD_EXTRA_MS = 30;
-export const BOOT_TIMEOUT_MS = 90_000;
 
 /** One bot run call: a stop flips `stopped` and stops every process the run started. */
 export interface Session {
@@ -50,49 +40,45 @@ export const opError = (
 export const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-export interface LineReader {
-  readonly next: (timeoutMs: number) => Promise<string | null>;
-  readonly close: () => void;
-}
-
-export const createLineReader = (stream: NodeJS.ReadableStream): LineReader => {
-  const rl = NodeReadline.createInterface({ input: stream, crlfDelay: Infinity });
-  const queue: string[] = [];
-  let waiter: ((line: string | null) => void) | null = null;
-  let closed = false;
-  rl.on("line", (line: string) => {
-    if (waiter !== null) {
-      const w = waiter;
-      waiter = null;
-      w(line);
-    } else queue.push(line);
-  });
-  rl.on("close", () => {
-    closed = true;
-    if (waiter !== null) {
-      const w = waiter;
-      waiter = null;
-      w(null);
-    }
-  });
-  return {
-    next: (timeoutMs: number) => {
-      if (queue.length > 0) return Promise.resolve(queue.shift()!);
-      if (closed) return Promise.resolve(null);
-      return new Promise<string | null>((resolve) => {
-        const timer = setTimeout(() => {
-          waiter = null;
-          resolve(null);
-        }, timeoutMs);
-        waiter = (line) => {
-          clearTimeout(timer);
-          resolve(line);
-        };
-      });
-    },
-    close: () => rl.close(),
-  };
+/** The middle value; null for none. */
+export const medianOf = (xs: ReadonlyArray<number>): number | null => {
+  if (xs.length === 0) return null;
+  const sorted = [...xs].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
 };
+
+/** The 4 m map cell a position falls in, over x and z: the one coverage grid. */
+export const cellOf = (pos: readonly [number, number, number]): string =>
+  `${Math.floor(pos[0] / 4) * 4},${Math.floor(pos[2] / 4) * 4}`;
+
+/** The bot child's structured evidence, kept only when its JSON fits 4 KB. */
+export const boundEvidence = (
+  evidence: unknown,
+): { readonly value: unknown; readonly dropped: boolean } => {
+  if (evidence === undefined || evidence === null) return { value: undefined, dropped: false };
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(evidence);
+  } catch {
+    return { value: undefined, dropped: true };
+  }
+  if (text === undefined) return { value: undefined, dropped: false };
+  return Buffer.byteLength(text, "utf8") > 4096
+    ? { value: undefined, dropped: true }
+    : { value: evidence, dropped: false };
+};
+
+/**
+ * The bot child's environment: the engine allowlist (on Windows it carries
+ * SYSTEMROOT and the temp dirs Node needs), never a key or a display route.
+ * The desktop app runs the server as Electron in Node mode, and the child is
+ * started with the same executable, so it must be told to be Node too.
+ */
+export const botChildEnv = (): NodeJS.ProcessEnv =>
+  engineChildEnv({
+    NODE_OPTIONS: "--max-old-space-size=1536",
+    ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
+  });
 
 export const asNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -116,7 +102,13 @@ const ENDINGS: Readonly<Record<string, string>> = {
   failed: "lost",
   budget: "timed out",
   stalled: "stalled",
-  error: "error",
+  crashed: "crashed",
+  unresponsive: "stopped answering",
+  "not-booted": "did not boot",
+  "bot-error": "bot error",
+  // A bot's own "error" is about the bot, never the game.
+  error: "bot error",
+  stopped: "stopped",
 };
 export const botEnding = (state: string): string => ENDINGS[state] ?? state.slice(0, 40);
 
@@ -407,30 +399,3 @@ export const extractRunFrames = async (
 
 /** Stills extraction runs fixed ffmpeg args on already-written video: allowlisted engine base only. */
 export const headlessEnv = (): NodeJS.ProcessEnv => engineChildEnv();
-
-/** The frozen-screen probe runs on the extracted frames, never per tick. */
-export const frozenScreenFinding = async (
-  frames: string[],
-  t: number,
-  pos: [number, number, number] | null,
-): Promise<GameBotFinding | null> => {
-  if (frames.length < 3) return null;
-  const hashes = new Set<string>();
-  for (const frame of frames) {
-    try {
-      const bytes = await NodeFSP.readFile(frame);
-      hashes.add(NodeCrypto.createHash("sha1").update(bytes).digest("hex"));
-    } catch {
-      return null;
-    }
-  }
-  if (hashes.size > 1) return null;
-  return {
-    detector: "frozen",
-    severity: "error",
-    summary: "Screen unchanged across the run video while inputs ran",
-    t,
-    pos,
-    detail: `${frames.length} extracted frames identical`,
-  };
-};
