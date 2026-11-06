@@ -14,7 +14,10 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   refuses as busy rather than racing the first. While a production run holds the game (live,
   finishing or restoring), it is the folder's one writer: other owners' writing operations are
   refused `busy` with `runReason: "run-live"` (`GameProjectService.admitWrite`), reads and Play of
-  an exported build stay open, and the run's role threads pass. The run's own folder moves
+  an exported build stay open, and the run's role threads pass only for their own agent: admission
+  trusts `GameCaller` (the MCP game tools mark an agent and whether it is a run role; a client call
+  is the client), never the thread being viewed, so a person looking at a role's chat or a blind
+  sample's copy cannot write as that role. The run's own folder moves
   (captures, restores, kept names) run as operations owned by the run, taking the operation lock
   and then the checkpoint workspace lock; T3's turn captures take only the latter, so the two
   never wait in a cycle.
@@ -45,7 +48,10 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   token, so a reused pid or a record an agent wrote never names another process. A tree is a
   process group on Linux and macOS; on Windows every owned child joins one kill-on-close Job Object
   held by a helper whose stdin is the server's pipe, so the tree dies with the server however it
-  exits, and a tree stop is `taskkill /T /F`. Free memory is `os.freemem()` (libuv's MemAvailable
+  exits; only a child whose launch record is reaped at the next start (the live Unity editor) stays
+  out of the job, since a Licensing Client it starts inherits the job and must outlive us. A tree
+  stop on Windows ends the root and its descendants pid by pid, never `/T`, so a `keep` filter can
+  spare what is the user's. Free memory is `os.freemem()` (libuv's MemAvailable
   on Linux). Every in-game runner quits when its control socket closes, so a crashed server leaves
   no game running; only the live editors outlive it, and their records reap them.
 - `GameAssetLibrary` serves the curated CC0 library in `assetLibraryCatalog.ts`. Each pack is a
@@ -122,7 +128,13 @@ knows which engine runs the game. A session opens held: the runner says hello wi
 capabilities, plays discrete acts with the game paused between them (exploration), and after
 `realtime` lets the game run for good while held keys, taps and clicks stream in and one tick
 observation goes out every 100 ms (bots). The policy that plays, the detectors, the video and the
-reports are shared; an engine adds only how a session launches.
+reports are shared; an engine adds only how a session launches. Every wait a session makes has a
+bound (`PLAY_BOUNDS` in [playSession.ts](../../apps/server/src/game/playSession.ts)), including
+every call into a web page, and its end says by whose side: a game that exits, crashes or stops
+answering is evidence about the build (a bot run ends `crashed` or `unresponsive` with its trace
+and video), while our display or browser going away is a tool fault. A tick's `t` is the game's
+own clock on every engine: it stops while the game pauses itself (Godot counts physics frames only
+while the tree runs, Unity reads `Time.time`, a page sums its frames' clamped deltas).
 
 - Godot's runner is one GDScript ([godotPlayRunner.ts](../../apps/server/src/game/godotPlayRunner.ts))
   the server writes under the game's ignored `builds/logs/` for each session, so it always matches
@@ -156,7 +168,7 @@ So the harness needs exactly two things from an OS: a **process host**
 ([windowHost.ts](../../apps/server/src/game/windowHost.ts)): one `launch(command, viewport)` that
 gives a game or editor a window it draws into, which the user never sees and which never takes
 focus. Exploration, bots and the live Unity editor (which runs the Unity check and builds players)
-and Blender all launch through it; the Godot check needs no window and runs headless. On Linux every launch gets its own Xvfb display; the display outlives its command and ends right
+and Blender all launch through it; the Godot check needs no window and runs headless. On Linux every launch gets its own Xvfb display, which Xvfb picks itself (`-displayfd`); the display outlives its command and ends right
 after it (an engine that loses its display mid-quit hangs in Xlib's exit path), so a game that quits
 because its server died takes its display along. Windows and macOS give an app no private display
 (a virtual monitor needs a driver there; macOS's API is private), so the window opens on the
@@ -390,8 +402,11 @@ because explore sessions, bot runs and game operations are keyed by checkout roo
 Two starts at once would both pass a free-memory check made before either allocates, so explore
 and bot starts and the live Unity and Blender editor opens hold one gate (`GameMemoryGate`) from
 that check through their import and boot (a Unity open through its launch and its first minute,
-not its whole cold import). Time queued behind the gate counts against the same 75 s bound, after
-which the start is refused `busy` (contention, not memory), never kept waiting unseen. No gated
+not its whole cold import). A start that imports into the folder (a native explore session, each
+native bot run) takes the game's operation lock first and holds both through its boot; the gate
+is the one place that order is kept, so nothing takes the operation lock while holding the gate.
+Time queued behind the lock or the gate counts against the same 75 s bound, after which the start
+is refused `busy` (contention, not memory), never kept waiting unseen. No gated
 start may open an editor: the gate is one permit and does not nest. A sample's time waiting there is
 given back to its clock. A play turn (`plays`: a sample's, the tester's, the ship player's) whose
 play was refused for memory, a busy machine or a tool of ours, and that played nothing (no input

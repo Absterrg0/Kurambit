@@ -4,11 +4,14 @@ import * as NodePath from "node:path";
 import * as Context from "effect/Context";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
+import * as Cache from "effect/Cache";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
   GameOperationError,
+  gameOperationFault,
+  type GameToolchainStatus,
   type GameCheckResult,
   type GameStatus,
   type GameAction,
@@ -68,7 +71,6 @@ import * as GameEngine from "./GameEngine.ts";
 import * as GameExplore from "./GameExplore.ts";
 import * as GameExport from "./GameExport.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
-import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GamePreview from "./GamePreview.ts";
@@ -76,6 +78,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameUnity from "./GameUnity.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import {
   SAVED_DIR,
   SAVED_EVENT,
@@ -88,18 +91,6 @@ import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
 import { comparedSource, type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
 import { WEB_BUILD_DIRECTORY } from "./webBuild.ts";
 import { textOf } from "./liveProcess.ts";
-
-/**
- * A Godot bot peaked at 710 MB in its import and 505 MB playing (Godot,
- * ffmpeg recording, its display, bot child); a Chromium bot at 630 MB. Its
- * Chromium launches after the memory gate, so two bots admitted together
- * must both fit.
- */
-const BOT_ROOM: MemoryRoom = {
-  what: "bot run",
-  neededMb: 1536,
-  env: "KURAMBIT_BOT_MEMORY_MB",
-};
 
 export class GameService extends Context.Service<
   GameService,
@@ -339,6 +330,13 @@ export class GameService extends Context.Service<
       root: string,
       runIds: ReadonlyArray<string>,
     ) => Effect.Effect<string | null, GameOperationError>;
+    /**
+     * The toolchain's status for the Settings row and the stage's readiness,
+     * cached; with a thread, Unity's entry speaks for that game's editor version.
+     */
+    readonly toolchain: (
+      threadId?: ThreadId,
+    ) => Effect.Effect<GameToolchainStatus, GameOperationError>;
     /** A quick look at a finished bot run: summary, findings and evidence paths. */
     readonly botView: (
       threadId: ThreadId,
@@ -412,10 +410,10 @@ const make = Effect.gen(function* () {
   const library = yield* GameAssetLibrary.GameAssetLibrary;
   const gameBot = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
-  const gate = yield* GameMemoryGate.GameMemoryGate;
   const exporter = yield* GameExport.GameExport;
   const explore = yield* GameExplore.GameExplore;
   const players = yield* GamePlayer.GamePlayer;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const snapshot = (root: string, project: string) =>
     Effect.promise((signal) => snapshotBuildSource(root, project, { signal }));
   // Status is read on every push for the thread, so its freshness answer reuses
@@ -437,39 +435,26 @@ const make = Effect.gen(function* () {
       if (reread) cache.clear();
       return snapshotBuildSource(root, project, { signal, cache });
     });
-  // No exclusive() here: a real-time run takes minutes and must not hold the
-  // game's operation lock. The bot service refuses a second concurrent run
-  // per checkout as busy.
-  const botRunIn = Effect.fnUntraced(function* (
-    root: string,
-    input: GameBotRunInput,
-    owner?: ThreadId,
-  ) {
-    const engine = engineProfile((yield* projects.read(root)).engine.name);
-    yield* gate.admit(
-      "Bot run",
-      root,
-      BOT_ROOM,
-      // A prepared player imports in its own build, and only when it builds.
-      engine.play === "player"
-        ? Effect.void
-        : Effect.gen(function* () {
-            // An engine with no import step (three.js) succeeds here at once.
-            const imported = yield* engines.importProject(root);
-            if (!imported.success)
-              return yield* new GameOperationError({
-                operation: "Bot run",
-                path: imported.path ?? root,
-                reason: "command-failed",
-                detail:
-                  `The ${engine.displayName} import failed before the bot run started.\n${imported.message}`.slice(
-                    -2000,
-                  ),
-              });
-          }),
-    );
-    return yield* gameBot.run(root, input, owner);
+  // The run itself takes minutes and holds no game lock: GameBot takes the
+  // game's operation lock and the memory gate only around each run's import
+  // and boot, and refuses a second call on the same checkout as busy.
+  const botRunIn = (root: string, input: GameBotRunInput, owner?: ThreadId) =>
+    gameBot.run(root, input, owner);
+  // The toolchain's answer per project (Unity speaks for its own editor
+  // version), cached: the stage reads it on its own query, never on every
+  // status read, and a settings change clears it.
+  const toolchainStatus = yield* Cache.make({
+    lookup: (unityProject: string) =>
+      tools.status(unityProject === "" ? undefined : { unityProject }),
+    capacity: 32,
+    timeToLive: "30 seconds",
   });
+  yield* settings.subscribeChanges.pipe(
+    Effect.flatMap((changes) =>
+      Stream.runForEach(changes, () => Cache.invalidateAll(toolchainStatus)),
+    ),
+    Effect.forkScoped,
+  );
   /**
    * Imports first: a fresh game has no .godot cache, so .tres files and
    * class_names can resolve. With a live editor, import and check share one
@@ -699,6 +684,8 @@ const make = Effect.gen(function* () {
         yield* operations.cancel(root, String(threadId));
         yield* explore.release(threadId, root);
       }
+      // Bot runs are keyed by their own checkout, which may be another one.
+      yield* gameBot.stopOwned(threadId);
     }),
     status: Effect.fn("GameService.status")(function* (threadId, statusOptions) {
       const root = yield* projects.resolve(threadId);
@@ -815,9 +802,20 @@ const make = Effect.gen(function* () {
     // Its video lands in the game folder; the run is recorded on the thread.
     botRun: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) =>
-        projects
-          .admitWrite(threadId, root, "Bot run", String(threadId))
-          .pipe(Effect.andThen(botRunIn(root, input, threadId))),
+        projects.admitWrite(threadId, root, "Bot run", String(threadId)).pipe(
+          Effect.andThen(botRunIn(root, input, threadId)),
+          // A play refused for a cause not about the game is marked like an
+          // explore start's, so a run's play turn that played nothing is replayed.
+          Effect.tapError((error) =>
+            error.reason !== "cancelled" &&
+            (gameOperationFault(error.reason) === "machine" ||
+              gameOperationFault(error.reason) === "tool")
+              ? explore
+                  .markRefused(threadId, root, error.reason, 0)
+                  .pipe(Effect.ignore({ log: true }))
+              : Effect.void,
+          ),
+        ),
       ),
     botRunIn: (root, input) => botRunIn(root, input),
     botRuns: (threadId) => gameBot.runs(threadId),
@@ -826,8 +824,20 @@ const make = Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         return yield* gameBot.view(root, input);
       }),
-    // Foundation placeholder (CONTRACT §3): builder P implements it over GameBot.
-    botReportText: () => Effect.succeed(null),
+    botReportText: (root, runIds) => gameBot.reportText(root, runIds),
+    toolchain: (threadId) =>
+      Effect.gen(function* () {
+        if (threadId === undefined) return yield* Cache.get(toolchainStatus, "");
+        const root = yield* projects.resolve(threadId);
+        const manifest = yield* projects.read(root);
+        // Only Unity picks its editor by the project's own version.
+        return yield* Cache.get(
+          toolchainStatus,
+          manifest.engine.name === "unity"
+            ? GameProjectService.insideGame(root, manifestProject(manifest))
+            : "",
+        );
+      }),
     botReport: (threadId) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);

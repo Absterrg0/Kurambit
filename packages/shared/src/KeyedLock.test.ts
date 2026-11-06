@@ -3,9 +3,11 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as KeyedLock from "./KeyedLock.ts";
 
@@ -116,6 +118,59 @@ describe("KeyedLock", () => {
       assert.isFalse(yield* Ref.get(finalized));
       yield* Scope.close(callerScope, Exit.void);
       assert.isTrue(yield* Ref.get(finalized));
+    }),
+  );
+
+  it.effect("a bounded try never starts the work late and never keeps the key", () =>
+    Effect.gen(function* () {
+      const lock = yield* KeyedLock.make<string>();
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const holder = yield* lock
+        .withLock(
+          "key",
+          Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        )
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+
+      const ran = yield* Ref.make(0);
+      assert.isTrue(
+        Option.isNone(
+          yield* lock.tryWithLock(
+            "key",
+            0,
+            Ref.update(ran, (n) => n + 1),
+          ),
+        ),
+      );
+      const waiting = yield* lock
+        .tryWithLock(
+          "key",
+          1_000,
+          Ref.update(ran, (n) => n + 1),
+        )
+        .pipe(Effect.forkChild);
+      yield* TestClock.adjust("1 second");
+      assert.isTrue(Option.isNone(yield* Fiber.join(waiting)));
+      assert.strictEqual(yield* Ref.get(ran), 0);
+
+      const queued = yield* lock
+        .tryWithLock(
+          "key",
+          60_000,
+          Ref.updateAndGet(ran, (n) => n + 1),
+        )
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(holder);
+      assert.deepStrictEqual(yield* Fiber.join(queued), Option.some(1));
+      assert.deepStrictEqual(yield* lock.activeKeys, []);
+      assert.deepStrictEqual(
+        yield* lock.tryWithLock("key", 0, Effect.succeed("free")),
+        Option.some("free"),
+      );
     }),
   );
 });

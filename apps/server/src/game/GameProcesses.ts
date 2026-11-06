@@ -4,12 +4,13 @@ import type * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeStream from "node:stream";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { GameOperationError, type GameProcessResult, type GameViewport } from "@kurambit/contracts";
-import { HOST_OS, ProcessHost, spawnOwned } from "./processHost.ts";
+import { HOST_OS, ProcessHost, spawnOwned, type ProcessFacts } from "./processHost.ts";
 import type { WindowCommand, WindowHost } from "./windowHost.ts";
 
 interface Running {
@@ -126,6 +127,19 @@ interface ProcessInput {
    * is ever matched by name.
    */
   window?: { readonly host: WindowHost; readonly viewport: GameViewport } | undefined;
+  /**
+   * False for a child whose launch record is reaped at the next start (the
+   * live Unity editor): it stays out of the Windows kill-on-close job, so a
+   * Licensing Client it starts is not ended with the server.
+   */
+  joinsJob?: boolean | undefined;
+  /** Which of a Windows tree a stop may end (a Unity editor's Licensing Client never). */
+  keep?: ((facts: ProcessFacts) => boolean) | undefined;
+  /**
+   * False keeps the output in memory only: a short probe (a tool's
+   * --version) leaves no log file behind for every call.
+   */
+  log?: boolean | undefined;
 }
 export class GameProcesses extends Context.Service<
   GameProcesses,
@@ -144,19 +158,22 @@ const make = Effect.gen(function* () {
     input: Parameters<GameProcesses["Service"]["run"]>[0],
     signal?: AbortSignal,
   ) => {
+    const keepsLog = input.log !== false;
     const logs = NodePath.join(input.root, "builds/logs");
-    await NodeFSP.mkdir(logs, { recursive: true });
+    if (keepsLog) await NodeFSP.mkdir(logs, { recursive: true });
     signal?.throwIfAborted();
-    const logPath = NodePath.join(
-      logs,
-      `${Date.now()}-${input.operation}-${NodeCrypto.randomUUID()}.log`,
-    );
-    const log = NodeFS.createWriteStream(logPath, { flags: "wx" });
+    const logPath = keepsLog
+      ? NodePath.join(logs, `${Date.now()}-${input.operation}-${NodeCrypto.randomUUID()}.log`)
+      : "";
+    const log = keepsLog
+      ? NodeFS.createWriteStream(logPath, { flags: "wx" })
+      : new NodeStream.PassThrough().resume();
     // Spawn only after the log opens, so a failed log write cannot leave an untracked process.
-    await new Promise<void>((resolve, reject) => {
-      log.once("open", () => resolve());
-      log.once("error", reject);
-    });
+    if (keepsLog)
+      await new Promise<void>((resolve, reject) => {
+        log.once("open", () => resolve());
+        log.once("error", reject);
+      });
     const command = {
       executable: input.executable,
       args: input.args,
@@ -169,6 +186,8 @@ const make = Effect.gen(function* () {
           ? { ...input.env }
           : { ...headlessEnvironment(process.env), ...input.env },
       stdio: ["ignore", "pipe", "pipe"],
+      joinsJob: input.joinsJob,
+      keep: input.keep,
     } satisfies WindowCommand;
     const hosted =
       input.window === undefined
@@ -177,9 +196,14 @@ const make = Effect.gen(function* () {
             log.end();
             throw error;
           });
+    // Every child owns its tree: an engine's own children (an @tool script's
+    // OS.execute, an export plugin's tools) end with it on a stop or timeout.
     const owned =
       hosted?.process ??
-      spawnOwned(host, command.executable, command.args, { ...command, tree: false });
+      spawnOwned(host, command.executable, command.args, {
+        ...command,
+        tree: true,
+      });
     const { child } = owned;
     let stdout = "",
       stderr = "",
@@ -206,7 +230,7 @@ const make = Effect.gen(function* () {
       if (channel === "stdout") stdout = (stdout + value).slice(-64_000);
       else stderr = (stderr + value).slice(-64_000);
       // Keep disk output bounded too; noisy tools must not fill the user's disk.
-      if (log.bytesWritten < 16 * 1024 * 1024) log.write(chunk);
+      if (!("bytesWritten" in log) || log.bytesWritten < 16 * 1024 * 1024) log.write(chunk);
     };
     child.stdout?.on("data", (chunk: Buffer) => append(chunk, "stdout"));
     child.stderr?.on("data", (chunk: Buffer) => append(chunk, "stderr"));

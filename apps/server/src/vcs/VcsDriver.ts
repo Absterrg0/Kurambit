@@ -112,6 +112,15 @@ export interface VcsCheckpointOps {
   ) => Effect.Effect<boolean, VcsError>;
 }
 
+/**
+ * `initialCommit` also records every file in the folder as the first commit,
+ * with Kurambit's own identity and git's plumbing, so the user's signing
+ * config and hooks never apply to a repository Kurambit creates.
+ */
+export interface VcsDriverInitInput extends VcsInitInput {
+  readonly initialCommit?: { readonly message: string };
+}
+
 export class VcsDriver extends Context.Service<
   VcsDriver,
   {
@@ -132,7 +141,7 @@ export class VcsDriver extends Context.Service<
       cwd: string,
       relativePaths: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyArray<string>, VcsError>;
-    readonly initRepository: (input: VcsInitInput) => Effect.Effect<void, VcsError>;
+    readonly initRepository: (input: VcsDriverInitInput) => Effect.Effect<void, VcsError>;
     readonly getDiffPreview?: (
       input: ReviewDiffPreviewInput,
     ) => Effect.Effect<ReviewDiffPreviewResult, VcsError>;

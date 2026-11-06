@@ -28,6 +28,8 @@ export interface FrameVideoFacts {
   readonly distinctFrames: number;
   /** The longest wall time, in ms, the engine's frame counter did not advance. */
   readonly longestStallMs: number;
+  /** Game seconds at the start of that stall. */
+  readonly longestStallAt: number;
 }
 
 /**
@@ -55,6 +57,13 @@ export const openFrameVideo = (input: {
   let lastAdvance = 0;
   let lastCounter = -1;
   let longestStallMs = 0;
+  let longestStallAt = 0;
+  let lastAdvanceT = 0;
+  const stalled = (now: number) => {
+    if (now - lastAdvance <= longestStallMs) return;
+    longestStallMs = now - lastAdvance;
+    longestStallAt = lastAdvanceT;
+  };
   const open = (): OwnedProcess => {
     const log = NodeFS.openSync(input.logPath, "w");
     const owned = spawnOwned(
@@ -112,8 +121,9 @@ export const openFrameVideo = (input: {
       }
       received.push([frame.frame, Number(frame.t.toFixed(3)), now - started]);
       if (frame.frame !== lastCounter) {
-        longestStallMs = Math.max(longestStallMs, now - lastAdvance);
+        stalled(now);
         lastAdvance = now;
+        lastAdvanceT = frame.t;
         lastCounter = frame.frame;
       }
       const slot = Math.floor((now - started) / interval);
@@ -132,7 +142,7 @@ export const openFrameVideo = (input: {
       if (owned === null) return null;
       const now = Date.now();
       fillTo(Math.floor((now - started) / interval) + 1);
-      longestStallMs = Math.max(longestStallMs, now - lastAdvance);
+      stalled(now);
       let timedOut = false;
       await new Promise<void>((resolve) => {
         if (!owned.running()) return resolve();
@@ -157,6 +167,7 @@ export const openFrameVideo = (input: {
         dropped,
         distinctFrames: new Set(received.map(([frame]) => frame)).size,
         longestStallMs,
+        longestStallAt: Number(longestStallAt.toFixed(2)),
       };
       await NodeFSP.writeFile(
         input.sidecarPath,

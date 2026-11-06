@@ -87,8 +87,10 @@ export const LIVE_SWEEP_MS = 15_000;
  * One idle sweep of a live editor's sessions, so one forgotten game cannot
  * hold an editor and its display forever: an idle session past LIVE_IDLE_MS
  * closes, and every idle one closes early when the machine runs short of
- * memory. Each `close` re-checks that its session is still idle in the step
- * that ends it, since a call may have taken it meanwhile.
+ * memory. A session whose process or MCP child died (`alive` says false) is
+ * closed and forgotten, so the next call reopens it instead of reusing a dead
+ * one. Each `close` re-checks that its session is still idle in the step that
+ * ends it, since a call may have taken it meanwhile.
  */
 export const sweepIdle = (input: {
   readonly what: string;
@@ -97,6 +99,8 @@ export const sweepIdle = (input: {
     readonly root: string;
     readonly lastActive: number;
     readonly close: Effect.Effect<void>;
+    /** Whether the editor and its MCP child still run; absent is taken as alive. */
+    readonly alive?: Effect.Effect<boolean>;
   }>;
 }) =>
   Effect.gen(function* () {
@@ -105,6 +109,16 @@ export const sweepIdle = (input: {
     const shortMb =
       idle.length === 0 ? null : underIdleMemoryFloor(yield* input.memory.availableMemory);
     for (const session of idle) {
+      if (session.alive !== undefined && !(yield* session.alive)) {
+        yield* Effect.logWarning(
+          `a live ${input.what} died; it is closed and reopens on its next call`,
+          {
+            root: session.root,
+          },
+        );
+        yield* session.close;
+        continue;
+      }
       const expired = now - session.lastActive > LIVE_IDLE_MS;
       if (!expired && shortMb === null) continue;
       if (!expired)

@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Pure path, environment and licence-file helpers for the Unity lane's native boundary.
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { UNITY_MIN_VERSION } from "@kurambit/contracts";
 import { engineChildEnv } from "./GameProcesses.ts";
+import { HOST_OS } from "./processHost.ts";
 import { UNITY_CLI_VERSION } from "./plumbingBuilds.ts";
 
 export const UNITY_DOWNLOAD_URL = "https://unity.com/download";
@@ -205,9 +205,38 @@ export const pickUnityEditor = <C extends UnityEditorCandidate>(
     : { kind: "unsupported", candidate: pool.find((candidate) => candidate.version !== null)! };
 };
 
-/** Where the Unity Licensing Client keeps the entitlement Unity Hub activated. */
-export const unityLicenseFile = (): string =>
-  NodePath.join(NodeOS.homedir(), ".config/unity3d/Unity/licenses/UnityEntitlementLicense.xml");
+/**
+ * Where Unity keeps a licence, per OS, as Unity's activation FAQ lists them:
+ * the named-user entitlement the Hub activates, and a serial licence file.
+ */
+export const unityLicenseFiles = (
+  platform: NodeJS.Platform,
+  env: { readonly LOCALAPPDATA?: string | undefined; readonly PROGRAMDATA?: string | undefined },
+  home: string,
+): { readonly entitlement: string; readonly serial: string } => {
+  if (platform === "win32") {
+    const join = NodePath.win32.join;
+    return {
+      entitlement: join(
+        env.LOCALAPPDATA ?? join(home, "AppData", "Local"),
+        "Unity",
+        "licenses",
+        "UnityEntitlementLicense.xml",
+      ),
+      serial: join(env.PROGRAMDATA ?? "C:\\ProgramData", "Unity", "Unity_lic.ulf"),
+    };
+  }
+  const join = NodePath.posix.join;
+  return platform === "darwin"
+    ? {
+        entitlement: join(home, "Library/Unity/licenses/UnityEntitlementLicense.xml"),
+        serial: "/Library/Application Support/Unity/Unity_lic.ulf",
+      }
+    : {
+        entitlement: join(home, ".config/unity3d/Unity/licenses/UnityEntitlementLicense.xml"),
+        serial: join(home, ".local/share/unity3d/Unity/Unity_lic.ulf"),
+      };
+};
 
 export type UnityLicense =
   | { readonly kind: "active"; readonly product: string; readonly refreshBy: string | null }
@@ -219,12 +248,20 @@ export type UnityLicense =
  * its refresh date matter here; the signature is the Licensing Client's
  * business, and an editor that rejects the file still fails loudly at start.
  */
-export const parseUnityLicense = (xml: string | null, nowMs: number): UnityLicense => {
-  if (xml === null) return { kind: "missing" };
+export const parseUnityLicense = (
+  xml: string | null,
+  nowMs: number,
+  /** A serial licence file is there: the editor reads it itself, and fails loudly if it is bad. */
+  serial = false,
+): UnityLicense => {
+  const missing: UnityLicense = serial
+    ? { kind: "active", product: "Unity (serial licence)", refreshBy: null }
+    : { kind: "missing" };
+  if (xml === null) return missing;
   const group = /<EntitlementGroup\b[^>]*\bType="EDITOR"[^>]*>([\s\S]*?)<\/EntitlementGroup>/.exec(
     xml,
   );
-  if (group === null) return { kind: "missing" };
+  if (group === null) return missing;
   const product = /\bProduct="([^"]{1,80})"/.exec(group[0])?.[1] ?? "Unity";
   const refreshBy = /<UpdateDate>([^<]{1,40})<\/UpdateDate>/.exec(group[1] ?? "")?.[1] ?? null;
   if (refreshBy !== null) {
@@ -234,9 +271,9 @@ export const parseUnityLicense = (xml: string | null, nowMs: number): UnityLicen
   return { kind: "active", product, refreshBy };
 };
 
-export const unityLicenseMessage = (license: UnityLicense): string =>
+export const unityLicenseMessage = (license: UnityLicense, file: string): string =>
   license.kind === "missing"
-    ? `No Unity licence is active on this machine (${unityLicenseFile()} is missing or holds no editor entitlement). Open Unity Hub, sign in, and add a Unity Personal licence under Preferences > Licenses.`
+    ? `No Unity licence is active on this machine (${file} is missing or holds no editor entitlement). Open Unity Hub, sign in, and add a Unity Personal licence under Preferences > Licenses.`
     : license.kind === "expired"
       ? `The ${license.product} licence needed a refresh by ${license.refreshBy}. Open Unity Hub and sign in so it renews the licence.`
       : `${license.product} licence active${license.refreshBy === null ? "" : ` (refresh due ${license.refreshBy.slice(0, 10)})`}.`;
@@ -283,9 +320,18 @@ export const unityCliEnv = (home: string, extra?: NodeJS.ProcessEnv): NodeJS.Pro
     XDG_CACHE_HOME: NodePath.join(home, ".cache"),
     XDG_DATA_HOME: NodePath.join(home, ".local/share"),
     XDG_STATE_HOME: NodePath.join(home, ".local/state"),
+    // Windows apps keep their config and logs under these, not HOME
+    // (unverified for the CLI: it is Hub-style, so it likely logs there).
+    ...(HOST_OS === "win32"
+      ? {
+          USERPROFILE: home,
+          APPDATA: NodePath.join(home, "AppData", "Roaming"),
+          LOCALAPPDATA: NodePath.join(home, "AppData", "Local"),
+        }
+      : {}),
     ...extra,
   });
 
 /** Unity Licensing Client binaries, whoever started them, are never signalled. */
 export const isUnityLicensingClient = (exe: string): boolean =>
-  /(^|\/)Unity\.Licensing\.|\/Licensing\/Client\//.test(exe);
+  /(^|[\\/])Unity\.Licensing\.|[\\/]Licensing[\\/]Client[\\/]/i.test(exe);

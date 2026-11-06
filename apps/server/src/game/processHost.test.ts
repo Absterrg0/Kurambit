@@ -7,6 +7,7 @@ import {
   makeProcessHost,
   spawnOwned,
   stopRecorded,
+  windowsDescendants,
   type ProcessFacts,
 } from "./processHost.ts";
 
@@ -77,4 +78,20 @@ it.skipIf(HOST_OS !== "linux")("a tree stop ends what the child started", async 
   await owned.stop({ graceMs: 1_000 });
   expect(owned.alive()).toBe(false);
   expect(await processFacts(grandchild)).toBeNull();
+});
+
+// Windows reuses pids and never reparents: a process whose parent pid names
+// the editor but started before it is someone else's and is never ended.
+it("takes a Windows tree by parent link, never a process older than its parent", () => {
+  const at = (pid: number, ppid: number, start: string) =>
+    facts({ pid, ppid, pgid: null, start, argv: null });
+  const editor = at(10, 1, "2026-11-06T10:00:00.0000000Z");
+  const all = [
+    editor,
+    at(11, 10, "2026-11-06T10:00:05.0000000Z"),
+    at(12, 11, "2026-11-06T10:00:06.0000000Z"),
+    at(13, 10, "2026-11-06T09:00:00.0000000Z"),
+    at(14, 2, "2026-11-06T10:00:07.0000000Z"),
+  ];
+  expect(windowsDescendants(all, [editor]).map((member) => member.pid)).toEqual([11, 12]);
 });

@@ -27,7 +27,8 @@ describe("bot evidence", () => {
       let record = BotEvidence.add(BotEvidence.empty("t", "/g"), "/g", run("p", "play"));
       for (let i = 0; i < BotEvidence.KEPT_RUNS; i++)
         record = BotEvidence.add(record, "/g", run(`e${i}`, "explore"));
-      await BotEvidence.write(dir, record);
+      // The record as the atomic writer leaves it (its own tests cover the write).
+      NodeFS.writeFileSync(recordPath(dir, "t"), JSON.stringify(record));
       const reloaded = await BotEvidence.read(dir, "t");
       expect(reloaded).toEqual(record);
       expect(record.count).toBe(BotEvidence.KEPT_RUNS + 1);
