@@ -194,7 +194,6 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
             artDirection,
             engine,
             modelSelection: model,
-            profile,
           },
         })
       : await open({ environmentId, input: { path: directory, modelSelection: model } });

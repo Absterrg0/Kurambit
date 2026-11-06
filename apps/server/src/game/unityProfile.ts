@@ -3,6 +3,7 @@ import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const UNITY_PROFILE: GameEngineProfile = {
   id: "unity",
+  turnLoop: false,
   displayName: "Unity",
   projectDirectory: UNITY_PROJECT_DIRECTORY,
   exportTargets: ["Linux", "Windows"],

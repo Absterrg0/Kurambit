@@ -25,6 +25,8 @@ export const GameBuildSource = Schema.Union([
     threadTitle: Schema.String,
     /** The turn's ordinal in its thread. */
     turn: PositiveInt,
+    /** The T3 run that made the turn: what `GameBuildRef`'s turn form names. */
+    runId: Schema.String,
     /** The person's request, first line, at most 140 characters. */
     request: Schema.String,
   }),
@@ -108,6 +110,12 @@ export const GameBuild = Schema.Struct({
   /** Why it cannot be restored (a live run, a role thread), else null. */
   noRestore: Schema.NullOr(Schema.String),
   facts: GameBuildFactsSummary,
+  /**
+   * The build this one was made from: restoring it undoes this build. A turn's is
+   * the build the folder held when the turn started (turn 1's: the thread's start
+   * checkpoint, ordinal 0); a round's is its base; null when unknown.
+   */
+  base: Schema.NullOr(GameBuildId),
 });
 export type GameBuild = typeof GameBuild.Type;
 

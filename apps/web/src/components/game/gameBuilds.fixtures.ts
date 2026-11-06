@@ -39,6 +39,7 @@ export const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
       threadId: ThreadId.make("thread-main"),
       threadTitle: "Main chat",
       turn: 5,
+      runId: "run:thread:thread-main:ordinal:5",
       request: "Make the slime jump higher",
     },
     summary: "Make the slime jump higher",
@@ -47,6 +48,7 @@ export const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: true,
     noPlay: null,
     noRestore: null,
+    base: null,
     facts: summary("measuring"),
   },
   {
@@ -72,6 +74,7 @@ export const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: true,
     noPlay: null,
     noRestore: "Stop the run to go back to a build.",
+    base: null,
     facts: summary("measured"),
   },
   {
@@ -84,6 +87,7 @@ export const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: false,
     noPlay: "Unity builds cannot be played here yet.",
     noRestore: "This build's history was pruned.",
+    base: null,
     facts: summary("incomplete"),
   },
 ];

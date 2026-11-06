@@ -4,7 +4,7 @@ Kurambit is a local desktop app for making games with coding agents. A Node WebS
 
 ## Where Kurambit is going
 
-One brief should produce a game at a decent stage with the shape of a Steam demo, and creators keep improving it with the studio. Any genre. What the harness itself does around the model is the product: it plays every build with a separate tester session, compares builds blind so a worse one never lands, and stops when the game is done or stops getting better. Creators decide taste and direction; the harness never spends tokens on work that adds nothing.
+Kurambit does for games what T3 Code does for code. A brief becomes a playable, good-looking game in minutes, and every chat turn after that visibly makes it better: the turn's build plays on the Stage, the harness measures its facts (boots, can it be won or lost, does it freeze), and undo is one click. Keep going is the same loop repeated on top. Each step is proposed from the evidence, undone when a fact gets worse, and stopped when steps stop gaining anything. Any genre, aiming at a game with the shape of a Steam demo. Creators decide taste and direction; the harness measures, never judges taste for them, and never spends tokens on work that adds nothing. three.js is the lane being built first. Godot and Unity are parked native lanes, so keep the engine a parameter everywhere.
 
 ## What we keep
 

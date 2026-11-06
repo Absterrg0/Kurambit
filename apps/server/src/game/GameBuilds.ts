@@ -357,6 +357,7 @@ const make = Effect.gen(function* () {
                 threadId: row.threadId,
                 threadTitle: row.threadTitle,
                 turn: row.runOrdinal,
+                runId: row.runId,
                 request: firstLine(row.request, "(no request text)"),
               },
               summary: shared
@@ -573,6 +574,8 @@ const make = Effect.gen(function* () {
           id: entry.id,
           at: entry.at,
           source: entry.source,
+          // Phase 1 (loop2): the turn loop's builder fills the undo base.
+          base: null,
           summary: entry.summary,
           files: entry.files,
           fileCount: entry.fileCount,

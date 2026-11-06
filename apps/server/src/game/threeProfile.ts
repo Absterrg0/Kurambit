@@ -3,6 +3,7 @@ import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const THREE_PROFILE: GameEngineProfile = {
   id: "three",
+  turnLoop: true,
   displayName: "three.js",
   projectDirectory: THREE_PROJECT_DIRECTORY,
   exportTargets: ["Web"],

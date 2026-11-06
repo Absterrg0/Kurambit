@@ -36,6 +36,11 @@ export interface GameSourceRules {
 
 export interface GameEngineProfile {
   readonly id: GameEngineId;
+  /**
+   * When a chat turn changes the game, play and measure its build at once. Off
+   * for an engine whose build is too slow to follow every turn (parked lanes).
+   */
+  readonly turnLoop: boolean;
   /** Short human name for honest operation messages ("Godot", "three.js", "Unity"). */
   readonly displayName: string;
   /** The engine project directory a new game gets; the run calls it the lane. */

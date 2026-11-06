@@ -1381,7 +1381,6 @@ const make = Effect.gen(function* () {
       threadId: created.threadId,
       brief: input.brief,
       ...(input.artDirection === undefined ? {} : { artDirection: input.artDirection }),
-      ...(input.profile === undefined ? {} : { profile: input.profile }),
     }).pipe(
       Effect.catch((cause) =>
         Effect.sync(() =>

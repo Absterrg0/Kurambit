@@ -612,8 +612,6 @@ export const GameCreateInput = Schema.Struct({
   engine: Schema.optionalKey(GameEngineId),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
-  /** How the game's first run decides; omitted means Guided. */
-  profile: Schema.optionalKey(GameRunProfile),
 });
 export type GameCreateInput = typeof GameCreateInput.Type;
 export const GameOpenInput = Schema.Struct({ path: Schema.String, modelSelection: ModelSelection });
