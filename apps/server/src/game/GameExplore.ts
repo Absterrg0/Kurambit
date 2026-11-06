@@ -144,7 +144,6 @@ export class GameExplore extends Context.Service<
     readonly memoryWait: (threadId: ThreadId) => Effect.Effect<
       {
         readonly waitedMs: number;
-        readonly refusals: number;
         readonly refused: boolean;
         readonly executedInputSteps: number;
       },
@@ -347,14 +346,10 @@ const make = Effect.gen(function* () {
     evidenceLock.withPermits(1)(
       Effect.gen(function* () {
         const record = yield* loadEvidence(String(threadId), root);
-        const prior = record.memory ?? { waitedMs: 0, refusals: 0, refused: false };
+        const prior = record.memory ?? { waitedMs: 0, refused: false };
         const next: ExploreEvidence.ThreadEvidence = {
           ...record,
-          memory: {
-            waitedMs: prior.waitedMs + waitedMs,
-            refusals: prior.refusals + (refused === true ? 1 : 0),
-            refused: refused ?? prior.refused,
-          },
+          memory: { waitedMs: prior.waitedMs + waitedMs, refused: refused ?? prior.refused },
         };
         rememberEvidence(next);
         yield* writeEvidence(next);
@@ -1307,7 +1302,7 @@ const make = Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const record = yield* threadEvidence(threadId, root);
       const { executedInputSteps } = ExploreEvidence.totals(record);
-      const memory = record.memory ?? { waitedMs: 0, refusals: 0, refused: false };
+      const memory = record.memory ?? { waitedMs: 0, refused: false };
       return { ...memory, executedInputSteps };
     }),
     sheet: Effect.fn("GameExplore.sheet")(function* (threadId, output) {

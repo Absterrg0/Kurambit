@@ -6,7 +6,13 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError } from "@kurambit/contracts";
 import { botEnding, botFinalState } from "../gameBotRuntime.ts";
-import { type GameRunMemoryShort, handBackOnLowMemory, memoryEnded } from "./lowMemory.ts";
+import {
+  type GameRunGameBusy,
+  type GameRunMemoryShort,
+  handBackOnBusy,
+  handBackOnLowMemory,
+  memoryEnded,
+} from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
 import { playCopy, type RoleDeps } from "./roleWorkspace.ts";
 import type { Step } from "./state.ts";
@@ -34,11 +40,15 @@ export const runBotFact = (
     readonly runId: string;
     readonly copies: string;
     readonly log: (line: string) => Effect.Effect<void>;
-    /** The step may still hand itself back to wait for memory. */
+    /** The step may still hand itself back to wait for memory, or for a start ahead of it. */
     readonly memoryWaitsLeft: boolean;
+    readonly busyWaitsLeft: boolean;
   },
   step: BotStep,
-): Effect.Effect<BotResult | ReturnType<typeof memoryEnded>, GameRunMemoryShort> => {
+): Effect.Effect<
+  BotResult | ReturnType<typeof memoryEnded>,
+  GameRunMemoryShort | GameRunGameBusy
+> => {
   const errorFact = (note: string): BotResult => ({
     kind: "bot",
     fact: { ending: "error", seconds: 0, final: {}, note: plain(note, ctx.root) },
@@ -88,15 +98,20 @@ export const runBotFact = (
               detail: `could not copy the bot files into the build's copy (${cause instanceof Error && "code" in cause ? String(cause.code) : "copy failed"})`,
             }),
         });
-        const result = yield* handBackOnLowMemory(
-          deps.game.botRunIn(worktree.path, {
-            file: step.file,
-            seconds: step.seconds,
-            mode: "play",
-            decider: step.decider,
-          }),
+        // Two bots of a pair start one at a time: the second may queue behind the first's import.
+        const result = yield* handBackOnBusy(
+          handBackOnLowMemory(
+            deps.game.botRunIn(worktree.path, {
+              file: step.file,
+              seconds: step.seconds,
+              mode: "play",
+              decider: step.decider,
+            }),
+            "bot run",
+            ctx.memoryWaitsLeft,
+          ),
           "bot run",
-          ctx.memoryWaitsLeft,
+          ctx.busyWaitsLeft,
         );
         // The tester's decider is replayed; without its key the bot's own policy chose.
         const fallback =

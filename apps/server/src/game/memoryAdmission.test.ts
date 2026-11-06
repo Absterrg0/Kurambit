@@ -62,10 +62,11 @@ it.effect("refuses after the bound, with the time it waited", () =>
 );
 
 it.effect(
-  "refuses a start queued behind a long hold once its bound passes, never interrupting the holder",
+  "refuses a start queued behind a long hold once its bound passes as contention, never as memory, and never interrupts the holder",
   () =>
     Effect.gen(function* () {
       const gate = Semaphore.makeUnsafe(1);
+      const credited: Array<[number, boolean]> = [];
       const admit = (start: Effect.Effect<string>) =>
         admitWithMemory({
           gate,
@@ -73,7 +74,7 @@ it.effect(
           maxWaitMs: 75_000,
           poll: "5 seconds",
           refuse: (short, waitedMs) => ({ short, waitedMs }),
-          onWaited: () => {},
+          onWaited: (waitedMs, refused) => credited.push([waitedMs, refused]),
           start,
         });
       const holder = yield* Effect.forkChild(
@@ -81,7 +82,12 @@ it.effect(
       );
       const queued = yield* Effect.forkChild(Effect.flip(admit(Effect.succeed("ran"))));
       yield* TestClock.adjust("2 minutes");
-      expect(yield* Fiber.join(queued)).toMatchObject({ waitedMs: 75_000 });
+      expect(yield* Fiber.join(queued)).toEqual({ short: null, waitedMs: 75_000 });
+      // The holder's admission, then the queued start's wait, given back but not a memory refusal.
+      expect(credited).toEqual([
+        [0, false],
+        [75_000, false],
+      ]);
       yield* TestClock.adjust("15 minutes");
       expect(yield* Fiber.join(holder)).toBe("held");
     }),

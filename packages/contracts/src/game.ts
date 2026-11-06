@@ -220,7 +220,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "Kurambit's starter template files are missing. Reinstall or update the app.",
       "command-failed":
         "The command failed. Read builds/logs for stdout and stderr, fix the reported error, and retry.",
-      busy: "Another operation is running for this game. Wait for it or press Stop.",
+      busy: "Another operation is running for this game, or another start on this machine is still taking its memory. Wait for it or press Stop.",
       "low-memory":
         "This machine has too little free memory to start this without risking it being killed mid-work. Close other apps, or wait a few minutes for other work to finish, then retry once. Retrying sooner gets the same answer.",
       checksum: "A helper Kurambit fetches failed its published checksum. Retry.",

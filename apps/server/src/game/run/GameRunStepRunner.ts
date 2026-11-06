@@ -41,6 +41,7 @@ import {
   gameRunOperationOwner,
   roleCapCommandId,
   roleThreadId,
+  roleTurnCommandId,
   roleTurnMessageId,
 } from "../../orchestration-v2/gameRun/ids.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
@@ -272,7 +273,7 @@ const make = Effect.gen(function* () {
       const pause = kind === "busy" ? BUSY_PAUSE : MEMORY_PAUSE;
       yield* log(
         kind === "busy"
-          ? `${short.what} found the game busy (${lastLine(short.error)}); the step waits ${BUSY_PAUSE} (${n} of ${BUSY_WAITS})`
+          ? `${short.what} could not start yet (${lastLine(short.error)}); the step waits ${BUSY_PAUSE} (${n} of ${BUSY_WAITS})`
           : `${short.what} refused, memory short (${lastLine(short.error)}); the step waits ${MEMORY_PAUSE} (${n} of ${MEMORY_WAITS})`,
       );
       const at =
@@ -734,6 +735,7 @@ const make = Effect.gen(function* () {
         copies: copiesOf(run.id),
         log,
         memoryWaitsLeft: memoryWaitsLeft(record),
+        busyWaitsLeft: busyWaitsLeft(record),
       },
       step,
     ).pipe(
@@ -741,6 +743,7 @@ const make = Effect.gen(function* () {
       Effect.flatMap((result) => complete({ ...job, stepId }, stepId, result)),
       Effect.catchTags({
         GameRunMemoryShort: (short) => waitForMemory(job, record, stepId, short, log),
+        GameRunGameBusy: (busy) => waitForMemory(job, record, stepId, busy, log),
       }),
     );
 
@@ -986,6 +989,16 @@ const make = Effect.gen(function* () {
       if (threadId === null) return;
       const prompt = at.role.prompt;
       const projectId = at.run.projectId;
+      // A memory wait's turn counts its own explore marks (the landing's
+      // replay, the cap's wait), from before it is sent: a repeat after the
+      // send leaves the marks the turn has made.
+      if (
+        job.turn === "memory" &&
+        (yield* threads.getCommandReceipt(
+          roleTurnCommandId(roleTurnMessageId(job.stepId, job.attempt, job.turn, job.n)),
+        )) === null
+      )
+        yield* game.finishExploration(threadId);
       yield* Effect.uninterruptible(
         Effect.gen(function* () {
           yield* roles.sendTurn({

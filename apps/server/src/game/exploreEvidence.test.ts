@@ -60,12 +60,12 @@ describe("explore evidence", () => {
       const record: ExploreEvidence.ThreadEvidence = {
         ...ExploreEvidence.upsert(ExploreEvidence.empty("t", "/g"), session("a", 2, 30_000)),
         inputCapMs: 120_000,
-        memory: { waitedMs: 45_000, refusals: 1, refused: false },
+        memory: { waitedMs: 45_000, refused: false },
       };
       await ExploreEvidence.write(dir, record);
       const reloaded = await ExploreEvidence.read(dir, "t");
       expect(reloaded?.inputCapMs).toBe(120_000);
-      expect(reloaded?.memory).toEqual({ waitedMs: 45_000, refusals: 1, refused: false });
+      expect(reloaded?.memory).toEqual({ waitedMs: 45_000, refused: false });
     } finally {
       NodeFS.rmSync(dir, { recursive: true, force: true });
     }

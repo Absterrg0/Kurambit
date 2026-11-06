@@ -33,12 +33,9 @@ const ThreadEvidence = Schema.Struct({
   inputCapMs: Schema.optionalKey(Schema.Number),
   /**
    * Since the thread's last finish: how long its starts waited for memory (the
-   * run gives that time back to its cap), how many were refused, and whether
-   * the latest was.
+   * run gives that time back to its cap), and whether the latest was refused.
    */
-  memory: Schema.optionalKey(
-    Schema.Struct({ waitedMs: Schema.Number, refusals: Schema.Number, refused: Schema.Boolean }),
-  ),
+  memory: Schema.optionalKey(Schema.Struct({ waitedMs: Schema.Number, refused: Schema.Boolean })),
 });
 export type ThreadEvidence = typeof ThreadEvidence.Type;
 const ThreadEvidenceJson = Schema.fromJsonString(ThreadEvidence);

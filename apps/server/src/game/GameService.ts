@@ -124,13 +124,12 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<void, GameOperationError>;
     /**
      * Since this thread's last finishExploration: how long its explore starts
-     * waited for memory, how many were refused `low-memory` and whether the
-     * latest was; with the input steps its sessions have executed in all.
+     * waited for memory and whether the latest was refused `low-memory`; with
+     * the input steps its sessions have executed in all.
      */
     readonly exploreMemoryWait: (threadId: ThreadId) => Effect.Effect<
       {
         readonly waitedMs: number;
-        readonly refusals: number;
         readonly refused: boolean;
         readonly executedInputSteps: number;
       },

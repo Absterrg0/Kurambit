@@ -54,7 +54,7 @@ import * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
 import { BuildName } from "./buildNames.ts";
 import { captureBuild, freeBy, isGameCode, measureChange } from "./builds.ts";
-import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
+import { MEMORY_PAUSE, MEMORY_WAITS } from "./lowMemory.ts";
 import { causeText } from "../runSetup.ts";
 import { RETRIES as LANDING_RETRIES, retrying } from "./retrying.ts";
 import { lastPlay } from "../botEvidence.ts";
@@ -462,17 +462,20 @@ const make = Effect.gen(function* () {
       // frees ends the run resumably instead of voiding the sample. Only play
       // turns: the write-up does not play.
       if (role.inputCapMs > 0 && !role.release) {
+        // The marks count from this turn's send (the memory resend resets
+        // them): a turn that played keeps its result, since a replay would
+        // give one side a second turn, and one that never tried to start is
+        // not the machine's fault.
         const mark = yield* game.exploreMemoryWait(roleThreadId);
-        const atStart = { refusals: 0, refused: false, executedInputSteps: 0 };
-        if (mark !== null && replayRefusedTurn(atStart, mark)) {
+        if (mark.refused && mark.executedInputSteps === 0) {
           const waits = turns.filter((t) => t.sent && t.turn.kind === "memory").length;
           if (waits >= MEMORY_WAITS)
             return yield* end("low-memory", `${role.role}: explore start refused, memory short`);
           yield* log(
             `${role.role}: explore start refused, memory short; waiting ${MEMORY_PAUSE} (${waits + 1} of ${MEMORY_WAITS})`,
           );
-          // The next turn's marks count from here.
-          yield* game.finishExploration(roleThreadId);
+          // The marks stay until the resend starts the next turn over: a landing
+          // run again before then reads the same marks and sets the same timer.
           return yield* again("memory", MEMORY_PAUSE);
         }
       }
