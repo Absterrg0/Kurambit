@@ -1,16 +1,51 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Paths name the build Play serves; gameWebServer owns the loopback HTTP boundary.
 import * as NodePath from "node:path";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import { GameOperationError } from "@kurambit/contracts";
 import { serveGameDirectory } from "./gameWebServer.ts";
+
+/** A save settles before it is pushed: editors write a file in several events. */
+const LIVE_SETTLE = Duration.millis(400);
+
+/**
+ * Whether a change under the live-served folder is the game's: Blender's
+ * sources and backups, dotfiles and editors' temporary files are not, so
+ * saving a .blend or a swap file never reloads the game. Pure.
+ */
+export const isLiveChange = (path: string): boolean => {
+  const segments = path.split(/[\\/]/).filter((segment) => segment !== "");
+  const name = segments.at(-1);
+  if (name === undefined || segments.some((segment) => segment.startsWith("."))) return false;
+  return !/(\.blend1?|~|\.swp|\.tmp)$/i.test(name);
+};
 
 export class GamePreview extends Context.Service<
   GamePreview,
   {
     /** Serves a build and makes it the one Play shows. */
     readonly select: (root: string, directory: string) => Effect.Effect<string, GameOperationError>;
+    /**
+     * Serves the game's own folder, as its dev server: one server and one
+     * recursive watch per game, kept until `stop`. Each settled change the
+     * game's (`isLiveChange`) calls `onChange` with its path. A watch that
+     * fails is logged and ends only the watch; the next `live` opens it again.
+     */
+    readonly live: (
+      root: string,
+      directory: string,
+      onChange: (path: string) => Effect.Effect<void>,
+    ) => Effect.Effect<string, GameOperationError>;
+    /** The URL of the game's live-served folder, or null when it is not served. */
+    readonly liveUrl: (root: string) => string | null;
+    /** Closes every server of this game and its live watch; no change is pushed after it. */
     readonly stop: (root: string) => Effect.Effect<void>;
     /** Closes the servers of this game's builds other than `directories` (builds an export pruned). */
     readonly retain: (root: string, directories: ReadonlyArray<string>) => Effect.Effect<void>;
@@ -19,6 +54,19 @@ export class GamePreview extends Context.Service<
   }
 >()("kurambit/game/GamePreview") {}
 const make = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  // Kept apart from the builds' servers, so an export pruning its builds
+  // (`retain`) or selecting one never closes the live folder's.
+  const lives = new Map<string, { url: string; close: () => Promise<void> }>();
+  const livePending = new Map<string, Promise<string>>();
+  const watches = new Map<string, Scope.Closeable>();
+  const closeWatch = (root: string) =>
+    Effect.suspend(() => {
+      const scope = watches.get(root);
+      if (scope === undefined) return Effect.void;
+      watches.delete(root);
+      return Scope.close(scope, Exit.void);
+    });
   const servers = new Map<
     string,
     { root: string; directory: string; url: string; close: () => Promise<void> }
@@ -43,14 +91,86 @@ const make = Effect.gen(function* () {
       }),
     );
     latest.delete(root);
+    await livePending.get(root)?.catch(() => undefined);
+    const live = lives.get(root);
+    lives.delete(root);
+    await live?.close();
   };
+  // The watch first, so no change is pushed for a folder no longer served.
+  const stopRoot = (root: string) =>
+    Effect.andThen(
+      closeWatch(root),
+      Effect.promise(() => closeWhere(root)),
+    );
   yield* Effect.addFinalizer(() =>
-    Effect.promise(async () => {
-      const roots = new Set([...servers.values()].map((entry) => entry.root));
-      for (const root of roots) await closeWhere(root);
-      await Promise.all([...pending.values()].map((opening) => opening.catch(() => undefined)));
+    Effect.gen(function* () {
+      for (const root of [...watches.keys()]) yield* closeWatch(root);
+      yield* Effect.promise(async () => {
+        const roots = new Set([...servers.values()].map((entry) => entry.root));
+        for (const root of [...roots, ...lives.keys()]) await closeWhere(root);
+        await Promise.all([...pending.values()].map((opening) => opening.catch(() => undefined)));
+      });
     }),
   );
+  const serveLive = (root: string, directory: string) =>
+    Effect.tryPromise({
+      try: async () => {
+        const existing = lives.get(root);
+        if (existing) return existing.url;
+        const inFlight = livePending.get(root);
+        if (inFlight) return inFlight;
+        const opening = serveGameDirectory(root, directory).then(({ url, close }) => {
+          lives.set(root, { url, close });
+          return url;
+        });
+        livePending.set(root, opening);
+        try {
+          return await opening;
+        } finally {
+          livePending.delete(root);
+        }
+      },
+      catch: (cause) =>
+        new GameOperationError({
+          operation: "preview",
+          path: NodePath.join(root, directory, "index.html"),
+          reason: "io",
+          cause,
+        }),
+    });
+  const watchLive = (
+    root: string,
+    directory: string,
+    onChange: (path: string) => Effect.Effect<void>,
+  ) =>
+    Effect.gen(function* () {
+      if (watches.has(root)) return;
+      const scope = Scope.makeUnsafe();
+      watches.set(root, scope);
+      // `live` returns once the watch is installed, so a save right after it is seen.
+      const ready = Deferred.makeUnsafe<void>();
+      const settle = () => Deferred.doneUnsafe(ready, Effect.void);
+      yield* fileSystem
+        .watch(NodePath.join(root, directory), { recursive: true, onReady: settle })
+        .pipe(
+          Stream.map((event) => event.path),
+          Stream.filter(isLiveChange),
+          Stream.debounce(LIVE_SETTLE),
+          Stream.runForEach(onChange),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("The game's live watch ended; Reload still works.", { root, cause }),
+          ),
+          // A watch that ended on its own leaves room for the next `live` to open one.
+          Effect.ensuring(
+            Effect.sync(() => {
+              settle();
+              if (watches.get(root) === scope) watches.delete(root);
+            }),
+          ),
+          Effect.forkIn(scope),
+        );
+      yield* Deferred.await(ready);
+    });
   const openServer = (root: string, directory: string) =>
     Effect.tryPromise({
       try: async () => {
@@ -92,7 +212,10 @@ const make = Effect.gen(function* () {
   };
   return GamePreview.of({
     url: (root) => latest.get(root)?.url ?? null,
-    stop: (root) => Effect.promise(() => closeWhere(root)),
+    liveUrl: (root) => lives.get(root)?.url ?? null,
+    live: (root, directory, onChange) =>
+      serveLive(root, directory).pipe(Effect.tap(() => watchLive(root, directory, onChange))),
+    stop: stopRoot,
     retain: (root, directories) => Effect.promise(() => retain(root, directories)),
     // A window opened before a new selection keeps loading the build it was
     // opened on, because each directory keeps its own server. Selecting only
