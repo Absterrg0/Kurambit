@@ -78,6 +78,27 @@ describe("budget", () => {
     const bot = { file: ".studio/bot/win.mjs", hash: "h", decider: "policy" } as const;
     expect(skilledFact(slow, bot, null)).toMatchObject({ status: "not-measured", retry: false });
   });
+
+  it("is the machine's, retried, when the machine was busy during the play", () => {
+    const slow = { ...run("budget", { state: "playing" }), timeRatio: 0.14 };
+    const busy = { cores: 12, stalled: 0.45, load: 13.4 };
+    expect(tierFact(slow, 60, null, busy)).toMatchObject({
+      status: "not-measured",
+      retry: true,
+      why: expect.stringContaining("the machine was busy (load 13.4 on 12 cores)"),
+    });
+    // Without CPU pressure, the load per core decides.
+    expect(tierFact(slow, 60, null, { cores: 12, stalled: null, load: 13.4 })).toMatchObject({
+      retry: true,
+    });
+    // Only a slow game on an idle machine is a fact about the game.
+    expect(tierFact(slow, 60, null, { cores: 12, stalled: 0.03, load: 13.4 })).toMatchObject({
+      retry: false,
+      standing: true,
+    });
+    const bot = { file: ".studio/bot/win.mjs", hash: "h", decider: "policy" } as const;
+    expect(skilledFact(slow, bot, null, busy)).toMatchObject({ retry: true });
+  });
 });
 
 describe("faultOf", () => {

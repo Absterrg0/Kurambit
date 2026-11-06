@@ -11,8 +11,10 @@
 // again), as `standing` when it needs a person (their measure tries again).
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -38,6 +40,8 @@ import {
   faultOf,
   firstResponseOf,
   isStanding,
+  machineBusy,
+  type MachineLoad,
   notMeasured,
   skilledFact,
   tierEvidenceOf,
@@ -63,6 +67,50 @@ const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait for the one running. */
 const QUEUE_LIMIT = 3;
 const TIER_FILES = ["tier.mjs", "idle.mjs", "masher.mjs", "sensors.mjs"];
+
+/** How long a tier waits for a busy machine to calm before it plays anyway, as the memory gate waits for memory. */
+const IDLE_WAIT_MS = 120_000;
+const IDLE_POLL = "5 seconds" as const;
+
+/** Linux's CPU pressure: the 10 s average share and the cumulative stall (µs) of "some"; null elsewhere. */
+const cpuPressure = Effect.promise(() =>
+  NodeFSP.readFile("/proc/pressure/cpu", "utf8").then(
+    (text) => {
+      const some = /^some avg10=([\d.]+) .*\btotal=(\d+)/m.exec(text);
+      return some === null ? null : { avg10: Number(some[1]) / 100, total: Number(some[2]) };
+    },
+    () => null,
+  ),
+);
+const machineNow = (stalled: number | null): MachineLoad => ({
+  cores: NodeOS.availableParallelism(),
+  stalled,
+  load: NodeOS.loadavg()[0] ?? 0,
+});
+/** `work` with how busy the machine was while it ran. */
+const withMachine = <A, E, R>(work: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const from = yield* Clock.currentTimeMillis;
+    const before = yield* cpuPressure;
+    const value = yield* work;
+    const ms = (yield* Clock.currentTimeMillis) - from;
+    const after = yield* cpuPressure;
+    const stalled =
+      before === null || after === null || ms <= 0
+        ? null
+        : Math.min(1, Math.max(0, (after.total - before.total) / (ms * 1000)));
+    return { value, machine: machineNow(stalled) };
+  });
+/** Waits a while for an idle machine; a tier that plays on a busy one anyway is classified so. */
+const idleMachine = Effect.gen(function* () {
+  const until = (yield* Clock.currentTimeMillis) + IDLE_WAIT_MS;
+  for (;;) {
+    const pressure = yield* cpuPressure;
+    if (!machineBusy(machineNow(pressure?.avg10 ?? null))) return;
+    if ((yield* Clock.currentTimeMillis) >= until) return;
+    yield* Effect.sleep(IDLE_POLL);
+  }
+});
 
 /** A build GameBuilds resolved: its game, its commit and its content key. */
 export interface ResolvedBuild {
@@ -517,8 +565,13 @@ const make = Effect.gen(function* () {
               ? notMeasured("the harness's bots could not be written into the build's copy", true)
               : null;
 
+        // Each bot run waits a while for an idle machine and says how busy it was,
+        // so a run slowed by other work is never read as the game's slowness.
         const runBot = (file: string, seconds: number, decider: "policy" | "jev") =>
-          step(game.botRunIn(copy, { file, seconds, mode: "play", decider }));
+          Effect.andThen(
+            idleMachine,
+            withMachine(step(game.botRunIn(copy, { file, seconds, mode: "play", decider }))),
+          );
         const didNotBoot = (error: GameOperationError) =>
           ({
             status: "measured",
@@ -532,11 +585,11 @@ const make = Effect.gen(function* () {
           }) as const;
         const tier = (name: "idle" | "masher", playSeconds: number) =>
           runBot(`.studio/bot/kit/${name}.mjs`, tierWallSeconds(playSeconds), "policy").pipe(
-            Effect.flatMap((result) =>
+            Effect.flatMap(({ value: result, machine }) =>
               Effect.map(moveEvidence(root, key, name, result), (evidence) => ({
                 result,
                 evidence,
-                fact: tierFact(result, playSeconds, evidence),
+                fact: tierFact(result, playSeconds, evidence, machine),
               })),
             ),
             Effect.catchTags({
@@ -609,9 +662,9 @@ const make = Effect.gen(function* () {
                   tierWallSeconds(GAME_FACTS_BOUNDS.skilledSeconds),
                   bot.decider,
                 ).pipe(
-                  Effect.flatMap((result) =>
+                  Effect.flatMap(({ value: result, machine }) =>
                     Effect.map(moveEvidence(root, key, "skilled", result), (evidence) =>
-                      skilledFact(result, bot, evidence),
+                      skilledFact(result, bot, evidence, machine),
                     ),
                   ),
                   Effect.catchTags({

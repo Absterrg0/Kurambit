@@ -54,13 +54,44 @@ export const faultOf = (error: GameOperationError): NotMeasured | null => {
   );
 };
 
-/** A game below real time: its span of play did not fit the wall budget. Standing, never re-run in the background. */
-const tooSlow = (result: GameBotRunResult, playSeconds: number) =>
-  notMeasured(
-    `the game ran at ${result.timeRatio.toFixed(2)}× real time, so ${playSeconds} s of play did not fit the run's wall budget`,
-    false,
-    true,
-  );
+/**
+ * How busy the machine was over a bot's play, as the harness sees it:
+ * `stalled` is the share of the window some task waited for a CPU (Linux's
+ * CPU pressure), null where the OS has none; `load` the 1-minute load average
+ * at its end, the fallback. Our own game and bot count in both, which the
+ * thresholds leave room for.
+ */
+export interface MachineLoad {
+  readonly cores: number;
+  readonly stalled: number | null;
+  readonly load: number;
+}
+const BUSY_STALLED = 0.2;
+const BUSY_LOAD_PER_CORE = 0.75;
+
+/** Whether other work on the machine, not the game, can explain a slow run. */
+export const machineBusy = (machine: MachineLoad | null): boolean =>
+  machine !== null &&
+  (machine.stalled !== null
+    ? machine.stalled >= BUSY_STALLED
+    : machine.load / Math.max(1, machine.cores) >= BUSY_LOAD_PER_CORE);
+
+/**
+ * A run below real time: its span of play did not fit the wall budget. On a
+ * busy machine that says nothing about the game, so it is retried; only a
+ * slow game on an idle machine is standing (a person's measure tries again).
+ */
+const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: MachineLoad | null) =>
+  machineBusy(machine)
+    ? notMeasured(
+        `the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
+        true,
+      )
+    : notMeasured(
+        `the game ran at ${result.timeRatio.toFixed(2)}× real time on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
+        false,
+        true,
+      );
 
 /** What a tier bot reports in its status evidence (templates/bot-kit/tier.mjs). */
 interface TierEvidence {
@@ -105,6 +136,7 @@ export const tierFact = (
   result: GameBotRunResult,
   playSeconds: number,
   evidence: string | null,
+  machine: MachineLoad | null = null,
 ): TierFact => {
   const status = result.status.state;
   const note = result.status.note.slice(0, 200);
@@ -138,7 +170,7 @@ export const tierFact = (
     case "never-started":
       return notMeasured(note, false);
     case "budget":
-      return tooSlow(result, playSeconds);
+      return tooSlow(result, playSeconds, machine);
     case "done": {
       const final = result.finalState;
       if (typeof final["state"] !== "string")
@@ -255,6 +287,7 @@ export const skilledFact = (
   result: GameBotRunResult,
   bot: { readonly file: string; readonly hash: string; readonly decider: "policy" | "jev" },
   evidence: string | null,
+  machine: MachineLoad | null = null,
 ): Facts["skilled"] => {
   const status = result.status.state;
   const note = result.status.note.slice(0, 200);
@@ -279,7 +312,7 @@ export const skilledFact = (
   if (status === "not-booted") return value("did-not-boot", null);
   if (status === "stopped") return notMeasured("the measurement was stopped", true);
   if (status === "bot-error") return notMeasured(`the bot itself failed: ${note}`, false);
-  if (status === "budget") return tooSlow(result, GAME_FACTS_BOUNDS.skilledSeconds);
+  if (status === "budget") return tooSlow(result, GAME_FACTS_BOUNDS.skilledSeconds, machine);
   const final = result.finalState;
   if (final["state"] === "ended" && (final["result"] === "won" || final["result"] === "lost"))
     return value(final["result"], null);
