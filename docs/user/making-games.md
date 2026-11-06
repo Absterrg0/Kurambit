@@ -67,13 +67,21 @@ reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_ME
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.
 
-## Start a game
+## Making a game
 
 Choose **New game** on the home screen or in the sidebar. Name the game, write a brief and optional
-art direction, and choose where to save it (`~/Games/<slug>` by default). Pick the agent and model,
-choose how the run decides (Guided or Autopilot, see below), then choose **Create game**. Kurambit creates the project folder, starts a production run on your
-brief (see below), and opens the game on its **Run** tab. The game's session stays yours: talk to
-your agent there about the game at any time.
+art direction, choose the engine and where to save it (`~/Games/<slug>` by default), pick the agent
+and model, then choose **Create game**. Kurambit creates the project folder and opens the game's
+chat with your brief already sent as its first message, so you see exactly what the agent was told.
+Your agent builds a first playable version in a few minutes; every message after that makes it
+better.
+
+While that first turn runs, the stage says your agent is making the first playable build. On a
+three.js game, the build plays on the stage by itself when the turn ends, and so does the build of
+every later turn that changes the game. If you are playing at that moment (you clicked into the
+game), it is not reloaded under you: the stage shows **New build from turn N** with **Play**
+instead. The stage never switches views by itself. Godot and Unity games are not rebuilt by
+themselves; **Rebuild** and **Play** work as before.
 
 Engine: Godot native (default) or three.js browser. Godot is the full lane: a real Godot 4.7 project
 with Blender-made art, native play, and Web, Windows and Linux exports. Its Windows and Linux builds
@@ -246,13 +254,27 @@ keep their references.
 Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
 keeps running; use **Stop** in the stage to close it.
 
-## Builds
+## Builds and undo
 
 Every agent turn that changes the game is a build, in any of the game's chats, and so is every
-round of a production run. The **Builds** tab lists them newest first, with when and where each came
-from (a chat turn or a run round), what changed, and its facts once measured. **Open build** under a
-turn's changed files opens that turn's build. The top entry, **Now**, is the game folder itself and
-its exports.
+round of a production run. Under a turn's changed files in the chat, the turn's build shows:
+
+- up to three of its facts, or that it is still being measured, queued, or not measured and why;
+- **Play**, which shows it on the stage;
+- **Undo** on the game's latest turn, which puts back the build the turn started from. After an
+  undo, **Redo** puts the turn's change back. **Undo the last turn's change** in the command
+  palette does the same.
+- **Go back to this build** on an older turn;
+- **Open build**, which opens it on the **Builds** tab.
+
+Undo changes the game's files, not the chat: the conversation stays as it is, so your agent still
+knows what it tried, and it sees from the files that you undid it. Undo, Redo and going back wait
+for the agent's turn to end and for a live run to be stopped. The chat's own **Edit from here**
+still rewinds the conversation itself.
+
+The **Builds** tab lists every build newest first, with when and where each came from (a chat turn
+or a run round), what changed, and its facts once measured. The top entry, **Now**, is the game
+folder itself and its exports.
 
 - **Play** plays a build from a copy, in the stage, even an old one; the game folder is never
   touched. **Back to the current game** returns to the folder's own game, and **Stop** ends the
@@ -275,7 +297,8 @@ its exports.
 player does nothing (idle) or presses keys at random (masher), what the game's own bot does
 (skilled), whether it can be won without skill, how long the picture freezes and how much it moves,
 and how soon the game answers the first input. Opening or playing a build that was never measured
-measures it, one build at a time; a run measures its builds itself. A fact Kurambit could not
+measures it, one build at a time; a run measures its builds itself, and a three.js game measures
+each turn's build in the background when the turn ends. A fact Kurambit could not
 measure says **Not measured** and why, and never counts as a result: if a tool failed, **Measure
 again** tries once more. Your agent sees the same builds and facts.
 
