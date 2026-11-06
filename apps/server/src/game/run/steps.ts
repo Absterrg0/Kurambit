@@ -77,10 +77,10 @@ export const bootStep = (
   // An engine whose games play as a built player (Unity) checks the scene in
   // its editor, but testers and samples play the player: a build that only
   // the editor runs (an editor-only API, a scene missing from the build)
-  // fails here, where its builder sees why. The player is built from the
-  // build's own sources, so a refusal of those sources (a link in the
-  // project, too many files) is the build's verdict too. The player is cached
-  // by source, so the tester's first session reuses it.
+  // fails here, where its builder sees why. Only the build's own fault is a
+  // verdict; a request of ours that was refused is our fault, read as a tool's
+  // (contract §1). The player is cached by source, so the tester's first
+  // session reuses it.
   const player = game.preparePlayer(ctx.root).pipe(
     Effect.map((p): Boot => ({
       kind: "boot",
@@ -88,7 +88,7 @@ export const bootStep = (
       detail: `boot clean; Linux player ${p.origin} in ${Math.round(p.ms / 1000)} s`,
     })),
     Effect.catchIf(
-      (error) => ["build", "request"].includes(gameOperationFault(error.reason)),
+      (error) => gameOperationFault(error.reason) === "build",
       (error) => {
         // The first line names the session the build was for; the errors follow it,
         // then the log path and the editor's own output, which only the server log keeps.

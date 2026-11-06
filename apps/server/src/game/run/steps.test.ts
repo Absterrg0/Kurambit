@@ -74,11 +74,11 @@ it.effect("the build's own fault is the boot verdict", () =>
   }),
 );
 
-// A Unity build the source snapshot cannot read (a link in the project) is the build's fault:
-// handed back, it would wait out every resume as "busy" and never be judged.
-it.effect("a player build refused for its own sources is a boot verdict, not a hand-back", () =>
+// A refusal of our own request to build the player is ours, never the build's
+// verdict: it pauses the run with why, waiting cannot clear it.
+it.effect("a player build refused as our own request is not measured, never a boot verdict", () =>
   Effect.gen(function* () {
-    const result = yield* boot(() => Effect.succeed({ ok: true, errors: [] }), {
+    const refused = yield* boot(() => Effect.succeed({ ok: true, errors: [] }), {
       engine: "unity",
       prepare: () =>
         Effect.fail(
@@ -86,11 +86,15 @@ it.effect("a player build refused for its own sources is a boot verdict, not a h
             operation: "Explore session",
             path: "/g",
             reason: "invalid-input",
-            detail:
-              "The game sources could not be identified before the Unity session ran; the result would not be current.",
+            detail: "The game sources could not be identified before the Unity session ran.",
           }),
         ),
+    }).pipe(Effect.flip);
+    expect(refused).toMatchObject({ _tag: "GameRunToolFailed", standing: true });
+    const failed = yield* boot(() => Effect.succeed({ ok: true, errors: [] }), {
+      engine: "unity",
+      prepare: () => Effect.fail(refusal("command-failed")),
     });
-    expect(result).toMatchObject({ kind: "boot", ok: false });
+    expect(failed).toMatchObject({ kind: "boot", ok: false });
   }),
 );

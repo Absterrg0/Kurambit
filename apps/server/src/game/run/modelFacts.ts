@@ -2,7 +2,8 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
-import { laneAssets, laneLibrary } from "../engineProfile.ts";
+import type { GameEngineId } from "@kurambit/contracts";
+import { gamePaths } from "../engineProfile.ts";
 import { readGltfJson, readMat4Accessor } from "../gltfJson.ts";
 import { walkFiles } from "../walkFiles.ts";
 import { listedIn, readAssetsDoc } from "./assetsDoc.ts";
@@ -155,9 +156,13 @@ export const describeModel = async (path: string, label: string): Promise<string
         skin?.inverseBindMatrices === undefined
           ? joints.map(() => IDENTITY)
           : await readMat4Accessor(path, doc, skin.inverseBindMatrices, MAX_JOINTS);
-      if (!Array.isArray(ibms) || joints.length === 0) {
+      if (!Array.isArray(ibms) || joints.length === 0 || ibms.length < joints.length) {
         notMeasured.push(
-          joints.length === 0 ? "its skin names no joints" : (ibms as { notRead: string }).notRead,
+          joints.length === 0
+            ? "its skin names no joints"
+            : !Array.isArray(ibms)
+              ? (ibms as { notRead: string }).notRead
+              : "its skin has fewer inverse bind matrices than joints",
         );
         placements = null;
       } else {
@@ -231,9 +236,14 @@ export interface ModelFacts {
  * Facts on the models the game owns under the lane's asset dir, plus library
  * models ASSETS.md names (the game uses those).
  */
-export const modelFacts = async (root: string, lane: string): Promise<ModelFacts> => {
-  const assets = NodePath.join(root, laneAssets(lane));
-  const library = NodePath.join(root, laneLibrary(lane));
+export const modelFacts = async (
+  root: string,
+  engine: GameEngineId,
+  lane: string,
+): Promise<ModelFacts> => {
+  const paths = gamePaths(engine, lane);
+  const assets = NodePath.join(root, paths.assets);
+  const library = NodePath.join(root, paths.library);
   const assetsDoc = (await readAssetsDoc(root)) ?? "";
   const every = await walkFiles(assets, {
     enter: (_full, name) => !name.startsWith("."),
@@ -251,10 +261,13 @@ export const modelFacts = async (root: string, lane: string): Promise<ModelFacts
     .filter((full) => !full.startsWith(library + NodePath.sep) || listed.has(lanePath(full)))
     .sort();
   const lines: string[] = [];
-  for (const full of found.slice(0, MAX_MODELS))
+  for (const full of found.slice(0, MAX_MODELS)) {
+    const label = NodePath.relative(assets, full).split(NodePath.sep).join("/");
+    // One broken model is said so; it never takes the other models' facts with it.
     lines.push(
-      await describeModel(full, NodePath.relative(assets, full).split(NodePath.sep).join("/")),
+      await describeModel(full, label).catch(() => `${label}: not measured (it could not be read)`),
     );
+  }
   if (found.length > MAX_MODELS)
     lines.push(`(${found.length - MAX_MODELS} more models not measured)`);
   return {

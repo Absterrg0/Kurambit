@@ -12,7 +12,7 @@ import * as NodePath from "node:path";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
-  GameOperationError,
+  type GameManifest,
   type GameRun as GameRunRecord,
   GameRunId,
   type GameRunStep,
@@ -64,7 +64,11 @@ import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
-import * as GameProjectService from "../GameProjectService.ts";
+import {
+  type GameProjectWorld,
+  gameProjectWorld,
+  layerGameProjectFake,
+} from "../testing/gameProjectFake.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import * as GameRunControl from "../GameRunControl.ts";
 import * as BotEvidence from "../botEvidence.ts";
@@ -625,8 +629,8 @@ interface World {
   readonly botRecords: Map<ThreadId, BotEvidence.ThreadBots>;
   /** The game's project was deleted under the run. */
   projectDeleted: boolean;
-  /** The game folder no longer resolves. */
-  folderGone: boolean;
+  /** The game's threads and folders as GameProjectService sees them (P's rules fake). */
+  readonly project: GameProjectWorld;
   /** Runs when the job reads the run's project, before a role's start. */
   onProjectRead: Effect.Effect<void> | null;
   /** Runs as a role turn is sent. */
@@ -674,7 +678,7 @@ const newWorld = Effect.gen(function* () {
     exportsBreak: false,
     botRecords: new Map(),
     projectDeleted: false,
-    folderGone: false,
+    project: gameProjectWorld(),
     onProjectRead: null,
     onSend: null,
     duringSend: null,
@@ -829,6 +833,13 @@ const gameRoot = () => {
 };
 
 const layerGame = (root: string, world: World) => {
+  world.project.threads.set(String(creator), root);
+  world.project.games.set(root, {
+    name: "Arena",
+    project: "godot",
+    engine: { name: "godot", version: "4.7" },
+    assets: [],
+  } as unknown as GameManifest);
   // One config for the runner and the test, which looks in the run's copies folder.
   const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
     prefix: "game-run-core-config-",
@@ -896,6 +907,8 @@ const layerGame = (root: string, world: World) => {
         ),
         roleThreadsOf(world),
         Layer.mock(GameService.GameService)({
+          // A landing stops the role's play first (P-E10); nothing plays in these tests.
+          cancelThread: () => Effect.void,
           finishExploration: () =>
             Effect.succeed({
               sessions: 0,
@@ -928,23 +941,9 @@ const layerGame = (root: string, world: World) => {
               ),
             ),
         }),
-        Layer.mock(GameProjectService.GameProjectService)({
-          resolve: () =>
-            world.folderGone
-              ? Effect.fail(
-                  new GameOperationError({
-                    operation: "resolve-thread",
-                    path: root,
-                    reason: "project-not-found",
-                  }),
-                )
-              : Effect.succeed(root),
-          read: () =>
-            Effect.succeed({
-              project: "godot",
-              engine: { name: "godot", version: "4.7" },
-            } as never),
-        }),
+        // The real rules over the world's threads: a thread not launched yet,
+        // a folder that is no game and each role's own folder resolve as they would.
+        layerGameProjectFake(world.project),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
           runChanged: (_root, step) => Queue.offer(world.pushes, step).pipe(Effect.asVoid),
@@ -961,6 +960,14 @@ const layerGame = (root: string, world: World) => {
                   cause: "the thread store refused it",
                 });
               const threadId = input.threadId!;
+              // T3 binds the thread to the folder its launch named, else the project's.
+              world.project.threads.set(
+                String(threadId),
+                input.workspaceStrategy?.type === "existing_worktree"
+                  ? input.workspaceStrategy.worktreePath
+                  : lastRoot,
+              );
+              world.project.roles.add(String(threadId));
               world.launchedWith.set(threadId, {
                 parent: input.parentThreadId ?? null,
                 worktreePath:
@@ -1004,6 +1011,8 @@ const atVision = (world: World) =>
     const thread = roleThreadId(vision.id, 1);
     yield* recordThread(vision.id, 1, thread);
     world.existing.add(thread);
+    world.project.threads.set(String(thread), lastRoot);
+    world.project.roles.add(String(thread));
     return { vision, thread };
   });
 const recordThread = (stepId: GameRunStep["id"], attempt: number, thread: ThreadId) =>
@@ -1505,7 +1514,7 @@ it.effect("a finish that breaks before the folder still stops the run's role tur
         ending: "usage-limit",
         reason: "usage limit until noon",
       });
-      world.folderGone = true;
+      world.project.threads.delete(String(creator));
       const finished = yield* awaitRun((run) => run.finished !== null);
       yield* startRunner;
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
@@ -1929,7 +1938,7 @@ it.effect("records a landing cannot write by the last try stop the run before it
     Effect.gen(function* () {
       yield* atVision(world);
       yield* startRunner;
-      world.folderGone = true;
+      world.project.threads.delete(String(creator));
       const jobs = yield* GameRunJobs.GameRunJobs;
       yield* jobs.outputs({
         threadId: creator,
@@ -1944,7 +1953,7 @@ it.effect("records a landing cannot write by the last try stop the run before it
       assert.equal(paused.ending, "tool-failed");
       assert.match(paused.lastFailure, /records could not be written/);
       // The step the records were for never starts: the stop cancelled its effect.
-      world.folderGone = false;
+      world.project.threads.set(String(creator), lastRoot);
       yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
       assert.deepEqual(world.launches, []);
     }),
@@ -2283,6 +2292,7 @@ it.effect("every chat of a game reaches its one run, and a role thread only its 
         creationSource: "web",
       });
       world.chats.add(other);
+      world.project.threads.set(String(other), lastRoot);
       const control = yield* GameRunControl.GameRunControl;
       const status = yield* control.runStatus(other);
       assert.equal(status.runId, runId);

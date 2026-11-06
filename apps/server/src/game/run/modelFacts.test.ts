@@ -62,3 +62,23 @@ describe("model facts", () => {
     expect(line).not.toMatch(/tall/);
   });
 });
+
+describe("model facts on broken skins", () => {
+  it("says a skin with fewer inverse bind matrices than joints is not measured", async () => {
+    const path = await model({
+      skins: [{ joints: [2, 3], inverseBindMatrices: 1 }],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 64 }],
+      buffers: [{ uri: ibm(1), byteLength: 64 }],
+    });
+    expect(await describeModel(path, "fox")).toContain("skinned: size not measured");
+  });
+
+  it("refuses an impossible stride before reading anything", async () => {
+    const path = await model({
+      skins: [{ joints: [2], inverseBindMatrices: 1 }],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 64, byteStride: 1_000_000_000 }],
+      buffers: [{ uri: "huge.bin", byteLength: 64 }],
+    });
+    expect(await describeModel(path, "fox")).toContain("impossible stride");
+  });
+});

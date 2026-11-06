@@ -49,7 +49,13 @@ import * as Stream from "effect/Stream";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { gameRunRefsFolder } from "../checkpointing/Utils.ts";
-import { gitEra, RESUMABLE, settling, toState } from "../orchestration-v2/gameRun/decide.ts";
+import {
+  gitEra,
+  NO_EXPORT as NO_EXPORT_ENDINGS,
+  RESUMABLE,
+  settling,
+  toState,
+} from "../orchestration-v2/gameRun/decide.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -259,6 +265,43 @@ const make = Effect.gen(function* () {
       ? `The run ended: ${run.ending ?? "unknown"}.${failure}`
       : `The run paused: ${why}, so nothing was judged.${failure.length > 0 ? ` ${run.lastFailure}.` : ""} Resume it with an empty brief once that is fixed.`;
   };
+
+  const ExportRow = Schema.Struct({
+    verified: Schema.optionalKey(Schema.Boolean),
+    skipped: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    message: Schema.optionalKey(Schema.String),
+  });
+  const decodeExports = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({ web: Schema.optionalKey(ExportRow), linux: Schema.optionalKey(ExportRow) }),
+    ),
+  );
+  /**
+   * What a finished run's exports came to, from the finish's own record: an
+   * export that failed is said beside the ending, never hidden in a log.
+   * Absent or unreadable record: nothing to add.
+   */
+  const exportsLine = (root: string, run: GameRun) =>
+    run.status !== "ended" ||
+    run.finished !== run.endedAt ||
+    NO_EXPORT_ENDINGS.has(run.ending ?? "")
+      ? Effect.succeed("")
+      : Effect.promise(async () => {
+          const text = await NodeFSP.readFile(
+            NodePath.join(root, ".studio", "exports.json"),
+            "utf8",
+          ).catch(() => null);
+          if (text === null) return "";
+          const record = decodeExports(text);
+          if (Option.isNone(record)) return "";
+          const failed = (["web", "linux"] as const).flatMap((target) => {
+            const row = record.value[target];
+            return row === undefined || row.verified === true || row.skipped != null
+              ? []
+              : [`${target === "web" ? "Web" : "Linux"} (${(row.message ?? "").slice(0, 160)})`];
+          });
+          return failed.length === 0 ? "" : ` Its exports failed: ${failed.join("; ")}.`;
+        });
 
   // A resume keeps the folder before the run next moves it (decide.ts resumeSave).
   const SAVES_FOLDER =
@@ -585,12 +628,12 @@ const make = Effect.gen(function* () {
         ? null
         : {
             ...shown,
-            evidence: (yield* Effect.promise(() => presentable(root, run.lane, asked))).map(
-              (e) => ({
-                label: e.label,
-                path: NodePath.join(root, e.path),
-              }),
-            ),
+            evidence: (yield* Effect.promise(() =>
+              presentable(root, runEngine(run), run.lane, asked),
+            )).map((e) => ({
+              label: e.label,
+              path: NodePath.join(root, e.path),
+            })),
           };
     const failure = run.lastFailure.length > 0 ? ` Last failure: ${run.lastFailure}` : "";
     const step = running ? currentStep(state) : null;
@@ -611,10 +654,10 @@ const make = Effect.gen(function* () {
         move: r.move,
         branch: r.branch,
         kept: r.kept,
+        current: r.kept && r.build !== undefined && r.build === run.best,
         outcome: roundOutcome(r),
-        verdicts: r.verdicts,
+        verdicts: r.verdicts.map(({ order, verdict }) => ({ order, verdict })),
         linesChanged: r.linesChanged,
-        testerNote: r.testerNote ?? null,
         durationMs: r.durationMs,
         note: r.note ?? null,
         steer: r.steer ?? [],
@@ -644,7 +687,7 @@ const make = Effect.gen(function* () {
                     },
             },
       message: !running
-        ? endedMessage(run)
+        ? `${endedMessage(run)}${yield* exportsLine(root, run)}`
         : run.status === "waiting" && state.inFlight?.kind === "decide"
           ? `Waiting for the creator's answer on ${DECISION_LABEL[state.inFlight.decision.kind]}; answer in the game's chat.`
           : `${step ?? run.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`,

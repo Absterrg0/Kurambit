@@ -79,6 +79,8 @@ export const runBotFact = (
           })
           .pipe(measuring(what, roots));
         if (result.played === false) return withheld(`the bot did not play: ${result.status.note}`);
+        // A bot's own word the harness reserves arrives as `bot:<word>` (CONTRACT A9):
+        // it is measured play, the bot's to say, and is shown, never withheld.
         if (result.status.state === "bot-error" || result.status.state === "stopped")
           return withheld(`the bot did not finish: ${result.status.note}`);
         // The tester's decider is replayed; without its key the bot's own policy chose.
@@ -103,16 +105,20 @@ export const runBotFact = (
   return play.pipe(
     Effect.catchTags({
       // A game that would not boot under the bot is measured, about this build.
+      // The copy is the run's own folder: a game.json or a link the copy did
+      // not get right is ours, never the build's (boot read the root's).
       GameRunBuildFault: (fault) =>
-        Effect.succeed<BotResult>({
-          kind: "bot",
-          fact: {
-            ending: "did not boot",
-            seconds: 0,
-            final: {},
-            note: plain(fault.error.detail ?? fault.error.reason, ctx.root),
-          },
-        }),
+        fault.error.reason !== "command-failed"
+          ? Effect.fail(toolFailed(what, fault.error, { roots }))
+          : Effect.succeed<BotResult>({
+              kind: "bot",
+              fact: {
+                ending: "did not boot",
+                seconds: 0,
+                final: {},
+                note: plain(fault.error.detail ?? fault.error.reason, ctx.root),
+              },
+            }),
     }),
   );
 };

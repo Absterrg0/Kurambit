@@ -302,12 +302,15 @@ function RoundDetail({
   threadRef,
   round,
   rung,
+  current,
   live,
   latestRestore,
 }: {
   threadRef: ScopedThreadRef;
   round: number;
   rung: GameRunRoundRef["rung"];
+  /** From the run's status, which every push refreshes: the detail is read once. */
+  current: boolean;
   live: boolean;
   latestRestore: GameRunRestoreRef | null;
 }) {
@@ -463,7 +466,7 @@ function RoundDetail({
 
       {detail.restorable ? (
         <div className="flex flex-wrap items-center gap-2">
-          {detail.current ? (
+          {current ? (
             <p className="text-2xs text-muted-foreground">
               This round is the game's current build.
             </p>
@@ -543,6 +546,7 @@ export function GameRunRoundRow({
               threadRef={threadRef}
               round={round.round}
               rung={round.rung}
+              current={round.current}
               live={live}
               latestRestore={latestRestore}
             />

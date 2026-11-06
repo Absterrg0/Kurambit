@@ -5,7 +5,8 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import * as NodeZlib from "node:zlib";
-import { laneAssets, laneLibrary } from "../engineProfile.ts";
+import type { GameEngineId } from "@kurambit/contracts";
+import { gamePaths } from "../engineProfile.ts";
 import { listedIn, readAssetsDoc } from "./assetsDoc.ts";
 import { walkFiles } from "../walkFiles.ts";
 
@@ -538,9 +539,14 @@ export interface SpriteFacts {
 }
 
 /** Measured facts on every image the game owns under the lane's asset dir, library packs aside. */
-export const spriteFacts = async (root: string, lane: string): Promise<SpriteFacts> => {
-  const assets = NodePath.join(root, laneAssets(lane));
-  const library = NodePath.join(root, laneLibrary(lane));
+export const spriteFacts = async (
+  root: string,
+  engine: GameEngineId,
+  lane: string,
+): Promise<SpriteFacts> => {
+  const paths = gamePaths(engine, lane);
+  const assets = NodePath.join(root, paths.assets);
+  const library = NodePath.join(root, paths.library);
   const files = await listImages(assets, library);
   const rel = (full: string) => NodePath.relative(assets, full);
   const game = loader(MAX_TOTAL_PIXELS);
@@ -731,14 +737,14 @@ export const spriteFacts = async (root: string, lane: string): Promise<SpriteFac
     const transparent = shots.filter((s) => hasBackground(s.m));
     const most = [...transparent].sort((a, b) => b.m.colours - a.m.colours).slice(0, 3);
     notable.push(
-      `Distinct colours (RGBA values of visible pixels, pooled over each side's transparent-background images, so a sheet and its separate tiles count alike), library pack against the game: ${packParts.join("; ")}; the game's own under ${laneAssets(lane)}: ${
+      `Distinct colours (RGBA values of visible pixels, pooled over each side's transparent-background images, so a sheet and its separate tiles count alike), library pack against the game: ${packParts.join("; ")}; the game's own under ${paths.assets}: ${
         transparent.length === 0
           ? "no transparent-background image"
           : `${colourText(pool.size)} over ${plural(transparent.length, "image")} (${sizesText(transparent.map((s) => s.m))}; median ${colourText(median(transparent.map((s) => s.m.colours)))} per image); most in one image: ${most.map((s) => `${s.path} ${colourText(s.m.colours)}`).join(", ")}`
       }.`,
     );
   }
-  const header = `${shots.length} images measured under ${laneAssets(lane)}/ (library packs aside; paths below are relative to it; visible means alpha >= ${VISIBLE_ALPHA}).${
+  const header = `${shots.length} images measured under ${paths.assets}/ (library packs aside; paths below are relative to it; visible means alpha >= ${VISIBLE_ALPHA}).${
     game.skipped.size > 0
       ? ` Not measured: ${[...game.skipped].map(([reason, n]) => `${n} ${reason}`).join(", ")}.`
       : ""

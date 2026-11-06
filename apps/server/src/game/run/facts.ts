@@ -75,8 +75,10 @@ const codeFacts = async (root: string, engine: GameEngineId, lane: string): Prom
   let images = 0;
   let audio = 0;
   let models = 0;
+  // The folders the engine generates are not the game's sources.
+  const { skipDirs } = engineProfile(engine).buildInputs;
   const files = await walkFiles(base, {
-    enter: (_full, name) => name !== ".godot" && name !== "builds",
+    enter: (_full, name) => !skipDirs.includes(name) && name !== "builds",
   });
   for (const full of files) {
     const name = NodePath.basename(full);
@@ -115,7 +117,13 @@ export const reviewerFacts = async (
 ): Promise<string> => {
   const code = await total("Code facts", () => codeFacts(root, engine, lane));
   // Only the notable image facts: the reviewer judges the whole game, not each file.
-  const sprites = await total("Image facts", async () => (await spriteFacts(root, lane)).notable);
-  const modelNotes = await total("Model facts", async () => (await modelFacts(root, lane)).notable);
+  const sprites = await total(
+    "Image facts",
+    async () => (await spriteFacts(root, engine, lane)).notable,
+  );
+  const modelNotes = await total(
+    "Model facts",
+    async () => (await modelFacts(root, engine, lane)).notable,
+  );
   return `${code} ${await assetFacts(root, engine, lane)}${sprites.length > 0 ? ` ${sprites}` : ""}${modelNotes.length > 0 ? ` Models: ${modelNotes}.` : ""}${botsText(bots)}`;
 };

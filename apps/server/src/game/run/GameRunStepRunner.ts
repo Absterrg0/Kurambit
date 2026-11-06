@@ -37,7 +37,7 @@ import * as Stream from "effect/Stream";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { gitEra, RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
+import { gitEra, NO_EXPORT, RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   gameRunOperationOwner,
@@ -105,10 +105,6 @@ export class GameRunStepRunner extends Context.Service<
     readonly handle: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
   }
 >()("kurambit/game/run/GameRunStepRunner") {}
-
-// Endings that leave nothing to export: a stop, a failure, or a machine too short of memory or
-// too busy for the exports to start.
-const NO_EXPORT: ReadonlySet<string> = new Set(["stopped", "failed", "low-memory", "busy"]);
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
@@ -431,10 +427,10 @@ const make = Effect.gen(function* () {
       const judged = role.role === "art-director" || redo;
       if (!judged) return role.prompt;
       const sprites = yield* Effect.promise(() =>
-        total("Image facts", async () => (await spriteFacts(root, run.lane)).full),
+        total("Image facts", async () => (await spriteFacts(root, runEngine(run), run.lane)).full),
       );
       const models = yield* Effect.promise(() =>
-        total("Model facts", async () => (await modelFacts(root, run.lane)).full),
+        total("Model facts", async () => (await modelFacts(root, runEngine(run), run.lane)).full),
       );
       return role.role === "art-director"
         ? `${role.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, runEngine(run), run.lane)), sprites)}${modelBlock(models)}`
@@ -1286,9 +1282,11 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* jobs.attach({
         // A folder that cannot be read is no reason to skip the question.
-        showable: (threadId, lane, decision) =>
+        showable: (threadId, run, decision) =>
           projects.resolve(threadId).pipe(
-            Effect.flatMap((root) => Effect.tryPromise(() => presentable(root, lane, decision))),
+            Effect.flatMap((root) =>
+              Effect.tryPromise(() => presentable(root, runEngine(run), run.lane, decision)),
+            ),
             Effect.map((evidence) => evidence.length > 0),
             Effect.orElseSucceed(() => true),
           ),

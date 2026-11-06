@@ -633,6 +633,9 @@ const decide = (
   }
 };
 
+/** The run's game as its prompts name it: its engine and its project folder. */
+const gameOf = (s: RunState): Roles.RunGame => ({ engine: s.engine, project: s.lane });
+
 // ── Step builders. ────────────────────────────────────────────────────────
 type RoleSpec = Partial<Omit<RoleStep, "kind" | "id" | "role" | "prompt" | "capMs">> &
   Pick<RoleStep, "role" | "prompt" | "capMs">;
@@ -698,14 +701,14 @@ const newBlock = (
   turns: 0,
 });
 
-const blockStep = (id: number, b: Block, lane: string): Step =>
+const blockStep = (id: number, b: Block, game: Roles.RunGame): Step =>
   role(id, {
     role: `builder-${b.tag}`,
     title: `studio builder ${b.tag}`,
     thread: b.thread,
     prompt:
       b.thread === null
-        ? Roles.builderFirst(b.whole, lane, b.direction)
+        ? Roles.builderFirst(b.whole, game, b.direction)
         : Roles.builderMore(Math.max(1, Math.round(b.msLeft / MIN)), b.direction),
     capMs: b.msLeft,
     source: true,
@@ -1352,7 +1355,7 @@ const proceed = (state: RunState, done: string, now: number): RunState => {
           "build",
           newBlock(
             "build",
-            Roles.firstDirection(state.lane, state.ladder?.rungs[0] ?? null, state.buildNotes),
+            Roles.firstDirection(gameOf(state), state.ladder?.rungs[0] ?? null, state.buildNotes),
             true,
             ms,
             state.best,
@@ -1383,7 +1386,7 @@ const roundDirection = (state: RunState) => {
     state.next.length === 0 &&
     state.rounds.length > 0 &&
     prior.length > 0;
-  const base = repeating ? prior : Roles.roundBase(state.next, state.pickNotes, state.lane);
+  const base = repeating ? prior : Roles.roundBase(state.next, state.pickNotes, gameOf(state));
   const direction = state.steer.length === 0 ? base : Roles.steered(state.steer, base);
   return { direction, repeating };
 };
@@ -1543,7 +1546,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
   if (state.inFlight !== null) return { kind: "step", state, step: state.inFlight };
   const id = state.seq + 1;
   const t = state.task;
-  const lane = state.lane;
+  const lane = gameOf(state);
   const go = (s: Step, task: Task = t, logs: ReadonlyArray<string> = []) =>
     step(state, task, s, logs);
   const run = (op: BuildOp, task: Task = t) => go(build(id, op), task);
@@ -2244,7 +2247,7 @@ const applyRound = (
   release: ThreadId[],
 ): RunState => {
   const now = input.now;
-  const lane = s.lane;
+  const lane = gameOf(s);
   const g = res.kind === "build" ? res.build : null;
   const at = (round: Partial<Round>): RunState => ({ ...s, task: { ...r, ...round } });
   switch (r.phase) {
@@ -2337,7 +2340,7 @@ const applyRound = (
         phase: "stall",
         record: {
           ...r.record,
-          note: `stalled (no game-code change under ${lane}/ after replace attempt)`,
+          note: `stalled (no game-code change under ${lane.project}/ after replace attempt)`,
         },
       });
     }
@@ -2390,7 +2393,7 @@ const applyRound = (
           fixes: r.fixes + 1,
           block: {
             ...r.block,
-            direction: Roles.fixChecks(failed, rung, s.lane),
+            direction: Roles.fixChecks(failed, rung, gameOf(s)),
             msLeft: FIX_MS,
             quiet: 0,
             turns: Math.max(1, r.block.turns),
