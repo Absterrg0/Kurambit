@@ -2812,7 +2812,7 @@ function GameRoundTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "game
   if (ctx.threadRef === null) return null;
   return (
     <div className="min-w-0 px-1">
-      <GameRoundCard threadRef={ctx.threadRef} round={row.round} />
+      <GameRoundCard threadRef={ctx.threadRef} runId={row.runId} round={row.round} />
     </div>
   );
 }

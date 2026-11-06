@@ -169,6 +169,7 @@ export type TimelineEntry = (
       readonly id: string;
       readonly kind: "game-round";
       readonly createdAt: string;
+      readonly runId: string;
       readonly round: number;
     }
 ) & {
@@ -575,6 +576,7 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
 export interface TimelineAnchoredCard {
   readonly id: string;
   readonly createdAt: string;
+  readonly runId: string;
   readonly round: number;
 }
 
@@ -798,6 +800,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       id: card.id,
       kind: "game-round",
       createdAt: card.createdAt,
+      runId: card.runId,
       round: card.round,
     };
     const insertionIndex = entries.findIndex((candidate) => candidate.createdAt > card.createdAt);

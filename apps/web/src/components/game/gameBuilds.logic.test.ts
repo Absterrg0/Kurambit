@@ -18,13 +18,18 @@ describe("roundCardAction", () => {
     expect(roundCardAction(fakeRound({}), stopped)).toMatchObject({
       kind: "revert",
       target: BUILD_A,
+      asBest: false,
       blocked: null,
     });
   });
 
-  it("keeps a round that was not kept by restoring its own build", () => {
+  it("keeps a round that was not kept by making its own build the run's best", () => {
     const round = fakeRound({ outcome: "rejected", kept: false, build: BUILD_C, base: BUILD_B });
-    expect(roundCardAction(round, stopped)).toMatchObject({ kind: "keep", target: BUILD_C });
+    expect(roundCardAction(round, stopped)).toMatchObject({
+      kind: "keep",
+      target: BUILD_C,
+      asBest: true,
+    });
   });
 
   it("offers nothing it cannot name exactly", () => {
@@ -37,8 +42,9 @@ describe("roundCardAction", () => {
     expect(roundCardAction(fakeRound({ outcome: "abandoned" }), stopped)).toBeNull();
   });
 
-  it("waits for a live run to stop", () => {
+  it("waits for a live run to stop and the chat's turn to end", () => {
     expect(roundCardAction(fakeRound({}), { active: true, best: BUILD_B })?.blocked).not.toBeNull();
+    expect(roundCardAction(fakeRound({}), stopped, true)?.blocked).not.toBeNull();
   });
 });
 

@@ -1,17 +1,18 @@
 import { AsyncResult } from "effect/reactivity";
+import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import * as Schema from "effect/Schema";
 import { ColumnsIcon, HistoryIcon, PlayIcon, WorkflowIcon } from "lucide-react";
 import {
   GameBuildId,
   type GameRunRoundRef,
-  type GameRunStatusResult,
   type RunId,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import type { TimelineAnchoredCard } from "../../session-logic";
-import { gameEnvironment, setStagePlayTarget } from "../../state/game";
+import { chatRuns, gameEnvironment, setStagePlayTarget, type GameChatRun } from "../../state/game";
+import { useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -22,33 +23,20 @@ import { restoreQuestion, useBuildPlay, useBuildRestore } from "./useBuildAction
 
 const isBuildId = Schema.is(GameBuildId);
 
-// A string, so a run status refetch that moved no round re-renders nothing.
-const roundCardsKey = (
-  threadId: string,
-  result: AsyncResult.AsyncResult<GameRunStatusResult, unknown>,
-): string => {
-  if (!AsyncResult.isSuccess(result)) return "";
-  const status = result.value;
-  // Cards appear in the chat the run talks to, never in its role threads.
-  if ((status.chat ?? null) !== threadId || status.runId === null) return "";
-  return status.rounds
-    .flatMap((round) =>
-      round.endedAt == null ? [] : [`${status.runId}\u0001${round.round}\u0001${round.endedAt}`],
-    )
-    .join("\u0002");
-};
-const selectorFor = new Map<
-  string,
-  (result: AsyncResult.AsyncResult<GameRunStatusResult, unknown>) => string
->();
-const selectRoundCards = (threadId: string) => {
-  let select = selectorFor.get(threadId);
-  if (select === undefined) {
-    select = (result) => roundCardsKey(threadId, result);
-    selectorFor.set(threadId, select);
-  }
-  return select;
-};
+type ChatRunsResult = AsyncResult.AsyncResult<ReadonlyArray<GameChatRun>, unknown>;
+
+// A string, so a refetch that moved no round re-renders nothing. Cards come
+// from every run whose chat this is, never in its role threads.
+const selectRoundCards = (result: ChatRunsResult): string =>
+  AsyncResult.isSuccess(result)
+    ? result.value
+        .flatMap((run) =>
+          run.rounds.flatMap((round) =>
+            round.endedAt == null ? [] : [`${run.runId}\u0001${round.round}\u0001${round.endedAt}`],
+          ),
+        )
+        .join("\u0002")
+    : "";
 
 // The timeline compares its anchored cards by identity: one array per key.
 const EMPTY_CARDS: ReadonlyArray<TimelineAnchoredCard> = [];
@@ -61,27 +49,27 @@ const cardsOf = (key: string): ReadonlyArray<TimelineAnchoredCard> => {
   if (lastCards.key === key) return lastCards.cards;
   const cards = key.split("\u0002").map((part) => {
     const [runId = "", round = "0", endedAt = ""] = part.split("\u0001");
-    return { id: `game-round:${runId}:${round}`, createdAt: endedAt, round: Number(round) };
+    return {
+      id: `game-round:${runId}:${round}`,
+      createdAt: endedAt,
+      runId,
+      round: Number(round),
+    };
   });
   lastCards = { key, cards };
   return cards;
 };
 
 /**
- * The run's round cards for one chat, placed at each round's end. Derived from
- * the run status the game surfaces already read: no message, no agent turn.
+ * The round cards of every run this chat directs, placed at each round's end.
+ * Derived from records the client reads anyway: no message, no agent turn.
  */
 export function useGameRoundCards(
   threadRef: ScopedThreadRef | null,
 ): ReadonlyArray<TimelineAnchoredCard> {
   const key = useEnvironmentQuerySelector(
-    threadRef === null
-      ? null
-      : gameEnvironment.runStatus({
-          environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId },
-        }),
-    selectRoundCards(threadRef?.threadId ?? ""),
+    threadRef === null ? null : chatRuns(threadRef),
+    selectRoundCards,
   );
   return cardsOf(key);
 }
@@ -110,15 +98,20 @@ const tokensLine = (tokens: number | null | undefined): string =>
       ? `${Math.round(tokens / 1000)}k tokens`
       : `${tokens} tokens`;
 
-/** One round of the run, in the run's chat: what changed, its facts against its base, and Keep or Revert. */
-export function GameRoundCard({ threadRef, round }: { threadRef: ScopedThreadRef; round: number }) {
-  const status = useEnvironmentQuery(
-    gameEnvironment.runStatus({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-  ).data;
-  const ref = status?.rounds.find((entry) => entry.round === round) ?? null;
+/** One round of a run, in the run's chat: what changed, its facts against its base, and Keep or Revert. */
+export function GameRoundCard({
+  threadRef,
+  runId,
+  round,
+}: {
+  threadRef: ScopedThreadRef;
+  runId: string;
+  round: number;
+}) {
+  const run = useEnvironmentQuery(chatRuns(threadRef)).data?.find((entry) => entry.runId === runId);
+  const ref = run?.rounds.find((entry) => entry.round === round) ?? null;
+  // A turn in this chat may be writing the folder: no restore under it.
+  const turnRunning = threadRuntimeIsActive(useThreadShell(threadRef)?.runtime);
   const build = ref?.build != null && isBuildId(ref.build) ? ref.build : null;
   const base = ref?.base != null && isBuildId(ref.base) ? ref.base : null;
   const compare = useEnvironmentQuery(
@@ -141,14 +134,17 @@ export function GameRoundCard({ threadRef, round }: { threadRef: ScopedThreadRef
   );
   const restores = useBuildRestore(threadRef, builds.data?.restore ?? null);
   const plays = useBuildPlay(threadRef);
-  if (status === null || ref === null) return null;
+  if (run === undefined || ref === null) return null;
   const outcome = OUTCOME[ref.outcome];
-  const action = roundCardAction(ref, { active: status.active, best: status.best ?? null });
+  const action = roundCardAction(ref, { active: run.active, best: run.best }, turnRunning);
   const comparison = compare.data;
   const changed = comparison?.deltas.filter((delta) => delta.change !== "same").slice(0, 3) ?? [];
-  const measuring =
-    comparison !== null &&
-    (comparison.factsA.state !== "measured" || comparison.factsB.state !== "measured");
+  const states = comparison === null ? [] : [comparison.factsA.state, comparison.factsB.state];
+  const factsLine = states.some((state) => state === "queued" || state === "measuring")
+    ? "Measuring…"
+    : states.some((state) => state !== "measured")
+      ? "Not every fact is measured on both builds; none measured changed."
+      : "No fact changed against the build before it.";
   const play = async () => {
     if (build === null) return;
     const result = await plays.send({ _tag: "build", build });
@@ -160,7 +156,7 @@ export function GameRoundCard({ threadRef, round }: { threadRef: ScopedThreadRef
     });
     useGameWorkspaceStore.getState().showStageTab("play");
   };
-  const best = status.best != null && isBuildId(status.best) ? status.best : null;
+  const best = run.best !== null && isBuildId(run.best) ? run.best : null;
   const against = best !== null && best !== build ? best : base;
   return (
     <section
@@ -192,9 +188,7 @@ export function GameRoundCard({ threadRef, round }: { threadRef: ScopedThreadRef
         ) : changed.length > 0 ? (
           <GameBuildFactsDiff deltas={changed} labels={["Before", "This round"]} />
         ) : (
-          <p className="text-2xs text-muted-foreground">
-            {measuring ? "Measuring…" : "No fact changed against the build before it."}
-          </p>
+          <p className="text-2xs text-muted-foreground">{factsLine}</p>
         )
       ) : null}
       <div className="flex flex-wrap items-center gap-1.5">
@@ -234,11 +228,10 @@ export function GameRoundCard({ threadRef, round }: { threadRef: ScopedThreadRef
             onClick={() =>
               void restores.send(
                 action.target,
-                restoreQuestion(
-                  action.kind === "revert"
-                    ? `the build before round ${round}`
-                    : `round ${round}'s build`,
-                ),
+                action.kind === "revert"
+                  ? restoreQuestion(`the build before round ${round}`)
+                  : `Keep round ${round}'s build as the run's best?\nIt goes into the game folder and the run's best becomes it, so a resume continues from it. What the folder holds now is saved as a build first, so you can undo this.`,
+                action.asBest,
               )
             }
           >

@@ -140,31 +140,49 @@ export interface RoundCardAction {
   readonly kind: "revert" | "keep";
   /** The build the restore puts in the folder. */
   readonly target: GameBuildId;
+  /** Keep makes the round's build the run's best (CONTRACT A1), so a resume continues from it. */
+  readonly asBest: boolean;
   readonly label: string;
   /** Why it cannot be pressed now, or null. */
   readonly blocked: string | null;
 }
 
 /**
- * What a round card offers against the run's own decision. A kept round that
- * is still the best can go back to the build it was judged against; a round
- * that was not kept can be put in the folder instead. Both are restores, so
- * they wait for the run to stop: while it is live, the run decides.
+ * What a round card offers against the run's own decision (CONTRACT A1). A
+ * kept round that is still the best can revert to the best it was judged
+ * against; a round that was not kept can be kept, which puts its build in the
+ * folder and makes it the run's best. Both wait for a stopped run and an idle
+ * chat: while the run is live it decides, and a turn may be writing the folder.
  */
 export const roundCardAction = (
   round: Pick<GameRunRoundRef, "outcome" | "build" | "base">,
   run: { readonly active: boolean; readonly best: string | null },
+  turnRunning = false,
 ): RoundCardAction | null => {
   const build = round.build ?? null;
   const base = round.base ?? null;
   if (build === null || !isBuildId(build)) return null;
   const blocked = run.active
-    ? "Stop the run to change this; while it is live, the run decides."
-    : null;
+    ? "Stop the run to keep or revert a round; while it is live, the run decides."
+    : turnRunning
+      ? "Wait for the agent's turn to end to keep or revert a round."
+      : null;
   if (round.outcome === "kept") {
     if (run.best !== build || base === null || !isBuildId(base) || base === build) return null;
-    return { kind: "revert", target: base, label: "Revert", blocked };
+    return {
+      kind: "revert",
+      target: base,
+      asBest: false,
+      label: "Revert to the build before it",
+      blocked,
+    };
   }
   if (round.outcome === "abandoned" || run.best === build) return null;
-  return { kind: "keep", target: build, label: "Keep this build instead", blocked };
+  return {
+    kind: "keep",
+    target: build,
+    asBest: true,
+    label: "Keep this build as the run's best",
+    blocked,
+  };
 };

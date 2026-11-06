@@ -611,6 +611,7 @@ type MessagesTimelineRowContent =
       kind: "game-round";
       id: string;
       createdAt: string;
+      runId: string;
       round: number;
     };
 
@@ -1750,6 +1751,7 @@ export function deriveMessagesTimelineRows(input: {
         kind: "game-round",
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
+        runId: timelineEntry.runId,
         round: timelineEntry.round,
       });
       continue;
@@ -2189,7 +2191,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "game-round": {
       const bg = b as typeof a;
-      return a.createdAt === bg.createdAt && a.round === bg.round;
+      return a.createdAt === bg.createdAt && a.runId === bg.runId && a.round === bg.round;
     }
 
     case "mcp-app": {
