@@ -49,6 +49,9 @@ public sealed class CharacterAnimator : MonoBehaviour
     private static readonly HashSet<string> Once = new HashSet<string> { "attack", "hit", "die", "jump" };
     // Words that say nothing about the motion; any other word makes a clip a variant.
     private static readonly HashSet<string> Filler = new HashSet<string> { "loop", "anim", "animation", "fwd", "forward", "inplace", "cycle" };
+    // Clips with these words are held poses or guards, never a role's pick
+    // (KayKit's "Block_Attack" is not its attack); play them by their own word.
+    private static readonly string[] NotARole = { "block", "blocking", "pose", "aiming", "reload" };
 
     [Tooltip("The model's clips; filled from the model's file when this component is added in the editor.")]
     public AnimationClip[] clips = new AnimationClip[0];
@@ -133,9 +136,11 @@ public sealed class CharacterAnimator : MonoBehaviour
         foreach (var clip in names)
         {
             var w = Words(clip);
+            if (Roles.ContainsKey(wanted) && NotARole.Any(w.Contains)) continue;
             var k = System.Array.FindIndex(keys, key => w.Contains(key));
             if (k < 0) continue;
-            var score = w.Count(x => !keys.Contains(x) && !Filler.Contains(x)) * 10 + k;
+            // A lone letter is a variant tag ("Hit_A"), not another motion.
+            var score = w.Count(x => !keys.Contains(x) && !Filler.Contains(x) && x.Length > 1) * 10 + k;
             if (score < bestScore)
             {
                 bestScore = score;

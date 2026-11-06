@@ -37,6 +37,9 @@ const ONCE = new Set(["attack", "hit", "die", "jump"]);
 // Words that say nothing about the motion; any other word makes a clip a
 // variant ("Idle_Talking_Loop" loses to "Idle_Loop").
 const FILLER = new Set(["loop", "anim", "animation", "fwd", "forward", "inplace", "cycle"]);
+// Clips with these words are held poses or guards, never a role's pick
+// (KayKit's "Block_Attack" is not its attack); play them by their own word.
+const NOT_A_ROLE = ["block", "blocking", "pose", "aiming", "reload"];
 
 const words = (name) =>
   name
@@ -54,9 +57,12 @@ export function findClip(clips, state) {
   let bestScore = Infinity;
   for (const clip of clips) {
     const w = words(clip.name);
+    if (ROLES[state] !== undefined && NOT_A_ROLE.some((x) => w.includes(x))) continue;
     const k = keys.findIndex((key) => w.includes(key));
     if (k < 0) continue;
-    const score = w.filter((x) => !keys.includes(x) && !FILLER.has(x)).length * 10 + k;
+    // A lone letter is a variant tag ("Hit_A"), not another motion.
+    const score =
+      w.filter((x) => !keys.includes(x) && !FILLER.has(x) && x.length > 1).length * 10 + k;
     if (score < bestScore) [best, bestScore] = [clip, score];
   }
   return best;

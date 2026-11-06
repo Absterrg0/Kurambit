@@ -37,6 +37,9 @@ const ONCE := ["attack", "hit", "die", "jump"]
 ## Words that say nothing about the motion; any other word makes a clip a
 ## variant ("Idle_Talking_Loop" loses to "Idle_Loop").
 const FILLER := ["loop", "anim", "animation", "fwd", "forward", "inplace", "cycle"]
+## Clips with these words are held poses or guards, never a role's pick
+## (KayKit's "Block_Attack" is not its attack); play them by their own word.
+const NOT_A_ROLE := ["block", "blocking", "pose", "aiming", "reload"]
 
 var player: AnimationPlayer
 var clips: PackedStringArray = []
@@ -93,6 +96,8 @@ static func find_clip(names: PackedStringArray, wanted: String) -> String:
 	var best_score := 1 << 30
 	for clip in names:
 		var w := _words(clip)
+		if ROLES.has(wanted) and NOT_A_ROLE.any(func(x): return x in w):
+			continue
 		var k := -1
 		for i in keys.size():
 			if keys[i] in w:
@@ -102,7 +107,8 @@ static func find_clip(names: PackedStringArray, wanted: String) -> String:
 			continue
 		var extra := 0
 		for x in w:
-			if not (x in keys) and not (x in FILLER):
+			# A lone letter is a variant tag ("Hit_A"), not another motion.
+			if not (x in keys) and not (x in FILLER) and x.length() > 1:
 				extra += 1
 		if extra * 10 + k < best_score:
 			best_score = extra * 10 + k
