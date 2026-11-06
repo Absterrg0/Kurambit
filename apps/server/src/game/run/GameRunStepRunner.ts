@@ -35,7 +35,7 @@ import * as Stream from "effect/Stream";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { gitEra, RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
+import { RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   gameRunOperationOwner,
@@ -362,10 +362,8 @@ const make = Effect.gen(function* () {
       const root = yield* projects
         .resolve(job.threadId, { deleted: "allowed" })
         .pipe(Effect.option);
-      const log = (line: string) =>
-        Option.isSome(root) ? logLine(root.value, line) : Effect.logInfo(line);
       for (const thread of job.release)
-        yield* releaseCopy(deps, { copies: copiesOf(job.runId), log }, thread);
+        yield* releaseCopy(deps, { copies: copiesOf(job.runId), log: Effect.logInfo }, thread);
       if (job.files.length === 0) return;
       const writes = Effect.gen(function* () {
         if (Option.isNone(root))
@@ -427,12 +425,8 @@ const make = Effect.gen(function* () {
   const releaseCopies = (job: { readonly threadId: ThreadId; readonly runId: GameRun["id"] }) =>
     Effect.gen(function* () {
       const roleThreads = yield* runRoleThreads(job.threadId, job.runId);
-      const root = yield* projects
-        .resolve(job.threadId, { deleted: "allowed" })
-        .pipe(Effect.option);
-      const log = (line: string) =>
-        Option.isSome(root) ? logLine(root.value, line) : Effect.logInfo(line);
-      yield* dropRunCopies(deps, { copies: copiesOf(job.runId), log }, roleThreads, false);
+      const ctx = { copies: copiesOf(job.runId), log: Effect.logInfo };
+      yield* dropRunCopies(deps, ctx, roleThreads, false);
     });
 
   // The art director judges files, so it gets the asset-list and measured
@@ -793,9 +787,6 @@ const make = Effect.gen(function* () {
               }),
             ),
           );
-        case "git":
-          // Only a run from before builds on checkpoints planned one; it is never continued.
-          return yield* fail(job, record.id, "this run versions on git branches and cannot go on");
         case "boot":
           return yield* reporting(
             job,
@@ -1053,17 +1044,10 @@ const make = Effect.gen(function* () {
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.failCause(cause)
-            : projects.resolve(run.threadId, { deleted: "allowed" }).pipe(
-                Effect.flatMap((root) =>
-                  logLine(
-                    root,
-                    `run finish broke (${causeText(cause)}); the ending is recorded anyway`,
-                  ),
-                ),
-                Effect.catchCause(() =>
-                  Effect.logWarning("game run finish broke", { runId: run.id, cause }),
-                ),
-              ),
+            : Effect.logWarning("game run finish broke; the ending is recorded anyway", {
+                runId: run.id,
+                cause,
+              }),
         ),
       );
       yield* recordEnd(
@@ -1120,11 +1104,9 @@ const make = Effect.gen(function* () {
         `run ended: ${run.ending ?? "unknown"}${run.lastFailure ? ` (${run.lastFailure})` : ""}`,
       );
       if (run.ending !== null && !NO_EXPORT.has(run.ending)) {
-        // An ending mid-round (a usage limit, a provider outage) leaves the
-        // round's unfinished work in the folder. The exports are of the best
-        // build, and the folder is left as the run left it, so a resume goes on
-        // from that work, kept once per ending (withBuildInFolder).
-        // One bound for every wait of the ending, however many moves and exports it makes.
+        // The exports are of the best build, and the folder's work (an ending
+        // mid-round leaves it unfinished) is kept once per ending and put back,
+        // so a resume goes on from it. One bound for every wait of the ending.
         const waitUntil = yield* freeBy;
         const exports = finishExports(
           root,
@@ -1136,27 +1118,20 @@ const make = Effect.gen(function* () {
           roleThreads,
         ).pipe(Effect.ignore);
         const name = BuildName.ending(job.endedAt);
-        // A run from before checkpoints holds no builds: its folder is exported as it is.
-        const ended = gitEra(run)
-          ? null
-          : yield* withBuildInFolder(
-              { game, checkpoints, lock: folderLock(run, waitUntil) },
-              { root, runId: run.id, lane: run.lane },
-              { sha: run.best, park: name },
-              () => exports.pipe(Effect.as({ value: undefined, putBack: true })),
-            ).pipe(
-              Effect.catchCause((cause) =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Effect.failCause(cause)
-                  : log(
-                      `finishExports: the folder's work could not be kept (${causeText(cause)}); exporting the folder as it is`,
-                    ).pipe(Effect.as(null)),
-              ),
-            );
-        if (ended !== null && ended.parked.length > 0)
-          yield* log(
-            `the folder's work at the ending is kept as ${keptBuild(run.id, name, run.lane, ended.parked)}`,
-          );
+        const ended = yield* withBuildInFolder(
+          { game, checkpoints, lock: folderLock(run, waitUntil) },
+          { root, runId: run.id, lane: run.lane },
+          { sha: run.best, park: name },
+          () => exports.pipe(Effect.as({ value: undefined, putBack: true })),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : log(
+                  `finishExports: the folder's work could not be kept (${causeText(cause)}); exporting the folder as it is`,
+                ).pipe(Effect.as(null)),
+          ),
+        );
         if (ended?.kind === "refused")
           yield* log(
             `finishExports: the best build could not be restored (${ended.detail}); exporting the folder as it is`,
@@ -1169,18 +1144,13 @@ const make = Effect.gen(function* () {
       }
       // Last, so every build the ending used is still there for a finish a
       // restart repeats; a repeat finds fewer refs and removes nothing more.
-      if (!gitEra(run))
-        yield* pruneBuilds(
-          checkpoints,
-          root,
-          toState(run, records.gameRunRounds, held ?? null),
-        ).pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.failCause(cause)
-              : log(`the run's spent builds could not be cleared: ${causeText(cause)}`),
-          ),
-        );
+      yield* pruneBuilds(checkpoints, root, toState(run, records.gameRunRounds, held ?? null)).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : log(`the run's spent builds could not be cleared: ${causeText(cause)}`),
+        ),
+      );
       // Only a run something can still resume keeps its roles' copies: one
       // whose chat or project was deleted never runs again. A read that fails
       // is no proof of either, so the copies stay for storage cleanup's bound.
@@ -1256,7 +1226,7 @@ const make = Effect.gen(function* () {
             : Effect.succeed<GameRunRestoreOutcome>({
                 kind: "refused",
                 reason: "git-failed",
-                message: `The restore broke (${causeText(cause)}); see .studio/run.log and the game's git status.`,
+                message: `The restore broke (${causeText(cause)}).`,
               }),
         ),
       );
@@ -1286,35 +1256,10 @@ const make = Effect.gen(function* () {
       yield* operations.runChanged(root, currentStep(toState(run, records.gameRunRounds, held)));
     });
 
-  // The run log is for people: each step's decisions, written once it settles.
-  // Nothing reads it back; the step records are the run's history.
-  // Steps in flight, by id, with the attempt that is: a landed step is written
-  // once and dropped, so the set holds only what the runs are doing now.
-  const inFlightSteps = new Map<string, number>();
-  const logStep = (step: GameRunStep) =>
-    Effect.gen(function* () {
-      if (step.status === "planned" || step.status === "running") {
-        inFlightSteps.set(step.id, step.attempt);
-        return;
-      }
-      // A step seen only landed (a restart in between) is written too.
-      const held = inFlightSteps.get(step.id);
-      if (held !== undefined && held !== step.attempt) return;
-      if (held === undefined && step.completedAt === null) return;
-      inFlightSteps.delete(step.id);
-      // A step that completed with nothing to say only restates its record.
-      if (step.status === "completed" && step.logs.length === 0) return;
-      const root = yield* projects.resolve(step.threadId);
-      yield* logLine(root, `${describe(step.step)} (${step.status})`);
-      for (const line of step.logs) yield* logLine(root, `  ${line}`);
-    });
-
   const handle: GameRunStepRunner["Service"]["handle"] = (event) =>
     (event.type === "game-run.created" || event.type === "game-run.updated"
       ? showLive(event.payload)
-      : event.type === "game-run-step.updated"
-        ? logStep(event.payload)
-        : Effect.void
+      : Effect.void
     ).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("game run live line failed", { threadId: event.threadId, cause }),

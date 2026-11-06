@@ -255,7 +255,6 @@ const plainSubmission = (state: State.RunState, step: State.RoleStep): Partial<P
 // each runs on a creator's ask (drive keeps asking).
 const atRound = (patch: Partial<State.RunState> = {}) =>
   base({
-    trunk: "main",
     best: "best",
     stage: "build",
     ladder: { rungs: [], note: "finish rounds only" },
@@ -942,7 +941,6 @@ describe("blind comparators", () => {
 
   it("keeps a tied pick's comparator worktree for its selection, then releases it", () => {
     const pick = base({
-      trunk: "main",
       best: "trunk0",
       stage: "vision",
       task: {
@@ -1000,7 +998,6 @@ describe("blind comparators", () => {
     task: Partial<Extract<State.RunState["task"], { _tag: "pick" }>> = {},
   ): State.RunState =>
     base({
-      trunk: "main",
       best: "trunk0",
       stage: "vision",
       protos: [
@@ -1126,7 +1123,6 @@ describe("ladder", () => {
 
   it("writes the ladder in the plan stage and gives a wrong shape one fix turn", () => {
     const atPlan = base({
-      trunk: "main",
       best: "best",
       stage: "pick",
       task: {
@@ -1700,7 +1696,6 @@ describe("ladder", () => {
 
 describe("art review", () => {
   const atArt = base({
-    trunk: "main",
     best: "best",
     stage: "plan",
     task: {

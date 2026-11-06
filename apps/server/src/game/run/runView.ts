@@ -195,15 +195,12 @@ export const describe = (step: State.Step): string => {
   if (step.kind === "pair") return step.halves.map(describe).join(" | ");
   if (step.kind === "role")
     return `step ${step.id}: ${step.role}${step.thread === null ? "" : " (follow-up)"}${step.at === null ? "" : ` at ${step.at.slice(0, 12)}`}`;
-  if (step.kind === "git") return `step ${step.id}: git ${step.op._tag}`;
   if (step.kind === "bot") return `step ${step.id}: bot ${step.file} at ${step.sha.slice(0, 12)}`;
   if (step.kind === "decide") return `step ${step.id}: ask the creator (${step.decision.id})`;
   return `step ${step.id}: ${step.kind}`;
 };
 export const summarize = (res: Policy.StepResult): string => {
   if (res.kind === "done") return `done${res.timedOut ? " (capped)" : ""} on ${res.threadId}`;
-  if (res.kind === "git")
-    return `git ok=${res.git.ok} ${res.git.branch} ${res.git.sha.slice(0, 8)} ${res.git.detail}`.trim();
   if (res.kind === "boot") return `boot ${res.ok ? "clean" : `failed: ${res.detail}`}`;
   if (res.kind === "ended" || res.kind === "failed") return `${res.kind}: ${res.reason}`;
   if (res.kind === "decided") return `decided ${res.answer} (${res.by})`;

@@ -20,7 +20,7 @@ import type { Step } from "./state.ts";
 type BotStep = Extract<Step, { kind: "bot" }>;
 type BotResult = Extract<StepResult, { kind: "bot" }>;
 
-// Notes land in run.log and the comparison record: the cause, never a machine
+// Notes land in the step record and the comparison record: the cause, never a machine
 // path. Only paths under these roots go; a game's own node or res:// paths stay.
 const plain = (text: string, root: string): string => {
   const roots = [root, NodeOS.homedir(), NodeOS.tmpdir()]

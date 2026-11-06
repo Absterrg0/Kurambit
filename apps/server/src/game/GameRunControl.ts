@@ -414,7 +414,7 @@ const make = Effect.gen(function* () {
     run: GameRun,
     state: RunState,
   ): Effect.Effect<ReadonlyArray<GameRunSavedBuild>> => {
-    if (run.status !== "ended" || gitEra(run)) return Effect.succeed([]);
+    if (run.status !== "ended") return Effect.succeed([]);
     const folder = gameRunRefsFolder(run.id);
     return checkpoints.listCheckpointRefs({ cwd: root, prefix: folder }).pipe(
       Effect.map((listed) => {
@@ -837,7 +837,7 @@ const make = Effect.gen(function* () {
           "run-restore",
           root,
           "not-kept",
-          `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. A round's build that was not kept may still be among the saved builds game_run_status lists.${gitEra(run) ? ` Its work stays on branch ${record.branch}.` : ""}`,
+          `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. A round's build that was not kept may still be among the saved builds game_run_status lists.`,
         );
     } else if (!(yield* savedBuilds(root, run, state)).some((b) => b.name === build))
       return yield* runError(

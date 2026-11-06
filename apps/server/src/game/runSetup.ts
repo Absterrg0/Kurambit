@@ -1,4 +1,4 @@
-// @effect-diagnostics globalDate:off globalDateInEffect:off nodeBuiltinImport:off -- The production run's files in the game folder: skill pack, bot kit, ignores, the run log.
+// @effect-diagnostics nodeBuiltinImport:off -- The production run's files in the game folder: skill pack, bot kit, ignores.
 // What a run puts in the game folder before and around its steps.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
@@ -22,7 +22,6 @@ export const RUN_STATE_IGNORES = [
   ".studio/stop",
   ".studio/steer.jsonl",
   ".studio/profile",
-  ".studio/run.log",
   ".studio/bot-results.jsonl",
   ".studio/player-report.md",
   ".studio/pick.txt",
@@ -89,18 +88,9 @@ export const writeAtomic = async (file: string, text: string): Promise<void> => 
   }
 };
 
-/** The run log is for people: nothing reads it back. */
-// A rejected append (the folder gone, a full disk) must not break the work it
-// logs: Effect.promise would turn it into a defect that Effect.ignore lets through.
+/** A run's line for people, in the server log: the run's step records are its history. */
 export const logLine = (root: string, line: string): Effect.Effect<void> =>
-  Effect.tryPromise(() =>
-    NodeFSP.mkdir(NodePath.join(root, ".studio"), { recursive: true }).then(() =>
-      NodeFSP.appendFile(
-        NodePath.join(root, ".studio", "run.log"),
-        `${new Date().toISOString()} ${line}\n`,
-      ),
-    ),
-  ).pipe(Effect.ignore);
+  Effect.logInfo(line).pipe(Effect.annotateLogs({ game: root }));
 
 // A game made before the decision protocol has the older creator section; it is replaced whole.
 const CREATOR_HEADING = "## The creator's session and the production run";

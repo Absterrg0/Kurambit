@@ -266,7 +266,6 @@ describe("game-run commands", () => {
     expect(vision).toMatchObject({ status: "planned", kind: "role", seq: 2 });
     expect(vision!.step).toMatchObject({ role: "vision" });
     expect(runOf(records)).toMatchObject({
-      trunk: "",
       best: "c0ffee",
       versions: "checkpoints",
       inFlight: 2,

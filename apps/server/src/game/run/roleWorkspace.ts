@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off -- A role's copy and evidence are files on disk; preparation is timed on the wall clock for the run log.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off -- A role's copy and evidence are files on disk; preparation is timed on the wall clock for the server log.
 // A role's workspace around its turns: the plain copy of a build a role that
 // plays one gets before its thread exists, and the copy's release once the
 // role has no turn left.

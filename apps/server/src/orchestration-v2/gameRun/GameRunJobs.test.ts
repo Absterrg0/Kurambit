@@ -57,7 +57,7 @@ it.effect("a stop drops the re-run a job had pending", () =>
       assert.equal(yield* Queue.take(job.started), 1);
       yield* jobs.fork("step", runId, job.work);
       yield* jobs.stopRun(runId);
-      assert.isFalse(yield* jobs.isLive("step"));
+      assert.equal(job.runs(), 1);
       // A later ask is a new job, not the dropped re-run.
       const next = yield* Effect.forkChild(Queue.take(job.started));
       yield* jobs.fork("step", runId, job.work);

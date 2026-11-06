@@ -77,7 +77,7 @@ export const wayBack = (runId: string, name: string, lane: string) => {
 };
 
 /**
- * A kept build as the run log names it: the Run tab's saved builds bring it
+ * A kept build as the run's log lines name it: the Run tab's saved builds bring it
  * back, and the git command is the fallback when the app cannot.
  */
 export const keptBuild = (runId: string, name: string, lane: string, sha: string) =>
