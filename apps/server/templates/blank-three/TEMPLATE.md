@@ -11,7 +11,9 @@ The first playable build, in this order (the game's AGENTS.md, "The first turn")
 1. The look: `game_assets_search` lists the library by style family; write
    `STYLE.json`, then `game_assets_add` the player and one or two threats or
    props. They land under `web/assets/library/<pack>/`; name them in `ASSETS`
-   by the path the add reports.
+   by the path the add reports. The shell loads them and compiles their
+   shaders behind the loading screen, so play never starts on a freeze; keep
+   the default `LOOK` (no bloom, no lights besides `ctx.look.sun`) for it.
 2. The game: paste the recipe for your view from `studio-skills/three.md`
    (third person, top-down, side view) over `web/main.js`, swap in your
    models, and grow it into the brief's core loop with the kits below.
@@ -69,7 +71,9 @@ The rest of this file is reference: read a section when you use its kit.
 "assets/library/kaykit-adventurers/Characters/gltf/Knight.glb" }`: the shell loads them behind a loading bar
   before the title, and `ctx.assets.model("knight")` returns a fresh copy
   (with `.animations`) and `ctx.assets.texture(name)` a texture, ready in
-  `start`. A path that fails to load is reported as a page error.
+  `start`. A path that fails to load is reported as a page error. The
+  loading screen also compiles the models' shaders, lit as a run is, so the
+  first frame of play does not stall on them.
 - `GameState.state` reads `"title"`, `"playing"`, `"paused"` or `"ended"`
   (`GameState.result` is `"won"` or `"lost"` after a run). The shell sets it;
   the game reads it.

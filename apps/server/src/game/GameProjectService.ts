@@ -43,7 +43,7 @@ import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
-import { ensureScaffold } from "./runSetup.ts";
+import { ensureScaffold, ensureTurnSections } from "./runSetup.ts";
 import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
@@ -263,6 +263,11 @@ const make = Effect.gen(function* () {
     const lexicalRoot = NodePath.resolve(root);
     const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
     const manifest = yield* read(canonicalRoot);
+    if (options.resume === true)
+      yield* ensureTurnSections(canonicalRoot, manifest.engine.name).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
     const project = yield* projects.getByWorkspaceRoot(canonicalRoot).pipe(
       // A project registered before this canonical rule may still store the
       // alias; reuse that row rather than creating a second one for one game.
