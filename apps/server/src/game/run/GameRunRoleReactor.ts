@@ -478,6 +478,15 @@ const make = Effect.gen(function* () {
           yield* log(`${why}; waiting ${MEMORY_PAUSE} (${waits + 1} of ${MEMORY_WAITS})`);
           // The marks stay until the resend starts the next turn over: a landing
           // run again before then reads the same marks and sets the same timer.
+          // A session left open would hold the memory the pause waits for; one
+          // this cannot close is the idle reaper's.
+          yield* game
+            .finishExploration(roleThreadId, { keepMarks: true })
+            .pipe(
+              Effect.catch((error) =>
+                log(`${role.role}: explore session not closed: ${error.detail ?? error.reason}`),
+              ),
+            );
           return yield* again("memory", MEMORY_PAUSE);
         }
       }

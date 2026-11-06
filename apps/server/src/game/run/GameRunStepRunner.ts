@@ -35,7 +35,7 @@ import * as Stream from "effect/Stream";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
+import { gitEra, RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   gameRunOperationOwner,
@@ -119,8 +119,9 @@ export class GameRunStepRunner extends Context.Service<
   }
 >()("kurambit/game/run/GameRunStepRunner") {}
 
-// Endings that leave nothing to export: a stop, a failure, or memory too short for the exports.
-const NO_EXPORT: ReadonlySet<string> = new Set(["stopped", "failed", "low-memory"]);
+// Endings that leave nothing to export: a stop, a failure, or a machine too short of memory or
+// too busy for the exports to start.
+const NO_EXPORT: ReadonlySet<string> = new Set(["stopped", "failed", "low-memory", "busy"]);
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
@@ -1116,22 +1117,33 @@ const make = Effect.gen(function* () {
           gameRunOperationOwner(run.id),
           waitUntil,
           roleThreads,
-        ).pipe(Effect.ignore);
-        const name = BuildName.ending(job.endedAt);
-        const ended = yield* withBuildInFolder(
-          { game, checkpoints, lock: folderLock(run, waitUntil) },
-          { root, runId: run.id, lane: run.lane },
-          { sha: run.best, park: name },
-          () => exports.pipe(Effect.as({ value: undefined, putBack: true })),
         ).pipe(
+          // Total, defects included: an export that breaks is not the swap
+          // breaking, which would put the work back and export it instead.
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
               ? Effect.failCause(cause)
-              : log(
-                  `finishExports: the folder's work could not be kept (${causeText(cause)}); exporting the folder as it is`,
-                ).pipe(Effect.as(null)),
+              : log(`finishExports: the exports broke: ${causeText(cause)}`),
           ),
         );
+        const name = BuildName.ending(job.endedAt);
+        // A run from before checkpoints holds no builds: its folder is exported as it is.
+        const ended = gitEra(run)
+          ? null
+          : yield* withBuildInFolder(
+              { game, checkpoints, lock: folderLock(run, waitUntil) },
+              { root, runId: run.id, lane: run.lane },
+              { sha: run.best, park: name },
+              () => exports.pipe(Effect.as({ value: undefined, putBack: true })),
+            ).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.failCause(cause)
+                  : log(
+                      `finishExports: the folder's work could not be kept (${causeText(cause)}); exporting the folder as it is`,
+                    ).pipe(Effect.as(null)),
+              ),
+            );
         if (ended?.kind === "refused")
           yield* log(
             `finishExports: the best build could not be restored (${ended.detail}); exporting the folder as it is`,

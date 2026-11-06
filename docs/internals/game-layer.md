@@ -285,8 +285,8 @@ nothing). Records hold builds by commit oid; labels (`round-N`, `proto-N`) only 
 text. A builder turn's change is measured at its landing: the folder is captured and diffed with
 the build before it, and a diff that cannot be read counts as a change. A run from before kept
 its builds on git branches (`GameRun.versions` absent): it is history. Its records still decode
-and display, a resume or steer of it is refused, and one an older Kurambit left live is stopped
-at startup without touching the folder; nothing else in the run handles one.
+and display, a resume or steer of it is refused, one an older Kurambit left live is stopped at
+startup without touching the folder, and a finish it still owes exports its folder as it is.
 
 Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups)
 are written for people and later roles; nothing the run decides reads them. The run keeps no log

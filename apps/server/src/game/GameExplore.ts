@@ -121,8 +121,14 @@ export class GameExplore extends Context.Service<
       threadId: ThreadId,
       input: typeof GameExploreCloseInput.Type,
     ) => Effect.Effect<typeof GameExploreCloseResult.Type, GameOperationError>;
-    /** Closes the thread's open session and returns what its sessions played in all. */
-    readonly finish: (threadId: ThreadId) => Effect.Effect<
+    /**
+     * Closes the thread's open session and returns what its sessions played in
+     * all. `keepMarks` leaves the memory marks for the turn that reads them.
+     */
+    readonly finish: (
+      threadId: ThreadId,
+      options?: { readonly keepMarks?: boolean },
+    ) => Effect.Effect<
       {
         sessions: number;
         actions: number;
@@ -1255,7 +1261,7 @@ const make = Effect.gen(function* () {
     start: exploreStart,
     act: exploreAct,
     close: exploreClose,
-    finish: Effect.fn("GameExplore.finish")(function* (threadId) {
+    finish: Effect.fn("GameExplore.finish")(function* (threadId, options) {
       const root = yield* projects.resolve(threadId);
       const live = exploreLive.get(root);
       if (live !== undefined && String(live.threadId) === String(threadId))
@@ -1264,7 +1270,7 @@ const make = Effect.gen(function* () {
       const record = yield* evidenceLock.withPermits(1)(
         Effect.gen(function* () {
           const loaded = yield* loadEvidence(String(threadId), root);
-          if (loaded.memory === undefined) return loaded;
+          if (loaded.memory === undefined || options?.keepMarks === true) return loaded;
           const { memory: _cleared, ...rest } = loaded;
           rememberEvidence(rest);
           yield* writeEvidence(rest);

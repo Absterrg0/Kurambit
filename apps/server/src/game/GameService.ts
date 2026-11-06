@@ -104,7 +104,10 @@ export class GameService extends Context.Service<
   GameService,
   {
     readonly cancelThread: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
-    readonly finishExploration: (threadId: ThreadId) => Effect.Effect<
+    readonly finishExploration: (
+      threadId: ThreadId,
+      options?: { readonly keepMarks?: boolean },
+    ) => Effect.Effect<
       {
         sessions: number;
         actions: number;

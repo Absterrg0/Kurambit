@@ -14,7 +14,7 @@ import * as Templates from "./templates.ts";
 // Run notes and reports are harness output, never game content: ignoring them
 // keeps the tree clean so build swaps never need a stash (T28 wedged on a
 // half-applied stash pop). The list keeps the files earlier runs wrote
-// (run.json, rounds.jsonl, stop, steer, profile), so an older game's leftovers
+// (run.json, rounds.jsonl, stop, steer, profile, run.log), so an older game's leftovers
 // never ride in a commit.
 export const RUN_STATE_IGNORES = [
   ".studio/run.json",
@@ -22,6 +22,7 @@ export const RUN_STATE_IGNORES = [
   ".studio/stop",
   ".studio/steer.jsonl",
   ".studio/profile",
+  ".studio/run.log",
   ".studio/bot-results.jsonl",
   ".studio/player-report.md",
   ".studio/pick.txt",
