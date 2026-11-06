@@ -9,6 +9,7 @@
 import * as NodePath from "node:path";
 import {
   CommandId,
+  GameOperationError,
   type GameRun,
   type GameRunStep,
   type GameRunStepId,
@@ -20,6 +21,7 @@ import {
   type ThreadId,
   gameRunStepCommandId,
   gameRunStepId,
+  plainReason,
 } from "@kurambit/contracts";
 import { latestRootProviderFailure } from "@kurambit/shared/orchestrationV2ThreadError";
 import * as Cause from "effect/Cause";
@@ -28,6 +30,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -54,7 +57,7 @@ import * as GameService from "../GameService.ts";
 import { logLine } from "../runSetup.ts";
 import { BuildName } from "./buildNames.ts";
 import { captureBuild, freeBy, isGameCode, measureChange } from "./builds.ts";
-import { MEMORY_PAUSE, MEMORY_WAITS } from "./lowMemory.ts";
+import { MEMORY_PAUSE, MEMORY_WAITS, classify, handBack, toolFailed } from "./handBack.ts";
 import { causeText } from "../runSetup.ts";
 import { RETRIES as LANDING_RETRIES, retrying } from "./retrying.ts";
 import { lastPlay } from "../botEvidence.ts";
@@ -117,6 +120,8 @@ export const roleTurns = (runs: ReadonlyArray<OrchestrationV2Run>): AttributedTu
 /** The step's turns on one role thread, continuations included, oldest first. */
 export const stepTurns = (runs: ReadonlyArray<OrchestrationV2Run>, stepId: GameRunStepId) =>
   roleTurns(runs).filter((t) => t.turn.stepId === stepId);
+
+const isGameOperationError = Schema.is(GameOperationError);
 
 const millis = (value: DateTime.Utc | null | undefined) =>
   value == null ? null : DateTime.toEpochMillis(value);
@@ -289,9 +294,11 @@ const make = Effect.gen(function* () {
 
   /**
    * A step whose landing or timer could not be written however often it was
-   * tried fails, so the run ends resumably with why instead of holding a step
-   * nothing will move. A refusal means the step moved on already.
+   * tried pauses the run as a tool that kept failing, instead of holding a
+   * step nothing will move: nothing was measured, so nothing is judged. A
+   * refusal means the step moved on already.
    */
+  /** The build's own fault where the step has no verdict form for it: the step fails with it. */
   const failStep = (input: {
     readonly creator: ThreadId;
     readonly runId: GameRun["id"];
@@ -316,9 +323,41 @@ const make = Effect.gen(function* () {
           OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
         }),
         retrying,
-        // Recovery owes a step whose failure never got through: it wakes it at startup.
         Effect.catch((cause) =>
           Effect.logWarning("game run step could not be failed; recovery owes it", {
+            stepId: input.stepId,
+            cause,
+          }),
+        ),
+      );
+
+  const pauseStep = (input: {
+    readonly creator: ThreadId;
+    readonly runId: GameRun["id"];
+    readonly stepId: GameRunStepId;
+    readonly attempt: number;
+    readonly reason: string;
+  }) =>
+    engine
+      .dispatch({
+        type: "game-run.step.complete",
+        commandId: gameRunStepCommandId(input.stepId, input.attempt, "complete"),
+        threadId: input.creator,
+        runId: input.runId,
+        stepId: input.stepId,
+        attempt: input.attempt,
+        result: { kind: "ended", ending: "tool-failed", reason: input.reason.slice(0, 300) },
+      })
+      .pipe(
+        Effect.asVoid,
+        Effect.catchTags({
+          OrchestratorGameRunRefusedError: () => Effect.void,
+          OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+        }),
+        retrying,
+        // Recovery owes a step whose pause never got through: it wakes it at startup.
+        Effect.catch((cause) =>
+          Effect.logWarning("game run step could not be paused; recovery owes it", {
             stepId: input.stepId,
             cause,
           }),
@@ -358,7 +397,7 @@ const make = Effect.gen(function* () {
           }),
           retrying,
           Effect.catch((error) =>
-            failStep({
+            pauseStep({
               creator: input.creator,
               runId: input.at.run.id,
               stepId: input.stepId,
@@ -460,22 +499,27 @@ const make = Effect.gen(function* () {
           return yield* again("retry", Duration.seconds(15 * 2 ** retries));
         }
       }
-      // A sample's play turn that did not play because its explore start was
-      // refused for a cause not about the build (memory short, or queued
-      // behind another start) plays again on a fresh clock, every cause under
-      // one count; one that never clears ends the run resumably instead of
-      // voiding the sample. Only play turns: the write-up does not play.
-      if (role.inputCapMs > 0 && !role.release) {
+      // A play turn (a sample's, the tester's, the ship player's) that played
+      // nothing because its play was refused for a cause not about the build
+      // (memory short, queued behind another start, a tool of ours failing)
+      // plays again on a fresh clock, never lands as "played nothing": its
+      // evidence would be judged. Memory and busy replay up to their count; a
+      // tool that failed once more gets one replay (the agent was told to
+      // retry inside its turn already), one waiting cannot clear none. Past
+      // that the run pauses resumably. Only play turns: a write-up does not play.
+      if (role.plays ?? (role.inputCapMs > 0 && !role.release)) {
         // The marks count from this turn's send (the memory resend resets
         // them): a turn that played keeps its result, since a replay would
         // give one side a second turn, and one that never tried to start is
         // not the machine's fault.
         const mark = yield* game.exploreMemoryWait(roleThreadId);
-        if (mark.refused !== null && mark.executedInputSteps === 0) {
+        const botsPlayed = role.bots ? (yield* game.botRuns(roleThreadId)).count : 0;
+        if (mark.refused !== null && mark.executedInputSteps === 0 && botsPlayed === 0) {
           const waits = turns.filter((t) => t.sent && t.turn.kind === "memory").length;
-          const why = `${role.role}: explore start refused, ${mark.refused === "busy" ? "queued behind other starts" : "memory short"}`;
-          if (waits >= MEMORY_WAITS) return yield* end(mark.refused, why);
-          yield* log(`${why}; waiting ${MEMORY_PAUSE} (${waits + 1} of ${MEMORY_WAITS})`);
+          const why = `${role.role}: play refused, ${mark.refused === "busy" ? "queued behind other starts" : mark.refused === "low-memory" ? "memory short" : "a tool of Kurambit's failed"}`;
+          const limit = mark.refused !== "tool-failed" ? MEMORY_WAITS : mark.standing ? 0 : 1;
+          if (waits >= limit) return yield* end(mark.refused, why);
+          yield* log(`${why}; waiting ${MEMORY_PAUSE} (${waits + 1} of ${limit})`);
           // The marks stay until the resend starts the next turn over: a landing
           // run again before then reads the same marks and sets the same timer.
           // A session left open would hold the memory the pause waits for; one
@@ -500,6 +544,11 @@ const make = Effect.gen(function* () {
         (yield* threads.getCommandReceipt(roleCapCommandId(turn.stepId, turn.attempt, run.id)))
           ?.status === "accepted";
       const budgetCut = timedOut && at.run.budgetEndsAt !== null && now >= at.run.budgetEndsAt;
+      // The role's play stops before anything is read or captured (P-E10): a
+      // bot run or an operation of the turn still going would write the folder
+      // under the capture, or hold the game against the next step. Bounded,
+      // and it cancels queued operations, explore sessions and bots too.
+      yield* game.cancelThread(roleThreadId);
       // Evidence is cumulative per thread; closing here also releases the
       // thread's explorer so nothing stays open between roles.
       once.evidence ??= yield* readEvidence(roleThreadId);
@@ -612,13 +661,71 @@ const make = Effect.gen(function* () {
             );
             const creator = shell?.lineage.parentThreadId ?? null;
             if (creator === null) return null;
-            yield* failStep({
-              creator,
-              runId: turn.runId,
-              stepId: turn.stepId,
-              attempt: turn.attempt,
-              reason: `its turn could not be landed after ${LANDING_RETRIES + 1} tries (${causeText(Cause.fail(error))})`,
-            });
+            // Landing is reading the role's evidence, sources and bots, all
+            // ours: the step waits on its timer for the tool to come back
+            // (its wake lands the settled turn again), or pauses past that.
+            const at = yield* locate(creator, turn.stepId, turn.attempt).pipe(
+              Effect.orElseSucceed(() => null),
+            );
+            // Read once, as every step's work is: the build's own fault fails
+            // the step with it, a fault waiting cannot clear pauses at once.
+            const what = `${at?.role?.role ?? "a role"}'s landing`;
+            const read = classify(what, error);
+            // A damaged evidence record is gone: no wait brings the play back.
+            const cause =
+              read._tag === "GameRunToolFailed" &&
+              isGameOperationError(error) &&
+              /evidence record damaged/.test(error.detail ?? "")
+                ? toolFailed(what, error, { standing: true })
+                : read;
+            if (cause._tag === "GameRunJobBroke")
+              return yield* pauseStep({
+                creator,
+                runId: turn.runId,
+                stepId: turn.stepId,
+                attempt: turn.attempt,
+                reason: `its turn could not be landed after ${LANDING_RETRIES + 1} tries (${causeText(Cause.fail(error))})`,
+              }).pipe(Effect.as(null));
+            if (cause._tag === "GameRunBuildFault")
+              return yield* failStep({
+                creator,
+                runId: turn.runId,
+                stepId: turn.stepId,
+                attempt: turn.attempt,
+                reason: `the build cannot be kept: ${plainReason(cause.error.detail ?? cause.error.reason)}`,
+              }).pipe(Effect.as(null));
+            if (at === null)
+              return yield* pauseStep({
+                creator,
+                runId: turn.runId,
+                stepId: turn.stepId,
+                attempt: turn.attempt,
+                reason: `its turn could not be landed after ${LANDING_RETRIES + 1} tries (${causeText(Cause.fail(error))})`,
+              }).pipe(Effect.as(null));
+            yield* handBack(
+              engine,
+              {
+                creator,
+                runId: turn.runId,
+                stepId: turn.stepId,
+                attempt: turn.attempt,
+                record: at.record,
+              },
+              cause,
+              (result) => report(creator, at, turn.stepId, result),
+              (line) => Effect.logInfo(line),
+            ).pipe(
+              retrying,
+              Effect.catch((cause) =>
+                pauseStep({
+                  creator,
+                  runId: turn.runId,
+                  stepId: turn.stepId,
+                  attempt: turn.attempt,
+                  reason: `its turn could not be landed (${causeText(Cause.fail(cause))})`,
+                }),
+              ),
+            );
             return null;
           }),
         ),

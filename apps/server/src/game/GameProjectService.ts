@@ -26,7 +26,10 @@ import {
   type GameSummary,
   manifestProject,
 } from "@kurambit/contracts";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
+import { GameCaller, type GameCallerValue } from "./GameCaller.ts";
 import * as GameOperations from "./GameOperations.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
@@ -35,8 +38,6 @@ import { toState } from "../orchestration-v2/gameRun/decide.ts";
 import { isGameRunOperationOwner } from "../orchestration-v2/gameRun/ids.ts";
 import { gameRunHold } from "../orchestration-v2/CommandPolicy.ts";
 import { currentStep } from "./run/runView.ts";
-import * as GameProcesses from "./GameProcesses.ts";
-import { commandDetail } from "./commandDetail.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
@@ -55,6 +56,74 @@ export const insideGame = (root: string, relative: string) => {
     });
   return target;
 };
+/**
+ * The folder a new game gets: its name in lower-case ASCII words. Accents fold
+ * to their letters; a name with no Latin letters at all (ゲーム, Игра) gets
+ * `game-<hex>`, since the name itself stays the game's title.
+ */
+export const gameFolderName = (name: string, hex: string): string =>
+  name
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || `game-${hex}`;
+
+/** Written first into a game being created, under the ignored builds/; removed once it is committed. */
+const CREATE_MARKER = "builds/.kurambit-creating";
+
+/** A folder a create of ours left half-made: empty, or still holding the marker. */
+export const halfMadeCreate = async (root: string): Promise<boolean> => {
+  const entries = await NodeFSP.readdir(root).catch(() => null);
+  if (entries === null) return false;
+  if (entries.length === 0) return true;
+  return NodeFSP.lstat(NodePath.join(root, CREATE_MARKER)).then(
+    (stat) => stat.isFile(),
+    () => false,
+  );
+};
+
+const gitInitError = (root: string) => (cause: unknown) =>
+  new GameOperationError({
+    operation: "git-init",
+    path: root,
+    reason: "tool-failed",
+    detail: "git could not create the game's repository and its first commit.",
+    cause,
+  });
+
+const HELD: Record<"live" | "finishing" | "restoring", string> = {
+  live: "A production run is working on this game; this would change the folder its builds and checks read.",
+  finishing: "The production run is finishing: it is exporting the game's best build.",
+  restoring: "A round of the production run is being restored into this game's folder.",
+};
+const ROLE_HELD =
+  "This chat is one of the production run's roles; only the run's own agent works here while the run is live. Stop the run to work in it yourself.";
+
+/**
+ * Whether a write is admitted while a production run holds the game: null to
+ * admit, else why not. The one rule, for the service and its test fake. A
+ * role's thread (game folder or copy) is written only by its own agent while
+ * the run is live; a person looking at it is not that agent. Any other thread
+ * is refused only on the run's own game folder.
+ */
+export const admitDecision = (facts: {
+  readonly hold: "live" | "finishing" | "restoring" | null;
+  readonly role: boolean | "unknown";
+  readonly onRunFolder: boolean;
+  readonly caller: GameCallerValue;
+}): string | null => {
+  if (facts.hold === null) return null;
+  if (facts.role === true)
+    return facts.hold === "live" && facts.caller.kind === "agent" && facts.caller.runRole
+      ? null
+      : facts.hold === "live"
+        ? ROLE_HELD
+        : HELD[facts.hold];
+  if (facts.role === "unknown" || facts.onRunFolder) return HELD[facts.hold];
+  return null;
+};
+
 export class GameProjectService extends Context.Service<
   GameProjectService,
   {
@@ -87,10 +156,10 @@ export class GameProjectService extends Context.Service<
     ) => Effect.Effect<"live" | "finishing" | "restoring" | null>;
     /**
      * Refuses an operation that writes the game while a production run holds
-     * it, unless the run or one of its role threads asks: the run's builds,
-     * checks and exports read the folder as its own, and a creator's Rebuild
-     * or edit beside them would make a check fail for a cause that is not the
-     * build. `root` names the folder in the refusal.
+     * it, unless the run itself or a role's own agent (GameCaller) asks: the
+     * run's builds, checks and exports read the folder as its own, and a
+     * creator's Rebuild or edit beside them would make a check fail for a
+     * cause that is not the build. `root` names the folder in the refusal.
      */
     readonly admitWrite: (
       threadId: ThreadId,
@@ -99,15 +168,10 @@ export class GameProjectService extends Context.Service<
       owner: string,
     ) => Effect.Effect<void, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
-    /** Expensive reads (asset usage, viewport, builds). */
-    readonly inventory: (root: string) => Effect.Effect<
-      {
-        manifest: GameManifest;
-        viewport: GodotViewport;
-        builds: { target: string; path: string; updatedAt: string }[];
-      },
-      GameOperationError
-    >;
+    /** The manifest and the resolution the game plays at. */
+    readonly inventory: (
+      root: string,
+    ) => Effect.Effect<{ manifest: GameManifest; viewport: GodotViewport }, GameOperationError>;
   }
 >()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
@@ -116,10 +180,11 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const launches = yield* ThreadLaunchService.ThreadLaunchService;
-  const processes = yield* GameProcesses.GameProcesses;
   const operations = yield* GameOperations.GameOperations;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const fileSystem = yield* FileSystem.FileSystem;
+  const vcs = yield* VcsDriverRegistry.VcsDriverRegistry;
+  const createLocks = yield* KeyedLock.make<string>();
   // The game's run as its records hold it: a card says what a live run is doing.
   const liveRun = (projectId: ProjectId) =>
     Effect.gen(function* () {
@@ -279,18 +344,29 @@ const make = Effect.gen(function* () {
   const create: GameProjectService["Service"]["create"] = Effect.fn("GameProjectService.create")(
     function* (input) {
       const name = input.name.trim();
-      const slug = name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "");
-      if (!slug)
+      if (name === "")
         return yield* new GameOperationError({
           operation: "create-game",
           path: input.name,
           reason: "invalid-path",
+          detail: "A game needs a name.",
         });
       const parent = input.parentDirectory.trim() || NodePath.join(NodeOS.homedir(), "Games");
-      const requestedRoot = NodePath.resolve(parent.replace(/^~(?=\/|$)/, NodeOS.homedir()), slug);
+      const requestedRoot = NodePath.resolve(
+        parent.replace(/^~(?=\/|$)/, NodeOS.homedir()),
+        gameFolderName(
+          name,
+          // From the name itself, so a retry or a second click names the same folder.
+          NodeCrypto.createHash("sha256").update(name.normalize("NFC")).digest("hex").slice(0, 6),
+        ),
+      );
+      // One create per folder at a time in this server, so a second click
+      // cannot take the first's half-made folder for a leftover.
+      return yield* createLocks.withLock(requestedRoot, createAt(input, name, requestedRoot));
+    },
+  );
+  const createAt = (input: GameCreateInput, name: string, requestedRoot: string) =>
+    Effect.gen(function* () {
       // Start through the requested path, then settle on the real root before
       // writing any server-owned record. A symlinked parent must not mint keys
       // that the rest of the app cannot match.
@@ -306,21 +382,25 @@ const make = Effect.gen(function* () {
         yield* Effect.tryPromise({
           try: async () => {
             await NodeFSP.mkdir(NodePath.dirname(root), { recursive: true });
-            await NodeFSP.mkdir(root); // Never adopt or overwrite an existing directory during creation.
-            created = true;
-            const engine = createEngine(input);
-            // The Unity template ships its own Assets/ tree, and Unity has no web build.
-            const engineDirs =
-              engine === "three"
-                ? ["web/assets", "builds/web"]
-                : engine === "unity"
-                  ? []
-                  : ["godot/assets/models", "godot/scripts", "builds/web"];
+            // Never adopt or overwrite an existing directory, except a create of
+            // ours that a crash cut short: it is empty, or still holds the marker.
+            const claimed = await NodeFSP.mkdir(root).then(
+              () => true,
+              async (cause: NodeJS.ErrnoException) => {
+                if (cause.code !== "EEXIST" || !(await halfMadeCreate(root))) throw cause;
+                await NodeFSP.rm(root, { recursive: true, force: true });
+                await NodeFSP.mkdir(root);
+                return true;
+              },
+            );
+            created = claimed;
+            await NodeFSP.mkdir(NodePath.join(root, "builds"), { recursive: true });
+            await NodeFSP.writeFile(NodePath.join(root, CREATE_MARKER), "", { flag: "wx" });
             for (const relative of [
               "art/blender",
               "art/scripts",
               "art/previews",
-              ...engineDirs,
+              ...engineProfile(createEngine(input)).scaffold.directories,
               "builds/linux",
             ])
               await NodeFSP.mkdir(NodePath.join(root, relative), { recursive: true });
@@ -331,7 +411,20 @@ const make = Effect.gen(function* () {
             }
           },
           catch: (cause) =>
-            new GameOperationError({ operation: "scaffold-game", path: root, reason: "io", cause }),
+            (cause as NodeJS.ErrnoException | undefined)?.code === "EEXIST" && !created
+              ? new GameOperationError({
+                  operation: "create-game",
+                  path: root,
+                  reason: "invalid-path",
+                  detail: `A folder already exists at ${root}. Open it with Open game, or choose another name.`,
+                  cause,
+                })
+              : new GameOperationError({
+                  operation: "scaffold-game",
+                  path: root,
+                  reason: "io",
+                  cause,
+                }),
         });
         const templatesDirectory = yield* resolveTemplatesDirectory().pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -347,34 +440,18 @@ const make = Effect.gen(function* () {
           Effect.provideService(Path.Path, path),
         );
         root = yield* resolveCanonicalRoot(root, "create-game");
-        for (const args of [
-          ["init"],
-          ["add", "."],
-          [
-            "-c",
-            "user.name=Kurambit",
-            "-c",
-            "user.email=studio@localhost",
-            "commit",
-            "-m",
-            "chore: create game project",
-          ],
-        ]) {
-          const result = yield* processes.run({
-            root,
-            executable: "git",
-            args,
-            operation: "git-init",
-            timeoutMs: 30_000,
-          });
-          if (result.exitCode !== 0)
-            return yield* new GameOperationError({
-              operation: "git-init",
-              path: result.logPath,
-              reason: "command-failed",
-              detail: commandDetail(result),
-            });
-        }
+        // The first commit is Kurambit's own, through git's plumbing: the
+        // user's signing config and hooks never apply to it. The marker sits
+        // under the ignored builds/, so it never rides in that commit.
+        const git = yield* vcs.get("git").pipe(Effect.mapError(gitInitError(root)));
+        yield* git
+          .initRepository({ cwd: root, initialCommit: { message: "chore: create game project" } })
+          .pipe(Effect.mapError(gitInitError(root)));
+        yield* Effect.tryPromise({
+          try: () => NodeFSP.rm(NodePath.join(root, CREATE_MARKER)),
+          catch: (cause) =>
+            new GameOperationError({ operation: "create-game", path: root, reason: "io", cause }),
+        });
         // The creator thread starts empty: GameRun.createGame starts the
         // production run with this brief, and the thread stays the creator's
         // own conversation with the game.
@@ -383,8 +460,7 @@ const make = Effect.gen(function* () {
         // A create that fails or is interrupted must not leave a half-made folder behind.
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : rollback)),
       );
-    },
-  );
+    });
   const resolve = Effect.fn("GameProjectService.resolve")(function* (
     threadId: ThreadId,
     options: { readonly deleted?: "allowed" } = {},
@@ -451,11 +527,6 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => "live" as const),
     );
 
-  const HELD: Record<"live" | "finishing" | "restoring", string> = {
-    live: "A production run is working on this game; this would change the folder its builds and checks read.",
-    finishing: "The production run is finishing: it is exporting the game's best build.",
-    restoring: "A round of the production run is being restored into this game's folder.",
-  };
   const admitWrite: GameProjectService["Service"]["admitWrite"] = (
     threadId,
     root,
@@ -468,29 +539,28 @@ const make = Effect.gen(function* () {
       const run = yield* projectRun(threadId).pipe(Effect.option);
       const hold = Option.isSome(run) ? holdOf(run.value) : "live";
       if (hold === null) return;
-      // The run holds its game folder only: a copy or another checkout of the game is not it.
-      if (Option.isSome(run) && run.value !== null) {
-        const gameRoot = yield* resolve(run.value.threadId, { deleted: "allowed" }).pipe(
-          Effect.option,
-        );
-        if (Option.isSome(gameRoot) && gameRoot.value !== root) return;
-      }
-      // A role thread is the live run's own hand; an unreadable one is not
-      // taken for one, and an ended run's roles have no work left.
-      const role =
-        hold === "live" &&
-        (yield* threads.getThreadRecords(threadId, []).pipe(
+      const gameRoot =
+        Option.isSome(run) && run.value !== null
+          ? yield* resolve(run.value.threadId, { deleted: "allowed" }).pipe(Effect.option)
+          : Option.none();
+      const refusal = admitDecision({
+        hold,
+        // An unreadable record is never taken for a role's, and never admitted as one.
+        role: yield* threads.getThreadRecords(threadId, []).pipe(
           Effect.map(({ thread }) => thread.launchedBy === "game_run"),
-          Effect.orElseSucceed(() => false),
-        ));
-      if (role) return;
-      return yield* new GameOperationError({
-        operation,
-        path: root,
-        reason: "busy",
-        runReason: "run-live",
-        detail: HELD[hold],
+          Effect.orElseSucceed(() => "unknown" as const),
+        ),
+        onRunFolder: Option.isNone(gameRoot) || gameRoot.value === root,
+        caller: yield* GameCaller,
       });
+      if (refusal !== null)
+        return yield* new GameOperationError({
+          operation,
+          path: root,
+          reason: "busy",
+          runReason: "run-live",
+          detail: refusal,
+        });
     });
 
   return GameProjectService.of({
@@ -547,7 +617,12 @@ const make = Effect.gen(function* () {
             const latestThread = newestThreadByProject.get(project.id) ?? null;
             const currentOperation = operations.current(root);
             const keyArt = yield* Effect.promise(() =>
-              findKeyArt(root, manifestProject(manifest.value)),
+              findKeyArt(
+                root,
+                manifestProject(manifest.value),
+                "title",
+                manifest.value.engine.name,
+              ),
             );
             const summary: GameSummary = {
               projectId: project.id,
@@ -600,8 +675,6 @@ const make = Effect.gen(function* () {
     read,
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
-      // The walk stays bounded to the engine tree; every source is read once
-      // to attribute asset usage, and a changed tree is never served stale.
       // An engine with a fixed resolution (three.js, Unity) plays at it; Godot's is in project.godot.
       const expensive = yield* Effect.tryPromise({
         try: async () => {
@@ -617,70 +690,7 @@ const make = Effect.gen(function* () {
         catch: (cause) =>
           new GameOperationError({ operation: "inventory", path: root, reason: "io", cause }),
       });
-      // Stat-only reads detect new builds and a deleted brief without a walk.
-      const builds = yield* Effect.promise(async () => {
-        const found: { target: string; path: string; updatedAt: string }[] = [];
-        // A Web build is either the legacy mutable directory or one immutable
-        // candidate. Report the newest artifact that exists; the stage replaces
-        // this with the selected record when one is stored.
-        const webCandidates: { relative: string; mtimeMs: number; updatedAt: string }[] = [];
-        const legacy = await NodeFSP.stat(NodePath.join(root, "builds/web/index.html")).then(
-          (stat) => stat,
-          () => null,
-        );
-        if (legacy !== null)
-          webCandidates.push({
-            relative: "builds/web/index.html",
-            mtimeMs: legacy.mtimeMs,
-            updatedAt: DateTime.formatIso(DateTime.fromDateUnsafe(legacy.mtime)),
-          });
-        const candidates = await NodeFSP.readdir(NodePath.join(root, "builds/candidates"), {
-          withFileTypes: true,
-        }).catch(() => []);
-        for (const entry of candidates) {
-          if (!entry.isDirectory() || !/^[0-9a-f]{64}$/.test(entry.name)) continue;
-          const relative = `builds/candidates/${entry.name}/index.html`;
-          const stat = await NodeFSP.stat(NodePath.join(root, relative)).then(
-            (found) => found,
-            () => null,
-          );
-          if (stat !== null)
-            webCandidates.push({
-              relative,
-              mtimeMs: stat.mtimeMs,
-              updatedAt: DateTime.formatIso(DateTime.fromDateUnsafe(stat.mtime)),
-            });
-        }
-        webCandidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
-        const newestWeb = webCandidates[0];
-        if (newestWeb !== undefined)
-          found.push({
-            target: "Web",
-            path: newestWeb.relative,
-            updatedAt: newestWeb.updatedAt,
-          });
-        for (const [target, relative] of [
-          ["Linux", "builds/linux/game.x86_64"],
-          ["Windows", "builds/windows/game.exe"],
-        ] as const) {
-          try {
-            const stat = await NodeFSP.stat(NodePath.join(root, relative));
-            found.push({
-              target,
-              path: relative,
-              updatedAt: stat.mtime.toISOString(),
-            });
-          } catch {
-            /* A game need not have been built for every platform. */
-          }
-        }
-        return found;
-      });
-      return {
-        manifest,
-        builds,
-        viewport: expensive.viewport,
-      };
+      return { manifest, viewport: expensive.viewport };
     }),
   });
 });

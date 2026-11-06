@@ -108,7 +108,7 @@ describe("the generated check bot", () => {
     expect(sent.setStates).toEqual(["zone2"]);
     expect(sent.presses.filter((k) => k === "Enter").length).toBeLessThanOrEqual(2);
     expect(sent.held.size).toBe(0);
-    const seen = readReport(status.note)!;
+    const seen = readReport(status.evidence)!;
     expect(seen.start).toEqual({ zone: 1, score: 2 });
     expect(seen.end).toEqual({ zone: 2, score: 3 });
     expect(seen.hud).toBe("Zone 2 / 3");
@@ -129,6 +129,32 @@ describe("the generated check bot", () => {
       () => ({ gameState: { state: "title" }, hudText: "Play" }),
     );
     expect(sent.presses).toEqual([]);
-    expect(evaluate(t0, readReport(status.note)!).pass).toBe(true);
+    expect(evaluate(t0, readReport(status.evidence)!).pass).toBe(true);
+  });
+
+  // Whatever the game holds, the report fits the bot status's 4096-byte evidence:
+  // a check never pauses the run because a game's state is large.
+  it("bounds its report by construction and says what it cut", async () => {
+    const t0 = terms('inventory contains "key" and player.name == "x" and hud contains "Hp"');
+    const { status } = await drive(
+      {
+        what: "x",
+        from: "title",
+        setup: null,
+        input: [],
+        keys: keysOf(t0),
+        needles: needlesOf(t0),
+      },
+      () => ({
+        gameState: {
+          state: "title",
+          inventory: Array.from({ length: 5000 }, (_, i) => ({ id: i, name: `item-${i}` })),
+          player: { name: "y".repeat(10_000) },
+        },
+        hudText: `Hp ${"z".repeat(10_000)}`,
+      }),
+    );
+    expect(JSON.stringify(status.evidence).length).toBeLessThan(4096);
+    expect(readReport(status.evidence)!.cut).toEqual(["inventory", "player.name"]);
   });
 });

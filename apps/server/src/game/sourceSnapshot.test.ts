@@ -5,7 +5,14 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, describe, expect, it } from "@effect/vitest";
-import { type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
+import { gameOperationFault } from "@kurambit/contracts";
+import { GODOT_PROFILE } from "./godotProfile.ts";
+import { UNITY_PROFILE } from "./unityProfile.ts";
+import {
+  type SourceHashCache,
+  snapshotBuildSource,
+  sourceIdentityError,
+} from "./sourceSnapshot.ts";
 
 const roots: string[] = [];
 afterAll(() =>
@@ -39,7 +46,7 @@ const unity = async (content: string) => {
 };
 
 const idOf = async (root: string) => {
-  const snapshot = await snapshotBuildSource(root, "unity");
+  const snapshot = await snapshotBuildSource(root, "unity", { rules: UNITY_PROFILE.buildInputs });
   if (snapshot.kind !== "known") throw new Error("unknown snapshot");
   return snapshot.sourceId;
 };
@@ -79,11 +86,17 @@ describe("snapshotBuildSource with a hash cache", () => {
     const old = new Date(Date.now() - 60_000);
     await NodeFSP.utimes(script, old, old);
     const cache: SourceHashCache = new Map();
-    const first = await snapshotBuildSource(root, "godot", { cache });
+    const first = await snapshotBuildSource(root, "godot", {
+      cache,
+      rules: GODOT_PROFILE.buildInputs,
+    });
     expect(cache.size).toBe(1);
     await NodeFSP.writeFile(script, "speed = 9\n");
     await NodeFSP.utimes(script, old, old);
-    const second = await snapshotBuildSource(root, "godot", { cache });
+    const second = await snapshotBuildSource(root, "godot", {
+      cache,
+      rules: GODOT_PROFILE.buildInputs,
+    });
     if (first.kind !== "known" || second.kind !== "known") throw new Error("unknown snapshot");
     expect(second.sourceId).not.toBe(first.sourceId);
   });
@@ -94,7 +107,20 @@ describe("snapshotBuildSource with a hash cache", () => {
     await NodeFSP.mkdir(NodePath.join(root, "godot"), { recursive: true });
     await NodeFSP.writeFile(NodePath.join(root, "godot/main.gd"), "speed = 1\n");
     const cache: SourceHashCache = new Map();
-    await snapshotBuildSource(root, "godot", { cache });
+    await snapshotBuildSource(root, "godot", { cache, rules: GODOT_PROFILE.buildInputs });
     expect(cache.size).toBe(0);
+  });
+});
+
+// A run judges the build on its own content and pauses on ours: an
+// unidentifiable tree must never read as the run's own bad request.
+describe("sourceIdentityError", () => {
+  const fault = (why: Parameters<typeof sourceIdentityError>[3]) =>
+    gameOperationFault(sourceIdentityError("boot", "/g", "unity", why).reason);
+  it("reads a link and too many files as the build's, an unreadable or moving tree as ours", () => {
+    expect(fault({ kind: "unknown", reason: "symlink", detail: "unity/Assets/x" })).toBe("build");
+    expect(fault({ kind: "unknown", reason: "entry-limit" })).toBe("build");
+    expect(fault({ kind: "unknown", reason: "io" })).toBe("tool");
+    expect(fault({ kind: "changed", detail: "moved" })).toBe("tool");
   });
 });

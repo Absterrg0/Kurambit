@@ -1,8 +1,11 @@
 import * as HostProcess from "@kurambit/shared/HostProcess";
 // @effect-diagnostics nodeBuiltinImport:off -- This service owns the native filesystem, process, or loopback HTTP boundary.
+import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
+import * as NodeStreamPromises from "node:stream/promises";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -31,7 +34,7 @@ import {
   unityEditorDir,
   unityEditorExecutable,
   unityHubLocations,
-  unityLicenseFile,
+  unityLicenseFiles,
   unityLicenseMessage,
   unityVersionFromPath,
   unityWindowsSupport,
@@ -48,6 +51,7 @@ import {
 } from "./plumbingBuilds.ts";
 import { downloadPinned } from "./assetLibraryFiles.ts";
 import { fileSha256 } from "./fileHash.ts";
+import { openZipArchive } from "../zipArchive.ts";
 
 const DOWNLOADS = {
   blender: "https://www.blender.org/download/",
@@ -163,6 +167,8 @@ export class GameToolchain extends Context.Service<
      */
     readonly unityExecutables: Effect.Effect<UnityExecutables>;
     /** Per-tool status. With a Unity project, Unity's entry speaks for that project's editor version. */
+    /** Grows each time Kurambit fetches a tool, so a cached status of the toolchain knows it moved. */
+    readonly revision: () => number;
     readonly status: (options?: {
       readonly unityProject?: string | undefined;
     }) => Effect.Effect<GameToolchainStatus>;
@@ -197,9 +203,13 @@ const make = Effect.gen(function* () {
   const directory = toolsDirectory();
   const logRoot = NodePath.join(directory, ".operations");
   const fetchLock = Semaphore.makeUnsafe(1);
+  let revision = 0;
+  // A probe that answered is kept while the binary is the same file; one that
+  // failed or timed out (a cold start under memory pressure) only briefly, so
+  // a passing hiccup never reads as a broken tool for the server's life.
   const probes = new Map<
     string,
-    { mtime: number; size: number; exitCode: number; output: string }
+    { mtime: number; size: number; exitCode: number; output: string; until: number }
   >();
   const readSettings = settings.getSettings.pipe(
     Effect.mapError(
@@ -219,8 +229,15 @@ const make = Effect.gen(function* () {
   const probeVersion = (tool: BinaryTool, path: string) =>
     Effect.gen(function* () {
       const stat = yield* Effect.promise(() => NodeFSP.stat(path));
+      const now = yield* Clock.currentTimeMillis;
       const cached = probes.get(path);
-      if (cached && cached.mtime === stat.mtimeMs && cached.size === stat.size) return cached;
+      if (
+        cached &&
+        cached.mtime === stat.mtimeMs &&
+        cached.size === stat.size &&
+        now < cached.until
+      )
+        return cached;
       const result = yield* processes
         .run({
           root: logRoot,
@@ -228,10 +245,11 @@ const make = Effect.gen(function* () {
           args: ["--version"],
           operation: `${tool}-version`,
           timeoutMs: 20_000,
+          log: false,
         })
         .pipe(
           Effect.map((run) => ({
-            exitCode: run.exitCode,
+            exitCode: run.timedOut ? -1 : run.exitCode,
             output: `${run.stdout}${run.stderr}`,
             detail: commandDetail(run),
           })),
@@ -242,6 +260,7 @@ const make = Effect.gen(function* () {
         size: stat.size,
         exitCode: result.exitCode,
         output: result.exitCode === 0 ? result.output : result.detail || result.output,
+        until: result.exitCode === 0 ? Number.POSITIVE_INFINITY : now + 60_000,
       };
       probes.set(path, entry);
       return entry;
@@ -439,24 +458,105 @@ const make = Effect.gen(function* () {
         catch: (cause) =>
           new GameOperationError({ operation, path: unpacked, reason: "io", cause }),
       });
-      // tar reads both the tarballs and, on Windows and macOS (bsdtar), the zips.
+      // A zip (uv's Windows builds) is read by yauzl: the tar on PATH may be
+      // Git for Windows' GNU tar, which refuses zips and reads C:\ as a host.
+      if (file.endsWith(".zip")) {
+        yield* unzipFlat(operation, file, unpacked);
+        return NodePath.join(unpacked, build.dir);
+      }
       const extract = yield* processes.run({
         root: logRoot,
         executable: "tar",
         args: ["-xf", file, "-C", unpacked],
         operation: `${operation}-extract`,
         timeoutMs: 120_000,
+        log: false,
       });
       if (extract.exitCode !== 0)
         return yield* new GameOperationError({
           operation,
-          path: extract.logPath,
-          reason: "command-failed",
+          path: file,
+          reason: "tool-failed",
           detail: commandDetail(extract),
         });
       return NodePath.join(unpacked, build.dir);
     });
+  /**
+   * Unpacks a verified zip whose files sit at its root (uv's Windows builds):
+   * plain file names only, each written exclusively. Anything else in it is
+   * refused, since the archive's bytes were pinned and should hold nothing else.
+   */
+  const unzipFlat = (operation: string, file: string, unpacked: string) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const unsafe = (detail: string, cause?: unknown) =>
+          new GameOperationError({
+            operation,
+            path: file,
+            reason: "unsafe-archive",
+            detail,
+            cause,
+          });
+        const archive = yield* openZipArchive(file, unsafe);
+        for (;;) {
+          const entry = yield* archive.next;
+          if (entry === null) return;
+          const name = entry.fileName;
+          if (!/^[\w.-]+$/.test(name) || name === "." || name === "..")
+            return yield* unsafe(`The archive holds an unexpected entry (${name.slice(0, 120)}).`);
+          const readable = yield* archive.streamEntry(entry);
+          yield* Effect.tryPromise({
+            try: () =>
+              NodeStreamPromises.pipeline(
+                readable,
+                NodeFS.createWriteStream(NodePath.join(unpacked, name), {
+                  flags: "wx",
+                  mode: 0o755,
+                }),
+              ),
+            catch: (cause) =>
+              new GameOperationError({ operation, path: unpacked, reason: "io", cause }),
+          });
+        }
+      }),
+    );
   const exe = (name: string) => (platform === "win32" ? `${name}.exe` : name);
+  /**
+   * Puts a verified uv folder at `target`. A broken earlier one there is moved
+   * aside first (a rename onto a non-empty folder always fails), and a good
+   * one another server placed meanwhile is accepted: every server on the
+   * machine shares the tools folder, and no lock spans them.
+   */
+  const placeUv = (extracted: string, target: string) =>
+    Effect.gen(function* () {
+      const placedGood = Effect.flatMap(
+        Effect.promise(() => isExecutable(NodePath.join(target, exe("uv")))),
+        (present) =>
+          present
+            ? probeVersion("uv", NodePath.join(target, exe("uv"))).pipe(
+                Effect.map((probed) => probed.exitCode === 0 && probed.output.includes(UV_VERSION)),
+                Effect.orElseSucceed(() => false),
+              )
+            : Effect.succeed(false),
+      );
+      if (yield* placedGood) return;
+      const aside = `${target}.old-${NodeCrypto.randomUUID()}`;
+      yield* Effect.promise(() => NodeFSP.rename(target, aside).catch(() => undefined));
+      const placed = yield* Effect.tryPromise({
+        try: () => NodeFSP.rename(extracted, target),
+        catch: (cause) =>
+          new GameOperationError({ operation: "fetch-uv", path: target, reason: "io", cause }),
+      }).pipe(
+        Effect.catchTags({
+          // Another server placed it between the move and the rename.
+          GameOperationError: (error) =>
+            Effect.flatMap(placedGood, (good) => (good ? Effect.void : Effect.fail(error))),
+        }),
+        Effect.exit,
+      );
+      yield* Effect.promise(() => NodeFSP.rm(aside, { recursive: true, force: true }));
+      if (placed._tag === "Failure") return yield* Effect.failCause(placed.cause);
+    });
   const fetchUv = Effect.gen(function* () {
     const target = NodePath.join(directory, `uv-${UV_VERSION}`);
     if (plumbing === null)
@@ -475,6 +575,7 @@ const make = Effect.gen(function* () {
         args: ["--version"],
         operation: "fetch-uv-check",
         timeoutMs: 20_000,
+        log: false,
       });
       if (check.exitCode !== 0 || !(check.stdout + check.stderr).includes(UV_VERSION))
         return yield* new GameOperationError({
@@ -483,11 +584,7 @@ const make = Effect.gen(function* () {
           reason: "wrong-version",
           detail: `uv reported ${(check.stdout + check.stderr).slice(0, 200)}; expected ${UV_VERSION}.`,
         });
-      yield* Effect.tryPromise({
-        try: () => NodeFSP.rename(extracted, target),
-        catch: (cause) =>
-          new GameOperationError({ operation: "fetch-uv", path: target, reason: "io", cause }),
-      });
+      yield* placeUv(extracted, target);
     }).pipe(Effect.ensuring(dropStage(stage)));
   });
   const uv: GameToolchain["Service"]["uv"] = fetchLock.withPermits(1)(
@@ -496,6 +593,7 @@ const make = Effect.gen(function* () {
       if (found.kind === "ok") return found.path;
       if (!fetchesUv(found)) return (yield* executable("uv")).path;
       yield* fetchUv;
+      revision += 1;
       return (yield* executable("uv")).path;
     }),
   );
@@ -561,6 +659,7 @@ const make = Effect.gen(function* () {
           detail: `KURAMBIT_UNITY_CLI names ${cli}, which is not an executable file.`,
         });
       yield* fetchUnityCli;
+      revision += 1;
       return cli;
     }),
   );
@@ -665,11 +764,18 @@ const make = Effect.gen(function* () {
         upgradesProject: choice.upgradesProject?.text ?? null,
       };
     });
+  const licenseFiles = unityLicenseFiles(platform, process.env, NodeOS.homedir());
   const readLicense = Effect.gen(function* () {
     const xml = yield* Effect.promise(() =>
-      NodeFSP.readFile(unityLicenseFile(), "utf8").catch(() => null),
+      NodeFSP.readFile(licenseFiles.entitlement, "utf8").catch(() => null),
     );
-    return parseUnityLicense(xml, yield* Clock.currentTimeMillis);
+    const serial = yield* Effect.promise(() =>
+      NodeFSP.stat(licenseFiles.serial).then(
+        (stat) => stat.isFile() && stat.size > 0,
+        () => false,
+      ),
+    );
+    return parseUnityLicense(xml, yield* Clock.currentTimeMillis, serial);
   });
   const unity: GameToolchain["Service"]["unity"] = (projectDir) =>
     Effect.gen(function* () {
@@ -678,9 +784,9 @@ const make = Effect.gen(function* () {
       if (license.kind !== "active")
         return yield* new GameOperationError({
           operation: "Unity",
-          path: unityLicenseFile(),
+          path: licenseFiles.entitlement,
           reason: "license-missing",
-          detail: unityLicenseMessage(license),
+          detail: unityLicenseMessage(license, licenseFiles.entitlement),
         });
       const cli = yield* unityCli;
       return { ...editor, cli, cliHome: cliFiles.installHome, license };
@@ -702,7 +808,7 @@ const make = Effect.gen(function* () {
         return {
           ...base,
           status: "error",
-          message: unityLicenseMessage(license),
+          message: unityLicenseMessage(license, licenseFiles.entitlement),
           downloadUrl: UNITY_DOWNLOAD_URL,
         } satisfies GameToolStatus;
       const windows = yield* Effect.promise(() =>
@@ -718,7 +824,7 @@ const make = Effect.gen(function* () {
       return {
         ...base,
         status: gaps === "" ? "ready" : "warning",
-        message: `Unity ${editor.version}. ${unityLicenseMessage(license)}${gaps}`,
+        message: `Unity ${editor.version}. ${unityLicenseMessage(license, licenseFiles.entitlement)}${gaps}`,
         downloadUrl: gaps === "" ? null : UNITY_DOWNLOAD_URL,
       } satisfies GameToolStatus;
     }).pipe(
@@ -752,7 +858,14 @@ const make = Effect.gen(function* () {
     });
   const dropStage = (stage: string) =>
     Effect.promise(() => NodeFSP.rm(stage, { recursive: true, force: true }));
-  return GameToolchain.of({ executable, uv, unity, unityExecutables, status });
+  return GameToolchain.of({
+    executable,
+    uv,
+    unity,
+    unityExecutables,
+    status,
+    revision: () => revision,
+  });
 });
 const isExecutable = async (file: string) => {
   try {

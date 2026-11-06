@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeStream from "node:stream";
 import * as NodeStreamPromises from "node:stream/promises";
 import * as Effect from "effect/Effect";
-import { GameOperationError, type GameLibraryKind } from "@kurambit/contracts";
+import { GameOperationError, type GameEngineId, type GameLibraryKind } from "@kurambit/contracts";
 import { openZipArchive } from "../zipArchive.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
@@ -66,8 +66,6 @@ export interface LibraryIndex {
   readonly previews: ReadonlyArray<string>;
 }
 
-export type LibraryEngine = "godot" | "three" | "unity";
-
 const MEDIA: Record<string, LibraryMedia> = {
   png: "image",
   jpg: "image",
@@ -96,7 +94,7 @@ const MEDIA: Record<string, LibraryMedia> = {
 
 // What each engine's project loads as shipped. .blend needs a Blender path at import, and
 // the three.js template vendors only GLTFLoader, so neither is offered there.
-const LOADABLE: Record<LibraryEngine, ReadonlySet<string>> = {
+const LOADABLE: Record<GameEngineId, ReadonlySet<string>> = {
   godot: new Set(
     "png jpg jpeg webp svg glb gltf fbx obj dae ogg wav mp3 ttf otf txt xml json tmx tsx mtl bin".split(
       " ",
@@ -111,7 +109,7 @@ const LOADABLE: Record<LibraryEngine, ReadonlySet<string>> = {
 };
 
 /** Model formats in the order an engine prefers them; Kenney ships every model in several. */
-const MODEL_RANK: Record<LibraryEngine, ReadonlyArray<string>> = {
+const MODEL_RANK: Record<GameEngineId, ReadonlyArray<string>> = {
   godot: ["glb", "gltf", "fbx", "obj", "dae"],
   three: ["glb", "gltf"],
   unity: ["glb", "fbx", "gltf", "obj"],
@@ -123,8 +121,8 @@ const extensionOf = (path: string) => {
   return dot <= 0 ? "" : name.slice(dot + 1).toLowerCase();
 };
 export const mediaOf = (path: string): LibraryMedia | undefined => MEDIA[extensionOf(path)];
-export const loadableIn = (engine: LibraryEngine, format: string) => LOADABLE[engine].has(format);
-export const modelRank = (engine: LibraryEngine, format: string) => {
+export const loadableIn = (engine: GameEngineId, format: string) => LOADABLE[engine].has(format);
+export const modelRank = (engine: GameEngineId, format: string) => {
   const rank = MODEL_RANK[engine].indexOf(format);
   return rank === -1 ? MODEL_RANK[engine].length : rank;
 };
@@ -361,9 +359,13 @@ const relativeUris = (items: unknown): string[] =>
   Array.isArray(items)
     ? items.flatMap((item) => {
         const uri = (item as { uri?: unknown } | null)?.uri;
-        return typeof uri === "string" && !uri.startsWith("data:") && !/^[a-z]+:/i.test(uri)
-          ? [decodeURIComponent(uri)]
-          : [];
+        if (typeof uri !== "string" || uri.startsWith("data:") || /^[a-z]+:/i.test(uri)) return [];
+        // A malformed escape (`50%_tex.png`) names the file as written.
+        try {
+          return [decodeURIComponent(uri)];
+        } catch {
+          return [uri];
+        }
       })
     : [];
 

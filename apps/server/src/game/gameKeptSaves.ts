@@ -3,10 +3,41 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError, type GameSaves } from "@kurambit/contracts";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { isPathInside } from "./gameNativeUserDir.ts";
+import type { KeptStorage } from "./webPlaySession.ts";
 
 /** Game-relative home of kept saves; run state, ignored and never merged. */
 export const KEPT_SAVES_DIR = ".studio/saves";
+
+/**
+ * A directory inside the game folder, created when missing, that resolves
+ * inside the game even through links: an agent can replace any folder of the
+ * game with a link (`.studio`, `builds/logs`), and a server write must never
+ * follow it out. The nearest existing ancestor is checked before anything is
+ * created, so not even an empty directory is made outside the game.
+ */
+export const ensureGameDir = async (root: string, relative: string): Promise<string> => {
+  const dir = NodePath.join(root, relative);
+  const realRoot = await NodeFSP.realpath(root);
+  const refuse = (real: string) =>
+    new Error(`${dir} resolves to ${real}, outside the game folder; nothing is written there.`);
+  let existing = dir;
+  while (
+    !(await NodeFSP.lstat(existing).then(
+      () => true,
+      () => false,
+    ))
+  )
+    existing = NodePath.dirname(existing);
+  const realExisting = await NodeFSP.realpath(existing);
+  if (realExisting !== realRoot && !isPathInside(realExisting, realRoot))
+    throw refuse(realExisting);
+  await NodeFSP.mkdir(dir, { recursive: true });
+  const realDir = await NodeFSP.realpath(dir);
+  if (realDir !== realRoot && !isPathInside(realDir, realRoot)) throw refuse(realDir);
+  return dir;
+};
 
 /**
  * The one stable save location a kept play session of this game and engine
@@ -17,30 +48,39 @@ export const KEPT_SAVES_DIR = ".studio/saves";
  */
 export const keptSavesDir = async (root: string, engine: string): Promise<string> => {
   if (!/^[a-z0-9-]+$/.test(engine)) throw new Error(`Unexpected engine id "${engine}".`);
-  const dir = NodePath.join(root, KEPT_SAVES_DIR, engine);
-  const realRoot = await NodeFSP.realpath(root);
-  const refuse = (real: string) =>
-    new Error(
-      `The kept save location ${dir} resolves to ${real}, outside the game's ${KEPT_SAVES_DIR}/; kept saves are refused rather than written there.`,
-    );
-  // The nearest existing ancestor is checked before anything is created, so a
-  // linked `.studio` cannot get even an empty directory made outside the game.
-  let existing = dir;
-  while (
-    !(await NodeFSP.lstat(existing).then(
-      () => true,
-      () => false,
-    ))
-  )
-    existing = NodePath.dirname(existing);
-  const realExisting = await NodeFSP.realpath(existing);
-  if (!isPathInside(realExisting, realRoot)) throw refuse(realExisting);
-  await NodeFSP.mkdir(dir, { recursive: true });
+  const dir = await ensureGameDir(root, NodePath.join(KEPT_SAVES_DIR, engine));
+  // Inside the game is not enough: a saves folder linked elsewhere in it is refused too.
   const realDir = await NodeFSP.realpath(dir);
-  if (!isPathInside(realDir, NodePath.join(realRoot, KEPT_SAVES_DIR))) throw refuse(realDir);
+  if (!isPathInside(realDir, NodePath.join(await NodeFSP.realpath(root), KEPT_SAVES_DIR)))
+    throw new Error(
+      `The kept save location ${dir} resolves to ${realDir}, outside the game's ${KEPT_SAVES_DIR}/; kept saves are refused rather than written there.`,
+    );
   // Ignored however old the game's own .gitignore is, so saves never reach a commit.
-  await NodeFSP.writeFile(NodePath.join(root, KEPT_SAVES_DIR, ".gitignore"), "*\n");
+  await writeNoFollow(NodePath.join(root, KEPT_SAVES_DIR, ".gitignore"), "*\n");
   return dir;
+};
+
+/** Writes a file the server owns inside a checked game directory, replacing a link at its name. */
+export const writeNoFollow = async (file: string, text: string): Promise<void> => {
+  await NodeFSP.rm(file, { force: true }).catch(() => undefined);
+  await NodeFSP.writeFile(file, text, { flag: "wx" });
+};
+
+/** Appends one line, refusing a link at the file (O_NOFOLLOW where the OS has it). */
+export const appendNoFollow = async (file: string, line: string): Promise<void> => {
+  const handle = await NodeFSP.open(
+    file,
+    NodeFSP.constants.O_WRONLY |
+      NodeFSP.constants.O_APPEND |
+      NodeFSP.constants.O_CREAT |
+      (NodeFSP.constants.O_NOFOLLOW ?? 0),
+    0o644,
+  );
+  try {
+    await handle.appendFile(line);
+  } finally {
+    await handle.close();
+  }
 };
 
 /** Where a kept browser session's localStorage lives in its save location. */
@@ -67,3 +107,18 @@ export const keptSavesFor = (input: {
             cause,
           }),
       });
+
+/**
+ * Writes a kept page's storage back into the game's saves, replacing a link
+ * planted at its name rather than writing through it.
+ */
+export const writeKeptStorage = (kept: KeptStorage) =>
+  writeFileStringAtomically({
+    filePath: kept.path,
+    contents: kept.contents,
+    followLink: false,
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("A kept session's saves could not be written back.", { cause }),
+    ),
+  );

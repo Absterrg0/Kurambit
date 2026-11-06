@@ -33,23 +33,34 @@ import {
   GameOperationError,
   GameRunErrorReason,
   manifestProject,
+  plainReason,
 } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
+import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { gameRunRefsFolder } from "../checkpointing/Utils.ts";
-import { gitEra, RESUMABLE, settling, toState } from "../orchestration-v2/gameRun/decide.ts";
+import {
+  gitEra,
+  NO_EXPORT as NO_EXPORT_ENDINGS,
+  RESUMABLE,
+  settling,
+  toState,
+} from "../orchestration-v2/gameRun/decide.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { engineProfile, runEngine } from "./engineProfile.ts";
 import { BuildName } from "./run/buildNames.ts";
 import { withRoleGroups } from "./run/roleGroup.ts";
 import * as GameService from "./GameService.ts";
@@ -173,6 +184,8 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const game = yield* GameService.GameService;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
 
   /**
    * The caller's game: its folder, and the thread its run lives on. The folder
@@ -190,7 +203,14 @@ const make = Effect.gen(function* () {
           runError("resolve-game", threadId, "project-not-found", cause.message),
         ),
       );
-    const shell = yield* threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null));
+    // A read that fails is no answer: it is never "the thread is gone" or "no run".
+    const shell = yield* threads
+      .getThreadShell(threadId)
+      .pipe(
+        Effect.mapError((cause) =>
+          runError("resolve-game", threadId, "thread-read", String(cause.message)),
+        ),
+      );
     if (shell === null || shell.deletedAt !== null)
       return yield* runError("resolve-game", threadId, "project-not-found", "The thread is gone.");
     if (options.role !== "allowed") {
@@ -211,9 +231,77 @@ const make = Effect.gen(function* () {
     }
     const projectRun = yield* projections
       .getProjectGameRun(shell.projectId)
-      .pipe(Effect.orElseSucceed(() => null));
-    return { root, projectId: shell.projectId, runThread: projectRun?.threadId ?? threadId };
+      .pipe(
+        Effect.mapError((cause) =>
+          runError("resolve-game", threadId, "records-unreadable", String(cause.message)),
+        ),
+      );
+    const runThread = projectRun?.threadId ?? threadId;
+    // The run works in its own thread's folder; a chat on another checkout of
+    // the game reaches the run, never its own folder as the run's.
+    const runRoot =
+      runThread === threadId
+        ? root
+        : yield* projects
+            .resolve(runThread, { deleted: "allowed" })
+            .pipe(
+              Effect.mapError((cause) =>
+                runError("resolve-game", runThread, "project-not-found", cause.message),
+              ),
+            );
+    return { root: runRoot, projectId: shell.projectId, runThread };
   });
+
+  // A pause judged nothing: it says why, and how to go on, in plain words.
+  const PAUSES: Readonly<Record<string, string>> = {
+    "tool-failed": "a program Kurambit runs kept failing while measuring the build",
+    "low-memory": "the machine stayed short of memory",
+    busy: "the game stayed busy with other work",
+  };
+  const endedMessage = (run: GameRun): string => {
+    const why = run.ending === null ? undefined : PAUSES[run.ending];
+    const failure = run.lastFailure.length > 0 ? ` Last failure: ${run.lastFailure}` : "";
+    return why === undefined
+      ? `The run ended: ${run.ending ?? "unknown"}.${failure}`
+      : `The run paused: ${why}, so nothing was judged.${failure.length > 0 ? ` ${run.lastFailure}.` : ""} Resume it with an empty brief once that is fixed.`;
+  };
+
+  const ExportRow = Schema.Struct({
+    verified: Schema.optionalKey(Schema.Boolean),
+    skipped: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    message: Schema.optionalKey(Schema.String),
+  });
+  const decodeExports = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({ web: Schema.optionalKey(ExportRow), linux: Schema.optionalKey(ExportRow) }),
+    ),
+  );
+  /**
+   * What a finished run's exports came to, from the finish's own record: an
+   * export that failed is said beside the ending, never hidden in a log.
+   * Absent or unreadable record: nothing to add.
+   */
+  const exportsLine = (root: string, run: GameRun) =>
+    run.status !== "ended" ||
+    run.finished !== run.endedAt ||
+    NO_EXPORT_ENDINGS.has(run.ending ?? "")
+      ? Effect.succeed("")
+      : Effect.promise(async () => {
+          const text = await NodeFSP.readFile(
+            NodePath.join(root, ".studio", "exports.json"),
+            "utf8",
+          ).catch(() => null);
+          if (text === null) return "";
+          const record = decodeExports(text);
+          if (Option.isNone(record)) return "";
+          const failed = (["web", "linux"] as const).flatMap((target) => {
+            const row = record.value[target];
+            return row === undefined || row.verified === true || row.skipped != null
+              ? []
+              : [`${target === "web" ? "Web" : "Linux"} (${(row.message ?? "").slice(0, 160)})`];
+          });
+          return failed.length === 0 ? "" : ` Its exports failed: ${failed.join("; ")}.`;
+        });
 
   // A resume keeps the folder before the run next moves it (decide.ts resumeSave).
   const SAVES_FOLDER =
@@ -267,12 +355,32 @@ const make = Effect.gen(function* () {
         : `client:${kind}:${scope.thread}:${scope.run?.id ?? "new"}:${given}`,
     );
 
+  // One run per game: every start reads the game's run and dispatches under
+  // its project's lock, so two chats starting the first run at once cannot
+  // both find none (the decider's check runs under one thread's lock only).
+  const startLock = yield* KeyedLock.make<string>();
+  // Why a new game's run did not start, until a run is recorded: the Run tab
+  // says so instead of "not started". Only for this server's lifetime: after
+  // a restart the tab offers the start as for any game without a run.
+  const startFailures = new Map<ThreadId, string>();
   const runStart: Service["runStart"] = Effect.fn("GameRunControl.runStart")(function* (
     input: GameRunStartInput,
   ) {
+    const { projectId } = yield* resolveGame(input.threadId);
+    return yield* startLock.withLock(projectId, startOnce(input));
+  });
+  const startOnce = Effect.fn("GameRunControl.startOnce")(function* (input: GameRunStartInput) {
     const { root, runThread } = yield* resolveGame(input.threadId);
-    const { run } = yield* latestOf(input.threadId);
-    if (run !== null && run.status !== "ended")
+    const { run } = yield* recordsOf(runThread);
+    // A live run is the game's one run: a new brief is not quietly dropped.
+    if (run !== null && run.status !== "ended") {
+      if (input.brief.trim().length > 0)
+        return yield* runError(
+          "run-start",
+          input.threadId,
+          "run-live",
+          `A run is already going on this game (${run.stage}). Send the new brief as a note with game_run_steer, or stop the run and start again.`,
+        );
       return {
         runId: run.id,
         root,
@@ -280,6 +388,7 @@ const make = Effect.gen(function* () {
         resumed: true,
         message: `The run is already going (${run.stage}); watch it on the Run tab.`,
       } satisfies GameRunStartResult;
+    }
     // An ending still exporting or a restore still moving the folder owns it:
     // refuse before the scaffold below writes there, not after, at the decider.
     const busy = run === null ? null : settling(run);
@@ -290,21 +399,34 @@ const make = Effect.gen(function* () {
         busy.failure.reason,
         busy.failure.message,
       );
-    // The lane is the whole run's engine: a manifest that cannot be read is no Godot game.
-    const lane = manifestProject(
-      yield* projects
-        .read(root)
-        .pipe(
-          Effect.mapError((cause) =>
-            runError(
-              "run-start",
-              input.threadId,
-              "project-not-found",
-              `The game's manifest could not be read (${cause.detail ?? cause.reason}).`,
-            ),
+    // The manifest names the run's engine and its project folder: one that
+    // cannot be read is no game of any engine.
+    const manifest = yield* projects
+      .read(root)
+      .pipe(
+        Effect.mapError((cause) =>
+          runError(
+            "run-start",
+            input.threadId,
+            "project-not-found",
+            `The game's manifest could not be read (${cause.detail ?? cause.reason}).`,
           ),
         ),
-    );
+      );
+    const lane = manifestProject(manifest);
+    const scaffold = (fresh: boolean) =>
+      ensureScaffold(root, manifest.engine.name, fresh).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, pathService),
+        Effect.mapError((cause) =>
+          runError(
+            "run-start",
+            root,
+            "command-failed",
+            `The run's skill pack and bot kit could not be put in the game (${plainReason(cause.detail ?? cause.message, [root])}).`,
+          ),
+        ),
+      );
     const projection = yield* threads
       .getThreadProjection(input.threadId)
       .pipe(
@@ -330,12 +452,13 @@ const make = Effect.gen(function* () {
       RESUMABLE.has(run.ending) &&
       !gitEra(run)
     ) {
-      yield* ensureScaffold(root, lane, false);
+      yield* scaffold(false);
       yield* dispatch("run-start", {
         type: "game-run.resume",
         commandId: commandId("game-run.start", input.commandId, { thread: run.threadId, run }),
         threadId: run.threadId,
         runId: run.id,
+        chat: input.threadId,
         ...(budgetMinutes === undefined ? {} : { budgetMinutes }),
         ...(input.profile === undefined ? {} : { profile: input.profile }),
         ...(overridden ? { modelSelection: selectionFor(current, chosen) } : {}),
@@ -375,13 +498,15 @@ const make = Effect.gen(function* () {
     const runId = GameRunId.make(
       `run_${Date.now().toString(36)}${NodeCrypto.randomBytes(3).toString("hex")}`,
     );
-    yield* ensureScaffold(root, lane, true);
+    yield* scaffold(true);
     yield* dispatch("run-start", {
       type: "game-run.start",
       commandId: commandId("game-run.start", input.commandId, { thread: runThread, run }),
       threadId: runThread,
       runId,
       lane,
+      engine: manifest.engine.name,
+      chat: input.threadId,
       brief,
       ...(input.artDirection === undefined ? {} : { artDirection: input.artDirection }),
       ...(budgetMinutes === undefined ? {} : { budgetMinutes }),
@@ -390,7 +515,8 @@ const make = Effect.gen(function* () {
       runtimeMode: projection.thread.runtimeMode,
       ...(earlier ? { stage: "build" as const } : {}),
     });
-    const started = (yield* latestOf(input.threadId)).run;
+    startFailures.delete(input.threadId);
+    const started = (yield* recordsOf(runThread)).run;
     yield* logLine(
       root,
       run === null
@@ -468,8 +594,8 @@ const make = Effect.gen(function* () {
   const runStatus: Service["runStatus"] = Effect.fn("GameRunControl.runStatus")(function* (
     threadId: ThreadId,
   ) {
-    const { root } = yield* resolveGame(threadId);
-    const { run, state, threads } = yield* latestOf(threadId);
+    const { root, runThread } = yield* resolveGame(threadId);
+    const { run, state, threads } = yield* recordsOf(runThread);
     if (run === null || state === null)
       return {
         active: false,
@@ -488,7 +614,9 @@ const make = Effect.gen(function* () {
         threads: [],
         builds: [],
         restore: null,
-        message: "No run recorded for this game.",
+        message:
+          startFailures.get(runThread) ??
+          "No run recorded for this game yet: start one with a brief.",
         resumable: false,
       } satisfies GameRunStatusResult;
     const running = run.status !== "ended";
@@ -500,12 +628,12 @@ const make = Effect.gen(function* () {
         ? null
         : {
             ...shown,
-            evidence: (yield* Effect.promise(() => presentable(root, run.lane, asked))).map(
-              (e) => ({
-                label: e.label,
-                path: NodePath.join(root, e.path),
-              }),
-            ),
+            evidence: (yield* Effect.promise(() =>
+              presentable(root, runEngine(run), run.lane, asked),
+            )).map((e) => ({
+              label: e.label,
+              path: NodePath.join(root, e.path),
+            })),
           };
     const failure = run.lastFailure.length > 0 ? ` Last failure: ${run.lastFailure}` : "";
     const step = running ? currentStep(state) : null;
@@ -526,10 +654,10 @@ const make = Effect.gen(function* () {
         move: r.move,
         branch: r.branch,
         kept: r.kept,
+        current: r.kept && r.build !== undefined && r.build === run.best,
         outcome: roundOutcome(r),
-        verdicts: r.verdicts,
+        verdicts: r.verdicts.map(({ order, verdict }) => ({ order, verdict })),
         linesChanged: r.linesChanged,
-        testerNote: r.testerNote ?? null,
         durationMs: r.durationMs,
         note: r.note ?? null,
         steer: r.steer ?? [],
@@ -559,7 +687,7 @@ const make = Effect.gen(function* () {
                     },
             },
       message: !running
-        ? `The run ended: ${run.ending ?? "unknown"}.${failure}`
+        ? `${endedMessage(run)}${yield* exportsLine(root, run)}`
         : run.status === "waiting" && state.inFlight?.kind === "decide"
           ? `Waiting for the creator's answer on ${DECISION_LABEL[state.inFlight.decision.kind]}; answer in the game's chat.`
           : `${step ?? run.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`,
@@ -571,8 +699,8 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     given?: string,
   ) {
-    yield* resolveGame(threadId);
-    const { run } = yield* latestOf(threadId);
+    const { runThread } = yield* resolveGame(threadId);
+    const { run } = yield* recordsOf(runThread);
     if (run === null || run.status === "ended")
       return { stopped: false, message: "No live run for this game." } satisfies GameRunStopResult;
     yield* dispatch("run-stop", {
@@ -610,6 +738,7 @@ const make = Effect.gen(function* () {
       runId: run.id,
       decisionId: input.decisionId,
       answer: input.answer,
+      chat: input.threadId,
       ...(input.notes === undefined ? {} : { notes: input.notes }),
     }).pipe(
       Effect.mapError((error) =>
@@ -659,11 +788,11 @@ const make = Effect.gen(function* () {
     text: string,
     given?: string,
   ) {
-    const { root } = yield* resolveGame(threadId);
+    const { root, runThread } = yield* resolveGame(threadId);
     const note = text.trim().slice(0, 4000);
     if (note.length === 0)
       return yield* runError("run-steer", root, "empty-note", "The note is empty.");
-    const { run } = yield* latestOf(threadId);
+    const { run } = yield* recordsOf(runThread);
     if (run === null)
       return yield* runError(
         "run-steer",
@@ -677,8 +806,9 @@ const make = Effect.gen(function* () {
       threadId: run.threadId,
       runId: run.id,
       note,
+      chat: threadId,
     });
-    const after = yield* latestOf(threadId);
+    const after = yield* recordsOf(runThread);
     const pending = after.run?.steer.length ?? 0;
     if (run.status !== "ended")
       return {
@@ -723,7 +853,7 @@ const make = Effect.gen(function* () {
           "run-checks",
           root,
           "command-failed",
-          `The checks could not run now (${error.reason}: ${(error.detail ?? "").slice(0, 200)}); try again in a minute.`,
+          `The checks could not run now (${(error._tag === "GameRunToolFailed" ? error.reason : plainReason(error.error.detail ?? error.error.reason, [root])).slice(0, 200)}); try again in a minute.`,
         ),
       ),
     );
@@ -751,7 +881,7 @@ const make = Effect.gen(function* () {
     round: number,
   ) {
     const target = yield* resolveGame(threadId);
-    const { run, state } = yield* latestOf(threadId);
+    const { run, state } = yield* recordsOf(target.runThread);
     if (run === null || state === null)
       return yield* runError(operation, target.root, "no-run", "No run recorded for this game.");
     const record = state.rounds.find((r) => r.round === round);
@@ -762,7 +892,13 @@ const make = Effect.gen(function* () {
         "round-not-found",
         `Round ${round} is not recorded; the run has ${state.rounds.length} finished round${state.rounds.length === 1 ? "" : "s"}.`,
       );
-    return { ...target, run, state, record, lane: run.lane || "godot" };
+    return {
+      ...target,
+      run,
+      state,
+      record,
+      lane: run.lane || engineProfile(runEngine(run)).projectDirectory,
+    };
   });
 
   const roundDetail: Service["roundDetail"] = Effect.fn("GameRunControl.roundDetail")(function* (
@@ -808,8 +944,8 @@ const make = Effect.gen(function* () {
   const pickDetail: Service["pickDetail"] = Effect.fn("GameRunControl.pickDetail")(function* (
     threadId: ThreadId,
   ) {
-    const { root } = yield* resolveGame(threadId);
-    const { state } = yield* latestOf(threadId);
+    const { root, runThread } = yield* resolveGame(threadId);
+    const { state } = yield* recordsOf(runThread);
     if (state === null)
       return yield* runError("run-pick", root, "no-run", "No run recorded for this game.");
     const evidence: {
@@ -829,8 +965,8 @@ const make = Effect.gen(function* () {
     options: { readonly waitFor?: Duration.Input } = {},
   ) {
     const { threadId, round, build } = input;
-    const { root } = yield* resolveGame(threadId);
-    const { run, state } = yield* latestOf(threadId);
+    const { root, runThread } = yield* resolveGame(threadId);
+    const { run, state } = yield* recordsOf(runThread);
     if (run === null || state === null)
       return yield* runError("run-restore", root, "no-run", "No run recorded for this game.");
     if ((round === undefined) === (build === undefined))
@@ -934,8 +1070,8 @@ const make = Effect.gen(function* () {
     input: GameCreateInput,
   ) {
     const created: typeof GameProjectResult.Type = yield* projects.create(input);
-    // The game exists either way; a run that cannot start shows as not
-    // started in the Run tab, where the creator can start it again.
+    // The game exists either way; a run that cannot start says why on the Run
+    // tab (and to game_run_status), where the creator can start it again.
     yield* runStart({
       threadId: created.threadId,
       brief: input.brief,
@@ -943,7 +1079,16 @@ const make = Effect.gen(function* () {
       ...(input.profile === undefined ? {} : { profile: input.profile }),
     }).pipe(
       Effect.catch((cause) =>
-        Effect.logWarning("game run did not start after create", { reason: cause.message }),
+        Effect.sync(() =>
+          startFailures.set(
+            created.threadId,
+            `The run did not start when this game was created (${plainReason(cause.detail ?? cause.message, [created.root])}); start it again with its brief.`,
+          ),
+        ).pipe(
+          Effect.andThen(
+            Effect.logWarning("game run did not start after create", { reason: cause.message }),
+          ),
+        ),
       ),
     );
     return created;

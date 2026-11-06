@@ -1,13 +1,64 @@
 import {
   GAME_TEMPLATES,
-  THREE_PINNED_VERSION,
-  UNITY_MIN_VERSION,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameEngineId,
   type GameManifest,
 } from "@kurambit/contracts";
 import { engineProfile } from "./engineProfile.ts";
+import { CHECK_BOT_DIR } from "./run/checkRunner.ts";
+
+// Run notes and reports are harness output, never game content: ignoring them
+// keeps the tree clean so build swaps never need a stash (T28 wedged on a
+// half-applied stash pop). The list keeps the files earlier runs wrote
+// (run.json, rounds.jsonl, stop, steer, profile, run.log), so an older game's leftovers
+// never ride in a commit.
+export const RUN_STATE_IGNORES = [
+  ".studio/run.json",
+  ".studio/rounds.jsonl",
+  ".studio/stop",
+  ".studio/steer.jsonl",
+  ".studio/profile",
+  ".studio/run.log",
+  ".studio/bot-results.jsonl",
+  ".studio/player-report.md",
+  ".studio/pick.txt",
+  ".studio/next.md",
+  ".studio/ship.md",
+  ".studio/art-review.md",
+  ".studio/ladder.json",
+  `${CHECK_BOT_DIR}/`,
+  ".studio/rung-change.json",
+  ".studio/exports.json",
+  ".studio/final-video.json",
+  ".studio/tester-*.md",
+  ".studio/reviewer-*.md",
+  ".studio/worktrees/",
+  ".studio/comparisons/",
+  ".studio/saves/",
+  // The creator's saved videos and images (gameSavedMedia.ts).
+  "saved/",
+  ".studio/play-*.md",
+  ".studio/proto-*.md",
+  ".studio/proto-*-frames.jpg",
+  ".studio/round-state.json",
+  "PICK-NOTES.md",
+  "JUDGE-NOTES.md",
+] as const;
+
+/** What every engine generates in the game folder, beside the run's own files. */
+const GENERATED_IGNORES = [
+  "builds/",
+  "godot/.godot/",
+  "unity/[Ll]ibrary/",
+  "unity/[Tt]emp/",
+  "unity/[Ll]ogs/",
+  "unity/[Uu]ser[Ss]ettings/",
+  "unity/[Oo]bj/",
+  "unity/*.csproj",
+  "unity/*.sln",
+  "*.blend1",
+];
 
 /** The engine a create request builds for. Omitted means the Godot native lane. */
 export const createEngine = (input: GameCreateInput): GameEngineId => input.engine ?? "godot";
@@ -27,12 +78,7 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
       ? {}
       : { gameplayScene: templateEntry.gameplayScene }),
     ...(templateEntry?.probe === true ? { probe: true } : {}),
-    engine:
-      engine === "three"
-        ? { name: "three", version: THREE_PINNED_VERSION }
-        : engine === "unity"
-          ? { name: "unity", version: UNITY_MIN_VERSION }
-          : { name: "godot", version: "4.7.2" },
+    engine: { name: engine, version: engineProfile(engine).scaffold.version },
     project: engineProfile(engine).projectDirectory,
     // The same folder under its legacy key, for one release, so an older installed Kurambit still opens the game.
     godotProject: engineProfile(engine).projectDirectory,
@@ -96,7 +142,6 @@ Use the game_* tools to check, play, export and package the game; never run Godo
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,
     "AGENTS.md": `${projectLine}\n${CREATOR_SESSION_SECTION}`,
     "CLAUDE.md": "@AGENTS.md\n",
-    ".gitignore":
-      "builds/\ngodot/.godot/\nunity/[Ll]ibrary/\nunity/[Tt]emp/\nunity/[Ll]ogs/\nunity/[Uu]ser[Ss]ettings/\nunity/[Oo]bj/\nunity/*.csproj\nunity/*.sln\n*.blend1\n.studio/run.json\n.studio/rounds.jsonl\n.studio/stop\n.studio/bot-results.jsonl\n.studio/player-report.md\n.studio/pick.txt\n.studio/next.md\n.studio/ship.md\n.studio/exports.json\n.studio/final-video.json\n.studio/tester-*.md\n.studio/reviewer-*.md\n.studio/worktrees/\n.studio/saves/\nsaved/\nPICK-NOTES.md\nJUDGE-NOTES.md\n",
+    ".gitignore": `${[...GENERATED_IGNORES, ...RUN_STATE_IGNORES].join("\n")}\n`,
   };
 }

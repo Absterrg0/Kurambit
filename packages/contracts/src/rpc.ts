@@ -1449,7 +1449,8 @@ const WsGameWebPackageRpc = Rpc.make(WS_METHODS.gameWebPackage, {
   error: gameError,
 });
 const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
-  payload: Schema.Struct({}),
+  /** With a thread, its game's own engine tool (Unity's editor by the project's version). */
+  payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
   success: GameToolchainStatus,
   error: gameError,
 });
@@ -1513,7 +1514,8 @@ const WsSubscribeGameEventsRpc = Rpc.make(WS_METHODS.subscribeGameEvents, {
   /** With a thread, only that thread's game's pushes. */
   payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
   success: GameOperationEvent,
-  error: EnvironmentAuthorizationError,
+  // A thread whose game cannot be resolved fails the stream with why, never ends it silently.
+  error: gameError,
   stream: true,
 });
 

@@ -57,6 +57,7 @@ import {
 } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
+import { GameEngineId } from "./game.ts";
 import { GameRunProfile, GameRunSubmission } from "./gameRun.ts";
 import {
   GameRun,
@@ -3034,6 +3035,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     ...GameRunCommandFields,
     /** The engine project directory the game's manifest names. */
     lane: TrimmedNonEmptyString,
+    /** The game's engine, from its manifest. Absent on commands from older servers; runEngine then derives it from lane. */
+    engine: Schema.optionalKey(GameEngineId),
     brief: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(8000)),
     artDirection: Schema.optional(Schema.String),
     budgetMinutes: Schema.optional(PositiveInt),
@@ -3045,6 +3048,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
      * prototypes, at the rounds (which write a ladder first when none exists).
      */
     stage: Schema.optional(Schema.Literal("build")),
+    /** The creator's chat the command came from: the run's questions wake there. Absent on commands from older servers. */
+    chat: Schema.optionalKey(ThreadId),
   }),
   /** Continues a run that ended resumably (budget, a provider or memory outage, a failure, a stop). */
   Schema.Struct({
@@ -3054,6 +3059,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     profile: Schema.optional(GameRunProfile),
     modelSelection: Schema.optional(ModelSelection),
     runtimeMode: Schema.optional(RuntimeMode),
+    /** The creator's chat the command came from: the run's questions wake there. Absent on commands from older servers. */
+    chat: Schema.optionalKey(ThreadId),
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.stop"),
@@ -3067,6 +3074,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     type: Schema.Literal("game-run.steer"),
     ...GameRunCommandFields,
     note: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4000)),
+    /** The creator's chat the command came from: the run's questions wake there. Absent on commands from older servers. */
+    chat: Schema.optionalKey(ThreadId),
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.profile.set"),
@@ -3079,6 +3088,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     decisionId: TrimmedNonEmptyString,
     answer: TrimmedNonEmptyString,
     notes: Schema.optional(Schema.String.check(Schema.isMaxLength(20_000))),
+    /** The creator's chat the command came from: the run's questions wake there. Absent on commands from older servers. */
+    chat: Schema.optionalKey(ThreadId),
   }),
   /** A role's typed result, checked against what its step asks for. */
   Schema.Struct({

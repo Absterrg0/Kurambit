@@ -28,11 +28,14 @@ export type Observed = {
   readonly start: Record<string, unknown>;
   readonly end: Record<string, unknown>;
   readonly hud: string;
+  /** Keys whose value the report cut to its first 60 characters (lists and objects among them). */
+  readonly cut?: ReadonlyArray<string>;
   /** Enter presses when a scenario meant to start in a run never left the title, else 0. */
   readonly stuckOnTitle?: number;
 };
 
 export const MAX_INPUT_MS = 20_000;
+const MAX_KEY = 64;
 const KEY = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 const TERM =
   /^\s*(delta\(\s*([^)\s]+)\s*\)|hud|[A-Za-z_][A-Za-z0-9_.]*)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$/;
@@ -72,6 +75,9 @@ export const parseExpect = (
           : { kind: "key", key: refText! };
     if (ref.kind !== "hud" && !KEY.test(ref.key))
       return { error: `"${ref.key}" is not a state key` };
+    // The check bot's report carries each key twice; bounded keys keep it whole.
+    if (ref.kind !== "hud" && ref.key.length > MAX_KEY)
+      return { error: `"${ref.key.slice(0, 20)}…" is longer than ${MAX_KEY} characters` };
     if (op === "contains" && ref.kind !== "hud" && typeof value !== "string")
       return { error: "contains takes quoted text" };
     if (ref.kind === "delta" && typeof value !== "number")
@@ -159,30 +165,37 @@ export const keysOf = (terms: ReadonlyArray<Term>): ReadonlyArray<string> => [
 export const needlesOf = (terms: ReadonlyArray<Term>): ReadonlyArray<string> =>
   terms.flatMap((t) => (t.ref.kind === "hud" ? [String(t.value)] : []));
 
-/** What a check bot reported in its note, or null when the note is not its report. */
-export const readReport = (note: string): Observed | null => {
-  try {
-    const r: unknown = JSON.parse(note);
-    if (r === null || typeof r !== "object") return null;
-    const { s, e, h, title } = r as { s?: unknown; e?: unknown; h?: unknown; title?: unknown };
-    if (s === null || typeof s !== "object" || e === null || typeof e !== "object") return null;
-    return {
-      start: s as Record<string, unknown>,
-      end: e as Record<string, unknown>,
-      hud: typeof h === "string" ? h : "",
-      stuckOnTitle: typeof title === "number" ? title : 0,
-    };
-  } catch {
-    return null;
-  }
+/**
+ * What a check bot reported in its status evidence, or null when that is not
+ * its report. The report is bounded by construction (at most 4 keys of at most
+ * 64 characters, values cut to 60, the HUD to 200), so it always fits the bot
+ * status's 4096-byte evidence: one missing is a fault of ours, not the game's.
+ */
+export const readReport = (evidence: unknown): Observed | null => {
+  if (evidence === null || typeof evidence !== "object") return null;
+  const { s, e, h, title, cut } = evidence as {
+    s?: unknown;
+    e?: unknown;
+    h?: unknown;
+    title?: unknown;
+    cut?: unknown;
+  };
+  if (s === null || typeof s !== "object" || e === null || typeof e !== "object") return null;
+  return {
+    start: s as Record<string, unknown>,
+    end: e as Record<string, unknown>,
+    hud: typeof h === "string" ? h : "",
+    stuckOnTitle: typeof title === "number" ? title : 0,
+    cut: Array.isArray(cut) ? cut.filter((key): key is string => typeof key === "string") : [],
+  };
 };
 
 /**
  * A bot that plays one check's scenario and reports what the game showed; it
  * judges nothing. It waits for the probe, records the start state, asks for the
  * setup state, plays the input in game time, lets the game settle, then reports
- * the named keys at start and end and the HUD text. A bot run keeps only a short
- * note, so the report holds just what the expectation reads.
+ * the named keys at start and end and the HUD text, in its status evidence (the
+ * note is prose and cut short), holding just what the expectation reads.
  */
 export const checkBot = (spec: {
   readonly what: string;
@@ -285,11 +298,22 @@ const read = (state, key) => {
   for (const part of key.split(".")) at = at !== null && typeof at === "object" ? at[part] : undefined;
   return at === undefined ? null : at;
 };
+// The report fits the bot status's 4096-byte evidence whatever the game holds:
+// at most 4 keys of at most 64 characters, each value a number, a boolean or
+// text of at most 60 characters. A list or an object becomes the start of its
+// JSON text, and the report names every value it cut.
+const cut = new Set();
 const pick = (state) => {
   const out = {};
   for (const key of keys) {
     const v = read(state, key);
-    if (v !== null) out[key] = typeof v === "string" ? v.slice(0, 60) : v;
+    if (v === null) continue;
+    if (typeof v === "number" || typeof v === "boolean") out[key] = Number.isFinite(v) || typeof v === "boolean" ? v : String(v);
+    else {
+      const text = typeof v === "string" ? v : JSON.stringify(v) ?? String(v);
+      if (text.length > 60 || typeof v !== "string") cut.add(key);
+      out[key] = text.slice(0, 60);
+    }
   }
   return out;
 };
@@ -297,6 +321,8 @@ export function status(obs) {
   if (obs.phase !== "report") return { state: "running", note: \`stopped at \${obs.phase}\${obs.phase === "input" ? \` step \${step + 1} of \${input.length}\` : ""}\` };
   const lines = hud.split("\\n").filter((l) => needles.some((n) => l.toLowerCase().includes(n)));
   const h = (lines.length > 0 ? lines.join("\\n") : hud).slice(0, 200);
-  return { state: "done", note: JSON.stringify({ s: pick(start), e: pick(end), h, title: onTitleAtStart ? titlePresses : 0 }) };
+  const s = pick(start);
+  const e = pick(end);
+  return { state: "done", note: "scenario reported", evidence: { s, e, h, title: onTitleAtStart ? titlePresses : 0, cut: [...cut] } };
 }
 `;

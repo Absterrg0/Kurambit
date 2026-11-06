@@ -11,7 +11,19 @@ import * as Semaphore from "effect/Semaphore";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { GameOperationError, type GameProcessResult, manifestProject } from "@kurambit/contracts";
+import {
+  GameOperationError,
+  manifestProject,
+  type GameProcessResult,
+  type GameUnityConsoleInput,
+  type GameUnityEditInput,
+  type GameUnityEvalInput,
+  type GameUnityPlayInput,
+  type GameUnityScreenshotInput,
+  type GameUnityScreenshotResult,
+  type GameUnityTextResult,
+  type GameUnityToolsResult,
+} from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
@@ -51,7 +63,15 @@ import {
   unityEditorDir,
   unityEditorEnv,
 } from "./unityToolchain.ts";
-import { checkoutOf, cloneTree } from "./unityPlayerCache.ts";
+import { makeCheckoutOf } from "./unityPlayerCache.ts";
+import { copyTree, makeAtomicWriter } from "./gameFiles.ts";
+import {
+  breakSession,
+  HeldSources,
+  type LiveHealth,
+  makeLiveRecords,
+  unityScenes,
+} from "./liveEditor.ts";
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 
 /**
@@ -116,13 +136,15 @@ export const UNITY_MCP_TOOLS = [
 export const UNITY_EDIT_TOOL =
   /^(scene_|gameobject_|component_|prefab_|material_|asset_find$|asset_create_folder$|script_attach$|settings_|lighting_|editor_save_all$|editor_status$|capture_scene_view$)/;
 
-interface Session {
+interface Session extends LiveHealth {
   readonly root: string;
   readonly projectDir: string;
   readonly editor: OwnedProcess;
   readonly window: HostedWindow;
   readonly client: Client;
   readonly logPath: string;
+  /** The project's scenes as the editor holds them; a change on disk while it sits idle makes it stale. */
+  readonly scene: HeldSources;
   lastActive: number;
   /** Calls and operations holding this editor right now; only an idle editor is ever evicted or swept. */
   inFlight: number;
@@ -154,6 +176,44 @@ export interface UnityCliResult {
   readonly errorMessage: string | null;
   readonly process: GameProcessResult;
 }
+
+/**
+ * How Unity answered one CLI call, the one reading every caller uses: the
+ * Pipeline answered (`result` is its command result, when it has one), it
+ * refused with its own error, or nothing came back (no envelope, or the call
+ * timed out: on a main-thread command, a frozen editor).
+ */
+export type UnityAnswer =
+  | { readonly kind: "answered"; readonly result: Record<string, unknown> | null }
+  | { readonly kind: "refused"; readonly code: string | null; readonly message: string }
+  | { readonly kind: "silent"; readonly timedOut: boolean };
+
+export const answerOf = (result: UnityCliResult): UnityAnswer => {
+  if (result.process.timedOut) return { kind: "silent", timedOut: true };
+  if (result.ok && result.data !== null) {
+    const data = result.data as { readonly result?: unknown };
+    return {
+      kind: "answered",
+      result:
+        typeof data.result === "object" && data.result !== null
+          ? (data.result as Record<string, unknown>)
+          : null,
+    };
+  }
+  if (result.errorCode !== null || result.errorMessage !== null)
+    return {
+      kind: "refused",
+      code: result.errorCode,
+      message: result.errorMessage ?? result.errorCode ?? "refused",
+    };
+  return { kind: "silent", timedOut: false };
+};
+
+/** A rejected MCP call the editor never answered: a timeout, or the connection gone. */
+const mcpUnanswered = (cause: unknown) =>
+  !(cause instanceof McpError) ||
+  cause.code === ErrorCode.RequestTimeout ||
+  cause.code === ErrorCode.ConnectionClosed;
 
 const opError = (
   operation: string,
@@ -216,27 +276,20 @@ const recordedOwners = (
  * UserSettings/EditorUserSettings.asset (gitignored, so a fresh checkout has
  * none); it is written before every start. A desired count of 0 clamps to
  * one worker, the lowest the editor allows; no standby workers are kept.
+ * Answers the settings text to write, or null when it already says so.
  */
-export const capImportWorkers = async (projectDir: string): Promise<void> => {
-  const file = NodePath.join(projectDir, "UserSettings/EditorUserSettings.asset");
+export const importWorkerSettings = (existing: string | null): string | null => {
   const wanted: Record<string, string> = {
     m_DesiredImportWorkerCount: "0",
     m_StandbyImportWorkerCount: "0",
     m_IdleImportWorkerShutdownDelay: "1000",
   };
-  const existing = await NodeFSP.readFile(file, "utf8").catch(() => null);
-  if (existing === null) {
-    await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
-    await NodeFSP.writeFile(
-      file,
-      `%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!162 &1\nEditorUserSettings:\n  m_ObjectHideFlags: 0\n  serializedVersion: 5\n${Object.entries(
-        wanted,
-      )
-        .map(([key, value]) => `  ${key}: ${value}\n`)
-        .join("")}`,
-    );
-    return;
-  }
+  if (existing === null)
+    return `%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!162 &1\nEditorUserSettings:\n  m_ObjectHideFlags: 0\n  serializedVersion: 5\n${Object.entries(
+      wanted,
+    )
+      .map(([key, value]) => `  ${key}: ${value}\n`)
+      .join("")}`;
   let text = existing;
   for (const [key, value] of Object.entries(wanted)) {
     const line = new RegExp(`^  ${key}: .*$`, "m");
@@ -244,7 +297,7 @@ export const capImportWorkers = async (projectDir: string): Promise<void> => {
       ? text.replace(line, `  ${key}: ${value}`)
       : text.replace(/^EditorUserSettings:\n/m, `EditorUserSettings:\n  ${key}: ${value}\n`);
   }
-  if (text !== existing) await NodeFSP.writeFile(file, text);
+  return text === existing ? null : text;
 };
 
 /**
@@ -441,6 +494,7 @@ const seedLibrary = async (
   mainProjectDir: string,
   projectDir: string,
   scratch: string,
+  signal: AbortSignal,
 ): Promise<string | null> => {
   const target = NodePath.join(projectDir, "Library");
   if ((await NodeFSP.stat(target).catch(() => null)) !== null) return "it already has one";
@@ -451,7 +505,8 @@ const seedLibrary = async (
     return "a Unity editor has the main checkout open, so its import cache may be mid-write";
   const staging = NodePath.join(scratch, `library-${NodeCrypto.randomUUID()}`);
   try {
-    await cloneTree(source, staging, 15 * 60_000);
+    // Bounded, and stopped with its caller, so a cut-short open leaves no copy running.
+    await copyTree(source, staging, AbortSignal.any([signal, AbortSignal.timeout(15 * 60_000)]));
     for (const name of LIBRARY_NOT_COPIED)
       await NodeFSP.rm(NodePath.join(staging, name), { recursive: true, force: true });
     await NodeFSP.rename(staging, target);
@@ -478,7 +533,15 @@ export class GameUnity extends Context.Service<
     readonly cli: (
       root: string,
       args: ReadonlyArray<string>,
-      options: { readonly operation: string; readonly timeoutMs: number },
+      options: {
+        readonly operation: string;
+        readonly timeoutMs: number;
+        /**
+         * False for a poll the editor may leave unanswered while it works (a
+         * build's status): its timeout then does not mark the editor stuck.
+         */
+        readonly unansweredIsNews?: boolean;
+      },
     ) => Effect.Effect<UnityCliResult, GameOperationError>;
     /** One `unity mcp` tool call against this game's live editor. */
     readonly call: (
@@ -500,6 +563,35 @@ export class GameUnity extends Context.Service<
     readonly logTail: (root: string) => Effect.Effect<string>;
     /** Close this game's live editor (by recorded pid only); game_stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
+    /**
+     * Marks this game's live editor unusable (the game froze it, play mode
+     * would not stop): it closes once its last holder lets go, and the next
+     * call opens a fresh one.
+     */
+    readonly wedged: (root: string, why: string) => Effect.Effect<void>;
+    /** `game_unity_tools`: the editing tools `game_unity_edit` may call. Refuses a game that is not Unity's. */
+    readonly listTools: (root: string) => Effect.Effect<GameUnityToolsResult, GameOperationError>;
+    /** `game_unity_edit`: one editing tool and the scene save, in one hold; fails when the save does not land. */
+    readonly edit: (
+      root: string,
+      input: GameUnityEditInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    readonly evaluate: (
+      root: string,
+      input: GameUnityEvalInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    readonly play: (
+      root: string,
+      input: GameUnityPlayInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    readonly screenshot: (
+      root: string,
+      input: GameUnityScreenshotInput,
+    ) => Effect.Effect<GameUnityScreenshotResult, GameOperationError>;
+    readonly console: (
+      root: string,
+      input: GameUnityConsoleInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
   }
 >()("kurambit/game/GameUnity") {}
 
@@ -511,20 +603,18 @@ const make = Effect.gen(function* () {
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
   const gate = yield* GameMemoryGate.GameMemoryGate;
-  const { stateDir } = yield* ServerConfig.ServerConfig;
+  const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/unity-live");
+  const writeAtomic = yield* makeAtomicWriter;
+  const checkoutOf = yield* makeCheckoutOf;
+  const records = yield* makeLiveRecords<SessionRecord>("unity-live", (root) =>
+    NodePath.join(homeDirOf(root), SESSION_FILE),
+  );
   const sessions = new Map<string, Session>();
   // Opening an editor takes minutes; two callers for one game must share it.
   const openLock = Semaphore.makeUnsafe(1);
   // The CLI path and its HOME never depend on which editor a game picks.
   const install = yield* tools.unityExecutables;
-  const serverRecords = NodePath.join(stateDir, "unity-live");
-
-  const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/unity-live");
-  const serverRecordOf = (root: string) =>
-    NodePath.join(
-      serverRecords,
-      `${NodeCrypto.createHash("sha256").update(root).digest("hex").slice(0, 24)}.json`,
-    );
+  const serverRecordOf = records.serverRecordOf;
   const liveExecutables = (): Effect.Effect<LiveExecutables> =>
     tools.unityExecutables.pipe(
       Effect.flatMap((unity) =>
@@ -586,16 +676,8 @@ const make = Effect.gen(function* () {
   // An editor orphaned by a crashed server is found through the server's own
   // copy of its record, whether or not its game is ever opened again.
   const startupLive = yield* liveExecutables();
-  yield* Effect.promise(async () => {
-    const live = startupLive;
-    for (const name of await NodeFSP.readdir(serverRecords).catch(() => [] as string[])) {
-      if (!name.endsWith(".json")) continue;
-      const file = NodePath.join(serverRecords, name);
-      const record = await readRecord<SessionRecord>(file);
-      if (record !== null && typeof record.homeDir === "string")
-        await reapRecord(record, record.homeDir, live);
-      await NodeFSP.rm(file, { force: true });
-    }
+  yield* records.reapAll(async (record) => {
+    if (typeof record.homeDir === "string") await reapRecord(record, record.homeDir, startupLive);
   });
 
   const runCli = (
@@ -667,17 +749,41 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         const existing = sessions.get(root);
+        // A held session is reused as it is; an idle one only while it is
+        // usable and its scene on disk is still the one it holds in memory
+        // (a file restore beside it would otherwise be saved over).
+        // A broken session still held is never replaced under its holder: the
+        // holder's next call fails at once, and the session is replaced when
+        // the hold ends.
+        if (existing !== undefined && existing.inFlight > 0 && existing.broken !== null)
+          return yield* opError(
+            "unity-live",
+            root,
+            "tool-failed",
+            `The live Unity editor stopped answering (${existing.broken}); it is closed when this operation ends, and the next Unity call reopens it.`,
+          );
+        const stale =
+          existing === undefined || existing.inFlight > 0
+            ? null
+            : yield* Effect.promise(() => existing.scene.changed());
         if (
           existing !== undefined &&
           existing.editor.running() &&
+          existing.broken === null &&
+          stale === null &&
           (existing.inFlight > 0 || now - existing.lastActive < LIVE_IDLE_MS)
         ) {
           existing.lastActive = now;
           take(existing);
           return existing;
         }
+        if (stale !== null)
+          yield* Effect.logInfo("live Unity editor reopens: its scene changed on disk", {
+            root,
+            scene: stale,
+          });
         // The production run plays blind samples in git worktrees of the game.
-        const checkout = yield* Effect.promise(() => checkoutOf(root));
+        const checkout = yield* checkoutOf(root);
         if (checkout.kind === "other")
           return yield* opError(
             "unity-live",
@@ -698,9 +804,7 @@ const make = Effect.gen(function* () {
         // use is never closed under its caller.
         for (const [otherRoot, other] of Array.from(sessions))
           if (otherRoot !== root && other.inFlight > 0) {
-            const [mine, theirs] = yield* Effect.promise(() =>
-              Promise.all([checkoutOf(root), checkoutOf(otherRoot)]),
-            );
+            const [mine, theirs] = yield* Effect.all([checkoutOf(root), checkoutOf(otherRoot)]);
             // A production run builds its blind samples in worktrees of the
             // game; stopping one from the game's own thread would not free the
             // editor and would sabotage the run.
@@ -729,26 +833,31 @@ const make = Effect.gen(function* () {
             "The live Unity editor needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
           );
         const homeDir = homeDirOf(root);
-        yield* Effect.tryPromise({
+        const workerSettings = NodePath.join(projectDir, "UserSettings/EditorUserSettings.asset");
+        const settingsText = yield* Effect.tryPromise({
           try: async () => {
             await NodeFSP.mkdir(homeDir, { recursive: true });
-            await NodeFSP.mkdir(serverRecords, { recursive: true });
+            await NodeFSP.mkdir(records.directory, { recursive: true });
             await NodeFSP.mkdir(install.cliHome, { recursive: true });
-            await capImportWorkers(projectDir);
             // Every earlier editor for this game was reaped above.
             await dropDataStoreMemory(homeDir);
+            return importWorkerSettings(
+              await NodeFSP.readFile(workerSettings, "utf8").catch(() => null),
+            );
           },
           catch: (cause) => opError("unity-live", homeDir, "io", undefined, cause),
         });
+        if (settingsText !== null) yield* writeAtomic(workerSettings, settingsText, "unity-live");
         // After the drops above: the main checkout's editor is closed, so its
         // import cache is copied whole.
         if (checkout.kind === "linked") {
           const notSeeded = yield* Effect.tryPromise({
-            try: () =>
+            try: (signal) =>
               seedLibrary(
                 NodePath.join(checkout.main, NodePath.relative(root, projectDir)),
                 projectDir,
                 NodePath.dirname(homeDir),
+                signal,
               ),
             catch: (cause) =>
               opError(
@@ -772,16 +881,13 @@ const make = Effect.gen(function* () {
         // Written as each pid appears, so a crash mid-start still leaves the
         // next open or game_stop something to reap.
         const remember = (launches: Partial<SessionRecord>) =>
-          Effect.tryPromise({
-            try: async () => {
-              record = { ...record, ...launches };
-              const text = JSON.stringify(record);
-              await NodeFSP.writeFile(NodePath.join(homeDir, SESSION_FILE), text);
-              await NodeFSP.writeFile(serverRecordOf(root), text);
-            },
-            catch: (cause) => opError("unity-live", SESSION_FILE, "io", undefined, cause),
+          Effect.suspend(() => {
+            record = { ...record, ...launches };
+            return records.remember(root, record);
           });
-        const fail = (detail: string, reason: GameOperationError["reason"] = "command-failed") =>
+        // A start that fails for its own reasons is a tool's fault unless the
+        // game's code is named (compile errors), which callers read as the build's.
+        const fail = (detail: string, reason: GameOperationError["reason"] = "tool-failed") =>
           Effect.gen(function* () {
             yield* drop(root);
             return yield* opError("unity-live", root, reason, detail);
@@ -832,6 +938,11 @@ const make = Effect.gen(function* () {
                     env: unityEditorEnv({ LIBGL_ALWAYS_SOFTWARE: "1" }),
                     stdio: "ignore",
                     token: editorToken,
+                    // On Windows the editor starts the user's Licensing
+                    // Client, which other editors share: the editor stays out
+                    // of the kill-on-close job, and a stop never ends that client.
+                    joinsJob: false,
+                    keep: (facts) => facts.exe !== null && !isUnityLicensingClient(facts.exe),
                   },
                   EDITOR_WINDOW,
                 ),
@@ -897,34 +1008,29 @@ const make = Effect.gen(function* () {
           const errors = [
             ...new Set((yield* editorLog(root)).match(/^[^\n]*error CS\d{4}:[^\n]*$/gm) ?? []),
           ].slice(0, 6);
-          const compile =
-            errors.length > 0 || /error CS\d{4}/.test(tail)
-              ? ` C# compile errors stop it opening the project; fix them and retry:\n${errors.join("\n")}\n`
-              : "";
+          const compiles = errors.length > 0 || /error CS\d{4}/.test(tail);
+          const compile = compiles
+            ? ` C# compile errors stop it opening the project; fix them and retry:\n${errors.join("\n")}\n`
+            : "";
           return yield* fail(
             ready === null
               ? `The Unity editor exited before it was ready (exit ${editor.exitCode ?? editor.signalCode}).${compile} Editor log: ${logPath}\n${tail.slice(-1500)}`
               : `The Unity editor did not become ready (${ready.errorCode ?? `exit ${ready.process.exitCode}`}: ${ready.errorMessage ?? "no answer"}).${compile} Editor log: ${logPath}\n${tail.slice(-1500)}`,
+            compiles ? "command-failed" : "tool-failed",
           );
         }
         // A batchmode editor starts on an untitled scene; edits, saves and the
         // camera capture all belong to the game's main scene.
         const manifest = yield* projects.read(root);
+        const scenePath = manifest.gameplayScene ?? "Assets/Scenes/Main.unity";
         yield* runCli(
           root,
           unity.cli,
-          [
-            "command",
-            "scene",
-            "open",
-            "--project-path",
-            projectDir,
-            "--",
-            "--path",
-            manifest.gameplayScene ?? "Assets/Scenes/Main.unity",
-          ],
+          ["command", "scene", "open", "--project-path", projectDir, "--", "--path", scenePath],
           { operation: "unity-open-scene", timeoutMs: 120_000 },
         );
+        const scene = new HeldSources(() => unityScenes(projectDir));
+        yield* Effect.promise(() => scene.hold());
         const mcpLog = NodeFS.openSync(NodePath.join(homeDir, "mcp.log"), "w");
         const mcpToken = launchToken();
         const transport = new StdioClientTransport({
@@ -940,7 +1046,7 @@ const make = Effect.gen(function* () {
             opError(
               "unity-live",
               root,
-              "command-failed",
+              "tool-failed",
               "Could not start `unity mcp` over stdio.",
               cause,
             ),
@@ -965,13 +1071,23 @@ const make = Effect.gen(function* () {
           window: hosted,
           client,
           logPath,
+          scene,
+          broken: null,
           lastActive: yield* Clock.currentTimeMillis,
           inFlight: 0,
         };
+        // `unity mcp` gone means every editing call would fail "did not answer":
+        // the session is closed at its next release and the next call reopens it.
+        client.onclose = () => breakSession(session, "`unity mcp` exited");
         sessions.set(root, session);
         take(session);
         return session;
-      }),
+      }).pipe(
+        // A start cut short (a stopped turn during the minutes-long ready
+        // wait) must not leave an editor running outside the session map: its
+        // record names it, and dropping reaps it.
+        Effect.onInterrupt(() => (sessions.has(root) ? Effect.void : drop(root))),
+      ),
     );
 
   const withSession = <A, E, R>(
@@ -989,8 +1105,28 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const session: Session | null = held;
             if (session === null) return;
+            // The last holder's work (an edit, an eval that saved, a build) is
+            // the session's own: what is on disk now is what it holds. Taken
+            // before the count drops, so no acquire sees it idle in between.
+            if (session.inFlight === 1 && session.broken === null)
+              yield* Effect.promise(() => session.scene.hold());
             session.inFlight -= 1;
             session.lastActive = yield* Clock.currentTimeMillis;
+            // A session something showed unusable closes when its last holder lets go.
+            if (session.broken !== null && session.inFlight === 0)
+              yield* openLock.withPermits(1)(
+                Effect.suspend(() =>
+                  session.inFlight === 0 && sessions.get(root) === session
+                    ? Effect.andThen(
+                        Effect.logWarning("live Unity editor closed", {
+                          root,
+                          reason: session.broken,
+                        }),
+                        drop(root),
+                      )
+                    : Effect.void,
+                ),
+              );
           }),
         ),
       );
@@ -1024,16 +1160,29 @@ const make = Effect.gen(function* () {
           resetTimeoutOnProgress: true,
           onprogress: () => undefined,
         }) as Promise<McpContent>,
-      catch: (cause) =>
-        opError(
+      catch: (cause) => {
+        // An answered JSON-RPC error (an unknown tool, bad arguments) is the
+        // caller's request; only silence or a lost connection is the editor's.
+        if (!mcpUnanswered(cause))
+          return opError(
+            "unity-live",
+            name,
+            "invalid-input",
+            `The Unity editor refused '${name}': ${cause instanceof Error ? cause.message : String(cause)}`,
+            cause,
+          );
+        // An editor that does not answer at all will not answer the next call either.
+        breakSession(session, `the live Unity editor did not answer '${name}'`);
+        return opError(
           "unity-live",
           name,
-          "command-failed",
+          "tool-failed",
           cause instanceof McpError && cause.code === ErrorCode.RequestTimeout
             ? `The Unity editor did not answer '${name}' within ${Math.round(timeoutMs / 1000)}s. It may still be working; read the scene before retrying.`
             : `The Unity editor did not answer '${name}'. ${cause instanceof Error ? cause.message : ""}`,
           cause,
-        ),
+        );
+      },
     });
 
   const call: GameUnity["Service"]["call"] = (root, name, args, timeoutMs = 2 * 60_000) =>
@@ -1071,6 +1220,7 @@ const make = Effect.gen(function* () {
             .map(([root, session]) => ({
               root,
               lastActive: session.lastActive,
+              alive: Effect.sync(() => session.broken === null && session.editor.running()),
               // Re-read under the lock: a call may have taken it meanwhile.
               close: openLock.withPermits(1)(
                 Effect.suspend(() =>
@@ -1087,7 +1237,123 @@ const make = Effect.gen(function* () {
     Effect.forEach([...sessions.keys()], drop, { discard: true, concurrency: "unbounded" }),
   );
 
+  const listTools = (root: string) =>
+    withSession(root, (session) =>
+      Effect.gen(function* () {
+        const listed = yield* Effect.tryPromise({
+          try: () => session.client.listTools(),
+          catch: (cause) =>
+            opError(
+              "unity-live",
+              root,
+              "tool-failed",
+              "`unity mcp` did not list its tools.",
+              cause,
+            ),
+        });
+        return listed.tools
+          .filter((tool) => UNITY_EDIT_TOOL.test(tool.name))
+          .map((tool) => ({
+            name: tool.name,
+            description: (tool.description ?? "").slice(0, 600),
+            input: tool.inputSchema,
+          }));
+      }),
+    );
+
+  // The game_unity_* tools are the Unity editor's own front, so only a Unity game has them.
+  const unityGame = (root: string, operation: string) =>
+    projects
+      .read(root)
+      .pipe(
+        Effect.flatMap((manifest) =>
+          manifest.engine.name === "unity"
+            ? Effect.void
+            : Effect.fail(
+                opError(
+                  operation,
+                  root,
+                  "invalid-input",
+                  "The game_unity_* tools work on Unity games; this game runs another engine.",
+                ),
+              ),
+        ),
+      );
+
+  const edit = (root: string, input: GameUnityEditInput) =>
+    Effect.gen(function* () {
+      yield* unityGame(root, "Unity edit");
+      if (!UNITY_EDIT_TOOL.test(input.tool))
+        return yield* opError(
+          "Unity edit",
+          input.tool,
+          "invalid-input",
+          "That tool is not an editing tool here. List the editing tools with game_unity_tools; use game_unity_eval, game_unity_play, game_unity_screenshot or game_unity_console for the rest.",
+        );
+      // Edits live in the open scene until saved, so the edit and its save hold one editor.
+      return yield* withSession(root, (session) =>
+        Effect.gen(function* () {
+          const result = yield* call(root, input.tool, { ...input.arguments });
+          // An edit whose save did not land is held only in the editor: the
+          // run's next capture would miss it, so the call fails.
+          const saved = yield* call(root, "editor_save_all", {}).pipe(
+            Effect.catchTags({
+              GameOperationError: (error) =>
+                Effect.fail(
+                  opError(
+                    "Unity edit",
+                    root,
+                    error.reason,
+                    `The edit ran but the scene was not saved, so it is held only in the live editor: ${error.detail ?? error.reason}\n${textOf(result).slice(0, 2000)}`,
+                    error,
+                  ),
+                ),
+            }),
+          );
+          return { text: `${textOf(result).slice(0, 8000)}\n${textOf(saved)}` };
+        }),
+      );
+    });
+
   return GameUnity.of({
+    wedged: (root, why) =>
+      Effect.sync(() => {
+        const session = sessions.get(root);
+        if (session !== undefined) breakSession(session, why);
+      }),
+    listTools: (root) =>
+      Effect.andThen(unityGame(root, "Unity tools"), listTools(root)).pipe(
+        Effect.map((tools) => ({ tools })),
+      ),
+    edit,
+    evaluate: (root, input) =>
+      Effect.andThen(
+        unityGame(root, "Unity eval"),
+        call(root, "script_eval", { code: input.code, timeout: 60 }, 90_000),
+      ).pipe(Effect.map((result) => ({ text: textOf(result).slice(0, 8000) }))),
+    play: (root, input) =>
+      Effect.gen(function* () {
+        yield* unityGame(root, "Unity play");
+        // An unfocused editor freezes play mode at frame 1 without auto-tick.
+        if (input.action === "start") yield* call(root, "editor_set_auto_tick", {});
+        const result = yield* call(
+          root,
+          input.action === "start" ? "editor_playmode_start" : "editor_playmode_stop",
+          {},
+          120_000,
+        );
+        return { text: textOf(result) };
+      }),
+    screenshot: (root, input) =>
+      Effect.andThen(
+        unityGame(root, "Unity screenshot"),
+        call(root, "capture_game_view", { source: "camera", max_resolution: input.maxSize ?? 960 }),
+      ).pipe(Effect.map(screenshotOf)),
+    console: (root, input) =>
+      Effect.andThen(
+        unityGame(root, "Unity console"),
+        call(root, "console_get", { level: input.level ?? "log", tail: input.tail ?? 50 }),
+      ).pipe(Effect.map((result) => ({ text: textOf(result).slice(0, 12000) }))),
     hold: (root) => (effect) => withSession(root, () => effect),
     cli: (root, args, options) =>
       withSession(root, (session) =>
@@ -1100,6 +1366,18 @@ const make = Effect.gen(function* () {
               options,
             );
           let result = yield* run();
+          // A call that hung past its bound found the editor stuck (on its main
+          // thread for most commands): it is not retried and not reused.
+          if (result.process.timedOut) {
+            // A poll that may go unanswered while the editor works (a build's
+            // status) says nothing about the editor; any other call does.
+            if (options.unansweredIsNews !== false)
+              breakSession(
+                session,
+                `the live Unity editor did not answer \`${args.join(" ")}\` in time`,
+              );
+            return result;
+          }
           if (
             !result.ok &&
             (result.process.exitCode === 12 ||
@@ -1108,33 +1386,16 @@ const make = Effect.gen(function* () {
             yield* waitReady(root, session);
             result = yield* run();
           }
+          if (result.process.timedOut && options.unansweredIsNews !== false)
+            breakSession(
+              session,
+              `the live Unity editor did not answer \`${args.join(" ")}\` in time`,
+            );
           return result;
         }),
       ),
     call,
-    tools: (root) =>
-      withSession(root, (session) =>
-        Effect.gen(function* () {
-          const listed = yield* Effect.tryPromise({
-            try: () => session.client.listTools(),
-            catch: (cause) =>
-              opError(
-                "unity-live",
-                root,
-                "command-failed",
-                "`unity mcp` did not list its tools.",
-                cause,
-              ),
-          });
-          return listed.tools
-            .filter((tool) => UNITY_EDIT_TOOL.test(tool.name))
-            .map((tool) => ({
-              name: tool.name,
-              description: (tool.description ?? "").slice(0, 600),
-              input: tool.inputSchema,
-            }));
-        }),
-      ),
+    tools: listTools,
     logTail,
     stop: drop,
   });

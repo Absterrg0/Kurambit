@@ -2,7 +2,8 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { fileSha256 } from "./fileHash.ts";
+import { GAME_SOURCE_FILE_LIMIT, sourceLimitDetail } from "@kurambit/contracts";
+import { hashFile } from "./sourceSnapshot.ts";
 
 /** The legacy mutable build directory. A new export never writes here. */
 export const WEB_BUILD_DIRECTORY = "builds/web";
@@ -19,14 +20,6 @@ const CANDIDATE_DIRECTORY = /^builds\/candidates\/([0-9a-f]{64})$/;
 export const candidateBuildId = (directory: string): string | null =>
   CANDIDATE_DIRECTORY.exec(directory)?.[1] ?? null;
 
-/** One served web build file, identified the way the source snapshot identifies sources. */
-export interface WebArtifactFile {
-  /** Game-relative path, with forward slashes. */
-  readonly path: string;
-  readonly size: number;
-  readonly mtimeMs: number;
-}
-
 /** One file's exact content identity, used for round decisions. */
 export interface WebBuildFile {
   /** Build-relative path, with forward slashes. */
@@ -42,73 +35,59 @@ export interface HashedWebBuild {
   readonly files: readonly WebBuildFile[];
 }
 
-/** A served build is a handful of files; a directory past this is not one we can vouch for. */
-const MAX_WEB_ARTIFACT_ENTRIES = 1_000;
+/**
+ * A three.js build is a copy of its sources, so a Web build may hold as many
+ * files as a game's sources may (and a Godot one a handful more).
+ */
+const MAX_WEB_ARTIFACT_FILES = GAME_SOURCE_FILE_LIMIT + 100;
+
+type WalkedFile = {
+  readonly path: string;
+  readonly absolute: string;
+  readonly size: number;
+  /** Device, inode, size and times: moves whenever the bytes could have. */
+  readonly identity: string;
+};
+
+/** Why a build folder could not be read as one: too many files, a link, or the filesystem. */
+export type WebBuildProblem = "entry-limit" | "symlink" | "io";
 
 const walkBuild = async (
   directory: string,
-): Promise<
-  | readonly {
-      readonly path: string;
-      readonly absolute: string;
-      readonly size: number;
-      readonly mtimeMs: number;
-    }[]
-  | null
-> => {
-  const files: { path: string; absolute: string; size: number; mtimeMs: number }[] = [];
+): Promise<{ readonly files: readonly WalkedFile[] } | { readonly problem: WebBuildProblem }> => {
+  const files: WalkedFile[] = [];
   const stack = [directory];
-  let visited = 0;
   try {
     while (stack.length > 0) {
       const current = stack.pop()!;
-      for (const entry of await NodeFSP.readdir(current, { withFileTypes: true })) {
-        visited += 1;
-        if (visited > MAX_WEB_ARTIFACT_ENTRIES) return null;
+      for await (const entry of await NodeFSP.opendir(current)) {
         const absolute = NodePath.join(current, entry.name);
         // A linked build file can be replaced without changing what the record
         // names, so it is not an artifact this server can vouch for.
-        if (entry.isSymbolicLink()) return null;
+        if (entry.isSymbolicLink()) return { problem: "symlink" };
         if (entry.isDirectory()) {
           stack.push(absolute);
           continue;
         }
         if (!entry.isFile()) continue;
-        const stat = await NodeFSP.stat(absolute);
+        if (files.length >= MAX_WEB_ARTIFACT_FILES) return { problem: "entry-limit" };
+        const stat = await NodeFSP.stat(absolute, { bigint: true });
         files.push({
           path: NodePath.relative(directory, absolute).split(NodePath.sep).join("/"),
           absolute,
-          size: stat.size,
-          mtimeMs: stat.mtimeMs,
+          size: Number(stat.size),
+          identity: `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`,
         });
       }
     }
   } catch {
-    return null;
+    return { problem: "io" };
   }
-  return files.sort((left, right) =>
-    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
-  );
-};
-
-/**
- * The files under a game-relative build directory, with legacy size/mtime
- * identities and game-relative paths. A record from before build-addressed
- * exports names paths under builds/web; passing that directory keeps it
- * readable, so legacy qualification survives the change.
- */
-export const describeWebArtifacts = async (
-  root: string,
-  directory: string = WEB_BUILD_DIRECTORY,
-): Promise<readonly WebArtifactFile[] | null> => {
-  const buildRoot = NodePath.join(root, directory);
-  const files = await walkBuild(buildRoot);
-  if (files === null) return null;
-  return files.map((file) => ({
-    path: `${directory}/${file.path}`,
-    size: file.size,
-    mtimeMs: file.mtimeMs,
-  }));
+  return {
+    files: files.sort((left, right) =>
+      left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+    ),
+  };
 };
 
 /** SHA-256 over the artifact's sorted path/content lines. */
@@ -123,15 +102,50 @@ export const webBuildId = (files: readonly WebBuildFile[]): string => {
  * round decides on: a same-size edit in the same mtime tick changes it, and an
  * unchanged copy of the same export always hashes the same.
  */
-export const hashWebBuildDirectory = async (directory: string): Promise<HashedWebBuild | null> => {
+export const readWebBuild = async (
+  directory: string,
+): Promise<HashedWebBuild | { readonly problem: WebBuildProblem | "empty" }> => {
   const walked = await walkBuild(directory);
-  if (walked === null || walked.length === 0) return null;
+  if ("problem" in walked) return walked;
+  if (walked.files.length === 0) return { problem: "empty" };
   const files: WebBuildFile[] = [];
-  for (const file of walked) {
-    const { sha256, bytes } = await fileSha256(file.absolute);
-    files.push({ path: file.path, size: bytes, sha256 });
+  try {
+    for (const file of walked.files) {
+      const { sha256, bytes } = await hashFile(file.absolute);
+      files.push({ path: file.path, size: bytes, sha256 });
+    }
+  } catch {
+    return { problem: "io" };
   }
   return { buildId: webBuildId(files), directory, files };
+};
+
+/** Why a Web build folder is not one build, in the words the export's refusal uses. */
+export const webBuildProblemText = (problem: WebBuildProblem | "empty", project: string): string =>
+  problem === "entry-limit"
+    ? sourceLimitDetail(project)
+    : problem === "symlink"
+      ? "The exported web build contains a symbolic link, which Play never serves."
+      : problem === "empty"
+        ? "The export wrote no web build files."
+        : "The exported web build directory could not be read back from disk.";
+
+/**
+ * The stat identity of every file in a build folder, without reading a byte:
+ * equal identities mean the bytes hashed earlier are still the ones there (the
+ * way git's index skips unchanged files). Null when the folder is not one
+ * build (a link, too many files, unreadable).
+ */
+export const webBuildStatIdentity = async (directory: string): Promise<string | null> => {
+  const walked = await walkBuild(directory);
+  return "problem" in walked
+    ? null
+    : walked.files.map((file) => `${file.path}\0${file.identity}`).join("\n");
+};
+
+const hashWebBuildDirectory = async (directory: string): Promise<HashedWebBuild | null> => {
+  const read = await readWebBuild(directory);
+  return "problem" in read ? null : read;
 };
 
 /** The same identity, for a game-relative build directory. */

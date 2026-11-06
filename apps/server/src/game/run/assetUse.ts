@@ -5,6 +5,9 @@
 // a false "missing" or "never referenced" would have a builder redo or delete good work.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import type { GameEngineId } from "@kurambit/contracts";
+import { ASSET_EXT, listedIn, readAssetsDoc } from "./assetsDoc.ts";
+import { codeOnly } from "./sourceText.ts";
 
 export interface EngineFile {
   /** Path relative to the engine dir, always with forward slashes. */
@@ -14,7 +17,7 @@ export interface EngineFile {
 }
 
 export interface AssetUse {
-  readonly engine: "godot" | "web" | "unity";
+  readonly engine: GameEngineId;
   /** Set when the folder is past the scan's bounds; the other facts are then empty. */
   readonly tooLarge: string | null;
   /** The game's own asset files; files copied from library packs are counted in `library`. */
@@ -29,8 +32,6 @@ export interface AssetUse {
   readonly drawn: ReadonlyArray<readonly [string, number]>;
 }
 
-const ASSET_EXT =
-  "png|jpe?g|webp|svg|gif|bmp|tga|exr|hdr|ktx2|wav|ogg|mp3|flac|glb|gltf|fbx|obj|blend|dae";
 const ASSET = new RegExp(`\\.(?:${ASSET_EXT})$`, "i");
 const SOURCE_GODOT = /\.(gd|tscn|tres|gdshader|godot|import|uid|gltf|json|cfg)$/i;
 const SOURCE_WEB = /\.(m?js|html?|css|json|gltf)$/i;
@@ -38,8 +39,14 @@ const SOURCE_WEB = /\.(m?js|html?|css|json|gltf)$/i;
 const CODE_GODOT = /\.(gd|tscn|tres|gdshader)$/;
 const CODE_WEB = /\.(m?js|html?|css)$/;
 const CODE_UNITY = /\.(cs|unity|prefab)$/;
-// Unity's text-serialized scenes, prefabs and assets name files by GUID; .meta files map GUIDs to paths.
-const SOURCE_UNITY = /\.(cs|unity|prefab|asset|mat|controller|anim)$/i;
+// Unity's text-serialized scenes, prefabs and assets name files by GUID; .meta files map GUIDs to
+// paths. UI Toolkit's USS and UXML name them by project:// URLs that carry the GUID too.
+const SOURCE_UNITY =
+  /\.(cs|unity|prefab|asset|mat|controller|overrideController|anim|playable|spriteatlas|spriteatlasv2|mixer|physicMaterial|physicsMaterial2D|renderTexture|lighting|terrainlayer|uss|uxml)$/i;
+// Unity ships every file under a Resources/ or StreamingAssets/ folder and loads it by a name
+// built at runtime, and Addressables loads its groups' entries by address: possibly used, all.
+const UNITY_ALWAYS_SHIPPED = /(?:^|\/)(?:Resources|StreamingAssets)\//;
+const UNITY_ADDRESSABLE_GROUPS = /(?:^|\/)AddressableAssetsData\/.*\.asset$/;
 const UNITY_VERSION_FILE = "ProjectSettings/ProjectVersion.txt";
 const UNITY_BUILD_SCENES = "ProjectSettings/EditorBuildSettings.asset";
 // The render pipeline assets (and what they name) load from these, not from any scene.
@@ -354,7 +361,8 @@ const drawnGodot = (path: string, text: string): Array<readonly [string, number]
   ];
 };
 
-const UNITY_GUID = /\bguid: ([0-9a-f]{32})\b/g;
+// `guid: X` in YAML, `guid=X` in a USS or UXML project:// URL, `m_GUID: X` in an Addressables group.
+const UNITY_GUID = /(?:\bguid|\bm_GUID)\s*[:=]\s*([0-9a-f]{32})\b/gi;
 const CS_ASSET_PATH = /"(Assets\/[^"\n]{1,200})"/g;
 // The literal's `$` marks an interpolated string; a `+` after it a path built at runtime.
 const CS_RESOURCES =
@@ -378,7 +386,7 @@ const unityRefs = (text: string, path: string, guids: ReadonlyMap<string, string
     const scanned = path === UNITY_BUILD_SCENES ? text.replace(DISABLED_SCENE, "") : text;
     // GUIDs of packages and built-in resources have no .meta here; they are not the game's files.
     for (const m of scanned.matchAll(UNITY_GUID)) {
-      const target = guids.get(m[1] ?? "");
+      const target = guids.get((m[1] ?? "").toLowerCase());
       if (target !== undefined)
         refs.push({ raw: target, refs: [{ kind: "exact", path: target }], reportable: false });
     }
@@ -457,72 +465,6 @@ const drawnWeb = (path: string, text: string): Array<readonly [string, number]> 
       ]
     : [];
 
-// A path character in ASSETS.md; ".." ends a path, so "a_0.png..a_5.png" reads as a span.
-const LISTED_PATH = `(?:res://)?(?!\\[)(?:[\\w/@*\\[\\]-]|\\.(?!\\.))*?\\.(?:${ASSET_EXT})\\b`;
-const LISTED_TOKEN = new RegExp(
-  `(${LISTED_PATH})(?:\\s*(?:…|\\.{2,3})\\s*(${LISTED_PATH}))?`,
-  "gi",
-);
-
-// `*` and `[0-5]` are globs; everything else is literal.
-const globSource = (glob: string) =>
-  glob.replace(/\[([\w-]+)\]|\*|[.+?^${}()|[\]\\]/g, (m, cls: string | undefined) =>
-    cls !== undefined ? `[${cls}]` : m === "*" ? "[^/]*" : `\\${m}`,
-  );
-
-/** `a_0.png … a_5.png`: the differing middle of two names, as digits where both are digits. */
-const spanSource = (first: string, last: string) => {
-  const dir = first.slice(0, first.lastIndexOf("/") + 1);
-  const a = first.slice(dir.length);
-  const b = last.slice(last.lastIndexOf("/") + 1);
-  let p = 0;
-  while (p < a.length && p < b.length && a[p] === b[p]) p += 1;
-  let s = 0;
-  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s])
-    s += 1;
-  while (p > 0 && /\d/.test(a[p - 1] ?? "")) p -= 1;
-  while (s > 0 && /\d/.test(a[a.length - s] ?? "")) s -= 1;
-  const digits = /^\d+$/.test(a.slice(p, a.length - s)) && /^\d+$/.test(b.slice(p, b.length - s));
-  return `${globSource(dir + a.slice(0, p))}${digits ? "\\d+" : "[^/]+"}${globSource(a.slice(a.length - s))}`;
-};
-
-const listedIn = (assetsMd: string, assets: ReadonlyArray<string>, lane: string) => {
-  const inList = new Set<string>();
-  const missing = new Set<string>();
-  const clean = (token: string) => {
-    const path = token.replace(/^res:\/\//, "").replace(/^\.\//, "");
-    return path.startsWith(`${lane}/`) ? path.slice(lane.length + 1) : path;
-  };
-  for (const m of assetsMd.matchAll(LISTED_TOKEN)) {
-    const token = m[1] ?? "";
-    const path = clean(token);
-    const name = path.slice(path.lastIndexOf("/") + 1);
-    // A stray extension or a name fragment is not a file entry.
-    if (/^[._]/.test(path) || /^[._]/.test(name)) continue;
-    const last = m[2] === undefined ? undefined : clean(m[2]);
-    const source = last !== undefined ? spanSource(path, last) : globSource(path);
-    let re: RegExp;
-    try {
-      re = new RegExp(path.includes("/") ? `^${source}$` : `(?:^|/)${source}$`);
-    } catch {
-      continue;
-    }
-    const hits = assets.filter((asset) => re.test(asset));
-    // Entries outside the engine dir (key art, .blend sources) are not part of the build.
-    if (
-      hits.length === 0 &&
-      path.includes("/") &&
-      !token.startsWith(`${lane}/`) &&
-      !path.startsWith("assets/") &&
-      !token.startsWith("res://")
-    )
-      continue;
-    for (const hit of hits) inList.add(hit);
-    if (hits.length === 0) missing.add(last === undefined ? path : `${path} … ${last}`);
-  }
-  return { inList, missing };
-};
-
 const tooLargeUse = (engine: AssetUse["engine"], tooLarge: string): AssetUse => ({
   engine,
   tooLarge,
@@ -542,13 +484,14 @@ type ScanEngine = AssetUse["engine"];
 /** How each engine's project names, loads and draws its files. */
 interface EngineScan {
   /** A file only this engine's project has, relative to the engine dir. */
-  readonly marker: string | null;
   /** Files whose text can reference others. */
   readonly source: RegExp;
   /** Code: what can be "never loaded" and what drawing is counted in; data files are neither. */
   readonly code: RegExp;
   /** Sources that never ship, so they load nothing. */
   readonly excluded: (path: string) => boolean;
+  /** Files the engine ships and may load by a name built at runtime: possibly used, never "unused". */
+  readonly shipped: (path: string) => boolean;
   /**
    * Ids the engine names files by (Godot uids, Unity GUIDs), imported copies'
    * sources, and the page's import map.
@@ -612,10 +555,10 @@ const unityIds = (files: ReadonlyArray<EngineFile>) => {
 
 const SCANS: Readonly<Record<ScanEngine, EngineScan>> = {
   godot: {
-    marker: "project.godot",
     source: SOURCE_GODOT,
     code: CODE_GODOT,
     excluded: () => false,
+    shipped: () => false,
     ids: godotIds,
     // A glTF names its buffers and images by relative path, as a page does.
     refs: (f, c) =>
@@ -623,17 +566,23 @@ const SCANS: Readonly<Record<ScanEngine, EngineScan>> = {
         ? webRefs(f.text, f.path, c.importMap)
         : godotRefs(f.text, c.uids, c.imported, c.isSource),
     names: (_, text) => [/^class_name\s+(\w+)/m.exec(text)?.[1]],
-    // project.godot names the main scene and autoloads.
-    roots: () => ["project.godot"],
+    // project.godot names the main scene and autoloads. Godot loads
+    // res://default_bus_layout.tres itself unless the project names another layout.
+    roots: (byPath) => [
+      "project.godot",
+      ...(/^\s*buses\/default_bus_layout\s*=/m.test(byPath.get("project.godot")?.text ?? "")
+        ? []
+        : ["default_bus_layout.tres"]),
+    ],
     drawn: drawnGodot,
     entry: "project.godot",
   },
   unity: {
-    marker: UNITY_VERSION_FILE,
     source: SOURCE_UNITY,
     code: CODE_UNITY,
     // Editor-only scripts never ship in the player.
     excluded: (path) => /(^|\/)Editor\//.test(path),
+    shipped: (path) => UNITY_ALWAYS_SHIPPED.test(path),
     ids: unityIds,
     refs: (f, c) => unityRefs(f.text, f.path, c.uids),
     // A C# file may declare several types; every one of them names the file.
@@ -645,16 +594,21 @@ const SCANS: Readonly<Record<ScanEngine, EngineScan>> = {
     // assets) and scripts it runs on load.
     roots: (byPath, sources) => [
       ...UNITY_SETTINGS_ROOTS,
-      ...sources.filter((p) => /\bRuntimeInitializeOnLoadMethod\b/.test(byPath.get(p)?.text ?? "")),
+      ...sources.filter(
+        (p) =>
+          /\bRuntimeInitializeOnLoadMethod\b/.test(byPath.get(p)?.text ?? "") ||
+          UNITY_ALWAYS_SHIPPED.test(p) ||
+          UNITY_ADDRESSABLE_GROUPS.test(p),
+      ),
     ],
     drawn: drawnUnity,
     entry: `the enabled ${UNITY_BUILD_SCENES} scenes and the graphics and quality settings`,
   },
-  web: {
-    marker: null,
+  three: {
     source: SOURCE_WEB,
     code: CODE_WEB,
     excluded: () => false,
+    shipped: () => false,
     ids: (files) => ({
       uids: new Map<string, string>(),
       imported: new Map<string, string>(),
@@ -669,21 +623,14 @@ const SCANS: Readonly<Record<ScanEngine, EngineScan>> = {
   },
 };
 
-/** The folder's engine, from the files only its project has. */
-const engineOf = (has: (path: string) => boolean): ScanEngine =>
-  (Object.keys(SCANS) as ScanEngine[]).find((engine) => {
-    const marker = SCANS[engine].marker;
-    return marker !== null && has(marker);
-  }) ?? "web";
-
 /** Pure: the same files always give the same facts. */
 export const scanAssetUse = (
   files: ReadonlyArray<EngineFile>,
+  engine: GameEngineId,
   lane: string,
   assetsMd: string | null,
 ): AssetUse => {
   const byPath = new Map(files.map((f) => [f.path, f]));
-  const engine = engineOf((path) => byPath.has(path));
   const scan = SCANS[engine];
   const isSource = (path: string) =>
     scan.source.test(path) &&
@@ -728,7 +675,7 @@ export const scanAssetUse = (
     queue.push(path);
   };
   for (const root of roots.length > 0 ? roots : [...refsOf.keys()]) reach(root);
-  const used = new Set<string>();
+  const used = new Set<string>(allAssets.filter((path) => scan.shipped(path)));
   const missing = new Set<string>();
   for (let from = queue.pop(); from !== undefined; from = queue.pop()) {
     for (const ref of refsOf.get(from) ?? []) {
@@ -792,13 +739,14 @@ const MAX_FILE_BYTES = 2_000_000;
 
 const readEngine = async (
   dir: string,
+  engine: GameEngineId,
 ): Promise<{ files: EngineFile[]; tooLarge: string | null }> => {
   const files: EngineFile[] = [];
   let sourceBytes = 0;
   let tooLarge: string | null = null;
   // A Unity project is read from Assets/ and the settings it loads from only:
   // Library/, Temp/, Logs/ and the package cache are generated and huge.
-  const unity = await isFile(NodePath.join(dir, UNITY_VERSION_FILE));
+  const unity = engine === "unity";
   const visit = async (rel: string) => {
     const entries = await NodeFSP.readdir(NodePath.join(dir, rel), { withFileTypes: true }).catch(
       () => [],
@@ -827,7 +775,13 @@ const readEngine = async (
         tooLarge = `more than ${MAX_SOURCE_BYTES / 1_000_000} MB of source`;
         return;
       }
-      const text = read ? await NodeFSP.readFile(full, "utf8").catch(() => null) : null;
+      // A path in a comment is no reference: the scan reads code only.
+      const text = read
+        ? await NodeFSP.readFile(full, "utf8").then(
+            (raw) => codeOnly(path, raw),
+            () => null,
+          )
+        : null;
       files.push({ path, text });
     }
   };
@@ -851,18 +805,14 @@ const isFile = (full: string) =>
     () => false,
   );
 
-export const readAssetUse = async (root: string, lane: string): Promise<AssetUse> => {
-  const { files, tooLarge } = await readEngine(NodePath.join(root, lane));
-  if (tooLarge !== null)
-    return tooLargeUse(
-      engineOf((path) => files.some((f) => f.path === path)),
-      tooLarge,
-    );
-  return scanAssetUse(
-    files,
-    lane,
-    await NodeFSP.readFile(NodePath.join(root, "ASSETS.md"), "utf8").catch(() => null),
-  );
+export const readAssetUse = async (
+  root: string,
+  engine: GameEngineId,
+  lane: string,
+): Promise<AssetUse> => {
+  const { files, tooLarge } = await readEngine(NodePath.join(root, lane), engine);
+  if (tooLarge !== null) return tooLargeUse(engine, tooLarge);
+  return scanAssetUse(files, engine, lane, await readAssetsDoc(root));
 };
 
 const list = (paths: ReadonlyArray<string>, max = 6) =>

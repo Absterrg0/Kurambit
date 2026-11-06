@@ -8,6 +8,7 @@
 // effects instead: the effect stays unsettled until its work is done, and the
 // outbox runs it again after a failure or a server death.
 import {
+  type GameEngineId,
   GameRunId as GameRunIdSchema,
   type GameRunId,
   type GameRunQuestion,
@@ -100,7 +101,7 @@ export interface GameRunJobRunner {
   /** Whether the game folder holds anything of a decision's evidence to show the creator. */
   readonly showable: (
     threadId: ThreadId,
-    lane: string,
+    run: { readonly lane: string; readonly engine?: GameEngineId },
     decision: GameRunQuestion,
   ) => Effect.Effect<boolean>;
 }
@@ -259,10 +260,8 @@ export const make = Effect.gen(function* () {
       Deferred.await(runner).pipe(Effect.flatMap((each) => each.releaseCopies(job))),
     fork,
     stopRun,
-    showable: (threadId, lane, decision) =>
-      Deferred.await(runner).pipe(
-        Effect.flatMap((each) => each.showable(threadId, lane, decision)),
-      ),
+    showable: (threadId, run, decision) =>
+      Deferred.await(runner).pipe(Effect.flatMap((each) => each.showable(threadId, run, decision))),
     attach: (each) => Deferred.succeed(runner, each).pipe(Effect.asVoid),
   });
 });

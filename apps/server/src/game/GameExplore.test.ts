@@ -18,7 +18,7 @@ import * as GameExplore from "./GameExplore.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProcesses from "./GameProcesses.ts";
-import * as GameProjectService from "./GameProjectService.ts";
+import { gameProjectWorld, layerGameProjectFake } from "./testing/gameProjectFake.ts";
 import { ProcessHost } from "./processHost.ts";
 
 const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
@@ -29,8 +29,8 @@ const layer = GameExplore.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
-      Layer.succeed(ProcessHost, { joinJob: () => undefined, displays: new Set<number>() }),
-      Layer.mock(GameProjectService.GameProjectService)({ resolve: () => Effect.succeed("/g") }),
+      Layer.succeed(ProcessHost, { joinJob: () => undefined }),
+      layerGameProjectFake(gameProjectWorld()),
       Layer.mock(GameProcesses.GameProcesses)({ list: () => [] }),
       Layer.mock(PreviewBrowser.PreviewBrowser)({}),
       Layer.mock(GameEngine.GameEngine)({}),
@@ -59,6 +59,6 @@ it.effect("a cap whose write failed is written by the retry, never taken from me
     NodeFS.rmSync(dir, { force: true });
     yield* explore.limitInput(thread, 60_000, "/game");
     const onDisk = yield* Effect.promise(() => ExploreEvidence.read(dir, thread));
-    assert.equal(onDisk?.inputCapMs, 60_000);
+    assert.equal(onDisk === "damaged" ? null : onDisk?.inputCapMs, 60_000);
   }).pipe(Effect.provide(layer)),
 );

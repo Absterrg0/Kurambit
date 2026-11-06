@@ -11,7 +11,6 @@ import type {
   ThreadId,
 } from "@kurambit/contracts";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
-import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Random from "effect/Random";
@@ -122,8 +121,9 @@ const NOTHING: GameRunPlan = { events: [], effects: [] };
 /**
  * A chat's deletion stops the run it holds, in the deletion's own commit (its
  * command id), so its finish stops the roles and no run stays live where no
- * chat reaches it. A run that is not live, a stop the run refuses, or records
- * that cannot be read plan nothing: the chat is deleted as before.
+ * chat reaches it. A run that is not live, or a stop the run refuses, plans
+ * nothing. Records that cannot be read fail the deletion: a chat deleted
+ * over a run nothing then stops would leave the run working its folder.
  */
 export const planDeletedChatRunStop = (
   deps: PlanDeps,
@@ -142,13 +142,4 @@ export const planDeletedChatRunStop = (
       runId: run.id,
     });
     return Result.isSuccess(planned) ? planned.success : NOTHING;
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.interrupt
-        : Effect.logWarning("a deleted chat's game run could not be planned to stop", {
-            threadId: input.threadId,
-            cause,
-          }).pipe(Effect.as(NOTHING)),
-    ),
-  );
+  });

@@ -5,6 +5,9 @@ import { describe, expect, it } from "@effect/vitest";
 import { UNITY_MIN_VERSION } from "@kurambit/contracts";
 import { toolCandidates } from "./GameToolchain.ts";
 import {
+  isUnityLicensingClient,
+  parseUnityLicense,
+  unityLicenseFiles,
   parseSecondaryInstallPath,
   parseUnityVersion,
   pickUnityEditor,
@@ -116,5 +119,34 @@ describe("tool candidates", () => {
       { path: "/usr/bin/godot", source: "path" },
       { path: "/usr/bin/godot4", source: "path" },
     ]);
+  });
+});
+
+describe("Unity licence", () => {
+  it("looks where Unity keeps it on each OS, and counts a serial licence", () => {
+    expect(
+      unityLicenseFiles("win32", { LOCALAPPDATA: "C:\\Users\\a\\AppData\\Local" }, "C:\\Users\\a")
+        .entitlement,
+    ).toBe("C:\\Users\\a\\AppData\\Local\\Unity\\licenses\\UnityEntitlementLicense.xml");
+    expect(unityLicenseFiles("darwin", {}, "/Users/a").entitlement).toBe(
+      "/Users/a/Library/Unity/licenses/UnityEntitlementLicense.xml",
+    );
+    expect(unityLicenseFiles("linux", {}, "/home/a").serial).toBe(
+      "/home/a/.local/share/unity3d/Unity/Unity_lic.ulf",
+    );
+    expect(parseUnityLicense(null, 0).kind).toBe("missing");
+    expect(parseUnityLicense(null, 0, true).kind).toBe("active");
+  });
+
+  it("knows a Licensing Client by either path separator", () => {
+    expect(
+      isUnityLicensingClient(
+        "C:\\Program Files\\Unity\\Hub\\Editor\\6000.0\\Editor\\Data\\Resources\\Licensing\\Client\\Unity.Licensing.Client.exe",
+      ),
+    ).toBe(true);
+    expect(isUnityLicensingClient("/opt/unity/Editor/Data/Resources/Licensing/Client/x")).toBe(
+      true,
+    );
+    expect(isUnityLicensingClient("/opt/unity/Editor/Unity")).toBe(false);
   });
 });

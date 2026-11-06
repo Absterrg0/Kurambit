@@ -14,7 +14,10 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   refuses as busy rather than racing the first. While a production run holds the game (live,
   finishing or restoring), it is the folder's one writer: other owners' writing operations are
   refused `busy` with `runReason: "run-live"` (`GameProjectService.admitWrite`), reads and Play of
-  an exported build stay open, and the run's role threads pass. The run's own folder moves
+  an exported build stay open, and the run's role threads pass only for their own agent: admission
+  trusts `GameCaller` (the MCP game tools mark an agent and whether it is a run role; a client call
+  is the client), never the thread being viewed, so a person looking at a role's chat or a blind
+  sample's copy cannot write as that role. The run's own folder moves
   (captures, restores, kept names) run as operations owned by the run, taking the operation lock
   and then the checkpoint workspace lock; T3's turn captures take only the latter, so the two
   never wait in a cycle.
@@ -26,12 +29,18 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 - The live editors (Blender with its pinned MCP addon per game; one batchmode Unity editor per
   server, since one costs 2-3 GB, reached through the official `unity` CLI and its `unity mcp`
   server) run on private displays with session.json launch records, reaping and idle shutdown
-  (`liveProcess.ts`). A record is acted on only while its process still verifies as the launch
+  (`liveProcess.ts`, `liveEditor.ts`). A session something showed unusable (its MCP child exited,
+  a call timed out on a frozen main thread) closes when its last holder lets go, and the next call
+  opens a fresh one; a session whose source on disk changed since it last opened or saved it
+  (Blender's live.blend, Unity's open scene) reopens instead of saving over it. A start cut short
+  stops what it launched. A record is acted on only while its process still verifies as the launch
   (below) and its command line names the executables the live toolchain would launch now, never
   paths from the record; of the editor's process tree only processes running from a detected
-  editor's directory, the CLI or Xvfb are signalled, and a Unity Licensing Client never is. Unity
-  also keeps a copy of its record under the server state dir, reaped at startup, so a crashed
-  server's editor dies even if its game is never reopened. Every call or operation holds the
+  editor's directory, the CLI or Xvfb are signalled, and a Unity Licensing Client never is.
+  Both editors keep a copy of their record under the server state dir, reaped at startup, so a
+  crashed server's editor dies even if its game is never reopened. Blender runs under its own
+  user-folder override (`BLENDER_USER_RESOURCES`) and installs the addon where Blender itself
+  says its user addons live, so no version or OS layout is assumed. Every call or operation holds the
   editor; another game's open closes it only while it is idle, and fails `busy` naming the holder.
 - `GameToolchain` detects the user's own Godot, Unity and Blender the way providers are detected,
   and never installs them: they are other vendors' software with their own upkeep and licences on
@@ -45,7 +54,10 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   token, so a reused pid or a record an agent wrote never names another process. A tree is a
   process group on Linux and macOS; on Windows every owned child joins one kill-on-close Job Object
   held by a helper whose stdin is the server's pipe, so the tree dies with the server however it
-  exits, and a tree stop is `taskkill /T /F`. Free memory is `os.freemem()` (libuv's MemAvailable
+  exits; only a child whose launch record is reaped at the next start (the live Unity editor) stays
+  out of the job, since a Licensing Client it starts inherits the job and must outlive us. A tree
+  stop on Windows ends the root and its descendants pid by pid, never `/T`, so a `keep` filter can
+  spare what is the user's. Free memory is `os.freemem()` (libuv's MemAvailable
   on Linux). Every in-game runner quits when its control socket closes, so a crashed server leaves
   no game running; only the live editors outlive it, and their records reap them.
 - `GameAssetLibrary` serves the curated CC0 library in `assetLibraryCatalog.ts`. Each pack is a
@@ -58,23 +70,41 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   machine (the installed app and any dev server) shares that cache, so fetches lock per pack only
   within one process, scratch names carry the fetching server's pid (a start-up sweep spares live
   ones), and placing a pack accepts a complete copy another server placed first.
-- An engine is two modules, and core code asks them instead of naming the engine. Its profile
+- An engine is two modules, and nothing above them names an engine. Its profile
   (`godotProfile.ts`, `threeProfile.ts`, `unityProfile.ts`, read through `engineProfile.ts`) is pure
-  data the services and the run's pure policy share: directories, export targets, how its games play
-  (a browser page, the engine's native runner, or a built player), the in-game runner files the
-  harness owns, Web build files, check messages, its skill and its prompt lines. Its backend (`GameGodotEngine`, `GameThreeEngine`,
-  `GameUnityEngine`, registered in `GameEngine`) holds the behaviour that differs: import, check,
-  export readiness and preset, export release, how a play session starts its runner process
-  (`playProcess`; null for a browser page), and two optional capabilities, `editor` (a live
-  editor that refuses a second user) and `player` (a player folder built from the sources). Godot owns the native process boundary (headless editor import, check script,
-  export presets; Web, Linux and Windows releases). three.js owns a headless-Chromium boundary
-  instead: the static folder is the game, so import is a no-op success, check loads the page
-  and reports console/page errors, export copies the folder. Windows and Linux exports are
-  refused plainly for three.js (`profile.exportTargets`). Unity refuses a second editor
-  on an open project, so every Unity operation goes through the game's live editor in
-  `GameUnity`: import refreshes and recompiles there, check recompiles and then plays the main
-  scene for 120 frames and reads the console, export builds a player folder that replaces
-  `builds/linux` or `builds/windows` only after its files and the source identity check out.
+  data the services, the client tables and the run's pure policy share: directories, its releases
+  (target, artifact, whether it ships as a file or a folder, whether Kurambit packages it), what of
+  the project is build input, how its games play, the harness's runner files, check messages, its
+  tool descriptions, skill and prompt lines. Its driver (`GameGodotEngine`, `GameThreeEngine`,
+  `GameUnityEngine`, registered in `GameEngine`) holds the behaviour that differs: the project and
+  its binary, its tool's status, viewport, import, check, writing one release into a staging folder
+  and checking its own files, how a play session starts its runner (`playProcess`; null for a
+  browser page), and the optional `editor` (a live editor that refuses a second user) and `player`
+  (where a game keeps its built players). A per-engine table outside a driver is a
+  `Record<GameEngineId, …>`, so a new engine does not compile without its entries. The game is
+  known by its manifest's engine id (and its project folder by `manifestProject`), never by the
+  folder's name; a run records the engine it started with (`runEngine` derives it from the lane for
+  older records).
+- Every release takes one path (`GameExport.releaseTo`): staged beside its destination, written and
+  checked by the driver, compared with the sources before and after (an unidentifiable tree is
+  refused before the engine runs), then published by `publishStaged`, which moves the incumbent
+  aside and puts it back on any failure. A native release replaces the whole `builds/<target>/`
+  folder; a Web build becomes the content-addressed candidate Play selects, and only the selected
+  build and the one before it are kept, with their preview servers; a kept Unity player is
+  published the same way. A crash between the two renames leaves a `.retired` copy with no final,
+  which the next export's sweep puts back. The check's verdict is `GameEngine.check`: everything
+  the game did is a check error or warning, and it fails only when a tool or the machine kept the
+  check from being made. Each engine has one error reading for import, export and check (Godot's
+  `parseGodotIssues`; Unity's `answerOf` over the CLI envelope), and a harness fault is
+  `tool-failed`, never `command-failed`. Godot owns the native process boundary (headless editor
+  import, check script, export presets); its check skips `.gdignore` folders and files every
+  export preset excludes, as the editor and exporter do. three.js owns a headless-Chromium
+  boundary: import is a no-op, the check loads the page (a page crash is the game's, a lost
+  browser a tool's), the release copies the folder. Unity refuses a second editor on an open
+  project, so every Unity operation goes through the game's live editor in `GameUnity`: import
+  refreshes and recompiles there, the check plays the first enabled build scene and the gameplay
+  scene; a game whose play mode never answers or advances no frame froze (an error, and the editor
+  is closed), one that runs below speed is a warning with its frame rate.
   Unity editors run with the real HOME so they reach the user's Licensing Client; Kurambit only
   reads the entitlement file to say whether a licence is active and never stores credentials.
   Every `unity` CLI call (status, command, recompile, mcp) runs under the CLI's own HOME in the
@@ -83,7 +113,7 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   `Library/Pipeline` port file, so nothing Kurambit runs writes the user's Unity Hub data.
   Blind samples play plain copies of a build, each a separate Unity project with no `Library/`.
   Before an editor opens on one, `GameUnity` gives it a copy-on-write copy
-  (`cp -a --reflink=auto`) of its game folder's `Library/`, found through the folder the copy
+  (`fs.cp` with `COPYFILE_FICLONE`: a reflink or APFS clone where the filesystem has one) of its game folder's `Library/`, found through the folder the copy
   names in `.kurambit-copy-of` and taken after the game folder's
   idle editor closed, so only what differs in that build is reimported (about a minute warm,
   against two cold). The compiled-script
@@ -122,7 +152,13 @@ knows which engine runs the game. A session opens held: the runner says hello wi
 capabilities, plays discrete acts with the game paused between them (exploration), and after
 `realtime` lets the game run for good while held keys, taps and clicks stream in and one tick
 observation goes out every 100 ms (bots). The policy that plays, the detectors, the video and the
-reports are shared; an engine adds only how a session launches.
+reports are shared; an engine adds only how a session launches. Every wait a session makes has a
+bound (`PLAY_BOUNDS` in [playSession.ts](../../apps/server/src/game/playSession.ts)), including
+every call into a web page, and its end says by whose side: a game that exits, crashes or stops
+answering is evidence about the build (a bot run ends `crashed` or `unresponsive` with its trace
+and video), while our display or browser going away is a tool fault. A tick's `t` is the game's
+own clock on every engine: it stops while the game pauses itself (Godot counts physics frames only
+while the tree runs, Unity reads `Time.time`, a page sums its frames' clamped deltas).
 
 - Godot's runner is one GDScript ([godotPlayRunner.ts](../../apps/server/src/game/godotPlayRunner.ts))
   the server writes under the game's ignored `builds/logs/` for each session, so it always matches
@@ -156,7 +192,7 @@ So the harness needs exactly two things from an OS: a **process host**
 ([windowHost.ts](../../apps/server/src/game/windowHost.ts)): one `launch(command, viewport)` that
 gives a game or editor a window it draws into, which the user never sees and which never takes
 focus. Exploration, bots and the live Unity editor (which runs the Unity check and builds players)
-and Blender all launch through it; the Godot check needs no window and runs headless. On Linux every launch gets its own Xvfb display; the display outlives its command and ends right
+and Blender all launch through it; the Godot check needs no window and runs headless. On Linux every launch gets its own Xvfb display, which Xvfb picks itself (`-displayfd`); the display outlives its command and ends right
 after it (an engine that loses its display mid-quit hangs in Xlib's exit path), so a game that quits
 because its server died takes its display along. Windows and macOS give an app no private display
 (a virtual monitor needs a driver there; macOS's API is private), so the window opens on the
@@ -180,7 +216,7 @@ from one per-OS/CPU table of official builds with their published SHA-256
 
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
 over RPC. Threads the production run launches get play-level tools (plus `game_run_submit`) only (status, check, import,
-export, explore start/act/close, bot run/view, blender, unity and asset library tools); every
+export, explore start/act/close, bot run/view/report, `game_run_checks`, blender, unity and asset library tools); every
 other MCP tool (threads, worktrees, projects, previews) hides from them unless it declares
 `EnabledWhen` itself, since a blind role that could list threads could map builds to reports. The `game_unity_*` tools
 are a curated front for `unity mcp`: a fixed allowlist of editing tools behind one
@@ -203,9 +239,10 @@ decision, and nothing outside the event log is the run's truth. Its events stay 
 stream; the Run tab and `game_run_status` read the records.
 
 A game has one run, not one per chat: the records sit on the thread that started the run, and every
-chat of the game's project reaches that run through `getProjectGameRun`. A start from another chat
-resumes or reports the live run instead of opening a second one, and the run's own role threads
-reach none of its controls.
+chat of the game's project reaches that run through `getProjectGameRun`. Starts read and dispatch
+under the project's lock, so two chats starting the first run at once cannot both find none; a
+start from another chat resumes the live run (an empty brief) or is refused (a new brief), and
+the run's own role threads reach none of its controls.
 
 - **Long work runs in jobs, never in effects.** An effect claim is a short lease on a worker pool
   every thread's provider work shares. A step's effect (`game-run.step.execute`) hands its work to
@@ -216,11 +253,21 @@ reach none of its controls.
   effect stays unsettled until its act is committed, and the outbox runs it again after a failure
   or a server death. A timer that only forked a job would be done before its work, and a death in
   between would leave the step running with no job and no timer.
-- **No failure is an answer.** A read or write the run decides by, or that moves it on, never
-  turns into null, false or a log line: it fails up to `retrying` (game/run/retrying.ts) and, when
-  every try fails, to a recorded ending (`game-run.step.fail`, a stop) or a log that recovery
-  owes it at startup. Only best-effort work for people (sheets, notes, log lines) and reads whose
-  unknown has a safe reading (a check with nothing to show is asked anyway) may swallow.
+- **No failure is an answer, and only a measurement is a verdict.** Every step's work, and each
+  half of a pair, reports through one boundary (`GameRunStepRunner.measure`). A measurement
+  completes the step: what the build did, including a crash, a freeze, a failed compile or a game
+  that never boots. What was not measured never does: memory short, the game held, or a tool of
+  Kurambit's that failed (a copy, a launch, a browser, an editor, a record), each read once
+  through `gameOperationFault` ([handBack.ts](../../apps/server/src/game/run/handBack.ts)), hands
+  the step back to a durable timer (memory 7 x 2 min, busy 15 x 1 min, a transient tool 3 x 2 min,
+  one command-id sequence across them), and past its waits, or at once for a fault waiting cannot
+  clear (`isStandingFault`), the run pauses resumably as `tool-failed`, `low-memory` or `busy`
+  with why. The decider hands those pauses, and `failed` (a thread or project deleted), to
+  `Policy.pause`, which keeps the step in flight; `applyResult` takes only a `Measured` result,
+  so no pass, fail, keep, drop or sample can be made of one. A build fault is re-tagged
+  `GameRunBuildFault`, which only the producers with a verdict form for it (boot, the checks, bot
+  facts) turn into one. Quick in-job retries (`retrying`) are only for the run's own record
+  writes. Prompt facts are total: what they could not read they say they did not measure.
 - **Attempts.** A step planned again (a resume) is a new attempt. Every report carries its attempt
   and a command id derived from step, attempt and action (`gameRunStepCommandId`), so a late report
   of an earlier try is refused and a retried one is a no-op. Each attempt has its own role thread
@@ -260,9 +307,12 @@ reach none of its controls.
   own interrupt (its command id), never by any interrupt.
 - **Decisions** wake the creator's chat the `DelegatedTaskQuestionReactor` way: one queued
   `message.dispatch` per decision and attempt with a `game_run` notification source (stored as
-  `background_task` for older clients). The answer's wait starts when that turn finished presenting
-  (`game-run.step.start`), its default fires from the `game-run.decision.deadline` effect with no
-  fiber holding it, and an answer cancels a wake still queued.
+  `background_task` for older clients), sent to the chat the creator last started, resumed,
+  steered or answered the run from (`GameRun.chat`), else the run's own thread, never one archived
+  or deleted. The answer's wait starts when that turn, or a restart's continuation of it, finished
+  presenting (`game-run.step.start`), its default fires from the `game-run.decision.deadline`
+  effect with no fiber holding it, and an answer cancels a wake still queued; recovery cleans up a
+  decision that settled while the server was down.
 - **The outbox timer exception.** The outbox runs a thread's effects in order, and an earlier
   pending effect holds later ones. The run's timers (a role's cap, a decision's deadline) wait
   minutes on the creator thread, so a pending `game-run.step.deadline`, `game-run.step.resend` or
@@ -368,23 +418,28 @@ comparators run, the tester's last play bot plays both builds in fresh copies fo
 time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
 that bot against the candidate, and a bot that fails on only one build would name it, so the
 comparators get bot facts only when the bot ran on both builds; otherwise neither report has them,
-and the step's record and the comparison record say why. A failing bot never drops the round. A comparison's two plays,
+and the step's record and the comparison record say why. Bot facts are withheld only when the bot
+itself did not play (its module would not load, its child broke, the run was stopped); a game
+that crashes, stops answering or never boots under it is a measured fact about that build. A comparison's two plays,
 and its two bot runs, run at once (Unity's one at a time, behind its one editor); that holds only
 because explore sessions, bot runs and game operations are keyed by checkout root, not by game.
 Two starts at once would both pass a free-memory check made before either allocates, so explore
 and bot starts and the live Unity and Blender editor opens hold one gate (`GameMemoryGate`) from
 that check through their import and boot (a Unity open through its launch and its first minute,
-not its whole cold import). Time queued behind the gate counts against the same 75 s bound, after
-which the start is refused `busy` (contention, not memory), never kept waiting unseen. No gated
+not its whole cold import). A start that imports into the folder (a native explore session, each
+native bot run) takes the game's operation lock first and holds both through its boot; the gate
+is the one place that order is kept, so nothing takes the operation lock while holding the gate.
+Time queued behind the lock or the gate counts against the same 75 s bound, after which the start
+is refused `busy` (contention, not memory), never kept waiting unseen. No gated
 start may open an editor: the gate is one permit and does not nest. A sample's time waiting there is
-given back to its clock. A play turn whose explore start was refused `low-memory` or `busy` and that
-played nothing is played again after a pause, both causes under one count and one cap; past it the
-run ends resumably with that cause (`low-memory` or `busy`), so no sample lands unplayed. Its
-explore marks reset only as that turn is sent. A step whose own work is refused
-`low-memory`, or `busy` (another operation holds the game, or a start ahead of it holds the gate), ends its job and comes back on a
-durable `game-run.step.wake` timer, so a wait never holds one of the run jobs' shared step slots;
-each kind of wait is counted on the step record, and a cause that does not clear ends the run
-resumably rather than voiding the sample or judging the build. Samples play
+given back to its clock. A play turn (`plays`: a sample's, the tester's, the ship player's) whose
+play was refused for memory, a busy machine or a tool of ours, and that played nothing (no input
+and no bot run), is played again after a pause rather than landed as "played nothing": memory and
+busy under one count up to their cap, a transient tool once, a standing one never; past it the
+run pauses resumably with that cause, so no sample lands unplayed and no tester's checks fail
+for want of play. Its explore marks reset only as that turn is sent. A step's own work that was
+not measured ends its job and comes back on a durable `game-run.step.wake` timer (above), so a
+wait never holds one of the run jobs' shared step slots. Samples play
 plain copies of their builds with no git (`materializeCheckpoint`, without `.studio` and
 `NOTES.md`), so no history, date or note tells the builds apart. Comparators never work in the
 game folder, whose build refs and notes name every sample's build: each gets a folder of its own, empty

@@ -101,21 +101,21 @@ export const GameRunRungRef = Schema.Struct({
 });
 export type GameRunRungRef = typeof GameRunRungRef.Type;
 
+/**
+ * One round in the run's status, short on purpose: every push resends it. The
+ * verdicts' reasons and the tester's note are in the round's detail
+ * (GameRunRoundResult, game_run_round).
+ */
 export const GameRunRoundRef = Schema.Struct({
   round: Schema.Number,
   move: Schema.String,
   branch: Schema.String,
   kept: Schema.Boolean,
+  /** This round's build is the game's current best. */
+  current: Schema.Boolean,
   outcome: GameRunRoundOutcome,
-  verdicts: Schema.Array(
-    Schema.Struct({
-      order: Schema.String,
-      verdict: Schema.String,
-      reason: Schema.String,
-    }),
-  ),
+  verdicts: Schema.Array(Schema.Struct({ order: Schema.String, verdict: Schema.String })),
   linesChanged: Schema.Number,
-  testerNote: Schema.NullOr(Schema.String),
   durationMs: Schema.Number,
   note: Schema.NullOr(Schema.String),
   /** The creator's steering notes this round started from. */
@@ -305,7 +305,9 @@ export const GameRunRoundDetail = Schema.Struct({
   linesChanged: Schema.Number,
   note: Schema.NullOr(Schema.String),
   steer: Schema.Array(Schema.String),
-  verdicts: GameRunRoundRef.fields.verdicts,
+  verdicts: Schema.Array(
+    Schema.Struct({ order: Schema.String, verdict: Schema.String, reason: Schema.String }),
+  ),
   /** The blind comparison: null when the round never reached one. */
   comparison: Schema.NullOr(GameRunComparison),
   testerNote: Schema.NullOr(Schema.String),

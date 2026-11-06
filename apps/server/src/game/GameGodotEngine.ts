@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   type GameActionResult,
+  type GameCheckIssue,
   type GameProcessResult,
   manifestProject,
 } from "@kurambit/contracts";
@@ -23,9 +24,10 @@ import {
 } from "./gameNativeUserDir.ts";
 import { RawCheckResult, parseGodotIssues } from "./godotCheckOutput.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
-import type { GameEngineBackend } from "./GameEngine.ts";
+import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
 import { GODOT_PROFILE } from "./godotProfile.ts";
 import { planWindowsPreset } from "./windowsPreset.ts";
+import { inspectWindowsBuildFiles } from "./windowsExport.ts";
 import { OFFSCREEN_POSITION } from "./windowHost.ts";
 import { HOST_OS } from "./processHost.ts";
 
@@ -42,22 +44,32 @@ const macBundleId = async (executable: string): Promise<string | null> => {
 
 const decodeCheckResult = Schema.decodeUnknownSync(RawCheckResult);
 
+/**
+ * Godot's one error reading, shared by import, export and the check: an
+ * engine error line as `parseGodotIssues` reads it (exit chatter such as
+ * leaked ObjectDB instances is not the game's failure), a non-zero exit or a
+ * timeout. A game's own printed text containing "ERROR:" is not an error line.
+ */
 const response = (
   process: GameProcessResult,
   outputPath: string | null = null,
-): GameActionResult => {
-  const errors = (process.stdout + "\n" + process.stderr)
-    .split("\n")
-    .filter((line) => /(?:SCRIPT ERROR|ERROR:|Parse Error)/.test(line));
-  const success = process.exitCode === 0 && !process.timedOut && errors.length === 0;
+): { readonly result: GameActionResult; readonly issues: ReadonlyArray<GameCheckIssue> } => {
+  const issues = parseGodotIssues(`${process.stdout}\n${process.stderr}`);
+  const success = process.exitCode === 0 && !process.timedOut && issues.length === 0;
   return {
-    success,
-    message: success
-      ? "Completed successfully."
-      : `Command failed${process.timedOut ? " after its timeout" : ` with exit code ${process.exitCode}`}. ${errors.slice(0, 8).join("\n")} See ${process.logPath}\n${commandDetail(process)}`,
-    path: outputPath,
-    url: null,
-    process,
+    result: {
+      success,
+      message: success
+        ? "Completed successfully."
+        : `Command failed${process.timedOut ? " after its timeout" : ` with exit code ${process.exitCode}`}. ${issues
+            .slice(0, 8)
+            .map((issue) => `${issue.file === "" ? "" : `${issue.file}: `}${issue.message}`)
+            .join("\n")} See ${process.logPath}\n${commandDetail(process)}`,
+      path: outputPath,
+      url: null,
+      process,
+    },
+    issues,
   };
 };
 
@@ -70,7 +82,148 @@ const response = (
 export const makeGodotBackend = (
   processes: GameProcesses.GameProcesses["Service"],
   tools: GameToolchain.GameToolchain["Service"],
+  writeAtomic: (
+    path: string,
+    contents: string,
+    operation: string,
+  ) => Effect.Effect<void, GameOperationError>,
 ): GameEngineBackend => {
+  const ensureWindowsPreset = (presetsPath: string) =>
+    Effect.gen(function* () {
+      const existing = yield* Effect.tryPromise({
+        try: async () => {
+          try {
+            return await NodeFSP.readFile(presetsPath, "utf8");
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+            throw cause;
+          }
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "export-windows",
+            path: presetsPath,
+            reason: "io",
+            cause,
+          }),
+      });
+      const plan = planWindowsPreset(existing);
+      if (!plan.ok)
+        return yield* new GameOperationError({
+          operation: "export-windows",
+          path: presetsPath,
+          reason: "invalid-input",
+          detail: plan.detail,
+        });
+      // Atomic: a half-written preset would break every later export; a
+      // preset the creator already wrote is never rewritten.
+      if (plan.text !== null) yield* writeAtomic(presetsPath, plan.text, "export-windows");
+      return plan;
+    });
+  const runExport = (
+    ctx: GameEngineContext,
+    preset: string,
+    outputPath: string,
+    operation: string,
+  ) =>
+    processes.run({
+      root: ctx.root,
+      executable: ctx.binary.path,
+      args: ["--headless", "--path", ctx.projectDir, "--export-release", preset, outputPath],
+      operation,
+      timeoutMs: 300_000,
+      env: GameProcesses.engineChildEnv(),
+      envMode: "replace",
+    });
+  /** The non-empty files a release must have written, or the first one missing. */
+  const missingFile = (files: ReadonlyArray<string>) =>
+    Effect.promise(async () => {
+      for (const file of files) {
+        const stat = await NodeFSP.stat(file).catch(() => null);
+        if (stat === null || !stat.isFile() || stat.size === 0) return file;
+      }
+      return null;
+    });
+  const release: GameEngineBackend["release"] = (ctx, input) =>
+    Effect.gen(function* () {
+      const { staging, target } = input;
+      const artifact =
+        target === "Web" ? "index.html" : target === "Windows" ? "game.exe" : "game.x86_64";
+      const output = NodePath.join(staging, artifact);
+      const run = yield* runExport(ctx, input.preset, output, input.operation);
+      const exported = response(run, output);
+      if (!exported.result.success) return { result: exported.result, artifact: null, notes: [] };
+      const expected =
+        target === "Web"
+          ? (GODOT_PROFILE.web?.exported ?? []).map((name) => NodePath.join(staging, name))
+          : [output];
+      const missing = yield* missingFile(expected);
+      if (missing !== null)
+        return {
+          result: {
+            ...exported.result,
+            success: false,
+            message:
+              `The ${target} export reported success but ${NodePath.basename(missing)} is missing or empty.\n${commandDetail(run)}`.slice(
+                -4096,
+              ),
+          },
+          artifact: null,
+          notes: [],
+        };
+      if (target !== "Windows")
+        return {
+          result: exported.result,
+          artifact,
+          notes:
+            target === "Linux"
+              ? [
+                  "Linux x86_64 build ready at builds/linux/game.x86_64 (keep game.pck beside it if the preset writes one).",
+                ]
+              : [],
+        };
+      // The PE and pack are read through file handles, never into memory: an
+      // embedded pack makes the executable as large as the game.
+      const inspection = yield* Effect.tryPromise({
+        try: () =>
+          inspectWindowsBuildFiles({
+            executable: output,
+            pck: NodePath.join(staging, "game.pck"),
+          }),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: input.operation,
+            path: output,
+            reason: "io",
+            detail: "The exported Windows executable could not be read back.",
+            cause,
+          }),
+      });
+      if (inspection.issues.length > 0)
+        return {
+          result: {
+            ...exported.result,
+            success: false,
+            message:
+              `The Windows export did not produce a usable x86_64 executable with the game's pack: ${inspection.issues.join(" ")}\n${commandDetail(run)}`.slice(
+                -4096,
+              ),
+          },
+          artifact: null,
+          notes: [],
+        };
+      const megabytes = Math.round(inspection.executableBytes / (1024 * 1024));
+      return {
+        result: exported.result,
+        artifact,
+        notes: [
+          inspection.embeddedPck
+            ? `Windows x86_64 build ready at builds/windows/game.exe with its game data embedded (${megabytes} MB).`
+            : `Windows x86_64 build ready at builds/windows/game.exe with builds/windows/game.pck beside it (${megabytes} MB). Keep both files together.`,
+          "This machine did not run it on Windows.",
+        ],
+      };
+    });
   const importProject: GameEngineBackend["importProject"] = (ctx) =>
     Effect.gen(function* () {
       // The editor's import runs the project's tool scripts and keeps logs under
@@ -98,13 +251,12 @@ export const makeGodotBackend = (
         })
         .pipe(
           Effect.ensuring(
-            Effect.promise(() => NodeFSP.rm(scratch, { recursive: true, force: true })),
+            Effect.promise(() =>
+              NodeFSP.rm(scratch, { recursive: true, force: true }).catch(() => undefined),
+            ),
           ),
         );
-      return {
-        result: response(run),
-        issues: parseGodotIssues(`${run.stdout}\n${run.stderr}`),
-      };
+      return response(run);
     });
   /**
    * The play runner runs the real main scene from current sources (no
@@ -194,12 +346,30 @@ export const makeGodotBackend = (
           projectDir: insideGame(root, manifestProject(manifest)),
         };
       }),
+    toolStatus: () =>
+      Effect.map(
+        tools.status(),
+        (status) => status.tools.find((tool) => tool.tool === "godot") ?? null,
+      ),
+    viewport: (projectDir) =>
+      Effect.tryPromise({
+        try: () =>
+          NodeFSP.readFile(NodePath.join(projectDir, "project.godot"), "utf8").catch(
+            (cause: NodeJS.ErrnoException) => {
+              // A project with no settings yet plays at Godot's own default.
+              if (cause.code === "ENOENT") return "";
+              throw cause;
+            },
+          ),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "Read the project settings",
+            path: NodePath.join(projectDir, "project.godot"),
+            reason: "io",
+            cause,
+          }),
+      }).pipe(Effect.map(parseGodotViewport)),
     projectSettingsFile: "project.godot",
-    projectDirectory: (manifest) => manifestProject(manifest),
-    projectSettings: (projectFileText: string) => ({
-      viewport: parseGodotViewport(projectFileText),
-    }),
-    parseDiagnostics: (output: string) => parseGodotIssues(output),
     importProject,
     runCheck: (ctx, input) =>
       Effect.gen(function* () {
@@ -298,85 +468,12 @@ export const makeGodotBackend = (
             Effect.map((plan) => ({ name: plan.name, added: plan.text !== null })),
           )
         : Effect.succeed({ name: target, added: false }),
-    runExportRelease: (ctx, input) =>
-      Effect.gen(function* () {
-        const run = yield* processes.run({
-          root: ctx.root,
-          executable: ctx.binary.path,
-          args: [
-            "--headless",
-            "--path",
-            ctx.projectDir,
-            "--export-release",
-            input.preset,
-            input.outputPath,
-          ],
-          operation: input.operation,
-          timeoutMs: 300_000,
-          env: GameProcesses.engineChildEnv(),
-          envMode: "replace",
-        });
-        return response(run, input.outputPath);
-      }),
+    release,
     playProcess,
     editor: null,
     player: null,
   };
 };
-
-/**
- * Ensures the project has a usable Windows Desktop preset. Its text is
- * written atomically because a half-written preset would break every later
- * export; a preset the creator already wrote is never rewritten.
- */
-const ensureWindowsPreset = (presetsPath: string) =>
-  Effect.gen(function* () {
-    const existing = yield* Effect.tryPromise({
-      try: async () => {
-        try {
-          return await NodeFSP.readFile(presetsPath, "utf8");
-        } catch (cause) {
-          if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
-          throw cause;
-        }
-      },
-      catch: (cause) =>
-        new GameOperationError({
-          operation: "export-windows",
-          path: presetsPath,
-          reason: "io",
-          cause,
-        }),
-    });
-    const plan = planWindowsPreset(existing);
-    if (!plan.ok)
-      return yield* new GameOperationError({
-        operation: "export-windows",
-        path: presetsPath,
-        reason: "invalid-input",
-        detail: plan.detail,
-      });
-    if (plan.text !== null) {
-      const text = plan.text;
-      const temporary = `${presetsPath}.${NodeCrypto.randomUUID()}.tmp`;
-      yield* Effect.tryPromise({
-        try: async () => {
-          await NodeFSP.writeFile(temporary, text, "utf8");
-          await NodeFSP.rename(temporary, presetsPath);
-        },
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "export-windows",
-            path: presetsPath,
-            reason: "io",
-            detail:
-              "The Windows export preset could not be added; existing presets were left as they were.",
-            cause,
-          }),
-      }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(temporary, { force: true }))));
-    }
-    return plan;
-  });
 
 const decodeText = <A>(decode: (input: unknown) => A, text: string | null): A | null => {
   if (text === null) return null;

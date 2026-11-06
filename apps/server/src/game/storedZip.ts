@@ -16,8 +16,28 @@ export interface StoredZipEntry {
   readonly mtimeMs: number;
   /** When set, a changed source file is rejected instead of archived. */
   readonly sha256?: string | undefined;
-  readonly read: (offset: number, length: number) => Promise<Buffer>;
+  /**
+   * Opens the source for one pass (the digest, then the write) and is closed
+   * after it, so an archive of thousands of files holds one descriptor at a
+   * time. Both passes are checked against the digest, so a file swapped
+   * between them is refused.
+   */
+  readonly open: () => Promise<EntryReader>;
 }
+
+export interface EntryReader {
+  readonly read: (offset: number, length: number) => Promise<Buffer>;
+  readonly close: () => Promise<void>;
+}
+
+const withReader = async <A>(entry: StoredZipEntry, use: (reader: EntryReader) => Promise<A>) => {
+  const reader = await entry.open();
+  try {
+    return await use(reader);
+  } finally {
+    await reader.close().catch(() => undefined);
+  }
+};
 
 export interface StoredZipFile {
   readonly name: string;
@@ -57,7 +77,14 @@ interface EntryDigest {
   readonly bytes: number;
 }
 
-const digestEntry = async (entry: StoredZipEntry, signal: AbortSignal | undefined) => {
+const digestEntry = (entry: StoredZipEntry, signal: AbortSignal | undefined) =>
+  withReader(entry, (reader) => digestReader(entry, reader, signal));
+
+const digestReader = async (
+  entry: StoredZipEntry,
+  reader: EntryReader,
+  signal: AbortSignal | undefined,
+) => {
   const hash = NodeCrypto.createHash("sha256");
   // zlib keeps the pre- and post-inversion itself: each call continues the last.
   let crc = 0;
@@ -65,7 +92,7 @@ const digestEntry = async (entry: StoredZipEntry, signal: AbortSignal | undefine
   while (offset < entry.size) {
     throwIfAborted(signal);
     const wanted = Math.min(ZIP_CHUNK_BYTES, entry.size - offset);
-    const chunk = await entry.read(offset, wanted);
+    const chunk = await reader.read(offset, wanted);
     if (chunk.byteLength === 0)
       throw new StoredZipError(
         entry.path,
@@ -213,21 +240,24 @@ export const writeStoredZip = async (input: {
         }),
       );
       const hash = NodeCrypto.createHash("sha256");
-      let offset = 0;
-      while (offset < digest.bytes) {
-        throwIfAborted(input.signal);
-        const wanted = Math.min(ZIP_CHUNK_BYTES, digest.bytes - offset);
-        const chunk = await entry.read(offset, wanted);
-        if (chunk.byteLength === 0)
-          throw new StoredZipError(
-            entry.path,
-            "changed",
-            "The file changed while it was being packaged, so no package was written.",
-          );
-        hash.update(chunk);
-        await write(chunk);
-        offset += chunk.byteLength;
-      }
+      const offset = await withReader(entry, async (reader) => {
+        let at = 0;
+        while (at < digest.bytes) {
+          throwIfAborted(input.signal);
+          const wanted = Math.min(ZIP_CHUNK_BYTES, digest.bytes - at);
+          const chunk = await reader.read(at, wanted);
+          if (chunk.byteLength === 0)
+            throw new StoredZipError(
+              entry.path,
+              "changed",
+              "The file changed while it was being packaged, so no package was written.",
+            );
+          hash.update(chunk);
+          await write(chunk);
+          at += chunk.byteLength;
+        }
+        return at;
+      });
       if (offset !== digest.bytes || hash.digest("hex") !== digest.sha256)
         throw new StoredZipError(
           entry.path,

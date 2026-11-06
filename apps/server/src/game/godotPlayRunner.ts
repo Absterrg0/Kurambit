@@ -85,6 +85,9 @@ var _game_paused := false
 var _realtime := false
 var _running := true
 var _start_physics := 0
+# Seconds of the game's own clock since real-time play began: it advances only
+# while the tree runs, scaled as the game scales time, as Unity's Time.time does.
+var _game_seconds := 0.0
 var _tick := 0
 var _sweep_tick := 0
 var _held: Dictionary = {}
@@ -169,6 +172,8 @@ func _serve() -> void:
 	var dead_pump := 0
 	while _running:
 		await physics_frame
+		if not paused:
+			_game_seconds += Engine.time_scale / float(_physics_hz)
 		# A peer leaves CONNECTED only when the harness is gone; the game
 		# quits with it, so a crashed server never leaves a game running.
 		if _peer.get_status() != 2:
@@ -538,11 +543,10 @@ func _send_frame() -> void:
 		return
 	if img.get_width() > _frame_width:
 		img.resize(_frame_width, maxi(1, roundi(float(img.get_height()) * _frame_width / img.get_width())), Image.INTERPOLATE_BILINEAR)
-	var frames := Engine.get_physics_frames() - _start_physics
 	var frame := {
 		"op": "frame",
 		"frame": Engine.get_frames_drawn(),
-		"t": float(frames) / float(_physics_hz),
+		"t": _game_seconds,
 		"width": img.get_width(),
 		"height": img.get_height(),
 		"jpeg": Marshalls.raw_to_base64(img.save_jpg_to_buffer(0.75)),
@@ -580,7 +584,7 @@ func _tick_observation() -> Dictionary:
 	return {
 		"op": "tick",
 		"tick": _tick,
-		"t": float(frames) / float(_physics_hz),
+		"t": _game_seconds,
 		"physicsFrames": frames,
 		"probe": _read_probe(TICK_TEXT_ENTRIES),
 		"body": _read_body(),
@@ -1196,9 +1200,11 @@ func _send(msg: Dictionary) -> void:
 
 # Between acts the tree is held; a game that unpauses itself meanwhile (a
 # countdown timer that runs while paused) gets that state back at the next
-# act, and game time stays frozen until then.
+# act, and game time stays frozen until then. It waits as long as the harness
+# keeps the connection: the harness's idle reaper owns a session's expiry,
+# and the process's own wall timeout ends a runner whose harness hung.
 func _read_line() -> String:
-	for i in 20000:
+	while true:
 		if _peer.get_status() != 2:
 			return ""
 		_peer.poll()

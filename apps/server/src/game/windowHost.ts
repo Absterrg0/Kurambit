@@ -1,10 +1,14 @@
 // @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off -- The window host: where native game and editor processes get a window the user never sees.
 import type * as NodeChildProcess from "node:child_process";
-import * as NodeFSP from "node:fs/promises";
-import * as NodeNet from "node:net";
 import type { GameViewport } from "@kurambit/contracts";
 import { findExecutable } from "./GameProcesses.ts";
-import { HOST_OS, spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
+import {
+  HOST_OS,
+  spawnOwned,
+  type OwnedProcess,
+  type ProcessFacts,
+  type ProcessHostState,
+} from "./processHost.ts";
 
 /**
  * What the harness needs from an OS to show a game: a window the game draws
@@ -38,6 +42,10 @@ export interface WindowCommand {
   readonly cwd?: string | undefined;
   readonly stdio: NodeChildProcess.StdioOptions;
   readonly token?: string | undefined;
+  /** See SpawnOwnedOptions: stays out of the Windows kill-on-close job. */
+  readonly joinsJob?: boolean | undefined;
+  /** See SpawnOwnedOptions: which of a Windows tree a stop may end. */
+  readonly keep?: ((facts: ProcessFacts) => boolean) | undefined;
 }
 
 export interface HostedWindow {
@@ -46,7 +54,7 @@ export interface HostedWindow {
    * (a display server). It exits when the command does.
    */
   readonly process: OwnedProcess;
-  /** Where the window lives, for logs and records (`:251`). */
+  /** Where the window lives, for logs and records. */
   readonly label: string;
   /** Stops the command and what its window needed. */
   readonly stop: (options?: { readonly graceMs?: number }) => Promise<void>;
@@ -56,63 +64,48 @@ export interface HostedWindow {
 export const findXvfb = (): Promise<string | null> =>
   findExecutable("Xvfb", { pathEnv: process.env.PATH, override: process.env.KURAMBIT_XVFB });
 
-const displayTaken = async (n: number): Promise<boolean> => {
-  try {
-    await NodeFSP.access(`/tmp/.X${n}-lock`);
-    return true;
-  } catch {
-    /* candidate */
-  }
-  return new Promise<boolean>((resolve) => {
-    const socket = NodeNet.connect(6000 + n, "127.0.0.1");
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => {
-      socket.destroy();
-      resolve(false);
-    });
-  });
-};
-
-/** A free private display number, well above the user's own; the caller releases it. */
-const pickDisplay = async (claimed: Set<number>): Promise<number | null> => {
-  for (let n = 119; n < 400; n++) {
-    if (claimed.has(n) || (await displayTaken(n)) || claimed.has(n)) continue;
-    claimed.add(n);
-    return n;
-  }
-  return null;
-};
+/**
+ * The exit a hosted command reports when its private display died before it
+ * did: the host's fault, which a game that then exits with an X error must not
+ * be taken for.
+ */
+export const DISPLAY_LOST_EXIT = 71;
+/** The exit a hosted command reports when its private display never started. */
+export const DISPLAY_FAILED_EXIT = 70;
+/** Whether a hosted command's exit says its display, not the game, failed: our side. */
+export const isHostExit = (exitCode: number): boolean =>
+  exitCode === DISPLAY_FAILED_EXIT || exitCode === DISPLAY_LOST_EXIT;
 
 /**
- * Runs a command on its own Xvfb display, as xvfb-run does, but on the
- * display number the server claimed: Xvfb starts, the command runs once the
- * display's lock file names this Xvfb (not another server's that won the
- * same number), and the display ends only after the command exits, so an
- * engine never loses its display mid-shutdown (Godot hangs in Xlib's exit
- * path when it does). A game that quits because its server died takes its
- * display with it. A 24-bit depth is required, or Xvfb rejects the screen and
- * the game boots against a dead display.
+ * Runs a command on its own Xvfb display, as xvfb-run does. Xvfb picks a free
+ * display itself (`-displayfd`) and writes its number once it accepts clients,
+ * so two launches at once never share one and nothing polls for it. The
+ * display ends only after the command exits, so an engine never loses its
+ * display mid-shutdown (Godot hangs in Xlib's exit path when it does); a game
+ * that quits because its server died takes its display with it. A 24-bit
+ * depth is required, or Xvfb rejects the screen and the game boots against a
+ * dead display.
  */
-const XVFB_WRAPPER = `display=$1 size=$2 xvfb=$3
-shift 3
-"$xvfb" "$display" -screen 0 "$size" -nolisten tcp </dev/null >/dev/null 2>&1 &
+const XVFB_WRAPPER = `size=$1 xvfb=$2
+shift 2
+dir=$(mktemp -d) || exit ${DISPLAY_FAILED_EXIT}
+mkfifo "$dir/display" || { rm -rf "$dir"; exit ${DISPLAY_FAILED_EXIT}; }
+"$xvfb" -displayfd 3 -screen 0 "$size" -nolisten tcp 3>"$dir/display" </dev/null >/dev/null 2>&1 &
 x=$!
-lock="/tmp/.X\${display#:}-lock"
-n=0
-until [ -e "$lock" ] && [ "$(tr -d ' \\n' < "$lock" 2>/dev/null)" = "$x" ]; do
-  if ! kill -0 "$x" 2>/dev/null || [ "$n" -ge 150 ]; then
-    echo "kurambit: the private display $display did not start" >&2
-    kill "$x" 2>/dev/null
-    exit 70
-  fi
-  n=$((n + 1))
-  sleep 0.1
-done
-DISPLAY=$display "$@"
+# A display that never says it is ready is ended, which ends the read below.
+( sleep 15; kill "$x" 2>/dev/null ) &
+w=$!
+read -r n < "$dir/display"
+kill "$w" 2>/dev/null
+rm -rf "$dir"
+if [ -z "$n" ] || ! kill -0 "$x" 2>/dev/null; then
+  echo "kurambit: the private display did not start" >&2
+  kill "$x" 2>/dev/null
+  exit ${DISPLAY_FAILED_EXIT}
+fi
+DISPLAY=":$n" "$@"
 status=$?
+kill -0 "$x" 2>/dev/null || exit ${DISPLAY_LOST_EXIT}
 kill "$x" 2>/dev/null
 wait "$x" 2>/dev/null
 exit $status`;
@@ -120,10 +113,6 @@ exit $status`;
 const xvfbHost = (host: ProcessHostState, xvfb: string): WindowHost => ({
   kind: "private-display",
   launch: async (command, viewport) => {
-    const claimed = host.displays;
-    const n = await pickDisplay(claimed);
-    if (n === null) throw new Error("No free private X display.");
-    const label = `:${n}`;
     const owned = spawnOwned(
       host,
       "/bin/sh",
@@ -131,7 +120,6 @@ const xvfbHost = (host: ProcessHostState, xvfb: string): WindowHost => ({
         "-c",
         XVFB_WRAPPER,
         "kurambit-window",
-        label,
         `${viewport.width}x${viewport.height}x24`,
         xvfb,
         command.executable,
@@ -144,14 +132,14 @@ const xvfbHost = (host: ProcessHostState, xvfb: string): WindowHost => ({
         tree: true,
         window: true,
         token: command.token,
+        joinsJob: command.joinsJob,
+        keep: command.keep,
       },
     );
     owned.child.unref();
-    owned.child.once("exit", () => claimed.delete(n));
-    owned.child.once("error", () => claimed.delete(n));
     return {
       process: owned,
-      label,
+      label: "private display",
       stop: (options) => owned.stop({ graceMs: options?.graceMs ?? 3_000 }),
     };
   },
@@ -171,6 +159,8 @@ const offscreenHost = (host: ProcessHostState): WindowHost => ({
       tree: true,
       window: true,
       token: command.token,
+      joinsJob: command.joinsJob,
+      keep: command.keep,
     });
     owned.child.unref();
     return {

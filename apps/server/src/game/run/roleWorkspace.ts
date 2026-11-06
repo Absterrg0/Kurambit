@@ -11,10 +11,11 @@ import { GAME_RUN_COPIES } from "../../config.ts";
 import type * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
 import type * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import type * as GameService from "../GameService.ts";
-import { laneProfile } from "../engineProfile.ts";
+import type { GameEngineId } from "@kurambit/contracts";
+import { engineProfile } from "../engineProfile.ts";
 import { COPY_OF } from "../unityPlayerCache.ts";
 import { NOT_IN_SAMPLE } from "./builds.ts";
-import { handBackOnLowMemory } from "./lowMemory.ts";
+import { measuring, toolFailed } from "./handBack.ts";
 import type { RoleStep } from "./state.ts";
 
 export type RoleDeps = {
@@ -25,13 +26,11 @@ export type RoleDeps = {
 };
 export type RoleContext = {
   readonly root: string;
-  readonly lane: string;
+  readonly engine: GameEngineId;
   readonly runId: string;
   /** Where this run's copies live: a folder of Kurambit's own, outside the game repository. */
   readonly copies: string;
   readonly log: (line: string) => Effect.Effect<void>;
-  /** The step may still hand itself back to wait for memory. */
-  readonly memoryWaitsLeft: boolean;
 };
 
 /** A run's copies: under Kurambit's own worktrees folder, never in the game repository. */
@@ -71,21 +70,29 @@ export const playCopy = (deps: RoleDeps, root: string, build: string, destinatio
 const stepCopy = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, build: string) =>
   Effect.gen(function* () {
     const path = copyPath(ctx, step);
-    const exists = yield* Effect.promise(() =>
+    const exists = yield* Effect.tryPromise(() =>
       NodeFSP.access(path).then(
         () => true,
-        () => false,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return false;
+          throw error;
+        },
       ),
     );
     if (exists) return path;
     const staging = `${path}.making`;
-    if (!(yield* playCopy(deps, ctx.root, build, staging))) return null;
+    // The run's record names a build that is gone: no wait brings it back.
+    if (!(yield* playCopy(deps, ctx.root, build, staging)))
+      return yield* toolFailed(`${step.role}'s copy of its build`, "the build is gone", {
+        standing: true,
+      });
     yield* Effect.tryPromise(() => NodeFSP.rename(staging, path));
     return path;
-  });
+  }).pipe(measuring(`${step.role}'s copy of its build`, [ctx.root, ctx.copies]));
 
 // A blind comparator's folder, made before its thread so the model's first
 // look finds its files in place: empty but for the step's copies, with no git.
+// One that cannot be made is not measured, never a comparator without a verdict.
 export const blankFolder = (_deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
   Effect.tryPromise(async () => {
     const dir = copyPath(ctx, step);
@@ -97,56 +104,34 @@ export const blankFolder = (_deps: RoleDeps, ctx: RoleContext, step: RoleStep) =
       await NodeFSP.copyFile(NodePath.join(ctx.root, from), target);
     }
     return { path: dir };
-  }).pipe(
-    Effect.catchCause(() =>
-      ctx.log(`${step.role}: its folder could not be made`).pipe(Effect.as(null)),
-    ),
-  );
+  }).pipe(measuring(`${step.role}'s folder`, [ctx.root, ctx.copies]));
 
 /**
  * A player's copy of its build, made before its thread. An engine whose games
  * play as a built player (Unity) gets that player prepared here, so both sides
  * of a comparison start on a ready player before the play clock starts: copied
  * from the main checkout when that holds one of the same sources, else built.
- * A failed preparation still plays (its first explore start builds, as it
- * always could), and only this log, which comparators never read, says which.
- * Memory short hands the step back to wait, before either side's clock; the
- * copy stays and the step's next try reuses it.
+ * A preparation that fails is not measured: a side that built its player
+ * inside its play clock would not be played as the other was. Boot already
+ * built this build's player, so even its build fault is ours. Memory short
+ * hands the step back to wait, before either side's clock; the copy stays and
+ * the step's next try reuses it.
  */
 export const sampleCopy = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, build: string) =>
   Effect.gen(function* () {
-    const engine = laneProfile(ctx.lane);
-    const path = yield* stepCopy(deps, ctx, step, build).pipe(
-      Effect.catchCause(() =>
-        ctx.log(`${step.role}: its copy of the build could not be made`).pipe(Effect.as(null)),
-      ),
-    );
-    if (path === null) return null;
+    const engine = engineProfile(ctx.engine);
+    const path = yield* stepCopy(deps, ctx, step, build);
     if (engine.play !== "player") return { path };
-    const name = engine.displayName;
+    const what = `${step.role}: ${engine.displayName} player preparation`;
     const from = Date.now();
-    const seconds = () => `${Math.round((Date.now() - from) / 1000)} s`;
-    yield* handBackOnLowMemory(
-      deps.game.preparePlayer(path),
-      `${step.role}: ${name} player preparation`,
-      ctx.memoryWaitsLeft,
-    ).pipe(
-      Effect.flatMap((prepared) =>
-        ctx.log(
-          `${step.role}: ${name} player ${prepared.origin} for ${prepared.sourceId.slice(0, 12)} in ${seconds()} before launch`,
-        ),
-      ),
+    const prepared = yield* deps.game.preparePlayer(path).pipe(
+      measuring(what, [ctx.root, ctx.copies]),
       Effect.catchTags({
-        GameOperationError: (error) =>
-          ctx.log(
-            `${step.role}: ${name} player not prepared after ${seconds()} (${(error.detail ?? error.reason).slice(0, 300)}); its first explore start builds one`,
-          ),
+        GameRunBuildFault: (fault) => Effect.fail(toolFailed(what, fault.error)),
       }),
-      Effect.catchDefect(() =>
-        ctx.log(
-          `${step.role}: ${name} player preparation broke after ${seconds()}; its first explore start builds one`,
-        ),
-      ),
+    );
+    yield* ctx.log(
+      `${what}: ${prepared.origin} for ${prepared.sourceId.slice(0, 12)} in ${Math.round((Date.now() - from) / 1000)} s before launch`,
     );
     return { path };
   });

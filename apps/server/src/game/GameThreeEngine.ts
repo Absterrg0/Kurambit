@@ -5,7 +5,6 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import {
   THREE_PINNED_VERSION,
-  THREE_PROJECT_DIRECTORY,
   THREE_VIEWPORT,
   GameOperationError,
   type GameActionResult,
@@ -19,11 +18,14 @@ import { stackToGameFile, type GameBrowser } from "./gameChromium.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 import {
   openWebPlaySession,
+  WebBrowserGone,
   WebBrowserLaunchFailed,
+  WebPageCrashed,
   WebPageNotReady,
   type WebPageEvent,
 } from "./webPlaySession.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
+import { copyTree } from "./gameFiles.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
 
 const BOOT_TIMEOUT_MS = 60_000;
@@ -66,7 +68,16 @@ export const makeThreeBackend = (
       };
       const issues: GameCheckIssue[] = [];
       const reached: string[] = [];
-      yield* Effect.promise(() => NodeFSP.mkdir(temporary, { recursive: true }));
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(temporary, { recursive: true }),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "three-check",
+            path: temporary,
+            reason: "io",
+            cause,
+          }),
+      });
       const browser = yield* gameBrowser("three-check", ctx.projectDir);
       const server = yield* Effect.tryPromise({
         try: () => serveGameDirectory(ctx.root, ctx.projectName),
@@ -125,6 +136,16 @@ export const makeThreeBackend = (
               onPageEvent,
               stopOnPageError: true,
             }).catch((cause: unknown) => {
+              // The game's page crashing is what the check measures; our browser
+              // going away is not, and fails the check below.
+              if (cause instanceof WebPageCrashed) {
+                log(`page crashed: ${cause.message}`);
+                issues.push({
+                  file: `${ctx.projectName}/${entry === "boot" ? "index.html" : input.gameplayScene.split("?")[0]}`,
+                  message: `The page crashed while it ${entry === "boot" ? "booted" : "started gameplay"} (${cause.message.slice(0, 300)}).`,
+                });
+                return null;
+              }
               if (!(cause instanceof WebPageNotReady)) throw cause;
               if (cause.navigation !== null) log(`navigation failed: ${cause.navigation}`);
               timedOut = cause.timedOut;
@@ -135,7 +156,10 @@ export const makeThreeBackend = (
               await new Promise((resolve) => setTimeout(resolve, 2000));
               await session.close();
               reached.push(entry);
-            } else if (entry !== "boot")
+            } else if (
+              entry !== "boot" &&
+              !issues.some((issue) => issue.message.startsWith("The page crashed"))
+            )
               issues.push({
                 file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
                 message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
@@ -144,7 +168,8 @@ export const makeThreeBackend = (
           }
           return { timedOut };
         },
-        // A browser that would not start says nothing about the build.
+        // A browser that would not start, or that went away, says nothing
+        // about the build: the check could not be made.
         catch: (cause) =>
           cause instanceof WebBrowserLaunchFailed
             ? new GameOperationError({
@@ -157,8 +182,8 @@ export const makeThreeBackend = (
             : new GameOperationError({
                 operation: "three-check",
                 path: ctx.projectDir,
-                reason: "command-failed",
-                detail: `Headless Chromium failed during the check: ${
+                reason: "tool-failed",
+                detail: `${cause instanceof WebBrowserGone ? "Headless Chromium went away" : "Headless Chromium failed"} during the check: ${
                   cause instanceof Error ? cause.message.slice(0, 500) : String(cause).slice(0, 500)
                 }`,
                 cause,
@@ -168,11 +193,12 @@ export const makeThreeBackend = (
       const booted = reached.includes("boot");
       if (!booted)
         issues.unshift({
-          file: "web/index.html",
+          file: `${ctx.projectName}/index.html`,
           message: timedOut
             ? `The page never reported ready (window.__studio.ready stayed false past ${BOOT_TIMEOUT_MS / 1000}s).`
             : "The page did not boot: window.__studio had not appeared when the page errored. Fix the errors this check lists, and keep the studio bridge from the starter.",
         });
+      // The log is for people; the verdict above does not depend on it.
       yield* Effect.promise(() =>
         NodeFSP.writeFile(logPath, `${lines.join("\n")}\n`).catch(() => undefined),
       );
@@ -204,39 +230,22 @@ export const makeThreeBackend = (
   return {
     profile: THREE_PROFILE,
     resolveProject: (root, manifest) =>
-      Effect.gen(function* () {
-        if (manifest.engine.name !== "three")
-          return yield* new GameOperationError({
-            operation: "resolve-engine",
-            path: root,
-            reason: "invalid-input",
-            detail: "The three.js backend was asked to resolve a non-three.js game.",
-          });
-        return {
-          binary: {
-            path: NodePath.join(manifestProject(manifest), "vendor", "three.module.js"),
-            version: THREE_PINNED_VERSION,
-            templates: null,
-          },
-          projectName: manifestProject(manifest),
-          projectDir: insideGame(root, manifestProject(manifest)),
-        };
-      }),
+      Effect.sync(() => ({
+        binary: {
+          path: NodePath.join(manifestProject(manifest), "vendor", "three.module.js"),
+          version: THREE_PINNED_VERSION,
+          templates: null,
+        },
+        projectName: manifestProject(manifest),
+        projectDir: insideGame(root, manifestProject(manifest)),
+      })),
+    // three.js is vendored in the game: nothing to install.
+    toolStatus: () => Effect.succeed(null),
+    viewport: () => Effect.succeed({ ...THREE_VIEWPORT }),
     projectSettingsFile: "index.html",
-    projectDirectory: (manifest) => manifestProject(manifest),
-    projectSettings: () => ({ viewport: { ...THREE_VIEWPORT } }),
     // A static copy needs no export templates and no preset.
     exportReady: () => Effect.void,
     exportPreset: (_ctx, target) => Effect.succeed({ name: target, added: false }),
-    parseDiagnostics: (output: string) => {
-      const found: GameCheckIssue[] = [];
-      for (const line of output.split("\n")) {
-        const match = /^(pageerror|console error):\s*(.+)$/i.exec(line.trim());
-        if (match?.[2] !== undefined)
-          found.push({ file: THREE_PROJECT_DIRECTORY, message: match[2].slice(0, 500) });
-      }
-      return found.slice(0, 100);
-    },
     importProject: (ctx) =>
       Effect.succeed({
         result: response(
@@ -254,25 +263,20 @@ export const makeThreeBackend = (
         issues: [],
       }),
     runCheck,
-    runExportRelease: (ctx, input) =>
+    // The web release is a static copy of the project, which the core then hashes, moves and selects.
+    release: (ctx, input) =>
       Effect.gen(function* () {
-        // The web sparkling: a static copy of the project into the staging
-        // dir whose index.html the core then hashes, moves and selects.
-        const stagingDir = NodePath.dirname(input.outputPath);
-        yield* Effect.promise(() =>
-          NodeFSP.cp(ctx.projectDir, stagingDir, { recursive: true }),
-        ).pipe(
-          Effect.mapError(
-            (cause) =>
-              new GameOperationError({
-                operation: input.operation,
-                path: stagingDir,
-                reason: "io",
-                detail: "The static project could not be staged for export.",
-                cause,
-              }),
-          ),
-        );
+        yield* Effect.tryPromise({
+          try: (signal) => copyTree(ctx.projectDir, input.staging, signal),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: input.operation,
+              path: input.staging,
+              reason: "io",
+              detail: "The static project could not be staged for export.",
+              cause,
+            }),
+        });
         const run: GameProcessResult = {
           pid: 0,
           exitCode: 0,
@@ -282,7 +286,11 @@ export const makeThreeBackend = (
           stderr: "",
           logPath: NodePath.join(ctx.root, "builds/logs"),
         };
-        return response(run, input.outputPath);
+        return {
+          result: response(run, NodePath.join(input.staging, "index.html")),
+          artifact: "index.html",
+          notes: [],
+        };
       }),
     // The browser host opens the page itself: there is no runner process.
     playProcess: null,

@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
+import * as NodeReadline from "node:readline";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
@@ -47,8 +48,12 @@ export interface PlaySession {
   readonly realtime: (frames?: PlayFrameRequest) => Promise<void>;
   /** Writes the picture as it is now to `path`; false when it could not. Runners with `frames`. */
   readonly still: (path: string) => Promise<boolean>;
-  /** The next tick observation as the runner sent it, or null when none came in time. */
-  readonly nextTick: (timeoutMs: number) => Promise<Record<string, unknown> | null>;
+  /**
+   * The next tick observation as the runner sent it; `timeout` when none came
+   * in time (the session is open but silent), `closed` when the connection is
+   * gone. Who closed it is the launch's to say (`PlayLaunch.ended`).
+   */
+  readonly nextTick: (timeoutMs: number) => Promise<PlayTick>;
   readonly input: (input: {
     readonly held: readonly string[];
     readonly taps: readonly string[];
@@ -62,6 +67,69 @@ export interface PlaySession {
   /** Asks the runner to quit and lets go of the connection. Idempotent. */
   readonly close: () => Promise<void>;
 }
+
+export type PlayTick =
+  | { readonly kind: "tick"; readonly observation: Record<string, unknown> }
+  | { readonly kind: "timeout" }
+  | { readonly kind: "closed" };
+
+/**
+ * How a played game ended, by whose side: the game's (its process exited, its
+ * page crashed, its runner closed the session) is evidence about the build;
+ * the host's (the private display or our browser went away) is a tool fault.
+ */
+export interface PlayEnd {
+  readonly by: "game" | "host";
+  readonly detail: string;
+}
+
+/** The game stopped answering within an act's bound: evidence about the build. */
+export class PlayUnresponsive extends Error {}
+
+/** The game's runner went away mid-act: evidence about the build. */
+export class PlayClosed extends Error {}
+
+/** The game never booted: its process exited first, it never connected or never said hello in time. */
+export class PlayNotBooted extends Error {}
+
+/**
+ * Every wait a play session makes, in one place: nothing waits on a game,
+ * page or runner without one of these.
+ */
+export const PLAY_BOUNDS = {
+  /** From launch to the runner's hello or the page's ready. */
+  bootMs: 90_000,
+  /** One act on a runner (the runner bounds its own steps). */
+  socketActMs: 120_000,
+  /** Past the act's own step time, for a page's act. */
+  webActGraceMs: 30_000,
+  /** One tick of real-time play; misses in a row before the game counts as stopped answering. */
+  tickMs: 3_000,
+  tickMisses: 20,
+  /** One web input or state write: a miss past it. */
+  webCallMs: 2_000,
+  stillMs: 15_000,
+  quitMs: 2_000,
+  webStorageMs: 3_000,
+  webLeaveMs: 5_000,
+  browserCloseMs: 10_000,
+  keptSavesMs: 5_000,
+  /** After a session closed, how long the launch has to say who ended it. */
+  endedMs: 5_000,
+} as const;
+
+/** `promise`, or TIMED_OUT once `ms` pass; a late rejection is swallowed. */
+export const TIMED_OUT: unique symbol = Symbol("timed out");
+export const bounded = <T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  promise.catch(() => undefined);
+  return Promise.race([
+    promise,
+    new Promise<typeof TIMED_OUT>((resolve) => {
+      timer = setTimeout(() => resolve(TIMED_OUT), Math.max(0, ms));
+    }),
+  ]).finally(() => clearTimeout(timer));
+};
 
 /** One engine picture from the real-time stream. */
 export interface PlayFrame {
@@ -259,43 +327,38 @@ const frameOf = (line: string): PlayFrame | null => {
 };
 
 /**
- * Lines from a socket, awaited one at a time with a deadline. Frame lines
- * never queue: they go to `onFrame` as they arrive (or are dropped while no
- * one asked for frames), so a stream of pictures never delays an act's
- * reply or a tick.
+ * Lines from a stream (a runner's socket, the bot child's stdout), awaited one
+ * at a time with a deadline. Frame lines never queue: they go to the frame
+ * sink as they arrive (or are dropped while no one asked for frames), so a
+ * stream of pictures never delays an act's reply or a tick.
  */
-const lineQueue = (socket: NodeNet.Socket) => {
-  let buffer = "";
+export const createLineReader = (stream: NodeJS.ReadableStream) => {
+  const reader = NodeReadline.createInterface({ input: stream, crlfDelay: Infinity });
   const ready: string[] = [];
   let closed = false;
   let wake: (() => void) | null = null;
   let onFrame: ((frame: PlayFrame) => void) | null = null;
-  socket.setEncoding("utf8");
-  socket.on("data", (chunk: string) => {
-    buffer += chunk;
-    for (let index = buffer.indexOf("\n"); index >= 0; index = buffer.indexOf("\n")) {
-      const line = buffer.slice(0, index);
-      buffer = buffer.slice(index + 1);
-      if (line.startsWith(FRAME_PREFIX)) {
-        const frame = onFrame === null ? null : frameOf(line);
-        if (frame !== null) onFrame?.(frame);
-      } else ready.push(line);
+  reader.on("line", (line: string) => {
+    if (line.startsWith(FRAME_PREFIX)) {
+      const frame = onFrame === null ? null : frameOf(line);
+      if (frame !== null) onFrame?.(frame);
+      return;
     }
+    ready.push(line);
     wake?.();
   });
   const onClose = () => {
     closed = true;
     wake?.();
   };
-  socket.on("close", onClose);
-  socket.on("error", onClose);
-  const take = (): string | null => ready.shift() ?? null;
-  /** One line, "closed" when the runner is gone, or "timeout". */
+  reader.on("close", onClose);
+  stream.on("error", onClose);
+  /** One line, "closed" when the stream is gone, or "timeout". */
   const next = (timeoutMs: number, signal?: AbortSignal): Promise<string | "closed" | "timeout"> =>
     new Promise((resolve, reject) => {
       if (signal?.aborted) return reject(new Error("aborted"));
-      const ready = take();
-      if (ready !== null) return resolve(ready);
+      const first = ready.shift();
+      if (first !== undefined) return resolve(first);
       if (closed) return resolve("closed");
       const finish = (value: string | "closed" | "timeout" | Error) => {
         wake = null;
@@ -308,8 +371,8 @@ const lineQueue = (socket: NodeNet.Socket) => {
       const timer = setTimeout(() => finish("timeout"), Math.max(0, timeoutMs));
       signal?.addEventListener("abort", onAbort, { once: true });
       wake = () => {
-        const line = take();
-        if (line !== null) finish(line);
+        const line = ready.shift();
+        if (line !== undefined) finish(line);
         else if (closed) finish("closed");
       };
     });
@@ -319,8 +382,10 @@ const lineQueue = (socket: NodeNet.Socket) => {
     frames: (sink: ((frame: PlayFrame) => void) | null) => {
       onFrame = sink;
     },
+    close: () => reader.close(),
   };
 };
+export type LineReader = ReturnType<typeof createLineReader>;
 
 const decodeHandshake = Schema.decodeUnknownOption(PlaySessionHandshake);
 
@@ -335,7 +400,7 @@ const tickOf = (record: Record<string, unknown>): boolean =>
 
 const socketSession = (
   socket: NodeNet.Socket,
-  lines: ReturnType<typeof lineQueue>,
+  lines: LineReader,
   hello: Record<string, unknown>,
   server: NodeNet.Server,
 ): PlaySession => {
@@ -353,6 +418,26 @@ const socketSession = (
     if (!socket.destroyed) socket.write(`${JSON.stringify(command)}\n`);
   };
   const { probe, screenText, ui, errors } = sanitizeObservation(hello);
+  /**
+   * Every line any read loop takes passes here first: a state write's reply
+   * can arrive while an act or a still is waiting, and its refusal still counts.
+   */
+  const read = async (deadline: number, signal?: AbortSignal) => {
+    const line = await lines.next(deadline - Date.now(), signal);
+    if (line === "timeout" || line === "closed") return line;
+    const record = parseLine(line.trim());
+    if (record !== null && replyOf(record) && pendingStates.has(record["id"])) {
+      const target = pendingStates.get(record["id"])!;
+      pendingStates.delete(record["id"]);
+      if (record["ok"] !== true && refused.length < 20)
+        refused.push({
+          target,
+          error: typeof record["error"] === "string" ? record["error"].slice(0, 300) : "refused",
+        });
+      return null;
+    }
+    return record;
+  };
   return {
     protocol,
     capabilities,
@@ -361,12 +446,14 @@ const socketSession = (
     act: async (steps, screenshotPath, signal) => {
       const id = nextId++;
       send({ op: "act", id, steps: [...steps], screenshotPath });
-      const deadline = Date.now() + 120_000;
+      const deadline = Date.now() + PLAY_BOUNDS.socketActMs;
       for (;;) {
-        const line = await lines.next(deadline - Date.now(), signal);
-        if (line === "timeout") throw new Error("The act timed out after 120s.");
-        if (line === "closed") throw new Error("The game's runner closed the session.");
-        const record = parseLine(line.trim());
+        const record = await read(deadline, signal);
+        if (record === "timeout")
+          throw new PlayUnresponsive(
+            `The game did not answer this act within ${PLAY_BOUNDS.socketActMs / 1000} s.`,
+          );
+        if (record === "closed") throw new PlayClosed("The game's runner closed the session.");
         if (record === null || !replyOf(record) || record["id"] !== id) continue;
         if (record["ok"] !== true)
           throw new Error(
@@ -385,11 +472,10 @@ const socketSession = (
       if (!capabilities.has("frames")) return false;
       const id = nextId++;
       send({ op: "still", id, path });
-      const deadline = Date.now() + 15_000;
+      const deadline = Date.now() + PLAY_BOUNDS.stillMs;
       for (;;) {
-        const line = await lines.next(deadline - Date.now());
-        if (line === "timeout" || line === "closed") return false;
-        const record = parseLine(line.trim());
+        const record = await read(deadline);
+        if (record === "timeout" || record === "closed") return false;
         if (record !== null && replyOf(record) && record["id"] === id)
           return record["ok"] === true && record["screenshot"] === true;
       }
@@ -397,20 +483,9 @@ const socketSession = (
     nextTick: async (timeoutMs) => {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
-        const line = await lines.next(deadline - Date.now());
-        if (line === "timeout" || line === "closed") return null;
-        const record = parseLine(line.trim());
-        if (record !== null && replyOf(record) && pendingStates.has(record["id"])) {
-          const target = pendingStates.get(record["id"])!;
-          pendingStates.delete(record["id"]);
-          if (record["ok"] !== true && refused.length < 20)
-            refused.push({
-              target,
-              error:
-                typeof record["error"] === "string" ? record["error"].slice(0, 300) : "refused",
-            });
-        }
-        if (record !== null && tickOf(record)) return record;
+        const record = await read(deadline);
+        if (record === "timeout" || record === "closed") return { kind: record };
+        if (record !== null && tickOf(record)) return { kind: "tick", observation: record };
       }
     },
     input: async ({ held, taps, clicks }) =>
@@ -430,9 +505,10 @@ const socketSession = (
       if (!socket.destroyed)
         await new Promise<void>((resolve) => {
           socket.end(`${JSON.stringify({ op: "quit", id: nextId++ })}\n`, () => resolve());
-          setTimeout(resolve, 2_000);
+          setTimeout(resolve, PLAY_BOUNDS.quitMs);
         });
       socket.destroy();
+      lines.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
@@ -481,47 +557,57 @@ export const listenForRunner = async () => {
       } satisfies PlaySessionRequest),
     );
   /**
-   * Waits for the runner's hello. `alive` lets the caller end the wait early
-   * when the launched process is already gone or the run was stopped.
+   * Waits for the runner's hello. `exited` (the launched process's exit) ends
+   * the wait early: a game that dies before its hello never booted.
    */
   const accept = async (input: {
     readonly timeoutMs: number;
     readonly what: string;
     readonly signal?: AbortSignal | undefined;
-    readonly alive?: () => boolean;
+    readonly exited?: Promise<unknown>;
   }): Promise<PlaySession> => {
+    input.signal?.throwIfAborted();
     const deadline = Date.now() + input.timeoutMs;
-    let socket: NodeNet.Socket | null = null;
-    while (socket === null) {
-      input.signal?.throwIfAborted();
-      if (input.alive !== undefined && !input.alive())
-        throw new Error(`${input.what} exited before it connected; no session was opened.`);
-      if (Date.now() >= deadline)
-        throw new Error(
-          `${input.what} did not connect within ${input.timeoutMs}ms; no session was opened.`,
-        );
-      socket = await Promise.race([
-        connection,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 250)),
-      ]);
-    }
-    const lines = lineQueue(socket);
+    let gone = false;
+    const exited = (input.exited ?? new Promise<never>(() => undefined)).then(
+      () => (gone = true),
+      () => (gone = true),
+    );
+    const aborted = new Promise<"aborted">((resolve) =>
+      input.signal?.addEventListener("abort", () => resolve("aborted"), { once: true }),
+    );
+    const socket = await Promise.race([
+      connection,
+      exited.then(() => "exited" as const),
+      aborted,
+      bounded(new Promise<never>(() => undefined), input.timeoutMs),
+    ]);
+    if (socket === "aborted") throw new Error("aborted");
+    if (socket === "exited")
+      throw new PlayNotBooted(`${input.what} exited before it connected; no session was opened.`);
+    if (socket === TIMED_OUT)
+      throw new PlayNotBooted(
+        `${input.what} did not connect within ${input.timeoutMs}ms; no session was opened.`,
+      );
+    const lines = createLineReader(socket);
     for (;;) {
       const line = await lines.next(Math.min(1000, deadline - Date.now()), input.signal);
       if (line === "closed")
-        throw new Error(`${input.what} exited before booting; no session was opened.`);
+        throw new PlayNotBooted(`${input.what} exited before booting; no session was opened.`);
       if (line === "timeout") {
         if (Date.now() >= deadline)
-          throw new Error(
+          throw new PlayNotBooted(
             `${input.what} did not boot within ${input.timeoutMs}ms; no session was opened.`,
           );
-        if (input.alive !== undefined && !input.alive())
-          throw new Error(`${input.what} exited before booting; no session was opened.`);
+        if (gone)
+          throw new PlayNotBooted(`${input.what} exited before booting; no session was opened.`);
         continue;
       }
       const record = parseLine(line.trim());
       if (record === null) continue;
-      if (typeof record["error"] === "string") throw new Error(record["error"].slice(0, 2000));
+      // The runner's own boot error: the game's scene or code would not start.
+      if (typeof record["error"] === "string")
+        throw new PlayNotBooted(record["error"].slice(0, 2000));
       if (record["token"] !== token)
         throw new Error(`${input.what} presented a wrong session token.`);
       return socketSession(socket, lines, record, server);

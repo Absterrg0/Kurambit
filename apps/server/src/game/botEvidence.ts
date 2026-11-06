@@ -7,7 +7,8 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
-import { keyOf, recordPath, writeRecordFile } from "./exploreEvidence.ts";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
+import { keyOf, recordPath } from "./exploreEvidence.ts";
 
 const BotRun = Schema.Struct({
   runId: Schema.String,
@@ -103,4 +104,7 @@ export const setAside = async (dir: string, threadId: string, nowMs: number) => 
 };
 
 export const write = (dir: string, record: ThreadBots) =>
-  writeRecordFile(dir, record.threadId, encode(record));
+  writeFileStringAtomically({
+    filePath: recordPath(dir, record.threadId),
+    contents: encode(record),
+  });

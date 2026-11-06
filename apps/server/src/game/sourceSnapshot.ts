@@ -3,24 +3,15 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import { GAME_SOURCE_FILE_LIMIT, GameOperationError, sourceLimitDetail } from "@kurambit/contracts";
+import type { GameSourceRules } from "./engineProfile.ts";
 
 /**
- * A walked-entry bound, not a game-size limit. A tree larger than this cannot be
- * identified, so callers must treat the result as unknown (and therefore stale)
- * rather than guessing that it did not change.
+ * Skipped entries (engine output, sidecars) are walked but not counted toward
+ * the file limit; this bounds the walk itself, so a tree of nothing but output
+ * cannot keep it going.
  */
-const DEFAULT_MAX_SOURCE_ENTRIES = 10_000;
-
-/** Directories Unity generates at its project root; see snapshotBuildSource. */
-const UNITY_OUTPUT_DIRECTORIES = new Set([
-  "Library",
-  "Temp",
-  "Logs",
-  "UserSettings",
-  "obj",
-  "Build",
-  "Builds",
-]);
+const WALK_FACTOR = 4;
 
 /** Opening without following a link makes a swapped-in symlink fail closed. */
 const READ_FLAGS = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW;
@@ -41,32 +32,36 @@ export type SourceSnapshot =
     };
 
 /**
- * Hashes the exact bytes read, streaming so a large imported asset never sits
- * whole in memory. The handle closes on every path; an abort destroys the
- * stream so the read does not outlive cancellation.
+ * SHA-256 and byte count of a file, streamed so a large build never sits whole
+ * in memory: the game layer's one file hasher (snapshots, Web builds, library
+ * packs). `noFollow` refuses a link at the path (O_NOFOLLOW, where it exists),
+ * so a link swapped in fails closed; an abort stops the read.
  */
-const hashFileContent = async (
-  absolute: string,
-  signal: AbortSignal | undefined,
-): Promise<{ readonly size: number; readonly sha256: string }> => {
+export const hashFile = async (
+  path: string,
+  options: { readonly signal?: AbortSignal | undefined; readonly noFollow?: boolean } = {},
+): Promise<{ readonly sha256: string; readonly bytes: number }> => {
+  const { signal } = options;
   let handle: NodeFSP.FileHandle;
   try {
-    handle = await NodeFSP.open(absolute, READ_FLAGS);
+    handle = await NodeFSP.open(
+      path,
+      options.noFollow === true ? READ_FLAGS : NodeFS.constants.O_RDONLY,
+    );
   } catch (cause) {
     if (signal?.aborted) signal.throwIfAborted();
     throw cause;
   }
   const hash = NodeCrypto.createHash("sha256");
-  let size = 0;
+  let bytes = 0;
   try {
     signal?.throwIfAborted();
-    const stream = handle.createReadStream({ autoClose: false, signal });
+    const stream = handle.createReadStream({ autoClose: false, ...(signal ? { signal } : {}) });
     try {
       for await (const chunk of stream) {
         signal?.throwIfAborted();
-        const buffer = chunk as Buffer;
-        size += buffer.length;
-        hash.update(buffer);
+        hash.update(chunk as Buffer);
+        bytes += (chunk as Buffer).byteLength;
       }
     } finally {
       stream.destroy();
@@ -75,7 +70,15 @@ const hashFileContent = async (
   } finally {
     await handle.close().catch(() => undefined);
   }
-  return { size, sha256: hash.digest("hex") };
+  return { sha256: hash.digest("hex"), bytes };
+};
+
+const hashFileContent = async (
+  absolute: string,
+  signal: AbortSignal | undefined,
+): Promise<{ readonly size: number; readonly sha256: string }> => {
+  const hashed = await hashFile(absolute, { signal, noFollow: true });
+  return { size: hashed.bytes, sha256: hashed.sha256 };
 };
 
 const MAX_DERIVED_ASSET_BYTES = 1 << 20;
@@ -143,26 +146,27 @@ export const snapshotBuildSource = async (
   root: string,
   godotProject: string,
   options: {
+    /** The engine's build inputs (its profile's `buildInputs`): the engine is never guessed from files. */
+    readonly rules: GameSourceRules;
     readonly maxEntries?: number | undefined;
     readonly signal?: AbortSignal | undefined;
     readonly cache?: SourceHashCache | undefined;
-  } = {},
+  },
 ): Promise<SourceSnapshot> => {
-  const limit = options.maxEntries ?? DEFAULT_MAX_SOURCE_ENTRIES;
+  const limit = options.maxEntries ?? GAME_SOURCE_FILE_LIMIT;
   const signal = options.signal;
   const cache = options.cache;
   const seen = new Set<string>();
   const engineRoot = NodePath.join(root, godotProject);
-  // A Unity project's own caches sit at its root beside Assets/ and are
-  // rewritten by every editor start; they are output, never build input.
-  const unityProject = await NodeFSP.stat(
-    NodePath.join(engineRoot, "ProjectSettings/ProjectVersion.txt"),
-  ).then(
-    (stat) => stat.isFile(),
-    () => false,
-  );
+  const rules = options.rules;
   const lines: string[] = [];
   const files = new Map<string, string>();
+  const tooMany = (): SourceSnapshot => ({
+    kind: "unknown",
+    reason: "entry-limit",
+    detail: sourceLimitDetail(godotProject),
+  });
+  let counted = 0;
   let visited = 0;
   try {
     const stack = [engineRoot];
@@ -175,7 +179,7 @@ export const snapshotBuildSource = async (
         const name = item.name;
         signal?.throwIfAborted();
         visited += 1;
-        if (visited > limit) return { kind: "unknown", reason: "entry-limit" };
+        if (visited > limit * WALK_FACTOR) return tooMany();
         const absolute = NodePath.join(directory, name);
         const relative = NodePath.relative(engineRoot, absolute).split(NodePath.sep).join("/");
         let entry: NodeFS.BigIntStats;
@@ -189,28 +193,20 @@ export const snapshotBuildSource = async (
         if (entry.isSymbolicLink())
           return { kind: "unknown", reason: "symlink", detail: `${godotProject}/${relative}` };
         if (entry.isDirectory()) {
-          if (name === ".godot") continue;
-          if (unityProject && directory === engineRoot && UNITY_OUTPUT_DIRECTORIES.has(name))
-            continue;
+          if (rules.skipDirs.includes(name)) continue;
+          if (directory === engineRoot && rules.rootOutputDirs.includes(name)) continue;
           stack.push(absolute);
           continue;
         }
         if (!entry.isFile()) continue;
         // Sidecars the engine generates beside real sources. An import rewrites
         // them, so they can never be part of whether the build still matches.
-        if (name.endsWith(".import") || name.endsWith(".uid")) continue;
-        if (
-          unityProject &&
-          directory === engineRoot &&
-          (name.endsWith(".csproj") ||
-            name.endsWith(".sln") ||
-            // Mono's crash dumps, written here whenever an editor is stopped:
-            // counted, every editor close would make a fresh player stale.
-            name.startsWith("mono_crash."))
-        )
-          continue;
+        if (rules.sidecarSuffixes.some((suffix) => name.endsWith(suffix))) continue;
+        if (directory === engineRoot && rules.rootOutputFiles?.test(name) === true) continue;
+        counted += 1;
+        if (counted > limit) return tooMany();
         const derived =
-          unityProject && name.endsWith(".asset") && entry.size <= MAX_DERIVED_ASSET_BYTES;
+          rules.derivedAssets && name.endsWith(".asset") && entry.size <= MAX_DERIVED_ASSET_BYTES;
         const identity = `${derived}:${entry.dev}:${entry.ino}:${entry.size}:${entry.mtimeNs}:${entry.ctimeNs}`;
         let hashed: { readonly size: number; readonly sha256: string };
         try {
@@ -275,7 +271,7 @@ const describeUnknown = (snapshot: Extract<SourceSnapshot, { kind: "unknown" }>)
   snapshot.reason === "symlink"
     ? `a symlink is not followed (${snapshot.detail ?? "unknown path"})`
     : snapshot.reason === "entry-limit"
-      ? "the source tree is past the scan bound"
+      ? (snapshot.detail ?? `the game holds more than ${GAME_SOURCE_FILE_LIMIT} source files`)
       : "the source tree could not be read";
 
 /**
@@ -307,3 +303,47 @@ export const comparedSource = (
     };
   return { kind: "current", sourceId: after.sourceId };
 };
+
+/**
+ * Why an operation's sources could not be identified, as the one error every
+ * consumer raises (CONTRACT A7): a link in the project is the game's
+ * (`symlink`); more files than a build reads is the game's (`command-failed`,
+ * naming the limit); a tree that changed while it was read is transient
+ * (`tool-failed`); an unreadable one is ours (`io`). Never `invalid-input`,
+ * which a run reads as its own bad request.
+ */
+export const sourceIdentityError = (
+  operation: string,
+  root: string,
+  project: string,
+  why:
+    | Extract<SourceSnapshot, { kind: "unknown" }>
+    | { readonly kind: "changed"; readonly detail: string },
+): GameOperationError =>
+  why.kind === "changed"
+    ? new GameOperationError({
+        operation,
+        path: NodePath.join(root, project),
+        reason: "tool-failed",
+        detail: `${why.detail} Something else wrote the game's files meanwhile; run it again once that work ends.`,
+      })
+    : why.reason === "symlink"
+      ? new GameOperationError({
+          operation,
+          path: NodePath.join(root, project),
+          reason: "symlink",
+          detail: `A symbolic link is in the game's sources (${why.detail ?? "unknown path"}); a build never follows one. Replace it with the real file or folder.`,
+        })
+      : why.reason === "entry-limit"
+        ? new GameOperationError({
+            operation,
+            path: NodePath.join(root, project),
+            reason: "command-failed",
+            detail: why.detail ?? sourceLimitDetail(project),
+          })
+        : new GameOperationError({
+            operation,
+            path: NodePath.join(root, project),
+            reason: "io",
+            detail: `The game's sources could not be read (${why.detail ?? "a filesystem error"}).`,
+          });

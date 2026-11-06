@@ -66,6 +66,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
   const canRun = useAtomValue(gameEnvironment.runStart.permissionAtom(threadRef.environmentId));
   const runStart = useAtomCommand(gameEnvironment.runStart, { reportFailure: false });
+  const canStop = useAtomValue(gameEnvironment.runStop.permissionAtom(threadRef.environmentId));
   const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
   const canSteer = useAtomValue(gameEnvironment.runSteer.permissionAtom(threadRef.environmentId));
   const runSteer = useAtomCommand(gameEnvironment.runSteer, { reportFailure: false });
@@ -262,9 +263,16 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
               />
             ) : null}
           </>
+        ) : statusQuery.error !== null && status === null ? (
+          // A status that could not be read is never "not started".
+          <p role="alert" className="text-xs text-destructive-foreground">
+            The run's status could not be read: {statusQuery.error}
+          </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Start a run to build, play, judge and keep improving this game until the budget ends.
+            {status !== null && status.message.length > 0
+              ? status.message
+              : "Start a run to build, play, judge and keep improving this game until the budget ends."}
           </p>
         )}
         {error ? (
@@ -273,7 +281,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
           </p>
         ) : null}
         {startMessage ? <p className="text-2xs text-muted-foreground">{startMessage}</p> : null}
-        {!active ? (
+        {!active && !(statusQuery.error !== null && status === null) ? (
           <div className="space-y-2">
             <Textarea
               value={brief}
@@ -384,7 +392,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             <Button
               size="sm"
               variant="outline"
-              disabled={busy || !canRun}
+              disabled={busy || !canStop}
               onClick={() => void stop()}
             >
               <SquareIcon className="size-3.5" aria-hidden="true" />
@@ -491,6 +499,7 @@ const ENDING: Record<string, string> = {
   "provider-down": "Provider down",
   "low-memory": "Memory short",
   busy: "Machine busy",
+  "tool-failed": "Tool failed",
 };
 const endingLabel = (ending: string | null): string =>
   ending === null ? "Paused" : (ENDING[ending] ?? ending);

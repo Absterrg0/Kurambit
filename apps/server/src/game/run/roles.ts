@@ -1,7 +1,14 @@
 // Every prompt the run sends, built from facts. About 150 words of rules; names no game,
 // genre or mechanic. Builders write; the harness plays.
 import { GAME_EXPLORE_BOUNDS } from "@kurambit/contracts";
-import { laneAssets, laneProfile, laneUi } from "../engineProfile.ts";
+import type { GameEngineId } from "@kurambit/contracts";
+import { engineProfile, gamePaths } from "../engineProfile.ts";
+
+/** The run's game as its prompts name it: its engine, and its project folder in the game. */
+export interface RunGame {
+  readonly engine: GameEngineId;
+  readonly project: string;
+}
 import type { Rung } from "./state.ts";
 
 // Role threads have no local engine binaries and must never look for any:
@@ -27,13 +34,13 @@ export const CONTINUE = "Continue where you left off. Reply briefly, then keep w
 export const MEMORY_RETRY =
   "Your exploration could not start earlier because this machine was short of memory or busy with another start; it has had time to free and your clock starts over now. Start the exploration again and do the whole task below.";
 
-const buildRule = (lane: string) =>
-  `${TOOL_RULE}Make the smallest change that fixes this block's named top flaw. Follow its cause even when it needs a deeper rule or system change. Keep the game bootable; avoid filler and length targets. Use game_check for boot checks and focused play when needed to understand or verify the flaw. The harness independently plays and judges your build afterwards. Work under ${lane}/; changes only to notes, bots or skills do not count. Finish when the direction is addressed and report what changed and what remains unverified.`;
+const buildRule = (game: RunGame) =>
+  `${TOOL_RULE}Make the smallest change that fixes this block's named top flaw. Follow its cause even when it needs a deeper rule or system change. Keep the game bootable; avoid filler and length targets. Use game_check for boot checks and focused play when needed to understand or verify the flaw. The harness independently plays and judges your build afterwards. Work under ${game.project}/; changes only to notes, bots or skills do not count. Finish when the direction is addressed and report what changed and what remains unverified.`;
 
 // Rounds fix one named flaw; prototypes and the first full build make a
 // playable whole, so they get their own rule instead of the round's.
-const wholeBuildRule = (lane: string) =>
-  `${TOOL_RULE}Build what this direction asks as one playable whole, not a sketch. Keep the game bootable as you go; use game_check for boot checks and focused play to verify what you built. The harness independently plays and judges your build afterwards. Work under ${lane}/; changes only to notes, bots or skills do not count. Finish when the direction is built and report what changed and what remains unverified.`;
+const wholeBuildRule = (game: RunGame) =>
+  `${TOOL_RULE}Build what this direction asks as one playable whole, not a sketch. Keep the game bootable as you go; use game_check for boot checks and focused play to verify what you built. The harness independently plays and judges your build afterwards. Work under ${game.project}/; changes only to notes, bots or skills do not count. Finish when the direction is built and report what changed and what remains unverified.`;
 
 export const LADDER_FILE = ".studio/ladder.json";
 
@@ -47,17 +54,17 @@ const LADDER_SHAPE = `the ladder from this build to a game with the shape of a S
 const LADDER_RULES = ` Each rung's "is" is one sentence: what the game IS once that rung is built, something a player notices in the first minute (a mechanic working end to end, a new area or level, a way to win and to lose, a flow from title to ending, feel and audio). Each rung has 2 to 4 checks; "what" is a sentence a player could verify. Make every check you can a state check, which the harness scores itself by playing a short scenario and reading the game's state: {"what":"...","kind":"state","from":"play" or "title","setup":"<where to start the scenario: game_state (with "values":{"<key>":<value>} written into the game's state), player (with "values":{"position":[x,y,z]}), or a target of the game's own the builder adds; omit to start where the game starts>","input":[{"hold":"<key>","ms":<n>},{"press":"<key>"},{"wait":<ms>}] (at most 20 s in all; omit when none),"expect":"<state key> <== != >= <= > <> <number, true, false or "text">"}. expect may join up to four terms with and, use delta(<key>) for how much a value changed during the scenario, and hud contains "text" for text on screen; the keys are the game's own GameState values, which the builder makes the game report. Only what needs eyes or taste is a look check, judged by a tester from play: {"what":"...","kind":"look","how":"<what to look at and when>"}. Play is seen as frames without sound, so audio is never a look check: check it as state the game reports about what it plays (a count of sounds played, whether music runs). A usual order: the core loop playable end to end; a complete first area with a way to win and to lose; progression (more areas or rising challenge); title, flow and ending; feel, juice and audio. Each round of the run builds one rung and is kept only when its checks pass, so make every rung a real step a round can build, and no rung for what already works. Polish is not a rung: the run polishes after the ladder.`;
 const LADDER_ASK = `Then submit the ladder with game_run_submit: ${LADDER_SHAPE} as {"_tag":"ladder","rungs":[{"is":"...","checks":[...]}]} with 4 to 7 rungs in build order.${LADDER_RULES} ${REFUSED}`;
 
-export const stage = (name: "vision" | "plan" | "art", lane: string): string => {
+export const stage = (name: "vision" | "plan" | "art", game: RunGame): string => {
   if (name === "vision")
     return `${TOOL_RULE}Read the brief in BRIEF.md and make it yours. Write VISION.md in this folder in your own words: the player's fantasy, the 30-second loop, what makes this one special. Look through the CC0 asset library (game_assets_search with no query and no kind lists every pack and its style); when one pack fits the brief, make it the game's style source and name it in VISION.md, so the whole game keeps that one look. Then render one key-art PNG the finished game must live up to with game_blender_code, in that pack's style when you chose one (see ./studio-skills/art-pipeline.md for a working render setup; your own image tools are fine if you have them), look at it, and name it in VISION.md. Do not write game code yet. Work only in this folder. Do not use subagents. Never commit.`;
   if (name === "plan")
     return `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (default target). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. ${LADDER_ASK} Do not write game code. Do not use subagents. Do not commit.`;
-  return `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Make the game's asset set as files in ${laneAssets(lane)} (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. Take what fits the key art from the CC0 library (game_assets_search, look at its contact sheet, then game_assets_add), starting with the pack VISION.md names if it names one, and render the rest to match: one consistent style for the whole game. Render sprites and animation frames from Blender models with game_blender_render_sprites (a pixel-art style pack goes in as its palette), never with your own camera or render code. Also replace ${laneUi(lane)}/icon.png (a placeholder) with the game's icon, 256x256, cut from the key art around its main subject so it reads at taskbar size: the window, the web tab and the Windows .exe use it. Also save the key art, 16:9, as ${laneUi(lane)}/title_bg.png: the title screen shows it behind the menu${laneProfile(lane).run.prompts.titleArt}. ${laneProfile(lane).run.prompts.art}In a 3D game every character or creature that moves is a rigged model with its animation clips (idle, walk or run, and its actions): take a rigged library character first (game_assets_search; the style pack's characters), and model one yourself only with an armature and clips when none fits; sprite frames are for 2D games. Record each file's intended use and source in ASSETS.md as a file-to-use map (one line per file: path, what it depicts, where the game loads it, source and licence). Do not write game code yet. Do not use subagents. Do not commit.`;
+  return `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Make the game's asset set as files in ${gamePaths(game.engine, game.project).assets} (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. Take what fits the key art from the CC0 library (game_assets_search, look at its contact sheet, then game_assets_add), starting with the pack VISION.md names if it names one, and render the rest to match: one consistent style for the whole game. Render sprites and animation frames from Blender models with game_blender_render_sprites (a pixel-art style pack goes in as its palette), never with your own camera or render code. Also replace ${gamePaths(game.engine, game.project).ui}/icon.png (a placeholder) with the game's icon, 256x256, cut from the key art around its main subject so it reads at taskbar size: the window, the web tab and the Windows .exe use it. Also save the key art, 16:9, as ${gamePaths(game.engine, game.project).ui}/title_bg.png: the title screen shows it behind the menu${engineProfile(game.engine).run.prompts.titleArt}. ${engineProfile(game.engine).run.prompts.art}In a 3D game every character or creature that moves is a rigged model with its animation clips (idle, walk or run, and its actions): take a rigged library character first (game_assets_search; the style pack's characters), and model one yourself only with an armature and clips when none fits; sprite frames are for 2D games. Record each file's intended use and source in ASSETS.md as a file-to-use map (one line per file: path, what it depicts, where the game loads it, source and licence). Do not write game code yet. Do not use subagents. Do not commit.`;
 };
 
 // The art stage's first render is judged by a fresh session, never by its maker.
-export const artReview = (lane: string): string =>
-  `${TOOL_RULE}You are the art director for this game's asset set. Read VISION.md and ./studio-skills/art-director.md. Open the key-art image VISION.md names and look at it, then read ASSETS.md and open every image file it lists under ${laneAssets(lane)} (for 3D models, look at a render made with the game_blender_* tools). If VISION.md names a style-source library pack, look at it with game_assets_search (pack: that id) and judge the set's style against it; a different rendering style (smooth renders against pixel art) is a cohesion defect. Judge the key art and the set against VISION.md: cohesion with the key art, readability at play size, glaring defects, and anything that looks placeholder or code-drawn (flat shapes, plain dots, missing light, glow or shading, a crowded composition, animation frames that barely differ, a flat background, a 3D character or creature that moves but has no skeleton or animation clips in the model facts, models whose heights do not fit each other). ${`Then submit your review with game_run_submit as {"_tag":"art","redo":<true or false>,"defects":"<${ART_DEFECTS}>"} (${ART_NOT_CODE}). redo is true only when a listed defect makes the game look worse than its vision promises. ${REFUSED} Change no files. Do not use subagents.`}`;
+export const artReview = (game: RunGame): string =>
+  `${TOOL_RULE}You are the art director for this game's asset set. Read VISION.md and ./studio-skills/art-director.md. Open the key-art image VISION.md names and look at it, then read ASSETS.md and open every image file it lists under ${gamePaths(game.engine, game.project).assets} (for 3D models, look at a render made with the game_blender_* tools). If VISION.md names a style-source library pack, look at it with game_assets_search (pack: that id) and judge the set's style against it; a different rendering style (smooth renders against pixel art) is a cohesion defect. Judge the key art and the set against VISION.md: cohesion with the key art, readability at play size, glaring defects, and anything that looks placeholder or code-drawn (flat shapes, plain dots, missing light, glow or shading, a crowded composition, animation frames that barely differ, a flat background, a 3D character or creature that moves but has no skeleton or animation clips in the model facts, models whose heights do not fit each other). ${`Then submit your review with game_run_submit as {"_tag":"art","redo":<true or false>,"defects":"<${ART_DEFECTS}>"} (${ART_NOT_CODE}). redo is true only when a listed defect makes the game look worse than its vision promises. ${REFUSED} Change no files. Do not use subagents.`}`;
 const ART_DEFECTS =
   "a short list of concrete defects in the art files, one line each naming the file, what is wrong and what would fix it";
 const ART_NOT_CODE =
@@ -85,8 +92,8 @@ export const modelBlock = (models: string, redo = false): string =>
     : `\n\nMeasured 3D model facts (read from each file; heights in model units, so compare sizes across models; numbers, not verdicts${redo ? "; measured before your redo" : ""}):\n${models}`;
 
 // Works as a follow-up on the art thread and as a fresh art role alike.
-export const artRedo = (defects: string, lane: string): string =>
-  `${TOOL_RULE}${SKILL_LINE}An independent art director reviewed the key art and the asset set and asked for one redo. Its defect list:\n${defects}\n\nFix every listed defect: re-render the named files (the key art VISION.md names, files under ${laneAssets(lane)}) held to the look VISION.md describes, keep each file's path, and update ASSETS.md where a file changed. Look at each new render before you finish. This is the only redo. Do not write game code. Do not use subagents. Do not commit.`;
+export const artRedo = (defects: string, game: RunGame): string =>
+  `${TOOL_RULE}${SKILL_LINE}An independent art director reviewed the key art and the asset set and asked for one redo. Its defect list:\n${defects}\n\nFix every listed defect: re-render the named files (the key art VISION.md names, files under ${gamePaths(game.engine, game.project).assets}) held to the look VISION.md describes, keep each file's path, and update ASSETS.md where a file changed. Look at each new render before you finish. This is the only redo. Do not write game code. Do not use subagents. Do not commit.`;
 
 // A run that reached its rounds before the ladder existed writes one from where the game is.
 export const ladderWrite = (): string =>
@@ -112,9 +119,9 @@ const lookCount = (rung: Pick<Rung, "checks">): number =>
 export const fixChecks = (
   failed: ReadonlyArray<{ readonly k: number; readonly what: string; readonly evidence: string }>,
   rung: Pick<Rung, "checks">,
-  lane: string,
+  game: RunGame,
 ): string =>
-  `The harness booted your build and played the rung's state checks. These failed:\n${failed.map((c) => `${c.k + 1}. ${c.what}: ${c.evidence}`).join("\n")}\nThe checks as written:\n${checkList(rung)}\nFix the game so each holds in play: a value the game reports no key for must be exposed in its GameState under that name, and a setup target the game refuses must be added: ${laneProfile(lane).run.prompts.stateHook} Run game_run_checks to score them yourself before you stop. Do not edit the ladder or the checks.`;
+  `The harness booted your build and played the rung's state checks. These failed:\n${failed.map((c) => `${c.k + 1}. ${c.what}: ${c.evidence}`).join("\n")}\nThe checks as written:\n${checkList(rung)}\nFix the game so each holds in play: a value the game reports no key for must be exposed in its GameState under that name, and a setup target the game refuses must be added: ${engineProfile(game.engine).run.prompts.stateHook} Run game_run_checks to score them yourself before you stop. Do not edit the ladder or the checks.`;
 
 const checkList = (rung: Pick<Rung, "checks">): string =>
   rung.checks
@@ -130,25 +137,25 @@ const checkList = (rung: Pick<Rung, "checks">): string =>
  * itself once (its frames become the creator's sheet) and pitches itself in two lines.
  */
 export const proto = (
-  lane: string,
+  game: RunGame,
   guided: { readonly pitch: string; readonly notes: string } | null = null,
 ): string =>
-  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} with placeholder art only: something winnable and losable. ${laneProfile(lane).run.prompts.shell}Keep the boot clean. ${
+  `${wholeBuildRule(game)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${game.project} with placeholder art only: something winnable and losable. ${engineProfile(game.engine).run.prompts.shell}Keep the boot clean. ${
     guided === null
       ? ""
       : `${guided.notes.length > 0 ? `The creator saw an earlier pair of prototypes and asked for this: ${guided.notes}\n` : ""}The creator chooses between this prototype and another one. Before you finish, play your build once with game_explore_start/act/close, so the creator sees its frames. Then write ${guided.pitch}: two lines in plain words, what this version tries and how it feels to play. `
   }Do not use subagents. Do not commit.`;
 
 /** The vision once more, on the creator's notes about the key art and VISION.md. */
-export const visionRevise = (notes: string, lane: string): string =>
-  `${stage("vision", lane)}\n\nVISION.md and its key art exist already. The creator looked at them and asked for this:\n${notes}\nRevise VISION.md and render the key art again to answer it, keeping what the creator did not ask to change; name the new key art in VISION.md.`;
+export const visionRevise = (notes: string, game: RunGame): string =>
+  `${stage("vision", game)}\n\nVISION.md and its key art exist already. The creator looked at them and asked for this:\n${notes}\nRevise VISION.md and render the key art again to answer it, keeping what the creator did not ask to change; name the new key art in VISION.md.`;
 
 /** The plan's ladder once more, on the creator's notes. */
 export const ladderRevise = (notes: string): string =>
   `${TOOL_RULE}The creator read the ladder in ${LADDER_FILE} and asked for this:\n${notes}\nSubmit a new ladder that answers it, keeping the shape: ${LADDER_ASK} Update PLAN.md where the change makes it wrong. You may only write PLAN.md. Do not use subagents. Do not commit.`;
 
-export const firstDirection = (lane: string, first: Rung | null = null, creator = ""): string =>
-  `${creator.length > 0 ? `${creator}\n` : ""}Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${laneAssets(lane)} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. ${laneProfile(lane).run.prompts.shell}${first === null ? "" : `Aim at the ladder's first rung (${LADDER_FILE}), which the first round checks: the game IS ${first.is} Its checks:\n${checkList(first)}\nMake each check observable the way it says. `}End with something a player notices in the first minute; game files under ${lane}/ only.`;
+export const firstDirection = (game: RunGame, first: Rung | null = null, creator = ""): string =>
+  `${creator.length > 0 ? `${creator}\n` : ""}Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${gamePaths(game.engine, game.project).assets} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. ${engineProfile(game.engine).run.prompts.shell}${first === null ? "" : `Aim at the ladder's first rung (${LADDER_FILE}), which the first round checks: the game IS ${first.is} Its checks:\n${checkList(first)}\nMake each check observable the way it says. `}End with something a player notices in the first minute; game files under ${game.project}/ only.`;
 
 /**
  * A ladder round's direction: the rung, then the reviewer's ledger. A rung that
@@ -161,37 +168,37 @@ export const rungDirection = (
   ledger: string,
   lastTry: string,
   continuing: boolean,
-  lane: string,
+  game: RunGame,
 ): string =>
-  `This round builds rung ${k} of ${total} of the ladder in ${LADDER_FILE}. After it the game IS: ${rung.is}\nThe round is kept only when a tester verifies each of these checks in play:\n${checkList(rung)}\nRead VISION.md and PLAN.md first, then build the rung as one playable whole, end to end, in the game's own code and assets. Make every check observable the way it says: for a state check, the game must report each key its expect reads in its GameState, and reach its setup; ${laneProfile(lane).run.prompts.stateHook}For a look check, make what it names show on screen. Run game_run_checks to score the state checks on your build as you go, and stop only when they pass. Keep what works now working.${lastTry.length === 0 ? "" : continuing ? `\nThe last round built this rung and did not land it: ${lastTry} Its work is your starting point: keep what passed working and finish what failed, making each failed check reachable and observable in play.` : `\nAn earlier round built this rung and did not land it: ${lastTry} Start from what is on main and do not repeat that.`}${ledger.length > 0 ? `\nAlongside the rung, never instead of it, clear what you can of the last review's ledger (bugs, rough edges, DO NOT REGRESS):\n${ledger}` : ""}\nWork in game files under ${lane}/; notes, bots and skill files do not count.`;
+  `This round builds rung ${k} of ${total} of the ladder in ${LADDER_FILE}. After it the game IS: ${rung.is}\nThe round is kept only when a tester verifies each of these checks in play:\n${checkList(rung)}\nRead VISION.md and PLAN.md first, then build the rung as one playable whole, end to end, in the game's own code and assets. Make every check observable the way it says: for a state check, the game must report each key its expect reads in its GameState, and reach its setup; ${engineProfile(game.engine).run.prompts.stateHook}For a look check, make what it names show on screen. Run game_run_checks to score the state checks on your build as you go, and stop only when they pass. Keep what works now working.${lastTry.length === 0 ? "" : continuing ? `\nThe last round built this rung and did not land it: ${lastTry} Its work is your starting point: keep what passed working and finish what failed, making each failed check reachable and observable in play.` : `\nAn earlier round built this rung and did not land it: ${lastTry} Start from what is on main and do not repeat that.`}${ledger.length > 0 ? `\nAlongside the rung, never instead of it, clear what you can of the last review's ledger (bugs, rough edges, DO NOT REGRESS):\n${ledger}` : ""}\nWork in game files under ${game.project}/; notes, bots and skill files do not count.`;
 
-const concreteAsk = (lane: string) =>
-  `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under ${lane}/; notes, bots and skill files do not count.`;
+const concreteAsk = (game: RunGame) =>
+  `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under ${game.project}/; notes, bots and skill files do not count.`;
 
 /** The round's base direction: the last review, else the pick's findings, else the plan. */
-export const roundBase = (next: string, pickNotes: string, lane: string): string =>
+export const roundBase = (next: string, pickNotes: string, game: RunGame): string =>
   next.length > 0
     ? next
     : pickNotes.length > 0
-      ? `No review yet. The blind pick of the prototypes reported real play issues; fix the most important one in how the game plays, feels or looks:\n${pickNotes}\n${concreteAsk(lane)}`
-      : `Read PLAN.md and improve the biggest quality gap in what exists: how it plays, feels and looks, working systems, no bugs. Play weakness first. ${concreteAsk(lane)}`;
+      ? `No review yet. The blind pick of the prototypes reported real play issues; fix the most important one in how the game plays, feels or looks:\n${pickNotes}\n${concreteAsk(game)}`
+      : `Read PLAN.md and improve the biggest quality gap in what exists: how it plays, feels and looks, working systems, no bugs. Play weakness first. ${concreteAsk(game)}`;
 
 /** The creator's own notes lead the round; the review's direction follows as far as it fits. */
 export const steered = (notes: ReadonlyArray<string>, base: string): string =>
   `The creator asked for this; it comes first this round:\n${notes.map((note) => `- ${note}`).join("\n")}\nThen, where it fits alongside that, the last direction:\n${base}`;
 
-export const roundDirection = (base: string, repeating: boolean, lane: string): string =>
+export const roundDirection = (base: string, repeating: boolean, game: RunGame): string =>
   repeating
-    ? `The last review wrote no new direction, so this round repeats the previous one:\n${base}\n${concreteAsk(lane)}`
+    ? `The last review wrote no new direction, so this round repeats the previous one:\n${base}\n${concreteAsk(game)}`
     : base;
 
-export const retryDirection = (direction: string, lane: string, rung: boolean): string =>
+export const retryDirection = (direction: string, game: RunGame, rung: boolean): string =>
   rung
-    ? `The last block changed no game files under ${lane}/. Build this round's rung now:\n${direction}\nVerify with game_check. No subagents. No commits.`
-    : `The last block changed no game files under ${lane}/. Address the named top flaw now: ${direction} ${concreteAsk(lane)} Verify with game_check. No subagents. No commits.`;
+    ? `The last block changed no game files under ${game.project}/. Build this round's rung now:\n${direction}\nVerify with game_check. No subagents. No commits.`
+    : `The last block changed no game files under ${game.project}/. Address the named top flaw now: ${direction} ${concreteAsk(game)} Verify with game_check. No subagents. No commits.`;
 
-export const builderFirst = (whole: boolean, lane: string, direction: string): string =>
-  `${whole ? wholeBuildRule(lane) : buildRule(lane)}${SKILL_LINE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\nNote learnings in NOTES.md. Do not use subagents. Never commit, never reset git.`;
+export const builderFirst = (whole: boolean, game: RunGame, direction: string): string =>
+  `${whole ? wholeBuildRule(game) : buildRule(game)}${SKILL_LINE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\nNote learnings in NOTES.md. Do not use subagents. Never commit, never reset git.`;
 
 // A builder that finished the direction early otherwise spends its follow-ups
 // rewriting NOTES.md until the no-change limit ends the block.

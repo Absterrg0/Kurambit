@@ -39,6 +39,7 @@ export function GamePlaySurface({
   frameKey,
   hidden,
   canOperate,
+  operation,
   onPlay,
   onRebuild,
   onStop,
@@ -46,6 +47,8 @@ export function GamePlaySurface({
   onOpenTools,
 }: {
   phase: GameStagePhase;
+  /** The operation running on the game: its name, and whether it is this thread's own (Stop ends only those). */
+  operation: { readonly name: string; readonly own: boolean } | null;
   viewport: GameViewport;
   gameName: string;
   previewUrl: string | null;
@@ -170,6 +173,7 @@ export function GamePlaySurface({
             gameName={gameName}
             phase={phase}
             canOperate={canOperate}
+            operation={operation}
             onPlay={onPlay}
             onRebuild={onRebuild}
             onStop={onStop}
@@ -186,6 +190,7 @@ function StageStateCard({
   gameName,
   phase,
   canOperate,
+  operation,
   onPlay,
   onRebuild,
   onStop,
@@ -195,6 +200,7 @@ function StageStateCard({
   gameName: string;
   phase: GameStagePhase;
   canOperate: boolean;
+  operation: { readonly name: string; readonly own: boolean } | null;
   onPlay: () => void;
   onRebuild: () => void;
   onStop: () => void;
@@ -248,7 +254,7 @@ function StageStateCard({
               <RefreshCwIcon className="size-5" aria-hidden="true" />
             </StageIcon>
             <StageCopy
-              title="Building the web game"
+              title={operation === null ? "Starting" : operation.name}
               body={
                 <span className="inline-flex items-center gap-1.5">
                   <span className="truncate">{phase.message}</span>
@@ -258,10 +264,13 @@ function StageStateCard({
                 </span>
               }
             />
-            <Button size="sm" variant="outline" disabled={!canOperate} onClick={onStop}>
-              <SquareIcon className="size-3.5" aria-hidden="true" />
-              Stop
-            </Button>
+            {/* Stop ends only this chat's own work; a run's capture or check is the run's. */}
+            {operation === null || operation.own ? (
+              <Button size="sm" variant="outline" disabled={!canOperate} onClick={onStop}>
+                <SquareIcon className="size-3.5" aria-hidden="true" />
+                Stop
+              </Button>
+            ) : null}
           </>
         ) : null}
         {phase.kind === "ready" ? (

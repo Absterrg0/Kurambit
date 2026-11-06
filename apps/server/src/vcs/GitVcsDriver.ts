@@ -589,6 +589,14 @@ function parseGitRemoteVerboseOutput(
   return remotes;
 }
 
+/** The identity of every commit Kurambit itself makes: checkpoints and a created repository's first. */
+const KURAMBIT_COMMIT_IDENTITY = {
+  GIT_AUTHOR_NAME: "Kurambit",
+  GIT_AUTHOR_EMAIL: "kurambit@users.noreply.github.com",
+  GIT_COMMITTER_NAME: "Kurambit",
+  GIT_COMMITTER_EMAIL: "kurambit@users.noreply.github.com",
+} as const;
+
 const gitCommand = (
   process: VcsProcess.VcsProcess["Service"],
   operation: string,
@@ -827,11 +835,46 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     return relativePaths.filter((relativePath) => !ignoredPaths.has(relativePath));
   });
 
-  const initRepository: VcsDriver.VcsDriver["Service"]["initRepository"] = (input) =>
-    gitCommand(vcsProcess, "GitVcsDriver.initRepository", input.cwd, ["init"], {
+  const initRepository: VcsDriver.VcsDriver["Service"]["initRepository"] = Effect.fn(
+    "GitVcsDriver.initRepository",
+  )(function* (input) {
+    const operation = "GitVcsDriver.initRepository";
+    yield* gitCommand(vcsProcess, operation, input.cwd, ["init"], {
       timeoutMs: 10_000,
       maxOutputBytes: 64 * 1024,
-    }).pipe(Effect.asVoid);
+    });
+    const initialCommit = input.initialCommit;
+    if (initialCommit === undefined) return;
+    // Plumbing, as checkpoints commit: commit-tree runs no hooks, and signing is
+    // turned off explicitly, so a global commit.gpgSign or hooksPath cannot fail
+    // or prompt during a create.
+    const env = { ...process.env, ...KURAMBIT_COMMIT_IDENTITY };
+    const plumbing = (args: ReadonlyArray<string>) =>
+      gitCommand(vcsProcess, operation, input.cwd, args, {
+        env,
+        timeoutMs: 120_000,
+        maxOutputBytes: 64 * 1024,
+      });
+    yield* plumbing(["add", "-A"]);
+    const tree = (yield* plumbing(["write-tree"])).stdout.trim();
+    const commit = (yield* plumbing([
+      "-c",
+      "commit.gpgSign=false",
+      "commit-tree",
+      tree,
+      "-m",
+      initialCommit.message,
+    ])).stdout.trim();
+    if (tree.length === 0 || commit.length === 0)
+      return yield* new VcsProcessExitError({
+        operation,
+        command: "git commit-tree",
+        cwd: input.cwd,
+        exitCode: 0,
+        detail: "git returned an empty tree or commit oid for the first commit.",
+      });
+    yield* plumbing(["update-ref", "HEAD", commit]);
+  });
 
   const resolveHeadCommit = (cwd: string) =>
     execute({
@@ -1828,10 +1871,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           const commitEnv: NodeJS.ProcessEnv = {
             ...process.env,
             GIT_INDEX_FILE: tempIndexPath,
-            GIT_AUTHOR_NAME: "Kurambit",
-            GIT_AUTHOR_EMAIL: "kurambit@users.noreply.github.com",
-            GIT_COMMITTER_NAME: "Kurambit",
-            GIT_COMMITTER_EMAIL: "kurambit@users.noreply.github.com",
+            ...KURAMBIT_COMMIT_IDENTITY,
           };
           for (const [key, value] of captureConfig)
             Object.assign(commitEnv, VcsProcess.gitConfigEnv(commitEnv, key, value, hostPlatform));

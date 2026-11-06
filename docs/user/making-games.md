@@ -31,6 +31,10 @@ locations (Unity Hub's editors folder and its secondary install folder, and copi
 Kurambit installed), then your PATH (`godot`, `godot4`, `blender`). A path you enter is the only
 place it looks, so a wrong one shows as an error instead of being skipped.
 
+ffmpeg records bot runs' videos, so bot runs need it; the asset library also uses it to draw
+contact sheets of a pack's pictures, and without it lists the pack's files with no picture.
+Kurambit finds it on your PATH or at `KURAMBIT_FFMPEG`.
+
 The live Blender view's helper runs through uv; Kurambit uses yours if it is on PATH and otherwise
 fetches it once by itself. Playing native games and the live Blender and Unity editors also need
 the system Xvfb package (`xorg-x11-server-Xvfb` on Fedora, `xvfb` on Debian and Ubuntu): everything
@@ -49,12 +53,16 @@ machine hang on swap; a production run waits for memory rather than failing, and
 short it pauses, ready to resume. The refusal says how much is needed and how much is free; close
 other apps or wait a few minutes, then ask again. Starts also take turns across the machine, so a
 start can wait behind another game's: a run that keeps waiting behind other starts pauses as
-**Machine busy**, ready to resume once they finish. Kurambit never closes your other apps to make
+**Machine busy**, ready to resume once they finish. A run whose own tools keep failing while they
+measure a build (the browser, an engine editor, a copy of the game) pauses as **Tool failed** after
+a few minutes of waiting, with what failed; it never judges the build on it, and resuming the run
+with an empty brief goes on once the cause is fixed. Kurambit never closes your other apps to make
 room. If free memory falls under about 1 GB while an editor sits idle, Kurambit closes it and
 reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB`,
 `KURAMBIT_BLENDER_MEMORY_MB`, `KURAMBIT_EXPLORE_NATIVE_MEMORY_MB`,
-`KURAMBIT_EXPLORE_WEB_MEMORY_MB` and `KURAMBIT_BOT_MEMORY_MB` change the requirement, and 0
-turns the check off.
+`KURAMBIT_EXPLORE_WEB_MEMORY_MB`, `KURAMBIT_EXPLORE_UNITY_MEMORY_MB` (1 GB for a Unity session),
+`KURAMBIT_BLENDER_RENDER_MEMORY_MB` (sprite renders and rendered looks) and
+`KURAMBIT_BOT_MEMORY_MB` change the requirement, and 0 turns the check off.
 
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.
@@ -73,8 +81,8 @@ browser lane: a static browser game with three.js vendored (no install step), pl
 through the same tools, with a Web export only. The run loop, Play, preview and web packaging work
 the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
 editor on a private display, plays real Linux builds of it, and exports Linux and Windows builds.
-Unity games have no Web export, so Play and web packaging are not available for them, and bot runs
-do not play them yet. In a production run, each blind comparison builds a Unity game in a separate
+Unity games have no Web export, so Play and web packaging are not available for them; explore
+sessions and bot runs play a Linux player of the current sources, built once per change. In a production run, each blind comparison builds a Unity game in a separate
 checkout of it, which takes over the one Unity editor for that build; the game's own editor reopens
 on its next Unity call.
 
@@ -96,7 +104,7 @@ player's report and frames. Each round after it says what it tried and whether i
 verdicts and reasoning, the blind players' reports, the bot's results and video, the tester's note
 and the reviewer's direction. Your agent can read the same with `game_run_round`, so you can ask it
 what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
-the work. **Stop run** ends it; every build the run made, rejected ones too, stays kept. The run never
+the work. **Stop run** ends it; its kept builds stay, as do rounds that failed their checks, were inconclusive or were not judged; a round whose build the best beat in both orders is cleared when the run ends. The run never
 commits, switches branches or touches your git: its builds are Kurambit checkpoints, and your
 game folder holds the current build as uncommitted work you commit when you like. Starting the run again without
 a new brief continues it where it stopped, and if Kurambit restarts during a run, the run picks up
@@ -108,7 +116,7 @@ are not carried over; its history stays in git.
 
 A run is **Guided** (the default) or on **Autopilot**. A Guided run asks you at the moments that
 shape the game: once the vision and its key art exist, once both prototypes are built, and once
-the plan has written its ladder. Your agent posts the question in the game's chat with the key
+the plan has written its ladder. Your agent posts the question in the game chat you last started, steered or answered the run from, with the key
 art, each prototype's frames and its two-line pitch, or the ladder, and asks what you want. Answer
 in your own words: keep it or ask for changes ("pinker, rounder"), pick a prototype or combine
 them ("the second one, with the first one's camera"), ask for one more pair of prototypes, edit
@@ -182,21 +190,25 @@ its right.
   the stage says so and offers to rebuild.
 - **Stop** ends only the processes Kurambit
   started for this game, and closes its preview server.
-- **Export Windows** writes a 64-bit build to `builds/windows/game.exe` (Godot and Unity games;
-  three.js games export Web only and Windows and Linux are refused with the reason). The standard preset embeds
-  the game data, so you can copy that one file to a Windows PC. A game whose Windows preset does not
-  embed it also gets `builds/windows/game.pck`, and both files must be copied together; the export
-  result says which files to share. **Download package** on the same card zips the checked release
-  files Kurambit already exported — `game.exe` alone, or `game.exe` and `game.pck` — without
-  exporting again. If the game sources changed since that export, export Windows again before
-  packaging. **Export Linux** writes a standalone build to `builds/linux/`. Kurambit checks the
+- **Export Windows** writes a 64-bit build to `builds/windows/` (Godot and Unity games; the Builds
+  tab shows only the targets a game's engine makes, and three.js games export Web only). A Godot
+  build is `game.exe`: the standard preset embeds the game data, so you can copy that one file to a
+  Windows PC; a preset that does not embed it also writes `game.pck`, and both files must be copied
+  together. A Unity build is the whole `builds/windows/` folder (`game.exe` with its `game_Data/`
+  and runtime files); ship the folder. **Download package** on the same card zips a Godot release
+  Kurambit already exported — `game.exe` alone, or `game.exe` and `game.pck` — without
+  exporting again; a Unity folder is not packaged. If the game sources changed since that export, export Windows again before
+  packaging. **Export Linux** writes a standalone build to `builds/linux/` (for Unity, the whole
+  folder ships). A release replaces the previous one only once it is complete and checked, so a
+  failed or interrupted export leaves the last good build in place. Kurambit checks the
   Windows executable it produced but does not run it, so try it on Windows before sharing it. If
   Godot's Windows export templates are missing, add them in the Godot editor under **Editor →
   Manage Export Templates**. The **Builds**
   tab lists every target with its time, folder and logs, and a freshness check against the current
   sources.
 - **Download package** on the Web card zips the exact build Play serves, without exporting or
-  rebuilding. Later source edits are not included; only a new export changes what a new package
+  rebuilding. Kurambit keeps the build Play serves and the one before it; older web builds are
+  removed as new ones land. Later source edits are not included; only a new export changes what a new package
   contains. Upload the extracted files to an ordinary static HTTP host and serve them over HTTP;
   opening `index.html` directly from disk (`file://`) is not a supported way to play a WebAssembly
   export.

@@ -4,15 +4,9 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
-import { GameOperationError } from "@kurambit/contracts";
+import { plainReason } from "@kurambit/contracts";
 import { botEnding, botFinalState } from "../gameBotRuntime.ts";
-import {
-  type GameRunGameBusy,
-  type GameRunMemoryShort,
-  handBackOnBusy,
-  handBackOnLowMemory,
-  memoryEnded,
-} from "./lowMemory.ts";
+import { type NotMeasured, measuring, toolFailed } from "./handBack.ts";
 import type { StepResult } from "./policy.ts";
 import { playCopy, type RoleDeps } from "./roleWorkspace.ts";
 import type { Step } from "./state.ts";
@@ -20,106 +14,84 @@ import type { Step } from "./state.ts";
 type BotStep = Extract<Step, { kind: "bot" }>;
 type BotResult = Extract<StepResult, { kind: "bot" }>;
 
-// Notes land in the step record and the comparison record: the cause, never a machine
-// path. Only paths under these roots go; a game's own node or res:// paths stay.
-const plain = (text: string, root: string): string => {
-  const roots = [root, NodeOS.homedir(), NodeOS.tmpdir()]
-    .filter((each) => each.length > 1)
-    .map((each) => each.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return text
-    .replace(new RegExp(`(?:${roots.join("|")})[^\\s'"\`)]*`, "g"), "<path>")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 160);
-};
+/**
+ * The fact a comparison withholds from both reports: the bot itself did not
+ * play (its module would not load, its child broke, the run was stopped).
+ * The same bot fails the same way on both builds, so it says nothing about
+ * either; the policy reads this one ending as "no fact".
+ */
+const WITHHELD = "error";
 
+// Notes land in the step record and the comparison record: the cause, never a machine path.
+const plain = (text: string, root: string) =>
+  plainReason(text.replace(/\s+/g, " "), [root, NodeOS.homedir(), NodeOS.tmpdir()]).slice(0, 160);
+
+/**
+ * The bot on one build, measured: how it ended there (won, lost, timed out,
+ * crashed, stopped answering, did not boot), or withheld when the bot itself
+ * did not play. A copy, a tool or the machine that kept it from playing fails
+ * as not measured: no fact is made of it.
+ */
 export const runBotFact = (
   deps: RoleDeps,
   ctx: {
     readonly root: string;
-    readonly runId: string;
     readonly copies: string;
-    readonly log: (line: string) => Effect.Effect<void>;
-    /** The step may still hand itself back to wait for memory, or for a start ahead of it. */
-    readonly memoryWaitsLeft: boolean;
-    readonly busyWaitsLeft: boolean;
   },
   step: BotStep,
-): Effect.Effect<
-  BotResult | ReturnType<typeof memoryEnded>,
-  GameRunMemoryShort | GameRunGameBusy
-> => {
-  const errorFact = (note: string): BotResult => ({
+): Effect.Effect<BotResult, NotMeasured> => {
+  const what = "the bot run on one compared build";
+  const roots = [ctx.root, ctx.copies];
+  const withheld = (note: string): BotResult => ({
     kind: "bot",
-    fact: { ending: "error", seconds: 0, final: {}, note: plain(note, ctx.root) },
+    fact: { ending: WITHHELD, seconds: 0, final: {}, note: plain(note, ctx.root) },
   });
   // A fresh copy every time: a resumed step's earlier copy is replaced whole.
   const copy = NodePath.join(ctx.copies, `bot-${step.id}`);
   const play = Effect.acquireUseRelease(
     playCopy(deps, ctx.root, step.sha, copy).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GameOperationError({
-            operation: "Bot facts",
-            path: step.sha,
-            reason: "io",
-            detail: `could not copy the build (${cause.message})`,
-          }),
-      ),
+      measuring(what, roots),
       Effect.flatMap((made) =>
         made
-          ? Effect.succeed({ worktree: { path: copy } })
-          : Effect.fail(
-              new GameOperationError({
-                operation: "Bot facts",
-                path: step.sha,
-                reason: "io",
-                detail: "the build is gone",
-              }),
-            ),
+          ? Effect.succeed(copy)
+          : // The run's record names a build that is gone: no wait brings it back.
+            Effect.fail(toolFailed(what, "the build is gone", { standing: true })),
       ),
     ),
-    ({ worktree }) =>
+    (path) =>
       Effect.gen(function* () {
         // The bot was written after the build was kept, so it lives only in
         // the game folder; the copy gets the folder's whole bot tree.
-        yield* Effect.tryPromise({
-          try: () =>
-            NodeFSP.cp(
-              NodePath.join(ctx.root, ".studio", "bot"),
-              NodePath.join(worktree.path, ".studio", "bot"),
-              { recursive: true, force: true },
-            ),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "Bot facts",
-              path: ".studio/bot",
-              reason: "io",
-              detail: `could not copy the bot files into the build's copy (${cause instanceof Error && "code" in cause ? String(cause.code) : "copy failed"})`,
-            }),
-        });
-        // Two bots of a pair start one at a time: the second may queue behind the first's import.
-        const result = yield* handBackOnBusy(
-          handBackOnLowMemory(
-            deps.game.botRunIn(worktree.path, {
-              file: step.file,
-              seconds: step.seconds,
-              mode: "play",
-              decider: step.decider,
-            }),
-            "bot run",
-            ctx.memoryWaitsLeft,
+        yield* Effect.tryPromise(() =>
+          NodeFSP.cp(
+            NodePath.join(ctx.root, ".studio", "bot"),
+            NodePath.join(path, ".studio", "bot"),
+            { recursive: true, force: true },
           ),
-          "bot run",
-          ctx.busyWaitsLeft,
-        );
+        ).pipe(measuring(`${what} (its bot files)`, roots));
+        // Two bots of a pair start one at a time: the second may queue behind the first's import.
+        const result = yield* deps.game
+          .botRunIn(path, {
+            file: step.file,
+            seconds: step.seconds,
+            mode: "play",
+            decider: step.decider,
+          })
+          .pipe(measuring(what, roots));
+        if (result.played === false) return withheld(`the bot did not play: ${result.status.note}`);
+        // A bot's own word the harness reserves arrives as `bot:<word>` (CONTRACT A9):
+        // it is measured play, the bot's to say, and is shown, never withheld.
+        if (result.status.state === "bot-error" || result.status.state === "stopped")
+          return withheld(`the bot did not finish: ${result.status.note}`);
         // The tester's decider is replayed; without its key the bot's own policy chose.
         const fallback =
           result.policyNote === null ? "" : "no Jev key here, so the bot's own policy chose; ";
+        const ending = botEnding(result.status.state);
         return {
           kind: "bot",
           fact: {
-            ending: botEnding(result.status.state),
+            // A bot's own word "error" is its finding, never the withheld fact.
+            ending: ending === WITHHELD ? "bot error" : ending,
             seconds: result.gameSeconds,
             final: botFinalState(result.finalState),
             ...(result.perf === undefined ? {} : { perf: result.perf }),
@@ -127,23 +99,26 @@ export const runBotFact = (
           },
         } satisfies BotResult;
       }),
-    ({ worktree }) =>
-      Effect.promise(() =>
-        NodeFSP.rm(worktree.path, { recursive: true, force: true }).catch(() => {}),
-      ),
+    (path) =>
+      Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true }).catch(() => {})),
   );
-  // A bot that cannot run on a build withholds bot facts, never drops the round;
-  // memory still short after the step's waits ends the run resumably, as it
-  // would for any step.
-  // Error messages open with generic advice; detail carries the cause.
   return play.pipe(
     Effect.catchTags({
-      GameOperationError: (error) =>
-        Effect.succeed(
-          error.reason === "low-memory"
-            ? memoryEnded(error)
-            : errorFact(error.detail ?? error.reason ?? "the bot run failed"),
-        ),
+      // A game that would not boot under the bot is measured, about this build.
+      // The copy is the run's own folder: a game.json or a link the copy did
+      // not get right is ours, never the build's (boot read the root's).
+      GameRunBuildFault: (fault) =>
+        fault.error.reason !== "command-failed"
+          ? Effect.fail(toolFailed(what, fault.error, { roots }))
+          : Effect.succeed<BotResult>({
+              kind: "bot",
+              fact: {
+                ending: "did not boot",
+                seconds: 0,
+                final: {},
+                note: plain(fault.error.detail ?? fault.error.reason, ctx.root),
+              },
+            }),
     }),
   );
 };

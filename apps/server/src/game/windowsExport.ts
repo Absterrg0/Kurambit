@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Reads an exported executable and pack through file handles.
+import * as NodeFSP from "node:fs/promises";
 /**
  * What a Windows release export must prove before it replaces an earlier one:
  * a 64-bit PE executable, and a Godot pack that still contains the project.
@@ -212,21 +214,43 @@ export const inspectWindowsBuildSource = async (input: {
   }
 };
 
-const bufferSource = (bytes: Uint8Array): WindowsBuildSource => ({
-  size: bytes.byteLength,
-  read: async (offset, length) => bytes.subarray(offset, offset + length),
-});
-
 /**
- * `pck` is the sidecar a non-embedded export writes. The standard preset embeds
- * the pack so one .exe is enough; a custom non-embedded preset needs both files
- * kept together.
+ * Inspects an exported executable and its optional `.pck` sidecar through file
+ * handles, a chunk at a time: an embedded pack makes the executable as large
+ * as the game, so it is never read whole. A missing sidecar reads as none.
+ * The standard preset embeds the pack so one .exe is enough; a custom
+ * non-embedded preset needs both files kept together.
  */
-export const inspectWindowsBuild = (input: {
-  readonly executable: Uint8Array;
-  readonly pck: Uint8Array | null;
-}): Promise<WindowsBuildInspection> =>
-  inspectWindowsBuildSource({
-    executable: bufferSource(input.executable),
-    pck: input.pck === null ? null : bufferSource(input.pck),
-  });
+export const inspectWindowsBuildFiles = async (input: {
+  readonly executable: string;
+  readonly pck: string;
+}): Promise<WindowsBuildInspection> => {
+  const open = async (path: string) => {
+    const handle = await NodeFSP.open(path, "r");
+    const size = (await handle.stat()).size;
+    const source: WindowsBuildSource = {
+      size,
+      read: async (offset, length) => {
+        const buffer = Buffer.alloc(length);
+        const { bytesRead } = await handle.read(buffer, 0, length, offset);
+        return buffer.subarray(0, bytesRead);
+      },
+    };
+    return { handle, source };
+  };
+  const executable = await open(input.executable);
+  let pck: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    pck = await open(input.pck).catch((cause: NodeJS.ErrnoException) => {
+      if (cause.code === "ENOENT") return null;
+      throw cause;
+    });
+    return await inspectWindowsBuildSource({
+      executable: executable.source,
+      pck: pck?.source ?? null,
+    });
+  } finally {
+    await executable.handle.close().catch(() => undefined);
+    await pck?.handle.close().catch(() => undefined);
+  }
+};

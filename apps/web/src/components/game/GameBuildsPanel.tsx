@@ -9,6 +9,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 
+import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { gameEnvironment } from "../../state/game";
@@ -51,6 +52,7 @@ const BUILD_META: Record<
 export function GameBuildsPanel({
   threadRef,
   builds,
+  exportTargets,
   webBuildStale,
   sourcesDifferFromPlay,
   canOperate,
@@ -60,6 +62,8 @@ export function GameBuildsPanel({
 }: {
   threadRef: ScopedThreadRef;
   builds: readonly BuildEntry[];
+  /** The release targets this game's engine exports; the panel offers only those. */
+  exportTargets: GameStatus["exportTargets"];
   webBuildStale: boolean;
   sourcesDifferFromPlay: GameStatus["sourcesDifferFromPlay"];
   canOperate: boolean;
@@ -70,6 +74,12 @@ export function GameBuildsPanel({
   const check = useAtomCommand(gameEnvironment.checkSources, { reportFailure: false });
   const packageWindows = useAtomCommand(gameEnvironment.packageWindows, { reportFailure: false });
   const packageWeb = useAtomCommand(gameEnvironment.packageWeb, { reportFailure: false });
+  const canPackageWindows = useAtomValue(
+    gameEnvironment.packageWindows.permissionAtom(threadRef.environmentId),
+  );
+  const canPackageWeb = useAtomValue(
+    gameEnvironment.packageWeb.permissionAtom(threadRef.environmentId),
+  );
   const preparedConnection = usePreparedConnection(threadRef.environmentId);
   const [packaging, setPackaging] = useState<"Windows" | "Web" | null>(null);
   const [packageNotice, setPackageNotice] = useState<{
@@ -78,7 +88,15 @@ export function GameBuildsPanel({
     readonly status: string | null;
     readonly error: string | null;
   } | null>(null);
-  const [checked, setChecked] = useState<GameStatus["sourcesDifferFromPlay"] | null>(null);
+  // A check answers for the builds and sources it saw: a new build or an edit
+  // since then makes the server's own answer current again.
+  const checkedFor = `${builds.map((entry) => `${entry.path}#${entry.updatedAt}`).join("|")}|${webBuildStale}`;
+  const [checkedState, setChecked] = useState<{
+    readonly value: GameStatus["sourcesDifferFromPlay"];
+    readonly for: string;
+  } | null>(null);
+  const checked =
+    checkedState !== null && checkedState.for === checkedFor ? checkedState.value : null;
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const windowsBuild = builds.find((entry) => entry.target === "Windows");
@@ -101,7 +119,7 @@ export function GameBuildsPanel({
     setChecking(false);
     if (result._tag === "Failure") setCheckError(String(squashAtomCommandFailure(result)));
     else {
-      setChecked(result.value.sourcesDifferFromPlay);
+      setChecked({ value: result.value.sourcesDifferFromPlay, for: checkedFor });
       setCheckError(null);
     }
   };
@@ -168,9 +186,13 @@ export function GameBuildsPanel({
         </Button>
         {checkError ? <span role="alert">{checkError}</span> : null}
       </div>
-      {BUILD_TARGETS.map((target) => {
+      {BUILD_TARGETS.filter((target) => exportTargets.includes(target)).map((target) => {
         const meta = BUILD_META[target];
         const build = builds.find((entry) => entry.target === target);
+        const canPackage =
+          canOperate &&
+          build?.packageable === true &&
+          (target === "Web" ? canPackageWeb : canPackageWindows);
         const stale = target === "Web" && build !== undefined && webBuildStale;
         const notice = target === "Linux" ? null : packageNoticeFor(target);
         const Icon = meta.icon;
@@ -194,6 +216,12 @@ export function GameBuildsPanel({
                 ) : null}
               </div>
               <p className="text-xs text-muted-foreground">{meta.body}</p>
+              {build?.ships === "folder" ? (
+                <p className="text-2xs text-muted-foreground">
+                  This release is the whole {build.path.replace(/\/[^/]+$/, "")} folder; ship the
+                  folder as it is.
+                </p>
+              ) : null}
               <p className="truncate font-mono text-2xs text-muted-foreground">
                 {build
                   ? `${build.path} · updated ${new Date(build.updatedAt).toLocaleString()}`
@@ -222,23 +250,25 @@ export function GameBuildsPanel({
                         <Gamepad2Icon className="size-3.5" aria-hidden="true" />
                         Play
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!canOperate || operationRunning || packaging !== null}
-                        aria-busy={packaging === "Web"}
-                        onClick={() => void downloadPackage("Web")}
-                      >
-                        <DownloadIcon className="size-3.5" aria-hidden="true" />
-                        {packaging === "Web" ? "Packaging…" : "Download package"}
-                      </Button>
+                      {build.packageable ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!canPackage || operationRunning || packaging !== null}
+                          aria-busy={packaging === "Web"}
+                          onClick={() => void downloadPackage("Web")}
+                        >
+                          <DownloadIcon className="size-3.5" aria-hidden="true" />
+                          {packaging === "Web" ? "Packaging…" : "Download package"}
+                        </Button>
+                      ) : null}
                     </>
                   ) : (
                     <>
-                      {target === "Windows" ? (
+                      {target === "Windows" && build.packageable ? (
                         <Button
                           size="sm"
-                          disabled={!canOperate || operationRunning || packaging !== null}
+                          disabled={!canPackage || operationRunning || packaging !== null}
                           aria-busy={packaging === "Windows"}
                           onClick={() => void downloadPackage("Windows")}
                         >

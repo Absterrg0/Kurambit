@@ -4,22 +4,42 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { GameOperationError, type GameViewport } from "@kurambit/contracts";
+import { GameOperationError, type GameProcessResult, type GameViewport } from "@kurambit/contracts";
 import type { GameEngineBackend } from "./GameEngine.ts";
 import type { GameBrowser } from "./gameChromium.ts";
 import type * as GameProcesses from "./GameProcesses.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
-import { listenForRunner, type PlaySession } from "./playSession.ts";
-import { openWebPlaySession, WebBrowserLaunchFailed } from "./webPlaySession.ts";
-import type { WindowHost } from "./windowHost.ts";
+import {
+  PLAY_BOUNDS,
+  PlayNotBooted,
+  TIMED_OUT,
+  bounded,
+  listenForRunner,
+  type PlayEnd,
+  type PlaySession,
+} from "./playSession.ts";
+import {
+  openWebPlaySession,
+  WebBrowserLaunchFailed,
+  WebPageCrashed,
+  WebPageNotReady,
+  type KeptStorage,
+} from "./webPlaySession.ts";
+import { isHostExit, type WindowHost } from "./windowHost.ts";
 
 export interface PlayLaunch {
   readonly play: PlaySession;
   /**
-   * Ends everything the launch started: the session, then the game, awaited
-   * to its exit, so nothing still writes into its folder. Idempotent.
+   * Settles when the game ends, saying by whose side: its process exited or
+   * its page crashed (the game's), or its display or browser went away (ours).
    */
-  readonly stop: () => Promise<void>;
+  readonly ended: Promise<PlayEnd>;
+  /**
+   * Ends everything the launch started: the session, then the game, awaited
+   * to its exit, so nothing still writes into its folder. Idempotent; a kept
+   * page's storage comes back for the caller to write.
+   */
+  readonly stop: () => Promise<{ readonly keptStorage: KeptStorage | null }>;
   readonly bootMs: number;
   /** Folders the runner writes that go with the session. */
   readonly scratch: ReadonlyArray<string>;
@@ -27,6 +47,21 @@ export interface PlayLaunch {
 }
 
 const isGameOperationError = Schema.is(GameOperationError);
+
+/**
+ * The game never booted: its process exited or never said hello in time, or
+ * its page never became ready or crashed while loading. Evidence about the
+ * build, never a tool fault; a bot run reports it as its `not-booted` status.
+ */
+export class PlayDidNotBoot extends Schema.TaggedError<PlayDidNotBoot>()("PlayDidNotBoot", {
+  /** What the game did instead, in its runner's or page's words. */
+  detail: Schema.String,
+}) {
+  override get message(): string {
+    return "The game did not boot.";
+  }
+}
+const didNotBoot = (detail: string) => new PlayDidNotBoot({ detail: detail.slice(0, 2000) });
 
 const failure =
   (operation: string, path: string, reason: GameOperationError["reason"], detail?: string) =>
@@ -41,10 +76,24 @@ const failure =
           cause,
         });
 
-const once = (work: () => Promise<void>): (() => Promise<void>) => {
-  let running: Promise<void> | null = null;
+const once = <A>(work: () => Promise<A>): (() => Promise<A>) => {
+  let running: Promise<A> | null = null;
   return () => (running ??= work());
 };
+
+/** How a runner process's exit reads: our display wrapper says when its display died first. */
+const runnerEnd = (result: GameProcessResult | null): PlayEnd =>
+  result !== null && isHostExit(result.exitCode)
+    ? { by: "host", detail: "The game's private display failed." }
+    : {
+        by: "game",
+        detail:
+          result === null
+            ? "The game's process ended."
+            : result.signal !== null
+              ? `The game's process was ended by ${result.signal}.`
+              : `The game's process exited with code ${result.exitCode}.`,
+      };
 
 /**
  * The engine's runner process (Godot on its sources, Unity's prepared player)
@@ -72,7 +121,7 @@ export const openRunnerPlay = (
     readonly bootTimeoutMs: number;
     readonly what: string;
   },
-): Effect.Effect<PlayLaunch, GameOperationError> =>
+): Effect.Effect<PlayLaunch, GameOperationError | PlayDidNotBoot> =>
   Effect.gen(function* () {
     const { operation, root } = input;
     const launch = input.backend.playProcess;
@@ -134,39 +183,43 @@ export const openRunnerPlay = (
               input.host === null ? undefined : { host: input.host, viewport: input.viewport },
           });
           game = started;
-          let exited = false;
-          void started.exited.then(
-            () => (exited = true),
-            () => (exited = true),
-          );
           const play = yield* restore(
             Effect.tryPromise({
               try: (signal) =>
-                listener.accept({
-                  timeoutMs: input.bootTimeoutMs,
-                  what: input.what,
-                  signal,
-                  alive: () => !exited,
-                }),
-              catch: failure(operation, root, "command-failed"),
+                listener
+                  .accept({
+                    timeoutMs: input.bootTimeoutMs,
+                    what: input.what,
+                    signal,
+                    exited: started.exited,
+                  })
+                  .catch(async (cause: unknown) => {
+                    // A launch that ended before its hello is the game's only
+                    // while our own side lived: a display that failed is ours.
+                    const end = await bounded(
+                      started.exited.then(runnerEnd, () => runnerEnd(null)),
+                      PLAY_BOUNDS.endedMs,
+                    );
+                    if (end !== TIMED_OUT && end.by === "host") throw new Error(end.detail);
+                    throw cause;
+                  }),
+              catch: (cause) =>
+                cause instanceof PlayNotBooted
+                  ? didNotBoot(cause.message)
+                  : failure(operation, root, "tool-failed")(cause),
             }),
           );
           const bootMs = Date.now() - bootStart;
           return {
             play,
+            ended: started.exited.then(runnerEnd, () => runnerEnd(null)),
             stop: once(async () => {
               await play.close();
               // A kept session's game got its quit and has a few seconds to finish
               // writing its saves before it is stopped.
-              if (input.saves !== null) {
-                let timer: ReturnType<typeof setTimeout> | undefined;
-                await Promise.race([
-                  started.exited.catch(() => undefined),
-                  new Promise((resolve) => (timer = setTimeout(resolve, 5_000))),
-                ]);
-                clearTimeout(timer);
-              }
+              if (input.saves !== null) await bounded(started.exited, PLAY_BOUNDS.keptSavesMs);
               await end();
+              return { keptStorage: null };
             }),
             bootMs,
             scratch: spec.scratch,
@@ -186,7 +239,7 @@ export const openPagePlay = (input: {
   readonly viewport: GameViewport;
   readonly bootTimeoutMs: number;
   readonly keptStorage: string | null;
-}): Effect.Effect<PlayLaunch, GameOperationError> =>
+}): Effect.Effect<PlayLaunch, GameOperationError | PlayDidNotBoot> =>
   Effect.gen(function* () {
     const { operation, root } = input;
     // Interruptible only while the page boots, which ends its browser on abort.
@@ -210,19 +263,24 @@ export const openPagePlay = (input: {
                 signal,
                 keptStorage: input.keptStorage,
               }),
+            // The page not booting or crashing is the game's; the browser is ours.
             catch: (cause) =>
-              failure(
-                operation,
-                root,
-                cause instanceof WebBrowserLaunchFailed ? "tool-missing" : "command-failed",
-              )(cause),
+              cause instanceof WebPageNotReady || cause instanceof WebPageCrashed
+                ? didNotBoot(cause.message)
+                : failure(
+                    operation,
+                    root,
+                    cause instanceof WebBrowserLaunchFailed ? "tool-missing" : "tool-failed",
+                  )(cause),
           }),
         ).pipe(Effect.onError(() => Effect.promise(unserve)));
         return {
           play,
+          ended: play.ended,
           stop: once(async () => {
             await play.close();
             await unserve();
+            return { keptStorage: play.keptStorage() };
           }),
           bootMs: Date.now() - bootStart,
           scratch: [],

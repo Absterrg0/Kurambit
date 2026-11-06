@@ -1,13 +1,21 @@
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
-import { GameOperationError, type GameOperationEvent, type GameStatus } from "@kurambit/contracts";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
+import {
+  GameOperationError,
+  ThreadId,
+  type GameOperationEvent,
+  type GameStatus,
+} from "@kurambit/contracts";
+import { isGameRunOperationOwner } from "../orchestration-v2/gameRun/ids.ts";
 
 /** The status-shaped operation the stage renders. */
 export type GameOperation = NonNullable<GameStatus["operation"]>;
@@ -32,6 +40,7 @@ export class GameOperations extends Context.Service<
       root: string,
       operation: Omit<GameOperation, "revision">,
       eventState: GameOperationEventState,
+      owner?: string,
     ) => Effect.Effect<void>;
     /** Something of the game other than an operation changed (`name` says what): a push, no record. */
     readonly changed: (root: string, name: string, message: string) => Effect.Effect<void>;
@@ -48,14 +57,17 @@ export class GameOperations extends Context.Service<
      * (epoch ms) queues behind it until then. `owner` is the thread whose
      * call started it.
      */
-    readonly exclusive: <A, E extends { readonly message: string } = GameOperationError>(
+    readonly exclusive: <A, E = GameOperationError, R = never>(
       root: string,
       name: string,
-      work: Effect.Effect<A, E>,
+      work: Effect.Effect<A, E, R>,
       owner: string,
       options?: { readonly waitUntil?: number },
-    ) => Effect.Effect<A, E | GameOperationError>;
-    /** Cancels the game's running operation; with `owner`, only that thread's. */
+    ) => Effect.Effect<A, E | GameOperationError, R>;
+    /**
+     * Cancels the game's operations, running or still queued; with `owner`,
+     * only that owner's. Resolves once each has ended.
+     */
     readonly cancel: (root: string, owner?: string) => Effect.Effect<void>;
   }
 >()("kurambit/game/GameOperations") {}
@@ -76,12 +88,32 @@ const operationMessage = (result: unknown, name: string): string => {
   if (typeof result !== "object" || result === null) return `${name} completed.`;
   return "message" in result ? String(result.message) : `${name} completed.`;
 };
+/** A failed operation's message, whatever its error. */
+const errorMessage = (error: unknown): string =>
+  typeof error === "object" && error !== null && "message" in error
+    ? String(error.message)
+    : String(error);
+/** The thread an owner names; a run's or the system's own work has none. */
+const ownerThread = (owner: string | undefined): ThreadId | undefined =>
+  owner === undefined || isGameRunOperationOwner(owner) || !/^[\w.-]+$/.test(owner)
+    ? undefined
+    : ThreadId.make(owner);
+
+/** One operation asked for on a game: queued or running. */
+interface Entry {
+  readonly name: string;
+  readonly owner: string;
+  readonly cancelled: Deferred.Deferred<void>;
+  readonly done: Deferred.Deferred<void>;
+  running: boolean;
+}
 
 export const layer = Layer.effect(
   GameOperations,
   Effect.gen(function* () {
     const operations = new Map<string, GameOperation>();
     const events = yield* PubSub.unbounded<GameOperationEvent>();
+    const locks = yield* KeyedLock.make<string>();
     // Starts at the server's clock so a restarted server's revisions stay above
     // the ones a client still holds from before.
     let revision = DateTime.toEpochMillis(yield* DateTime.now);
@@ -89,10 +121,16 @@ export const layer = Layer.effect(
       root: string,
       operation: Omit<GameOperation, "revision">,
       eventState: GameOperationEventState,
+      owner?: string,
     ) =>
       Effect.gen(function* () {
         revision += 1;
-        operations.set(root, { ...operation, revision });
+        const ownerThreadId = ownerThread(owner);
+        operations.set(root, {
+          ...operation,
+          revision,
+          ...(ownerThreadId === undefined ? {} : { ownerThreadId }),
+        });
         yield* PubSub.publish(events, {
           root,
           revision,
@@ -100,92 +138,81 @@ export const layer = Layer.effect(
           state: eventState,
           message: operation.message,
           at: DateTime.formatIso(yield* DateTime.now),
+          ...(ownerThreadId === undefined ? {} : { ownerThreadId }),
         });
       }).pipe(Effect.withSpan("GameOperations.record"));
-    // A turn that ends cancels only its own work: the production run runs
-    // boot checks on the same game while role turns are being interrupted at
-    // their caps.
-    const active = new Map<
-      string,
-      { cancelled: Deferred.Deferred<void>; done: Deferred.Deferred<void>; owner: string }
-    >();
+    // Every operation asked for on a game, queued ones too: a turn that ends
+    // cancels only its own work, wherever it is. The production run runs boot
+    // checks on the same game while role turns are being interrupted at their caps.
+    const entries = new Map<string, Set<Entry>>();
     const cancel = Effect.fnUntraced(function* (root: string, owner?: string) {
-      const operation = active.get(root);
-      if (operation === undefined) return;
-      if (owner !== undefined && operation.owner !== owner) return;
-      yield* Deferred.succeed(operation.cancelled, undefined);
+      const matching = [...(entries.get(root) ?? [])].filter(
+        (entry) => owner === undefined || entry.owner === owner,
+      );
+      for (const entry of matching) yield* Deferred.succeed(entry.cancelled, undefined);
       // The race interrupts work and awaits its finalizers, including native child exit.
-      yield* Deferred.await(operation.done);
+      for (const entry of matching) yield* Deferred.await(entry.done);
     });
-    const exclusive = <A, E extends { readonly message: string } = GameOperationError>(
+    const busy = (root: string, name: string) =>
+      new GameOperationError({
+        operation: name,
+        path: root,
+        reason: "busy",
+        detail: `${[...(entries.get(root) ?? [])].find((entry) => entry.running)?.name ?? "Another operation"} is running on this game.`,
+      });
+    const exclusive = <A, E = GameOperationError, R = never>(
       root: string,
       name: string,
-      work: Effect.Effect<A, E>,
+      work: Effect.Effect<A, E, R>,
       owner: string,
       options?: { readonly waitUntil?: number },
-    ): Effect.Effect<A, E | GameOperationError> =>
+    ): Effect.Effect<A, E | GameOperationError, R> =>
       Effect.gen(function* () {
-        const cancelled = yield* Deferred.make<void>();
-        const done = yield* Deferred.make<void>();
-        // A waiter wakes when the running operation ends and checks again:
-        // another waiter may have taken the game first.
-        for (;;) {
-          const running = active.get(root);
-          if (running === undefined) break;
-          const left =
-            options?.waitUntil === undefined
-              ? 0
-              : options.waitUntil - (yield* Clock.currentTimeMillis);
-          if (left <= 0)
-            return yield* new GameOperationError({
-              operation: name,
-              path: root,
-              reason: "busy",
-              detail: `${operations.get(root)?.name ?? "Another operation"} is running on this game.`,
-            });
-          yield* Deferred.await(running.done).pipe(Effect.timeoutOption(Duration.millis(left)));
-        }
-        active.set(root, { cancelled, done, owner });
-        const at = DateTime.formatIso(yield* DateTime.now);
-        yield* record(
-          root,
-          { name, state: "running", message: `${name} is running.`, at },
-          "running",
-        );
-        const stopped = Deferred.isDone(cancelled);
-        return yield* work.pipe(
-          Effect.raceFirst(
-            Deferred.await(cancelled).pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new GameOperationError({
-                    operation: name,
-                    path: root,
-                    reason: "cancelled",
-                    detail: "Operation cancelled.",
-                  }),
-                ),
-              ),
-            ),
-          ),
-          Effect.tap((result) =>
-            Effect.gen(function* () {
-              const failed = operationFailed(result);
-              yield* record(
+        const entry: Entry = {
+          name,
+          owner,
+          cancelled: yield* Deferred.make<void>(),
+          done: yield* Deferred.make<void>(),
+          running: false,
+        };
+        const waitMs =
+          options?.waitUntil === undefined
+            ? 0
+            : Math.max(0, options.waitUntil - (yield* Clock.currentTimeMillis));
+        // Recorded and pushed only once it holds the game; the record of its end
+        // is in the same uninterruptible release, so no interrupt leaves a game
+        // busy with nothing running.
+        const held = Effect.acquireUseRelease(
+          Effect.gen(function* () {
+            entry.running = true;
+            const at = DateTime.formatIso(yield* DateTime.now);
+            yield* record(
+              root,
+              { name, state: "running", message: `${name} is running.`, at },
+              "running",
+              owner,
+            );
+            return at;
+          }),
+          () => work,
+          (at, exit) => {
+            if (exit._tag === "Success") {
+              const failed = operationFailed(exit.value);
+              return record(
                 root,
                 {
                   name,
                   state: failed ? "failed" : "succeeded",
-                  message: operationMessage(result, name),
+                  message: operationMessage(exit.value, name),
                   at,
                 },
                 failed ? "failed" : "succeeded",
+                owner,
               );
-            }),
-          ),
-          Effect.tapError((error) =>
-            Effect.gen(function* () {
-              const wasCancelled = yield* stopped;
+            }
+            return Effect.gen(function* () {
+              const wasCancelled = yield* Deferred.isDone(entry.cancelled);
+              const failure = Cause.findErrorOption(exit.cause);
               yield* record(
                 root,
                 {
@@ -193,27 +220,54 @@ export const layer = Layer.effect(
                   // The status field has no cancelled state; Stop reads as a
                   // failed run with an honest message.
                   state: "failed",
-                  message: error.message,
+                  message:
+                    Option.isSome(failure) && !wasCancelled
+                      ? errorMessage(failure.value)
+                      : `${name} was cancelled.`,
                   at,
                 },
-                wasCancelled ? "cancelled" : "failed",
+                wasCancelled || Option.isNone(failure) ? "cancelled" : "failed",
+                owner,
               );
-            }),
-          ),
-          Effect.onInterrupt(() =>
-            Effect.gen(function* () {
-              yield* record(
-                root,
-                { name, state: "failed", message: `${name} was cancelled.`, at },
-                "cancelled",
-              );
-            }),
-          ),
-          Effect.ensuring(
+            });
+          },
+        );
+        const locked = locks
+          .tryWithLock(root, waitMs, held)
+          .pipe(
+            Effect.flatMap((ran) =>
+              Option.isSome(ran) ? Effect.succeed(ran.value) : Effect.fail(busy(root, name)),
+            ),
+          );
+        return yield* Effect.acquireUseRelease(
+          Effect.sync(() => {
+            const set = entries.get(root) ?? new Set<Entry>();
+            set.add(entry);
+            entries.set(root, set);
+          }),
+          () =>
+            locked.pipe(
+              Effect.raceFirst(
+                Deferred.await(entry.cancelled).pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      new GameOperationError({
+                        operation: name,
+                        path: root,
+                        reason: "cancelled",
+                        detail: "Operation cancelled.",
+                      }),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          () =>
             Effect.sync(() => {
-              active.delete(root);
-            }).pipe(Effect.andThen(Deferred.succeed(done, undefined))),
-          ),
+              const set = entries.get(root);
+              set?.delete(entry);
+              if (set?.size === 0) entries.delete(root);
+            }).pipe(Effect.andThen(Deferred.succeed(entry.done, undefined))),
         );
       });
     return GameOperations.of({

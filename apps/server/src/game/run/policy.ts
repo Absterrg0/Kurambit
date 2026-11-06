@@ -7,7 +7,7 @@ import type {
   GameRunSubmissionKind,
   ThreadId,
 } from "@kurambit/contracts";
-import { laneProfile } from "../engineProfile.ts";
+import { engineProfile } from "../engineProfile.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
 import * as Roles from "./roles.ts";
 import type * as State from "./state.ts";
@@ -88,6 +88,15 @@ export type Inputs = { readonly now: number; readonly coin: number; readonly id:
 export type RoleDone = State.RoleDone;
 export type BuildOutcome = GameRunBuildOutcome;
 export type StepResult = State.StepResult;
+/**
+ * A result the run may judge by: a build outcome, a bot fact, a role's own
+ * turn. A pause (`ended`: nothing was measured, a tool or the machine kept it
+ * from happening) and a `failed` step (the work cannot happen as planned) are
+ * never one; the decider hands them to `pause`, and the compiler keeps them
+ * out of every branch below that makes a pass, a fail, a keep or a sample.
+ */
+export type Measured = Exclude<StepResult, { readonly kind: "ended" | "failed" }>;
+export type Unmeasured = Extract<StepResult, { readonly kind: "ended" | "failed" }>;
 
 export type Planned =
   | {
@@ -624,6 +633,9 @@ const decide = (
   }
 };
 
+/** The run's game as its prompts name it: its engine and its project folder. */
+const gameOf = (s: RunState): Roles.RunGame => ({ engine: s.engine, project: s.lane });
+
 // ── Step builders. ────────────────────────────────────────────────────────
 type RoleSpec = Partial<Omit<RoleStep, "kind" | "id" | "role" | "prompt" | "capMs">> &
   Pick<RoleStep, "role" | "prompt" | "capMs">;
@@ -689,14 +701,14 @@ const newBlock = (
   turns: 0,
 });
 
-const blockStep = (id: number, b: Block, lane: string): Step =>
+const blockStep = (id: number, b: Block, game: Roles.RunGame): Step =>
   role(id, {
     role: `builder-${b.tag}`,
     title: `studio builder ${b.tag}`,
     thread: b.thread,
     prompt:
       b.thread === null
-        ? Roles.builderFirst(b.whole, lane, b.direction)
+        ? Roles.builderFirst(b.whole, game, b.direction)
         : Roles.builderMore(Math.max(1, Math.round(b.msLeft / MIN)), b.direction),
     capMs: b.msLeft,
     source: true,
@@ -940,6 +952,7 @@ const sampleStep = (
       prompt: Roles.samplePlay(c.question, sampleFile(s)),
       capMs: CAP.judge,
       inputCapMs: Roles.SAMPLE_INPUT_MS,
+      plays: true,
     });
     return { sample: s, step };
   }
@@ -955,6 +968,7 @@ const sampleStep = (
         prompt: Roles.sampleMore(Math.round((s.evidence?.nominalMs ?? 0) / 1000), sampleFile(s)),
         capMs: CAP.judge,
         inputCapMs: Roles.SAMPLE_INPUT_MS,
+        plays: true,
       }),
     };
   const step = role(id, {
@@ -993,7 +1007,7 @@ const compareStep = (
   state: RunState,
 ): { cmp: Compare; step: Step; logs: string[] } => {
   const move = compareMove(c);
-  const parallel = laneProfile(state.lane).run.parallelSamples;
+  const parallel = engineProfile(state.engine).run.parallelSamples;
   if (move.kind === "bots") {
     // Decided here, after the plays and their replays: the runs still owed
     // must fit and leave both verdicts their time.
@@ -1101,7 +1115,7 @@ const compareStep = (
 const applyCompare = (
   c: Compare,
   done: Step,
-  res: StepResult,
+  res: Measured,
   logs: string[],
   release: ThreadId[],
 ): Compare => {
@@ -1120,6 +1134,8 @@ const applyCompare = (
     logs.push(`bot facts withheld from both reports: ${botWithheld}`);
     return { ...c, bots, botWithheld };
   }
+  // A comparison's other steps are role turns; anything else measures none of it.
+  if (res.kind !== "done") return c;
   // Two samples may be in flight at once; the step's role names its own.
   const si = c.samples.findIndex(
     (s) => s.phase !== "done" && (done.kind !== "role" || done.role === `sample-${s.label}`),
@@ -1127,28 +1143,25 @@ const applyCompare = (
   if (si >= 0) {
     const s = c.samples[si]!;
     const next: Sample =
-      res.kind !== "done"
-        ? { ...s, phase: "done", notes: "", evidence: null }
-        : s.phase === "play"
-          ? {
+      s.phase === "play"
+        ? {
+            ...s,
+            thread: res.threadId,
+            // Evidence is cumulative per thread, so the second turn adds to it.
+            ...(res.evidence !== null && res.evidence.nominalMs < PLAY_FLOOR_MS
+              ? { phase: "more" as const, extra: true }
+              : { phase: "write" as const }),
+            evidence: res.evidence,
+          }
+        : s.phase === "more"
+          ? { ...s, phase: "write", evidence: res.evidence ?? s.evidence }
+          : {
               ...s,
-              thread: res.threadId,
-              // Evidence is cumulative per thread, so the second turn adds to it.
-              ...(res.evidence !== null && res.evidence.nominalMs < PLAY_FLOOR_MS
-                ? { phase: "more" as const, extra: true }
-                : { phase: "write" as const }),
-              evidence: res.evidence,
-            }
-          : s.phase === "more"
-            ? { ...s, phase: "write", evidence: res.evidence ?? s.evidence }
-            : {
-                ...s,
-                phase: "done",
-                notes: submitted(res, "report")?.report ?? "",
-                evidence: res.evidence ?? s.evidence,
-                sheet: res.sheet,
-              };
-    if (res.kind === "failed") logs.push(`sample ${s.label} could not finish: ${res.reason}`);
+              phase: "done",
+              notes: submitted(res, "report")?.report ?? "",
+              evidence: res.evidence ?? s.evidence,
+              sheet: res.sheet,
+            };
     if (next.phase === "done" && !usable(next))
       logs.push(`play sample ${s.label} lacked usable hands-on evidence`);
     return { ...c, samples: catchUp(c.samples.with(si, next), logs) };
@@ -1156,10 +1169,6 @@ const applyCompare = (
   const ji = c.judges.findIndex((j) => j.phase !== "done");
   if (ji < 0) return c;
   const j = c.judges[ji]!;
-  if (res.kind !== "done") {
-    logs.push(`comparator ${j.id} could not finish`);
-    return { ...c, judges: c.judges.with(ji, { ...j, phase: "done" }) };
-  }
   const sub = submitted(res, "verdict");
   const text = sub?.reasons ?? "";
   const verdict = sub?.verdict ?? null;
@@ -1346,7 +1355,7 @@ const proceed = (state: RunState, done: string, now: number): RunState => {
           "build",
           newBlock(
             "build",
-            Roles.firstDirection(state.lane, state.ladder?.rungs[0] ?? null, state.buildNotes),
+            Roles.firstDirection(gameOf(state), state.ladder?.rungs[0] ?? null, state.buildNotes),
             true,
             ms,
             state.best,
@@ -1377,7 +1386,7 @@ const roundDirection = (state: RunState) => {
     state.next.length === 0 &&
     state.rounds.length > 0 &&
     prior.length > 0;
-  const base = repeating ? prior : Roles.roundBase(state.next, state.pickNotes, state.lane);
+  const base = repeating ? prior : Roles.roundBase(state.next, state.pickNotes, gameOf(state));
   const direction = state.steer.length === 0 ? base : Roles.steered(state.steer, base);
   return { direction, repeating };
 };
@@ -1537,7 +1546,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
   if (state.inFlight !== null) return { kind: "step", state, step: state.inFlight };
   const id = state.seq + 1;
   const t = state.task;
-  const lane = state.lane;
+  const lane = gameOf(state);
   const go = (s: Step, task: Task = t, logs: ReadonlyArray<string> = []) =>
     step(state, task, s, logs);
   const run = (op: BuildOp, task: Task = t) => go(build(id, op), task);
@@ -1637,6 +1646,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
             prompt: Roles.SHIP_PLAY,
             capMs: CAP.ship,
             clear: [".studio/ship.md"],
+            plays: true,
           })
         : act({
             role: `ship-${t.n}`,
@@ -1662,8 +1672,8 @@ export const plan = (state: RunState, input: Inputs): Planned => {
   }
   const r = t;
   const n = r.n;
-  const tester = (prompt: string, capMs: number) =>
-    act({ role: `tester-${n}`, thread: r.thread, prompt, capMs, bots: true });
+  const tester = (prompt: string, capMs: number, plays = false) =>
+    act({ role: `tester-${n}`, thread: r.thread, prompt, capMs, bots: true, plays });
   switch (r.phase) {
     case "start": {
       if (state.stallStreak >= STALL_LIMIT) return end("stalled");
@@ -1750,12 +1760,15 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "reject":
       return toBest();
     case "tester-facts":
-    case "review-facts":
       return go({ kind: "facts", id });
+    // The reviewer's facts state the bot runs of this round's tester, on its candidate.
+    case "review-facts":
+      return go({ kind: "facts", id, bots: r.thread });
     case "tester":
       return tester(
         Roles.testerPlay(n, r.jev, rungOf(state, r), r.continued ? lastTryOf(state, r) : ""),
         CAP.tester,
+        true,
       );
     case "tester-write":
       return tester(Roles.testerWrite(n, r.move, rungOf(state, r)), CAP.write);
@@ -1907,7 +1920,9 @@ export const applyPair = (state: RunState, pair: PairStep, input: Inputs): Appli
     const rest = pair.halves.slice(i);
     if (!inComparison(s)) return leave(s);
     const res = resultOf(half);
-    if (res === undefined) return out({ ...s, inFlight: keep(rest, null) });
+    // The decider never lands a pair with an unmeasured half in its results.
+    if (res === undefined || res.kind === "failed")
+      return out({ ...s, inFlight: keep(rest, null) });
     const applied = applyResult(s, half, res, input);
     logs.push(...applied.logs);
     files.push(...applied.files);
@@ -1919,28 +1934,32 @@ export const applyPair = (state: RunState, pair: PairStep, input: Inputs): Appli
   return inComparison(s) ? out(s) : leave(s);
 };
 
-export const applyResult = (
-  state: RunState,
-  done: Step,
-  res: StepResult,
-  input: Inputs,
-): Applied => {
+/**
+ * Nothing was measured: usage limits, a provider that stays down, memory that
+ * stays short, a busy machine or a tool that keeps failing (`ended`), or work
+ * that cannot happen as planned (`failed`: its thread or project deleted). The
+ * run ends resumably with why, and the step stays in flight, so a resume runs
+ * exactly it again (a pair only its unmeasured half) and judges nothing on it.
+ */
+export const pause = (state: RunState, done: Step, res: Unmeasured): Applied => ({
+  state: {
+    ...state,
+    inFlight: done,
+    ending: res.kind === "ended" ? res.ending : "failed",
+    lastFailure: res.reason.slice(0, 300),
+  },
+  logs: [],
+  files: [],
+  release: [],
+});
+
+export const applyResult = (state: RunState, done: Step, res: Measured, input: Inputs): Applied => {
   const logs: string[] = [];
   const files: Array<{ path: string; text: string }> = [];
   const release: ThreadId[] = [];
   const out = (s: RunState): Applied => ({ state: s, logs, files, release });
-  // Usage limits, a provider that stays down and memory that stays short end
-  // the run resumably; the step stays in flight so a resume reattaches to its thread.
-  if (res.kind === "ended")
-    return out({ ...state, inFlight: done, ending: res.ending, lastFailure: res.reason });
   const s: RunState = { ...state, inFlight: null };
   const t = s.task;
-  const inCompare =
-    (t._tag === "pick" && t.phase === "compare") || (t._tag === "round" && t.phase === "compare");
-  // The run never stalls on the art reviewer: a review that cannot finish keeps the art.
-  const inArtReview = t._tag === "stage" && t.phase === "review";
-  if (res.kind === "failed" && !inCompare && !inArtReview)
-    return out({ ...s, ending: "failed", lastFailure: res.reason.slice(0, 300) });
   if (
     res.kind === "done" &&
     res.budgetCut &&
@@ -2006,10 +2025,7 @@ export const applyResult = (
         const art = submitted(res, "art");
         const text = art?.defects ?? "";
         const verdict = art === null ? null : art.redo ? "REDO" : "KEEP";
-        if (verdict === null)
-          logs.push(
-            `art review submitted no verdict${res.kind === "failed" ? ` (${res.reason})` : ""}; keeping the art`,
-          );
+        if (verdict === null) logs.push("art review submitted no verdict; keeping the art");
         if (verdict !== "REDO") return out({ ...s, task: { ...t, phase: "commit" } });
         if (!artFits(CAP.artRedo)) {
           logs.push("art review asked for a redo, but the budget leaves no room; keeping the art");
@@ -2224,14 +2240,14 @@ const applyRound = (
   s: RunState,
   r: Round,
   done: Step,
-  res: StepResult,
+  res: Measured,
   input: Inputs,
   logs: string[],
   files: Array<{ path: string; text: string }>,
   release: ThreadId[],
 ): RunState => {
   const now = input.now;
-  const lane = s.lane;
+  const lane = gameOf(s);
   const g = res.kind === "build" ? res.build : null;
   const at = (round: Partial<Round>): RunState => ({ ...s, task: { ...r, ...round } });
   switch (r.phase) {
@@ -2324,7 +2340,7 @@ const applyRound = (
         phase: "stall",
         record: {
           ...r.record,
-          note: `stalled (no game-code change under ${lane}/ after replace attempt)`,
+          note: `stalled (no game-code change under ${lane.project}/ after replace attempt)`,
         },
       });
     }
@@ -2337,29 +2353,23 @@ const applyRound = (
         logs,
       );
     case "boot": {
+      // Only a boot verdict moves the phase on; nothing else measured the boot.
+      if (res.kind !== "boot") return s;
       const rung = rungOf(s, r);
-      if (res.kind === "boot" && res.ok)
+      if (res.ok)
         return at({
           phase: rung !== null && rung.checks.some(isStateCheck) ? "checks" : "tester-facts",
         });
       return at({
         phase: "reject",
-        record: {
-          ...r.record,
-          note: `boot failed: ${res.kind === "boot" ? res.detail : "unknown"}`.slice(0, 300),
-        },
+        record: { ...r.record, note: `boot failed: ${res.detail}`.slice(0, 300) },
       });
     }
     case "checks": {
+      // Only the checks' own scoring passes or fails them.
+      if (res.kind !== "checks") return s;
       const rung = rungOf(s, r)!;
-      const results =
-        res.kind === "checks"
-          ? res.results
-          : rung.checks.flatMap((c, k) =>
-              c.kind === "state"
-                ? [{ k, what: c.what, pass: false, evidence: "the checks did not run", frame: "" }]
-                : [],
-            );
+      const results = res.results;
       const stateChecks = results.map(({ k, pass, evidence, frame }) => ({
         k,
         pass,
@@ -2383,7 +2393,7 @@ const applyRound = (
           fixes: r.fixes + 1,
           block: {
             ...r.block,
-            direction: Roles.fixChecks(failed, rung, s.lane),
+            direction: Roles.fixChecks(failed, rung, gameOf(s)),
             msLeft: FIX_MS,
             quiet: 0,
             turns: Math.max(1, r.block.turns),
@@ -2415,7 +2425,7 @@ const applyRound = (
     case "tester":
       return res.kind === "done"
         ? at({ phase: "tester-write", thread: res.threadId, ...testedBot(res, r) })
-        : at({ phase: "restore" });
+        : s;
     case "tester-write":
     case "tester-duty": {
       const bot = testedBot(res, r);
