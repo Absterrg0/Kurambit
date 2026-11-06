@@ -37,6 +37,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { recordProvenance, renderSprites } from "./blenderSprites.ts";
+import { lockArmatureRefusal, lockImportRefusal, readGameStyle } from "./gameStyle.ts";
 import { gamePaths } from "./engineProfile.ts";
 import { breakSession, HeldSources, type LiveHealth, makeLiveRecords } from "./liveEditor.ts";
 import {
@@ -102,6 +103,32 @@ const CALL_TIMEOUT_MS: Record<string, number> = {
   search_assets: 2 * 60_000,
 };
 const IMPORT_TOOL = "game_blender_assets_import";
+
+/**
+ * Python that prints `STUDIO_ARMATURES {name: [bones]}` for the armatures that
+ * would travel with `objs` into a GLB: the objects themselves, their parents
+ * and the armatures their modifiers deform with.
+ */
+const ARMATURES_OF = `
+def studio_armatures(objs):
+    found = {}
+    for o in objs:
+        cands = [o, o.parent] + [m.object for m in getattr(o, "modifiers", []) if m.type == "ARMATURE"]
+        for a in cands:
+            if a is not None and a.type == "ARMATURE":
+                found[a.name] = [b.name for b in a.data.bones]
+    print("STUDIO_ARMATURES " + json.dumps(found))
+`;
+
+const armaturesIn = (text: string): Record<string, ReadonlyArray<string>> | null => {
+  const found = /STUDIO_ARMATURES (\{.*\})/.exec(text)?.[1];
+  if (found === undefined) return null;
+  try {
+    return JSON.parse(found) as Record<string, ReadonlyArray<string>>;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * The licence an import's source states. Poly Haven is CC0 throughout; the
@@ -894,6 +921,13 @@ const make = Effect.gen(function* () {
     gamePaths(manifest.engine.name, manifestProject(manifest)).blender;
   const exportDirOf = (root: string) => projects.read(root).pipe(Effect.map(assetDirOf));
 
+  /** The game's style lock, read fresh on every call. */
+  const styleOf = (root: string) =>
+    Effect.tryPromise({
+      try: () => NodeFSP.realpath(root),
+      catch: (cause) => opError("blender-live", root, "io", undefined, cause),
+    }).pipe(Effect.flatMap(readGameStyle));
+
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>
     Effect.gen(function* () {
       const absolute = NodePath.join(root, BLEND_REL);
@@ -1010,6 +1044,7 @@ const make = Effect.gen(function* () {
       holding(
         root,
         Effect.gen(function* () {
+          const refused = lockImportRefusal(input.source, yield* styleOf(root));
           const text = yield* callText(root, "search_assets", {
             source: input.source,
             ...(input.query === undefined ? {} : { query: input.query }),
@@ -1017,13 +1052,23 @@ const make = Effect.gen(function* () {
             ...(input.category === undefined ? {} : { category: input.category }),
             limit: input.limit ?? 10,
           });
-          return { text };
+          return {
+            text:
+              refused === null
+                ? text
+                : `${text}\n\nAn import from ${input.source} would be refused: ${refused}`,
+          };
         }),
       ),
     assetsImport: (root, input) =>
       holding(
         root,
         Effect.gen(function* () {
+          // Refused before the live scene changes.
+          const style = yield* styleOf(root);
+          const outside = lockImportRefusal(input.source, style);
+          if (outside !== null)
+            return yield* opError("blender-assets-import", root, "invalid-input", outside);
           // The import adds to the live scene; only what it added is exported,
           // never the rest of the scene under the asset's name.
           const before = yield* callText(root, "execute_blender_code", {
@@ -1045,6 +1090,39 @@ const make = Effect.gen(function* () {
             ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
             ...(input.applyTo === undefined ? {} : { apply_to: input.applyTo }),
           });
+          // A rigged import must be on the lock's rig; one that is not leaves the scene again.
+          const rigged = yield* callText(root, "execute_blender_code", {
+            code: [
+              "import bpy, json",
+              ARMATURES_OF,
+              `before = set(${known})`,
+              "studio_armatures([o for o in bpy.context.scene.objects if o.name not in before])",
+            ].join("\n"),
+          });
+          const armatures = armaturesIn(rigged);
+          if (armatures === null)
+            return yield* opError(
+              "blender-assets-import",
+              root,
+              "tool-failed",
+              `Blender did not list the import's armatures: ${rigged.slice(0, 500)}`,
+            );
+          const offRig = lockArmatureRefusal(armatures, style);
+          if (offRig !== null) {
+            yield* callText(root, "execute_blender_code", {
+              code: [
+                "import bpy",
+                `before = set(${known})`,
+                "for o in [o for o in bpy.data.objects if o.name not in before]: bpy.data.objects.remove(o, do_unlink=True)",
+              ].join("\n"),
+            });
+            return yield* opError(
+              "blender-assets-import",
+              root,
+              "invalid-input",
+              `${offRig} The import was taken out of the live scene again.`,
+            );
+          }
           const blend = yield* saveBlend(root);
           // Library models arrive at arbitrary scale: normalize the id to a
           // file name, export what the import added as one GLB the game can
@@ -1133,6 +1211,27 @@ const make = Effect.gen(function* () {
             );
           const absolute = NodePath.join(root, file);
           const names = input.objects ?? [];
+          // Characters reach the game only on the lock's rig: checked before anything is written.
+          const rigged = yield* callText(root, "execute_blender_code", {
+            code: [
+              "import bpy, json",
+              ARMATURES_OF,
+              `wanted = ${JSON.stringify(names)}`,
+              "obs = [bpy.data.objects.get(n) for n in wanted] if wanted else [o for o in bpy.context.scene.objects if o.type == 'MESH']",
+              "studio_armatures([o for o in obs if o is not None])",
+            ].join("\n"),
+          });
+          const armatures = armaturesIn(rigged);
+          if (armatures === null)
+            return yield* opError(
+              "blender-export",
+              file,
+              "tool-failed",
+              `Blender did not list the export's armatures: ${rigged.slice(0, 500)}`,
+            );
+          const offRig = lockArmatureRefusal(armatures, yield* styleOf(root));
+          if (offRig !== null)
+            return yield* opError("blender-export", file, "invalid-input", offRig);
           const exported = yield* callText(root, "execute_blender_code", {
             code: [
               "import bpy, os, json",

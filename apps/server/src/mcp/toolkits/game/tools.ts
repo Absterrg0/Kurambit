@@ -133,7 +133,7 @@ const BlenderSceneTool = Tool.make("game_blender_scene", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   description:
-    "Search a library of existing assets for the live Blender scene (pinned mcp-for-blender search_assets, adapted). Sources: polyhaven (HDRIs, PBR textures and realistic models, all CC0, no key), sketchfab (user-made models; needs the user's Sketchfab API key in the scene) and polypizza (stylised low-poly, CC0 or CC-BY; needs the user's Poly Pizza API key). Pass the result id to game_blender_assets_import.",
+    "Search a library of existing assets for the live Blender scene (pinned mcp-for-blender search_assets, adapted). Sources: polyhaven (HDRIs, PBR textures and realistic models, all CC0, no key), sketchfab (user-made models; needs the user's Sketchfab API key in the scene) and polypizza (stylised low-poly, CC0 or CC-BY; needs the user's Poly Pizza API key). Pass the result id to game_blender_assets_import. With a STYLE.json, only sources its imports list may be imported, and the result says when an import would be refused.",
   parameters: GameBlenderAssetsSearchInput,
   success: GameBlenderAssetsSearchResult,
   failure,
@@ -144,7 +144,7 @@ const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   description:
-    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB of only the objects the import added is exported under <engine dir>/assets/blender/ (godot/ or web/; unity/Assets/Blender/ for Unity) that the game can load, with its source and licence recorded in ASSETS.md (CC-BY models must be credited); an HDRI or texture import adds no object, so no GLB. Run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
+    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB of only the objects the import added is exported under <engine dir>/assets/blender/ (godot/ or web/; unity/Assets/Blender/ for Unity) that the game can load, with its source and licence recorded in ASSETS.md (CC-BY models must be credited); an HDRI or texture import adds no object, so no GLB. Run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them. With a STYLE.json, a source its imports does not list is refused before anything downloads, and a rigged model not on its rig (or any rigged model when it names no rig) is refused and taken out of the scene again.",
   parameters: GameBlenderAssetsImportInput,
   success: GameBlenderAssetsImportResult,
   failure,
@@ -155,7 +155,7 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderExportTool = Tool.make("game_blender_export", {
   description:
-    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's project) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb (unity/Assets/Blender/scene.glb for Unity). The .blend source is saved in the game with the export. Run game_import after.",
+    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's project) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb (unity/Assets/Blender/scene.glb for Unity). The .blend source is saved in the game with the export. With a STYLE.json, an export carrying an armature not on its rig (or any armature when it names no rig) is refused before anything is written: characters come from the lock's packs. Run game_import after.",
   parameters: GameBlenderExportInput,
   success: GameBlenderExportResult,
   failure,
