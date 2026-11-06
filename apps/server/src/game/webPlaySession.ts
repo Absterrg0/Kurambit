@@ -565,8 +565,14 @@ export const openWebPlaySession = async (input: {
         tickStart = 0;
         if (frames === undefined) return;
         frameSink = frames.onFrame;
-        const cdp = await bounded(context.newCDPSession(page), PLAY_BOUNDS.webCallMs);
-        if (cdp === TIMED_OUT) return;
+        // A video that never starts is our browser's failure: claimed as a
+        // video it would read as a game that drew nothing.
+        const opening = context.newCDPSession(page);
+        const cdp = await bounded(opening, PLAY_BOUNDS.webCallMs);
+        if (cdp === TIMED_OUT) {
+          void opening.then((late) => late.detach()).catch(() => undefined);
+          throw new WebBrowserGone("The browser did not start its screencast.");
+        }
         screencast = cdp;
         cdp.on("Page.screencastFrame", (event) => {
           void cdp
@@ -577,7 +583,7 @@ export const openWebPlaySession = async (input: {
           frames.onFrame({ frame: pageFrames, t: gameT(), jpeg: lastJpeg });
         });
         const width = Math.min(frames.width, input.width);
-        await bounded(
+        const started = await bounded(
           cdp.send("Page.startScreencast", {
             format: "jpeg",
             quality: 75,
@@ -586,6 +592,8 @@ export const openWebPlaySession = async (input: {
           }),
           PLAY_BOUNDS.webCallMs,
         );
+        if (started === TIMED_OUT)
+          throw new WebBrowserGone("The browser did not start its screencast.");
       },
       nextTick: async (timeoutMs) => {
         if (endedWith !== null) return { kind: "closed" };

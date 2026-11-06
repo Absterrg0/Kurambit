@@ -59,8 +59,11 @@ export const openFrameVideo = (input: {
   let longestStallMs = 0;
   let longestStallAt = 0;
   let lastAdvanceT = 0;
+  // The stall is measured over play only: the teardown after it (an end still,
+  // a browser leaving its page) draws nothing new and is no frozen game.
+  let measuring = true;
   const stalled = (now: number) => {
-    if (now - lastAdvance <= longestStallMs) return;
+    if (!measuring || now - lastAdvance <= longestStallMs) return;
     longestStallMs = now - lastAdvance;
     longestStallAt = lastAdvanceT;
   };
@@ -131,6 +134,11 @@ export const openFrameVideo = (input: {
       // A picture newer than its slot's is kept for the next slot.
       if (written === slot) write(frame);
       last = frame;
+    },
+    /** Play has ended: later time and pictures still fill the video, never its stall. */
+    markEnd: (): void => {
+      if (ffmpeg !== null) stalled(Date.now());
+      measuring = false;
     },
     /** The latest picture, as received. */
     last: (): PlayFrame | null => last,

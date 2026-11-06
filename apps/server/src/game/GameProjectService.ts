@@ -354,7 +354,11 @@ const make = Effect.gen(function* () {
       const parent = input.parentDirectory.trim() || NodePath.join(NodeOS.homedir(), "Games");
       const requestedRoot = NodePath.resolve(
         parent.replace(/^~(?=\/|$)/, NodeOS.homedir()),
-        gameFolderName(name, NodeCrypto.randomBytes(3).toString("hex")),
+        gameFolderName(
+          name,
+          // From the name itself, so a retry or a second click names the same folder.
+          NodeCrypto.createHash("sha256").update(name.normalize("NFC")).digest("hex").slice(0, 6),
+        ),
       );
       // One create per folder at a time in this server, so a second click
       // cannot take the first's half-made folder for a leftover.
