@@ -79,6 +79,8 @@ export const runBotFact = (
           })
           .pipe(measuring(what, roots));
         if (result.played === false) return withheld(`the bot did not play: ${result.status.note}`);
+        // A bot's own word the harness reserves arrives as `bot:<word>` (CONTRACT A9):
+        // it is measured play, the bot's to say, and is shown, never withheld.
         if (result.status.state === "bot-error" || result.status.state === "stopped")
           return withheld(`the bot did not finish: ${result.status.note}`);
         // The tester's decider is replayed; without its key the bot's own policy chose.
