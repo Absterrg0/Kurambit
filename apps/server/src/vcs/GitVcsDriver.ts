@@ -2316,6 +2316,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               prefix.length === 0 ? commitOid : `${commitOid}:${prefix.replace(/\/$/, "")}`;
             yield* execute({ operation, cwd: top, args: ["read-tree", tree], env });
             const excluded = input.excludePaths ?? [];
+            // Forced: git's up-to-date check compares the temp index with the
+            // worktree and HEAD, and refuses any excluded file the checkpoint
+            // holds differently from both. With --cached only that throwaway
+            // index changes.
             if (excluded.length > 0)
               yield* execute({
                 operation,
@@ -2324,6 +2328,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
                   "rm",
                   "-r",
                   "-q",
+                  "-f",
                   "--cached",
                   "--ignore-unmatch",
                   "--",

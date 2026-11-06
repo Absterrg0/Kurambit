@@ -726,6 +726,25 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           expect(yield* fileSystem.exists(NodePath.join(copy, "NOTES.md"))).toBe(false);
           expect(yield* fileSystem.exists(NodePath.join(copy, ".git"))).toBe(false);
           expect(yield* fileSystem.readFile(at(".git/index"))).toEqual(index);
+          // A build whose excluded file differs from both HEAD and the folder
+          // (a run's notes drift every round) is still copied without it.
+          yield* writeTextFile(at("NOTES.md"), "notes v3\n");
+          const drifted = yield* checkpointStore.captureCheckpoint({
+            cwd: tmp,
+            checkpointRef: checkpointRefForGameRun("run_1", "round-2"),
+          });
+          yield* writeTextFile(at("NOTES.md"), "notes v2\n");
+          const driftedCopy = yield* makeTmpDir("checkpoint-copy-");
+          expect(
+            yield* checkpointStore.materializeCheckpoint({
+              cwd: tmp,
+              checkpointRef: CheckpointRef.make(drifted),
+              destination: driftedCopy,
+              excludePaths: ["NOTES.md"],
+            }),
+          ).toBe(true);
+          expect(yield* fileSystem.exists(NodePath.join(driftedCopy, "NOTES.md"))).toBe(false);
+          expect(yield* fileSystem.readFile(at(".git/index"))).toEqual(index);
           // A copy that would replace the repository or a folder in it is refused.
           for (const destination of [tmp, at("game")]) {
             const refused = yield* checkpointStore
