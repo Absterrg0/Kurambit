@@ -3,24 +3,17 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import { GAME_SOURCE_FILE_LIMIT, sourceLimitDetail } from "@kurambit/contracts";
+import type { GameSourceRules } from "./engineProfile.ts";
+import { GODOT_PROFILE } from "./godotProfile.ts";
+import { UNITY_PROFILE } from "./unityProfile.ts";
 
 /**
- * A walked-entry bound, not a game-size limit. A tree larger than this cannot be
- * identified, so callers must treat the result as unknown (and therefore stale)
- * rather than guessing that it did not change.
+ * Skipped entries (engine output, sidecars) are walked but not counted toward
+ * the file limit; this bounds the walk itself, so a tree of nothing but output
+ * cannot keep it going.
  */
-const DEFAULT_MAX_SOURCE_ENTRIES = 10_000;
-
-/** Directories Unity generates at its project root; see snapshotBuildSource. */
-const UNITY_OUTPUT_DIRECTORIES = new Set([
-  "Library",
-  "Temp",
-  "Logs",
-  "UserSettings",
-  "obj",
-  "Build",
-  "Builds",
-]);
+const WALK_FACTOR = 4;
 
 /** Opening without following a link makes a swapped-in symlink fail closed. */
 const READ_FLAGS = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW;
@@ -79,6 +72,17 @@ const hashFileContent = async (
 };
 
 const MAX_DERIVED_ASSET_BYTES = 1 << 20;
+
+/**
+ * The rules for a caller that names no engine: a Unity project is known by
+ * its version file, anything else reads as Godot. Kept until every caller
+ * passes its profile's rules.
+ */
+const legacyRules = (engineRoot: string): Promise<GameSourceRules> =>
+  NodeFSP.stat(NodePath.join(engineRoot, "ProjectSettings/ProjectVersion.txt")).then(
+    (stat) => (stat.isFile() ? UNITY_PROFILE.buildInputs : GODOT_PROFILE.buildInputs),
+    () => GODOT_PROFILE.buildInputs,
+  );
 
 /**
  * Hashes from earlier reads of the same tree, by absolute path. An entry is
@@ -143,26 +147,27 @@ export const snapshotBuildSource = async (
   root: string,
   godotProject: string,
   options: {
+    /** The engine's build inputs (its profile's `buildInputs`). */
+    readonly rules?: GameSourceRules | undefined;
     readonly maxEntries?: number | undefined;
     readonly signal?: AbortSignal | undefined;
     readonly cache?: SourceHashCache | undefined;
   } = {},
 ): Promise<SourceSnapshot> => {
-  const limit = options.maxEntries ?? DEFAULT_MAX_SOURCE_ENTRIES;
+  const limit = options.maxEntries ?? GAME_SOURCE_FILE_LIMIT;
   const signal = options.signal;
   const cache = options.cache;
   const seen = new Set<string>();
   const engineRoot = NodePath.join(root, godotProject);
-  // A Unity project's own caches sit at its root beside Assets/ and are
-  // rewritten by every editor start; they are output, never build input.
-  const unityProject = await NodeFSP.stat(
-    NodePath.join(engineRoot, "ProjectSettings/ProjectVersion.txt"),
-  ).then(
-    (stat) => stat.isFile(),
-    () => false,
-  );
+  const rules = options.rules ?? (await legacyRules(engineRoot));
   const lines: string[] = [];
   const files = new Map<string, string>();
+  const tooMany = (): SourceSnapshot => ({
+    kind: "unknown",
+    reason: "entry-limit",
+    detail: sourceLimitDetail(godotProject),
+  });
+  let counted = 0;
   let visited = 0;
   try {
     const stack = [engineRoot];
@@ -175,7 +180,7 @@ export const snapshotBuildSource = async (
         const name = item.name;
         signal?.throwIfAborted();
         visited += 1;
-        if (visited > limit) return { kind: "unknown", reason: "entry-limit" };
+        if (visited > limit * WALK_FACTOR) return tooMany();
         const absolute = NodePath.join(directory, name);
         const relative = NodePath.relative(engineRoot, absolute).split(NodePath.sep).join("/");
         let entry: NodeFS.BigIntStats;
@@ -189,28 +194,20 @@ export const snapshotBuildSource = async (
         if (entry.isSymbolicLink())
           return { kind: "unknown", reason: "symlink", detail: `${godotProject}/${relative}` };
         if (entry.isDirectory()) {
-          if (name === ".godot") continue;
-          if (unityProject && directory === engineRoot && UNITY_OUTPUT_DIRECTORIES.has(name))
-            continue;
+          if (rules.skipDirs.includes(name)) continue;
+          if (directory === engineRoot && rules.rootOutputDirs.includes(name)) continue;
           stack.push(absolute);
           continue;
         }
         if (!entry.isFile()) continue;
         // Sidecars the engine generates beside real sources. An import rewrites
         // them, so they can never be part of whether the build still matches.
-        if (name.endsWith(".import") || name.endsWith(".uid")) continue;
-        if (
-          unityProject &&
-          directory === engineRoot &&
-          (name.endsWith(".csproj") ||
-            name.endsWith(".sln") ||
-            // Mono's crash dumps, written here whenever an editor is stopped:
-            // counted, every editor close would make a fresh player stale.
-            name.startsWith("mono_crash."))
-        )
-          continue;
+        if (rules.sidecarSuffixes.some((suffix) => name.endsWith(suffix))) continue;
+        if (directory === engineRoot && rules.rootOutputFiles?.test(name) === true) continue;
+        counted += 1;
+        if (counted > limit) return tooMany();
         const derived =
-          unityProject && name.endsWith(".asset") && entry.size <= MAX_DERIVED_ASSET_BYTES;
+          rules.derivedAssets && name.endsWith(".asset") && entry.size <= MAX_DERIVED_ASSET_BYTES;
         const identity = `${derived}:${entry.dev}:${entry.ino}:${entry.size}:${entry.mtimeNs}:${entry.ctimeNs}`;
         let hashed: { readonly size: number; readonly sha256: string };
         try {
@@ -275,7 +272,7 @@ const describeUnknown = (snapshot: Extract<SourceSnapshot, { kind: "unknown" }>)
   snapshot.reason === "symlink"
     ? `a symlink is not followed (${snapshot.detail ?? "unknown path"})`
     : snapshot.reason === "entry-limit"
-      ? "the source tree is past the scan bound"
+      ? (snapshot.detail ?? `the game holds more than ${GAME_SOURCE_FILE_LIMIT} source files`)
       : "the source tree could not be read";
 
 /**

@@ -6,6 +6,7 @@ import { useState } from "react";
 import * as Schema from "effect/Schema";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  GAME_ENGINES,
   ModelSelection,
   type EnvironmentId,
   type GameEngineId,
@@ -424,25 +425,10 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   );
 }
 
-const ENGINE_OPTIONS = [
-  {
-    id: "godot",
-    title: "Godot native",
-    description:
-      "A real Godot 4.7 project with Blender-made art. The full lane: native play, Windows and Linux exports.",
-  },
-  {
-    id: "three",
-    title: "three.js browser",
-    description: "A quick static browser game, nothing to install. Web export only.",
-  },
-  {
-    id: "unity",
-    title: "Unity native",
-    description:
-      "A Unity 6 project in C#. Linux and Windows builds. Needs a Unity 6 editor from Unity Hub and a Unity Personal licence.",
-  },
-] as const satisfies ReadonlyArray<{ id: GameEngineId; title: string; description: string }>;
+const ENGINE_OPTIONS = (Object.keys(GAME_ENGINES) as GameEngineId[]).map((id) => ({
+  id,
+  ...GAME_ENGINES[id].picker,
+}));
 
 /** An engine that is not ready cannot be picked; it shows what is wrong and where to get it. */
 function EngineOption({

@@ -72,6 +72,22 @@ const ORPHAN_WORKTREE_GRACE_MS = 60 * 60 * 1_000;
 // editors' homes and the cached Unity players there belong to their services.
 const GAME_LOG_ENTRY =
   /^(?:\d+-[\w.-]+-[0-9a-f-]{36}\.log|(?:game-bot|game-explore|godot-import|godot-check|three-check)-[\w.-]+)$/;
+/**
+ * What a crash or a cut-short release leaves in a game's build folders: a
+ * release's staging folder, a Web build's staging, a partial package, a
+ * library add's staging. A release sweeps its own before it starts; these
+ * are the leftovers of games that are not exported again. Each folder is
+ * matched by its own names only, and only once a day old, so no live
+ * export's staging is touched.
+ */
+const GAME_BUILD_LEFTOVERS: ReadonlyArray<readonly [folder: ReadonlyArray<string>, name: RegExp]> =
+  [
+    [["builds"], /^\.release-[\w-]+-[0-9a-f-]{36}$/],
+    [["builds", "candidates"], /^\.(?:staging|release-web)-[0-9a-f-]{36}$/],
+    [["builds", "logs"], /^(?:\.release-[\w-]+-|library-add-)[0-9a-f-]{36}$/],
+    [["builds", "web-packages"], /^\.[0-9a-f]{64}\.[0-9a-f-]{36}\.partial$/],
+    [["builds", "windows"], /^\.game-windows\.zip\.[0-9a-f-]{36}\.partial$/],
+  ];
 /** Past this per game, the oldest game logs go before their age. */
 const GAME_LOGS_MAX_BYTES = 2 * 1024 ** 3;
 /** A game log touched this recently may be a live tool's, session's or run step's; it stays. */
@@ -932,8 +948,27 @@ const make = Effect.gen(function* () {
     now: number,
     removed: { files: number; bytes: number },
   ): Effect.fn.Return<boolean, PlatformError | ServerSettingsError> {
-    if (!(yield* fs.exists(path.join(root, "builds", "logs")))) return false;
+    if (!(yield* fs.exists(path.join(root, "builds")))) return false;
     const realRoot = yield* fs.realPath(root);
+    // Build leftovers first: they are a day past any live export by construction.
+    for (const [folder, pattern] of GAME_BUILD_LEFTOVERS) {
+      const directory = path.join(realRoot, ...folder);
+      if (!(yield* fs.exists(directory)) || (yield* fs.realPath(directory)) !== directory) continue;
+      for (const name of yield* fs.readDirectory(directory)) {
+        if (!pattern.test(name)) continue;
+        const target = path.join(directory, name);
+        const measured = yield* measureEntry(target).pipe(Effect.orElseSucceed(() => null));
+        if (measured === null || measured.modified > now - GAME_LOG_LIVE_MS) continue;
+        const gone = yield* fs.remove(target, { recursive: true }).pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        );
+        if (!gone) continue;
+        removed.files++;
+        removed.bytes += measured.bytes;
+      }
+    }
+    if (!(yield* fs.exists(path.join(root, "builds", "logs")))) return false;
     const logs = path.join(realRoot, "builds", "logs");
     if ((yield* fs.realPath(logs)) !== logs) return false;
     const owned: Array<{ target: string; bytes: number; modified: number }> = [];

@@ -29,12 +29,18 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 - The live editors (Blender with its pinned MCP addon per game; one batchmode Unity editor per
   server, since one costs 2-3 GB, reached through the official `unity` CLI and its `unity mcp`
   server) run on private displays with session.json launch records, reaping and idle shutdown
-  (`liveProcess.ts`). A record is acted on only while its process still verifies as the launch
+  (`liveProcess.ts`, `liveEditor.ts`). A session something showed unusable (its MCP child exited,
+  a call timed out on a frozen main thread) closes when its last holder lets go, and the next call
+  opens a fresh one; a session whose source on disk changed since it last opened or saved it
+  (Blender's live.blend, Unity's open scene) reopens instead of saving over it. A start cut short
+  stops what it launched. A record is acted on only while its process still verifies as the launch
   (below) and its command line names the executables the live toolchain would launch now, never
   paths from the record; of the editor's process tree only processes running from a detected
-  editor's directory, the CLI or Xvfb are signalled, and a Unity Licensing Client never is. Unity
-  also keeps a copy of its record under the server state dir, reaped at startup, so a crashed
-  server's editor dies even if its game is never reopened. Every call or operation holds the
+  editor's directory, the CLI or Xvfb are signalled, and a Unity Licensing Client never is.
+  Both editors keep a copy of their record under the server state dir, reaped at startup, so a
+  crashed server's editor dies even if its game is never reopened. Blender runs under its own
+  user-folder override (`BLENDER_USER_RESOURCES`) and installs the addon where Blender itself
+  says its user addons live, so no version or OS layout is assumed. Every call or operation holds the
   editor; another game's open closes it only while it is idle, and fails `busy` naming the holder.
 - `GameToolchain` detects the user's own Godot, Unity and Blender the way providers are detected,
   and never installs them: they are other vendors' software with their own upkeep and licences on
@@ -64,23 +70,41 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   machine (the installed app and any dev server) shares that cache, so fetches lock per pack only
   within one process, scratch names carry the fetching server's pid (a start-up sweep spares live
   ones), and placing a pack accepts a complete copy another server placed first.
-- An engine is two modules, and core code asks them instead of naming the engine. Its profile
+- An engine is two modules, and nothing above them names an engine. Its profile
   (`godotProfile.ts`, `threeProfile.ts`, `unityProfile.ts`, read through `engineProfile.ts`) is pure
-  data the services and the run's pure policy share: directories, export targets, how its games play
-  (a browser page, the engine's native runner, or a built player), the in-game runner files the
-  harness owns, Web build files, check messages, its skill and its prompt lines. Its backend (`GameGodotEngine`, `GameThreeEngine`,
-  `GameUnityEngine`, registered in `GameEngine`) holds the behaviour that differs: import, check,
-  export readiness and preset, export release, how a play session starts its runner process
-  (`playProcess`; null for a browser page), and two optional capabilities, `editor` (a live
-  editor that refuses a second user) and `player` (a player folder built from the sources). Godot owns the native process boundary (headless editor import, check script,
-  export presets; Web, Linux and Windows releases). three.js owns a headless-Chromium boundary
-  instead: the static folder is the game, so import is a no-op success, check loads the page
-  and reports console/page errors, export copies the folder. Windows and Linux exports are
-  refused plainly for three.js (`profile.exportTargets`). Unity refuses a second editor
-  on an open project, so every Unity operation goes through the game's live editor in
-  `GameUnity`: import refreshes and recompiles there, check recompiles and then plays the main
-  scene for 120 frames and reads the console, export builds a player folder that replaces
-  `builds/linux` or `builds/windows` only after its files and the source identity check out.
+  data the services, the client tables and the run's pure policy share: directories, its releases
+  (target, artifact, whether it ships as a file or a folder, whether Kurambit packages it), what of
+  the project is build input, how its games play, the harness's runner files, check messages, its
+  tool descriptions, skill and prompt lines. Its driver (`GameGodotEngine`, `GameThreeEngine`,
+  `GameUnityEngine`, registered in `GameEngine`) holds the behaviour that differs: the project and
+  its binary, its tool's status, viewport, import, check, writing one release into a staging folder
+  and checking its own files, how a play session starts its runner (`playProcess`; null for a
+  browser page), and the optional `editor` (a live editor that refuses a second user) and `player`
+  (where a game keeps its built players). A per-engine table outside a driver is a
+  `Record<GameEngineId, …>`, so a new engine does not compile without its entries. The game is
+  known by its manifest's engine id (and its project folder by `manifestProject`), never by the
+  folder's name; a run records the engine it started with (`runEngine` derives it from the lane for
+  older records).
+- Every release takes one path (`GameExport.releaseTo`): staged beside its destination, written and
+  checked by the driver, compared with the sources before and after (an unidentifiable tree is
+  refused before the engine runs), then published by `publishStaged`, which moves the incumbent
+  aside and puts it back on any failure. A native release replaces the whole `builds/<target>/`
+  folder; a Web build becomes the content-addressed candidate Play selects, and only the selected
+  build and the one before it are kept, with their preview servers; a kept Unity player is
+  published the same way. A crash between the two renames leaves a `.retired` copy with no final,
+  which the next export's sweep puts back. The check's verdict is `GameEngine.check`: everything
+  the game did is a check error or warning, and it fails only when a tool or the machine kept the
+  check from being made. Each engine has one error reading for import, export and check (Godot's
+  `parseGodotIssues`; Unity's `answerOf` over the CLI envelope), and a harness fault is
+  `tool-failed`, never `command-failed`. Godot owns the native process boundary (headless editor
+  import, check script, export presets); its check skips `.gdignore` folders and files every
+  export preset excludes, as the editor and exporter do. three.js owns a headless-Chromium
+  boundary: import is a no-op, the check loads the page (a page crash is the game's, a lost
+  browser a tool's), the release copies the folder. Unity refuses a second editor on an open
+  project, so every Unity operation goes through the game's live editor in `GameUnity`: import
+  refreshes and recompiles there, the check plays the first enabled build scene and the gameplay
+  scene; a game whose play mode never answers or advances no frame froze (an error, and the editor
+  is closed), one that runs below speed is a warning with its frame rate.
   Unity editors run with the real HOME so they reach the user's Licensing Client; Kurambit only
   reads the entitlement file to say whether a licence is active and never stores credentials.
   Every `unity` CLI call (status, command, recompile, mcp) runs under the CLI's own HOME in the
@@ -89,7 +113,7 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   `Library/Pipeline` port file, so nothing Kurambit runs writes the user's Unity Hub data.
   Blind samples play plain copies of a build, each a separate Unity project with no `Library/`.
   Before an editor opens on one, `GameUnity` gives it a copy-on-write copy
-  (`cp -a --reflink=auto`) of its game folder's `Library/`, found through the folder the copy
+  (`fs.cp` with `COPYFILE_FICLONE`: a reflink or APFS clone where the filesystem has one) of its game folder's `Library/`, found through the folder the copy
   names in `.kurambit-copy-of` and taken after the game folder's
   idle editor closed, so only what differs in that build is reimported (about a minute warm,
   against two cold). The compiled-script
@@ -192,7 +216,7 @@ from one per-OS/CPU table of official builds with their published SHA-256
 
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
 over RPC. Threads the production run launches get play-level tools (plus `game_run_submit`) only (status, check, import,
-export, explore start/act/close, bot run/view, blender, unity and asset library tools); every
+export, explore start/act/close, bot run/view/report, `game_run_checks`, blender, unity and asset library tools); every
 other MCP tool (threads, worktrees, projects, previews) hides from them unless it declares
 `EnabledWhen` itself, since a blind role that could list threads could map builds to reports. The `game_unity_*` tools
 are a curated front for `unity mcp`: a fixed allowlist of editing tools behind one

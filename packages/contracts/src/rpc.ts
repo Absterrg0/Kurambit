@@ -1513,7 +1513,8 @@ const WsSubscribeGameEventsRpc = Rpc.make(WS_METHODS.subscribeGameEvents, {
   /** With a thread, only that thread's game's pushes. */
   payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
   success: GameOperationEvent,
-  error: EnvironmentAuthorizationError,
+  // A thread whose game cannot be resolved fails the stream with why, never ends it silently.
+  error: gameError,
   stream: true,
 });
 

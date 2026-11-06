@@ -5,7 +5,44 @@ export const GODOT_PROFILE: GameEngineProfile = {
   displayName: "Godot",
   projectDirectory: "godot",
   exportTargets: ["Web", "Linux", "Windows"],
-  layout: { assets: "assets", ui: "ui", library: "library", blender: "assets/blender" },
+  releases: [
+    { target: "Web", artifact: null, ships: "folder", packageable: true },
+    // The standard presets embed the pack; a custom preset adds game.pck beside the executable.
+    { target: "Linux", artifact: "builds/linux/game.x86_64", ships: "file", packageable: false },
+    { target: "Windows", artifact: "builds/windows/game.exe", ships: "file", packageable: true },
+  ],
+  buildInputs: {
+    skipDirs: [".godot"],
+    rootOutputDirs: [],
+    sidecarSuffixes: [".import", ".uid"],
+    rootOutputFiles: null,
+    derivedAssets: false,
+  },
+  scaffold: {
+    version: "4.7.2",
+    directories: ["godot/assets/models", "godot/scripts", "builds/web"],
+  },
+  resourcePath: (projectRelative) => `res://${projectRelative}`,
+  importRoot: null,
+  groundHint: (width, height, ground) =>
+    `Godot: Sprite2D offset (0, ${height / 2 - ground}) puts the node origin on the ground line (x=${width / 2} is already the origin).`,
+  stripLoad: (key, resource, view) =>
+    `SpriteStrips.apply($AnimatedSprite2D, {${JSON.stringify(key)}: "${resource}"}, "${view}") loads it`,
+  tools: {
+    import: "Godot games run a headless editor import (sidecars and the .godot cache).",
+    check:
+      "Godot games load every .gd, .tscn and .tres outside .gdignore folders and outside what every export preset excludes, run the main scene and the gameplay scene game.json declares for 120 physics frames each, and report parse, load and runtime errors with file:line, plus lint warnings for InputMap actions used but not defined and a player without a working CollisionShape.",
+    export:
+      "Godot games take the Web, Windows or Linux release preset. Windows writes builds/windows/game.exe, a 64-bit x86_64 executable (the standard preset embeds the game data; a custom preset that does not also writes builds/windows/game.pck, so keep both files together; it has not been run on Windows). Linux writes builds/linux/game.x86_64. Missing export templates are an actionable error naming how the user adds them in Godot. Web uses Compatibility rendering and a single-threaded export.",
+    explore: "Godot games run natively with the game paused between acts.",
+  },
+  layout: {
+    assets: "assets",
+    ui: "ui",
+    library: "library",
+    blender: "assets/blender",
+    sprites: "sprites",
+  },
   viewport: null,
   play: "native",
   web: {

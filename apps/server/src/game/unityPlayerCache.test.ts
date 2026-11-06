@@ -4,7 +4,31 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { COPY_OF, checkoutOf, reuseMainPlayer, unityPlayerDirectory } from "./unityPlayerCache.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ServerConfig from "../config.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import {
+  COPY_OF,
+  makeCheckoutOf,
+  reuseMainPlayer,
+  unityPlayerDirectory,
+} from "./unityPlayerCache.ts";
+
+// The checkout reading runs through T3's real git driver.
+const checkoutOf = (root: string) =>
+  Effect.runPromise(
+    Effect.flatMap(makeCheckoutOf, (of) => of(root)).pipe(
+      Effect.provide(
+        GitVcsDriver.layer.pipe(
+          Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "unity-cache-" })),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+      Effect.scoped,
+    ),
+  );
 
 const SOURCE = "a".repeat(64);
 

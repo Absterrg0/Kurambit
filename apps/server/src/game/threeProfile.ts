@@ -1,4 +1,4 @@
-import { THREE_VIEWPORT, THREE_PROJECT_DIRECTORY } from "@kurambit/contracts";
+import { THREE_PINNED_VERSION, THREE_VIEWPORT, THREE_PROJECT_DIRECTORY } from "@kurambit/contracts";
 import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const THREE_PROFILE: GameEngineProfile = {
@@ -6,7 +6,37 @@ export const THREE_PROFILE: GameEngineProfile = {
   displayName: "three.js",
   projectDirectory: THREE_PROJECT_DIRECTORY,
   exportTargets: ["Web"],
-  layout: { assets: "assets", ui: "ui", library: "library", blender: "assets/blender" },
+  releases: [{ target: "Web", artifact: null, ships: "folder", packageable: true }],
+  buildInputs: {
+    skipDirs: [],
+    rootOutputDirs: [],
+    sidecarSuffixes: [],
+    rootOutputFiles: null,
+    derivedAssets: false,
+  },
+  scaffold: { version: THREE_PINNED_VERSION, directories: ["web/assets", "builds/web"] },
+  resourcePath: (projectRelative) => `./${projectRelative}`,
+  importRoot: null,
+  groundHint: (_width, height, ground) => {
+    const up = Number(((height - ground) / height).toFixed(4));
+    return `three.js: sprite.center.set(0.5, ${up}) on a THREE.Sprite, or geometry.translate(0, ${Number((0.5 - up).toFixed(4))} * planeHeight, 0) on a plane, puts the object's position on the ground line.`;
+  },
+  stripLoad: null,
+  tools: {
+    import: "three.js games have no import step: the static folder is the game.",
+    check:
+      "three.js games load the static page and then the gameplay entry in headless Chromium and report console and page errors; a page that crashes is the game's error, a browser that is lost is a tool failure.",
+    export:
+      "three.js games export Web only (a static copy of web/); Windows and Linux are refused.",
+    explore: "three.js games load the static folder in headless Chromium and play in real time.",
+  },
+  layout: {
+    assets: "assets",
+    ui: "ui",
+    library: "library",
+    blender: "assets/blender",
+    sprites: "sprites",
+  },
   viewport: THREE_VIEWPORT,
   play: "browser",
   // The release is a static copy of the folder: its entry proves the staging,

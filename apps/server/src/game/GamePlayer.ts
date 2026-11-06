@@ -7,18 +7,13 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import { GameOperationError } from "@kurambit/contracts";
+import { sweepPublished } from "./archivePublication.ts";
 import * as GameEngine from "./GameEngine.ts";
+import { publishFolder, releaseTo } from "./GameExport.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { snapshotBuildSource } from "./sourceSnapshot.ts";
-import {
-  checkoutOf,
-  completePlayer,
-  isPlayerDirectory,
-  reuseMainPlayer,
-  touchPlayer,
-  unityPlayerDirectory,
-} from "./unityPlayerCache.ts";
+import { makeCheckoutOf, reuseMainPlayer, touchPlayer } from "./unityPlayerCache.ts";
 
 /** Players a game keeps under builds/logs, about 100 MB each. */
 const PLAYERS_KEPT = 3;
@@ -83,6 +78,7 @@ const make = Effect.gen(function* () {
   const engines = yield* GameEngine.GameEngine;
   const projects = yield* GameProjectService.GameProjectService;
   const operations = yield* GameOperations.GameOperations;
+  const checkoutOf = yield* makeCheckoutOf;
   // Both samples of a pair prepare at once and one live editor runs at a
   // time: the second waits for the first's build instead of failing busy.
   const prepareLock = Semaphore.makeUnsafe(1);
@@ -100,14 +96,19 @@ const make = Effect.gen(function* () {
       const { player, editor } = backend;
       const known = (detail: string) =>
         Effect.flatMap(
-          Effect.promise((signal) => snapshotBuildSource(root, ctx.projectName, { signal })),
+          Effect.promise((signal) =>
+            snapshotBuildSource(root, ctx.projectName, {
+              signal,
+              rules: backend.profile.buildInputs,
+            }),
+          ),
           (source) =>
             source.kind === "known"
               ? Effect.succeed(source.sourceId)
               : Effect.fail(invalid(root, detail)),
         );
       const playerOf = (sourceId: string) =>
-        NodePath.join(unityPlayerDirectory(root, sourceId), player.executable);
+        NodePath.join(player.cacheDir(root, sourceId), player.executable);
       const startedMs = yield* Clock.currentTimeMillis;
       const prepared = (sourceId: string, origin: PlayerOrigin) =>
         Effect.map(Clock.currentTimeMillis, (now) => ({
@@ -116,12 +117,12 @@ const make = Effect.gen(function* () {
           origin,
           ms: now - startedMs,
         }));
-      const checkout = yield* Effect.promise(() => checkoutOf(root));
+      const checkout = yield* checkoutOf(root);
       // Only an exact content match is reused: the same sources build the same player.
       const ready = (sourceId: string) =>
         Effect.gen(function* () {
-          if (yield* Effect.promise(() => completePlayer(unityPlayerDirectory(root, sourceId)))) {
-            yield* Effect.promise(() => touchPlayer(unityPlayerDirectory(root, sourceId)));
+          if (yield* player.complete(player.cacheDir(root, sourceId))) {
+            yield* Effect.promise(() => touchPlayer(player.cacheDir(root, sourceId)));
             return yield* prepared(sourceId, "cached");
           }
           if (checkout.kind !== "linked") return null;
@@ -170,26 +171,35 @@ ${imported.message}`.slice(0, 3000),
             const afterImport = yield* ready(sourceId);
             if (afterImport !== null) return afterImport;
             // The most recently built or played few players are kept, so the
-            // sources a comparison's worktrees play are usually still here.
+            // sources a comparison's worktrees play are usually still here; a
+            // cut-short build's staging goes too.
+            const logs = NodePath.join(root, "builds/logs");
             yield* Effect.promise(async () => {
-              const logs = NodePath.join(root, "builds/logs");
+              await sweepPublished(logs, (name) => name.startsWith(".release-"));
               const players: Array<{ readonly path: string; readonly mtimeMs: number }> = [];
               for (const name of await NodeFSP.readdir(logs).catch(() => [] as string[]))
-                if (isPlayerDirectory(name)) {
+                if (player.isCacheDir(name)) {
                   const path = NodePath.join(logs, name);
                   const stat = await NodeFSP.stat(path).catch(() => null);
                   if (stat !== null) players.push({ path, mtimeMs: stat.mtimeMs });
                 }
               players.sort((a, b) => b.mtimeMs - a.mtimeMs);
+              // A player another process still holds open (Windows) goes next time.
               for (const { path } of players.slice(PLAYERS_KEPT - 1))
-                await NodeFSP.rm(path, { recursive: true, force: true });
+                await NodeFSP.rm(path, { recursive: true, force: true }).catch(() => undefined);
             });
-            const built = yield* player.build(ctx, {
+            const operation = `${engine} play build`;
+            // The player is kept under the sources it was built from, which the
+            // release proves did not move while it ran.
+            const built = yield* releaseTo(backend, ctx, {
               target: player.playTarget,
-              destination: unityPlayerDirectory(root, sourceId),
-              operation: "unity-play-build",
+              preset: player.playTarget,
+              operation,
+              stagingParent: logs,
+              publish: (staging, _artifact, built) =>
+                publishFolder(operation, staging, player.cacheDir(root, built)),
             });
-            if (!built.result.success)
+            if (built.kind === "failed")
               return yield* new GameOperationError({
                 operation: "Explore session",
                 path: root,
@@ -197,30 +207,6 @@ ${imported.message}`.slice(0, 3000),
                 detail: `The ${engine} play build failed, so no session was opened.
 ${built.result.message}`.slice(0, 3000),
               });
-            if (built.sourceId === null)
-              return yield* invalid(
-                root,
-                `The game sources changed while the ${engine} play build ran; start the session again.`,
-              );
-            // The sources moved between the read above and the build's own
-            // first read: the player is cached under what it was built from.
-            if (built.sourceId !== sourceId) {
-              const settled = built.sourceId;
-              yield* Effect.tryPromise({
-                try: () =>
-                  NodeFSP.rename(
-                    unityPlayerDirectory(root, sourceId),
-                    unityPlayerDirectory(root, settled),
-                  ),
-                catch: (cause) =>
-                  new GameOperationError({
-                    operation: "Explore session",
-                    path: unityPlayerDirectory(root, settled),
-                    reason: "io",
-                    cause,
-                  }),
-              });
-            }
             return yield* prepared(built.sourceId, "built");
           }),
         ),

@@ -12,6 +12,8 @@ export class GamePreview extends Context.Service<
     /** Serves a build and makes it the one Play shows. */
     readonly select: (root: string, directory: string) => Effect.Effect<string, GameOperationError>;
     readonly stop: (root: string) => Effect.Effect<void>;
+    /** Closes the servers of this game's builds other than `directories` (builds an export pruned). */
+    readonly retain: (root: string, directories: ReadonlyArray<string>) => Effect.Effect<void>;
     /** The URL of the build most recently selected for Play, or null. */
     readonly url: (root: string) => string | null;
   }
@@ -76,9 +78,22 @@ const make = Effect.gen(function* () {
           cause,
         }),
     });
+  const retain = async (root: string, directories: ReadonlyArray<string>) => {
+    const keep = new Set(directories.map((directory) => keyOf(root, directory)));
+    await Promise.all(
+      [...servers.entries()]
+        .filter(([key]) => key.startsWith(`${root}\0`) && !keep.has(key))
+        .map(async ([key, entry]) => {
+          servers.delete(key);
+          if (latest.get(root)?.key === key) latest.delete(root);
+          await entry.close().catch(() => undefined);
+        }),
+    );
+  };
   return GamePreview.of({
     url: (root) => latest.get(root)?.url ?? null,
     stop: (root) => Effect.promise(() => closeWhere(root)),
+    retain: (root, directories) => Effect.promise(() => retain(root, directories)),
     // A window opened before a new selection keeps loading the build it was
     // opened on, because each directory keeps its own server. Selecting only
     // changes which URL Play reports.

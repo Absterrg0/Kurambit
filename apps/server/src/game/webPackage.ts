@@ -82,18 +82,19 @@ const notPackaged = (path: string, detail: string) =>
     `${detail} No package was written, and any earlier package was left alone.`,
   );
 
-interface OpenedBuildFile {
-  readonly path: string;
-  readonly file: WebBuildFile;
-  readonly handle: NodeFSP.FileHandle;
-  readonly stat: Awaited<ReturnType<NodeFSP.FileHandle["stat"]>>;
-}
-
-const openBuildFile = async (root: string, directory: string, file: WebBuildFile) => {
+/**
+ * Opens one selected build file for one pass of the archive writer: a
+ * regular file, the size the build's hash recorded. Both passes compare its
+ * bytes with the recorded SHA-256, so a swap or an edit between them fails.
+ */
+const openBuildFile = (root: string, directory: string, file: WebBuildFile) => async () => {
   const absolute = NodePath.join(root, directory, file.path);
   let handle: NodeFSP.FileHandle;
   try {
-    handle = await NodeFSP.open(absolute, "r");
+    handle = await NodeFSP.open(
+      absolute,
+      NodeFSP.constants.O_RDONLY | (NodeFSP.constants.O_NOFOLLOW ?? 0),
+    );
   } catch (cause) {
     throw notPackaged(
       absolute,
@@ -102,58 +103,35 @@ const openBuildFile = async (root: string, directory: string, file: WebBuildFile
         : `The selected Web build file ${file.path} could not be opened: ${describe(cause)}.`,
     );
   }
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile())
-      throw notPackaged(absolute, `The selected Web build path ${file.path} is not a file.`);
-    if (stat.size !== file.size)
-      throw notPackaged(
-        absolute,
-        `The selected Web build file ${file.path} changed size while packaging.`,
-      );
-    const atPath = await NodeFSP.lstat(absolute).catch(() => null);
-    if (
-      atPath === null ||
-      !atPath.isFile() ||
-      atPath.dev !== stat.dev ||
-      atPath.ino !== stat.ino ||
-      atPath.size !== stat.size
-    )
-      throw notPackaged(
-        absolute,
-        `The selected Web build file ${file.path} was replaced while packaging.`,
-      );
-    return { path: file.path, file, handle, stat } satisfies OpenedBuildFile;
-  } catch (cause) {
+  const stat = await handle.stat().catch(async (cause: unknown) => {
     await handle.close().catch(() => undefined);
     throw cause;
+  });
+  if (!stat.isFile() || stat.size !== file.size) {
+    await handle.close().catch(() => undefined);
+    throw notPackaged(
+      absolute,
+      `The selected Web build file ${file.path} changed while packaging.`,
+    );
   }
+  return {
+    read: async (offset: number, length: number) => {
+      const buffer = Buffer.allocUnsafe(length);
+      let read = 0;
+      while (read < length) {
+        const result = await handle.read(buffer, read, length - read, offset + read);
+        if (result.bytesRead === 0)
+          throw notPackaged(
+            file.path,
+            `The selected Web build file ${file.path} changed while packaging.`,
+          );
+        read += result.bytesRead;
+      }
+      return buffer;
+    },
+    close: () => handle.close(),
+  };
 };
-
-const readOpened = (opened: OpenedBuildFile) => async (offset: number, length: number) => {
-  const buffer = Buffer.allocUnsafe(length);
-  let read = 0;
-  while (read < length) {
-    const result = await opened.handle.read(buffer, read, length - read, offset + read);
-    if (result.bytesRead === 0)
-      throw notPackaged(
-        opened.path,
-        `The selected Web build file ${opened.path} changed while packaging.`,
-      );
-    read += result.bytesRead;
-  }
-  return buffer;
-};
-
-const sameFingerprint = (
-  stat: Awaited<ReturnType<NodeFSP.FileHandle["stat"]>>,
-  other: Awaited<ReturnType<NodeFSP.FileHandle["stat"]>>,
-) =>
-  stat.dev === other.dev &&
-  stat.ino === other.ino &&
-  stat.size === other.size &&
-  stat.mtimeMs === other.mtimeMs &&
-  stat.ctimeMs === other.ctimeMs;
 
 const safeRelative = (path: string) =>
   path.length > 0 &&
@@ -244,9 +222,9 @@ export const packageWebRelease = async (input: {
         .join(", ")}). A ZIP cannot set HTTP headers, so configure them on the static host.`,
     );
 
-  const opened: OpenedBuildFile[] = [];
   let staged: string | null = null;
   try {
+    const entries: StoredZipEntry[] = [];
     for (const file of hashed.files) {
       if (!safeRelative(file.path))
         throw new WebPackageError(
@@ -254,16 +232,21 @@ export const packageWebRelease = async (input: {
           "invalid",
           "The selected Web build contains an unsafe relative path.",
         );
-      opened.push(await openBuildFile(root, selected.directory, file));
+      const stat = await NodeFSP.lstat(NodePath.join(buildDirectory, file.path)).catch(() => null);
+      if (stat === null || !stat.isFile())
+        throw notPackaged(
+          file.path,
+          `The selected Web build file ${file.path} disappeared while packaging.`,
+        );
+      entries.push({
+        name: file.path === selected.entry ? archiveEntry : file.path,
+        path: file.path,
+        size: file.size,
+        mtimeMs: stat.mtimeMs,
+        sha256: file.sha256,
+        open: openBuildFile(root, selected.directory, file),
+      });
     }
-    const entries: StoredZipEntry[] = opened.map((file) => ({
-      name: file.file.path === selected.entry ? archiveEntry : file.file.path,
-      path: file.path,
-      size: file.file.size,
-      mtimeMs: Number(file.stat.mtimeMs),
-      sha256: file.file.sha256,
-      read: readOpened(file),
-    }));
     await NodeFSP.mkdir(NodePath.dirname(archive), { recursive: true });
     staged = NodePath.join(
       NodePath.dirname(archive),
@@ -274,23 +257,6 @@ export const packageWebRelease = async (input: {
       entries,
       signal: input.signal,
     });
-    for (const file of opened) {
-      throwIfAborted(input.signal);
-      const current = await file.handle.stat();
-      if (!sameFingerprint(current, file.stat))
-        throw notPackaged(
-          file.path,
-          `The selected Web build file ${file.path} changed while packaging.`,
-        );
-      const atPath = await NodeFSP.lstat(NodePath.join(root, selected.directory, file.path)).catch(
-        () => null,
-      );
-      if (atPath === null || !atPath.isFile() || !sameFingerprint(atPath, file.stat))
-        throw notPackaged(
-          file.path,
-          `The selected Web build file ${file.path} was replaced while packaging.`,
-        );
-    }
     throwIfAborted(input.signal);
     const stagedPath = staged;
     const stagedStat = await NodeFSP.stat(stagedPath).catch((cause) => {
@@ -368,7 +334,6 @@ export const packageWebRelease = async (input: {
     );
   } finally {
     if (staged !== null) await NodeFSP.rm(staged, { force: true }).catch(() => undefined);
-    await Promise.all(opened.map((file) => file.handle.close().catch(() => undefined)));
   }
 };
 

@@ -61,7 +61,6 @@ import {
   type GameBotViewResult,
   manifestProject,
 } from "@kurambit/contracts";
-import { commandDetail } from "./commandDetail.ts";
 import { engineProfile } from "./engineProfile.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameBlender from "./GameBlender.ts";
@@ -87,10 +86,9 @@ import {
   listSaved,
   saveMedia,
 } from "./gameSavedMedia.ts";
-import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
-import { comparedSource, type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
-import { WEB_BUILD_DIRECTORY } from "./webBuild.ts";
-import { textOf } from "./liveProcess.ts";
+import type { GameSourceRules } from "./engineProfile.ts";
+import { type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
+import { COPY_OF } from "./unityPlayerCache.ts";
 
 export class GameService extends Context.Service<
   GameService,
@@ -148,12 +146,35 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameStatus, GameOperationError>;
     /** Operation pushes for every game this server runs. */
     readonly events: Stream.Stream<GameOperationEvent>;
-    /** The pushes for one thread's game; empty when the thread has no game. */
-    readonly threadEvents: (threadId: ThreadId) => Stream.Stream<GameOperationEvent>;
+    /** The pushes for one thread's game; the stream fails when the thread's game cannot be resolved. */
+    readonly threadEvents: (
+      threadId: ThreadId,
+    ) => Stream.Stream<GameOperationEvent, GameOperationError>;
+    /**
+     * The pushes a games library shows: games' own folders only, never the
+     * production run's sample copies, whose checks and builds change no card.
+     */
+    readonly libraryEvents: Stream.Stream<GameOperationEvent>;
+    /** The Game panel's actions: each one is the method below of the same name. */
     readonly action: (
       threadId: ThreadId,
       action: GameAction,
     ) => Effect.Effect<GameActionResult, GameOperationError>;
+    /**
+     * Play: serves the selected Web build as it is, and exports one only when
+     * none was ever built. An engine without a Web release has nothing to serve.
+     */
+    readonly play: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
+    /** Exports the current sources for Web and serves that build. */
+    readonly rebuild: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
+    /**
+     * `game_preview`: a playable build of the current sources. A Web build
+     * older than the sources is rebuilt (the same export Play's Rebuild runs);
+     * an engine whose games play as a built player gets that player prepared.
+     */
+    readonly preview: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
+    /** Stop game: the caller's work, and while no run holds the game, every process of it; says what did not stop. */
+    readonly stop: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
      * Close the live Blender and Unity editors without saving, so a scene held
      * in memory cannot save over files restored on disk; the next call reopens them.
@@ -414,15 +435,18 @@ const make = Effect.gen(function* () {
   const explore = yield* GameExplore.GameExplore;
   const players = yield* GamePlayer.GamePlayer;
   const settings = yield* ServerSettings.ServerSettingsService;
-  const snapshot = (root: string, project: string) =>
-    Effect.promise((signal) => snapshotBuildSource(root, project, { signal }));
   // Status is read on every push for the thread, so its freshness answer reuses
   // hashes of files whose stat identity is unchanged. An explicit check rereads
   // every byte and refreshes the cache. The most recently read checkouts keep
   // theirs (a run's sample copies are checkouts too); one dropped costs a
   // single full read. A cache holds up to 10k files, about 3 MB.
   const statusHashes = new Map<string, SourceHashCache>();
-  const statusSnapshot = (root: string, project: string, reread: boolean) =>
+  const statusSnapshot = (
+    root: string,
+    project: string,
+    reread: boolean,
+    rules?: GameSourceRules,
+  ) =>
     Effect.promise((signal) => {
       const key = `${root}\0${project}`;
       const cache = statusHashes.get(key) ?? new Map();
@@ -433,7 +457,7 @@ const make = Effect.gen(function* () {
         if (oldest !== undefined) statusHashes.delete(oldest);
       }
       if (reread) cache.clear();
-      return snapshotBuildSource(root, project, { signal, cache });
+      return snapshotBuildSource(root, project, { signal, cache, rules });
     });
   // The run itself takes minutes and holds no game lock: GameBot takes the
   // game's operation lock and the memory gate only around each run's import
@@ -455,126 +479,10 @@ const make = Effect.gen(function* () {
     ),
     Effect.forkScoped,
   );
-  /**
-   * Imports first: a fresh game has no .godot cache, so .tres files and
-   * class_names can resolve. With a live editor, import and check share one
-   * hold, as export does: another game cannot take the editor between them.
-   */
-  const checkGame = (root: string) =>
-    Effect.flatMap(engines.context(root), ({ backend }) =>
-      backend.editor === null ? checkSources(root) : backend.editor.hold(root)(checkSources(root)),
-    );
-  const checkSources = (root: string) =>
-    Effect.gen(function* () {
-      {
-        const startedAt = yield* Clock.currentTimeMillis;
-        const { backend, ctx } = yield* engines.context(root);
-        const { profile } = backend;
-        const godotProject = ctx.projectName;
-        const manifest = yield* projects.read(root);
-        const gameplayScene = manifest.gameplayScene ?? "";
-        // Import is cache preparation, not the check itself: Godot's import can
-        // write sidecar files inside the project, so the inputs are read after it
-        // and before the checking script runs.
-        const imported = (yield* backend.importProject(ctx)).result;
-        const before = yield* snapshot(root, godotProject);
-        {
-          const executed = yield* backend.runCheck(ctx, { gameplayScene });
-          const run = executed.run;
-          const reported = executed.reported;
-          const importedOutput =
-            imported.process === null
-              ? ""
-              : `${imported.process.stdout}\n${imported.process.stderr}`;
-          const importedIssues = backend.parseDiagnostics(importedOutput);
-          const parsed = [...importedIssues, ...executed.issues];
-          const errors = mergeCheckIssues(reported?.errors ?? [], parsed);
-          // File labels name the engine project, whichever engine it is.
-          const projectFile = `${godotProject}/${backend.projectSettingsFile}`;
-          if (!imported.success && importedIssues.length === 0)
-            errors.unshift({
-              file: projectFile,
-              message: `Import failed with exit code ${imported.process?.exitCode ?? -1}. ${imported.message}`,
-            });
-          if (reported === null)
-            errors.unshift({
-              file: projectFile,
-              message: `The ${profile.displayName} check script did not report a result. The project may have crashed during startup.`,
-            });
-          if (run.timedOut)
-            errors.unshift({
-              file: projectFile,
-              message: profile.check.timedOut,
-            });
-          if (run.exitCode !== 0 && errors.length === 0)
-            errors.unshift({
-              file: projectFile,
-              message: `${profile.displayName} exited with code ${run.exitCode}. ${commandDetail(run)}`,
-            });
-          // A game created before gameplay entries is checked as it always was, but
-          // the warning says what the check did not cover rather than implying it did.
-          // A three.js game's gameplay entry is a page URL (the starter's is
-          // index.html?play) that the check loads after the page itself.
-          const warnings = [
-            ...(reported?.warnings ?? []),
-            ...(manifest.gameplayScene == null && profile.check.withoutGameplayScene !== null
-              ? [{ file: "game.json", message: profile.check.withoutGameplayScene }]
-              : []),
-          ];
-          const after = yield* snapshot(root, godotProject);
-          const comparison = comparedSource(before, after, "check");
-          if (comparison.kind !== "current")
-            warnings.unshift({ file: `${godotProject}/`, message: comparison.detail });
-          const result = {
-            ok: errors.length === 0 && reported !== null && !run.timedOut,
-            errors: limitIssues(errors),
-            warnings: limitIssues(warnings),
-            entries: reported?.entries ?? [],
-            durationMs: (yield* Clock.currentTimeMillis) - startedAt,
-          };
-          return result;
-        }
-      }
-    });
-  // The game_unity_* tools are the Unity editor's own front, so only a Unity game has them.
-  const unityRoot = (root: string) =>
-    projects.read(root).pipe(
-      Effect.flatMap((manifest) =>
-        manifest.engine.name === "unity"
-          ? Effect.void
-          : Effect.fail(
-              new GameOperationError({
-                operation: "Unity editor",
-                path: root,
-                reason: "invalid-input",
-                detail:
-                  "The game_unity_* tools work on Unity games; this game runs another engine.",
-              }),
-            ),
-      ),
-    );
-  // An operation that may write the game: refused to other owners while a production run holds it.
-  const withRoot = Effect.fnUntraced(function* <A>(
-    threadId: ThreadId,
-    name: string,
-    work: (root: string) => Effect.Effect<A, GameOperationError>,
-    owner: string = String(threadId),
-    waitUntil?: number,
-  ) {
-    const root = yield* projects.resolve(threadId);
-    yield* projects.admitWrite(threadId, root, name, owner);
-    return yield* operations.exclusive(
-      root,
-      name,
-      work(root),
-      owner,
-      waitUntil === undefined ? undefined : { waitUntil },
-    );
-  });
   // A busy game while a run holds it is the run's own work: the refusal says
   // so, rather than suggesting Stop game, which stops only the caller's work.
   const heldBusy = (threadId: ThreadId) => (error: GameOperationError) =>
-    error.runReason !== undefined
+    error.reason !== "busy" || error.runReason !== undefined
       ? Effect.fail(error)
       : Effect.flatMap(projects.runHold(threadId), (hold) =>
           Effect.fail(
@@ -589,6 +497,20 @@ const make = Effect.gen(function* () {
                 }),
           ),
         );
+  // An operation that may write the game: refused to other owners while a production run holds it.
+  const withRoot = Effect.fnUntraced(function* <A>(
+    threadId: ThreadId,
+    name: string,
+    work: (root: string) => Effect.Effect<A, GameOperationError>,
+    owner: string = String(threadId),
+    waitUntil?: number,
+  ) {
+    const root = yield* projects.resolve(threadId);
+    yield* projects.admitWrite(threadId, root, name, owner);
+    return yield* operations
+      .exclusive(root, name, work(root), owner, waitUntil === undefined ? undefined : { waitUntil })
+      .pipe(Effect.catchTags({ GameOperationError: heldBusy(threadId) }));
+  });
   // Reads only, so a production run never refuses it.
   const readRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
@@ -625,6 +547,147 @@ const make = Effect.gen(function* () {
           }),
       }),
     );
+  // A production run's sample copies name their game folder in COPY_OF; their
+  // checks and builds change nothing a library card shows.
+  const libraryRoots = new Map<string, boolean>();
+  const isLibraryRoot = (root: string) =>
+    Effect.promise(async () => {
+      const known = libraryRoots.get(root);
+      if (known !== undefined) return known;
+      const copy = await NodeFSP.stat(NodePath.join(root, COPY_OF)).then(
+        () => true,
+        () => false,
+      );
+      if (libraryRoots.size > 512) libraryRoots.clear();
+      libraryRoots.set(root, !copy);
+      return !copy;
+    });
+  const exportAs = (threadId: ThreadId, target: "Linux" | "Windows") =>
+    withRoot(threadId, `Export ${target}`, (root) => exporter.export(root, target));
+  const rebuild = (threadId: ThreadId) => withRoot(threadId, "Build Web", exporter.publishWeb);
+  /** What a game whose engine makes no Web build answers Play with. */
+  const noWebPlay = (root: string, displayName: string): GameActionResult => ({
+    success: false,
+    message: `${displayName} games make no Web build to play here. Export a Linux or Windows release from the Builds panel (game_export for an agent), or explore and bot-play the game, which play its built player.`,
+    path: root,
+    url: null,
+    process: null,
+  });
+  const play = Effect.fn("GameService.play")(function* (threadId: ThreadId) {
+    const root = yield* projects.resolve(threadId);
+    // Play of a build already exported only reads, so it never takes the
+    // lock a run's capture or check may hold; one it must export is a write.
+    const served = yield* exporter.serve(root);
+    if (served !== null) return served;
+    const { targets, displayName } = yield* exporter.exportTargets(root);
+    if (!targets.includes("Web")) return noWebPlay(root, displayName);
+    // Another Play may have exported meanwhile.
+    return yield* withRoot(threadId, "Build Web", (root) =>
+      Effect.flatMap(exporter.serve(root), (again) =>
+        again === null ? exporter.publishWeb(root) : Effect.succeed(again),
+      ),
+    );
+  });
+  const gamePreview = Effect.fn("GameService.preview")(function* (threadId: ThreadId) {
+    const root = yield* projects.resolve(threadId);
+    const manifest = yield* projects.read(root);
+    const profile = engineProfile(manifest.engine.name);
+    if (profile.exportTargets.includes("Web")) {
+      // A build of other sources than the folder's is rebuilt; an unreadable
+      // tree cannot be shown current, so it is rebuilt too.
+      const selected = yield* exporter.selected(root);
+      const current = yield* statusSnapshot(
+        root,
+        manifestProject(manifest),
+        false,
+        profile.buildInputs,
+      );
+      const fresh =
+        selected !== null &&
+        selected.sourceId !== null &&
+        current.kind === "known" &&
+        current.sourceId === selected.sourceId;
+      if (fresh) {
+        const served = yield* exporter.serve(root);
+        if (served?.success === true) return served;
+      }
+      return yield* rebuild(threadId);
+    }
+    if (profile.play === "player") {
+      yield* projects.admitWrite(
+        threadId,
+        root,
+        `${profile.displayName} play build`,
+        String(threadId),
+      );
+      const prepared = yield* players.prepare(root);
+      return {
+        success: true,
+        message: `${profile.displayName} games play as a player of the current sources: ${prepared.player} is ready (${prepared.origin}). game_explore_start and game_bot_run play it.`,
+        path: prepared.player,
+        url: null,
+        process: null,
+      };
+    }
+    return noWebPlay(root, profile.displayName);
+  });
+  const stop = Effect.fn("GameService.stop")(function* (threadId: ThreadId) {
+    const root = yield* projects.resolve(threadId);
+    // The production run's builds, bots and editors are its own: while a
+    // run holds the game, Stop game ends only what is the caller's: its
+    // operation (an export for Play), its explore session, and Play's
+    // preview server, which no step of a run plays (the run's players
+    // serve their own folders).
+    const hold = yield* projects.runHold(threadId);
+    if (hold !== null) {
+      yield* operations.cancel(root, String(threadId));
+      yield* explore.release(threadId, root);
+      yield* preview.stop(root);
+      return {
+        success: true,
+        message:
+          hold === "finishing"
+            ? "Stopped your work and your Play of this game. The production run is finishing; its exports end on their own."
+            : hold === "restoring"
+              ? "Stopped your work and your Play of this game. A build of the production run is being restored; the restore ends on its own."
+              : "Stopped your work and your Play of this game. The production run's builds, bots and editors keep running; stop the run to stop them.",
+        path: null,
+        url: null,
+        process: null,
+      };
+    }
+    yield* operations.cancel(root);
+    yield* processes.stop(root);
+    // Each stop is tried; one that did not end its processes is said, never reported stopped.
+    const notStopped: string[] = [];
+    for (const [what, stopping] of [
+      ["the live Blender", liveBlender.stop(root)],
+      ["the live engine editor", closeEngineEditor(root)],
+      ["its bot runs", gameBot.stop(root)],
+    ] as const) {
+      const exit = yield* Effect.exit(stopping);
+      if (exit._tag === "Failure") {
+        notStopped.push(what);
+        yield* Effect.logWarning("Stop game: a stop failed", { root, what, cause: exit.cause });
+      }
+    }
+    yield* preview.stop(root);
+    return {
+      success: notStopped.length === 0,
+      message:
+        notStopped.length === 0
+          ? "Stopped this game's processes and preview server."
+          : `Stopped this game's processes and preview server, but ${notStopped.join(" and ")} did not stop; see the server log, and press Stop game again.`,
+      path: null,
+      url: null,
+      process: null,
+    };
+  });
+  const closeEngineEditor = (root: string) =>
+    projects.read(root).pipe(
+      Effect.flatMap((manifest) => engines.backendFor(manifest.engine.name)),
+      Effect.flatMap((backend) => backend.editor?.close(root) ?? Effect.void),
+    );
   return GameService.of({
     saveMedia: (threadId, source, label) =>
       Effect.flatMap(Clock.currentTimeMillis, (now) => {
@@ -658,15 +721,17 @@ const make = Effect.gen(function* () {
         ),
       ),
     events: operations.events,
+    // A thread whose game cannot be resolved fails the stream with why, so a
+    // client shows it instead of an empty stream that never pushes again.
     threadEvents: (threadId) =>
       Stream.unwrap(
-        projects.resolve(threadId).pipe(
-          Effect.map((root) =>
-            operations.events.pipe(Stream.filter((event) => event.root === root)),
-          ),
-          Effect.orElseSucceed(() => Stream.empty),
+        Effect.map(projects.resolve(threadId), (root) =>
+          operations.events.pipe(Stream.filter((event) => event.root === root)),
         ),
       ),
+    libraryEvents: operations.events.pipe(
+      Stream.filterEffect((event) => isLibraryRoot(event.root)),
+    ),
     finishExploration: explore.finish,
     limitExploreInput: explore.limitInput,
     exploreMemoryWait: explore.memoryWait,
@@ -691,8 +756,9 @@ const make = Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const manifest = yield* projects.read(root);
       const inventory = yield* projects.inventory(root);
+      const profile = engineProfile(manifest.engine.name);
       const selected = yield* exporter.selected(root);
-      const served = engineProfile(manifest.engine.name).web?.served ?? [];
+      const served = profile.web?.served ?? [];
       const selectedPresent =
         selected === null
           ? null
@@ -709,22 +775,6 @@ const make = Effect.gen(function* () {
               }
               return true;
             });
-      // The inventory reports what exists under builds/, but Play follows the
-      // selected record. With nothing selected, only the legacy mutable build
-      // can be played.
-      const builds =
-        selected === null
-          ? inventory.builds.filter(
-              (build) => build.target !== "Web" || build.path.startsWith(`${WEB_BUILD_DIRECTORY}/`),
-            )
-          : [
-              ...inventory.builds.filter((build) => build.target !== "Web"),
-              {
-                target: "Web",
-                path: `${selected.directory}/${selected.entry}`,
-                updatedAt: DateTime.formatIso(yield* DateTime.now),
-              },
-            ];
       // Freshness is a byte question against the snapshot the export recorded.
       // An unreadable tree cannot be shown to match, but it is also not proven
       // to differ.
@@ -732,9 +782,9 @@ const make = Effect.gen(function* () {
         root,
         manifestProject(manifest),
         statusOptions?.checkSources === true,
-      ).pipe(Effect.option);
-      const currentId =
-        current._tag === "Some" && current.value.kind === "known" ? current.value.sourceId : null;
+        profile.buildInputs,
+      );
+      const currentId = current.kind === "known" ? current.sourceId : null;
       const matchesSelected =
         selected === null || selected.sourceId === null || currentId === null
           ? null
@@ -749,26 +799,23 @@ const make = Effect.gen(function* () {
           : statusOptions?.checkSources !== true
             ? "unknown"
             : (matchesSelected ?? "unknown");
-      // Status observes the preview; it never switches it. A stopped preview
-      // stays stopped.
-      const previewUrl = preview.url(root);
       return {
         root,
-        ...inventory,
-        builds,
+        manifest: inventory.manifest,
+        viewport: inventory.viewport,
+        // The releases the engine makes, as their files are now: Play follows
+        // the selected record, dated by when it was selected.
+        builds: [...(yield* exporter.releases(root))],
+        exportTargets: [...profile.exportTargets],
         // Usability and source freshness are separate answers: the selected
         // build can be perfectly playable while the editable sources have moved
         // on, which is the normal state after an export.
         webBuildStale,
         sourcesDifferFromPlay,
-        // The toolchain picks a Unity editor by the project's own version; no other engine has one per project.
-        toolchain: yield* tools.status(
-          manifest.engine.name === "unity"
-            ? { unityProject: GameProjectService.insideGame(root, manifestProject(manifest)) }
-            : undefined,
-        ),
+        engineTool: yield* engines.toolStatus(root),
         processes: processes.list(root),
-        previewUrl,
+        // Status observes the preview; it never switches it.
+        previewUrl: preview.url(root),
         operation: operations.current(root),
       };
     }),
@@ -781,18 +828,9 @@ const make = Effect.gen(function* () {
         owner,
         waitUntil,
       ),
-    exportTargets: (threadId, owner, waitUntil) =>
-      readRoot(
-        threadId,
-        "Export targets",
-        (root) =>
-          Effect.gen(function* () {
-            const { profile } = (yield* engines.context(root)).backend;
-            return { targets: profile.exportTargets, displayName: profile.displayName };
-          }),
-        owner,
-        waitUntil,
-      ),
+    // A profile read: no lock, so it neither waits on nor fails beside another operation.
+    exportTargets: (threadId) =>
+      Effect.flatMap(projects.resolve(threadId), (root) => exporter.exportTargets(root)),
     packageWindows: (threadId) =>
       withRoot(threadId, "Package Windows build", exporter.packageWindows),
     packageWeb: (threadId) => withRoot(threadId, "Package Web build", exporter.packageWeb),
@@ -848,103 +886,39 @@ const make = Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         const manifest = yield* projects.read(root);
         const label = `${engineProfile(manifest.engine.name).displayName} check`;
-        return yield* withRoot(threadId, label, checkGame, owner);
+        return yield* withRoot(threadId, label, engines.check, owner);
       }),
-    unityTools: (threadId) =>
-      withRoot(threadId, "Unity tools", (root) =>
-        unityRoot(root).pipe(
-          Effect.andThen(liveUnity.tools(root)),
-          Effect.map((tools) => ({ tools })),
-        ),
-      ),
+    unityTools: (threadId) => withRoot(threadId, "Unity tools", liveUnity.listTools),
     unityEdit: (threadId, input) =>
-      withRoot(threadId, "Unity edit", (root) =>
-        Effect.gen(function* () {
-          yield* unityRoot(root);
-          if (!GameUnity.UNITY_EDIT_TOOL.test(input.tool))
-            return yield* new GameOperationError({
-              operation: "Unity edit",
-              path: input.tool,
-              reason: "invalid-input",
-              detail:
-                "That tool is not an editing tool here. List the editing tools with game_unity_tools; use game_unity_eval, game_unity_play, game_unity_screenshot or game_unity_console for the rest.",
-            });
-          // Edits live in the open scene until saved, so the edit and its save hold one editor.
-          return yield* liveUnity.hold(root)(
-            Effect.gen(function* () {
-              const result = yield* liveUnity.call(root, input.tool, { ...input.arguments });
-              const saved = yield* liveUnity.call(root, "editor_save_all", {}).pipe(
-                Effect.map(textOf),
-                Effect.orElseSucceed(() => "Saving the scene failed."),
-              );
-              return { text: `${textOf(result).slice(0, 8000)}\n${saved}` };
-            }),
-          );
-        }),
-      ),
+      withRoot(threadId, "Unity edit", (root) => liveUnity.edit(root, input)),
     unityEval: (threadId, input) =>
-      withRoot(threadId, "Unity eval", (root) =>
-        unityRoot(root).pipe(
-          Effect.andThen(
-            liveUnity.call(root, "script_eval", { code: input.code, timeout: 60 }, 90_000),
-          ),
-          Effect.map((result) => ({ text: textOf(result).slice(0, 8000) })),
-        ),
-      ),
+      withRoot(threadId, "Unity eval", (root) => liveUnity.evaluate(root, input)),
     unityRecompile: (threadId) =>
       withRoot(threadId, "Unity recompile", (root) =>
         Effect.gen(function* () {
-          yield* unityRoot(root);
           const { backend, ctx } = yield* engines.context(root);
+          if (backend.editor === null)
+            return yield* new GameOperationError({
+              operation: "Unity recompile",
+              path: root,
+              reason: "invalid-input",
+              detail: "The game_unity_* tools work on Unity games; this game runs another engine.",
+            });
           const imported = yield* backend.importProject(ctx);
           return {
             ok: imported.result.success,
             errors: imported.issues,
             warnings: [],
-            text: imported.result.success
-              ? imported.result.message
-              : imported.result.message.slice(0, 4000),
+            text: imported.result.message.slice(0, 4000),
           };
         }),
       ),
     unityPlay: (threadId, input) =>
-      withRoot(threadId, "Unity play", (root) =>
-        Effect.gen(function* () {
-          yield* unityRoot(root);
-          // An unfocused editor freezes play mode at frame 1 without auto-tick.
-          if (input.action === "start") yield* liveUnity.call(root, "editor_set_auto_tick", {});
-          const result = yield* liveUnity.call(
-            root,
-            input.action === "start" ? "editor_playmode_start" : "editor_playmode_stop",
-            {},
-            120_000,
-          );
-          return { text: textOf(result) };
-        }),
-      ),
+      withRoot(threadId, "Unity play", (root) => liveUnity.play(root, input)),
     unityScreenshot: (threadId, input) =>
-      withRoot(threadId, "Unity screenshot", (root) =>
-        Effect.gen(function* () {
-          yield* unityRoot(root);
-          const result = yield* liveUnity.call(root, "capture_game_view", {
-            source: "camera",
-            max_resolution: input.maxSize ?? 960,
-          });
-          return GameUnity.screenshotOf(result);
-        }),
-      ),
+      withRoot(threadId, "Unity screenshot", (root) => liveUnity.screenshot(root, input)),
     unityConsole: (threadId, input) =>
-      withRoot(threadId, "Unity console", (root) =>
-        unityRoot(root).pipe(
-          Effect.andThen(
-            liveUnity.call(root, "console_get", {
-              level: input.level ?? "log",
-              tail: input.tail ?? 50,
-            }),
-          ),
-          Effect.map((result) => ({ text: textOf(result).slice(0, 12000) })),
-        ),
-      ),
+      withRoot(threadId, "Unity console", (root) => liveUnity.console(root, input)),
     blenderCode: (threadId, input) =>
       withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
     blenderLook: (threadId, input) =>
@@ -964,77 +938,25 @@ const make = Effect.gen(function* () {
       projects.resolve(threadId).pipe(Effect.flatMap((root) => library.search(root, input))),
     assetsAdd: (threadId, input) =>
       withRoot(threadId, "Library add", (root) => library.add(root, input)),
+    // Blender serves every engine's art; the engine's own live editor is its driver's.
     closeLiveEditors: (root) =>
-      Effect.all([liveBlender.stop(root), liveUnity.stop(root)], { discard: true }),
+      Effect.all([liveBlender.stop(root), closeEngineEditor(root).pipe(Effect.ignore)], {
+        discard: true,
+      }),
     preparePlayer: players.prepare,
     warmEditor: players.warmEditor,
-    action: Effect.fn("GameService.action")(function* (threadId, action) {
-      const root = yield* projects.resolve(threadId);
-      if (action === "stop") {
-        // The production run's builds, bots and editors are its own: while a
-        // run holds the game, Stop game ends only what is the caller's: its
-        // operation (an export for Play), its explore session, and Play's
-        // preview server, which no step of a run plays (the run's players
-        // serve their own folders).
-        const hold = yield* projects.runHold(threadId);
-        if (hold !== null) {
-          yield* operations.cancel(root, String(threadId));
-          yield* explore.release(threadId, root);
-          yield* preview.stop(root);
-          return {
-            success: true,
-            message:
-              hold === "finishing"
-                ? "Stopped your work and your Play of this game. The production run is finishing; its exports end on their own."
-                : hold === "restoring"
-                  ? "Stopped your work and your Play of this game. A build of the production run is being restored; the restore ends on its own."
-                  : "Stopped your work and your Play of this game. The production run's builds, bots and editors keep running; stop the run to stop them.",
-            path: null,
-            url: null,
-            process: null,
-          };
-        }
-        yield* operations.cancel(root);
-        yield* processes.stop(root);
-        yield* liveBlender.stop(root).pipe(Effect.ignore);
-        yield* liveUnity.stop(root).pipe(Effect.ignore);
-        yield* gameBot.stop(root).pipe(Effect.ignore);
-        yield* preview.stop(root);
-        return {
-          success: true,
-          message: "Stopped this game's processes and preview server.",
-          path: null,
-          url: null,
-          process: null,
-        };
-      }
-      // Play of a build already exported only reads, so it never takes the
-      // lock a run's capture or check may hold; one it must export is a write.
-      if (action === "preview") {
-        const served = yield* exporter.serve(root);
-        if (served !== null) return served;
-      }
-      // Admitted before the lock, so a refused click never makes the run's own work wait.
-      yield* projects.admitWrite(threadId, root, action, String(threadId));
-      return yield* operations
-        .exclusive(
-          root,
-          action,
-          action === "export-linux"
-            ? exporter.export(root, "Linux")
-            : action === "export-windows"
-              ? exporter.export(root, "Windows")
-              : // Rebuild forces a new export and publishes it.
-                action === "rebuild"
-                ? exporter.publishWeb(root)
-                : // Another Play may have exported meanwhile.
-                  Effect.flatMap(exporter.serve(root), (served) =>
-                    served === null ? exporter.publishWeb(root) : Effect.succeed(served),
-                  ),
-          String(threadId),
-        )
-        .pipe(Effect.catchIf((error) => error.reason === "busy", heldBusy(threadId)));
-    }),
+    action: (threadId, action) =>
+      action === "stop"
+        ? stop(threadId)
+        : action === "preview"
+          ? play(threadId)
+          : action === "rebuild"
+            ? rebuild(threadId)
+            : exportAs(threadId, action === "export-linux" ? "Linux" : "Windows"),
+    play,
+    rebuild,
+    preview: gamePreview,
+    stop,
   });
 });
 export const layer = Layer.effect(GameService, make).pipe(

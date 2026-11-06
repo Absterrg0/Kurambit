@@ -1,33 +1,24 @@
-import type {
-  GameEngineId,
-  GameStatus,
-  GameToolStatus,
-  GameToolchainStatus,
+import {
+  GAME_ENGINES,
+  type GameEngineId,
+  type GameStatus,
+  type GameToolStatus,
+  type GameToolchainStatus,
 } from "@kurambit/contracts";
-
-/**
- * The installed engine a game of this engine plays and builds with. three.js
- * needs nothing installed; Blender only serves the art tools, which say so
- * themselves when it is missing.
- */
-const ENGINE_TOOL: Record<GameEngineId, GameToolStatus["tool"] | null> = {
-  godot: "godot",
-  three: null,
-  unity: "unity",
-};
 
 /** The engine's own status; null for an engine that needs nothing installed. */
 export function engineToolFor(
   toolchain: GameToolchainStatus,
   engine: GameEngineId,
 ): GameToolStatus | null {
-  const name = ENGINE_TOOL[engine];
+  // three.js needs nothing installed; Blender only serves the art tools, which say so themselves.
+  const name = GAME_ENGINES[engine].tool;
   return name === null ? null : (toolchain.tools.find((tool) => tool.tool === name) ?? null);
 }
 
 /** A warning is usable: it names a gap (a missing Windows module) rather than a blocker. */
 export function toolchainReadyFor(toolchain: GameToolchainStatus, engine: GameEngineId): boolean {
-  if (ENGINE_TOOL[engine] === null) return true;
+  if (GAME_ENGINES[engine].tool === null) return true;
   const tool = engineToolFor(toolchain, engine);
   return tool !== null && tool.status !== "error";
 }
@@ -127,28 +118,6 @@ export function nextGamePreviewFrame(
   const artifactReplaced =
     serve.servedArtifactId !== null && serve.servedArtifactId !== previous.serve.servedArtifactId;
   return urlChanged || artifactReplaced ? candidate : previous;
-}
-
-/** How many reloads a run of status reads causes, first mount included. */
-export function countGamePreviewRemounts(serves: readonly GamePreviewServe[]): number {
-  let frame = null as null | { readonly key: string; readonly serve: GamePreviewServe };
-  let remounts = 0;
-  for (const serve of serves) {
-    const next = nextGamePreviewFrame(frame, serve);
-    if (frame !== null && next.key !== frame.key) remounts++;
-    frame = next;
-  }
-  if (frame !== null) remounts++;
-  return remounts;
-}
-
-/**
- * The iframe's identity from a full status read. Content must call
- * {@link nextGamePreviewFrame} repeatedly (the stage folds it across renders)
- * so unrelated status churn can never change the key.
- */
-export function gamePreviewFrameKey(serve: GamePreviewServe): string {
-  return frameKeyOf(serve);
 }
 
 export function gameSourceFreshnessLabel(value: GameStatus["sourcesDifferFromPlay"]): string {

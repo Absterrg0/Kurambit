@@ -1,12 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- This helper reads, copies and touches Unity player folders on the native filesystem.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeUtil from "node:util";
+import * as Effect from "effect/Effect";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import { copyTree } from "./gameFiles.ts";
 import { HOST_OS } from "./processHost.ts";
-
-const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
 export const unityPlayerDirectory = (root: string, sourceId: string) =>
   NodePath.join(root, "builds/logs", `unity-play-${sourceId.slice(0, 16)}`);
@@ -32,59 +31,57 @@ export const COPY_OF = ".kurambit-copy-of";
  * other folder whose .git is a file (a submodule, a separate git dir) has no
  * game folder to share an import with.
  */
-export const checkoutOf = async (root: string): Promise<Checkout> => {
-  const dotGit = await NodeFSP.stat(NodePath.join(root, ".git")).catch(() => null);
-  if (dotGit === null) {
-    const main = (
-      await NodeFSP.readFile(NodePath.join(root, COPY_OF), "utf8").catch(() => "")
-    ).trim();
-    return main.length > 0 && (await NodeFSP.realpath(main).catch(() => null)) !== null
-      ? { kind: "linked", main: await NodeFSP.realpath(main) }
-      : { kind: "own" };
-  }
-  if (!dotGit.isFile()) return { kind: "own" };
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
-  );
-  const listed = await execFile(
-    "git",
-    ["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
-    { cwd: root, env, timeout: 15_000 },
-  ).catch((cause: unknown) => cause);
-  const [common, gitDir] =
-    typeof listed === "object" && listed !== null && "stdout" in listed
-      ? String(listed.stdout).trim().split("\n")
-      : [];
-  if (common === undefined || gitDir === undefined)
-    return { kind: "other", detail: "git could not read its .git file" };
-  return NodePath.basename(common) === ".git" &&
-    NodePath.dirname(gitDir) === NodePath.join(common, "worktrees")
-    ? { kind: "linked", main: NodePath.dirname(common) }
-    : { kind: "other", detail: `its git dir is ${gitDir}` };
-};
+export const checkoutOf = (
+  root: string,
+  gitDirs: (cwd: string) => Effect.Effect<readonly [common: string, gitDir: string] | null>,
+): Effect.Effect<Checkout> =>
+  Effect.gen(function* () {
+    const dotGit = yield* Effect.promise(() =>
+      NodeFSP.stat(NodePath.join(root, ".git")).catch(() => null),
+    );
+    if (dotGit === null) {
+      const main = yield* Effect.promise(async () => {
+        const named = (
+          await NodeFSP.readFile(NodePath.join(root, COPY_OF), "utf8").catch(() => "")
+        ).trim();
+        return named.length > 0 ? await NodeFSP.realpath(named).catch(() => null) : null;
+      });
+      return main === null ? ({ kind: "own" } as const) : ({ kind: "linked", main } as const);
+    }
+    if (!dotGit.isFile()) return { kind: "own" } as const;
+    const dirs = yield* gitDirs(root);
+    if (dirs === null)
+      return { kind: "other", detail: "git could not read its .git file" } as const;
+    const [common, gitDir] = dirs;
+    return NodePath.basename(common) === ".git" &&
+      NodePath.dirname(gitDir) === NodePath.join(common, "worktrees")
+      ? ({ kind: "linked", main: NodePath.dirname(common) } as const)
+      : ({ kind: "other", detail: `its git dir is ${gitDir}` } as const);
+  });
 
-/**
- * Copies a directory tree as cheaply as the filesystem allows: reflinks on
- * Linux (btrfs, XFS), APFS clones on macOS, a plain copy where neither
- * exists (Windows). The copy keeps modes and times.
- */
-export const cloneTree = async (
-  source: string,
-  target: string,
-  timeoutMs: number,
-): Promise<void> => {
-  if (HOST_OS === "win32") {
-    await NodeFSP.cp(source, target, { recursive: true, preserveTimestamps: true });
-    return;
-  }
-  await execFile(
-    "cp",
-    HOST_OS === "darwin"
-      ? ["-c", "-R", "-p", "--", source, target]
-      : ["-a", "--reflink=auto", "--", source, target],
-    { timeout: timeoutMs },
-  );
-};
+/** `checkoutOf` over T3's own git driver (its environment, timeouts and interruption). */
+export const makeCheckoutOf = Effect.gen(function* () {
+  const git = yield* GitVcsDriver.GitVcsDriver;
+  const gitDirs = (cwd: string) =>
+    git
+      .execute({
+        operation: "game-checkout",
+        cwd,
+        args: ["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
+        allowNonZeroExit: true,
+        timeoutMs: 15_000,
+      })
+      .pipe(
+        Effect.map((result) => {
+          const [common, gitDir] = result.stdout.trim().split("\n");
+          return result.exitCode === 0 && common !== undefined && gitDir !== undefined
+            ? ([common, gitDir] as const)
+            : null;
+        }),
+        Effect.orElseSucceed(() => null),
+      );
+  return (root: string) => checkoutOf(root, gitDirs);
+});
 
 /**
  * The player a session plays on this machine: Unity builds it for the host
@@ -172,7 +169,7 @@ export const reuseMainPlayer = async (
   );
   try {
     await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
-    await cloneTree(source, staging, 5 * 60_000);
+    await copyTree(source, staging);
     const [copied, still] = await Promise.all([listing(staging), listing(source)]);
     if (copied !== still || !(await completePlayer(staging)))
       return "the main checkout's player changed while it was copied";

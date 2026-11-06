@@ -36,8 +36,9 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { renderSprites } from "./blenderSprites.ts";
-import { engineProfile } from "./engineProfile.ts";
+import { recordProvenance, renderSprites } from "./blenderSprites.ts";
+import { gamePaths } from "./engineProfile.ts";
+import { breakSession, HeldSources, type LiveHealth, makeLiveRecords } from "./liveEditor.ts";
 import {
   commandFlag,
   commandHas,
@@ -100,10 +101,29 @@ const CALL_TIMEOUT_MS: Record<string, number> = {
   get_scene_info: 2 * 60_000,
   search_assets: 2 * 60_000,
 };
+const IMPORT_TOOL = "game_blender_assets_import";
+
+/**
+ * The licence an import's source states. Poly Haven is CC0 throughout; the
+ * pinned server's Poly Pizza reply carries `Licence:` and `Attribution:`
+ * lines (its fixed format); a Sketchfab import reports none, so the line
+ * says where to read it.
+ */
+const importLicence = (source: string, id: string, reply: string): string => {
+  if (source === "polyhaven") return "CC0 1.0 (Poly Haven)";
+  const licence = /^Licence: (.+)$/m.exec(reply)?.[1]?.trim();
+  const attribution = /^Attribution: (.+)$/m.exec(reply)?.[1]?.trim();
+  if (licence !== undefined && licence !== "Unknown")
+    return `${licence}${attribution === undefined ? "" : `, credit: ${attribution}`}${/BY/i.test(licence) ? " (CC-BY: credit it in the game)" : ""}`;
+  return source === "sketchfab"
+    ? `not reported by the import; read it at https://sketchfab.com/3d-models/${id} (CC-BY needs credit in the game)`
+    : `not reported by ${source}; check it before shipping`;
+};
+
 const STILL_WORKING =
   "Blender may still be finishing this call. Inspect the scene with game_blender_scene or game_blender_look before retrying, so the work is not done twice.";
 
-interface Session {
+interface Session extends LiveHealth {
   readonly root: string;
   readonly port: number;
   readonly homeDir: string;
@@ -113,6 +133,8 @@ interface Session {
   readonly transport: StdioClientTransport;
   /** What this session was launched from; its own pids are verified against these. */
   readonly live: LiveExecutables;
+  /** live.blend as the session holds it in memory; a change on disk makes the session stale. */
+  readonly blend: HeldSources;
   lastActive: number;
 }
 
@@ -176,6 +198,11 @@ const sessionEnv = (homeDir: string, extra?: NodeJS.ProcessEnv): NodeJS.ProcessE
   env.XDG_CACHE_HOME = NodePath.join(fakeHome, ".cache");
   env.XDG_DATA_HOME = NodePath.join(fakeHome, ".local", "share");
   env.XDG_RUNTIME_DIR = NodePath.join(homeDir, "runtime");
+  // Blender's own override of every user folder (config, scripts, extensions),
+  // on every OS and without a version folder (Blender 4.2+): the real
+  // ~/.config/blender, %APPDATA%\\Blender Foundation and ~/Library/Application
+  // Support/Blender are never read or written. Unverified on Windows and macOS.
+  env.BLENDER_USER_RESOURCES = NodePath.join(homeDir, "blender");
   env.LIBGL_ALWAYS_SOFTWARE = "1";
   env.LP_NUM_THREADS = "2";
   env.DISABLE_TELEMETRY = "true";
@@ -215,6 +242,8 @@ const BLENDER_WINDOW = { width: 1280, height: 800 } as const;
  * in-memory map dies with the server, the detached children do not.
  */
 interface SessionRecord {
+  /** The session's folder, so the server's own copy of the record can be reaped at startup. */
+  readonly homeDir: string;
   readonly port: number;
   /** Where Blender's window lives (`:119`), once it opened. */
   readonly display?: string;
@@ -265,6 +294,15 @@ const reapRecorded = async (homeDir: string, live: LiveExecutables): Promise<voi
   const file = NodePath.join(homeDir, SESSION_FILE);
   const record = await readRecord<SessionRecord>(file);
   if (record === null) return;
+  await reapRecord(record, homeDir, live);
+  await NodeFSP.rm(file, { force: true });
+};
+
+const reapRecord = async (
+  record: Partial<SessionRecord>,
+  homeDir: string,
+  live: LiveExecutables,
+): Promise<void> => {
   const owners = recordedOwners(record, live, NodePath.join(homeDir, "boot_server.py"));
   await stopRecorded(
     owners.map((owner) => owner.launch),
@@ -278,7 +316,6 @@ const reapRecorded = async (homeDir: string, live: LiveExecutables): Promise<voi
         ),
     },
   );
-  await NodeFSP.rm(file, { force: true });
 };
 
 export class GameBlender extends Context.Service<
@@ -339,10 +376,18 @@ const make = Effect.gen(function* () {
       Effect.sync(() => held.set(root, (held.get(root) ?? 0) + 1)),
       () => effect,
       () =>
-        Effect.sync(() => {
+        Effect.suspend(() => {
           const left = (held.get(root) ?? 1) - 1;
           if (left > 0) held.set(root, left);
           else held.delete(root);
+          // A session something showed unusable closes when its last holder lets go.
+          const session = sessions.get(root);
+          return left <= 0 && session !== undefined && session.broken !== null
+            ? Effect.andThen(
+                Effect.logWarning("live Blender closed", { root, reason: session.broken }),
+                drop(root),
+              )
+            : Effect.void;
         }),
     );
 
@@ -358,6 +403,9 @@ const make = Effect.gen(function* () {
   );
 
   const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/blender-live");
+  const records = yield* makeLiveRecords<SessionRecord>("blender-live", (root) =>
+    NodePath.join(homeDirOf(root), SESSION_FILE),
+  );
 
   const liveExecutables: Effect.Effect<LiveExecutables> = Effect.gen(function* () {
     const blender = yield* tools.executable("blender").pipe(
@@ -398,10 +446,20 @@ const make = Effect.gen(function* () {
           () => false,
         ),
       );
+      yield* Effect.promise(() =>
+        NodeFSP.rm(records.serverRecordOf(root), { force: true }).catch(() => undefined),
+      );
       if (!recorded) return;
       const live = session?.live ?? (yield* liveExecutables);
       yield* Effect.promise(() => reapRecorded(homeDirOf(root), live));
     });
+
+  // A Blender orphaned by a crashed server is found through the server's own
+  // copy of its record, whether or not its game is ever opened again.
+  const startupLive = yield* liveExecutables;
+  yield* records.reapAll(async (record) => {
+    if (typeof record.homeDir === "string") await reapRecord(record, record.homeDir, startupLive);
+  });
 
   // uv comes from the toolchain: detected, or fetched once on first use.
   interface UvPaths {
@@ -430,15 +488,34 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
       const existing = sessions.get(root);
+      // Reused only while it is usable and live.blend on disk is still the
+      // scene it holds: after a file restore beside it, the next save would
+      // write the old scene over the restored one, so it reopens the file.
+      const stale =
+        existing === undefined ? null : yield* Effect.promise(() => existing.blend.changed());
       if (
         existing !== undefined &&
         existing.blender.running() &&
+        existing.broken === null &&
+        stale === null &&
         now - existing.lastActive < LIVE_IDLE_MS
       ) {
         existing.lastActive = now;
         return existing;
       }
+      if (stale !== null)
+        yield* Effect.logInfo("live Blender reopens: live.blend changed on disk", { root });
       yield* drop(root);
+      return yield* start(root).pipe(
+        // A start cut short or failed (a stopped turn during the socket wait)
+        // must not leave Blender or its MCP child running outside the session
+        // map: its record names them, and the reap stops them.
+        Effect.onExit((exit) => (exit._tag === "Success" ? Effect.void : drop(root))),
+      );
+    });
+
+  const start = (root: string): Effect.Effect<Session, GameOperationError> =>
+    Effect.gen(function* () {
       const uv = yield* resolveUv;
       const blender = yield* tools.executable("blender");
       const host = yield* Effect.promise(() => findWindowHost(processHost));
@@ -470,9 +547,39 @@ const make = Effect.gen(function* () {
         },
         catch: (cause) => opError("blender-live", homeDir, "io", undefined, cause),
       });
-      const addonsDir = NodePath.join(homeDir, "home/.config/blender/4.5/scripts/addons");
+      // Blender says where its user addons live under the isolated user folder
+      // (BLENDER_USER_RESOURCES), so no version or OS layout is guessed.
+      const located = yield* processes.run({
+        root,
+        executable: blender.path,
+        args: [
+          "--background",
+          "--factory-startup",
+          "--python-exit-code",
+          "1",
+          "--python-expr",
+          "import bpy; print('KURAMBIT_ADDONS=' + bpy.utils.user_resource('SCRIPTS', path='addons', create=True))",
+        ],
+        operation: "blender-live-addons-dir",
+        timeoutMs: 120_000,
+        env: sessionEnv(homeDir),
+        envMode: "replace",
+      });
+      const addonsDir = /KURAMBIT_ADDONS=(.+)/.exec(located.stdout)?.[1]?.trim();
+      if (
+        located.exitCode !== 0 ||
+        addonsDir === undefined ||
+        !NodePath.resolve(addonsDir).startsWith(NodePath.resolve(homeDir) + NodePath.sep)
+      )
+        return yield* opError(
+          "blender-live",
+          located.logPath,
+          "tool-failed",
+          `Blender ${blender.version} did not report a user addon folder inside the session's own folder${addonsDir === undefined ? "" : ` (it reported ${addonsDir})`}, so the pinned addon cannot be installed without touching the user's real Blender settings.`,
+          located,
+        );
       // The pinned server ships its addon; install it into the isolated
-      // config only, never the real ~/.config/blender.
+      // config only, never the user's real Blender folders.
       const installed = yield* processes.run({
         root,
         executable: uv.uvx,
@@ -495,7 +602,7 @@ const make = Effect.gen(function* () {
         return yield* opError(
           "blender-live",
           installed.logPath,
-          "command-failed",
+          "tool-failed",
           "Could not install the pinned Blender addon into the isolated config.",
           installed,
         );
@@ -503,26 +610,31 @@ const make = Effect.gen(function* () {
       const enable = yield* processes.run({
         root,
         executable: blender.path,
+        // Blender exits 0 when a --python-expr raises; the exit code flag and
+        // the marker make a missing addon fail here, not as a 90 s socket wait.
         args: [
           "--background",
+          "--python-exit-code",
+          "1",
           "--python-expr",
-          "import bpy; bpy.ops.preferences.addon_enable(module='blender_mcp'); bpy.ops.wm.save_userpref()",
+          "import bpy; bpy.ops.preferences.addon_enable(module='blender_mcp'); bpy.ops.wm.save_userpref(); print('KURAMBIT_ENABLED')",
         ],
         operation: "blender-live-enable",
         timeoutMs: 120_000,
         env: sessionEnv(homeDir),
         envMode: "replace",
       });
-      if (enable.exitCode !== 0)
+      if (enable.exitCode !== 0 || !enable.stdout.includes("KURAMBIT_ENABLED"))
         return yield* opError(
           "blender-live",
           enable.logPath,
-          "command-failed",
-          "Could not enable the Blender addon in the isolated config.",
+          "tool-failed",
+          `Blender ${blender.version} could not enable the pinned addon in the isolated config (it was not found or failed to load).`,
           enable,
         );
       const bootPy = NodePath.join(homeDir, "boot_server.py");
       let record: SessionRecord = {
+        homeDir,
         port,
         blender: blender.path,
         bootPy,
@@ -531,12 +643,9 @@ const make = Effect.gen(function* () {
       // Written as each pid appears, so a crash mid-start still leaves the
       // next ensure or game_stop something to reap.
       const remember = (launches: Partial<SessionRecord>) =>
-        Effect.tryPromise({
-          try: () => {
-            record = { ...record, ...launches };
-            return NodeFSP.writeFile(NodePath.join(homeDir, SESSION_FILE), JSON.stringify(record));
-          },
-          catch: (cause) => opError("blender-live", SESSION_FILE, "io", undefined, cause),
+        Effect.suspend(() => {
+          record = { ...record, ...launches };
+          return records.remember(root, record);
         });
       yield* Effect.tryPromise({
         try: () =>
@@ -621,7 +730,7 @@ const make = Effect.gen(function* () {
             return yield* opError(
               "blender-live",
               logPath,
-              "command-failed",
+              "tool-failed",
               "Blender's addon socket did not open in 90s; see builds/logs/blender-live/blender.log.",
             );
           }
@@ -663,7 +772,7 @@ const make = Effect.gen(function* () {
           opError(
             "blender-live",
             PINNED_PKG,
-            "command-failed",
+            "tool-failed",
             "Could not start the pinned MCP server over stdio.",
             cause,
           ),
@@ -686,6 +795,8 @@ const make = Effect.gen(function* () {
       const mcpLaunch = yield* Effect.promise(() => adoptLaunch(processHost, mcpPid, mcpToken));
       if (mcpLaunch !== null) yield* remember({ mcpLaunch });
       const startedAt = yield* Clock.currentTimeMillis;
+      const blend = new HeldSources();
+      yield* Effect.promise(() => blend.hold([blendPath]));
       const session: Session = {
         root,
         port,
@@ -695,8 +806,13 @@ const make = Effect.gen(function* () {
         client,
         transport,
         live: { blender: blender.path, uvx: uv.uvx },
+        blend,
+        broken: null,
         lastActive: startedAt,
       };
+      // The MCP child gone means every call would fail "did not answer": the
+      // session closes at its next release and the next call restarts it.
+      client.onclose = () => breakSession(session, "the pinned MCP server exited");
       sessions.set(root, session);
       return session;
     });
@@ -720,16 +836,19 @@ const make = Effect.gen(function* () {
             resetTimeoutOnProgress: true,
             onprogress: () => undefined,
           }),
-        catch: (cause) =>
-          opError(
+        catch: (cause) => {
+          // A Blender that does not answer at all will not answer the next call either.
+          breakSession(session, `Blender did not answer '${name}'`);
+          return opError(
             "blender-live",
             root,
-            "command-failed",
+            "tool-failed",
             cause instanceof McpError && cause.code === ErrorCode.RequestTimeout
               ? `Blender did not answer '${name}' within ${Math.round((CALL_TIMEOUT_MS[name] ?? 120_000) / 1000)}s. ${STILL_WORKING}`
               : `Blender did not answer '${name}'.`,
             cause,
-          ),
+          );
+        },
       })) as McpContent;
       session.lastActive = yield* Clock.currentTimeMillis;
       const text = textOf(result);
@@ -757,7 +876,7 @@ const make = Effect.gen(function* () {
 
   /** Where GLBs land in the engine project, from the manifest and its engine's layout. */
   const assetDirOf = (manifest: GameManifest) =>
-    `${manifestProject(manifest)}/${engineProfile(manifest.engine.name).layout.blender}`;
+    gamePaths(manifest.engine.name, manifestProject(manifest)).blender;
   const exportDirOf = (root: string) => projects.read(root).pipe(Effect.map(assetDirOf));
 
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>
@@ -774,6 +893,9 @@ const make = Effect.gen(function* () {
       });
       if (!text.includes("STUDIO_SAVED"))
         return yield* opError("blender-live", BLEND_REL, "command-failed", text.slice(0, 1000));
+      // What the session holds is now what is on disk.
+      const session = sessions.get(root);
+      if (session !== undefined) yield* Effect.promise(() => session.blend.hold([absolute]));
       return BLEND_REL;
     });
 
@@ -886,6 +1008,19 @@ const make = Effect.gen(function* () {
       holding(
         root,
         Effect.gen(function* () {
+          // The import adds to the live scene; only what it added is exported,
+          // never the rest of the scene under the asset's name.
+          const before = yield* callText(root, "execute_blender_code", {
+            code: "import bpy, json\nprint('STUDIO_NAMES ' + json.dumps([o.name for o in bpy.data.objects]))\n",
+          });
+          const known = /STUDIO_NAMES (\[.*\])/.exec(before)?.[1];
+          if (known === undefined)
+            return yield* opError(
+              "blender-assets-import",
+              root,
+              "tool-failed",
+              `Blender did not list the scene's objects before the import: ${before.slice(0, 500)}`,
+            );
           const text = yield* callText(root, "import_asset", {
             source: input.source,
             id: input.id,
@@ -896,7 +1031,7 @@ const make = Effect.gen(function* () {
           });
           const blend = yield* saveBlend(root);
           // Library models arrive at arbitrary scale: normalize the id to a
-          // file name, export the scene's meshes as one GLB the game can
+          // file name, export what the import added as one GLB the game can
           // preload, and keep the .blend source in the game.
           const safe =
             input.id
@@ -913,19 +1048,51 @@ const make = Effect.gen(function* () {
             code: [
               "import bpy",
               `fp = ${JSON.stringify(absolute)}`,
-              "obs = [o for o in bpy.context.scene.objects if o.type == 'MESH']",
+              `before = set(${known})`,
+              // New objects in the scene, with their parents so armatures and empties travel along.
+              "added = [o for o in bpy.context.scene.objects if o.name not in before]",
+              "keep = set(added)",
+              "for o in added:",
+              "    p = o.parent",
+              "    while p is not None:",
+              "        keep.add(p)",
+              "        p = p.parent",
               "bpy.ops.object.select_all(action='DESELECT')",
-              "for o in obs: o.select_set(True)",
-              "bpy.ops.export_scene.gltf(filepath=fp, export_format='GLB', use_selection=True)",
-              "print(f'STUDIO_EXPORTED {len(obs)}')",
+              "for o in keep: o.select_set(True)",
+              "if keep: bpy.ops.export_scene.gltf(filepath=fp, export_format='GLB', use_selection=True)",
+              "print(f'STUDIO_EXPORTED {len(keep)}')",
             ].join("\n"),
           });
-          if (!exported.includes("STUDIO_EXPORTED"))
+          const count = Number(/STUDIO_EXPORTED (\d+)/.exec(exported)?.[1] ?? Number.NaN);
+          if (!Number.isFinite(count))
             return {
               text: `${text}\nSaved .blend source: ${blend}\nGLB export failed: ${exported.slice(0, 500)}`,
             };
+          if (count === 0)
+            return {
+              text: `${text}\nSaved .blend source: ${blend}\nThe import added no object to the scene (an HDRI or a texture), so there is nothing to export.`,
+              blend,
+            };
+          // Provenance travels with the file: CC-BY models must be credited in the game.
+          const credited = yield* Effect.flatMap(
+            Effect.tryPromise({
+              try: () => NodeFSP.realpath(root),
+              catch: (cause) => opError("blender-assets-import", root, "io", undefined, cause),
+            }),
+            (realRoot) =>
+              recordProvenance(
+                realRoot,
+                [
+                  {
+                    first: exportRel,
+                    line: `- \`${exportRel}\` — Blender import from ${input.source} ${input.id} by ${IMPORT_TOOL}; licence: ${importLicence(input.source, input.id, text)}. Depicts / loaded by: (fill in).`,
+                  },
+                ],
+                IMPORT_TOOL,
+              ),
+          );
           return {
-            text: `${text}\nSaved .blend source: ${blend}\nExported ${exportRel}. Run game_import after.`,
+            text: `${text}\nSaved .blend source: ${blend}\nExported ${exportRel} (${count} object${count === 1 ? "" : "s"} the import added). ${credited} Run game_import after.`,
             blend,
             export: exportRel,
           };

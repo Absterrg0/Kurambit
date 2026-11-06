@@ -1,10 +1,4 @@
-import {
-  EnvironmentId,
-  GAME_SAVED_MEDIA_EVENT,
-  type ScopedThreadRef,
-  ThreadId,
-  WS_METHODS,
-} from "@kurambit/contracts";
+import { EnvironmentId, type ScopedThreadRef, ThreadId, WS_METHODS } from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -13,6 +7,7 @@ import {
 import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { type GameEventScope, gameEventScope } from "./gameEventScope";
 
 const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
   label: "game:events",
@@ -23,12 +18,14 @@ const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRunt
 });
 
 /**
- * A value that changes on every push for one thread's game. Its queries read it
- * through `refreshTrigger`, so an idle Stage learns about a later agent build
- * from the push instead of polling, and another game's work never refetches it.
+ * A value that changes on every push of one scope for one thread's game. Its
+ * queries read it through `refreshTrigger`, so an idle Stage learns about a
+ * later agent build from the push instead of polling, another game's work
+ * never refetches it, and a push of another scope (a run step for the
+ * status, an export for the run) does not either.
  */
-const threadGameSignal = Atom.family((key: string) => {
-  const [environmentId = "", threadId = ""] = key.split("\0");
+const threadScopeSignal = Atom.family((key: string) => {
+  const [environmentId = "", threadId = "", scope = ""] = key.split("\0");
   let last = "";
   return Atom.make((get) => {
     const result = get(
@@ -37,17 +34,19 @@ const threadGameSignal = Atom.family((key: string) => {
         input: { threadId: ThreadId.make(threadId) },
       }),
     );
-    // A saved/ change is the Saved list's alone; status and the run do not reread for it.
-    if (AsyncResult.isSuccess(result) && result.value.name !== GAME_SAVED_MEDIA_EVENT)
+    if (AsyncResult.isSuccess(result) && gameEventScope(result.value) === scope)
       last = `${result.value.at}\0${result.value.revision ?? ""}`;
     return last;
   }).pipe(Atom.withLabel(`game:thread-signal:${key}`));
 });
 
-const threadSignal = (target: {
-  readonly environmentId: EnvironmentId;
-  readonly input: { readonly threadId: ThreadId };
-}) => threadGameSignal(`${target.environmentId}\0${target.input.threadId}`);
+const threadSignal =
+  (scope: GameEventScope) =>
+  (target: {
+    readonly environmentId: EnvironmentId;
+    readonly input: { readonly threadId: ThreadId };
+  }) =>
+    threadScopeSignal(`${target.environmentId}\0${target.input.threadId}\0${scope}`);
 
 /**
  * Changes only when a game's run or operation changes state, which is all a
@@ -58,8 +57,8 @@ const gameListSignal = Atom.family((environmentId: string) => {
   let changes = 0;
   return Atom.make((get) => {
     const result = get(gameEvents({ environmentId: EnvironmentId.make(environmentId), input: {} }));
-    if (!AsyncResult.isSuccess(result) || result.value.name === GAME_SAVED_MEDIA_EVENT)
-      return changes;
+    // The server sends the library only games' own folders (never a run's sample copies).
+    if (!AsyncResult.isSuccess(result) || gameEventScope(result.value) === "saved") return changes;
     const event = result.value;
     // A run event's message is its current step, which the card shows.
     const state =
@@ -115,8 +114,7 @@ const savedMediaSignal = Atom.family((key: string) => {
         input: { threadId: ThreadId.make(threadId) },
       }),
     );
-    if (!AsyncResult.isSuccess(result) || result.value.name !== GAME_SAVED_MEDIA_EVENT)
-      return changes;
+    if (!AsyncResult.isSuccess(result) || gameEventScope(result.value) !== "saved") return changes;
     const seen = `${result.value.at}\0${result.value.revision ?? ""}`;
     if (seen !== last) {
       last = seen;
@@ -158,7 +156,7 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameStatus,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    refreshTrigger: threadSignal,
+    refreshTrigger: threadSignal("operation"),
   }),
   list: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:list",
@@ -180,7 +178,7 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameRunStatus,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    refreshTrigger: threadSignal,
+    refreshTrigger: threadSignal("run"),
   }),
   // Read when a round row opens, never for every round; a finished round's
   // evidence does not change, so an open row is not polled, only reread when
@@ -199,7 +197,7 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameRunPick,
     staleTimeMs: 60_000,
     idleTtlMs: 60_000,
-    refreshTrigger: threadSignal,
+    refreshTrigger: threadSignal("run"),
   }),
   runRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runRestore",

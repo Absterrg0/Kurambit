@@ -65,6 +65,7 @@ import {
   GameWindowsPackage,
   OrchestratorMcpFailure,
 } from "@kurambit/contracts";
+import { PROFILES, type GameEngineProfile } from "../../../game/engineProfile.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -75,6 +76,9 @@ const dependencies = [
   ThreadManagementService.ThreadManagementService,
 ];
 const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
+/** Each engine's own sentence for a tool whose behaviour differs by engine, from its profile. */
+const perEngine = (line: (tools: GameEngineProfile["tools"]) => string) =>
+  PROFILES.map((profile) => line(profile.tools)).join(" ");
 /**
  * Run threads from the production run get play-level tools only
  * (status, check, import, export, explore, game_bot_*, game_blender_*, game_unity_*, game_assets_*).
@@ -85,7 +89,7 @@ const hiddenFromRunThreads = () => !McpInvocationContext.isGameRunThread();
 const onlyForRunThreads = () => McpInvocationContext.isGameRunThread();
 const GameStatusTool = Tool.make("game_status", {
   description:
-    "Inspect this thread's Kurambit project: brief path, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
+    "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
   parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
   success: GameStatus,
   failure,
@@ -140,7 +144,7 @@ const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   description:
-    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB is exported under <engine dir>/assets/blender/ (godot/ or web/; unity/Assets/Blender/ for Unity) that the game can load; run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
+    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB of only the objects the import added is exported under <engine dir>/assets/blender/ (godot/ or web/; unity/Assets/Blender/ for Unity) that the game can load, with its source and licence recorded in ASSETS.md (CC-BY models must be credited); an HDRI or texture import adds no object, so no GLB. Run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
   parameters: GameBlenderAssetsImportInput,
   success: GameBlenderAssetsImportResult,
   failure,
@@ -273,8 +277,7 @@ export const GameUnityScreenshotTool = Tool.make("game_unity_screenshot", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameUnityScreenshotToolkit = Toolkit.make(GameUnityScreenshotTool);
 const ImportTool = Tool.make("game_import", {
-  description:
-    "Run a real headless engine import in this thread's game. Call after every asset transfer or engine change. Returns success=false on parse errors, missing resources, import errors or nonzero exit, with stdout/stderr and log path. Fix failures before export.",
+  description: `Import this thread's game in its engine. ${perEngine((t) => t.import)} Call after every asset transfer or engine change. Returns success=false on parse errors, missing resources, compile or import errors, with the output and log path; a tool Kurambit runs failing on its own is an error with reason tool-failed instead, which says nothing about the game. Fix failures before export.`,
   success: GameActionResult,
   failure,
   failureMode: "return",
@@ -283,8 +286,7 @@ const ImportTool = Tool.make("game_import", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const CheckTool = Tool.make("game_check", {
-  description:
-    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene and the gameplay scene game.json declares for 120 physics frames each, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, and errors for a player in the `player` group without a direct, enabled CollisionShape with a shape, or a CharacterBody without a CollisionShape. Reports which entries ran. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest. On a three.js game this loads the static page in headless Chromium and reports console and page errors instead.",
+  description: `Fast static and boot check for this thread's game: it imports, then boots the entry the player opens and the gameplay entry game.json declares, and reports what the game did as errors and warnings with file:line, and which entries ran. ${perEngine((t) => t.check)} Everything the game does is in the result; the call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory). Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest.`,
   success: GameCheckResult,
   failure,
   failureMode: "return",
@@ -293,8 +295,7 @@ const CheckTool = Tool.make("game_check", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const ExportTool = Tool.make("game_export", {
-  description:
-    "Import and export this thread's game. Godot games take the Web, Windows or Linux release preset: Windows produces builds/windows/game.exe, a 64-bit x86_64 executable. The standard preset embeds the game data, so the executable alone is enough; a custom preset that does not embed it also produces builds/windows/game.pck, so heed the result and copy both files together. It has not been run on Windows. Linux produces builds/linux/game.x86_64. three.js games export Web only (a static copy of the game); Windows and Linux are refused. Web exports to a content-addressed build the export selects for Play at once. Verifies the actual artifact. Missing Windows templates are an actionable error naming how the user adds them in Godot. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. Use game_preview to build and serve a playable browser URL.",
+  description: `Import and export this thread's game for one target; a target its engine does not make is refused. ${perEngine((t) => t.export)} A release is staged and checked, then replaces the previous one only when the sources did not change while it was made, so a failed export leaves the last good build in place. Web exports to a content-addressed build the export selects for Play at once. Returns the published artifact's path and the command output, or why it failed. Use game_preview to play the latest sources.`,
   parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
   success: GameActionResult,
   failure,
@@ -305,7 +306,7 @@ const ExportTool = Tool.make("game_export", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const PackageWindowsTool = Tool.make("game_package_windows", {
   description:
-    "Package the Windows release this game already exported as a downloadable ZIP. It never exports: if builds/windows/game.exe is missing, is not a checked x86_64 executable with the game's Godot pack, or changes while packaging, it returns the exact reason and leaves existing release files and any earlier package untouched. The ZIP contains game.exe and, only for a non-embedded preset, game.pck, at the archive root so extraction is runnable. Returns the absolute archive path, byte count, SHA-256, per-file hashes and notes; the Builds panel also receives a short-lived signed download URL. Packaging does not prove Windows booted.",
+    "Package the Windows release this game already exported as a downloadable ZIP, for an engine whose Windows release Kurambit packages (a game whose Windows release is a whole folder is refused: ship the folder). It never exports: if builds/windows/game.exe is missing, is not a checked x86_64 executable with the game's pack, or changes while packaging, it returns the exact reason and leaves existing release files and any earlier package untouched. The ZIP contains game.exe and, only for a non-embedded preset, game.pck, at the archive root so extraction is runnable. Returns the absolute archive path, byte count, SHA-256, per-file hashes and notes; the creator downloads it from the Builds panel. Packaging does not prove Windows booted.",
   // No `parameters`: an explicit empty Schema.Struct({}) serializes to a root
   // anyOf, which no MCP client accepts, and the whole server fails to register.
   success: GameWindowsPackage,
@@ -317,7 +318,7 @@ const PackageWindowsTool = Tool.make("game_package_windows", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const PackageWebTool = Tool.make("game_package_web", {
   description:
-    "Package the exact immutable Web build Play currently serves as a downloadable ZIP for an ordinary static game host. It never exports, never rebuilds and never packages a draft: if no build is selected, or the selected build is missing or its bytes changed, it returns the exact reason and leaves the selection, sources and any earlier package untouched. The ZIP contains every served build file at its relative path with index.html at the archive root. The archive is bound to the selected build id and its own SHA-256. Upload and serve the extracted files over HTTP; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP. Returns the absolute archive path, byte count, SHA-256, per-file hashes, entry and notes; the Builds panel also receives a short-lived signed download URL.",
+    "Package the exact immutable Web build Play currently serves as a downloadable ZIP for an ordinary static game host. It never exports, never rebuilds and never packages a draft: if no build is selected, or the selected build is missing or its bytes changed, it returns the exact reason and leaves the selection, sources and any earlier package untouched. The ZIP contains every served build file at its relative path with index.html at the archive root. The archive is bound to the selected build id and its own SHA-256. Upload and serve the extracted files over HTTP; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP. Returns the absolute archive path, byte count, SHA-256, per-file hashes, entry and notes; the creator downloads it from the Builds panel. An engine with no Web build is refused.",
   // No `parameters` here either; see game_package_windows.
   success: GameWebPackage,
   failure,
@@ -361,7 +362,7 @@ const SavedDeleteTool = Tool.make("game_saved_delete", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const PreviewTool = Tool.make("game_preview", {
   description:
-    "Build this thread's Web release when it is missing or older than the game sources, start its managed loopback static server, and return the playable URL. A fresh existing build is served without another export. This is an actual WebAssembly game, not a screenshot. game_stop closes the server.",
+    "A playable build of this thread's current sources. For an engine with a Web build: when the selected build is missing, damaged or exported from other sources than the folder holds now, it exports Web again (the same export the Builds panel's Rebuild runs), then serves it from a managed loopback static server and returns the playable URL; a build of the current sources is served without another export. This is the actual game, not a screenshot. For an engine whose games play as a built player (Unity), it prepares that player of the current sources and returns its path; game_explore_start and game_bot_run play it. game_stop closes the server.",
   success: GameActionResult,
   failure,
   failureMode: "return",
@@ -371,7 +372,7 @@ const PreviewTool = Tool.make("game_preview", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const StopTool = Tool.make("game_stop", {
   description:
-    "Stop only this game's processes spawned by Kurambit, including running Blender/Godot operations and native play, and close its Web preview server. Returns after managed processes exit. Does not kill external editors or other games.",
+    "Stop only this game's processes spawned by Kurambit, including running operations, live editors, bot runs and native play, and close its Web preview server. Returns after managed processes exit and says which did not stop (success false). While a production run holds the game it stops only the caller's own work, explore session and Play; the run's builds, bots and editors keep running until the run is stopped. Does not kill external editors or other games.",
   success: GameActionResult,
   failure,
   failureMode: "return",
@@ -384,7 +385,8 @@ const StopTool = Tool.make("game_stop", {
  */
 const ExploreStartTool = Tool.make("game_explore_start", {
   description:
-    "Open a bounded exploration session on this thread's game: Godot games run natively with the game paused between acts; three.js games load the static folder in headless Chromium and play in real time. Probes, visible text, interactive controls, errors and a picture (native games need a window for it: Xvfb on Linux, a window kept off-screen on Windows and macOS; web games always have one). Nothing is exported. Pass target native or web to pick the runner, or omit it for the game's own engine. Returns a session id for game_explore_act. Only one live session exists per game: its owning thread must close it before that game starts another. Sessions start with no saved data; saves keep reuses one save location across kept sessions, to check that what the game saves (best scores, settings, unlocks) survives a relaunch.",
+    `Open a bounded exploration session on this thread's game. ${perEngine((t) => t.explore)}` +
+    " Probes, visible text, interactive controls, errors and a picture (native games need a window for it: Xvfb on Linux, a window kept off-screen on Windows and macOS; web games always have one). Nothing is exported. Pass target native or web to pick the runner, or omit it for the game's own engine. Returns a session id for game_explore_act. Only one live session exists per game: its owning thread must close it before that game starts another. Sessions start with no saved data; saves keep reuses one save location across kept sessions, to check that what the game saves (best scores, settings, unlocks) survives a relaunch.",
   parameters: GameExploreStartInput,
   success: GameExploreStartResult,
   failure,
