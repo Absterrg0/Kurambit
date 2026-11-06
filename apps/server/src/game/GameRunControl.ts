@@ -757,26 +757,23 @@ const make = Effect.gen(function* () {
     const { projectId } = yield* resolveGame(threadId);
     const unreadable = (cause: { readonly message: string }) =>
       runError("run-read", threadId, "records-unreadable", String(cause.message));
-    const own = yield* projections.getGameRunRecords(threadId).pipe(Effect.mapError(unreadable));
-    const latest = yield* projections
-      .getProjectGameRun(projectId)
-      .pipe(Effect.mapError(unreadable));
-    // The project's latest run may live on another chat's thread and talk to this one.
-    const elsewhere =
-      latest !== null && latest.threadId !== threadId
-        ? yield* projections.getGameRunRecords(latest.threadId).pipe(Effect.mapError(unreadable))
-        : null;
-    const candidates = [
-      ...own.gameRuns.map((run) => ({ run, records: own })),
-      ...(elsewhere === null || latest === null
-        ? []
-        : elsewhere.gameRuns
-            .filter((run) => run.id === latest.id)
-            .map((run) => ({ run, records: elsewhere }))),
-    ]
-      .filter(({ run }) => (run.chat ?? run.threadId) === threadId)
-      .toSorted((a, b) => b.run.startedAt.localeCompare(a.run.startedAt))
+    // Every run of the game whose chat is this one, on whichever thread its records live.
+    const runsOfChat = (yield* projections
+      .listProjectGameRuns(projectId, 50)
+      .pipe(Effect.mapError(unreadable)))
+      .filter((run) => (run.chat ?? run.threadId) === threadId)
       .slice(0, 10);
+    const recordsByThread = new Map<ThreadId, ProjectionStore.GameRunThreadRecords>();
+    const candidates: Array<{ run: GameRun; records: ProjectionStore.GameRunThreadRecords }> = [];
+    for (const run of runsOfChat) {
+      const records =
+        recordsByThread.get(run.threadId) ??
+        (yield* projections
+          .getGameRunRecords(run.threadId, { steps: "in-flight" })
+          .pipe(Effect.mapError(unreadable)));
+      recordsByThread.set(run.threadId, records);
+      candidates.push({ run, records });
+    }
     const runsOut = yield* Effect.forEach(candidates, ({ run, records }) =>
       Effect.gen(function* () {
         const roundRecords = records.gameRunRounds.filter((r) => r.runId === run.id);

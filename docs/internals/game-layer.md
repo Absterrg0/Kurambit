@@ -229,47 +229,25 @@ run's own status, round, steer, decide and profile tools stay outside their cata
 
 ## Builds and facts
 
-A build is not a record of its own. [GameBuilds](../../apps/server/src/game/GameBuilds.ts) reads
-the rail from what already exists each time it is asked: every T3 turn checkpoint of the game's
-non-role threads that changed the engine project, art or `ASSETS.md`, and the run's rounds,
-prototypes, stages and saved builds. A build's id is its commit. Role turns are folded into
-their rounds, and a turn that changed only notes is not a build. The list, compare, facts,
-measure, play and restore RPCs and the `game_builds`, `game_facts` and `game_build_restore`
-tools are one method each on that service. Pushes are the game operation stream's `builds` and
-`facts` events (from `GameBuildsReactor` and the measurements), never polling.
-
-- **Copies, never the folder.** Playing or measuring a build runs in a plain copy of it
-  ([GameBuildCopies](../../apps/server/src/game/GameBuildCopies.ts)) under Kurambit's
-  worktrees folder (`game-builds/`, in `GIT_CEILING_DIRECTORIES` like the run's copies). A copy
-  is keyed by the git tree of the build's engine folder, so builds with the same project share
-  one, and it names the game folder in `COPY_OF`, so a Unity copy reuses the folder's import
-  cache. Four unused copies per game are kept. Stop game ends the game's work on its copies
-  too, because GameBuildCopies sits below GameService.
-- **Facts are measured once per content.** [GameFacts](../../apps/server/src/game/GameFacts.ts)
-  keys facts by the engine and that tree, plus a harness id (a hash of the tier bots and
-  `GAME_FACTS_BOUNDS`), in the `game_build_facts` table. Facts from another harness read
-  `stale` and are never compared. One measurement runs at a time on the server, and every bot
-  start still passes the memory gate. Each tier is written as soon as it lands, so a restart
-  loses only the tier in flight. A tool or machine fault (`gameOperationFault`) is stored as
-  "not measured" with whether waiting clears it, and is tried again on the next measure, never
-  read as a fact about the game. The tier bots (`templates/bot-kit/{idle,masher}.mjs`) are copied
-  fresh from the server's templates into each copy, never taken from the game. Their endings
-  are read from the shell's own run state (`GameState.state`, `result`), so a game without that
-  state gets "not measured", not a guess. The skilled tier replays the game's latest play-mode bot
-  from the bot service's records, and is not comparable across two versions of that bot.
-  Liveness is one ffmpeg pass over the random-input video's span of play
-  ([videoSignals.ts](../../apps/server/src/game/videoSignals.ts)). Evidence moves into the
-  game's `builds/logs/game-bot-facts-*`, which the game-logs cleanup governs. The one wording and
-  the one diff are the pure `gameFactsView` and `diffBuildFacts` in the contracts.
-- **Going back.** A game with a run restores through the run's command-first restore. A turn's
-  build is named by its commit and restored like a saved build, so the run's best stays. A game
-  with no run makes the same moves (`withBuildInFolder`: the folder parked as a build first, the
-  scoped restore, the check). Its latest restore goes in `game_build_restores`. Either way the
-  parked folder is the undo. Keep on a round card (`asBest`) restores a stopped run's round as a
-  kept round's restore does, so it becomes the best even when the gate did not keep it.
-- **Plays are visible.** `GameStatus.buildPlays` lists the copies serving a build now. Every
-  start and stop (Stop game, `game.buildStop`, an evicted copy) pushes `builds`, and stopping one
-  build's Play never touches the folder's own Play or a measurement of the same build.
+- **A build is no record of its own.** [GameBuilds](../../apps/server/src/game/GameBuilds.ts)
+  reads the rail each time from the turn checkpoints and the run's records; a build's id is its
+  commit. Every surface (the six RPCs, the `game_builds`, `game_facts` and `game_build_restore`
+  tools) is one method of that service.
+- **Copies, never the folder.** A build is played and measured in a plain copy under the
+  worktrees folder's `game-builds/`, which is in `GIT_CEILING_DIRECTORIES` like the run's copies
+  ([GameBuildCopies](../../apps/server/src/game/GameBuildCopies.ts)). One engine step at a
+  time runs on a copy, so Play's Web export and a bot run never import into one project at
+  once. A copy is removed only when nothing leases or serves it.
+- **Facts are keyed by content.** A facts row is keyed by the git tree of the build's engine
+  folder plus a harness id, so builds with the same project share facts, and facts from another
+  harness are never compared. Owed work is data, not memory: a measure writes its row first, so
+  a startup reconcile re-measures any row that still owes a tier.
+- **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
+  `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
+  tries it again). Tier endings are read from the shell's run state, never from a bot's word.
+- **Going back with no run** makes the run's own moves (`withBuildInFolder`) under the
+  `game-builds` run-ref folder. The record is written before the folder moves, and a restart
+  settles a restore it cut short by running its moves again.
 
 ## The run as an orchestration domain
 

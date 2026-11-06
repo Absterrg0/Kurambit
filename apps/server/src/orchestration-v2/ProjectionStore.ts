@@ -470,6 +470,11 @@ export interface ProjectionStoreV2Shape {
   readonly getProjectGameRun: (
     projectId: ProjectId,
   ) => Effect.Effect<GameRun | null, ProjectionStoreV2Error>;
+  /** A project's game runs, newest first, at most `limit`: every chat's, for the round cards. */
+  readonly listProjectGameRuns: (
+    projectId: ProjectId,
+    limit: number,
+  ) => Effect.Effect<ReadonlyArray<GameRun>, ProjectionStoreV2Error>;
   /**
    * A project's turn checkpoints, newest first: every ready checkpoint a
    * turn of one of its live threads captured, with the thread, the turn and
@@ -5256,6 +5261,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
       );
 
+    const listProjectGameRuns: ProjectionStoreV2Shape["listProjectGameRuns"] = (projectId, limit) =>
+      sql<PayloadRow>`
+        SELECT payload_json FROM orchestration_v2_projection_game_runs
+        WHERE project_id = ${projectId}
+        ORDER BY started_at DESC, rowid DESC
+        LIMIT ${limit}
+      `.pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => decodeGameRunPayload(row.payload_json)),
+        ),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const listProjectTurnCheckpoints: ProjectionStoreV2Shape["listProjectTurnCheckpoints"] = (
       projectId,
       options,
@@ -6555,6 +6573,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       listGameRunThreadsToRecover,
       listLiveGameRunRoleTurns,
       listProjectTurnCheckpoints,
+      listProjectGameRuns,
       getProjectGameRun,
       getRuntimeRequest,
       getPlan,
@@ -6966,6 +6985,16 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               (state.projections.get(run.threadId)?.thread.deletedAt ?? null) !== null;
             return deleted && gameRunSettled(run) ? null : run;
           }),
+        ),
+      listProjectGameRuns: (projectId, limit) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.gameRunRecords.values()]
+              .flatMap((records) => records.gameRuns)
+              .filter((each) => each.projectId === projectId)
+              .toSorted((a, b) => b.startedAt.localeCompare(a.startedAt))
+              .slice(0, limit),
+          ),
         ),
       listProjectTurnCheckpoints: (projectId, options) =>
         Ref.get(replayState).pipe(
