@@ -193,8 +193,10 @@ export function GameStage({
   const [gameFocused, setGameFocused] = useState(false);
   // The live game's first page error, for the frame that threw it.
   const [studioError, setStudioError] = useState<{ key: string; text: string } | null>(null);
-  // A live game opens itself once per stage; after that, Play is the person's.
+  // A live game keeps itself served: it opens when shown, and again after a
+  // server restart, unless the person stopped it here (then Play is theirs).
   const [liveOpenAsked, setLiveOpenAsked] = useState(false);
+  const [stoppedHere, setStoppedHere] = useState(false);
   // The quiet shell: streamed tokens do not re-render the stage.
   const latestRun = useQuietThreadShell(threadRef)?.latestRun ?? null;
   const turnStartedAt = latestRun?.startedAt ?? latestRun?.requestedAt ?? null;
@@ -276,6 +278,8 @@ export function GameStage({
     } else {
       setMessage(result.value.message);
       if (stageAction === "stop") stageAfterGameAction(threadRef, stageAction);
+      if (stageAction === "stop") setStoppedHere(true);
+      if (stageAction === "preview") setStoppedHere(false);
     }
     refresh();
   };
@@ -406,10 +410,13 @@ export function GameStage({
     turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
     turnBuildPending: sawTurnEnd && endedTurnBuilt && !operationSinceTurnEnd,
   });
-  // A live game serves itself when the stage shows it, once (design §2.2).
+  // An ask is answered once the server serves it; a later loss of the serve
+  // (a server restart) asks again (design §2.2).
+  if (liveOpenAsked && data.previewUrl !== null) setLiveOpenAsked(false);
   if (
     stageKind === "live" &&
     !liveOpenAsked &&
+    !stoppedHere &&
     !hidden &&
     data.previewUrl === null &&
     canAct &&
