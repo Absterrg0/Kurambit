@@ -81,8 +81,12 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
             cause: forkableSourceRunStatusError(input.sourceRun),
           });
         }
+        // A fork is the user's own thread: a production run's role mark would
+        // make it run-owned (no checkpoints, no automatic continuation, the run's
+        // narrow tool scope) although no run holds it.
+        const { launchedBy: _launchedBy, ...source } = input.sourceProjection.thread;
         const targetThread: OrchestrationV2AppThread = {
-          ...input.sourceProjection.thread,
+          ...source,
           createdBy: input.createdBy,
           creationSource: input.creationSource,
           id: input.targetThreadId,
