@@ -120,12 +120,13 @@ export function GameBuildTimeline({
       : lastPage !== undefined && AsyncResult.isSuccess(lastPage)
         ? lastPage.value.next
         : null;
-  // The newest marks are the ones a person wants: keep the row scrolled to them.
-  const markCount = marks.length;
+  // The newest marks are the ones a person wants: a new build scrolls to them,
+  // while Older adds marks at the left and leaves the row where it is.
+  const newest = marks.at(-1)?.id ?? "";
   useEffect(() => {
     const row = marksRef.current;
-    if (row !== null && markCount > 0) row.scrollLeft = row.scrollWidth;
-  }, [markCount]);
+    if (row !== null && newest !== "") row.scrollLeft = row.scrollWidth;
+  }, [newest]);
 
   const pick = (build: GameBuild) => {
     if (picking === "any") setPicking(refOf(build));
@@ -220,6 +221,10 @@ export function GameBuildTimeline({
           {list === null ? (
             <span className="text-2xs text-muted-foreground">
               {first.error ?? "Reading the builds…"}
+            </span>
+          ) : marks.length === 0 ? (
+            <span className="text-2xs text-muted-foreground">
+              No builds yet. Each turn that changes the game becomes one.
             </span>
           ) : null}
           {marks.map((build) => {
