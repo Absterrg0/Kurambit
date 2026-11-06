@@ -1,4 +1,17 @@
-import { EnvironmentId, type ScopedThreadRef, ThreadId, WS_METHODS } from "@kurambit/contracts";
+import * as Schema from "effect/Schema";
+import {
+  EnvironmentId,
+  GameBuildId,
+  type GameAction,
+  type GameStatus,
+  type GameBuildPlayResult,
+  type GameBuildRef,
+  type GameBuildsResult,
+  type GameRunRoundRef,
+  type ScopedThreadRef,
+  ThreadId,
+  WS_METHODS,
+} from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -18,14 +31,15 @@ const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRunt
 });
 
 /**
- * A value that changes on every push of one scope for one thread's game. Its
- * queries read it through `refreshTrigger`, so an idle Stage learns about a
- * later agent build from the push instead of polling, another game's work
- * never refetches it, and a push of another scope (a run step for the
+ * A value that changes on every push of the given scopes for one thread's
+ * game. Its queries read it through `refreshTrigger`, so an idle Stage learns
+ * about a later agent build from the push instead of polling, another game's
+ * work never refetches it, and a push of another scope (a run step for the
  * status, an export for the run) does not either.
  */
 const threadScopeSignal = Atom.family((key: string) => {
-  const [environmentId = "", threadId = "", scope = ""] = key.split("\0");
+  const [environmentId = "", threadId = "", scopes = ""] = key.split("\0");
+  const wanted = new Set(scopes.split("|"));
   let last = "";
   return Atom.make((get) => {
     const result = get(
@@ -34,19 +48,19 @@ const threadScopeSignal = Atom.family((key: string) => {
         input: { threadId: ThreadId.make(threadId) },
       }),
     );
-    if (AsyncResult.isSuccess(result) && gameEventScope(result.value) === scope)
+    if (AsyncResult.isSuccess(result) && wanted.has(gameEventScope(result.value)))
       last = `${result.value.at}\0${result.value.revision ?? ""}`;
     return last;
   }).pipe(Atom.withLabel(`game:thread-signal:${key}`));
 });
 
 const threadSignal =
-  (scope: GameEventScope) =>
+  (...scopes: ReadonlyArray<GameEventScope>) =>
   (target: {
     readonly environmentId: EnvironmentId;
     readonly input: { readonly threadId: ThreadId };
   }) =>
-    threadScopeSignal(`${target.environmentId}\0${target.input.threadId}\0${scope}`);
+    threadScopeSignal(`${target.environmentId}\0${target.input.threadId}\0${scopes.join("|")}`);
 
 /**
  * Changes only when a game's run or operation changes state, which is all a
@@ -58,7 +72,10 @@ const gameListSignal = Atom.family((environmentId: string) => {
   return Atom.make((get) => {
     const result = get(gameEvents({ environmentId: EnvironmentId.make(environmentId), input: {} }));
     // The server sends the library only games' own folders (never a run's sample copies).
-    if (!AsyncResult.isSuccess(result) || gameEventScope(result.value) === "saved") return changes;
+    // A card shows no saved media, builds or facts, so their pushes never reread the list.
+    if (!AsyncResult.isSuccess(result)) return changes;
+    const scope = gameEventScope(result.value);
+    if (scope === "saved" || scope === "builds" || scope === "facts") return changes;
     const event = result.value;
     // A run event's message is its current step, which the card shows.
     const state =
@@ -125,24 +142,179 @@ const savedMediaSignal = Atom.family((key: string) => {
 });
 
 /**
- * A restore this client is sending for one thread's game: which build, and the
- * run's latest restore when it was sent. Every restore button of the game reads
- * it, so none can send a second one before the run's status shows the first.
+ * A build restore this client is sending for one thread's game: which build,
+ * and the game's latest restore when it was sent. Every restore button of the
+ * game (the rail, the undo, a round card) reads it, so none can send a second
+ * one before the Builds list shows the first.
  */
-export interface RunRestoreSending {
+export interface BuildRestoreSending {
   readonly target: string;
   readonly since: string | null;
 }
-const runRestoreSendingAtom = Atom.family((key: string) =>
-  Atom.make<RunRestoreSending | null>(null).pipe(
+const buildRestoreSendingAtom = Atom.family((key: string) =>
+  Atom.make<BuildRestoreSending | null>(null).pipe(
     Atom.keepAlive,
-    Atom.withLabel(`game:run-restore-sending:${key}`),
+    Atom.withLabel(`game:build-restore-sending:${key}`),
   ),
 );
-export const runRestoreSending = (ref: ScopedThreadRef) =>
-  runRestoreSendingAtom(`${ref.environmentId}\0${ref.threadId}`);
-export const setRunRestoreSending = (ref: ScopedThreadRef, value: RunRestoreSending | null) =>
-  appAtomRegistry.set(runRestoreSending(ref), value);
+export const buildRestoreSending = (ref: ScopedThreadRef) =>
+  buildRestoreSendingAtom(`${ref.environmentId}\0${ref.threadId}`);
+export const setBuildRestoreSending = (ref: ScopedThreadRef, value: BuildRestoreSending | null) =>
+  appAtomRegistry.set(buildRestoreSending(ref), value);
+
+/**
+ * An earlier build the Stage is playing instead of the game folder's own
+ * preview. Session state: after a reload Play asks again, and the server
+ * reuses the build's running copy.
+ */
+export interface StagePlayTarget {
+  readonly build: GameBuildId;
+  readonly label: string;
+  readonly result: GameBuildPlayResult;
+}
+const stagePlayTargetAtom = Atom.family((key: string) =>
+  Atom.make<StagePlayTarget | null>(null).pipe(
+    Atom.keepAlive,
+    Atom.withLabel(`game:stage-play-target:${key}`),
+  ),
+);
+export const stagePlayTarget = (ref: ScopedThreadRef) =>
+  stagePlayTargetAtom(`${ref.environmentId}\0${ref.threadId}`);
+export const setStagePlayTarget = (ref: ScopedThreadRef, value: StagePlayTarget | null) =>
+  appAtomRegistry.set(stagePlayTarget(ref), value);
+/**
+ * The stage after a game action, from any entry point (the stage, the
+ * palette): Play shows the folder's own game, and Stop, which ends the
+ * copies too, leaves no copy to show.
+ */
+export const stageAfterGameAction = (ref: ScopedThreadRef, action: GameAction) => {
+  if (action === "preview" || action === "stop") setStagePlayTarget(ref, null);
+};
+
+// A page of the game's builds, newest first. A new build, a restore and a
+// facts change push; nothing polls.
+const buildsQuery = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "game:builds",
+  tag: WS_METHODS.gameBuilds,
+  staleTimeMs: 5_000,
+  idleTtlMs: 60_000,
+  refreshTrigger: threadSignal("builds", "facts"),
+});
+
+const refKey = (ref: GameBuildRef): string =>
+  ref._tag === "build" ? ref.build : `turn:${ref.threadId}:${ref.runId}`;
+
+/**
+ * Changes when one build's facts moved, or a pair's: read from the first page
+ * of the Builds list, which every facts push rereads, as the listed builds'
+ * facts summaries. A push for another build leaves the summary as it was, so
+ * a build's facts are not reread for it, and a stale or incomplete reading
+ * is not reread forever. A build the first page does not list (an old one, a
+ * chat turn named by its run) falls back to every facts push.
+ */
+const buildFactsSignal = Atom.family((key: string): Atom.Atom<string> => {
+  const [environmentId = "", threadId = "", ...refs] = key.split("\0");
+  return Atom.make((get) => {
+    const list = get(
+      buildsQuery({
+        environmentId: EnvironmentId.make(environmentId),
+        input: { threadId: ThreadId.make(threadId) },
+      }),
+    );
+    const listed = AsyncResult.isSuccess(list) ? list.value.builds : [];
+    const parts = refs.map((ref) => {
+      const build = listed.find((entry) => entry.id === ref);
+      return build === undefined
+        ? null
+        : `${build.facts.state}:${build.facts.notMeasured}:${build.facts.chips.map((chip) => chip.text).join(",")}`;
+    });
+    if (parts.every((part) => part !== null)) return parts.join("|");
+    return get(threadScopeSignal(`${environmentId}\0${threadId}\0facts`));
+  }).pipe(Atom.withLabel(`game:build-facts-signal:${key}`));
+});
+
+/**
+ * The Builds list past its first page: `count` pages chained from the first
+ * page's current `next`, so a new build shifting the first page never leaves
+ * a row between two pages.
+ */
+const olderBuildPagesAtom = Atom.family((key: string) => {
+  const [environmentId = "", threadId = "", count = "0"] = key.split("\0");
+  return Atom.make((get) => {
+    const target = (before?: string) =>
+      buildsQuery({
+        environmentId: EnvironmentId.make(environmentId),
+        input:
+          before === undefined
+            ? { threadId: ThreadId.make(threadId) }
+            : { threadId: ThreadId.make(threadId), before },
+      });
+    const first = get(target());
+    const pages: Array<AsyncResult.AsyncResult<GameBuildsResult, unknown>> = [];
+    let next = AsyncResult.isSuccess(first) ? first.value.next : null;
+    for (let index = 0; index < Number(count) && next !== null; index += 1) {
+      const page = get(target(next));
+      pages.push(page);
+      next = AsyncResult.isSuccess(page) ? page.value.next : null;
+    }
+    return pages;
+  }).pipe(Atom.withLabel(`game:older-build-pages:${key}`));
+});
+export const olderBuildPages = (ref: ScopedThreadRef, count: number) =>
+  olderBuildPagesAtom(`${ref.environmentId}\0${ref.threadId}\0${count}`);
+
+/**
+ * Slice 1 CONTRACT A3: the build copies a game is playing, as `GameStatus.buildPlays`.
+ * Builder F's branch adds the field; until it lands, a status without it says
+ * nothing, and `null` here means the server does not report copies.
+ */
+const GameBuildPlays = Schema.Array(
+  Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),
+);
+export type GameBuildPlaying = (typeof GameBuildPlays.Type)[number];
+const isGameBuildPlays = Schema.is(GameBuildPlays);
+export const buildPlaysOf = (status: GameStatus): ReadonlyArray<GameBuildPlaying> | null => {
+  const plays = (status as { readonly buildPlays?: unknown }).buildPlays;
+  return isGameBuildPlays(plays) ? plays : null;
+};
+
+/**
+ * Slice 1 CONTRACT A4's shape (`game.runRounds`): every run whose chat is this
+ * thread, newest first. Until builder F's branch lands that read, it is the
+ * one run the run status names, when this thread is its chat.
+ */
+export interface GameChatRun {
+  readonly runId: string;
+  readonly active: boolean;
+  readonly best: string | null;
+  readonly rounds: ReadonlyArray<GameRunRoundRef>;
+}
+const chatRunsAtom = Atom.family((key: string) => {
+  const [environmentId = "", threadId = ""] = key.split("\0");
+  return Atom.make((get) =>
+    AsyncResult.map(
+      get(
+        gameEnvironment.runStatus({
+          environmentId: EnvironmentId.make(environmentId),
+          input: { threadId: ThreadId.make(threadId) },
+        }),
+      ),
+      (status): ReadonlyArray<GameChatRun> =>
+        status.runId === null || (status.chat ?? null) !== threadId
+          ? []
+          : [
+              {
+                runId: status.runId,
+                active: status.active,
+                best: status.best ?? null,
+                rounds: status.rounds,
+              },
+            ],
+    ),
+  ).pipe(Atom.withLabel(`game:chat-runs:${key}`));
+});
+export const chatRuns = (ref: ScopedThreadRef) =>
+  chatRunsAtom(`${ref.environmentId}\0${ref.threadId}`);
 
 export const gameEnvironment = {
   toolchain: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
@@ -156,7 +328,8 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameStatus,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    refreshTrigger: threadSignal("operation"),
+    // A build copy starting or stopping (A3) is a builds push; the status lists the copies.
+    refreshTrigger: threadSignal("operation", "builds"),
   }),
   list: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:list",
@@ -199,9 +372,41 @@ export const gameEnvironment = {
     idleTtlMs: 60_000,
     refreshTrigger: threadSignal("run"),
   }),
-  runRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:runRestore",
-    tag: WS_METHODS.gameRunRestore,
+  builds: buildsQuery,
+  // A measured build's facts never change, so they are read once; others
+  // reread only when that build's own facts moved (see buildFactsSignal).
+  buildFacts: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:buildFacts",
+    tag: WS_METHODS.gameBuildFacts,
+    staleTimeMs: 60_000,
+    idleTtlMs: 5 * 60_000,
+    refreshTrigger: ({ environmentId, input }) =>
+      buildFactsSignal(`${environmentId}\0${input.threadId}\0${refKey(input.build)}`),
+    isFinal: (facts) => facts.state === "measured",
+  }),
+  buildCompare: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:buildCompare",
+    tag: WS_METHODS.gameBuildCompare,
+    staleTimeMs: 60_000,
+    idleTtlMs: 5 * 60_000,
+    refreshTrigger: ({ environmentId, input }) =>
+      buildFactsSignal(
+        `${environmentId}\0${input.threadId}\0${refKey(input.a)}\0${refKey(input.b)}`,
+      ),
+    isFinal: (comparison) =>
+      comparison.factsA.state === "measured" && comparison.factsB.state === "measured",
+  }),
+  buildMeasure: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:buildMeasure",
+    tag: WS_METHODS.gameBuildMeasure,
+  }),
+  buildPlay: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:buildPlay",
+    tag: WS_METHODS.gameBuildPlay,
+  }),
+  buildRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:buildRestore",
+    tag: WS_METHODS.gameBuildRestore,
   }),
   saveMedia: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:saveMedia",

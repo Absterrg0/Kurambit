@@ -176,6 +176,7 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { ChangedFilesCard, type ChangedFileContextMenuHandler } from "./ChangedFilesTree";
+import { GameRoundCard, GameTurnBuildLink } from "../game/GameRoundCard";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
 import {
@@ -1917,7 +1918,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                 row.kind === "event" ||
                 row.kind === "attempt-fold" ||
                 row.kind === "html-render" ||
-                row.kind === "mcp-app"
+                row.kind === "mcp-app" ||
+                row.kind === "game-round"
               ? "pb-2"
               : "pb-4",
         (row.kind === "message" && row.message.role === "assistant") ||
@@ -1967,6 +1969,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
+      {row.kind === "game-round" ? <GameRoundTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
       {row.kind === "event" ? <V2EventTimelineRow row={row} /> : null}
@@ -2800,6 +2803,16 @@ function ProposedPlanTimelineRow({
         workspaceRoot={ctx.workspaceRoot}
         findActive={ctx.findActive}
       />
+    </div>
+  );
+}
+
+function GameRoundTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "game-round" }> }) {
+  const ctx = use(TimelineRowCtx);
+  if (ctx.threadRef === null) return null;
+  return (
+    <div className="min-w-0 px-1">
+      <GameRoundCard threadRef={ctx.threadRef} runId={row.runId} round={row.round} />
     </div>
   );
 }
@@ -4022,7 +4035,7 @@ function AssistantChangedFilesSectionInner({
       },
       event,
     );
-  return (
+  const card = (
     <ChangedFilesCard
       runId={turnSummary.runId}
       files={checkpointFiles}
@@ -4034,6 +4047,14 @@ function AssistantChangedFilesSectionInner({
       onOpenTurnDiff={onOpenTurnDiff}
       onFileContextMenu={onFileContextMenuHandler}
     />
+  );
+  // A game turn that changed files is a build: one link opens it on the Builds tab.
+  if (!ctx.gameThread || ctx.threadRef === null) return card;
+  return (
+    <>
+      {card}
+      <GameTurnBuildLink threadRef={ctx.threadRef} runId={turnSummary.runId} />
+    </>
   );
 }
 

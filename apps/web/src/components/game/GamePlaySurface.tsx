@@ -63,14 +63,92 @@ export function GamePlaySurface({
   onAskAgent: (error: string) => void;
   onOpenTools: () => void;
 }) {
+  const playing = phase.kind === "playing" && previewUrl !== null;
+  return (
+    <div
+      data-game-play-surface="true"
+      className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-stage p-3 [container-type:size]"
+    >
+      <GameFrameBox viewport={viewport} gameName={gameName} playing={playing}>
+        {playing ? (
+          <GameFrame
+            key={frameKey}
+            url={previewUrl}
+            title={`${gameName} preview`}
+            hidden={hidden}
+          />
+        ) : (
+          <StageStateCard
+            gameName={gameName}
+            phase={phase}
+            canOperate={canOperate}
+            operation={operation}
+            onPlay={onPlay}
+            onRebuild={onRebuild}
+            onStop={onStop}
+            onAskAgent={onAskAgent}
+            onOpenTools={onOpenTools}
+          />
+        )}
+      </GameFrameBox>
+    </div>
+  );
+}
+
+/**
+ * The game's frame in its own shape. Before there is a game to show, it is the
+ * game's poster. Its parent must be a size container.
+ */
+export function GameFrameBox({
+  viewport,
+  gameName,
+  playing,
+  children,
+}: {
+  viewport: GameViewport;
+  gameName: string;
+  playing: boolean;
+  children: ReactNode;
+}) {
+  const [pigment, pigmentInk] = gamePigment(gameName);
+  return (
+    <div
+      className="relative overflow-hidden rounded-xl bg-frame shadow-2xl shadow-black/60 ring-1 ring-washi/10"
+      style={
+        playing
+          ? frameStyle(viewport)
+          : {
+              ...frameStyle(viewport),
+              background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${pigmentInk})`,
+            }
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A playing game: the iframe, the pause-and-mute bridge while hidden, and the
+ * click that gives it focus. Mount it with a key that changes when the served
+ * build does; a remount reloads the game.
+ */
+export function GameFrame({
+  url,
+  title,
+  hidden,
+}: {
+  url: string;
+  title: string;
+  /** The game should pause and mute itself: another tab is open, or another frame has focus. */
+  hidden: boolean;
+}) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [frameFocused, setFrameFocused] = useState(false);
   // Track the hide request the game never answered: without StudioProbe or when
   // a hidden page is too throttled to pump the engine, the pause/mute request is
   // lost and the game may quietly keep running while another tab is open.
   const pendingAck = useRef(false);
-  const playing = phase.kind === "playing" && previewUrl !== null;
-  const [pigment, pigmentInk] = gamePigment(gameName);
   const visible = !hidden;
   // The hint is exactly "an unconfirmed pause is outstanding".
   const [unacknowledged, setUnacknowledged] = useState(false);
@@ -93,96 +171,60 @@ export function GamePlaySurface({
 
   useEffect(() => {
     // The outstanding-hide accounting IS the hint: a hide request is in flight
-    // until the game answers either way, and only a stop or an ack retires it.
-    pendingAck.current = playing && (pendingAck.current || !visible);
+    // until the game answers either way, and only an unmount or an ack retires it.
+    pendingAck.current = pendingAck.current || !visible;
     setUnacknowledged(pendingAck.current);
-    if (playing) {
-      frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
-    }
+    frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
     // A remount does not need a repost here: onLoad restates the current state
     // to the fresh document.
-  }, [playing, visible]);
-
+  }, [visible]);
   const focusFrame = () => {
     frameRef.current?.focus();
     frameRef.current?.contentWindow?.focus();
     setFrameFocused(true);
   };
   return (
-    <div
-      data-game-play-surface="true"
-      className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-stage p-3 [container-type:size]"
-    >
-      <div
-        className="relative overflow-hidden rounded-xl bg-frame shadow-2xl shadow-black/60 ring-1 ring-washi/10"
-        style={
-          playing
-            ? frameStyle(viewport)
-            : {
-                ...frameStyle(viewport),
-                // Before there is a game to show, the frame is the game's poster.
-                background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${pigmentInk})`,
-              }
-        }
-      >
-        {playing ? (
-          <>
-            <iframe
-              key={frameKey}
-              ref={frameRef}
-              src={previewUrl}
-              title={`${gameName} preview`}
-              allow="autoplay; fullscreen; gamepad"
-              // The game is served from its own loopback origin, so the sandbox
-              // keeps it out of the app's origin. It needs allow-same-origin to
-              // keep that loopback origin for its own wasm and pack fetches, and
-              // pointer lock so 3D games can capture the pointer.
-              // oxlint-disable-next-line react/iframe-missing-sandbox -- allow-same-origin is this iframe's own loopback origin, not the app's.
-              sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups allow-downloads"
-              className="size-full border-0 bg-black"
-              onLoad={() => {
-                setFrameFocused(false);
-                // The game's listener may have come up after the last message;
-                // a fresh document needs the current state restated.
-                frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
-              }}
-              onFocus={() => setFrameFocused(true)}
-              onBlur={() => setFrameFocused(false)}
-            />
-            {unacknowledged ? (
-              <div className="pointer-events-none absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs text-stage-muted ring-1 ring-white/10">
-                <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
-                Game may still be running
-              </div>
-            ) : null}
-            {frameFocused ? null : (
-              <button
-                type="button"
-                className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-black/35"
-                onClick={focusFrame}
-              >
-                <span className="flex items-center gap-2 rounded-full bg-black/75 px-4 py-2 text-sm font-medium text-stage-foreground shadow-lg ring-1 ring-white/15">
-                  <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
-                  Click to play
-                </span>
-              </button>
-            )}
-          </>
-        ) : (
-          <StageStateCard
-            gameName={gameName}
-            phase={phase}
-            canOperate={canOperate}
-            operation={operation}
-            onPlay={onPlay}
-            onRebuild={onRebuild}
-            onStop={onStop}
-            onAskAgent={onAskAgent}
-            onOpenTools={onOpenTools}
-          />
-        )}
-      </div>
-    </div>
+    <>
+      <iframe
+        ref={frameRef}
+        src={url}
+        title={title}
+        allow="autoplay; fullscreen; gamepad"
+        // The game is served from its own loopback origin, so the sandbox
+        // keeps it out of the app's origin. It needs allow-same-origin to
+        // keep that loopback origin for its own wasm and pack fetches, and
+        // pointer lock so 3D games can capture the pointer.
+        // oxlint-disable-next-line react/iframe-missing-sandbox -- allow-same-origin is this iframe's own loopback origin, not the app's.
+        sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups allow-downloads"
+        className="size-full border-0 bg-black"
+        onLoad={() => {
+          setFrameFocused(false);
+          // The game's listener may have come up after the last message;
+          // a fresh document needs the current state restated.
+          frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
+        }}
+        onFocus={() => setFrameFocused(true)}
+        onBlur={() => setFrameFocused(false)}
+      />
+      {unacknowledged ? (
+        <div className="pointer-events-none absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs text-stage-muted ring-1 ring-white/10">
+          <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
+          Game may still be running
+        </div>
+      ) : null}
+      {frameFocused ? null : (
+        <button
+          type="button"
+          className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-black/35"
+          onClick={focusFrame}
+        >
+          <span className="flex items-center gap-2 rounded-full bg-black/75 px-4 py-2 text-sm font-medium text-stage-foreground shadow-lg ring-1 ring-white/15">
+            <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
+            Click to play
+          </span>
+        </button>
+      )}
+    </>
   );
 }
 

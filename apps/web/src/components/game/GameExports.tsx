@@ -30,26 +30,27 @@ const BUILD_META: Record<
   { title: string; body: string; icon: typeof Gamepad2Icon; play: boolean }
 > = {
   Web: {
-    title: "Web build",
+    title: "Web export",
     body: "Runs in this window. This is what Play serves.",
     icon: Gamepad2Icon,
     play: true,
   },
   Windows: {
-    title: "Windows build",
-    body: "A standalone 64-bit Windows build for Windows PCs. Download package zips this exported release, not later source edits. Play still serves the Web build.",
+    title: "Windows export",
+    body: "A standalone 64-bit Windows release for Windows PCs. Download package zips this export, not later source edits. Play still serves the Web export.",
     icon: MonitorIcon,
     play: false,
   },
   Linux: {
-    title: "Linux build",
-    body: "A standalone build for Linux desktops. Play still serves the Web build.",
+    title: "Linux export",
+    body: "A standalone release for Linux desktops. Play still serves the Web export.",
     icon: LaptopIcon,
     play: false,
   },
 };
 
-export function GameBuildsPanel({
+/** The game folder's exports: the release files Play serves and the person ships. */
+export function GameExports({
   threadRef,
   builds,
   exportTargets,
@@ -178,7 +179,7 @@ export function GameBuildsPanel({
     });
   };
   return (
-    <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>{gameSourceFreshnessLabel(checked ?? sourcesDifferFromPlay)}</span>
         <Button size="xs" variant="outline" disabled={checking} onClick={() => void checkSources()}>
@@ -229,7 +230,7 @@ export function GameBuildsPanel({
               </p>
               {target === "Web" ? (
                 <p className="text-2xs text-muted-foreground">
-                  Packages the build Play serves; later source edits are not included.
+                  Packages the export Play serves; later source edits are not included.
                 </p>
               ) : null}
               {notice?.error ? (
@@ -330,7 +331,7 @@ export function GameBuildsPanel({
       })}
       <GameSavedList threadRef={threadRef} />
       <p className="px-1 text-xs text-muted-foreground">
-        Builds live in <span className="font-mono">builds/</span> and are not committed to the game
+        Exports live in <span className="font-mono">builds/</span> and are not committed to the game
         repository. Every operation writes its output to{" "}
         <span className="font-mono">builds/logs/</span>.
       </p>

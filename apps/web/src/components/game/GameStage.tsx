@@ -5,6 +5,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import {
   ChevronDownIcon,
   DownloadIcon,
+  HistoryIcon,
   MaximizeIcon,
   MessageSquareIcon,
   MinimizeIcon,
@@ -22,7 +23,12 @@ import type { GameAction, ScopedThreadRef } from "@kurambit/contracts";
 import { GAME_ENGINES, GAME_TEMPLATES } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 
-import { gameEnvironment } from "../../state/game";
+import {
+  buildPlaysOf,
+  gameEnvironment,
+  stageAfterGameAction,
+  stagePlayTarget,
+} from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
@@ -45,10 +51,12 @@ import {
 } from "../ui/menu";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { GameBuildsPanel } from "./GameBuildsPanel";
+import { GameBuildsView } from "./GameBuildsView";
+import { GameExports } from "./GameExports";
+import { useBuildStop } from "./useBuildActions";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
-import { GamePlaySurface } from "./GamePlaySurface";
+import { GameFrame, GameFrameBox, GamePlaySurface } from "./GamePlaySurface";
 import { GameRunPanel } from "./GameRunPanel";
 import {
   buildFailurePrompt,
@@ -61,8 +69,8 @@ const BUSY_LABELS: Record<GameAction, string> = {
   preview: "Building the web preview",
   rebuild: "Rebuilding the web preview",
   stop: "Stopping",
-  "export-linux": "Exporting the Linux build",
-  "export-windows": "Exporting the Windows build",
+  "export-linux": "Exporting for Linux",
+  "export-windows": "Exporting for Windows",
 };
 
 const PLAY_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
@@ -109,12 +117,22 @@ export function GameStage({
   const setChatWidth = useGameWorkspaceStore((state) => state.setChatWidth);
   const setChatCollapsed = useGameWorkspaceStore((state) => state.setChatCollapsed);
   const [tab, setTab] = useState<GameStageTab | null>(null);
+  // An earlier build the stage plays from a copy instead of the folder's own preview.
+  const asked = useAtomValue(stagePlayTarget(threadRef));
+  const stopBuild = useBuildStop(threadRef);
   const tabRequest = useGameWorkspaceStore((state) => state.stageTabRequest);
   const [seenTabRequest, setSeenTabRequest] = useState(tabRequest);
+  // The latest build another surface asked the Builds tab to open; the view
+  // remounts for each one and reads it once.
+  const [buildRequest, setBuildRequest] = useState<typeof tabRequest>(null);
   if (tabRequest !== seenTabRequest) {
     setSeenTabRequest(tabRequest);
     if (tabRequest !== null) setTab(tabRequest.tab);
+    if (tabRequest?.build !== undefined) setBuildRequest(tabRequest);
   }
+  const [buildsSeen, setBuildsSeen] = useState(false);
+  const [askedSeen, setAskedSeen] = useState(asked);
+  const [askedStatus, setAskedStatus] = useState<typeof query.data>(null);
   // A game being made by its production run opens on the run, not on an
   // empty stage; the creator's own choice of tab always wins.
   const runStatus = useEnvironmentQuery(
@@ -186,8 +204,25 @@ export function GameStage({
         </span>
       </section>
     ) : null;
+  // The copy the stage was asked to play shows only while the server says it
+  // plays (CONTRACT A3), so a Stop from the palette, another client or an
+  // agent takes the banner down. Until the status is read again after the ask,
+  // the ask stands.
+  if (asked !== askedSeen) {
+    setAskedSeen(asked);
+    setAskedStatus(data);
+  }
+  const plays = buildPlaysOf(data);
+  const playTarget =
+    asked !== null &&
+    (plays === null || data === askedStatus || plays.some((play) => play.build === asked.build))
+      ? asked
+      : null;
   const tabs = PLAY_TABS;
   const activeTab = tab ?? (runStatus.data?.active === true ? "run" : "play");
+  // The Builds tab stays mounted once opened, so going to the stage to play a
+  // build and coming back keeps what was open there.
+  if (activeTab === "builds" && !buildsSeen) setBuildsSeen(true);
   const webBuild = data.builds.find((build) => build.target === "Web");
   const phase = deriveGameStagePhase({
     // The game's own engine tool, as the server resolved it for this project.
@@ -256,7 +291,9 @@ export function GameStage({
     busy !== null ||
     operationState === "running" ||
     data.processes.length > 0 ||
-    data.previewUrl !== null;
+    data.previewUrl !== null ||
+    playTarget !== null ||
+    (plays?.length ?? 0) > 0;
   const buildingMessage =
     operationState === "running" && data.operation !== null
       ? data.operation.message
@@ -277,6 +314,7 @@ export function GameStage({
   const frameKey = frame.key;
   const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
   const perform = async (stageAction: GameAction) => {
+    if (stageAction === "preview") stageAfterGameAction(threadRef, stageAction);
     if (stageAction === "preview" && data.previewUrl !== null) {
       setTab("play");
       return;
@@ -297,6 +335,7 @@ export function GameStage({
     } else {
       setMessage(result.value.message);
       if (stageAction === "export-linux" || stageAction === "export-windows") setTab("builds");
+      if (stageAction === "stop") stageAfterGameAction(threadRef, stageAction);
     }
     refresh();
   };
@@ -370,7 +409,7 @@ export function GameStage({
     ) : staleChipVisible ? (
       <div className="flex items-center gap-2 border-t border-warning/20 bg-warning-surface/50 px-3 py-1.5 text-xs text-warning-foreground">
         <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1">This web build is older than the latest changes.</span>
+        <span className="min-w-0 flex-1">This web export is older than the latest changes.</span>
         <Button
           size="xs"
           variant="warning-outline"
@@ -472,9 +511,6 @@ export function GameStage({
             {tabs.map((entry) => (
               <Toggle key={entry.value} value={entry.value} data-game-tab={entry.value}>
                 {entry.label}
-                {entry.value === "builds" && data.builds.length > 0 ? (
-                  <span className="text-muted-foreground">{data.builds.length}</span>
-                ) : null}
               </Toggle>
             ))}
           </ToggleGroup>
@@ -498,7 +534,7 @@ export function GameStage({
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    aria-label="Rebuild the web build"
+                    aria-label="Rebuild the web export"
                     className="hidden @[46rem]/stage-header:inline-flex"
                     disabled={!rebuildEnabled}
                     onClick={() => void perform("rebuild")}
@@ -507,7 +543,7 @@ export function GameStage({
               >
                 <RefreshCwIcon className="size-3.5" aria-hidden="true" />
               </TooltipTrigger>
-              <TooltipPopup side="bottom">Rebuild the web build</TooltipPopup>
+              <TooltipPopup side="bottom">Rebuild the web export</TooltipPopup>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
@@ -542,7 +578,7 @@ export function GameStage({
               <MenuPopup align="end">
                 <MenuItem disabled={!rebuildEnabled} onClick={() => void perform("rebuild")}>
                   <RefreshCwIcon />
-                  Rebuild the web build
+                  Rebuild the web export
                 </MenuItem>
                 <MenuItem
                   disabled={!canOperate || !runningSomething}
@@ -557,13 +593,13 @@ export function GameStage({
                     onClick={() => void perform("export-windows")}
                   >
                     <MonitorIcon />
-                    Export Windows build
+                    Export for Windows
                   </MenuItem>
                 ) : null}
                 {data.exportTargets.includes("Linux") ? (
                   <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-linux")}>
                     <DownloadIcon />
-                    Export Linux build
+                    Export for Linux
                   </MenuItem>
                 ) : null}
                 <MenuSeparator />
@@ -630,9 +666,48 @@ export function GameStage({
         visible with its parent), so GamePlaySurface tells the game over
         postMessage to pause and mute while the tab is elsewhere.
       */}
+      {playTarget !== null && activeTab === "play" ? (
+        <div className="flex items-center gap-2 border-b border-info/20 bg-info/8 px-3 py-1.5 text-xs text-info-foreground">
+          <HistoryIcon className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">
+            Playing {playTarget.label} from a copy. The game folder is untouched.
+          </span>
+          <Button size="xs" variant="ghost" onClick={() => void stopBuild(playTarget.build)}>
+            Back to the current game
+          </Button>
+        </div>
+      ) : null}
+      {playTarget !== null ? (
+        <div
+          aria-hidden={activeTab !== "play"}
+          data-game-play-surface="build"
+          className={
+            activeTab === "play"
+              ? "relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-stage p-3 [container-type:size]"
+              : "hidden"
+          }
+        >
+          <GameFrameBox viewport={data.viewport} gameName={data.manifest.name} playing>
+            {playTarget.result._tag === "web" ? (
+              <GameFrame
+                key={`${playTarget.build}\0${playTarget.result.url}`}
+                url={playTarget.result.url}
+                title={`${data.manifest.name}, ${playTarget.label}`}
+                hidden={hidden || activeTab !== "play"}
+              />
+            ) : (
+              <p className="flex size-full items-center justify-center p-6 text-center text-sm text-washi/90">
+                {playTarget.result.message}
+              </p>
+            )}
+          </GameFrameBox>
+        </div>
+      ) : null}
       <div
-        aria-hidden={activeTab !== "play"}
-        className={activeTab === "play" ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+        aria-hidden={activeTab !== "play" || playTarget !== null}
+        className={
+          activeTab === "play" && playTarget === null ? "flex min-h-0 flex-1 flex-col" : "hidden"
+        }
       >
         <GamePlaySurface
           phase={phase}
@@ -640,7 +715,7 @@ export function GameStage({
           gameName={data.manifest.name}
           previewUrl={data.previewUrl}
           frameKey={frameKey}
-          hidden={hidden || activeTab !== "play"}
+          hidden={hidden || activeTab !== "play" || playTarget !== null}
           canOperate={canOperate}
           operation={
             busy !== null
@@ -659,22 +734,36 @@ export function GameStage({
           onOpenTools={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
         />
       </div>
-      {activeTab === "builds" ? (
-        <GameBuildsPanel
-          key={threadRef.threadId}
+      {buildsSeen ? (
+        <GameBuildsView
+          key={`${threadRef.threadId}\0${buildRequest?.n ?? 0}`}
           threadRef={threadRef}
-          builds={data.builds}
-          exportTargets={data.exportTargets}
-          webBuildStale={data.webBuildStale}
-          sourcesDifferFromPlay={data.sourcesDifferFromPlay}
-          canOperate={canOperate}
-          operationRunning={building}
-          onPlay={() => {
-            setTab("play");
-            void perform("preview");
-          }}
-          onExport={(target) =>
-            void perform(target === "Windows" ? "export-windows" : "export-linux")
+          compact={compact}
+          writer={canOperate}
+          turnRunning={turnRunning}
+          runActive={runStatus.data?.active === true}
+          viewport={data.viewport}
+          gameName={data.manifest.name}
+          request={buildRequest}
+          hidden={hidden || activeTab !== "builds"}
+          onShowStage={() => setTab("play")}
+          exports={
+            <GameExports
+              threadRef={threadRef}
+              builds={data.builds}
+              exportTargets={data.exportTargets}
+              webBuildStale={data.webBuildStale}
+              sourcesDifferFromPlay={data.sourcesDifferFromPlay}
+              canOperate={canOperate}
+              operationRunning={building}
+              onPlay={() => {
+                setTab("play");
+                void perform("preview");
+              }}
+              onExport={(target) =>
+                void perform(target === "Windows" ? "export-windows" : "export-linux")
+              }
+            />
           }
         />
       ) : null}

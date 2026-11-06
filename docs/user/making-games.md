@@ -225,6 +225,39 @@ keep their references.
 Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
 keeps running; use **Stop** in the stage to close it.
 
+## Builds
+
+Every agent turn that changes the game is a build, in any of the game's chats, and so is every
+round of a production run. The **Builds** tab lists them newest first, with when and where each came
+from (a chat turn or a run round), what changed, and its facts once measured. **Open build** under a
+turn's changed files opens that turn's build. The top entry, **Now**, is the game folder itself and
+its exports.
+
+- **Play** plays a build from a copy, in the stage, even an old one; the game folder is never
+  touched. **Back to the current game** returns to the folder's own game, and **Stop** ends the
+  copies too. Unity builds cannot be played this way yet; the build says so.
+- **Compare with…** shows two builds side by side, each playable, with their facts in a table:
+  ↑ and ↓ show which way a fact moved, ≠ that it changed without a direction (an ending that
+  became another), and = that it did not change; a change is coloured when it is better or worse. A fact that was not measured on one side reads "not comparable" with the reason.
+  Only the side you are playing runs; the other is paused and muted.
+- **Go back to this build** puts it in the game folder: the engine project, `art/` and `ASSETS.md`
+  return to that build, and notes, `PLAN.md`, `VISION.md`, bots and run records stay as they are.
+  What the folder held is saved as a build first, and **Undo this restore** puts it back. Going back
+  waits for a live run to be stopped and for the agent's turn to end.
+- After each round of a production run, the run's chat shows a round card: the round's build, what
+  changed, its facts against the build before it, and the minutes and tokens it took. On a stopped
+  run, **Keep this build as the run's best** puts a round that was not kept in the folder and makes
+  it the best, so a resume continues from it; **Revert to the build before it** puts back the best a
+  kept round was judged against. While the run is live, the card shows the run's own decision.
+
+**Facts** are what Kurambit measured by playing the build: whether it boots, what happens when a
+player does nothing (idle) or presses keys at random (masher), what the game's own bot does
+(skilled), whether it can be won without skill, how long the picture freezes and how much it moves,
+and how soon the game answers the first input. Opening or playing a build that was never measured
+measures it, one build at a time; a run measures its builds itself. A fact Kurambit could not
+measure says **Not measured** and why, and never counts as a result: if a tool failed, **Measure
+again** tries once more. Your agent sees the same builds and facts.
+
 ## Keep a video or image
 
 Bot videos, explore screenshots and the blind players' frame sheets live with the game's logs, which

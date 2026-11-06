@@ -606,6 +606,13 @@ type MessagesTimelineRowContent =
       itemId: TurnItemId;
       revision: string;
       mcpApp: McpAppReference;
+    }
+  | {
+      kind: "game-round";
+      id: string;
+      createdAt: string;
+      runId: string;
+      round: number;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -1739,6 +1746,17 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "game-round") {
+      nextRows.push({
+        kind: "game-round",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        runId: timelineEntry.runId,
+        round: timelineEntry.round,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "mcp-app") {
       nextRows.push({
         kind: "mcp-app",
@@ -2169,6 +2187,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       // Entries rebuild on any tool update; an equal page must keep its mounted frame.
       const bh = b as typeof a;
       return a.createdAt === bh.createdAt && htmlRenderReferencesEqual(a.htmlRender, bh.htmlRender);
+    }
+
+    case "game-round": {
+      const bg = b as typeof a;
+      return a.createdAt === bg.createdAt && a.runId === bg.runId && a.round === bg.round;
     }
 
     case "mcp-app": {
