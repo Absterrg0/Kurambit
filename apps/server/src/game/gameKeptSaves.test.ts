@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { keptSavesDir } from "./gameKeptSaves.ts";
+import { ensureGameDir, keptSavesDir } from "./gameKeptSaves.ts";
 
 const scratch = () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kept-saves-"));
 
@@ -35,6 +35,22 @@ it("refuses a linked .studio or saves folder that points outside the game, creat
     await NodeFSP.symlink(outside, NodePath.join(linkedSaves, ".studio/saves"));
     await expect(keptSavesDir(linkedSaves, "unity")).rejects.toThrow(/outside the game/);
     expect(await NodeFSP.readdir(outside)).toEqual([]);
+  } finally {
+    await NodeFSP.rm(base, { recursive: true, force: true });
+  }
+});
+
+it("never makes a game folder through a linked parent that leaves the game", async () => {
+  const base = await scratch();
+  try {
+    const root = NodePath.join(base, "game");
+    const outside = NodePath.join(base, "home");
+    await NodeFSP.mkdir(root);
+    await NodeFSP.mkdir(outside);
+    await NodeFSP.symlink(outside, NodePath.join(root, "builds"));
+    await expect(ensureGameDir(root, "builds/logs")).rejects.toThrow(/outside the game/);
+    expect(await NodeFSP.readdir(outside)).toEqual([]);
+    expect(await ensureGameDir(root, ".studio")).toBe(NodePath.join(root, ".studio"));
   } finally {
     await NodeFSP.rm(base, { recursive: true, force: true });
   }
