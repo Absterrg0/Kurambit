@@ -117,6 +117,21 @@ zone, look-ahead, damping and level bounds, and in 3D pull in at walls.
 The shell ticks both after `update` and drops them between runs. The comment
 block at the top of each file shows each call.
 
+## The look
+
+`web/shell/look.js` draws every frame: Neutral tone mapping (base colours
+stay true, highlights roll off), a sky light from above and the ground, soft
+shadows and the canvas's anti-aliasing. `ctx.look.sun({ follow: ctx.player,
+size: 30 })` adds a sun whose shadows follow the player, as the starter does;
+models from `ASSETS` cast and receive shadows, and a mesh you build needs
+`castShadow` (and `receiveShadow` for the ground). Tune it with one export in
+`main.js`: `export const LOOK = { exposure: 1.1, environment: "room", bloom: true }`.
+Bloom (emissive and HDR colours above 1 glow) is off unless asked for: it
+costs several times the plain look every frame. A 2D or pixel-art game keeps
+its sprites' colours exact with `export const LOOK = { toneMapping: "none",
+environment: false, shadows: false }`. The comment block at the top of the
+file lists every option.
+
 ## Levels
 
 `buildLevel(ctx, rows, legend, { floor })` (`web/shell/level.js`) builds a

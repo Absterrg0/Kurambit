@@ -15,5 +15,11 @@
   They import the bare specifier `three`; the import map in `../index.html`
   points it at `./vendor/three.module.js`. Games load models through
   `ASSETS` and `ctx.assets` (`shell/assets.js`), which uses these.
+- `addons/postprocessing/{EffectComposer,Pass,RenderPass,ShaderPass,MaskPass,UnrealBloomPass,OutputPass}.js`,
+  `addons/shaders/{CopyShader,LuminosityHighPassShader,OutputShader}.js` and
+  `addons/environments/RoomEnvironment.js` (the look, `shell/look.js`): the
+  same tarball's files, added 2026-11-06 (sha512 integrity matches the
+  registry). Like the files above, they pass through the repository's code
+  formatter on commit, which changes whitespace and quotes, not code.
 - Keep this pin. A game that needs a newer three.js says why here and vendors
   the new files with their license the same way.

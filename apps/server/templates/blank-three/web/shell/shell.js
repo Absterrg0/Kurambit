@@ -10,10 +10,11 @@
 //                                    // with no run, then return false
 //   export const KEEP_ACROSS_RUNS = ["best"]; // GameState values a retry keeps
 //   export const ASSETS = { knight: "assets/models/knight.glb" }; // loaded before the title
+//   export const LOOK = { bloom: false }; // tone mapping, light, shadows, bloom (shell/look.js)
 //
 // ctx, fresh each run: renderer, canvas, hud (the game's DOM layer), scene,
 // camera, player, ui (the HUD kit: counter, bar, timer, objective, toast,
-// hint; shell/hud.js), assets (model(name) / texture(name), shell/assets.js),
+// hint; shell/hud.js), look (sun(); shell/look.js), assets (model(name) / texture(name), shell/assets.js),
 // input (named actions from keys, mouse and gamepad, which
 // the player can rebind: input.down("jump"), input.pressed("action"),
 // input.vector(); the table and the calls are in shell/controls.js), keys
@@ -45,6 +46,7 @@ import {
 import { Juice, juiceShell } from "./juice.js";
 import { animateShell } from "./animate.js";
 import { cameraShell } from "./camera.js";
+import { createLook } from "./look.js";
 import { createHud } from "./hud.js";
 import { assets, preloadAssets } from "./assets.js";
 import { createControls, createInput } from "./controls.js";
@@ -93,6 +95,7 @@ const screens = {
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio ?? 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+const look = createLook(renderer, game.LOOK);
 
 let run = null;
 let openScreen = null;
@@ -154,6 +157,8 @@ function newContext() {
       timers.push({ left: seconds, fn });
     },
   };
+  ctx.look = look.forRun(ctx);
+  look.prepare(ctx.scene);
   return { ctx, input, down, pressed, buttons, clicked, listeners, timers, reported: false };
 }
 
@@ -198,6 +203,7 @@ function clearRun() {
   juiceShell.reset();
   animateShell.reset();
   cameraShell.reset();
+  look.reset();
   if (run !== null) {
     const ended = run;
     run = null;
@@ -679,6 +685,7 @@ function step(dt) {
     game.update?.(dt, run.ctx);
     animateShell.update(dt);
     cameraShell.update(dt);
+    look.update();
     run.ctx.ui.update(dt);
   } catch (error) {
     // One report a run: the loop keeps going so the menus keep working.
@@ -696,13 +703,14 @@ function draw() {
   }
   const camera = run.ctx.camera;
   juiceShell.beforeRender(camera);
-  renderer.render(run.ctx.scene, camera);
+  look.render(run.ctx.scene, camera);
   juiceShell.afterRender(camera);
 }
 
 // Every resize, whatever the state: fullscreen is toggled from the pause menu.
 window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
+  look.resize(window.innerWidth, window.innerHeight);
   const aspect = window.innerWidth / window.innerHeight;
   const camera = run?.ctx.camera;
   if (camera?.isPerspectiveCamera) {
