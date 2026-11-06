@@ -378,6 +378,11 @@ it.effect("restores a saved build by its name, keeps the folder before, and leav
     expect(read()).toBe("edited since\n");
     expect(at(BuildName.best)).toBe(left);
 
+    // A saved build the folder already holds moves nothing, so it is refused and keeps no "before".
+    const same = yield* restore("r4", BuildName.restoreBefore("r1"));
+    expect(same).toMatchObject({ kind: "refused", reason: "already-current" });
+    expect(() => at(BuildName.restoreBefore("r4"))).toThrow();
+
     // A name the run never kept is refused, and the folder stays as it is.
     const gone = yield* restore("r3", BuildName.unfinished("round-9", 1));
     expect(gone).toMatchObject({ kind: "refused", reason: "commit-missing" });

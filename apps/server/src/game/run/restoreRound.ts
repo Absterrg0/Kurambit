@@ -128,6 +128,16 @@ export const restoreBuild = (input: {
     const abandoned = abandons ? "; the round in progress is abandoned" : "";
     const restorePaths = isRestored(lane);
     if (!(yield* measureChange(checkpoints, root, restorePaths, beforeRef, build)).changed) {
+      // A saved build already in the folder changes nothing, so it must not
+      // drop the round a stopped run holds either; its "before" is the same
+      // folder and is not kept. An undo still puts the run's state back.
+      if (target.kind === "saved" && undoes === null) {
+        yield* checkpoints.deleteCheckpointRefs({ cwd: root, checkpointRefs: [beforeRef] });
+        return no(
+          "already-current",
+          `The folder already holds ${named}; nothing was restored, and the run stays as it was.`,
+        );
+      }
       if (!(yield* keepBest))
         return no("commit-missing", "The best build the undo puts back is gone.");
       if (abandons)

@@ -605,6 +605,8 @@ export const GameRunRestoreRefusal = Schema.Literals([
   "restore-incomplete",
   "local-changes",
   "git-failed",
+  /** The folder already holds the saved build: nothing moved, so the run stays as it was. */
+  "already-current",
 ]);
 export type GameRunRestoreRefusal = typeof GameRunRestoreRefusal.Type;
 
