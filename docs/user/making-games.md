@@ -143,9 +143,19 @@ The plan writes a ladder: four to seven steps from the first playable build to a
 a Steam demo (the core loop end to end, a complete first area with a win and a loss, progression,
 a title-to-ending flow, feel and audio), each with checks a player could verify. Each round builds
 the next step. A tester plays it and passes or fails each check, and the round is kept when every
-check passes and the blind judges do not find the old build clearly better. A step that does not
-land in two rounds is set aside and tried once more after the rest. When the ladder is done, a
-ship review plays the whole game and the run ends with its verdict and reasons. The run never
+check passes and the blind judges do not find the old build clearly better. Checks must be
+things a player can see in play, so a ladder (yours too, when you edit it) is refused, with the
+reason, when a check jumps the game to a later state, counts volume ("at least ten"), or asks a
+tester to judge sound or a flash that lasts under a second; those become values the game reports.
+A round that fails because the run could not judge it does not count against the step, and the
+run judges the same build again; if that fails too, the run pauses for you. A check the tester
+cannot verify in play is rewritten once. A step that fails twice is never tried a third time as
+it is: on Autopilot the run splits it into smaller steps; a Guided run asks you to split it,
+change it, or set it aside. A set-aside step is not done. Starting a new run with the same brief
+keeps the game's ladder; a new brief writes a new one. When the ladder is done, a ship review
+plays the whole game: if it says the game is ready, the run ends **Ready**; if not, it ends **Not
+done** with the review's reasons, and resuming works on them for a round. A run that ends with
+set-aside steps is **Not done** too, and resuming splits them. The run never
 polishes on its own: ask for what you want polished in the chat, and the run comes back for one
 round on it. Three rounds in a row that land nothing stop the run as **Stalled**, with the last
 round's reason; fix what it names (or ask for a change), then resume. A plan that wrote no valid
