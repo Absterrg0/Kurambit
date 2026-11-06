@@ -18,6 +18,7 @@ export const THREE_PROFILE: GameEngineProfile = {
   scaffold: { version: THREE_PINNED_VERSION, directories: ["web/assets", "builds/web"] },
   resourcePath: (projectRelative) => `./${projectRelative}`,
   importRoot: null,
+  importStep: false,
   groundHint: (_width, height, ground) => {
     const up = Number(((height - ground) / height).toFixed(4));
     return `three.js: sprite.center.set(0.5, ${up}) on a THREE.Sprite, or geometry.translate(0, ${Number((0.5 - up).toFixed(4))} * planeHeight, 0) on a plane, puts the object's position on the ground line.`;

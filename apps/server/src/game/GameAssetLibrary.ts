@@ -1307,7 +1307,7 @@ const make = Effect.gen(function* () {
           filesDir,
           style,
         )),
-        "Run game_import, then game_check.",
+        profile.importStep ? "Run game_import, then game_check." : "Run game_check.",
       ].join("\n");
       return { text, directory: directoryRel, added: added.length };
     });
