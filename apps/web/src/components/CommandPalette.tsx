@@ -41,6 +41,7 @@ import {
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type GameAction,
+  GAME_ENGINES,
   type ProjectId,
   type SourceControlDiscoveryResult,
   type SourceControlRepositoryInfo,
@@ -51,12 +52,14 @@ import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
+  ChevronLeftIcon,
   ChevronRightIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  Gamepad2Icon,
   ColumnsIcon,
   HistoryIcon,
   MessageSquareDashedIcon,
@@ -64,6 +67,7 @@ import {
   MessageSquareIcon,
   MonitorIcon,
   MoonIcon,
+  PackageIcon,
   PlayIcon,
   Redo2Icon,
   SquareIcon,
@@ -121,7 +125,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { gameEnvironment, stageAfterGameAction } from "../state/game";
-import { useGameWorkspaceStore } from "../gameWorkspaceStore";
+import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
 import { useGameStageAccess } from "../hooks/useGameStageAccess";
 import { useIsGameThread, useIsGameThreadStatus } from "../hooks/useIsGameThread";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
@@ -720,12 +724,15 @@ function OpenCommandPaletteDialog(props: {
   // The same signal the game stage uses: the palette only leads with game
   // commands where the workspace has a game.
   const isGameThread = useIsGameThread(activeThreadRef);
-  // The same status read the stage mounts: Play and Rebuild exist only for an
-  // engine that makes a Web build.
-  const gameWebBuild =
-    useIsGameThreadStatus(activeThreadRef).data?.exportTargets.includes("Web") === true;
+  // The same status read the stage mounts: Play exists only for an engine that
+  // makes a Web build, and Rebuild only where the Stage plays an export.
+  const gameStatus = useIsGameThreadStatus(activeThreadRef).data;
+  const gameWebBuild = gameStatus?.exportTargets.includes("Web") === true;
+  const gameStageKind =
+    gameStatus === null || gameStatus === undefined
+      ? null
+      : GAME_ENGINES[gameStatus.manifest.engine.name].stage;
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
-  const runStart = useAtomCommand(gameEnvironment.runStart, { reportFailure: false });
   const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
   const canRestore = useAtomValue(
     activeThreadRef === null
@@ -738,11 +745,6 @@ function OpenCommandPaletteDialog(props: {
     activeThreadRef === null
       ? NO_PERMISSION
       : gameEnvironment.action.permissionAtom(activeThreadRef.environmentId),
-  );
-  const canRunStart = useAtomValue(
-    activeThreadRef === null
-      ? NO_PERMISSION
-      : gameEnvironment.runStart.permissionAtom(activeThreadRef.environmentId),
   );
   const canRunStop = useAtomValue(
     activeThreadRef === null
@@ -1535,7 +1537,7 @@ function OpenCommandPaletteDialog(props: {
         icon: <PlayIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("preview"),
       });
-    if (canGameAction && gameAccess === "writer" && gameWebBuild)
+    if (canGameAction && gameAccess === "writer" && gameWebBuild && gameStageKind === "export")
       actionItems.push({
         kind: "action",
         value: "action:game-rebuild",
@@ -1564,17 +1566,49 @@ function OpenCommandPaletteDialog(props: {
         useGameWorkspaceStore.getState().toggleChat();
       },
     });
-    // Which build is the person's pick from the Builds tab's list.
-    if (canRestore && gameAccess === "writer" && gameRun?.active !== true)
+    const requestStage = (request: GameStageRequest) => async () => {
+      useGameWorkspaceStore.getState().requestStage(request);
+    };
+    actionItems.push({
+      kind: "action",
+      value: "action:game-focus",
+      title: "Focus the game",
+      searchTerms: ["focus", "play", "keyboard", "stage", "game"],
+      icon: <Gamepad2Icon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "game.focus",
+      run: requestStage({ kind: "focus" }),
+    });
+    // The game's latest turn build, the one the timeline selects by default.
+    const latestBuild = turnUndo.view?.build ?? null;
+    if (latestBuild !== null) {
+      actionItems.push({
+        kind: "action",
+        value: "action:game-play-previous",
+        title: "Play the previous build",
+        searchTerms: ["previous", "back", "older", "build", "turn", "timeline", "game"],
+        icon: <ChevronLeftIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.playPrevious",
+        run: requestStage({ kind: "step", by: -1 }),
+      });
+      actionItems.push({
+        kind: "action",
+        value: "action:game-play-next",
+        title: "Play the next build",
+        searchTerms: ["next", "forward", "newer", "live", "build", "turn", "timeline", "game"],
+        icon: <ChevronRightIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.playNext",
+        run: requestStage({ kind: "step", by: 1 }),
+      });
+    }
+    // The latest build's detail, where Go back picks any build on the timeline.
+    if (canRestore && gameAccess === "writer" && gameRun?.active !== true && latestBuild !== null)
       actionItems.push({
         kind: "action",
         value: "action:game-build-restore",
         title: "Go back to a build…",
         searchTerms: ["restore", "undo", "back", "revert", "build", "version", "game"],
         icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          useGameWorkspaceStore.getState().showStageTab("builds");
-        },
+        run: requestStage({ kind: "detail", build: { _tag: "build", build: latestBuild.id } }),
       });
     const turnRestore = turnUndo.action;
     if (
@@ -1599,10 +1633,9 @@ function OpenCommandPaletteDialog(props: {
           ) : (
             <Redo2Icon className={ITEM_ICON_CLASS} />
           ),
-        run: async () => {
-          const failure = await turnUndo.send();
-          if (failure !== null) throw new Error(failure);
-        },
+        shortcutCommand: turnRestore.kind === "undo" ? "game.undoTurn" : "game.redoTurn",
+        // The Stage restores, so the palette, the keys and the strip share one path.
+        run: requestStage({ kind: turnRestore.kind }),
       });
     actionItems.push({
       kind: "action",
@@ -1610,56 +1643,43 @@ function OpenCommandPaletteDialog(props: {
       title: "Compare builds…",
       searchTerms: ["compare", "diff", "versions", "builds", "side by side", "game"],
       icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        useGameWorkspaceStore.getState().showStageTab("builds", { compare: "pick" });
-      },
+      run: requestStage({ kind: "compare" }),
     });
-    // The run's own controls belong to the game's own chats, never a role's.
-    if (gameAccess === "writer" && gameRun?.active === true) {
-      if (canRunStop)
-        actionItems.push({
-          kind: "action",
-          value: "action:game-run-stop",
-          title: "Stop production run",
-          searchTerms: ["stop", "run", "production", "game"],
-          icon: <SquareIcon className={ITEM_ICON_CLASS} />,
-          run: async () => {
-            const result = await runStop({
-              environmentId: threadRef.environmentId,
-              input: { threadId: threadRef.threadId },
-            });
-            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-          },
-        });
-    } else if (gameAccess === "writer") {
-      if (canRunStart && gameRun?.resumable === true)
-        actionItems.push({
-          kind: "action",
-          value: "action:game-run-resume",
-          title: "Resume production run",
-          searchTerms: ["resume", "continue", "run", "production", "game"],
-          icon: <PlayIcon className={ITEM_ICON_CLASS} />,
-          run: async () => {
-            const result = await runStart({
-              environmentId: threadRef.environmentId,
-              input: { threadId: threadRef.threadId, brief: "" },
-            });
-            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-          },
-        });
-      // A new run needs the creator's brief, which the Run tab takes.
-      if (canRunStart)
-        actionItems.push({
-          kind: "action",
-          value: "action:game-run-start",
-          title: "Start production run…",
-          searchTerms: ["start", "new", "run", "production", "brief", "game"],
-          icon: <PlayIcon className={ITEM_ICON_CLASS} />,
-          run: async () => {
-            useGameWorkspaceStore.getState().showStageTab("run");
-          },
-        });
-    }
+    if (canGameAction && gameAccess === "writer")
+      actionItems.push({
+        kind: "action",
+        value: "action:game-export",
+        title: "Export…",
+        searchTerms: [
+          "export",
+          "release",
+          "package",
+          "download",
+          "windows",
+          "linux",
+          "web",
+          "game",
+        ],
+        icon: <PackageIcon className={ITEM_ICON_CLASS} />,
+        run: requestStage({ kind: "export" }),
+      });
+    // A stage-era run is shown and stoppable; nothing starts or resumes one
+    // from the app. Its controls belong to the game's own chats, never a role's.
+    if (gameAccess === "writer" && gameRun?.active === true && canRunStop)
+      actionItems.push({
+        kind: "action",
+        value: "action:game-run-stop",
+        title: "Stop production run",
+        searchTerms: ["stop", "run", "production", "game"],
+        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          const result = await runStop({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        },
+      });
   }
   for (const [mode, title] of [
     ["create", "New game"],
