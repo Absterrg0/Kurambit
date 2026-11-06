@@ -943,6 +943,8 @@ const make = Effect.gen(function* () {
         processes: processes.list(root),
         // Status observes the preview; it never switches it.
         previewUrl: live ? preview.liveUrl(root) : preview.url(root),
+        // Phase 2 fix round (L): the serve's state, held by GamePreview.
+        live: live && preview.liveUrl(root) !== null ? ("serving" as const) : ("off" as const),
         buildPlays: copies.plays(root),
         operation: operations.current(root),
       };

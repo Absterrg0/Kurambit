@@ -586,6 +586,13 @@ export const GameStatus = Schema.Struct({
     Schema.Struct({ pid: Schema.Number, operation: Schema.String, logPath: Schema.String }),
   ),
   previewUrl: Schema.NullOr(Schema.String),
+  /**
+   * A live-staged game's serve, as the server holds it for every client:
+   * "serving"; "stopped" (someone stopped it: the Stage waits for Play); or
+   * "off" (not asked since the server started: a shown Stage opens it).
+   * Always "off" for engines not staged live.
+   */
+  live: Schema.Literals(["off", "serving", "stopped"]),
   /** The builds being played from copies of their own (Play of a build), with their URLs. */
   buildPlays: Schema.Array(
     Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),
