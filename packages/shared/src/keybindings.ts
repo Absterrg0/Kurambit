@@ -128,6 +128,27 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+b", command: "rightPanel.toggle" },
   { key: "mod+shift+b", command: "threadPanel.toggle", when: "!terminalFocus" },
   { key: "mod+alt+c", command: "game.chat.toggle", when: "gameThread" },
+  {
+    key: "mod+alt+z",
+    command: "game.undoTurn",
+    when: "gameThread && !editableFocus && !terminalFocus",
+  },
+  {
+    key: "mod+alt+shift+z",
+    command: "game.redoTurn",
+    when: "gameThread && !editableFocus && !terminalFocus",
+  },
+  { key: "mod+alt+g", command: "game.focus", when: "gameThread && !terminalFocus" },
+  {
+    key: "mod+alt+[",
+    command: "game.playPrevious",
+    when: "gameThread && !editableFocus && !terminalFocus",
+  },
+  {
+    key: "mod+alt+]",
+    command: "game.playNext",
+    when: "gameThread && !editableFocus && !terminalFocus",
+  },
   { key: "mod+t", command: "rightPanel.new", when: "rightPanelOpen && !terminalFocus" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },

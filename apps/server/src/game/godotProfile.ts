@@ -4,6 +4,7 @@ import type { GameEngineProfile } from "./engineProfile.ts";
 export const GODOT_PROFILE: GameEngineProfile = {
   id: "godot",
   turnLoop: GAME_ENGINES.godot.turnLoop,
+  stage: GAME_ENGINES.godot.stage,
   displayName: "Godot",
   projectDirectory: "godot",
   exportTargets: ["Web", "Linux", "Windows"],

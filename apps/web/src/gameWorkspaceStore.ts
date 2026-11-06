@@ -39,6 +39,21 @@ export type GameBuildRequest =
   | { readonly compare: readonly [GameBuildRef, GameBuildRef] }
   | { readonly compare: "pick" };
 
+/**
+ * What another surface (the palette, a key, the timeline, a chat turn's strip)
+ * asks the Stage to do. One channel, so every entry point shares the Stage's path.
+ */
+export type GameStageRequest =
+  | { readonly kind: "live" }
+  | { readonly kind: "play"; readonly build: GameBuildRef }
+  | { readonly kind: "detail"; readonly build: GameBuildRef }
+  | { readonly kind: "compare"; readonly pair?: readonly [GameBuildRef, GameBuildRef] }
+  | { readonly kind: "step"; readonly by: -1 | 1 }
+  | { readonly kind: "focus" }
+  | { readonly kind: "undo" }
+  | { readonly kind: "redo" }
+  | { readonly kind: "export" };
+
 interface GameWorkspaceStoreState {
   /** Width of the docked chat column on game threads, in CSS pixels. */
   chatWidth: number;
@@ -58,6 +73,9 @@ interface GameWorkspaceStoreState {
     readonly build?: GameBuildRequest;
   } | null;
   showStageTab: (tab: GameStageTab, build?: GameBuildRequest) => void;
+  /** The latest Stage request; `n` makes a repeat of the same request news. Not persisted. */
+  stageRequest: { readonly request: GameStageRequest; readonly n: number } | null;
+  requestStage: (request: GameStageRequest) => void;
 }
 
 /**
@@ -81,6 +99,9 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
         }),
       toggleChat: () => set((state) => ({ chatCollapsed: !state.chatCollapsed })),
       setChatCollapsed: (collapsed) => set({ chatCollapsed: collapsed }),
+      stageRequest: null,
+      requestStage: (request) =>
+        set((state) => ({ stageRequest: { request, n: (state.stageRequest?.n ?? 0) + 1 } })),
       stageTabRequest: null,
       showStageTab: (tab, build) =>
         set((state) => ({

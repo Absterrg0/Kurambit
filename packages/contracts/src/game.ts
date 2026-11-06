@@ -139,6 +139,10 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
   },
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "blank";
+/** How this game's engine shows the game on the Stage: its folder served live, a Web export, or its own window. */
+export const GameStageKind = Schema.Literals(["live", "export", "window"]);
+export type GameStageKind = typeof GameStageKind.Type;
+
 /** What a client says about each engine: keyed by every engine id, so a new engine does not compile without its entry. */
 export const GAME_ENGINES: Readonly<
   Record<
@@ -155,6 +159,8 @@ export const GAME_ENGINES: Readonly<
        * every turn; their games build and play as before.
        */
       readonly turnLoop: boolean;
+      /** How the Stage shows this engine's game. */
+      readonly stage: GameStageKind;
       readonly picker: { readonly title: string; readonly description: string };
     }
   >
@@ -164,6 +170,7 @@ export const GAME_ENGINES: Readonly<
     template: "blank",
     tool: "godot",
     turnLoop: false,
+    stage: "export",
     picker: {
       title: "Godot native",
       description:
@@ -175,6 +182,7 @@ export const GAME_ENGINES: Readonly<
     template: "blank-three",
     tool: null,
     turnLoop: true,
+    stage: "live",
     picker: {
       title: "three.js browser",
       description: "A quick static browser game, nothing to install. Web export only.",
@@ -185,6 +193,7 @@ export const GAME_ENGINES: Readonly<
     template: "blank-unity",
     tool: "unity",
     turnLoop: false,
+    stage: "window",
     picker: {
       title: "Unity native",
       description:
