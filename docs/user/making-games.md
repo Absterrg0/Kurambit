@@ -104,7 +104,7 @@ player's report and frames. Each round after it says what it tried and whether i
 verdicts and reasoning, the blind players' reports, the bot's results and video, the tester's note
 and the reviewer's direction. Your agent can read the same with `game_run_round`, so you can ask it
 what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
-the work. **Stop run** ends it; every build the run made, rejected ones too, stays kept. The run never
+the work. **Stop run** ends it; its kept builds stay, as do rounds that failed their checks, were inconclusive or were not judged; a round whose build the best beat in both orders is cleared when the run ends. The run never
 commits, switches branches or touches your git: its builds are Kurambit checkpoints, and your
 game folder holds the current build as uncommitted work you commit when you like. Starting the run again without
 a new brief continues it where it stopped, and if Kurambit restarts during a run, the run picks up
