@@ -35,7 +35,6 @@ import * as Stream from "effect/Stream";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import { gitEra, RESUMABLE, toState } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
@@ -62,7 +61,7 @@ import { presentable } from "./decisionEvidence.ts";
 import { finishExports } from "./finish.ts";
 import { restoreBuild, type RestoreTarget } from "./restoreRound.ts";
 import { BuildName, keptBuild } from "./buildNames.ts";
-import { buildStep, captureBuild, type FolderLock, freeBy, pruneBuilds } from "./builds.ts";
+import { buildStep, type FolderLock, freeBy, pruneBuilds, withBuildInFolder } from "./builds.ts";
 import * as GameRunRoleReactor from "./GameRunRoleReactor.ts";
 import {
   BUSY_PAUSE,
@@ -1110,41 +1109,10 @@ const make = Effect.gen(function* () {
         // An ending mid-round (a usage limit, a provider outage) leaves the
         // round's unfinished work in the folder. The exports are of the best
         // build, and the folder is left as the run left it, so a resume goes on
-        // from that work. The work is kept once per ending: a finish a restart
-        // cut after the best was restored must not keep the best as the work.
-        // A run from before checkpoints holds no builds to park or restore:
-        // its folder is exported as it is and left untouched.
+        // from that work, kept once per ending (withBuildInFolder).
         // One bound for every wait of the ending, however many moves and exports it makes.
         const waitUntil = yield* freeBy;
-        const ops = { game, checkpoints, lock: folderLock(run, waitUntil) };
-        const ctx = { root, runId: run.id, lane: run.lane };
-        const name = BuildName.ending(job.endedAt);
-        const parked = yield* Effect.gen(function* () {
-          if (gitEra(run)) return null;
-          const ref = checkpointRefForGameRun(run.id, name);
-          const kept = yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: ref });
-          if (!kept) {
-            const sha = yield* captureBuild(ops, root, run.id, name);
-            yield* log(
-              `the folder's work at the ending is kept as ${keptBuild(run.id, name, run.lane, sha)}`,
-            );
-          }
-          const best = yield* buildStep(ops, ctx, { _tag: "restore", sha: run.best, keep: [] });
-          if (!best.build.ok)
-            yield* log(
-              `finishExports: the best build could not be restored (${best.build.detail}); exporting the folder as it is`,
-            );
-          return best.build.ok ? ref : null;
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.failCause(cause)
-              : log(
-                  `finishExports: the best build could not be restored (${causeText(cause)}); exporting the folder as it is`,
-                ).pipe(Effect.as(null)),
-          ),
-        );
-        yield* finishExports(
+        const exports = finishExports(
           root,
           run.threadId,
           game,
@@ -1153,15 +1121,36 @@ const make = Effect.gen(function* () {
           waitUntil,
           roleThreads,
         ).pipe(Effect.ignore);
-        if (parked !== null)
-          yield* buildStep(ops, ctx, { _tag: "restore", sha: parked, keep: [] }).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.failCause(cause)
-                : log(
-                    `the run's unfinished work could not be put back (${causeText(cause)}); it is ${keptBuild(run.id, name, run.lane, "")}`,
-                  ),
-            ),
+        const name = BuildName.ending(job.endedAt);
+        // A run from before checkpoints holds no builds: its folder is exported as it is.
+        const ended = gitEra(run)
+          ? null
+          : yield* withBuildInFolder(
+              { game, checkpoints, lock: folderLock(run, waitUntil) },
+              { root, runId: run.id, lane: run.lane },
+              { sha: run.best, park: name },
+              () => exports.pipe(Effect.as({ value: undefined, putBack: true })),
+            ).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.failCause(cause)
+                  : log(
+                      `finishExports: the folder's work could not be kept (${causeText(cause)}); exporting the folder as it is`,
+                    ).pipe(Effect.as(null)),
+              ),
+            );
+        if (ended !== null && ended.parked.length > 0)
+          yield* log(
+            `the folder's work at the ending is kept as ${keptBuild(run.id, name, run.lane, ended.parked)}`,
+          );
+        if (ended?.kind === "refused")
+          yield* log(
+            `finishExports: the best build could not be restored (${ended.detail}); exporting the folder as it is`,
+          );
+        if (ended === null || ended.kind === "refused") yield* exports;
+        if (ended !== null && ended.back !== null)
+          yield* log(
+            `the run's unfinished work could not be put back (${ended.back}); it is ${keptBuild(run.id, name, run.lane, "")}`,
           );
       }
       // Last, so every build the ending used is still there for a finish a
