@@ -353,6 +353,7 @@ import { useGameWorkspaceStore } from "../gameWorkspaceStore";
 import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
 import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useGameRunComposerNotice } from "./game/useGameRunComposerNotice";
+import { useGameNextBanner } from "./game/GameNextBanner";
 import { useGameRoundCards } from "./game/GameRoundCard";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -3276,6 +3277,16 @@ export default function ChatView(props: ChatViewProps) {
     scheduleComposerFocus();
   };
   const askAgentToFixStable = useStableCallback(askAgentToFix);
+  const gameNextReply = (() => {
+    if (!isGameThread || !latestRunSettled || activeLatestRun === null) return null;
+    const reply = serverProjection?.messages.findLast(
+      (message) => message.role === "assistant" && !message.streaming,
+    );
+    return reply === undefined || reply.runId !== activeLatestRun.runId
+      ? null
+      : { key: `${routeThreadKey}:${reply.id}`, text: reply.text };
+  })();
+  const gameNextBanner = useGameNextBanner(gameNextReply, askAgentToFixStable);
   const sendAppMessage = async (text: string) => {
     if (!isServerThread || activeThreadId === null) {
       throw new Error("Messages from apps need a started thread.");
@@ -5206,7 +5217,7 @@ export default function ChatView(props: ChatViewProps) {
         })
       : null;
   const composerBannerItems = (() => {
-    const gameRunItems = gameRunNotice === null ? [] : [gameRunNotice];
+    const gameRunItems = [gameRunNotice, gameNextBanner].filter((item) => item !== null);
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [
       childInputBannerItem,
