@@ -46,6 +46,21 @@ window.addEventListener("error", (event) =>
     whereFrom(event.filename, event.lineno),
   ),
 );
+// A module that fails to fetch fires on its script element, not the window;
+// the capture phase sees it. A nested import failing blames the entry script.
+window.addEventListener(
+  "error",
+  (event) => {
+    const script = event.target;
+    if (script === window || script?.tagName !== "SCRIPT") return;
+    record(
+      `${script.src.replace(`${location.origin}/`, "")} did not load: a module it imports is missing or could not load.`,
+      "",
+      whereFrom(script.src, 0),
+    );
+  },
+  true,
+);
 window.addEventListener("unhandledrejection", (event) => {
   const frame = firstFrame(event.reason?.stack);
   record(
