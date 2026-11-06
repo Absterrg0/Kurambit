@@ -117,7 +117,7 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
-import { gameEnvironment } from "../state/game";
+import { gameEnvironment, stageAfterGameAction } from "../state/game";
 import { useGameWorkspaceStore } from "../gameWorkspaceStore";
 import { useGameStageAccess } from "../hooks/useGameStageAccess";
 import { useIsGameThread, useIsGameThreadStatus } from "../hooks/useIsGameThread";
@@ -1519,6 +1519,7 @@ function OpenCommandPaletteDialog(props: {
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       if (!result.value.success) throw new Error(result.value.message);
+      stageAfterGameAction(threadRef, action);
     };
     if (canGameAction && gameWebBuild)
       actionItems.push({

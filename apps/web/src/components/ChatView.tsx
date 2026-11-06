@@ -1657,6 +1657,14 @@ export default function ChatView(props: ChatViewProps) {
   const gameWorkspaceCompact = useGameWorkspaceCompact(workspaceLayoutElement, isGameThread);
   const [compactGamePane, setCompactGamePane] = useCompactGamePane(gameWorkspaceCompact);
   const showCompactGame = () => setCompactGamePane("game");
+  // A request for a stage tab (Open build, a round card, the palette) is a
+  // request to see the game: a compact workbench showing the chat switches.
+  const stageTabRequestN = useGameWorkspaceStore((state) => state.stageTabRequest?.n ?? 0);
+  const [seenStageTabRequestN, setSeenStageTabRequestN] = useState(stageTabRequestN);
+  if (stageTabRequestN !== seenStageTabRequestN) {
+    setSeenStageTabRequestN(stageTabRequestN);
+    if (compactGamePane !== "game") setCompactGamePane("game");
+  }
   const showCompactChat = () => {
     setCompactGamePane("chat");
     window.requestAnimationFrame(() => composerRef.current?.focusAtEnd());

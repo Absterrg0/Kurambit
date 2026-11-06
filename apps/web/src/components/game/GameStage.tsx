@@ -23,7 +23,12 @@ import type { GameAction, ScopedThreadRef } from "@kurambit/contracts";
 import { GAME_ENGINES, GAME_TEMPLATES } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 
-import { gameEnvironment, setStagePlayTarget, stagePlayTarget } from "../../state/game";
+import {
+  buildPlaysOf,
+  gameEnvironment,
+  stageAfterGameAction,
+  stagePlayTarget,
+} from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
@@ -48,6 +53,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildsView } from "./GameBuildsView";
 import { GameExports } from "./GameExports";
+import { useBuildStop } from "./useBuildActions";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
 import { GameFrame, GameFrameBox, GamePlaySurface } from "./GamePlaySurface";
@@ -112,7 +118,8 @@ export function GameStage({
   const setChatCollapsed = useGameWorkspaceStore((state) => state.setChatCollapsed);
   const [tab, setTab] = useState<GameStageTab | null>(null);
   // An earlier build the stage plays from a copy instead of the folder's own preview.
-  const playTarget = useAtomValue(stagePlayTarget(threadRef));
+  const asked = useAtomValue(stagePlayTarget(threadRef));
+  const stopBuild = useBuildStop(threadRef);
   const tabRequest = useGameWorkspaceStore((state) => state.stageTabRequest);
   const [seenTabRequest, setSeenTabRequest] = useState(tabRequest);
   // The latest build another surface asked the Builds tab to open; the view
@@ -124,6 +131,8 @@ export function GameStage({
     if (tabRequest?.build !== undefined) setBuildRequest(tabRequest);
   }
   const [buildsSeen, setBuildsSeen] = useState(false);
+  const [askedSeen, setAskedSeen] = useState(asked);
+  const [askedStatus, setAskedStatus] = useState<typeof query.data>(null);
   // A game being made by its production run opens on the run, not on an
   // empty stage; the creator's own choice of tab always wins.
   const runStatus = useEnvironmentQuery(
@@ -195,6 +204,20 @@ export function GameStage({
         </span>
       </section>
     ) : null;
+  // The copy the stage was asked to play shows only while the server says it
+  // plays (CONTRACT A3), so a Stop from the palette, another client or an
+  // agent takes the banner down. Until the status is read again after the ask,
+  // the ask stands.
+  if (asked !== askedSeen) {
+    setAskedSeen(asked);
+    setAskedStatus(data);
+  }
+  const plays = buildPlaysOf(data);
+  const playTarget =
+    asked !== null &&
+    (plays === null || data === askedStatus || plays.some((play) => play.build === asked.build))
+      ? asked
+      : null;
   const tabs = PLAY_TABS;
   const activeTab = tab ?? (runStatus.data?.active === true ? "run" : "play");
   // The Builds tab stays mounted once opened, so going to the stage to play a
@@ -268,7 +291,9 @@ export function GameStage({
     busy !== null ||
     operationState === "running" ||
     data.processes.length > 0 ||
-    data.previewUrl !== null;
+    data.previewUrl !== null ||
+    playTarget !== null ||
+    (plays?.length ?? 0) > 0;
   const buildingMessage =
     operationState === "running" && data.operation !== null
       ? data.operation.message
@@ -289,7 +314,7 @@ export function GameStage({
   const frameKey = frame.key;
   const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
   const perform = async (stageAction: GameAction) => {
-    if (stageAction === "preview") setStagePlayTarget(threadRef, null);
+    if (stageAction === "preview") stageAfterGameAction(threadRef, stageAction);
     if (stageAction === "preview" && data.previewUrl !== null) {
       setTab("play");
       return;
@@ -310,8 +335,7 @@ export function GameStage({
     } else {
       setMessage(result.value.message);
       if (stageAction === "export-linux" || stageAction === "export-windows") setTab("builds");
-      // Stop also ends the earlier builds this game was playing from copies.
-      if (stageAction === "stop") setStagePlayTarget(threadRef, null);
+      if (stageAction === "stop") stageAfterGameAction(threadRef, stageAction);
     }
     refresh();
   };
@@ -646,9 +670,9 @@ export function GameStage({
         <div className="flex items-center gap-2 border-b border-info/20 bg-info/8 px-3 py-1.5 text-xs text-info-foreground">
           <HistoryIcon className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate">
-            Playing {playTarget.label}, an earlier build, from a copy. The game folder is untouched.
+            Playing {playTarget.label} from a copy. The game folder is untouched.
           </span>
-          <Button size="xs" variant="ghost" onClick={() => setStagePlayTarget(threadRef, null)}>
+          <Button size="xs" variant="ghost" onClick={() => void stopBuild(playTarget.build)}>
             Back to the current game
           </Button>
         </div>
