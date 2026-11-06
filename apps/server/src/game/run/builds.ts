@@ -71,11 +71,12 @@ export const measureChange = (
 
 /**
  * A finished run's transient builds go: every turn's, and the candidate of
- * each round recorded as kept (its kept build holds it), abandoned by a
- * restore (the restore's before build holds its work) or beaten in both
+ * each round recorded as kept (its kept build holds it) or beaten in both
  * orders. Every other build stays: the run log tells a person it keeps a
  * round's candidate (unjudged, inconclusive, failed checks, a failed merge,
- * a budget leave, a round never recorded), its unfinished work and the work
+ * a budget leave, a round never recorded, a round a restore abandoned: the
+ * restore's before build may hold the best a step was putting back at the
+ * stop, not the candidate), its unfinished work and the work
  * each ending found, and gives the command that brings it back. A build the
  * run still holds (its best, a pending candidate, the round or block a resume
  * continues) stays whatever its name. Round records are history (each names
@@ -105,7 +106,6 @@ export const pruneBuilds = (checkpoints: Checkpoints, root: string, state: RunSt
       const [o1, o2] = r.verdicts;
       return (
         r.kept ||
-        r.abandoned === true ||
         (r.unjudged !== true &&
           r.inconclusive !== true &&
           classifyComparePair(o1?.verdict ?? "NONE", o2?.verdict ?? "NONE") === "best-wins")

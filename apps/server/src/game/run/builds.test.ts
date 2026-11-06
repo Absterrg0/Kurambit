@@ -129,6 +129,8 @@ it.effect("clears a finished run's spent builds and keeps every one it or a pers
       BuildName.ending("2026-11-04T12:00:00.000Z"),
       BuildName.candidate("round-4"),
       BuildName.candidate("round-6"),
+      // Abandoned by a restore: its folder before may hold the best, not this candidate.
+      BuildName.candidate("round-7"),
       BuildName.turn("step:7", 1),
     ];
     // A turn whose build is the best is still the best.
@@ -198,6 +200,16 @@ it.effect("clears a finished run's spent builds and keeps every one it or a pers
               verdicts: [],
               kept: false,
               note: "rung checks failed (1 FAIL); not judged",
+              durationMs: 0,
+              linesChanged: 0,
+            },
+            {
+              round: 7,
+              move: "",
+              branch: "round-7",
+              verdicts: [],
+              kept: false,
+              abandoned: true,
               durationMs: 0,
               linesChanged: 0,
             },
