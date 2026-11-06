@@ -32,6 +32,7 @@ import {
   buildPlaysOf,
   gameEnvironment,
   liveSignal,
+  projectTurnRunning,
   setStagePlayTarget,
   stageAfterGameAction,
   stagePlayTarget,
@@ -72,11 +73,14 @@ import {
   buildFailurePrompt,
   deriveGameStagePhase,
   liveErrorPrompt,
+  LIVE_PLAY_HASH,
   liveServe,
+  liveToShow,
   playHeldFrame,
   reloadFrame,
   remountOrHold,
   type GameFrameFold,
+  type LiveShown,
 } from "./gameStageLogic";
 
 const BUSY_LABELS: Record<GameAction, string> = {
@@ -120,14 +124,18 @@ const clockTime = (at: string) => {
  * (`GAME_ENGINES[engine].stage`): its folder served live, a Web export, or its
  * own window.
  */
-export function GameStage({
-  threadRef,
-  turnRunning,
-  onAskAgent,
-  compact = false,
-  hidden = false,
-  onShowChat,
-}: {
+export function GameStage(props: GameStageProps) {
+  // One stage per thread: a compare, a pick, a held reload or an error of one
+  // game never carries into another (ChatView keeps its children mounted).
+  return (
+    <ThreadGameStage
+      key={`${props.threadRef.environmentId}\0${props.threadRef.threadId}`}
+      {...props}
+    />
+  );
+}
+
+interface GameStageProps {
   threadRef: ScopedThreadRef;
   /** The thread's agent turn is running; a settled turn refreshes the stage. */
   turnRunning: boolean;
@@ -138,7 +146,16 @@ export function GameStage({
   hidden?: boolean;
   /** Opens the compact workbench's chat pane. */
   onShowChat?: (() => void) | undefined;
-}) {
+}
+
+function ThreadGameStage({
+  threadRef,
+  turnRunning,
+  onAskAgent,
+  compact = false,
+  hidden = false,
+  onShowChat,
+}: GameStageProps) {
   const navigate = useNavigate();
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
@@ -158,13 +175,39 @@ export function GameStage({
   const plays = useBuildPlay(threadRef);
   const turnUndo = useTurnUndo(threadRef, null);
   const live = useAtomValue(liveSignal(threadRef));
+  // Which live change the frame shows (A6): while this chat's turn runs, at
+  // most one per window, latest wins; at once otherwise and at the turn's end.
+  const [liveShown, setLiveShown] = useState<LiveShown | null>(null);
+  const [liveWokeAt, setLiveWokeAt] = useState(0);
+  const liveLatest = { revision: live.revision, at: live.at === "" ? 0 : Date.parse(live.at) };
+  const liveDecision = liveToShow({
+    latest: liveLatest,
+    shown: liveShown,
+    turnRunning,
+    now: Math.max(liveWokeAt, liveLatest.at),
+  });
+  if (liveDecision.show !== liveShown) setLiveShown(liveDecision.show);
+  const liveWakeAt = liveDecision.wakeAt;
+  // One timeout for the change that waits; none while nothing does.
+  useEffect(() => {
+    if (liveWakeAt === null) return;
+    const timeout = window.setTimeout(
+      () => setLiveWokeAt(Date.now()),
+      Math.max(0, liveWakeAt - Date.now()),
+    );
+    return () => window.clearTimeout(timeout);
+  }, [liveWakeAt]);
   const stageRequest = useGameWorkspaceStore((state) => state.stageRequest);
   // A request made before this stage mounted was for another one.
   const [mountRequestN] = useState(stageRequest?.n ?? 0);
   const [timelineRequest, setTimelineRequest] = useState<GameTimelineRequest | null>(null);
   const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const [focusRequest, setFocusRequest] = useState(0);
+  // A focus request, for the frame on screen when it came: each frame acts on a new one only.
+  const [focusRequest, setFocusRequest] = useState<{
+    readonly n: number;
+    readonly frame: "folder" | "copy";
+  } | null>(null);
   // The build the person last asked to play, for its refusal.
   const [playRef, setPlayRef] = useState<GameBuildRef | null>(null);
   const [askedSeen, setAskedSeen] = useState(asked);
@@ -193,12 +236,22 @@ export function GameStage({
   const [gameFocused, setGameFocused] = useState(false);
   // The live game's first page error, for the frame that threw it.
   const [studioError, setStudioError] = useState<{ key: string; text: string } | null>(null);
-  // A live game keeps itself served: it opens when shown, and again after a
-  // server restart, unless the person stopped it here (then Play is theirs).
+  // A shown live game opens itself while the server says nobody asked for it
+  // since it started (A4); once someone stopped it, Play is the person's.
   const [liveOpenAsked, setLiveOpenAsked] = useState(false);
-  const [stoppedHere, setStoppedHere] = useState(false);
+  // The action in flight or failed here, so a live game's card names it.
+  const [errorAction, setErrorAction] = useState<GameAction | null>(null);
   // The quiet shell: streamed tokens do not re-render the stage.
-  const latestRun = useQuietThreadShell(threadRef)?.latestRun ?? null;
+  const quietShell = useQuietThreadShell(threadRef);
+  const latestRun = quietShell?.latestRun ?? null;
+  // Any chat of this game mid-turn may be mid-edit in the live folder.
+  const gameTurnRunning = useAtomValue(
+    projectTurnRunning(
+      quietShell === null
+        ? null
+        : { environmentId: threadRef.environmentId, projectId: quietShell.projectId },
+    ),
+  );
   const turnStartedAt = latestRun?.startedAt ?? latestRun?.requestedAt ?? null;
   // Whether this stage watched the chat's turn end, and that turn's build is listed.
   const [seenTurnRunning, setSeenTurnRunning] = useState(turnRunning);
@@ -233,6 +286,7 @@ export function GameStage({
   const dragRef = useRef<{ x: number; width: number } | null>(null);
   const refresh = query.refresh;
   const data = query.data;
+  const liveStaged = data != null && GAME_ENGINES[data.manifest.engine.name].stage === "live";
   if (seenRevision === null && data) setSeenRevision(data.operation?.revision ?? 0);
   const operationState = data?.operation?.state ?? null;
   // Operation events invalidate the status query, so this is only a fallback
@@ -271,15 +325,15 @@ export function GameStage({
       input: { threadId: threadRef.threadId, action: stageAction },
     });
     setBusy(null);
+    setErrorAction(stageAction);
     if (result._tag === "Failure") {
       setError(String(squashAtomCommandFailure(result)));
     } else if (!result.value.success) {
       setError(result.value.message);
     } else {
-      setMessage(result.value.message);
+      // A live open needs no word: the game appears and the subtitle says Live.
+      if (!(stageAction === "preview" && liveStaged)) setMessage(result.value.message);
       if (stageAction === "stop") stageAfterGameAction(threadRef, stageAction);
-      if (stageAction === "stop") setStoppedHere(true);
-      if (stageAction === "preview") setStoppedHere(false);
     }
     refresh();
   };
@@ -321,7 +375,7 @@ export function GameStage({
         else setCompare(request.pair);
         return;
       case "focus":
-        setFocusRequest(n);
+        setFocusRequest({ n, frame: asked !== null ? "copy" : "folder" });
         return;
       case "undo":
       case "redo": {
@@ -404,7 +458,10 @@ export function GameStage({
     webBuildStale: data.webBuildStale,
     previewUrl: data.previewUrl,
     busyStartedAt: busy?.startedAt ?? null,
+    busyAction: busy?.action ?? null,
     localError: error,
+    errorAction,
+    liveServe: data.live,
     turnLoop: engine.turnLoop,
     turnRunning,
     turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
@@ -412,13 +469,12 @@ export function GameStage({
   });
   // An ask is answered once the server serves it; a later loss of the serve
   // (a server restart) asks again (design §2.2).
-  if (liveOpenAsked && data.previewUrl !== null) setLiveOpenAsked(false);
+  if (liveOpenAsked && data.live !== "off") setLiveOpenAsked(false);
   if (
     stageKind === "live" &&
+    data.live === "off" &&
     !liveOpenAsked &&
-    !stoppedHere &&
     !hidden &&
-    data.previewUrl === null &&
     canAct &&
     busy === null &&
     error === null
@@ -460,7 +516,7 @@ export function GameStage({
   const frame = remountOrHold(
     frameFold,
     stageKind === "live"
-      ? liveServe(data.previewUrl, live.revision)
+      ? liveServe(data.previewUrl, liveDecision.show.revision)
       : {
           previewUrl: data.previewUrl,
           servedArtifactId:
@@ -478,7 +534,7 @@ export function GameStage({
     (operation !== null && operationVisible && operation.state === "failed"
       ? operation.message
       : null) ??
-    (liveError !== null && !turnRunning ? liveError : null);
+    (liveError !== null && !turnRunning && !gameTurnRunning ? liveError : null);
   const failurePrompt =
     failureVisible !== null && failureVisible === liveError
       ? liveErrorPrompt(failureVisible)
@@ -605,7 +661,7 @@ export function GameStage({
         <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1">
           <TruncatedText
-            text={`The game threw while your agent is editing: ${liveError}`}
+            text={`The game threw while an agent is editing it: ${liveError}`}
             className="block"
           />
         </span>
@@ -867,7 +923,7 @@ export function GameStage({
                 url={playTarget.result.url}
                 title={`${data.manifest.name}, ${playTarget.label}`}
                 hidden={hidden || compare !== null}
-                focusRequest={focusRequest}
+                focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
               />
             ) : (
               <p className="flex size-full items-center justify-center p-6 text-center text-sm text-washi/90">
@@ -887,7 +943,12 @@ export function GameStage({
           phase={phase}
           viewport={data.viewport}
           gameName={data.manifest.name}
-          previewUrl={data.previewUrl}
+          // A live remount lands in play, the first load and Reload on the title (A5).
+          previewUrl={
+            stageKind === "live" && frame.intoPlay && data.previewUrl !== null
+              ? `${data.previewUrl}${LIVE_PLAY_HASH}`
+              : data.previewUrl
+          }
           frameKey={frameKey}
           hidden={frameHidden}
           canOperate={canOperate}
@@ -909,7 +970,7 @@ export function GameStage({
           held={held}
           onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
           onStudioMessage={onStudioMessage}
-          focusRequest={playTarget === null ? focusRequest : 0}
+          focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
         />
       </div>
       <GameBuildTimeline
