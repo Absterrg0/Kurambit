@@ -532,7 +532,11 @@ function RunLadder({ rungs }: { rungs: ReadonlyArray<GameRunRungRef> }) {
               </span>
               {rung.why.length > 0 ? (
                 <span className="block text-2xs text-muted-foreground">
-                  {rung.status === "set-aside" ? "Set aside: " : "Added by the reviewer: "}
+                  {rung.status === "set-aside"
+                    ? "Set aside: "
+                    : rung.from === "reviewer"
+                      ? "Added by the reviewer: "
+                      : "Changed next, after failing: "}
                   {rung.why}
                 </span>
               ) : null}
