@@ -299,6 +299,12 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   folder plus a harness id, so builds with the same project share facts, and facts from another
   harness are never compared. Owed work is data, not memory: a measure writes its row first, so
   a startup reconcile re-measures any row that still owes a tier.
+- **Game browsers draw on the GPU.** Once per server process, `makeGameBrowser` probes the pinned
+  headless shell for a hardware WebGL backend (Linux: EGL, then Vulkan, on the GPU's render node,
+  with no display in its environment) and every game browser launches with the first that drew on
+  hardware, else SwiftShader. SwiftShader costs several cores on a lit 3D scene and plays it at a
+  fraction of real time, so a facts row records its renderer, facts from different renderers are
+  not comparable, and a too-slow run in software is "not measured", never the game's slowness.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.

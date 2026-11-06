@@ -51,6 +51,8 @@ import {
 } from "./buildFacts.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
+import { makeGameBrowser } from "./gameChromium.ts";
+import { engineProfile } from "./engineProfile.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -233,6 +235,7 @@ const make = Effect.gen(function* () {
   const bots = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
   const processes = yield* GameProcesses.GameProcesses;
+  const gameBrowser = yield* makeGameBrowser;
   const scope = yield* Effect.scope;
   const templates = yield* resolveTemplatesDirectory().pipe(Effect.orDie);
   const kit = NodePath.join(templates, "bot-kit");
@@ -504,11 +507,21 @@ const make = Effect.gen(function* () {
           found !== null && found.harness === harness
             ? found.stored
             : { build: build.build, measuredAt: null, renderer: null };
+        // A browser game's bots draw with the backend the server probed; its
+        // renderer is recorded, so facts from the GPU and from SwiftShader are
+        // never compared as alike.
+        const backend =
+          engineProfile(build.engine).play === "browser"
+            ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
+            : Option.none();
+        const software = Option.isSome(backend) && backend.value.software;
         stored = {
           ...stored,
           root,
           engine: build.engine,
-          renderer: yield* rendererOf(copy, build.engine),
+          renderer: Option.isSome(backend)
+            ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
+            : yield* rendererOf(copy, build.engine),
         };
         const write = (patch: Partial<Record<FactName, unknown>>) =>
           Effect.gen(function* () {
@@ -571,6 +584,8 @@ const make = Effect.gen(function* () {
           Effect.andThen(
             idleMachine,
             withMachine(step(game.botRunIn(copy, { file, seconds, mode: "play", decider }))),
+          ).pipe(
+            Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
           );
         const didNotBoot = (error: GameOperationError) =>
           ({
