@@ -6,11 +6,13 @@ const WHAT: Record<Decision["kind"], string> = {
   style: "the game's vision and look",
   prototype: "which prototype the game continues from",
   ladder: "the ladder the run builds",
+  rung: "a ladder step that failed twice",
 };
 export const SUMMARY: Record<Decision["kind"], string> = {
   style: "The production run asks about the look",
   prototype: "The production run asks which prototype to keep",
   ladder: "The production run asks about the ladder",
+  rung: "The production run asks about a step that failed twice",
 };
 // The creator's run is still presenting in these states; any other has handed the
 // question to the user ("waiting" is the agent asking them itself).

@@ -576,7 +576,9 @@ const make = Effect.gen(function* () {
       resumed: false,
       message: earlier
         ? "A new run started from the brief and continues from the game as it is now: no new vision or prototypes; the plan writes a ladder for this game, then rounds build it. This game's earlier run is from an older Kurambit: its rounds, ladder and decisions were not carried over, and its history stays in git."
-        : "The run started; watch it on the Run tab.",
+        : started?.ladder != null && started.ladder.rungs.length > 0
+          ? `The run started on the same brief, so it builds this game's ladder again (${started.ladder.rungs.length} rungs, ${started.ladder.rungs.filter((x) => x.status === "done").length} landed); a new brief writes a new one. Watch it on the Run tab.`
+          : "The run started; watch it on the Run tab.",
     } satisfies GameRunStartResult;
   });
 

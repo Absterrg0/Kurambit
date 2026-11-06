@@ -594,7 +594,7 @@ const RunProfileTool = Tool.make("game_run_profile", {
 // slip in its shape is refused in the role's own turn and fixed there.
 const RunSubmitTool = Tool.make("game_run_submit", {
   description:
-    'Hand your role\'s result to this game\'s production run, in the shape your prompt names: {"_tag":"checks",...}, {"_tag":"ladder",...}, {"_tag":"verdict",...}, {"_tag":"select",...}, {"_tag":"ship",...}, {"_tag":"ledger",...}, {"_tag":"report",...} or {"_tag":"art",...}. A submission that does not fit what your step asks for is refused with the reason: fix it and submit again. A later submission replaces an earlier one. Then finish your turn.',
+    'Hand your role\'s result to this game\'s production run, in the shape your prompt names: {"_tag":"checks",...}, {"_tag":"ladder",...}, {"_tag":"rungs",...}, {"_tag":"verdict",...}, {"_tag":"select",...}, {"_tag":"ship",...}, {"_tag":"ledger",...}, {"_tag":"report",...} or {"_tag":"art",...}. A submission that does not fit what your step asks for is refused with the reason: fix it and submit again. A later submission replaces an earlier one. Then finish your turn.',
   parameters: GameRunSubmitInput,
   success: GameRunSubmitResult,
   failure,

@@ -419,6 +419,15 @@ describe("rounds", () => {
     expect(steps.filter((s) => s === "builder")).toHaveLength(1);
   });
 
+  it("ends the builder block on the builder's own end: no keep-going turn after it", () => {
+    const { steps } = drive(
+      atRound(),
+      roundResponder("A", "B"),
+      (s) => s.task._tag === "round" && s.task.phase === "boot",
+    );
+    expect(steps.filter((s) => s === "builder")).toHaveLength(1);
+  });
+
   it("asks the tester for a bot run once when none was recorded", () => {
     const lazy: Responder = (step, state) =>
       step.kind === "role" && step.role.startsWith("tester")
@@ -435,20 +444,14 @@ describe("rounds", () => {
     expect(steps.filter((s) => s === "tester")).toHaveLength(3);
   });
 
-  it("sends a player that used little of its play budget back for one more turn", () => {
-    // Cumulative evidence per thread: 12s after the first turn, 80s after the second.
+  it("never sends a player back to play on: its clock is its input budget, not the wall", () => {
     const shortPlay: Responder = (step, state) =>
       step.kind === "role" && step.role.startsWith("sample") && step.read.length === 0
-        ? done(step, {
-            evidence: {
-              ...goodEvidence,
-              nominalMs: step.prompt.includes("You used about") ? 80_000 : 12_000,
-            },
-          })
+        ? done(step, { evidence: { ...goodEvidence, nominalMs: 12_000 } })
         : roundResponder("A", "B")(step, state);
     const { state, steps } = drive(atRound(), shortPlay, (s) => s.rounds.length === 1);
-    // Per build: play, one more play, write.
-    expect(steps.filter((s) => s === "sample")).toHaveLength(6);
+    // Per build: one play turn, then its write-up.
+    expect(steps.filter((s) => s === "sample")).toHaveLength(4);
     expect(state.rounds[0]?.kept).toBe(true);
   });
 
@@ -506,54 +509,6 @@ describe("parallel samples", () => {
       ["sample", "sample"],
       ["sample", "sample"],
     ]);
-  });
-
-  it("lets one build take its extra play turn alone while the other is done", () => {
-    const shortOnCand: Responder = (step, state) =>
-      step.kind === "role" && step.role.startsWith("sample") && step.read.length === 0
-        ? done(step, {
-            evidence: {
-              ...goodEvidence,
-              nominalMs:
-                step.at === "cand" && !step.prompt.includes("You used about") ? 12_000 : 80_000,
-            },
-          })
-        : roundResponder("A", "B")(step, state);
-    const { state, steps, pairs } = drive(atRound(), shortOnCand, (s) => s.rounds.length === 1);
-    expect(steps.filter((s) => s === "sample")).toHaveLength(5);
-    // Plays together; then the candidate's extra turn beside the best's write-up; then its write-up alone.
-    expect(pairs).toEqual([
-      ["sample", "sample"],
-      ["sample", "sample"],
-    ]);
-    expect(state.rounds[0]?.kept).toBe(true);
-  });
-
-  it("gives a build played well short of the other one catch-up turn, once", () => {
-    const uneven =
-      (cand: number, best: number): Responder =>
-      (step, state) =>
-        step.kind === "role" && step.role.startsWith("sample") && step.read.length === 0
-          ? done(step, {
-              evidence: {
-                ...goodEvidence,
-                nominalMs: step.prompt.includes("You used about")
-                  ? 100_000
-                  : step.at === "cand"
-                    ? cand
-                    : best,
-              },
-            })
-          : roundResponder("A", "B")(step, state);
-    const short = drive(atRound(), uneven(70_000, 110_000), (s) => s.rounds.length === 1);
-    // Both plays, the candidate's catch-up turn, both write-ups.
-    expect(short.steps.filter((s) => s === "sample")).toHaveLength(5);
-    expect(short.logs.some((l) => /plays on: 70 s against 110 s/.test(l))).toBe(true);
-    const close = drive(atRound(), uneven(95_000, 110_000), (s) => s.rounds.length === 1);
-    expect(close.steps.filter((s) => s === "sample")).toHaveLength(4);
-    // A floor turn already spent is the one extra turn: no second catch-up.
-    const floored = drive(atRound(), uneven(10_000, 118_000), (s) => s.rounds.length === 1);
-    expect(floored.steps.filter((s) => s === "sample")).toHaveLength(5);
   });
 
   it("replays an unusable sample on its own build only", () => {
@@ -1263,7 +1218,7 @@ describe("ladder", () => {
     expect(starts.slice(2)).toEqual([null, null]);
   });
 
-  it("plays the ship check once the ladder is done, and ends there", () => {
+  it("plays the ship check once the ladder is done; not shippable is not done", () => {
     const ladder = fresh();
     const lastOpen = {
       ...ladder,
@@ -1285,9 +1240,21 @@ describe("ladder", () => {
             })
           : ladderResponder("A", "B")(step, state);
     const no = drive(landed.state, ship("NO"), (s) => s.ending !== null);
-    expect(no.state.ending).toBe("done");
-    expect(no.state.shipNoReasons).toContain("the ending is abrupt");
+    expect(no.state.ending).toBe("incomplete");
+    expect(no.state.lastFailure).toContain("not shippable: played it; the ending is abrupt");
+    expect(no.state.shipCheckedOn).toBe(landed.state.best);
     expect(no.state.rounds).toHaveLength(landed.state.rounds.length);
+    // A resume leads exactly one round with the review's reasons, then the ship check plays again.
+    const resumed = Policy.resume(no.state);
+    expect(resumed.steer.at(-1)).toContain("the ending is abrupt");
+    // The round's build is a new best (a fresh oid), which the ship review has not played.
+    const newBuild: Responder = (step, state) =>
+      step.kind === "build" && step.op._tag === "capture"
+        ? buildOk({ sha: "cand2" })
+        : ship("YES")(step, state);
+    const round = oneRound({ ...resumed, ending: null }, newBuild);
+    expect(round.state.rounds.at(-1)?.move).toContain("the ending is abrupt");
+    expect(drive(round.state, ship("YES"), (s) => s.ending !== null).state.ending).toBe("ready");
     expect(drive(landed.state, ship("YES"), (s) => s.ending !== null).state.ending).toBe("ready");
   });
 
@@ -1360,12 +1327,13 @@ describe("ladder", () => {
     });
   });
 
-  it("does not keep or judge a round whose checks fail, and sets the rung aside after two", () => {
+  it("does not keep or judge a round whose checks fail, and never builds a rung a third time as it is", () => {
     const respond = ladderResponder("A", "B", [true, false]);
     const one = oneRound(atLadder(), respond);
     expect(one.steps).not.toContain("sample");
     expect(one.steps).not.toContain("keep");
     expect(one.state.rounds[0]?.kept).toBe(false);
+    expect(one.state.rounds[0]?.failure).toBe("game");
     expect(one.state.rounds[0]?.rung?.outcome).toBe("failed");
     expect(one.state.rounds[0]?.rung?.why).toContain("part 1 ends");
     expect(one.state.best).toBe("best");
@@ -1373,21 +1341,126 @@ describe("ladder", () => {
     expect(one.state.stallStreak).toBe(1);
     expect(one.state.lastFailure).toContain("rung checks failed");
     const two = oneRound(one.state, respond);
-    expect(two.state.rounds[1]?.rung?.outcome).toBe("set-aside");
-    expect(two.state.ladder?.rungs[0]?.status).toBe("set-aside");
-    expect(two.logs.some((line) => line.includes("rung 1 set aside after 2 rounds"))).toBe(true);
-    const three = oneRound(two.state, respond);
-    expect(three.logs).toContain("round 3 builds rung 2 of 4: the game has part 2");
-    // A third round in a row that lands nothing ends the run, resumably, before
-    // it works through every rung's tries; its reason is the last round's.
-    expect(three.state.stallStreak).toBe(3);
-    const ended = Policy.plan(three.state, { now: T0, coin: 0, id: "x" });
-    expect(ended).toEqual({ kind: "end", reason: "stalled" });
-    expect(three.state.lastFailure).toMatch(/^round 3: rung checks failed/);
-    const resumed = Policy.plan(Policy.resume(three.state), { now: T0, coin: 0, id: "y" });
-    expect(resumed.kind === "step" && resumed.logs).toContain(
-      "round 4 builds rung 2 of 4: the game has part 2",
+    expect(two.state.ladder?.rungs[0]?.need).toBe("split");
+    expect(two.state.ladder?.rungs[0]?.status).toBe("todo");
+    // Autopilot: the plan splits it before anything is built again.
+    const split = Policy.plan(two.state, { now: T0, coin: 0, id: "s" });
+    if (split.kind !== "step" || split.step.kind !== "role") throw new Error("expected the split");
+    expect(split.step.title).toBe("studio rung split");
+    expect(Policy.asked(split.state, split.step)).toEqual({ kind: "rungs", min: 2, max: 3 });
+    const halves = [1, 2].map((i) => ({
+      is: `the game has half ${i} of part 1`,
+      checks: [
+        { what: `half ${i} starts`, how: "look at the start" },
+        { what: `half ${i} ends`, how: "look at the end" },
+      ],
+    }));
+    const applied = Policy.applyResult(
+      split.state,
+      split.step,
+      done(split.step, { submission: { _tag: "rungs", rungs: halves } }),
+      { now: T0, coin: 0, id: "t" },
     );
+    const rungs = applied.state.ladder?.rungs ?? [];
+    expect(rungs.map((x) => x.is).slice(0, 3)).toEqual([
+      "the game has half 1 of part 1",
+      "the game has half 2 of part 1",
+      "the game has part 2",
+    ]);
+    expect(rungs[0]?.from).toBe("split");
+    expect(applied.files.some((f) => f.path === ".studio/ladder.json")).toBe(true);
+    // A split's own rung that fails twice is set aside, never split again.
+    // (Its stall count is reset here only so the stall rule does not end the run first.)
+    const fresh2 = { ...applied.state, stallStreak: 0 };
+    const three = oneRound(oneRound(fresh2, respond).state, respond);
+    expect(three.state.ladder?.rungs[0]?.status).toBe("set-aside");
+    // A split that submits nothing sets the rung aside: one try, never repeated.
+    const none = Policy.applyResult(split.state, split.step, done(split.step), {
+      now: T0,
+      coin: 0,
+      id: "u",
+    });
+    expect(none.state.ladder?.rungs[0]?.status).toBe("set-aside");
+    expect(none.state.ladder?.rungs[0]?.why).toContain("could not be split");
+    // Guided: the creator is asked first, and the default is the split.
+    const guided = Policy.plan({ ...two.state, profile: "guided" }, { now: T0, coin: 0, id: "g" });
+    expect(
+      guided.kind === "step" && guided.step.kind === "decide" && guided.step.decision.kind,
+    ).toBe("rung");
+  });
+
+  it("never counts the harness's failure against the game: the build is judged again, and twice pauses", () => {
+    // The tester played nothing: its look checks are false, but nobody faulted the work.
+    const idle = ladderResponder("A", "B", [true, true], (step, state) =>
+      step.kind === "role" && step.role.startsWith("tester")
+        ? done(step, {
+            bots: 0,
+            evidence: { ...goodEvidence, executedInputSteps: 0 },
+            ...plainSubmission(state, step),
+          })
+        : undefined,
+    );
+    const one = oneRound(atLadder(), idle);
+    expect(one.state.rounds[0]?.failure).toBe("harness");
+    expect(one.state.ladder?.rungs[0]?.fails).toBe(0);
+    expect(one.state.stallStreak).toBe(0);
+    const again = oneRound(one.state, idle);
+    expect(again.logs).toContain(
+      "round 2 judges rung 1's last build again: its evaluation failed, not its work",
+    );
+    expect(again.steps).not.toContain("builder");
+    expect(again.state.ending).toBe("tool-failed");
+    expect(again.state.lastFailure).toContain("two rounds in a row could not be judged");
+    expect(again.state.ladder?.rungs[0]?.fails).toBe(0);
+  });
+
+  it("rewrites a check the tester could not verify in play, once, and keeps the round's work", () => {
+    const blind = ladderResponder("A", "B", [true, false], (step, state) => {
+      if (!(step.kind === "role" && step.role.startsWith("tester"))) return undefined;
+      const asked = Policy.asked(state, step);
+      if (asked.kind !== "checks") return undefined;
+      return done(step, {
+        submission: {
+          _tag: "checks",
+          checks: asked.look.map((check) =>
+            check === 2
+              ? { check, pass: false, evidence: "it is a sound", unverifiable: true }
+              : { check, pass: true, evidence: "saw it" },
+          ),
+          notes: "played it through, start to end",
+        },
+      });
+    });
+    const one = oneRound(atLadder(), blind);
+    expect(one.state.rounds[0]?.failure).toBe("check");
+    expect(one.state.ladder?.rungs[0]?.need).toBe("rewrite");
+    expect(one.state.ladder?.rungs[0]?.fails).toBe(0);
+    const rewrite = Policy.plan(one.state, { now: T0, coin: 0, id: "r" });
+    if (rewrite.kind !== "step" || rewrite.step.kind !== "role") throw new Error("expected it");
+    expect(Policy.asked(rewrite.state, rewrite.step)).toEqual({ kind: "rungs", min: 1, max: 1 });
+    const rung = {
+      is: "the game has part 1",
+      checks: [
+        { what: "part 1 starts", how: "probe value started" },
+        { what: "part 1 ends", kind: "state" as const, expect: 'state == "ended"' },
+      ],
+    };
+    const rewritten = Policy.applyResult(
+      rewrite.state,
+      rewrite.step,
+      done(rewrite.step, { submission: { _tag: "rungs", rungs: [rung] } }),
+      { now: T0, coin: 0, id: "w" },
+    ).state;
+    expect(rewritten.ladder?.rungs[0]?.rewritten).toBe(true);
+    expect(rewritten.ladder?.rungs[0]?.need).toBeUndefined();
+    // The next round grows the candidate whose check was rewritten.
+    const next = Policy.plan(rewritten, { now: T0, coin: 0, id: "n" });
+    expect(
+      next.kind === "step" &&
+        next.step.kind === "build" &&
+        next.step.op._tag === "restore" &&
+        next.step.op.sha,
+    ).toBe("cand");
   });
 
   it("counts a kept round as progress: the stall count starts again", () => {
@@ -1410,23 +1483,79 @@ describe("ladder", () => {
     );
   });
 
-  it("brings a set-aside rung back once after the rest of the ladder", () => {
+  it("never builds a set-aside rung as it is: the run is not done, and a resume splits it", () => {
     const ladder = fresh();
     const rungs = ladder.rungs.map((r, i) =>
       i === 1
         ? { ...r, status: "set-aside" as const, fails: 2, why: "never worked" }
         : { ...r, status: "done" as const },
     );
-    const back = oneRound(
-      atLadder({ ladder: { ...ladder, rungs } }),
-      ladderResponder("A", "B", [false, false]),
+    const at = { now: T0, coin: 0, id: "x" };
+    const aside = atLadder({ ladder: { ...ladder, rungs } });
+    expect(Policy.plan(aside, at)).toEqual({
+      kind: "end",
+      reason: "incomplete",
+      why: "rung 2 set aside (never worked)",
+    });
+    const resumed = Policy.plan(Policy.resume(aside), at);
+    expect(resumed.kind === "step" && resumed.step.kind === "role" && resumed.step.title).toBe(
+      "studio rung split",
     );
-    expect(back.logs.some((line) => line.startsWith("rung 2 comes back"))).toBe(true);
-    expect(back.state.ladder?.rungs[1]?.back).toBe(true);
-    const again = oneRound(back.state, ladderResponder("A", "B", [false, false]));
-    expect(again.state.ladder?.rungs[1]?.status).toBe("set-aside");
-    // Every rung has had its tries: the ladder is done and the ship check plays it.
-    expect(again.state.task._tag).toBe("ship");
+  });
+
+  it("recounts a game's earlier rounds under today's rules", () => {
+    const ladder = fresh();
+    const [first, second] = ladder.rungs;
+    const record = (round: number, rung: State.Rung, patch: Partial<State.RoundRecord>) => ({
+      round,
+      move: "",
+      branch: `round-${round}`,
+      verdicts: [],
+      kept: false,
+      durationMs: 0,
+      linesChanged: 0,
+      rung: {
+        rung: rung.id,
+        is: rung.is,
+        checks: rung.checks.map((c) => ({ what: c.what, pass: true, evidence: "" })),
+        outcome: "failed" as const,
+        why: "",
+      },
+      ...patch,
+    });
+    const audio = {
+      ...second!,
+      checks: [second!.checks[0]!, { what: "a chime plays when it ends", how: "listen" }],
+    };
+    const before = {
+      ...ladder,
+      rungs: [
+        { ...first!, status: "set-aside" as const, fails: 2, back: true },
+        { ...audio, status: "set-aside" as const, fails: 2 },
+        ...ladder.rungs.slice(2),
+      ],
+    };
+    // Rung 1 failed twice only because its samples never launched (an older harness bug).
+    const rounds = [
+      record(1, first!, { unjudged: true }),
+      record(2, first!, { unjudged: true }),
+      record(3, audio, {
+        rung: {
+          rung: audio.id,
+          is: audio.is,
+          checks: [
+            { what: audio.checks[0]!.what, pass: true, evidence: "saw it" },
+            { what: audio.checks[1]!.what, pass: false, evidence: "no chime heard" },
+          ],
+          outcome: "failed",
+          why: "",
+        },
+      }),
+    ];
+    const after = Policy.recount(before, rounds);
+    expect(after.rungs[0]).toMatchObject({ status: "todo", fails: 0 });
+    expect(after.rungs[0]?.need).toBeUndefined();
+    expect(after.rungs[1]).toMatchObject({ status: "todo", fails: 0, need: "rewrite" });
   });
 
   it("ends a run whose plan wrote no valid ladder unless the creator asks, and re-plans on resume", () => {
@@ -1457,19 +1586,19 @@ describe("ladder", () => {
       rungs: done4.rungs.map((r) => ({ ...r, status: "done" as const })),
     };
     const at = { now: T0, coin: 0, id: "x" };
-    expect(Policy.plan(atLadder({ ladder: finished }), at)).toEqual({
-      kind: "end",
-      reason: "done",
-    });
-    const asked = oneRound(
-      atLadder({ ladder: finished, steer: ["fix the jump"] }),
-      ladderResponder("A", "B"),
-    );
+    // A finished ladder whose best the ship review has not played gets that review.
+    const unplayed = Policy.plan(atLadder({ ladder: finished }), at);
+    expect(unplayed.kind === "step" && unplayed.state.task._tag).toBe("ship");
+    // Its best already judged shippable: the run is ready.
+    const shipped = atLadder({ ladder: finished, shipCheckedOn: "best" });
+    expect(Policy.plan(shipped, at)).toEqual({ kind: "end", reason: "ready" });
+    const asked = oneRound({ ...shipped, steer: ["fix the jump"] }, ladderResponder("A", "B"));
     expect(asked.logs).toContain("round 1: finish round (the ladder is done)");
     expect(asked.state.rounds[0]?.finish).toBe(true);
     expect(asked.state.rounds[0]?.move).toContain("fix the jump");
-    // One round per ask: with the note used up, the run is done again.
-    expect(Policy.plan(asked.state, at)).toEqual({ kind: "end", reason: "done" });
+    // One round per ask: with the note used up and a new best, the ship review plays it again.
+    const after = Policy.plan(asked.state, at);
+    expect(after.kind === "step" && after.state.task._tag).toBe("ship");
     // 200 minutes of budget with 30 left still builds the next rung.
     const late = Policy.plan(atLadder({ budgetMinutes: 200, budgetEndsAt: T0 + 30 * MIN }), at);
     expect(late.kind === "step" && late.logs).toContain(

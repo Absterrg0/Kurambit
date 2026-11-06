@@ -1297,4 +1297,44 @@ describe("game-run commands", () => {
     expect(stepOf(records).step).toMatchObject({ op: { _tag: "restore" } });
     expect(stepOf(records).logs.join("\n")).toContain("finish round");
   });
+
+  // Every new run on Lantern Marsh wrote a fresh ladder (five ladders, 19 minutes):
+  // the same brief now builds the ladder the game has, a new brief plans one.
+  it("a new run on the same brief reuses the game's ladder; a new brief plans one", () => {
+    const base = complete(started(), gitOk());
+    const ended = {
+      ...base,
+      runs: [
+        {
+          ...runOf(base),
+          status: "ended",
+          ending: "stopped",
+          inFlight: null,
+          finished: runOf(base).endedAt,
+          stage: "round-2",
+          brief: "A  small arena game.",
+          ladder: {
+            ...ladder,
+            rungs: ladder.rungs.map((r, i) => (i === 0 ? { ...r, status: "done" as const } : r)),
+          },
+        } satisfies GameRun,
+      ],
+    };
+    const again = (brief: string, id: string) =>
+      runOf(
+        accept(ended, {
+          type: "game-run.start",
+          runId: GameRunId.make(id),
+          lane: "godot",
+          brief,
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "m" },
+          runtimeMode: "full-access",
+        }).records,
+      );
+    const same = again("A small arena game. ", "game-run-2");
+    expect(same.ladder?.rungs.map((r) => r.status)).toEqual(
+      ladder.rungs.map((_, i) => (i === 0 ? "done" : "todo")),
+    );
+    expect(again("A bigger arena game.", "game-run-3").ladder).toBeNull();
+  });
 });

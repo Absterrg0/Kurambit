@@ -11,7 +11,8 @@ export const GameRunProfile = Schema.Literals(["guided", "autopilot"]);
 export type GameRunProfile = typeof GameRunProfile.Type;
 
 /** The decision points of a Guided run: the vision's style, the prototype, the ladder. */
-export const GameRunDecisionKind = Schema.Literals(["style", "prototype", "ladder"]);
+/** `rung`: a ladder step that failed twice, split or changed before it is built again. */
+export const GameRunDecisionKind = Schema.Literals(["style", "prototype", "ladder", "rung"]);
 export type GameRunDecisionKind = typeof GameRunDecisionKind.Type;
 
 /** The caller's id for one request: a retry with the same id is the same command, applied once. */
@@ -97,7 +98,7 @@ export const GameRunRungRef = Schema.Struct({
   current: Schema.Boolean,
   /** Why it was set aside, or why a reviewer added it. */
   why: Schema.String,
-  from: Schema.Literals(["plan", "reviewer"]),
+  from: Schema.Literals(["plan", "reviewer", "split"]),
 });
 export type GameRunRungRef = typeof GameRunRungRef.Type;
 
@@ -518,6 +519,7 @@ export const GameRunRungCheck = Schema.Struct({
   how: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(600))),
   kind: Schema.optionalKey(Schema.Literals(["state", "look"])),
   from: Schema.optionalKey(Schema.Literals(["play", "title"])),
+  /** Older ladders only: a check now starts from the title or play with real input, and a submission with a setup is refused. */
   setup: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(80))),
   /** What the setup target is given: values for "game_state", a position for "player". */
   values: Schema.optionalKey(
@@ -558,11 +560,20 @@ export const GameRunSubmission = Schema.Union([
         check: PositiveInt,
         pass: Schema.Boolean,
         evidence: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(600)),
+        /** It cannot be seen in play at all (it needs sound, or it is faster than frames show); never with pass. */
+        unverifiable: Schema.optionalKey(Schema.Boolean),
       }),
     ).check(Schema.isMaxLength(4)),
     notes: Schema.String.check(Schema.isMaxLength(8000)),
   }),
   Schema.TaggedStruct("ladder", { rungs: GameRunLadder.fields.rungs }),
+  /** One rung's change: its checks rewritten (one rung) or the rung split (two or three). */
+  Schema.TaggedStruct("rungs", {
+    rungs: Schema.Array(Schema.Struct(GameRunRungFields)).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(3),
+    ),
+  }),
   Schema.TaggedStruct("verdict", { verdict: Schema.Literals(["A", "B", "TIE"]), reasons: Reasons }),
   Schema.TaggedStruct("select", { pick: Schema.Literals(["A", "B"]), reasons: Reasons }),
   Schema.TaggedStruct("ship", { ship: Schema.Boolean, reasons: Reasons }),
@@ -584,6 +595,7 @@ export type GameRunSubmissionKind = GameRunSubmission["_tag"];
 export const GameRunSubmissionKind = Schema.Literals([
   "checks",
   "ladder",
+  "rungs",
   "verdict",
   "select",
   "ship",

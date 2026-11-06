@@ -458,6 +458,7 @@ const DECISION: Record<GameRunDecision["kind"], string> = {
   style: "the vision and look",
   prototype: "which prototype to keep",
   ladder: "the ladder",
+  rung: "a step that failed twice",
 };
 
 /** What a Guided run waits for. Static: the deadline is a time of day, not a countdown. */
@@ -480,6 +481,7 @@ const ENDING: Record<string, string> = {
   failed: "Failed",
   stalled: "Stalled",
   "no-ladder": "No ladder",
+  incomplete: "Not done",
   done: "Done",
   "usage-limit": "Usage limit",
   "provider-down": "Provider down",

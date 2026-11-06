@@ -59,11 +59,17 @@ export const GameRunRung = Schema.Struct({
   status: Schema.Literals(["todo", "done", "set-aside"]),
   // Rounds that built this rung without landing it since it last opened.
   fails: Schema.Number,
-  // A set-aside rung comes back once, after the rest of the ladder.
+  // Older ladders only: a set-aside rung came back once, unchanged. Now one returns only changed.
   back: Schema.Boolean,
   // Why it was set aside, or why a reviewer added it.
   why: Schema.String,
-  from: Schema.Literals(["plan", "reviewer"]),
+  // "split": one of the rungs a rung that failed twice was split into; it is never split again.
+  from: Schema.Literals(["plan", "reviewer", "split"]),
+  // The one plan turn the rung waits for before it is built again: its checks
+  // rewritten (one could not be verified in play) or the rung split (it failed twice).
+  need: Schema.optionalKey(Schema.Literals(["rewrite", "split"])),
+  // Its checks were rewritten once; another unverifiable check splits it instead.
+  rewritten: Schema.optionalKey(Schema.Boolean),
 });
 export type GameRunRung = typeof GameRunRung.Type;
 export const GameRunLadderState = Schema.Struct({
@@ -106,6 +112,10 @@ export const GameRunRoundRecord = Schema.Struct({
   inconclusive: Schema.optionalKey(Schema.Boolean),
   // A creator's restore of another round dropped this one mid-way.
   abandoned: Schema.optionalKey(Schema.Boolean),
+  // Why a round that did not land failed: the game's (a build, check or
+  // regression failure), the harness's (its evaluation could not judge), or a
+  // check's (it cannot be verified in play). Only "game" counts against the rung.
+  failure: Schema.optionalKey(Schema.Literals(["game", "harness", "check"])),
   durationMs: Schema.Number,
   linesChanged: Schema.Number,
   testerNote: Schema.optionalKey(Schema.String),
@@ -467,7 +477,7 @@ export const GameRunSample = Schema.Struct({
   side: GameRunSide,
   label: Schema.String,
   thread: Schema.NullOr(ThreadId),
-  // "more": one extra play turn when the first used little of the budget.
+  // "more": older records only, one extra play turn; a player's clock is now its input budget.
   phase: Schema.Literals(["play", "more", "write", "done"]),
   notes: Schema.String,
   evidence: Schema.NullOr(GameRunEvidence),
@@ -634,11 +644,13 @@ export const GameRunTask = Schema.Union([
   GameRunRoundTask,
   // A run that reached rounds without a ladder writes one first; "revise"
   // rewrites it once with the creator's notes from a Guided ladder review.
+  // "rewrite" and "split": one plan turn changes the rung `rung` names.
   Schema.TaggedStruct("ladder", {
-    phase: Schema.Literals(["write", "fix", "revise"]),
+    phase: Schema.Literals(["write", "fix", "revise", "rewrite", "split"]),
     thread: Schema.NullOr(ThreadId),
     error: Schema.String,
     notes: Schema.optionalKey(Schema.String),
+    rung: Schema.optionalKey(Schema.Number),
   }),
   Schema.TaggedStruct("ship", {
     n: Schema.Number,
@@ -709,6 +721,8 @@ export const GameRunEnding = Schema.Literals([
   "stalled",
   /** The plan wrote no valid ladder: nothing to build without the creator's ask. */
   "no-ladder",
+  /** The ladder has set-aside rungs, or the ship review said not shippable: not done, resumable. */
+  "incomplete",
   "budget",
   "failed",
   "usage-limit",
@@ -774,6 +788,8 @@ export const GameRun = Schema.Struct({
   stallStreak: Schema.Number,
   lastFailure: Schema.String,
   shipNoReasons: Schema.String,
+  /** The best build the ship review last judged; another one is judged again. Absent before. */
+  shipCheckedOn: Schema.optionalKey(Schema.String),
   /** The last reviewer's ledger of bugs and DO NOT REGRESS lines. */
   ledger: Schema.String,
   lastDirection: Schema.String,
