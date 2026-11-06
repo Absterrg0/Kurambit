@@ -124,6 +124,26 @@ export async function createLook(renderer, options = {}) {
       scenePass.camera = camera;
       composer.render();
     },
+    /**
+     * Compiles the shaders the models will need (lit by the environment and a
+     * shadow-casting sun, as a run is) and draws them once, off screen behind
+     * the loading screen. Without it the first frame of play compiles them,
+     * which freezes the start for a second or more in a software renderer.
+     */
+    warm(models) {
+      if (models.length === 0) return;
+      const scene = new THREE.Scene();
+      this.prepare(scene);
+      const sun = new THREE.DirectionalLight(0xffffff, 1);
+      sun.castShadow = true;
+      scene.add(sun, ...models);
+      const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 500);
+      camera.position.set(0, 4, 12);
+      camera.lookAt(0, 1, 0);
+      // One draw compiles the scene's and the shadow pass's programs alike.
+      this.render(scene, camera);
+      renderer.clear();
+    },
     resize(width, height) {
       if (composer === null) return;
       composer.setPixelRatio(renderer.getPixelRatio());

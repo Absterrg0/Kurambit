@@ -19,6 +19,11 @@ exported with the same `game_*` tools as a Godot game.
   `GLB format` becomes `GLB-format`). Packs differ in scale (a Kenney blocky
   character stands several times a mini one): when you mix packs, size each
   model with `root.scale.setScalar(n)`.
+- Keep the default look on the first build: `LOOK` as it is, no lights
+  besides `ctx.look.sun`. Builds are played and measured in a software
+  renderer, where bloom and extra lights stall the start; the shell already
+  loads every `ASSETS` model and compiles its shaders behind the loading
+  screen, so play starts without a freeze. Glows are a later turn.
 - No Blender, no key art, no plan, no `game_explore_*` to check your work:
   `game_check` clean is the check, and Kurambit plays and measures the build
   when the turn ends.

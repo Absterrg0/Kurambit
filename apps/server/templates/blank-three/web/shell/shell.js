@@ -755,6 +755,19 @@ if (Object.keys(game.ASSETS ?? {}).length > 0) {
   await preloadAssets(game.ASSETS, (done, total) => {
     fill.style.width = `${total === 0 ? 100 : (done / total) * 100}%`;
   });
+  const models = Object.keys(game.ASSETS).flatMap((name) => {
+    try {
+      return [assets.model(name)];
+    } catch {
+      return [];
+    }
+  });
+  // A warm-up that fails costs only the first frame's compile, never the boot.
+  try {
+    look.warm(models);
+  } catch (error) {
+    console.warn("look: shader warm-up failed", error);
+  }
 }
 if (BOOT_INTO_PLAY || new URLSearchParams(location.search).has("play")) startRun();
 else showTitle();
