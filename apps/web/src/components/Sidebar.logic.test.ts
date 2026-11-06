@@ -57,6 +57,8 @@ import {
   type SidebarListMarker,
   type SidebarSection,
   resolveSidebarDropVerb,
+  gameMainThread,
+  partitionGameChats,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@kurambit/client-runtime/state/thread-search";
 
@@ -2344,5 +2346,100 @@ describe("Working shelf (beta)", () => {
         unsnooze: false,
       });
     });
+  });
+});
+
+describe("a game's chats", () => {
+  const chat = (
+    id: string,
+    createdAt: string,
+    lineage: {
+      parentThreadId: string | null;
+      relationshipToParent: "fork" | "subagent" | "role" | null;
+    } = {
+      parentThreadId: null,
+      relationshipToParent: null,
+    },
+    overrides: { archivedAt?: string; deletedAt?: string; updatedAt?: string } = {},
+  ) => ({
+    id: ThreadId.make(id),
+    lineage: {
+      parentThreadId:
+        lineage.parentThreadId === null ? null : ThreadId.make(lineage.parentThreadId),
+      relationshipToParent: lineage.relationshipToParent,
+      rootThreadId: ThreadId.make(id),
+    },
+    createdAt,
+    updatedAt: overrides.updatedAt ?? createdAt,
+    archivedAt: overrides.archivedAt ?? null,
+    deletedAt: overrides.deletedAt ?? null,
+  });
+  const role = (id: string, parent: string, createdAt: string) =>
+    chat(id, createdAt, { parentThreadId: parent, relationshipToParent: "role" });
+
+  it("opens the oldest live top-level chat, however recent the others are", () => {
+    const main = chat("main", "2026-11-01T10:00:00Z", undefined, {
+      updatedAt: "2026-11-01T11:00:00Z",
+    });
+    const later = chat("later", "2026-11-02T10:00:00Z");
+    const fork = chat("fork", "2026-10-30T10:00:00Z", {
+      parentThreadId: "main",
+      relationshipToParent: "fork",
+    });
+    expect(gameMainThread([later, fork, main])?.id).toBe("main");
+    // Archiving the main chat promotes the next-oldest.
+    expect(gameMainThread([later, { ...main, archivedAt: "2026-11-03T10:00:00Z" }])?.id).toBe(
+      "later",
+    );
+  });
+
+  it("lists a run's role threads under past runs, never as chats, even when their chat is gone", () => {
+    const main = chat("main", "2026-11-01T10:00:00Z");
+    const other = chat("other", "2026-11-02T10:00:00Z");
+    const live = new Set(["main", "other", "r1", "r2", "o1"]);
+    const result = partitionGameChats(
+      [
+        main,
+        other,
+        role("r2", "main", "2026-11-01T12:00:00Z"),
+        role("r1", "main", "2026-11-01T11:00:00Z"),
+        // Its parent chat was deleted: today it would surface as a session.
+        role("o1", "deleted-chat", "2026-10-01T10:00:00Z"),
+      ],
+      live,
+    );
+    expect(result.main?.id).toBe("main");
+    expect(result.others.map((thread) => thread.id)).toEqual(["other"]);
+    expect(result.runs.map((run) => [run.chatId, run.chatLive, run.threads[0]?.id])).toEqual([
+      ["main", true, "r1"],
+      ["deleted-chat", false, "o1"],
+    ]);
+  });
+
+  it("keeps a subagent nested under its listed parent and lists an orphaned one", () => {
+    const main = chat("main", "2026-11-01T10:00:00Z");
+    const nested = chat("sub", "2026-11-01T11:00:00Z", {
+      parentThreadId: "main",
+      relationshipToParent: "subagent",
+    });
+    const orphan = chat("orphan", "2026-11-01T12:00:00Z", {
+      parentThreadId: "gone",
+      relationshipToParent: "subagent",
+    });
+    const result = partitionGameChats([main, nested, orphan], new Set(["main", "sub", "orphan"]));
+    expect(result.others.map((thread) => thread.id)).toEqual(["orphan"]);
+  });
+
+  it("stands for a game with no top-level chat by its newest other chat", () => {
+    const fork = chat("fork", "2026-11-01T10:00:00Z", {
+      parentThreadId: "gone",
+      relationshipToParent: "fork",
+    });
+    const result = partitionGameChats([fork, role("r", "gone", "2026-11-01T09:00:00Z")], new Set());
+    expect(result.main?.id).toBe("fork");
+    expect(result.others).toEqual([]);
+    expect(partitionGameChats([role("r", "gone", "2026-11-01T09:00:00Z")], new Set()).main).toBe(
+      null,
+    );
   });
 });

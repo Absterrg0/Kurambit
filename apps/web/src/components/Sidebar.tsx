@@ -4,7 +4,6 @@ import {
   gameInitial,
   gamePigment,
   gameTemplateAppearance,
-  newestThreadByProject,
   sortGameThreadsByActivity,
 } from "./game/gameLibrary.logic";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
@@ -68,10 +67,9 @@ import {
 } from "@kurambit/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
-  isNestedUnderLiveParent,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
-  type ThreadId,
+  ThreadId,
 } from "@kurambit/contracts";
 
 import type { TimestampFormat } from "@kurambit/contracts/settings";
@@ -177,6 +175,7 @@ import { environmentProjects } from "../state/projects";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
+import { gameEnvironment } from "../state/game";
 import { useThreadSearch } from "../state/queries";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
@@ -236,6 +235,9 @@ import {
   type SidebarListItem,
   type SidebarListMarker,
   type SidebarSection,
+  partitionGameChats,
+  type GameChats,
+  type GameRunThreads,
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
@@ -461,35 +463,39 @@ function useSidebarThreads(input: {
   const liveThreadIds = new Set<string>(
     allThreads.filter((thread) => thread.deletedAt === null).map((thread) => thread.id),
   );
-  const gameThreads = allThreads.filter(
-    (thread) =>
-      thread.deletedAt === null &&
-      thread.archivedAt === null &&
-      !isNestedUnderLiveParent(thread, liveThreadIds) &&
-      gameProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
-  );
   const gameThreadsByProjectKey = new Map<string, EnvironmentThreadShell[]>();
-  for (const thread of gameThreads) {
+  for (const thread of allThreads) {
+    if (thread.deletedAt !== null || thread.archivedAt !== null) continue;
     const key = `${thread.environmentId}:${thread.projectId}`;
+    if (!gameProjectKeys.has(key)) continue;
     const list = gameThreadsByProjectKey.get(key);
     if (list === undefined) gameThreadsByProjectKey.set(key, [thread]);
     else list.push(thread);
   }
-  for (const [key, list] of gameThreadsByProjectKey)
-    gameThreadsByProjectKey.set(key, sortGameThreadsByActivity(list));
-  // A game is one library row; its newest session stands for it. Shelf states
-  // belong to sessions, not games, so the row never moves into a collapsed
-  // shelf and the library stays ordered by activity.
-  const threads = [...newestThreadByProject(gameThreads).values()].map((thread) => ({
-    ...thread,
-    settledOverride: null,
-    settledAt: null,
-    unsettledAt: null,
-    snoozedUntil: null,
-    snoozedAt: null,
-    pinnedAt: null,
-    pinOrderKey: null,
-  })) satisfies EnvironmentThreadShell[];
+  const gameChatsByProjectKey = new Map<string, GameChats<EnvironmentThreadShell>>();
+  const threads: EnvironmentThreadShell[] = [];
+  for (const [key, list] of gameThreadsByProjectKey) {
+    const chats = partitionGameChats(list, liveThreadIds);
+    gameChatsByProjectKey.set(key, chats);
+    // A game is one library row and it opens the main chat. A game whose
+    // chats are all gone keeps its row through its newest run thread.
+    const newest = sortGameThreadsByActivity(list)[0]!;
+    const row = chats.main ?? newest;
+    // Shelf states belong to chats, not games, so the row never moves into a
+    // collapsed shelf, and it carries the game's latest activity so the
+    // library stays ordered by activity.
+    threads.push({
+      ...row,
+      updatedAt: newest.updatedAt,
+      settledOverride: null,
+      settledAt: null,
+      unsettledAt: null,
+      snoozedUntil: null,
+      snoozedAt: null,
+      pinnedAt: null,
+      pinOrderKey: null,
+    });
+  }
   const workingShelfEnabled = false;
   const nowMinute = useNowMinute();
   // Snooze wake times are second-precise, so classifying with the quantized
@@ -579,7 +585,7 @@ function useSidebarThreads(input: {
   return {
     ...partition,
     threads,
-    gameThreadsByProjectKey,
+    gameChatsByProjectKey,
     workingShelfEnabled,
     searchableThreads: [
       ...pinnedThreads,
@@ -1579,8 +1585,8 @@ type SidebarThreadRowProps = {
   variant: "card" | "slim" | "game";
   variantAction: SidebarSweepAction;
   game: GameLibraryEntry | null;
-  gameSessions: readonly SidebarThreadSummary[];
-  onNewSession: (() => void) | null;
+  gameChats: GameChats<SidebarThreadSummary> | null;
+  onNewChat: (() => void) | null;
   settlementSupported: boolean;
   snoozeSupported: boolean;
   pinningSupported: boolean;
@@ -1624,6 +1630,81 @@ type SidebarThreadRowProps = {
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
 };
 
+function GameDisclosureSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <>
+      <p className="px-1.5 pb-0.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground/70">
+        {title}
+      </p>
+      <ul role="list" className="flex flex-col pb-1">
+        {children}
+      </ul>
+    </>
+  );
+}
+
+function GameDisclosureLine(props: { label: string; at: string; onOpen: () => void }) {
+  return (
+    <li className="list-none">
+      <button
+        type="button"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          props.onOpen();
+        }}
+        className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+      >
+        <span className="min-w-0 flex-1 truncate">{props.label}</span>
+        <span className="shrink-0 text-2xs tabular-nums">
+          <RelativeTimeLabel timestamp={props.at} />
+        </span>
+      </button>
+    </li>
+  );
+}
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/**
+ * The runs that talked to one chat. Mounted only while the disclosure is
+ * open, so their rounds are read on open; the line opens the first role
+ * thread, whose relationship control walks the rest.
+ */
+function GamePastRunLine(props: {
+  environmentId: EnvironmentId;
+  run: GameRunThreads<SidebarThreadSummary>;
+  onOpen: (threadId: ThreadId) => void;
+}) {
+  const { run } = props;
+  const first = run.threads[0]!;
+  const rounds = useEnvironmentQuery(
+    run.chatLive
+      ? gameEnvironment.runRounds({
+          environmentId: props.environmentId,
+          input: { threadId: ThreadId.make(run.chatId) },
+        })
+      : null,
+  ).data;
+  const roleChats = plural(run.threads.length, "role chat");
+  const label = !run.chatLive
+    ? `Run from a deleted chat · ${roleChats}`
+    : rounds === null || rounds.runs.length === 0
+      ? `Run · ${roleChats}`
+      : [
+          rounds.runs.length === 1 ? "Run" : plural(rounds.runs.length, "run"),
+          plural(
+            rounds.runs.reduce((sum, entry) => sum + entry.rounds.length, 0),
+            "round",
+          ),
+          ...(rounds.runs.some((entry) => entry.active) ? ["live"] : []),
+        ].join(" · ");
+  return (
+    <GameDisclosureLine label={label} at={run.updatedAt} onOpen={() => props.onOpen(first.id)} />
+  );
+}
+
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
   const {
     isRenaming,
@@ -1647,12 +1728,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     variant,
     variantAction,
     game,
-    gameSessions,
-    onNewSession,
+    gameChats,
+    onNewChat,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
-  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [chatsOpen, setChatsOpen] = useState(false);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   useEffect(() => {
     if (!canOperateThread && isRenaming) onCancelRename();
@@ -2100,7 +2181,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const appearance = gameTemplateAppearance(gameSummary.template);
     const initial = gameInitial(gameSummary.name);
     const [pigment, pigmentInk] = gamePigment(gameSummary.name);
-    const olderSessions = gameSessions.filter((session) => session.id !== thread.id);
+    const otherChats = (gameChats?.others ?? []).filter((chat) => chat.id !== thread.id);
+    const pastRuns = gameChats?.runs ?? [];
+    const disclosureCount = otherChats.length + pastRuns.length;
+    const openFromDisclosure = (threadId: ThreadId) => {
+      onThreadActivate(scopeThreadRef(thread.environmentId, threadId));
+      setChatsOpen(false);
+    };
     const working =
       status === "working" || status === "waiting" || status === "approval" || status === "input";
     const progress = gameProgress(gameSummary);
@@ -2178,49 +2265,46 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <RelativeTimeLabel timestamp={thread.updatedAt} />
               </span>
               <span className="flex items-center gap-0.5">
-                {olderSessions.length > 0 ? (
+                {disclosureCount > 0 ? (
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <button
                           type="button"
-                          aria-label={`${sessionsOpen ? "Hide" : "Show"} ${olderSessions.length} older ${olderSessions.length === 1 ? "session" : "sessions"} of ${gameSummary.name}`}
-                          aria-expanded={sessionsOpen}
+                          aria-label={`${chatsOpen ? "Hide" : "Show"} other chats and past runs of ${gameSummary.name}`}
+                          aria-expanded={chatsOpen}
                           onPointerDown={(event) => event.stopPropagation()}
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            setSessionsOpen((open) => !open);
+                            setChatsOpen((open) => !open);
                           }}
                           className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
                         />
                       }
                     >
                       <ChevronDownIcon
-                        className={cn(
-                          "size-3.5 transition-transform",
-                          sessionsOpen && "rotate-180",
-                        )}
+                        className={cn("size-3.5 transition-transform", chatsOpen && "rotate-180")}
                         aria-hidden
                       />
                     </TooltipTrigger>
                     <TooltipPopup side="top">
-                      {sessionsOpen ? "Hide" : "Show"} sessions ({olderSessions.length})
+                      {chatsOpen ? "Hide" : "Show"} chats ({disclosureCount})
                     </TooltipPopup>
                   </Tooltip>
                 ) : null}
-                {onNewSession !== null ? (
+                {onNewChat !== null ? (
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <button
                           type="button"
-                          aria-label={`New session in ${gameSummary.name}`}
+                          aria-label={`New chat in ${gameSummary.name}`}
                           onPointerDown={(event) => event.stopPropagation()}
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            onNewSession();
+                            onNewChat();
                           }}
                           className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
                         />
@@ -2228,55 +2312,52 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     >
                       <PlusIcon className="size-3" aria-hidden />
                     </TooltipTrigger>
-                    <TooltipPopup side="top">New session</TooltipPopup>
+                    <TooltipPopup side="top">New chat</TooltipPopup>
                   </Tooltip>
                 ) : null}
               </span>
             </span>
           </div>
-          {sessionsOpen && olderSessions.length > 0 ? (
+          {chatsOpen && disclosureCount > 0 ? (
             <div className="border-t border-border/60 bg-muted/20 px-2 py-1.5 pl-13">
-              <p className="px-1.5 pb-0.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground/70">
-                Sessions
-              </p>
-              <ul role="list" className="flex flex-col">
-                {olderSessions.map((session) => (
-                  <li key={session.id} className="list-none">
-                    <button
-                      type="button"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onThreadActivate(scopeThreadRef(session.environmentId, session.id));
-                        setSessionsOpen(false);
-                      }}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        {session.title === gameSummary.name ? "Session" : session.title}
-                      </span>
-                      <span className="shrink-0 text-2xs tabular-nums">
-                        <RelativeTimeLabel timestamp={session.updatedAt} />
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {onNewSession !== null ? (
+              {otherChats.length > 0 ? (
+                <GameDisclosureSection title="Other chats">
+                  {otherChats.map((chat) => (
+                    <GameDisclosureLine
+                      key={chat.id}
+                      label={chat.title === gameSummary.name ? "Chat" : chat.title}
+                      at={chat.updatedAt}
+                      onOpen={() => openFromDisclosure(chat.id)}
+                    />
+                  ))}
+                </GameDisclosureSection>
+              ) : null}
+              {pastRuns.length > 0 ? (
+                <GameDisclosureSection title="Past runs">
+                  {pastRuns.map((run) => (
+                    <GamePastRunLine
+                      key={run.chatId}
+                      environmentId={thread.environmentId}
+                      run={run}
+                      onOpen={openFromDisclosure}
+                    />
+                  ))}
+                </GameDisclosureSection>
+              ) : null}
+              {onNewChat !== null ? (
                 <button
                   type="button"
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    setSessionsOpen(false);
-                    onNewSession();
+                    setChatsOpen(false);
+                    onNewChat();
                   }}
                   className="mt-0.5 flex w-full cursor-pointer items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-xs font-medium text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
                 >
                   <PlusIcon className="size-3" aria-hidden />
-                  New session
+                  New chat
                 </button>
               ) : null}
             </div>
@@ -3204,7 +3285,7 @@ export default function Sidebar() {
     activeKeys,
     pinnedKeysById,
     activeKeysById,
-    gameThreadsByProjectKey,
+    gameChatsByProjectKey,
   } = useSidebarThreads({
     projectScopeKey,
     scopedProjectKeys,
@@ -5020,14 +5101,14 @@ export default function Sidebar() {
                             thread={thread}
                             variant={rowVariant}
                             game={game}
-                            gameSessions={
+                            gameChats={
                               game === null
-                                ? []
-                                : (gameThreadsByProjectKey.get(
+                                ? null
+                                : (gameChatsByProjectKey.get(
                                     `${game.environmentId}:${game.projectId}`,
-                                  ) ?? [])
+                                  ) ?? null)
                             }
-                            onNewSession={game === null ? null : () => startGameSession(game)}
+                            onNewChat={game === null ? null : () => startGameSession(game)}
                             variantAction={
                               section === "snoozed"
                                 ? "unsnooze"

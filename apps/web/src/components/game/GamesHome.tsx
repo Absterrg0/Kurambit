@@ -25,6 +25,7 @@ import {
   gameTemplateAppearance,
   newestThreadByProject,
 } from "./gameLibrary.logic";
+import { gameMainThread } from "../Sidebar.logic";
 import { GameKeyArt } from "./GameKeyArt";
 import { gameProgress } from "./gameProgress";
 import { useGameLibrary } from "./useGameLibrary";
@@ -53,23 +54,31 @@ export function GamesHome() {
         !isNestedUnderLiveParent(thread, liveThreadIds),
     ),
   );
+  const threadsByProject = new Map<string, EnvironmentThreadShell[]>();
+  for (const thread of threads) {
+    const list = threadsByProject.get(thread.projectId);
+    if (list === undefined) threadsByProject.set(thread.projectId, [thread]);
+    else list.push(thread);
+  }
   const cards = games
-    .map((game) => ({
-      game,
-      latestThread: newestThreads.get(game.projectId) ?? null,
-    }))
+    .map((game) => {
+      const latestThread = newestThreads.get(game.projectId) ?? null;
+      // A game opens on its main chat, as its sidebar row does.
+      const mainThread = gameMainThread(threadsByProject.get(game.projectId) ?? []);
+      return { game, latestThread, openThread: mainThread ?? latestThread };
+    })
     .sort(
       (left, right) =>
         gameActivityMs(right) - gameActivityMs(left) ||
         left.game.name.localeCompare(right.game.name),
     );
   const openGame = (card: GameCard) => {
-    if (card.latestThread !== null) {
+    if (card.openThread !== null) {
       void navigate({
         to: "/$environmentId/$threadId",
         params: {
-          environmentId: card.latestThread.environmentId,
-          threadId: card.latestThread.id,
+          environmentId: card.openThread.environmentId,
+          threadId: card.openThread.id,
         },
       });
       return;
@@ -230,6 +239,7 @@ function BriefComposer({
 type GameCard = {
   readonly game: GameSummary & { readonly environmentId: EnvironmentId };
   readonly latestThread: EnvironmentThreadShell | null;
+  readonly openThread: EnvironmentThreadShell | null;
 };
 
 const gameActivityTimestamp = (card: GameCard): string => {
