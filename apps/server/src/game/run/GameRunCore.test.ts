@@ -610,6 +610,11 @@ interface World {
   readonly chats: Set<ThreadId>;
   readonly interrupts: Array<{ readonly threadId: ThreadId; readonly commandId: string }>;
   readonly launches: ThreadId[];
+  /** What each launch was given: its parent and the folder of its own, as T3 would record them. */
+  readonly launchedWith: Map<
+    ThreadId,
+    { readonly parent: ThreadId | null; readonly worktreePath: string | null }
+  >;
   readonly sends: Array<{ readonly threadId: ThreadId; readonly messageId: string }>;
   exportsAsked: number;
   /** Whose work each export was, as the run named it. */
@@ -662,6 +667,7 @@ const newWorld = Effect.gen(function* () {
     chats: new Set(),
     interrupts: [],
     launches: [],
+    launchedWith: new Map(),
     sends: [],
     exportsAsked: 0,
     exportOwners: [],
@@ -730,7 +736,14 @@ const roleThreadsOf = (world: World) =>
         ...(threadId === creator || world.chats.has(threadId)
           ? {}
           : { launchedBy: "game_run" as const }),
-        lineage: { parentThreadId: creator, relationshipToParent: "role", rootThreadId: creator },
+        // A role's parent is what its launch named, never assumed.
+        lineage: {
+          parentThreadId: world.launchedWith.has(threadId)
+            ? world.launchedWith.get(threadId)!.parent
+            : creator,
+          relationshipToParent: "role",
+          rootThreadId: creator,
+        },
       });
       return Layer.mock(ThreadManagement.ThreadManagementService)({
         dispatch: orchestrator.dispatch,
@@ -747,7 +760,8 @@ const roleThreadsOf = (world: World) =>
                           ? DateTime.makeUnsafe(Date.now())
                           : null,
                         archivedAt: null,
-                        worktreePath: null,
+                        // A copy's thread is bound to the folder its launch gave it.
+                        worktreePath: world.launchedWith.get(threadId)?.worktreePath ?? null,
                         activeRunId: null,
                       } as unknown as OrchestrationV2ThreadShell)
                     : null,
@@ -947,6 +961,13 @@ const layerGame = (root: string, world: World) => {
                   cause: "the thread store refused it",
                 });
               const threadId = input.threadId!;
+              world.launchedWith.set(threadId, {
+                parent: input.parentThreadId ?? null,
+                worktreePath:
+                  input.workspaceStrategy?.type === "existing_worktree"
+                    ? input.workspaceStrategy.worktreePath
+                    : null,
+              });
               world.launches.push(threadId);
               world.existing.add(threadId);
               yield* Queue.offer(world.launched, threadId);
