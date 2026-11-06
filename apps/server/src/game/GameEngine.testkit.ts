@@ -84,11 +84,9 @@ export const fakeDriver = (
         projectDir: NodePath.join(root, manifestProject(manifest)),
         binary: { path: `/fake/${engine}`, version: "0", templates: null },
       }),
-    toolStatus: () => Effect.succeed(null),
+    toolchainProject: null,
     viewport: () => Effect.succeed(profile.viewport ?? { width: 1280, height: 720 }),
     projectSettingsFile: "project",
-    projectDirectory: (manifest) => manifestProject(manifest),
-    projectSettings: () => ({ viewport: profile.viewport ?? { width: 1280, height: 720 } }),
     importProject: (ctx) =>
       Effect.as(fault("import", ctx.root), {
         result: action(
@@ -190,7 +188,6 @@ export const fakeGameEngine = (
           durationMs: 0,
         })),
       ),
-    toolStatus: () => Effect.succeed(null),
     viewport: (root) =>
       Effect.flatMap(context(root), ({ backend, ctx }) => backend.viewport(ctx.projectDir)),
   });

@@ -6,6 +6,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, describe, expect, it } from "@effect/vitest";
 import { gameOperationFault } from "@kurambit/contracts";
+import { GODOT_PROFILE } from "./godotProfile.ts";
+import { UNITY_PROFILE } from "./unityProfile.ts";
 import {
   type SourceHashCache,
   snapshotBuildSource,
@@ -44,7 +46,7 @@ const unity = async (content: string) => {
 };
 
 const idOf = async (root: string) => {
-  const snapshot = await snapshotBuildSource(root, "unity");
+  const snapshot = await snapshotBuildSource(root, "unity", { rules: UNITY_PROFILE.buildInputs });
   if (snapshot.kind !== "known") throw new Error("unknown snapshot");
   return snapshot.sourceId;
 };
@@ -84,11 +86,17 @@ describe("snapshotBuildSource with a hash cache", () => {
     const old = new Date(Date.now() - 60_000);
     await NodeFSP.utimes(script, old, old);
     const cache: SourceHashCache = new Map();
-    const first = await snapshotBuildSource(root, "godot", { cache });
+    const first = await snapshotBuildSource(root, "godot", {
+      cache,
+      rules: GODOT_PROFILE.buildInputs,
+    });
     expect(cache.size).toBe(1);
     await NodeFSP.writeFile(script, "speed = 9\n");
     await NodeFSP.utimes(script, old, old);
-    const second = await snapshotBuildSource(root, "godot", { cache });
+    const second = await snapshotBuildSource(root, "godot", {
+      cache,
+      rules: GODOT_PROFILE.buildInputs,
+    });
     if (first.kind !== "known" || second.kind !== "known") throw new Error("unknown snapshot");
     expect(second.sourceId).not.toBe(first.sourceId);
   });
@@ -99,7 +107,7 @@ describe("snapshotBuildSource with a hash cache", () => {
     await NodeFSP.mkdir(NodePath.join(root, "godot"), { recursive: true });
     await NodeFSP.writeFile(NodePath.join(root, "godot/main.gd"), "speed = 1\n");
     const cache: SourceHashCache = new Map();
-    await snapshotBuildSource(root, "godot", { cache });
+    await snapshotBuildSource(root, "godot", { cache, rules: GODOT_PROFILE.buildInputs });
     expect(cache.size).toBe(0);
   });
 });

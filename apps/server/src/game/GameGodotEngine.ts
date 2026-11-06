@@ -346,11 +346,7 @@ export const makeGodotBackend = (
           projectDir: insideGame(root, manifestProject(manifest)),
         };
       }),
-    toolStatus: () =>
-      Effect.map(
-        tools.status(),
-        (status) => status.tools.find((tool) => tool.tool === "godot") ?? null,
-      ),
+    toolchainProject: null,
     viewport: (projectDir) =>
       Effect.tryPromise({
         try: () =>
@@ -370,10 +366,6 @@ export const makeGodotBackend = (
           }),
       }).pipe(Effect.map(parseGodotViewport)),
     projectSettingsFile: "project.godot",
-    projectDirectory: (manifest) => manifestProject(manifest),
-    projectSettings: (projectFileText: string) => ({
-      viewport: parseGodotViewport(projectFileText),
-    }),
     importProject,
     runCheck: (ctx, input) =>
       Effect.gen(function* () {

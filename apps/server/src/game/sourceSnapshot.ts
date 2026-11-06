@@ -6,8 +6,6 @@ import * as NodePath from "node:path";
 import { GAME_SOURCE_FILE_LIMIT, GameOperationError, sourceLimitDetail } from "@kurambit/contracts";
 import { fileSha256 } from "./fileHash.ts";
 import type { GameSourceRules } from "./engineProfile.ts";
-import { GODOT_PROFILE } from "./godotProfile.ts";
-import { UNITY_PROFILE } from "./unityProfile.ts";
 
 /**
  * Skipped entries (engine output, sidecars) are walked but not counted toward
@@ -48,17 +46,6 @@ const hashFileContent = async (
 };
 
 const MAX_DERIVED_ASSET_BYTES = 1 << 20;
-
-/**
- * The rules for a caller that names no engine: a Unity project is known by
- * its version file, anything else reads as Godot. Kept until every caller
- * passes its profile's rules.
- */
-const legacyRules = (engineRoot: string): Promise<GameSourceRules> =>
-  NodeFSP.stat(NodePath.join(engineRoot, "ProjectSettings/ProjectVersion.txt")).then(
-    (stat) => (stat.isFile() ? UNITY_PROFILE.buildInputs : GODOT_PROFILE.buildInputs),
-    () => GODOT_PROFILE.buildInputs,
-  );
 
 /**
  * Hashes from earlier reads of the same tree, by absolute path. An entry is
@@ -123,19 +110,19 @@ export const snapshotBuildSource = async (
   root: string,
   godotProject: string,
   options: {
-    /** The engine's build inputs (its profile's `buildInputs`). */
-    readonly rules?: GameSourceRules | undefined;
+    /** The engine's build inputs (its profile's `buildInputs`): the engine is never guessed from files. */
+    readonly rules: GameSourceRules;
     readonly maxEntries?: number | undefined;
     readonly signal?: AbortSignal | undefined;
     readonly cache?: SourceHashCache | undefined;
-  } = {},
+  },
 ): Promise<SourceSnapshot> => {
   const limit = options.maxEntries ?? GAME_SOURCE_FILE_LIMIT;
   const signal = options.signal;
   const cache = options.cache;
   const seen = new Set<string>();
   const engineRoot = NodePath.join(root, godotProject);
-  const rules = options.rules ?? (await legacyRules(engineRoot));
+  const rules = options.rules;
   const lines: string[] = [];
   const files = new Map<string, string>();
   const tooMany = (): SourceSnapshot => ({

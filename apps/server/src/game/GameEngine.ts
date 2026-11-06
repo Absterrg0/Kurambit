@@ -12,7 +12,6 @@ import {
   type GameCheckIssue,
   type GameCheckResult,
   type GameProcessResult,
-  type GameToolStatus,
   type GameViewport,
 } from "@kurambit/contracts";
 import { commandDetail } from "./commandDetail.ts";
@@ -51,10 +50,6 @@ export interface GameEngineContext {
   /** Game-relative engine project directory. */
   readonly projectName: string;
   readonly binary: GameEngineBinary;
-}
-
-export interface GameEngineProjectSettings {
-  readonly viewport: GameViewport;
 }
 
 export interface GameEngineCheckReport {
@@ -125,19 +120,15 @@ export interface GameEngineBackend {
     root: string,
     manifest: GameManifest,
   ) => Effect.Effect<Omit<GameEngineContext, "root">, GameOperationError>;
-  /** The one tool this game's engine needs, for this project; null when it needs none. */
-  readonly toolStatus: (
-    root: string,
-    manifest: GameManifest,
-  ) => Effect.Effect<GameToolStatus | null>;
+  /**
+   * The project the toolchain resolves this engine's tool by (Unity picks its
+   * editor by the project's version); null when the tool is the same for every game.
+   */
+  readonly toolchainProject: ((root: string, manifest: GameManifest) => string) | null;
   /** The resolution the game boots, explores and bot-plays at, from the project folder alone. */
   readonly viewport: (projectDir: string) => Effect.Effect<GameViewport, GameOperationError>;
-  /** Kept for P's play callers until they read `viewport`; game-relative project-settings file. */
+  /** The project's settings file, relative to the project: where a check names project-wide errors. */
   readonly projectSettingsFile: string;
-  /** Kept for P's play callers until they read `ctx.projectName`. */
-  readonly projectDirectory: (manifest: GameManifest) => string;
-  /** Kept for P's play callers until they read `viewport`. */
-  readonly projectSettings: (projectFileText: string) => GameEngineProjectSettings;
   /**
    * The editor import, read by the engine's one error reading: success
    * exactly when the run ended cleanly and `issues` is empty.
@@ -221,8 +212,6 @@ export interface GameEngineBackend {
   } | null;
 }
 
-const TOOL_STATUS_TTL_MS = 30_000;
-
 const unsupportedEngine = (engineName: string) =>
   new GameOperationError({
     operation: "resolve-engine",
@@ -264,8 +253,6 @@ export class GameEngine extends Context.Service<
      * made: a tool or the machine.
      */
     readonly check: (root: string) => Effect.Effect<GameCheckResult, GameOperationError>;
-    /** The one tool this game's engine needs, as the toolchain sees it for this project. */
-    readonly toolStatus: (root: string) => Effect.Effect<GameToolStatus | null, GameOperationError>;
     /** The resolution the game boots, explores and bot-plays at. */
     readonly viewport: (root: string) => Effect.Effect<GameViewport, GameOperationError>;
   }
@@ -408,25 +395,6 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.catchTags({ GameOperationError: asResult }));
   });
 
-  // Status asks this on every push for a game; the toolchain probe reads
-  // settings, PATH and Unity Hub, so an answer is kept briefly per game.
-  // P's cached GameService.toolchain replaces it at the merge (CONTRACT A1).
-  const toolAnswers = new Map<
-    string,
-    { readonly at: number; readonly tool: GameToolStatus | null }
-  >();
-  const toolStatus = Effect.fn("GameEngine.toolStatus")(function* (root: string) {
-    const now = yield* Clock.currentTimeMillis;
-    const kept = toolAnswers.get(root);
-    if (kept !== undefined && now - kept.at < TOOL_STATUS_TTL_MS) return kept.tool;
-    const manifest = yield* projects.read(root);
-    const backend = yield* backendFor(manifest.engine.name);
-    const tool = yield* backend.toolStatus(root, manifest);
-    if (toolAnswers.size > 256) toolAnswers.clear();
-    toolAnswers.set(root, { at: now, tool });
-    return tool;
-  });
-
   const viewport = Effect.fn("GameEngine.viewport")(function* (root: string) {
     const manifest = yield* projects.read(root);
     const backend = yield* backendFor(manifest.engine.name);
@@ -434,7 +402,7 @@ const make = Effect.gen(function* () {
     return yield* backend.viewport(GameProjectService.insideGame(root, manifestProject(manifest)));
   });
 
-  return GameEngine.of({ backendFor, context, importProject, check, toolStatus, viewport });
+  return GameEngine.of({ backendFor, context, importProject, check, viewport });
 });
 
 export const layer = Layer.effect(GameEngine, make);

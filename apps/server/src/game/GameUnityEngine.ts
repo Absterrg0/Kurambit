@@ -648,15 +648,9 @@ export const makeUnityBackend = (
         };
       }),
     // The toolchain picks a Unity editor by the project's own version.
-    toolStatus: (root, manifest) =>
-      Effect.map(
-        tools.status({ unityProject: insideGame(root, manifestProject(manifest)) }),
-        (status) => status.tools.find((tool) => tool.tool === "unity") ?? null,
-      ),
+    toolchainProject: (root, manifest) => insideGame(root, manifestProject(manifest)),
     viewport: () => Effect.succeed({ ...UNITY_VIEWPORT }),
     projectSettingsFile: "ProjectSettings/ProjectSettings.asset",
-    projectDirectory: (manifest) => manifestProject(manifest),
-    projectSettings: () => ({ viewport: { ...UNITY_VIEWPORT } }),
     importProject,
     runCheck,
     // Players build in the live editor: no export templates and no preset.
