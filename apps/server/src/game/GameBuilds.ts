@@ -11,6 +11,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -40,6 +41,7 @@ import {
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../checkpointing/Utils.ts";
+import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { type EarlierBuild, summaryOf, turnChangeBase } from "./buildFacts.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
@@ -72,6 +74,8 @@ interface Entry {
   readonly files: GameBuild["files"];
   /** Null when the change was not counted. */
   readonly fileCount: number | null;
+  /** The build it was made from, which restoring undoes it; null when unknown. */
+  readonly base: string | null;
   /** How the run's restore names it: a kept round, a saved build's name, or its commit. */
   readonly handle: { readonly round: number } | { readonly build: string };
 }
@@ -175,6 +179,7 @@ const make = Effect.gen(function* () {
   const operations = yield* GameOperations.GameOperations;
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const scope = yield* Effect.scope;
+  const crypto = yield* Crypto.Crypto;
   // A round's change against the build before it never changes: read once.
   const roundFiles = new Map<string, { files: GameBuild["files"]; count: number | null }>();
 
@@ -336,6 +341,18 @@ const make = Effect.gen(function* () {
             { id: oid, startedAt, thread: row.threadId, turn: row.runOrdinal },
             earlier,
           );
+          // T3's own base: the thread's checkpoint before this one, which for
+          // turn 1 is the thread's start (ordinal 0, captured as it began).
+          const ordinal = row.checkpoint.ordinalWithinScope;
+          const t3Base =
+            ordinal === 0
+              ? null
+              : (refs.get(
+                  yield* checkpointRefForScopeOrdinal({
+                    scopeId: row.checkpoint.scopeId,
+                    ordinalWithinScope: ordinal - 1,
+                  }).pipe(Effect.provideService(Crypto.Crypto, crypto)),
+                ) ?? null);
           const t3Files = row.checkpoint.files.flatMap((file) => {
             const path = inGame(file.path);
             return path !== null && restored(path) ? [{ ...file, path }] : [];
@@ -365,6 +382,7 @@ const make = Effect.gen(function* () {
                 : summary,
               files: change.files,
               fileCount: change.count,
+              base: base ?? t3Base,
               handle: { build: oid },
             } satisfies Entry,
           ];
@@ -422,6 +440,7 @@ const make = Effect.gen(function* () {
               summary: build.label,
               files: [],
               fileCount: null,
+              base: null,
               handle: { build: ofRun ? build.name : build.oid },
             }
           : null;
@@ -447,7 +466,8 @@ const make = Effect.gen(function* () {
       for (const r of run.rounds) {
         const build = r.build;
         if (build !== null && isGameBuildId(build)) {
-          const change = yield* changeOf(g.root, g.lane, baseBefore(r.endedAt), build);
+          const base = baseBefore(r.endedAt);
+          const change = yield* changeOf(g.root, g.lane, base, build);
           rounds.push({
             id: build,
             at: r.endedAt ?? EPOCH,
@@ -465,6 +485,7 @@ const make = Effect.gen(function* () {
             summary: firstLine(r.move, `Round ${r.round}`),
             files: change.files,
             fileCount: change.count,
+            base,
             handle: r.outcome === "kept" ? { round: r.round } : { build },
           });
         }
@@ -574,8 +595,11 @@ const make = Effect.gen(function* () {
           id: entry.id,
           at: entry.at,
           source: entry.source,
-          // Phase 1 (loop2): the turn loop's builder fills the undo base.
-          base: null,
+          // Only a build still kept can be restored to undo this one.
+          base:
+            entry.base !== null && isGameBuildId(entry.base) && kept.has(entry.base)
+              ? entry.base
+              : null,
           summary: entry.summary,
           files: entry.files,
           fileCount: entry.fileCount,
@@ -717,6 +741,7 @@ const make = Effect.gen(function* () {
           summary: `Build ${id.slice(0, 8)}`,
           files: [],
           fileCount: null,
+          base: null,
           handle: { build: id },
         } satisfies Entry);
       const [row] = yield* rowsOf(g, [entry], new Set([...listed.kept, id]));
