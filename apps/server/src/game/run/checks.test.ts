@@ -207,5 +207,11 @@ describe("the check lint", () => {
     expect(problem(state("sounds_played > 0"))).toBeNull();
     expect(problem(look("at least one enemy is on screen"))).toBeNull();
     expect(problem(look("the flashlight beam lights the path", "look at the frames"))).toBeNull();
+    expect(problem(look("a 2.5 s countdown shows before each wave"))).toBeNull();
+    expect(problem(look("the player respawns within 1.5 seconds"))).toBeNull();
+    expect(problem(look("the settings menu shows a music volume slider"))).toBeNull();
+    expect(problem(look("a mute button sits on the HUD"))).toBeNull();
+    expect(problem(look("the hit flash lasts 300 ms"))).toMatch(/faster than frames show/);
+    expect(problem(look("the door opens in .5 s"))).toMatch(/faster than frames show/);
   });
 });

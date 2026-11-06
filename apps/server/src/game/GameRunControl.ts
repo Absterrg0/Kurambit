@@ -71,6 +71,7 @@ import { runStateChecks } from "./run/checkRunner.ts";
 import { presentable } from "./run/decisionEvidence.ts";
 import { roleTurns } from "./run/GameRunRoleReactor.ts";
 import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
+import { UNJUDGED_PAUSE } from "./run/policy.ts";
 import {
   readPickEvidence,
   readRoundEvidence,
@@ -304,6 +305,9 @@ const make = Effect.gen(function* () {
     busy: "the game stayed busy with other work",
   };
   const endedMessage = (run: GameRun): string => {
+    // The run's own evaluation (a tester or judges) judged nothing twice: no program failed.
+    if (run.ending === "tool-failed" && run.lastFailure.startsWith(UNJUDGED_PAUSE))
+      return `The run paused: its tester or blind judges could not judge two rounds in a row, so the run stopped before spending a third (${run.lastFailure.slice(UNJUDGED_PAUSE.length)}). Look at the last rounds' evidence, then resume it with an empty brief; it judges the same build again.`;
     const why = run.ending === null ? undefined : PAUSES[run.ending];
     const failure = run.lastFailure.length > 0 ? ` Last failure: ${run.lastFailure}` : "";
     return why === undefined

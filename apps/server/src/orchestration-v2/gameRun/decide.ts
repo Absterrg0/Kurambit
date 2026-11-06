@@ -620,7 +620,7 @@ const start = (work: Work, command: Command<"game-run.start">) => {
     prior.ladder !== null &&
     prior.ladder.rungs.length > 0 &&
     sameBrief(prior.brief, command.brief)
-      ? Policy.recount(prior.ladder, rounds)
+      ? Policy.refold(prior.ladder, rounds)
       : null;
   // Stages an earlier run on this game finished are not redone.
   const state: State.RunState = {

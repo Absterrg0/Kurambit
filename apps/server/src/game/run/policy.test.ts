@@ -1414,6 +1414,46 @@ describe("ladder", () => {
     expect(again.state.ladder?.rungs[0]?.fails).toBe(0);
   });
 
+  it("never counts a tester that submitted nothing against the game, nor spends a note on a re-judge", () => {
+    // Both of the tester's turns end with no submission: the look check is the role's missing result.
+    const silent = ladderResponder("A", "B", [true, true], (step) =>
+      step.kind === "role" && step.role.startsWith("tester") ? done(step) : undefined,
+    );
+    const one = oneRound(atLadder(), silent);
+    expect(one.state.rounds[0]?.failure).toBe("harness");
+    expect(one.state.rounds[0]?.rung?.checks.every((c) => c.evidence.length > 0)).toBe(true);
+    expect(one.state.ladder?.rungs[0]?.fails).toBe(0);
+    // A creator's note waits for the next round that has a builder.
+    const noted = { ...one.state, steer: ["make the gems bigger"] };
+    const rejudge = oneRound(noted, ladderResponder("A", "B"));
+    expect(rejudge.steps).not.toContain("builder");
+    expect(rejudge.state.steer).toEqual(["make the gems bigger"]);
+    expect(rejudge.state.rounds.at(-1)?.steer).toBeUndefined();
+  });
+
+  it("counts a round with a real failure as the game's even when another check is unverifiable", () => {
+    const mixed = ladderResponder("A", "B", [false, false], (step, state) => {
+      if (!(step.kind === "role" && step.role.startsWith("tester"))) return undefined;
+      const asked = Policy.asked(state, step);
+      if (asked.kind !== "checks") return undefined;
+      return done(step, {
+        submission: {
+          _tag: "checks",
+          checks: asked.look.map((check) =>
+            check === 2
+              ? { check, pass: false, evidence: "it is a sound", unverifiable: true }
+              : { check, pass: false, evidence: "the player cannot reach the ledge" },
+          ),
+          notes: "played it through, start to end",
+        },
+      });
+    });
+    const one = oneRound(atLadder(), mixed);
+    expect(one.state.rounds[0]?.failure).toBe("game");
+    expect(one.state.stallStreak).toBe(1);
+    expect(one.state.ladder?.rungs[0]).toMatchObject({ fails: 1, need: "rewrite" });
+  });
+
   it("rewrites a check the tester could not verify in play, once, and keeps the round's work", () => {
     const blind = ladderResponder("A", "B", [true, false], (step, state) => {
       if (!(step.kind === "role" && step.role.startsWith("tester"))) return undefined;
@@ -1501,6 +1541,75 @@ describe("ladder", () => {
     expect(resumed.kind === "step" && resumed.step.kind === "role" && resumed.step.title).toBe(
       "studio rung split",
     );
+  });
+
+  it("never recounts a rewritten rung's earlier rounds as its own", () => {
+    const blind = ladderResponder("A", "B", [true, false], (step, state) => {
+      if (!(step.kind === "role" && step.role.startsWith("tester"))) return undefined;
+      const asked = Policy.asked(state, step);
+      if (asked.kind !== "checks") return undefined;
+      return done(step, {
+        submission: {
+          _tag: "checks",
+          checks: asked.look.map((check) =>
+            check === 2
+              ? { check, pass: false, evidence: "it is a sound", unverifiable: true }
+              : { check, pass: true, evidence: "saw it" },
+          ),
+          notes: "played it through, start to end",
+        },
+      });
+    });
+    const one = oneRound(atLadder(), blind);
+    const rung = one.state.ladder!.rungs[0]!;
+    // The rewrite keeps the sentence and the check names, and changes how check 2 is read.
+    const rewritten = {
+      ...rung,
+      need: undefined,
+      rewritten: true,
+      checks: [
+        rung.checks[0]!,
+        { what: rung.checks[1]!.what, kind: "state" as const, expect: "ended == true" },
+      ],
+    };
+    const { need: _need, ...clean } = rewritten;
+    const ladder = { ...one.state.ladder!, rungs: [clean, ...one.state.ladder!.rungs.slice(1)] };
+    const after = Policy.recount(ladder, one.state.rounds);
+    expect(after.rungs[0]).toMatchObject({ status: "todo", fails: 0 });
+    expect(after.rungs[0]?.need).toBeUndefined();
+  });
+
+  it("applies a Guided split answer to the rung it asked about", () => {
+    const ladder = fresh();
+    const asking = ladder.rungs.map((r, i) =>
+      i === 2
+        ? { ...r, fails: 2, need: "split" as const, why: "failed twice" }
+        : i < 2
+          ? { ...r, status: "set-aside" as const, why: "never worked" }
+          : r,
+    );
+    const at = { now: T0, coin: 0, id: "x" };
+    const asked = Policy.plan(
+      atLadder({ profile: "guided", ladder: { ...ladder, rungs: asking } }),
+      at,
+    );
+    // A resume brings rung 1 back for a split while the question waits.
+    const rungs = asking.with(0, {
+      ...asking[0]!,
+      status: "todo" as const,
+      need: "split" as const,
+    });
+    if (asked.kind !== "step" || asked.step.kind !== "decide") throw new Error("expected the ask");
+    // A resume marked rung 1 for a split while the question waited.
+    const later = { ...asked.state, ladder: { ...ladder, rungs } };
+    const answered = Policy.applyResult(
+      later,
+      asked.step,
+      { kind: "decided", answer: "set-aside", notes: "", by: "creator" },
+      at,
+    );
+    expect(answered.state.ladder?.rungs[2]?.status).toBe("set-aside");
+    expect(answered.state.ladder?.rungs[0]?.status).toBe("todo");
   });
 
   it("recounts a game's earlier rounds under today's rules", () => {

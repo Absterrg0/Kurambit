@@ -99,6 +99,8 @@ export const GameRunRungRef = Schema.Struct({
   /** Why it was set aside, or why a reviewer added it. */
   why: Schema.String,
   from: Schema.Literals(["plan", "reviewer", "split"]),
+  /** The one plan turn it waits for before it is built again, with `why` saying why. */
+  need: Schema.optionalKey(Schema.Literals(["rewrite", "split"])),
 });
 export type GameRunRungRef = typeof GameRunRungRef.Type;
 

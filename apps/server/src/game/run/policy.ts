@@ -176,16 +176,25 @@ export type Failure = NonNullable<RoundRecord["failure"]>;
 const NO_RESULT = "the tester submitted no result for this check";
 const NO_PLAY = "no play on record for the tester (no explore input, no bot run)";
 
-/** Whose failure a round's failed checks are. */
-const checksFailure = (checks: Round["checks"]): Failure => {
+type CheckVerdict = Round["checks"][number];
+const unverified = (c: CheckVerdict) => c.evidence.startsWith(CANNOT_VERIFY);
+const unjudgedCheck = (c: CheckVerdict) =>
+  c.evidence.startsWith(NO_RESULT) || c.evidence.startsWith(NO_PLAY);
+
+/**
+ * Whose failure a round's failed checks are, check by check: any check the
+ * game failed on real evidence makes it the game's; only when every failed
+ * check is one play cannot verify (or the tester never judged) is it the
+ * check's, or the harness's when none is unverifiable.
+ */
+const checksFailure = (
+  checks: ReadonlyArray<CheckVerdict>,
+  cannotVerify: (c: CheckVerdict) => boolean = unverified,
+): Failure => {
   const failed = checks.filter((c) => !c.pass);
-  if (failed.some((c) => c.evidence.startsWith(CANNOT_VERIFY))) return "check";
-  if (
-    failed.length > 0 &&
-    failed.every((c) => c.evidence.startsWith(NO_RESULT) || c.evidence.startsWith(NO_PLAY))
-  )
-    return "harness";
-  return "game";
+  if (failed.length === 0 || failed.some((c) => !cannotVerify(c) && !unjudgedCheck(c)))
+    return "game";
+  return failed.some(cannotVerify) ? "check" : "harness";
 };
 
 /**
@@ -198,15 +207,18 @@ const recordedFailure = (r: RoundRecord, rung: Rung | null): Failure => {
   const note = r.note ?? "";
   if (r.unjudged === true || /tester write failed|could not be restored|not kept \(/.test(note))
     return "harness";
-  const checks = r.rung?.checks ?? [];
-  const failed = checks.filter((c) => !c.pass);
-  const linted = (what: string) => {
-    const check = rung?.checks.find((c) => c.what === what);
-    return check !== undefined && lintCheck(check) !== null;
-  };
-  if (failed.some((c) => c.evidence.startsWith(CANNOT_VERIFY) || linted(c.what))) return "check";
-  return checksFailure(checks);
+  return checksFailure(r.rung?.checks ?? [], (c) => recordedUnverified(c, rung));
 };
+
+// A recorded failed check play could not verify: said so, or one the lint now refuses.
+const recordedUnverified = (c: CheckVerdict, rung: Rung | null): boolean => {
+  if (unverified(c)) return true;
+  const check = rung?.checks.find((x) => x.what === c.what);
+  return check !== undefined && lintCheck(check) !== null;
+};
+
+/** The rung's checks in their full form (kind, expect, setup, input, how): a rewrite is a new rung. */
+const checksKey = (rung: Pick<Rung, "checks">): string => fnv(JSON.stringify(rung.checks));
 
 // ── Pure round decisions. ─────────────────────────────────────────────────
 export type PairKind = "best-wins" | "candidate-wins" | "inconclusive" | "unjudged";
@@ -376,10 +388,18 @@ const setAside = (rung: Rung, why: string): Rung => ({
   why: why.slice(0, 500),
 });
 /** What a rung waits for after this failure: a rewrite once, else a split; a split's own rung is set aside. */
-const afterFailure = (rung: Rung, failure: Failure, fails: number): Rung["need"] | "set-aside" => {
+const afterFailure = (
+  rung: Rung,
+  failure: Failure,
+  fails: number,
+  someUnverifiable: boolean,
+): Rung["need"] | "set-aside" => {
   if (failure === "check" && rung.rewritten !== true) return "rewrite";
   if (failure === "check" || (failure === "game" && fails >= RUNG_TRIES))
     return rung.from === "split" ? "set-aside" : "split";
+  // The game failed, and a check of the same round cannot be verified: the
+  // failure counts, and the check is rewritten before the next try.
+  if (failure === "game" && someUnverifiable && rung.rewritten !== true) return "rewrite";
   return undefined;
 };
 
@@ -408,7 +428,14 @@ const settleRung = (
       ).slice(0, 500);
   const failure: Failure = record.failure ?? "game";
   const fails = !record.kept && failure === "game" ? rung.fails + 1 : rung.fails;
-  const next = record.kept ? undefined : afterFailure(rung, failure, fails);
+  const next = record.kept
+    ? undefined
+    : afterFailure(
+        rung,
+        failure,
+        fails,
+        checks.some((c) => !c.pass && unverified(c)),
+      );
   const outcome = record.kept ? "landed" : next === "set-aside" ? "set-aside" : "failed";
   const k = positionOf(ladder, rung);
   logs.push(
@@ -432,7 +459,14 @@ const settleRung = (
         : next === undefined
           ? { ...rung, fails }
           : { ...rung, fails, need: next, why };
-  const result: RungResult = { rung: rung.id, is: rung.is, checks, outcome, why };
+  const result: RungResult = {
+    rung: rung.id,
+    is: rung.is,
+    checks,
+    outcome,
+    why,
+    checksKey: checksKey(rung),
+  };
   return {
     state: {
       ...state,
@@ -498,13 +532,19 @@ export const recount = (ladder: Ladder, rounds: ReadonlyArray<RoundRecord>): Lad
   rungs: ladder.rungs.map((rung) => {
     if (rung.status === "done") return rung;
     const whats = rung.checks.map((c) => c.what).join("\n");
+    const key = checksKey(rung);
+    // A round built exactly these checks: by their full form, or on an older
+    // record (no key) by sentence and check names, which a rewritten rung never
+    // trusts (its rewrite may keep both and change only how a check is read).
     const built = rounds.filter(
       (r) =>
         r.abandoned !== true &&
         r.rung !== undefined &&
         r.rung.rung === rung.id &&
         r.rung.is === rung.is &&
-        r.rung.checks.map((c) => c.what).join("\n") === whats,
+        (r.rung.checksKey !== undefined
+          ? r.rung.checksKey === key
+          : rung.rewritten !== true && r.rung.checks.map((c) => c.what).join("\n") === whats),
     );
     let next: Rung = { ...withoutNeed(rung), status: "todo", fails: 0, why: "" };
     if (built.length === 0) next = rung;
@@ -512,7 +552,12 @@ export const recount = (ladder: Ladder, rounds: ReadonlyArray<RoundRecord>): Lad
       if (r.kept || r.rung?.outcome === "landed") return { ...withoutNeed(rung), status: "done" };
       const failure = recordedFailure(r, rung);
       const fails = failure === "game" ? next.fails + 1 : next.fails;
-      const after = afterFailure(next, failure, fails);
+      const after = afterFailure(
+        next,
+        failure,
+        fails,
+        (r.rung?.checks ?? []).some((c) => !c.pass && recordedUnverified(c, rung)),
+      );
       const why = r.rung?.why ?? "";
       next =
         after === "set-aside"
@@ -683,13 +728,16 @@ const ladderDecision = (s: RunState, ladder: Ladder): Decision => ({
   waitMs: DECISION_WAIT_MS,
 });
 
-// The rung a rung decision is about: the first one waiting for its split. The
-// ladder does not move while the run waits, so it is the one the question named.
-const splitting = (ladder: Ladder | null): Rung | null =>
-  ladder?.rungs.find((x) => x.status === "todo" && x.need === "split") ?? null;
+// The rung a rung decision is about, by the id its decision id carries: a
+// resume while it waits may mark other rungs for a split too.
+const RUNG_DECISION = /-of-rung-(\d+)$/;
+const splitting = (ladder: Ladder | null, d: Decision): Rung | null => {
+  const id = Number(RUNG_DECISION.exec(d.id)?.[1] ?? Number.NaN);
+  return ladder?.rungs.find((x) => x.id === id && x.status === "todo") ?? null;
+};
 
 const rungDecision = (s: RunState, rung: Rung, k: number): Decision => ({
-  id: decisionId(s, "rung"),
+  id: `${decisionId(s, "rung")}-of-rung-${rung.id}`,
   kind: "rung",
   ask: `Rung ${k} of the ladder (${rung.is}) failed in two rounds, and the run never builds it a third time as it is. Split it into smaller steps, change it, or set it aside?`,
   evidence: [{ label: "Ladder", path: LADDER }],
@@ -826,7 +874,7 @@ const decide = (
         : proceed(next, "plan", input.now);
     }
     case "rung": {
-      const rung = splitting(s.ladder);
+      const rung = splitting(s.ladder, d);
       if (rung === null || s.ladder === null) return { ...s, task: newRound(s, input.now) };
       if (answer === "split" || answer === "rewrite")
         return {
@@ -1373,15 +1421,14 @@ const applyCompare = (
             phase: "write" as const,
             evidence: res.evidence,
           }
-        : s.phase === "more"
-          ? { ...s, phase: "write", evidence: res.evidence ?? s.evidence }
-          : {
-              ...s,
-              phase: "done",
-              notes: submitted(res, "report")?.report ?? "",
-              evidence: res.evidence ?? s.evidence,
-              sheet: res.sheet,
-            };
+        : // An older record's "more" sample was planned as its write-up: either lands done.
+          {
+            ...s,
+            phase: "done",
+            notes: submitted(res, "report")?.report ?? "",
+            evidence: res.evidence ?? s.evidence,
+            sheet: res.sheet,
+          };
     if (next.phase === "done" && !usable(next))
       logs.push(`play sample ${s.label} lacked usable hands-on evidence`);
     return { ...c, samples: c.samples.with(si, next) };
@@ -1681,21 +1728,23 @@ export const reopen = (state: RunState, now: number): RunState => ({
  * gets its rounds, and a run whose plan wrote no valid ladder plans again
  * instead of ending at once on the same empty ladder.
  */
+/**
+ * A ladder an ended run carries on with (its resume, or a new run's reuse):
+ * rungs refold under today's rules (an earlier harness fault no longer counts),
+ * and a set-aside rung comes back only changed: split first.
+ */
+export const refold = (ladder: Ladder, rounds: ReadonlyArray<RoundRecord>): Ladder => ({
+  ...ladder,
+  rungs: recount(ladder, rounds).rungs.map((x) =>
+    x.status === "set-aside"
+      ? { ...x, status: "todo" as const, need: "split" as const, why: x.why || "it was set aside" }
+      : x,
+  ),
+});
+
 export const resume = (state: RunState): RunState => {
   const kept = state.ladder !== null && state.ladder.rungs.length === 0 ? null : state.ladder;
-  // Rungs refold under today's rules (an earlier harness fault no longer counts),
-  // and a set-aside rung comes back only changed: split first.
-  const ladder =
-    kept === null
-      ? null
-      : {
-          ...kept,
-          rungs: recount(kept, state.rounds).rungs.map((x) =>
-            x.status === "set-aside"
-              ? { ...x, status: "todo" as const, need: "split" as const }
-              : x,
-          ),
-        };
+  const ladder = kept === null ? null : refold(kept, state.rounds);
   // A ladder that landed, judged not shippable on this best: the resume buys
   // one round led by the review's reasons, which is the creator's ask.
   const shipAsk =
@@ -2040,9 +2089,11 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         direction,
         repeating: false,
         move,
-        // Set before the block only when the round judges that build again as it is.
+        // Set before the block only when the round judges that build again as it
+        // is. No builder reads its direction, so the creator's notes wait for
+        // the next round that has one.
         ...(retry?.reeval === true ? { candidate: retry.build } : {}),
-        record: { ...r.record, branch: label, move, ...steer },
+        record: { ...r.record, branch: label, move, ...(retry?.reeval === true ? {} : steer) },
       };
       const logs = [
         ...pick.logs,
@@ -2142,6 +2193,15 @@ export const plan = (state: RunState, input: Inputs): Planned => {
 };
 
 // ── Results. ──────────────────────────────────────────────────────────────
+// The build a round's candidate is, by name: its own, or, when the round judged
+// an earlier round's build again (no block, no capture of its own), that one.
+const builtAs = (s: RunState, r: Round): string => {
+  if (r.block !== null || r.rung === null) return `build ${r.branch}`;
+  const made = s.rounds.findLast((x) => x.build === r.candidate);
+  return made === undefined
+    ? `build ${r.candidate.slice(0, 8)}`
+    : `build ${made.branch} (judged again)`;
+};
 // A round that fails on its state checks, without a tester or judges.
 const failedOnChecks = (rung: Rung, stateChecks: Round["stateChecks"]): Round["checks"] =>
   rung.checks.map((c, k) => {
@@ -2154,6 +2214,10 @@ const failedOnChecks = (rung: Rung, stateChecks: Round["stateChecks"]): Round["c
   });
 
 const noteOf = (r: Round, add: string) => `${r.record.note ?? ""} ${add}`.trim();
+
+/** How the pause after two rounds the harness could not judge begins its reason. */
+export const UNJUDGED_PAUSE =
+  "two rounds in a row could not be judged, so the run paused before it judged a third: ";
 
 /**
  * What a round that did not land does to the run beyond its rung: only the
@@ -2174,10 +2238,7 @@ const afterRound = (
     stallStreak: failure === "game" ? before.stallStreak + 1 : before.stallStreak,
     ending: twice && next.ending === null ? "tool-failed" : next.ending,
     lastFailure: twice
-      ? `two rounds in a row could not be judged, so the run paused before it judged a third: ${why}`.slice(
-          0,
-          300,
-        )
+      ? `${UNJUDGED_PAUSE}${why}`.slice(0, 300)
       : `round ${record.round}: ${why}`.slice(0, 300),
   };
 };
@@ -2677,7 +2738,6 @@ const applyRound = (
         return {
           ...s,
           pending,
-          steer: s.steer.slice(r.record.steer?.length ?? 0),
           task: {
             ...round,
             phase: "boot",
@@ -2804,7 +2864,14 @@ const applyRound = (
       if (failed.length === 0) return at({ phase: "tester-facts", stateChecks });
       // The same builder fixes what the checks showed, in this round, while its
       // context is warm: a failed fact costs minutes, not the round.
-      if (r.fixes < MAX_FIXES && r.block !== null && remaining(s, now) > ROUND_RESERVE_MS) {
+      // A check no build can pass (it cannot be verified in play) buys no fix turn.
+      const fixable = failed.some((c) => !c.evidence.startsWith(CANNOT_VERIFY));
+      if (
+        fixable &&
+        r.fixes < MAX_FIXES &&
+        r.block !== null &&
+        remaining(s, now) > ROUND_RESERVE_MS
+      ) {
         logs.push(
           `round ${r.n}: fix turn ${r.fixes + 1} of ${MAX_FIXES} for the failed state checks`,
         );
@@ -2850,8 +2917,17 @@ const applyRound = (
       if (sub !== null && notes.length > 20)
         files.push({ path: `.studio/tester-${r.n}.md`, text: `${notes}\n` });
       // A submission's checks are held over a follow-up turn that submits none.
+      // A tester that never submitted judged nothing: each look check is the
+      // role's missing result (the harness's), and the state checks keep the
+      // harness's own scores.
       const submittedChecks =
-        rung === null ? [] : sub !== null ? submittedChecksOf(sub, rung) : r.checks;
+        rung === null
+          ? []
+          : sub !== null
+            ? submittedChecksOf(sub, rung)
+            : r.checks.length > 0
+              ? r.checks
+              : submittedChecksOf({ _tag: "checks", checks: [], notes: "" }, rung);
       // The bot service's record of the tester's thread, which spans its
       // play, write and duty turns; the game folder's copy decides nothing.
       if (r.phase === "tester-write" && res.kind === "done" && res.bots === 0) {
@@ -2916,7 +2992,7 @@ const applyRound = (
         const why = `rung checks failed (${checkLine(r.checks) || "none verified"})`;
         const failure = checksFailure(r.checks);
         logs.push(
-          `round ${r.n}: ${why}; not judged, candidate kept as build ${r.branch}${failure === "game" ? "" : ` (the ${failure === "check" ? "check's" : "harness's"} failure, not the game's)`}`,
+          `round ${r.n}: ${why}; not judged, candidate kept as ${builtAs(s, r)}${failure === "game" ? "" : ` (the ${failure === "check" ? "check's" : "harness's"} failure, not the game's)`}`,
         );
         return {
           ...s,
@@ -2925,7 +3001,7 @@ const applyRound = (
             ...r,
             phase: "outcome",
             outcome: "drop",
-            reviewed: `the current best (this round's rung failed its checks; its candidate is set aside as build ${r.branch})`,
+            reviewed: `the current best (this round's rung failed its checks; its candidate is set aside as ${builtAs(s, r)})`,
             record: { ...r.record, note: noteOf(r, `${why}; not judged`), failure },
           },
         };
@@ -3007,7 +3083,7 @@ const applyRound = (
             reviewed: `the candidate in the folder (not kept: ${g!.detail})`.slice(0, 300),
             record: {
               ...r.record,
-              note: noteOf(r, `not kept (${g!.detail}); its build stays ${r.branch}`.slice(0, 200)),
+              note: noteOf(r, `not kept (${g!.detail}); it stays ${builtAs(s, r)}`.slice(0, 200)),
               failure: "harness",
             },
           },
@@ -3107,7 +3183,7 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
       ),
     };
   if (kind === "unjudged") {
-    logs.push(`round ${r.n}: no judge verdicts after retry; candidate kept as build ${r.branch}`);
+    logs.push(`round ${r.n}: no judge verdicts after retry; candidate kept as ${builtAs(s, r)}`);
     const why = verdicts[0]!.verdict === "NONE" ? verdicts[0]!.reason : verdicts[1]!.reason;
     return {
       ...s,
@@ -3116,12 +3192,14 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
       task: round(
         {
           outcome: "drop",
-          reviewed: `the current best (last round unjudged; its candidate is set aside as build ${r.branch})`,
+          reviewed: `the current best (last round unjudged; its candidate is set aside as ${builtAs(s, r)})`,
         },
         {
           unjudged: true,
           note: noteOf(r, "no judge verdicts after retry; candidate kept as a build"),
-          failure: "harness",
+          // One judge preferring the old build is a verdict on the game; only a
+          // gate that could not judge (no input on record, no verdict at all) is the harness's.
+          failure: gate === null && favoursBest ? "game" : "harness",
         },
       ),
     };
@@ -3130,12 +3208,10 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
   // later rounds refine this candidate against the same judged best.
   const split = `${verdicts[0]!.verdict}/${verdicts[1]!.verdict}`;
   const pending = advancePending(s.pending, r.branch, r.n, verdicts, r.candidate);
-  logs.push(
-    `round ${r.n}: inconclusive ${split}; best stands, candidate kept as build ${r.branch}`,
-  );
+  logs.push(`round ${r.n}: inconclusive ${split}; best stands, candidate kept as ${builtAs(s, r)}`);
   const note = noteOf(
     r,
-    `inconclusive (${split}); best stands, candidate kept as build ${r.branch}${pending === null ? "; pending dropped after 3 inconclusive rounds" : ""}`,
+    `inconclusive (${split}); best stands, candidate kept as ${builtAs(s, r)}${pending === null ? "; pending dropped after 3 inconclusive rounds" : ""}`,
   );
   return {
     ...s,
@@ -3143,7 +3219,7 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
     task: round(
       {
         outcome: "hold",
-        reviewed: `the current best (last round inconclusive ${split}; its candidate is set aside as build ${r.branch}; the top flaw below is still open)`,
+        reviewed: `the current best (last round inconclusive ${split}; its candidate is set aside as ${builtAs(s, r)}; the top flaw below is still open)`,
       },
       { inconclusive: true, note, failure: "game" },
     ),

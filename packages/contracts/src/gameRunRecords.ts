@@ -99,6 +99,8 @@ export const GameRunRungRecord = Schema.Struct({
   checks: Schema.Array(CheckVerdict),
   outcome: Schema.Literals(["landed", "failed", "set-aside"]),
   why: Schema.String,
+  /** The rung's checks as this round built them (a hash of their full form); absent on older records. A rewritten rung's earlier rounds are not its own. */
+  checksKey: Schema.optionalKey(Schema.String),
 });
 export type GameRunRungRecord = typeof GameRunRungRecord.Type;
 
