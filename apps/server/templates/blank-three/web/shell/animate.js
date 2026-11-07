@@ -20,6 +20,16 @@
 // entered (asked for again, they hold their last pose), then the loop asked
 // for meanwhile takes over; die plays once and holds until hero.revive().
 // hero.clips lists the clip names; the console shows which clip each role got.
+//
+// A model exported through Kurambit's pipeline (ASSETS names its .asset.json
+// sidecar) knows more, and animate reads it from the copy:
+//   hero.play("run", { moveSpeed: 5.5 }); // m/s it moves: the clip plays at
+//     // moveSpeed / its measured ground speed, so the feet stay planted
+//   hero.spring("tail", { stiffness: 0.09, damping: 0.14, gravity: 4 }); // retune a chain
+//   hero.lookAt(target.position);         // the head turns toward a point; null: ahead
+// The sidecar's spring chains (a tail, ears) swing on their own from the
+// start; spring(["bone_a", "bone_b"], opts) adds a chain to any model, root
+// to tip. A model with no measured ground speed plays at `speed` (default 1).
 import * as THREE from "../vendor/three.module.js";
 
 const ROLES = {
@@ -70,12 +80,175 @@ export function findClip(clips, state) {
 
 const live = new Set();
 
+const SPRING = { stiffness: 0.15, damping: 0.2, gravity: 0 };
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _q1 = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+
+// Bones only: a mesh may share a bone's name ("Head").
+const findBone = (root, name) => {
+  let found = null;
+  root.traverse((object) => {
+    if (found === null && object.isBone && object.name === name) found = object;
+  });
+  return found;
+};
+
+/** Rotate a bone by an angle about a world axis, keeping its parent's frame. */
+function rotateWorld(bone, axis, angle) {
+  bone.parent.getWorldQuaternion(_q1);
+  _q2.setFromAxisAngle(axis, angle);
+  bone.quaternion.premultiply(_q1.clone().invert().multiply(_q2).multiply(_q1));
+  bone.updateMatrixWorld(true);
+}
+
+/**
+ * A spring chain: each bone's tip is a point mass pulled toward where the clip
+ * puts it, with damping and gravity, held at the bone's length; the bone turns
+ * to point at it. Steps scale with dt, so it holds across frame rates; a jump
+ * further than a teleport snaps it back.
+ */
+function makeSpring(root, names, options) {
+  const bones = names.map((name) => findBone(root, name)).filter((bone) => bone !== null);
+  if (bones.length === 0) {
+    console.warn(`animate: no bones ${names.join(", ")} for a spring`);
+    return null;
+  }
+  root.updateWorldMatrix(true, true);
+  const at = (bone) => bone.getWorldPosition(new THREE.Vector3());
+  const links = bones.map((bone, i) => {
+    const next = bones[i + 1];
+    // Toward the child; the last bone points along its local +y (Blender's bone axis).
+    const axis =
+      next !== undefined ? next.position.clone().normalize() : new THREE.Vector3(0, 1, 0);
+    const length =
+      next !== undefined
+        ? at(bone).distanceTo(at(next))
+        : i > 0
+          ? at(bones[i - 1]).distanceTo(at(bone))
+          : 0.2 * root.getWorldScale(new THREE.Vector3()).y;
+    return {
+      bone,
+      axis,
+      length,
+      tip: null,
+      prev: new THREE.Vector3(),
+      base: bone.quaternion.clone(),
+      wrote: null,
+    };
+  });
+  const head = new THREE.Vector3();
+  const goal = new THREE.Vector3();
+  const vel = new THREE.Vector3();
+  const from = new THREE.Vector3();
+  const to = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  const pq = new THREE.Quaternion();
+  return {
+    key: bones.map((bone) => bone.name).join(","),
+    options,
+    update(dt) {
+      if (dt <= 0) return;
+      const { stiffness, damping, gravity } = options;
+      const k = 1 - Math.pow(1 - stiffness, dt * 60);
+      const keep = Math.pow(1 - damping, dt * 60);
+      for (const link of links) {
+        const { bone } = link;
+        // A clip that does not key this bone leaves our last rotation: start from its pose again.
+        if (link.wrote !== null && bone.quaternion.equals(link.wrote))
+          bone.quaternion.copy(link.base);
+        bone.updateWorldMatrix(true, false);
+        bone.getWorldPosition(head);
+        goal
+          .copy(link.axis)
+          .applyQuaternion(bone.getWorldQuaternion(q))
+          .multiplyScalar(link.length)
+          .add(head);
+        if (link.tip === null || link.tip.distanceTo(goal) > Math.max(link.length * 4, 1)) {
+          link.tip = goal.clone();
+          link.prev.copy(goal);
+        }
+        vel.subVectors(link.tip, link.prev).multiplyScalar(keep);
+        link.prev.copy(link.tip);
+        link.tip.add(vel).addScaledVector(_v3.subVectors(goal, link.tip), k);
+        link.tip.y -= gravity * dt * dt;
+        link.tip.sub(head).setLength(link.length).add(head);
+        from.subVectors(goal, head).normalize();
+        to.subVectors(link.tip, head).normalize();
+        q.setFromUnitVectors(from, to);
+        bone.parent.getWorldQuaternion(pq);
+        bone.quaternion.premultiply(pq.clone().invert().multiply(q).multiply(pq));
+        link.wrote = bone.quaternion.clone();
+        bone.updateMatrixWorld(true);
+      }
+    },
+  };
+}
+
 export function animate(gltf, { fade = 0.2 } = {}) {
   const root = gltf.scene ?? gltf;
   const clips = gltf.animations ?? [];
   const mixer = new THREE.AnimationMixer(root);
   const actions = new Map();
   const warned = new Set();
+  // The pipeline's sidecar (shell/assets.js); a library model has none.
+  const asset = gltf.userData?.asset ?? root.userData?.asset ?? null;
+  const groundSpeeds = new Map(
+    (asset?.clips ?? [])
+      .filter((clip) => typeof clip.groundSpeed === "number" && clip.groundSpeed > 0)
+      .map((clip) => [clip.name, clip.groundSpeed]),
+  );
+  const springs = [];
+  const addSpring = (names, options, name = null) => {
+    const chain = makeSpring(root, names, { ...SPRING, ...options });
+    if (chain !== null) springs.push(Object.assign(chain, { name }));
+  };
+  for (const chain of asset?.springs ?? []) addSpring(chain.bones, {}, chain.name);
+  const gaze = {
+    target: null,
+    name: null,
+    bone: null,
+    yaw: 0,
+    maxYaw: 1,
+    rate: 6,
+    base: null,
+    wrote: null,
+  };
+  const settleGaze = (dt) => {
+    const { bone } = gaze;
+    if (bone === null) return;
+    // As with springs: a clip that leaves the head unkeyed would otherwise compound the turn.
+    if (gaze.wrote !== null && bone.quaternion.equals(gaze.wrote)) bone.quaternion.copy(gaze.base);
+    let want = 0;
+    if (gaze.target !== null) {
+      const facing = _v2.set(0, 0, 1).applyQuaternion(root.getWorldQuaternion(_q1));
+      const to = _v3.subVectors(gaze.target, root.getWorldPosition(_v1));
+      if (to.lengthSq() > 1e-4)
+        want = THREE.MathUtils.clamp(
+          Math.atan2(facing.z * to.x - facing.x * to.z, facing.x * to.x + facing.z * to.z),
+          -gaze.maxYaw,
+          gaze.maxYaw,
+        );
+    }
+    gaze.yaw += (want - gaze.yaw) * (1 - Math.exp(-gaze.rate * dt));
+    gaze.base = bone.quaternion.clone();
+    rotateWorld(bone, _v1.set(0, 1, 0), gaze.yaw);
+    gaze.wrote = bone.quaternion.clone();
+  };
+  const unmeasured = new Set();
+  const rate = (action, options) => {
+    if (options.moveSpeed === undefined) return options.speed ?? 1;
+    const clip = action.getClip().name;
+    const ground = groundSpeeds.get(clip);
+    if (ground !== undefined) return THREE.MathUtils.clamp(options.moveSpeed / ground, 0.25, 3);
+    if (!unmeasured.has(clip)) {
+      unmeasured.add(clip);
+      console.warn(`animate: no measured ground speed for ${clip}; pass speed`);
+    }
+    return options.speed ?? 1;
+  };
   let current = null; // { state, action }
   let loopState = "idle";
   let loopOptions = {};
@@ -107,12 +280,13 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     );
   };
 
-  const start = (state, action, { once, speed = 1, fade: f = fade }) => {
+  const start = (state, action, options) => {
+    const { once, fade: f = fade } = options;
     const previous = current?.action ?? null;
     action.reset();
     action.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
     action.clampWhenFinished = once;
-    action.timeScale = speed;
+    action.timeScale = rate(action, options);
     // Loop to loop keeps the step phase (walk to run lands on the same foot).
     if (!once && previous !== null && previous.loop === THREE.LoopRepeat && previous !== action)
       action.time = (previous.time / previous.getClip().duration) * action.getClip().duration;
@@ -149,10 +323,52 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       if (current?.once && !current.done) return;
       if (current?.action === action && !current.once) {
         current.state = state;
-        action.timeScale = options.speed ?? 1;
+        action.timeScale = rate(action, options);
         return;
       }
       start(state, action, { ...options, once });
+    },
+    /**
+     * A chain that lags and swings on top of the clips: a sidecar chain's name
+     * ("tail"; "ear" is ear_l and ear_r) retunes it, a list of bones (root to tip)
+     * adds one. Options: stiffness, damping (0..1 per frame at 60 fps), gravity (m/s²).
+     */
+    spring(namesOrChain, options = {}) {
+      if (typeof namesOrChain === "string") {
+        const named = springs.filter(
+          (chain) =>
+            chain.name !== null &&
+            (chain.name === namesOrChain || chain.name.startsWith(`${namesOrChain}_`)),
+        );
+        if (named.length === 0)
+          console.warn(
+            `animate: no spring chain "${namesOrChain}"; chains: ${springs.map((chain) => chain.name ?? chain.key).join(", ") || "none"}`,
+          );
+        for (const chain of named) Object.assign(chain.options, options);
+        return animator;
+      }
+      const existing = springs.find((chain) => chain.key === namesOrChain.join(","));
+      if (existing !== undefined) Object.assign(existing.options, options);
+      else addSpring(namesOrChain, options);
+      return animator;
+    },
+    /** Turn the head toward a world point; null looks ahead again. maxYaw in radians, rate per second. */
+    lookAt(point, { bone = "Head", maxYaw = 1, rate = 6 } = {}) {
+      if (gaze.name !== bone) {
+        gaze.name = bone;
+        gaze.bone = findBone(root, bone);
+        gaze.wrote = null;
+        if (gaze.bone === null) console.warn(`animate: no bone "${bone}" to look with`);
+      }
+      gaze.target = point;
+      gaze.maxYaw = maxYaw;
+      gaze.rate = rate;
+      return animator;
+    },
+    /** After the mixer: springs, then the gaze. The shell calls it. */
+    settle(dt) {
+      for (const chain of springs) chain.update(dt);
+      settleGaze(dt);
     },
     /** Back to playing after die (a respawn). */
     revive() {
@@ -180,8 +396,16 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     console.info(
       `animate: clips ${animator.clips.join(", ")}; ` +
         Object.keys(ROLES)
-          .map((role) => `${role}=${findClip(clips, role)?.name ?? "-"}`)
-          .join(" "),
+          .map((role) => {
+            const name = findClip(clips, role)?.name;
+            if (name === undefined) return `${role}=-`;
+            const ground = groundSpeeds.get(name);
+            return `${role}=${name}${ground === undefined ? "" : ` (${ground.toFixed(2)} m/s)`}`;
+          })
+          .join(" ") +
+        (springs.length === 0
+          ? ""
+          : `; springs ${springs.map((chain) => chain.name ?? chain.key).join(", ")}`),
     );
   live.add(animator);
   animator.play("idle");
@@ -193,7 +417,11 @@ export const animateShell = {
   update(dt) {
     // A model taken out of the scene (a defeated enemy) costs nothing; it
     // resumes if it is added back. dispose() forgets it for good.
-    for (const animator of live) if (animator.root.parent !== null) animator.mixer.update(dt);
+    for (const animator of live)
+      if (animator.root.parent !== null) {
+        animator.mixer.update(dt);
+        animator.settle(dt);
+      }
   },
   reset() {
     for (const animator of live) animator.mixer.stopAllAction();
