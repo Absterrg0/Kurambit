@@ -46,7 +46,7 @@ export const kitVersion = async (kitDir: string): Promise<string> => {
 };
 
 /** What one kit entry said on stdout: its one result line, its refusal, or nothing (it raised). */
-export type KitOutput =
+type KitOutput =
   | { readonly kind: "result"; readonly value: unknown }
   | { readonly kind: "refused"; readonly reason: string; readonly text: string }
   | { readonly kind: "none" };
@@ -78,7 +78,6 @@ export const KitDigest = Schema.Struct({
   objects: Schema.Array(Schema.String),
   perObject: Schema.Record(Schema.String, Schema.String),
 });
-export type KitDigest = typeof KitDigest.Type;
 
 /**
  * A review's key: the objects as they are (name and digest each, in name order), the lock and
@@ -153,7 +152,7 @@ export const subjectName = (name: string) =>
     .slice(0, 64) || "model";
 
 /** The route an asset's body came by (a prop's: its first part's). */
-export const routeOf = (parts: ReadonlyArray<GameAssetPart>): GameAssetSource["route"] => {
+const routeOf = (parts: ReadonlyArray<GameAssetPart>): GameAssetSource["route"] => {
   const lead = parts.find((part) => part.what === "body") ?? parts[0];
   if (lead === undefined || lead.from === "made" || lead.from === "mpfb2") return "blender";
   return lead.from === "tripo" ? "tripo" : "library";

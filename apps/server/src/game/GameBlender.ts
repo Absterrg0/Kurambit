@@ -1255,11 +1255,15 @@ const make = Effect.gen(function* () {
       const kit = yield* kitDirectory;
       const copy = NodePath.join(out, "scene.blend");
       const paramsFile = NodePath.join(out, "params.json");
+      // The live scene saves the copy itself: Blender remaps its relative paths (library
+      // textures) for the copy's folder, so the pass resolves the same files the scene does.
+      const saved = yield* callText(root, "execute_blender_code", {
+        code: `import bpy\nbpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(copy)}, copy=True, compress=True)\nprint("STUDIO_SAVED")\n`,
+      });
+      if (!saved.includes("STUDIO_SAVED"))
+        return yield* opError("blender-review", copy, "command-failed", saved.slice(0, 1000));
       yield* Effect.tryPromise({
-        try: async () => {
-          await NodeFSP.copyFile(NodePath.join(root, BLEND_REL), copy);
-          await NodeFSP.writeFile(paramsFile, JSON.stringify({ ...params, out }));
-        },
+        try: () => NodeFSP.writeFile(paramsFile, JSON.stringify({ ...params, out })),
         catch: (cause) => opError("blender-review", out, "io", undefined, cause),
       });
       const result = yield* gate
@@ -1398,8 +1402,6 @@ const make = Effect.gen(function* () {
       const measured: Candidate =
         found ??
         (yield* Effect.gen(function* () {
-          // The pass opens the saved scene; it must be the live one (the pass checks the digest).
-          yield* saveBlend(root);
           const rig = style?.rig === undefined ? null : resolveRig(style.rig);
           const pass = yield* runPass(root, out, {
             objects: digest.objects,
