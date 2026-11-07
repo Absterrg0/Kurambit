@@ -278,10 +278,12 @@ export const GameArtProviderStatus = Schema.Struct({
   message: Schema.String,
 });
 export type GameArtProviderStatus = typeof GameArtProviderStatus.Type;
+/** Per lane, the provider a generation would use now (the person's choice or auto); null when none is ready. */
+export const GameArtLanes = Schema.Record(GameArtLane, Schema.NullOr(GameArtProviderId));
+export type GameArtLanes = typeof GameArtLanes.Type;
 export const GameArtProvidersResult = Schema.Struct({
   providers: Schema.Array(GameArtProviderStatus),
-  /** Per lane, the provider "auto" would use now; null when none is ready. */
-  lanes: Schema.Record(GameArtLane, Schema.NullOr(GameArtProviderId)),
+  lanes: GameArtLanes,
 });
 export type GameArtProvidersResult = typeof GameArtProvidersResult.Type;
 

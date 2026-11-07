@@ -34,6 +34,7 @@ import {
   GameGeneration,
   GameOperationError,
   type GameArtLane,
+  type GameArtLanes,
   type GameArtProviderId,
   type GameArtProviderStatus,
   type GameArtProvidersResult,
@@ -97,6 +98,8 @@ export class GameArt extends Context.Service<
       id: string,
     ) => Effect.Effect<GameGenerationChangeResult, GameOperationError>;
     readonly providers: Effect.Effect<GameArtProvidersResult, GameOperationError>;
+    /** The lane map alone, from saved keys and Codex's sign-in: no network, for game_status. */
+    readonly lanes: Effect.Effect<GameArtLanes, GameOperationError>;
   }
 >()("kurambit/game/art/GameArt") {}
 
@@ -1017,14 +1020,24 @@ const make = Effect.gen(function* () {
     const ready = new Set(
       statuses.filter((status) => status.ready).map((status) => status.provider),
     );
-    const lanes = Object.fromEntries(
+    return { providers: statuses, lanes: laneMap(all, ready) };
+  });
+
+  const laneMap = (all: ServerSettings, ready: ReadonlySet<GameArtProviderId>): GameArtLanes =>
+    Object.fromEntries(
       (Object.keys(GAME_ART_LANE_ORDER) as ReadonlyArray<GameArtLane>).map((lane) => {
         const choice = all.gameArtLanes[lane] ?? "auto";
         if (choice !== "auto") return [lane, ready.has(choice) ? choice : null];
         return [lane, GAME_ART_LANE_ORDER[lane].find((provider) => ready.has(provider)) ?? null];
       }),
-    ) as GameArtProvidersResult["lanes"];
-    return { providers: statuses, lanes };
+    ) as GameArtLanes;
+
+  const lanes: GameArt["Service"]["lanes"] = Effect.gen(function* () {
+    const all = yield* settings;
+    const ready = new Set<GameArtProviderId>();
+    for (const provider of Object.keys(GAME_ART_PROVIDERS) as ReadonlyArray<GameArtProviderId>)
+      if ((yield* quickReady(all, provider)).ready) ready.add(provider);
+    return laneMap(all, ready);
   });
 
   // ── Recovery: every record still making resumes polling its provider ──
@@ -1065,7 +1078,7 @@ const make = Effect.gen(function* () {
   );
   yield* Effect.forkScoped(recover);
 
-  return GameArt.of({ generate, wait, list, choose, cancel, providers });
+  return GameArt.of({ generate, wait, list, choose, cancel, providers, lanes });
 });
 
 /** The server's host: the provider registry's Codex and the run's in-flight step. */

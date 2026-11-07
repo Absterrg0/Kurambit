@@ -6,6 +6,7 @@ import { GameAssetFamily } from "./gameAssets.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason } from "./gameRunReasons.ts";
 import { GameCharacterRoute } from "./gameStyle.ts";
+import { GameArtLanes } from "./gameArt.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -604,6 +605,11 @@ export const GameStatus = Schema.Struct({
    * library). Only the person changes it.
    */
   characters: GameCharacterRoute,
+  /**
+   * Generated art: per lane, the provider game_generate would use now (a key saved, Codex
+   * signed in); null when nothing can make that lane. Absent when it could not be read.
+   */
+  artLanes: Schema.optionalKey(GameArtLanes),
   /** The builds being played from copies of their own (Play of a build), with their URLs. */
   buildPlays: Schema.Array(
     Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),

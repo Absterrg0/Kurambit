@@ -90,7 +90,7 @@ const visibleToRunThreads = () => true;
 const hiddenFromRunThreads = () => !McpInvocationContext.isGameRunThread();
 const GameStatusTool = Tool.make("game_status", {
   description:
-    "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes, playable preview URL and `characters`: how the person chose to make this game's characters (library, blender or tripo; only they change it). Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
+    "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes, playable preview URL and `characters`: how the person chose to make this game's characters (library, blender or generated; only they change it), and `artLanes`: per art lane, the provider game_generate would use now, or null when the person has set none up for it. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
   parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
   success: GameStatus,
   failure,
