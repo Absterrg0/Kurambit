@@ -1,5 +1,6 @@
 import {
   GAME_ART_PROVIDERS,
+  GAME_ASSET_USE_CAP,
   type GameArtLane,
   type GameArtProviderId,
   type GameArtProvidersResult,
@@ -41,17 +42,26 @@ const AS_DELIVERED: ReadonlySet<GameArtLane> = new Set([
 
 /**
  * Whether a finished generation is in the game, from the newest build whose asset use was
- * measured: joined by identical bytes, "in" only once a play loaded it. Null when unknown.
+ * measured: joined by identical bytes, "in" only once a play loaded it. Null when unknown: a
+ * generation that delivered nothing (an edit kept as it was), or one missing from a list that
+ * was cut at its cap, where a miss says nothing.
  */
 export const inGameLine = (
   generation: GameGeneration,
   latestUse: Pick<NonNullable<GameBuildsResult["latestUse"]>, "generations"> | null,
 ): "In the game" | "Not in the game yet" | null => {
-  if (generation.state !== "done" || generation.filesUndone === true || latestUse === null)
+  if (
+    generation.state !== "done" ||
+    generation.filesUndone === true ||
+    generation.files.length === 0 ||
+    latestUse === null
+  )
     return null;
   const joined = latestUse.generations.find((entry) => entry.id === generation.id);
   if (joined !== undefined) return joined.loaded ? "In the game" : "Not in the game yet";
-  return AS_DELIVERED.has(generation.lane) ? "Not in the game yet" : null;
+  return AS_DELIVERED.has(generation.lane) && latestUse.generations.length < GAME_ASSET_USE_CAP
+    ? "Not in the game yet"
+    : null;
 };
 
 /**
