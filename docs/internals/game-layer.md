@@ -254,6 +254,15 @@ still writing is not one. A `live` engine's Web export is a release only and nev
 live serve. An `export` engine (Godot) plays the selected Web export, rebuilt when stale, and a
 `window` engine (Unity) plays in its own window.
 
+The Stage talks to a live three.js game through the **Stage bridge**
+([gameStageBridge.ts](../../packages/contracts/src/gameStageBridge.ts)): `postMessage` objects both
+ends decode, since the game runs on its own origin. The game end is the shell's
+`stage-bridge.js`, inert until the Stage's first message, so plays and recordings never trace or
+outline. A game announces the bridge in `studio-ready`; a shell from before it posts a bare
+`studio-ready`, and so does the current `studio.js` refreshed into it as a harness file, which is
+why `studio.js` takes the bridge only as an optional input from `shell.js`. Godot and Unity have
+no bridge, and their `tuneFile` is null.
+
 So the harness needs exactly two things from an OS: a **process host**
 ([processHost.ts](../../apps/server/src/game/processHost.ts), above) and a **window host**
 ([windowHost.ts](../../apps/server/src/game/windowHost.ts)): one `launch(command, viewport)` that
@@ -298,8 +307,8 @@ run's own status, round, steer, decide and profile tools stay outside their cata
 
 - **A build is no record of its own.** [GameBuilds](../../apps/server/src/game/GameBuilds.ts)
   reads the rail each time from the turn checkpoints and the run's records; a build's id is its
-  commit. Every surface (the six RPCs, the `game_builds`, `game_facts` and `game_build_restore`
-  tools) is one method of that service.
+  commit. Every surface (its RPCs, the `game_builds`, `game_facts`, `game_build_restore` and
+  `game_tune` tools) is one method of that service.
 - **A turn's change is its own.** T3 diffs a turn's checkpoint against its thread's previous
   one, which in a game includes whatever the run or another chat did in between. A turn build
   counts from the newest build of the game captured before the turn began, and says so when the
@@ -336,6 +345,11 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   what it brought back, through the same `playCurrent`.
   `folderEdited` compares the folder's restored paths, captured with T3's capture, against
   `current`.
+- **A person's kept edit is a build too.** The Stage's Keep as a build (`keepValues`) captures
+  the folder, writes the engine's tune file and captures it again, under `game-builds/edits/`:
+  `<request>-values` is the build and `<request>-from` its base. It lists as a saved build with
+  `edit`, joins `current`, and owns Undo while it is the newest (`ownsUndo`), as a turn does; the
+  turn after it counts its change from it.
 - **Copies, never the folder.** A build is played and measured in a plain copy under the
   worktrees folder's `game-builds/`, which is in `GIT_CEILING_DIRECTORIES` like the run's copies
   ([GameBuildCopies](../../apps/server/src/game/GameBuildCopies.ts)). One engine step at a
