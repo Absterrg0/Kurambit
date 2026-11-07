@@ -255,6 +255,18 @@ export const FAKE_FACTS: GameBuildFacts = {
       more: 0,
     },
   },
+  performance: {
+    status: "measured",
+    value: {
+      fps: 59.9,
+      low1: 48.2,
+      gpuMs: 9.1,
+      scale: 0.8,
+      width: 1280,
+      height: 720,
+      frames: 4980,
+    },
+  },
   message: "",
 };
 
