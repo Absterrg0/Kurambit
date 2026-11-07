@@ -9,10 +9,14 @@ params (the server resolves the path and reads the generation's record):
     rig    a creature's own rig id ("tripo-quadruped"): the lock's rig governs humanoids only
     generation  {id, path}: the generation that delivered it; the server checks a creature's
                 armature against it before the lock's rig check skips it
+    restore     {scale, translation} | None: how the provider normalized the game's own mesh it
+                rigged (normalized = original × scale + translation, glTF axes); undone here, so
+                the mesh comes back at the size and place it was made at
 
 A creature keeps its skeleton and its clips: it is never conformed, and its armature carries
-kurambit_rig so the pass and the lock know it is on its own rig. A humanoid is not imported here:
-game_blender_character conforms it to the standard skeleton."""
+kurambit_rig so the pass and the lock know it is on its own rig. A model made in parts keeps each
+part as its own object, named after the part, so the game can pivot it. A humanoid is not imported
+here: game_blender_character conforms it to the standard skeleton."""
 import json
 import re
 
@@ -77,6 +81,14 @@ def generated(params):
                 child.parent = None
                 child.matrix_world = mw
     skeleton.remove_objects([o for o in new if o not in arms and o not in meshes])
+    restore = params.get("restore")
+    if restore:
+        # glTF (x, y, z) is Blender (x, -z, y); the inverse of p * s + t is (p - t) / s.
+        tx, ty, tz = restore["translation"]
+        undo = Matrix.Diagonal((1 / restore["scale"],) * 3).to_4x4() @ Matrix.Translation((-tx, tz, -ty))
+        for o in arms + meshes:
+            if o.parent is None:
+                o.matrix_world = undo @ o.matrix_world
     coll = bpy.data.collections.new(name)
     bpy.context.scene.collection.children.link(coll)
     for o in arms + meshes:
@@ -86,10 +98,13 @@ def generated(params):
 
     what = "body" if lane == "creature" else "mesh"
     part = json.dumps({"what": what, **stamp})
+    parts = {o: o.name for o in meshes}
     for i, o in enumerate(meshes):
         o["kurambit_source"] = part
         if lane == "model":
-            o.name = name if len(meshes) == 1 else f"{name}_{i + 1}"
+            # A part keeps the name it was made with (a door, a wheel); a numbered one takes a number.
+            own = re.sub(r"[^A-Za-z0-9_]+", "_", re.sub(r"\.\d{3}$", "", parts[o])).strip("_")
+            o.name = name if len(meshes) == 1 else f"{name}_{own or i + 1}"
     clips = []
     notes = []
     if arms:

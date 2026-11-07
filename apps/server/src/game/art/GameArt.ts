@@ -66,7 +66,7 @@ import {
   STANDARD_RIG,
 } from "../assetLibraryCatalog.ts";
 import { motionClipName } from "../generatedSource.ts";
-import { readGltfJson } from "../gltfJson.ts";
+import { glbJson, gltfMeshSize, readGltfJson } from "../gltfJson.ts";
 import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
 import { lockCharacterRouteRefusal } from "../gameStyle.ts";
@@ -78,6 +78,7 @@ import {
   type ArtReference,
   type ArtRemote,
   type ArtRequest,
+  type ArtRestore,
   type ArtStep,
   ArtProviderError,
   makeArtHttp,
@@ -131,10 +132,11 @@ export class GameArt extends Context.Service<
     /** The lane map alone, from saved keys and Codex's sign-in: no network, for game_status. */
     readonly lanes: Effect.Effect<GameArtLanes, GameOperationError>;
     /**
-     * Who renders a landed motion's review strip. GameBlender reads this service's records, so
-     * it cannot be one of its dependencies; GameService, which holds both, hands it in at start.
+     * Who renders the pictures on a card: a landed motion's strip, a model's views before its rig.
+     * GameBlender reads this service's records, so it cannot be one of its dependencies;
+     * GameService, which holds both, hands them in at start.
      */
-    readonly renderMotionStripsWith: (render: MotionStripRender) => Effect.Effect<void>;
+    readonly renderWith: (renderers: ArtRenderers) => Effect.Effect<void>;
   }
 >()("kurambit/game/art/GameArt") {}
 
@@ -145,11 +147,25 @@ export type MotionStripRender = (
   out: string,
 ) => Effect.Effect<void, GameOperationError>;
 
+/** Renders a model's front, side and back, textured and in clay, into `out` (game-relative). */
+export type ModelViewsRender = (
+  root: string,
+  model: string,
+  out: string,
+) => Effect.Effect<void, GameOperationError>;
+
+export interface ArtRenderers {
+  readonly motionStrip: MotionStripRender;
+  readonly modelViews: ModelViewsRender;
+}
+
 export interface GameArtDelivered {
   readonly generation: GameGeneration;
   readonly licence: string;
   /** A creature's body plan, as it was asked for. */
   readonly body: string | null;
+  /** How the provider normalized an uploaded mesh it rigged; the import undoes it. */
+  readonly restore: ArtRestore | null;
 }
 
 /**
@@ -211,6 +227,11 @@ const REFERENCE_MIME: Readonly<Record<string, ArtReference["mime"]>> = {
 const MULTI_CANDIDATE_LANES: ReadonlyArray<GameArtLane> = ["image", "texture"];
 const CHANGED_LABEL = "Changed";
 const AS_IT_WAS_LABEL = "As it was";
+/** The one candidate of a model the person looks at before it is rigged. */
+const RIG_THIS_LABEL = "Rig this";
+/** The game mesh a character or creature is rigged from: what Tripo takes. */
+const MESH_BYTES = 150 * 1024 * 1024;
+const RIGGED_LANES: ReadonlySet<GameArtLane> = new Set(["character", "creature"]);
 
 /** The game image an edit changes; null for anything else. */
 const editOf = (meta: Meta): string | null =>
@@ -259,6 +280,22 @@ const Meta = Schema.Struct({
   labels: Schema.optionalKey(Schema.Array(Schema.String)),
   /** The style picture each direction was sent with (a game path or `library:pack/path`), by candidate. */
   styles: Schema.optionalKey(Schema.Array(Schema.NullOr(Schema.String))),
+  /**
+   * The person looks at the model before the rig: true until they pick "Rig this". While it waits
+   * the row is choosing, its job holds the pending rig, and nothing runs, so a restart sends nothing.
+   */
+  review: Schema.optionalKey(Schema.Boolean),
+  /** When the chain went on after the person's look: its deadline counts from here. */
+  resumedAt: Schema.optionalKey(Schema.String),
+  /** How the provider normalized an uploaded mesh it rigged (see ArtRestore). */
+  restore: Schema.optionalKey(
+    Schema.Struct({
+      scale: Schema.Number,
+      translation: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+    }),
+  ),
+  /** What was measured of a rigged game mesh against the file sent, for the done text. */
+  meshNote: Schema.optionalKey(Schema.String),
 });
 type Meta = typeof Meta.Type;
 const decodeGeneration = Schema.decodeUnknownOption(Schema.fromJsonString(GameGeneration));
@@ -454,7 +491,7 @@ const make = Effect.gen(function* () {
   // One gate for the day's spend: the sum and the insert that counts against it are one step.
   const spendGate = yield* Semaphore.make(1);
   const changes = yield* PubSub.unbounded<string>();
-  const stripRenderer = yield* Ref.make<MotionStripRender | null>(null);
+  const renderers = yield* Ref.make<ArtRenderers | null>(null);
   const keyChecks = new Map<
     GameArtProviderId,
     { key: string; at: number; status: GameArtProviderStatus }
@@ -573,7 +610,10 @@ const make = Effect.gen(function* () {
     return `Nothing can make ${lane} yet: add ${named.join(" or ")} in Settings → Art providers.`;
   };
 
-  const route = (all: ServerSettings, request: Omit<ArtRequest, "references">) =>
+  const route = (
+    all: ServerSettings,
+    request: Omit<ArtRequest, "references"> & { readonly references: number },
+  ) =>
     Effect.gen(function* () {
       const choice = all.gameArtLanes[request.lane] ?? "auto";
       if (choice !== "auto") {
@@ -743,6 +783,40 @@ const make = Effect.gen(function* () {
               MOTION_VIDEO_BYTES,
             );
       return { body, ...(video === undefined ? {} : { video }) };
+    });
+
+  /**
+   * The game mesh a character or creature is rigged from: a GLB inside the game that holds a mesh
+   * and no skin. A rigged one is refused: rigging it again would replace the skeleton it has.
+   */
+  const riggableMesh = (root: string, path: string) =>
+    Effect.gen(function* () {
+      const absolute = yield* gameUpload(
+        root,
+        path,
+        "The mesh",
+        { test: /\.glb$/i, name: "a .glb file" },
+        MESH_BYTES,
+      );
+      const read = yield* Effect.promise(() => readGltfJson(absolute, 16 * 1024 * 1024));
+      const doc = (read.kind === "json" ? read.json : null) as {
+        readonly skins?: ReadonlyArray<{ readonly joints?: ReadonlyArray<number> }>;
+      } | null;
+      const refuse = (detail: string) =>
+        opError(
+          "art-generate",
+          `The mesh ${path} ${detail} Nothing was asked of a provider or spent.`,
+          "invalid-input",
+          path,
+        );
+      if (doc === null) return yield* refuse("does not read as a GLB.");
+      if (gltfMeshSize(doc) === null) return yield* refuse("holds no mesh.");
+      const joints = (doc.skins ?? []).reduce((sum, skin) => sum + (skin.joints ?? []).length, 0);
+      if ((doc.skins ?? []).length > 0)
+        return yield* refuse(
+          `is already rigged (${joints} joints): rigging it again would replace its skeleton. Keep its rig: game_blender_assets_import brings a library model in with its own rig and clips, and a rigged file already in the game is used as it is.`,
+        );
+      return absolute;
     });
 
   /**
@@ -930,6 +1004,10 @@ const make = Effect.gen(function* () {
           );
       }
       const written = yield* writeFiles(row, step.candidates);
+      const meshNote =
+        typeof row.meta.options.mesh === "string"
+          ? yield* meshKept(row, row.meta.options.mesh, step.candidates[0] ?? [])
+          : undefined;
       // Directions mark it themselves when one of them reported no cost.
       const estimated =
         (step.costUsd === null && row.generation.estimateUsd !== null) || row.meta.costEstimated;
@@ -963,6 +1041,8 @@ const make = Effect.gen(function* () {
           candidateFiles: edit === null ? candidateFiles : [candidateFiles[0] ?? [], []],
           costEstimated: estimated,
           job: row.meta.job,
+          ...(step.restore === undefined ? {} : { restore: step.restore }),
+          ...(meshNote === undefined ? {} : { meshNote }),
         },
       );
       if (edit !== null)
@@ -974,6 +1054,24 @@ const make = Effect.gen(function* () {
         return yield* chooseUnlocked(next, 0, "only");
       if (next.meta.autopilot) return yield* chooseUnlocked(next, 0, "autopilot");
       return yield* toChoosing(next);
+    });
+
+  /**
+   * The game's mesh is never rebuilt: what came back is measured against the file that was sent
+   * (triangles and textures), and the done text says either that they are kept or what changed.
+   */
+  const meshKept = (row: Row, mesh: string, files: ReadonlyArray<ArtFile>) =>
+    Effect.promise(async () => {
+      const read = await readGltfJson(NodePath.join(row.root, mesh), 16 * 1024 * 1024);
+      const sent = read.kind === "json" ? gltfMeshSize(read.json) : null;
+      const rigged = files.find((file) => file.role === "asset" && file.ext === "glb");
+      const back = rigged === undefined ? null : gltfMeshSize(glbJson(rigged.bytes));
+      const label = GAME_ART_PROVIDERS[row.generation.provider].label;
+      if (sent === null || back === null)
+        return `${label}'s rigged file could not be compared with ${mesh}.`;
+      if (back.triangles === sent.triangles && back.images >= sent.images)
+        return `${label} kept ${mesh}'s ${sent.triangles} triangles and ${sent.images} ${sent.images === 1 ? "texture" : "textures"}, adding only the skeleton, its skin and the clips.`;
+      return `${label}'s rigged file has ${back.triangles} triangles and ${back.images} textures where ${mesh} has ${sent.triangles} and ${sent.images}: ${label} changed the mesh. Look at it before using it, and say so to the person.`;
     });
 
   const fail = (row: Row, reason: string, cost: number | null | undefined) =>
@@ -1018,7 +1116,10 @@ const make = Effect.gen(function* () {
             );
       const label = GAME_ART_PROVIDERS[adapter.id].label;
       const limit = LANE_DEADLINE[initial.generation.lane];
-      const deadline = Date.parse(initial.generation.createdAt) + Duration.toMillis(limit);
+      // A look at the model may take the person days: the rig after it gets the lane's whole time.
+      const deadline =
+        Date.parse(initial.meta.resumedAt ?? initial.generation.createdAt) +
+        Duration.toMillis(limit);
       const late = () =>
         new ArtProviderError({
           reason: `${label} took longer than ${Duration.format(limit)}; Kurambit stopped asking. It may still finish and be charged at ${label}.`,
@@ -1059,25 +1160,29 @@ const make = Effect.gen(function* () {
           id,
           Effect.gen(function* () {
             const row = yield* loadOrFail(root, id, "art-drive");
-            if (row.generation.state !== "making") return false;
+            if (row.generation.state !== "making") return null;
             const kept =
               making.files === undefined || making.files.length === 0
                 ? []
                 : (yield* writeFiles(row, [making.files])).flat().map((file) => file.path);
             if (kept.length === 0 && encodeJson(row.meta.job) === encodeJson(making.remote))
-              return true;
+              return row;
             const next = yield* touch(
               row,
               {},
               { job: making.remote, kept: [...row.meta.kept, ...kept] },
             );
             yield* save(next, countedOf(next.generation));
-            return true;
+            return next;
           }),
         );
-        if (!live) return;
+        if (live === null) return;
         // The intent is saved above before the stage is sent: a restart finds it and stops.
         const stage = pendingStage(making.remote);
+        // The person looks at the model before the rig is bought: the row waits as choosing,
+        // with the rig still pending in its job, and this fiber ends.
+        if (stage === "rig" && live.meta.review === true && (yield* awaitLook(live, making)))
+          return;
         if (stage !== null) {
           step = yield* advanceOnce(making.remote, stage);
           continue;
@@ -1140,12 +1245,58 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * A character's or creature's model is in: render it (best effort) and wait as choosing, with
+   * one candidate the person picks to have it rigged. The day keeps the whole estimate reserved,
+   * so "Rig this" never needs a second admission; the generation shows what the model cost, which
+   * is what a cancel counts. False when there is no model file to show: the chain goes on.
+   */
+  const awaitLook = (row: Row, making: Extract<ArtStep, { kind: "making" }>) =>
+    Effect.gen(function* () {
+      const model = row.meta.kept.find((file) => /\.model\.(glb|gltf|fbx)$/i.test(file));
+      if (model === undefined) return false;
+      const out = `${row.meta.folder}/${row.generation.name}.model.png`;
+      const render = (yield* Ref.get(renderers))?.modelViews ?? null;
+      const rendered =
+        render === null
+          ? false
+          : yield* render(row.root, model, out).pipe(
+              Effect.as(true),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("model views not rendered", {
+                  id: row.generation.id,
+                  cause,
+                }).pipe(Effect.as(false)),
+              ),
+            );
+      return yield* locks.withLock(
+        row.generation.id,
+        Effect.gen(function* () {
+          const now = yield* loadOrFail(row.root, row.generation.id, "art-drive");
+          if (now.generation.state !== "making") return true;
+          const kept = rendered ? [...now.meta.kept, out] : now.meta.kept;
+          const next = yield* touch(
+            now,
+            {
+              state: "choosing",
+              candidates: [{ preview: rendered ? out : model, label: RIG_THIS_LABEL }],
+              costUsd: making.spent?.usd ?? null,
+            },
+            { kept, candidateFiles: [kept], costEstimated: making.spent?.estimated ?? false },
+          );
+          yield* writeRecordFile(next);
+          yield* save(next, next.generation.estimateUsd);
+          return true;
+        }),
+      );
+    });
+
+  /**
    * A landed motion's review strip, rendered on the body its GLB holds and shown on its card in
    * place of a model chip. Best effort: without it the card shows the clip's files.
    */
   const addMotionStrip = (root: string, id: string) =>
     Effect.gen(function* () {
-      const render = yield* Ref.get(stripRenderer);
+      const render = (yield* Ref.get(renderers))?.motionStrip ?? null;
       const row = yield* loadOrFail(root, id, "art-strip");
       if (render === null || row.generation.state !== "done") return;
       const clips = row.generation.files
@@ -1189,18 +1340,28 @@ const make = Effect.gen(function* () {
     const where = row.meta.folder;
     switch (g.state) {
       case "making":
-        return `Making ${edit === null ? `${g.lane} "${g.name}"` : `a change to ${edit}${row.meta.options.transparent === true ? " (cut out)" : ""}`} with ${label}${
+        return `${
+          typeof row.meta.options.mesh === "string"
+            ? `Rigging ${row.meta.options.mesh} as ${g.lane} "${g.name}"`
+            : `Making ${edit === null ? `${g.lane} "${g.name}"` : `a change to ${edit}${row.meta.options.transparent === true ? " (cut out)" : ""}`}`
+        } with ${label}${
           g.estimateUsd === null
             ? g.provider === "codex"
               ? " on the ChatGPT plan's Codex limits (no dollar cost)"
               : ""
             : `, estimated ${usd(g.estimateUsd)}`
-        }${spent !== null && limit !== null ? ` (${usd(spent)} of the ${usd(limit)} daily limit spent today)` : ""}. Files land in ${where}/. Wait with game_generate_wait id ${g.id}.`;
+        }${spent !== null && limit !== null ? ` (${usd(spent)} of the ${usd(limit)} daily limit spent today)` : ""}. Files land in ${where}/.${lookText(row)} Wait with game_generate_wait id ${g.id}.`;
       case "choosing":
         if (g.filesUndone === true)
           return `The candidates of "${g.name}" are no longer in the game: ${UNDONE}`;
         if (edit !== null)
           return `The change to ${edit} is ready (${g.candidates[0]?.preview ?? ""}); the person picks "${CHANGED_LABEL}" or "${AS_IT_WAS_LABEL}" in the chat. Until then the game keeps ${edit}. Cost ${costText(row)}.`;
+        if (row.meta.review === true)
+          return `The model of "${g.name}" is ready (${g.candidates[0]?.preview ?? ""}: front, side and back, textured and in clay). The person looks at it and picks "${RIG_THIS_LABEL}" or Cancel in the chat; nothing more is asked of ${label} until then. Cost so far ${costText(row)}${
+            g.estimateUsd !== null && g.costUsd !== null && g.estimateUsd > g.costUsd
+              ? `; the rig and its clips add about ${usd(roundUsd(g.estimateUsd - g.costUsd))}`
+              : ""
+          }. After "${RIG_THIS_LABEL}", game_generate_wait id ${g.id} waits for the rig.`;
         return `${g.candidates.length} ${g.candidates.length === 1 ? "candidate" : "candidates"} of "${g.name}" ${g.candidates.length === 1 ? "is" : "are"} ready (${g.candidates
           .map((candidate) => candidate.preview)
           .join(", ")})${refusedText(g)}; the person picks one in the chat. Cost ${costText(row)}.`;
@@ -1209,12 +1370,20 @@ const make = Effect.gen(function* () {
           return `"${g.name}" was made (${g.files.join(", ")}), but its files are no longer in the game: ${UNDONE}`;
         if (edit !== null) return editDone(row, edit);
         return `"${g.name}" is in the game: ${g.files.join(", ")}${
+          row.meta.resumedAt !== undefined
+            ? " (the person looked at the model and had it rigged)"
+            : RIGGED_LANES.has(g.lane) &&
+                row.meta.autopilot &&
+                typeof row.meta.options.mesh !== "string"
+              ? " (Keep going's autopilot had it rigged without stopping for the person's look at the model)"
+              : ""
+        }${
           g.chosenBy === "autopilot"
             ? " (Keep going took the first candidate)"
             : g.chosenBy === "person"
               ? ` (the person picked candidate ${(g.chosen ?? 0) + 1})`
               : ""
-        }. Cost ${costText(row)}. Recorded in ${where}/${g.name}.generation.json with its source, AI flag and licence.${nextStep(g)}`;
+        }. Cost ${costText(row)}. Recorded in ${where}/${g.name}.generation.json with its source, AI flag and licence.${row.meta.meshNote === undefined ? "" : ` ${row.meta.meshNote}`}${nextStep(g)}`;
       case "failed":
         return `"${g.name}" failed: ${g.error ?? "no reason given"}${g.costUsd ? ` Counted ${usd(g.costUsd)} against today (the provider may have charged for work it started).` : ""}`;
       case "cancelled":
@@ -1237,6 +1406,16 @@ const make = Effect.gen(function* () {
         : ` (the person picked "${CHANGED_LABEL}")`
     }. ${edit} is unchanged. ${cost} Recorded in ${row.meta.folder}/${g.name}.generation.json. Next: point the game at ${changed} wherever it uses ${edit} (or copy it over ${edit} when the game reads that path), and if ${edit} is STYLE.json's anchor, read the palette again from the new file with kurambit.palette_of and update STYLE.json.`;
   };
+  /** What a character or creature does between its model and its rig, while it is making. */
+  const lookText = (row: Row) => {
+    const g = row.generation;
+    if (!RIGGED_LANES.has(g.lane) || typeof row.meta.options.mesh === "string") return "";
+    if (row.meta.review === true)
+      return ` It stops after the model: the person looks at it and picks "${RIG_THIS_LABEL}" (or Cancel) in the chat before the rig is bought.`;
+    if (row.meta.autopilot && row.meta.resumedAt === undefined)
+      return " Keep going's autopilot has it rigged without stopping for the person's look at the model.";
+    return "";
+  };
   /** Where a delivered file goes next, so the agent reads the call instead of guessing it. */
   const nextStep = (g: GameGeneration) => {
     if (g.lane === "motion") {
@@ -1244,7 +1423,10 @@ const make = Effect.gen(function* () {
       const names = clips.map((file) => motionClipName(g.name, file));
       return ` Clip${clips.length === 1 ? "" : "s"} ${names.join(", ")}, on the standard skeleton: every humanoid in the game can play ${clips.length === 1 ? "it" : "them"}. Next: game_blender_character with clips that list ${clips.length === 1 ? "this file" : "the files the game needs"} beside the clips the character keeps (replace: true rebuilds one already made): ${clips.map((file) => JSON.stringify(file)).join(", ")}.`;
     }
-    const model = g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file));
+    // The model the person looked at before its rig is not what the game takes.
+    const model =
+      g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file) && !/\.model\.[a-z]+$/i.test(file)) ??
+      g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file));
     if (model === undefined) return " Next: add it to the game with game_import.";
     return g.lane === "character"
       ? ` Next: game_blender_character with body {game: "${model}"}.`
@@ -1342,8 +1524,38 @@ const make = Effect.gen(function* () {
             "An edit is one change: drop directions, and the person picks between the change and the image as it was.",
           );
       }
+      if (options.mesh !== undefined) {
+        if (!RIGGED_LANES.has(input.lane))
+          return yield* opError(
+            "art-generate",
+            `mesh is a game model rigged as a character or a creature, not made into a ${input.lane}. Nothing was asked of a provider or spent.`,
+          );
+        if ((input.references ?? []).length > 0)
+          return yield* opError(
+            "art-generate",
+            "The mesh is the model: leave references out. Nothing was asked of a provider or spent.",
+          );
+        if (options.lowPoly === true || options.parts === true)
+          return yield* opError(
+            "art-generate",
+            "The game's mesh is rigged as it is, never rebuilt: lowPoly and parts make a new model. Leave them out, or make a new model without mesh. Nothing was asked of a provider or spent.",
+          );
+      }
+      if (options.parts === true && input.lane !== "model")
+        return yield* opError(
+          "art-generate",
+          `parts are for a model with moving parts (a door, a turret, a wheel); a ${input.lane} moves by its rig. Nothing was asked of a provider or spent.`,
+        );
+      if (options.lowPoly === true && input.lane !== "model" && !RIGGED_LANES.has(input.lane))
+        return yield* opError(
+          "art-generate",
+          `lowPoly is topology for characters, creatures and models, not ${input.lane}.`,
+        );
       const base = { lane: input.lane, prompt: input.prompt, candidates: 1, options };
-      const adapter = yield* route(all, base);
+      const adapter = yield* route(all, {
+        ...base,
+        references: (input.references ?? []).length,
+      });
       if (input.lane === "motion" && (input.references ?? []).length > 0)
         return yield* opError(
           "art-generate",
@@ -1357,17 +1569,34 @@ const make = Effect.gen(function* () {
       const editedSize =
         edited !== null && edited.mime === "image/png" ? readPng(edited.bytes) : null;
       const references = yield* readReferences(root, input.references ?? []);
-      const uploads = input.lane === "motion" ? yield* motionUploads(root, options) : undefined;
+      const uploads =
+        input.lane === "motion"
+          ? yield* motionUploads(root, options)
+          : options.mesh !== undefined
+            ? { mesh: yield* riggableMesh(root, options.mesh) }
+            : undefined;
       const styles = yield* Effect.forEach(directions, (direction) =>
         direction.style === undefined ? Effect.succeed(null) : readStyle(root, direction.style),
       );
+      // A character or creature made while the person directs stops after its paid model, so they
+      // look at it before the rig is bought; Keep going's autopilot goes on without stopping.
+      const madeBody = RIGGED_LANES.has(input.lane) && options.mesh === undefined;
+      const autopilot =
+        (directions.length > 1 || edited !== null || madeBody) &&
+        (yield* host.keepGoingStep(threadId));
+      const review = madeBody && !autopilot;
       // Each direction is its own request for one image: the person picks between looks,
       // never between samples of one prompt (which come back as near-copies).
       const requests: ReadonlyArray<ArtRequest> =
         directions.length === 0
           ? [
               edited === null
-                ? { ...base, references, ...(uploads === undefined ? {} : { uploads }) }
+                ? {
+                    ...base,
+                    references,
+                    ...(uploads === undefined ? {} : { uploads }),
+                    ...(review ? { review: true } : {}),
+                  }
                 : {
                     ...base,
                     prompt: editPrompt(
@@ -1403,10 +1632,6 @@ const make = Effect.gen(function* () {
       const estimate = estimates.some((value) => value === null)
         ? null
         : roundUsd(estimates.reduce<number>((sum, value) => sum + (value ?? 0), 0));
-      // Keep going's autopilot picks where the person would: between looks, or a change and the
-      // image as it was (it takes the change).
-      const autopilot =
-        (directions.length > 1 || edited !== null) && (yield* host.keepGoingStep(threadId));
       const id = NodeCrypto.randomUUID();
       const limit = all.gameArtDailyLimitUsd;
       const admitted = yield* spendGate.withPermits(1)(
@@ -1454,6 +1679,7 @@ const make = Effect.gen(function* () {
             costEstimated: false,
             candidateFiles: [],
             options,
+            ...(review ? { review: true } : {}),
             ...(directions.length === 0
               ? {}
               : {
@@ -1554,6 +1780,7 @@ const make = Effect.gen(function* () {
               generation: row.generation,
               licence: licenceOf(row),
               body: typeof row.meta.options.body === "string" ? row.meta.options.body : null,
+              restore: row.meta.restore ?? null,
             },
       ),
     );
@@ -1638,9 +1865,37 @@ const make = Effect.gen(function* () {
               "art-choose",
               `The candidates of "${row.generation.name}" are no longer in the game: ${UNDONE}`,
             );
+          if (row.meta.review === true) return { generation: yield* rigAfterLook(row) };
           return { generation: (yield* chooseUnlocked(row, candidate, "person")).generation };
         }),
       );
+    });
+
+  /**
+   * "Rig this": the chain goes on from its saved job, whose rig is still pending. The row is
+   * making again before the driver starts, and the driver sends the rig once, as after any stage.
+   * The model's files stay and join what the rig delivers.
+   */
+  const rigAfterLook = (row: Row) =>
+    Effect.gen(function* () {
+      const job = row.meta.job;
+      if (job === null || pendingStage(job) === null)
+        return yield* opError("art-choose", `"${row.generation.name}" has no rig waiting.`);
+      const next = yield* touch(
+        row,
+        { state: "making", candidates: [], costUsd: null },
+        {
+          review: false,
+          candidateFiles: [],
+          costEstimated: false,
+          resumedAt: yield* nowIso,
+        },
+      );
+      yield* save(next, next.generation.estimateUsd);
+      yield* startDriver(row.root, row.generation.id, () =>
+        Effect.succeed({ kind: "making", remote: job } satisfies ArtStep),
+      );
+      return next.generation;
     });
 
   const cancel: GameArt["Service"]["cancel"] = (root, id) =>
@@ -1807,7 +2062,7 @@ const make = Effect.gen(function* () {
     delivered,
     providers,
     lanes,
-    renderMotionStripsWith: (render) => Ref.set(stripRenderer, render),
+    renderWith: (set) => Ref.set(renderers, set),
   });
 });
 

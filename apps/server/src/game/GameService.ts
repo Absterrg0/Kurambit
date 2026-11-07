@@ -510,8 +510,12 @@ const make = Effect.gen(function* () {
   const preview = yield* GamePreview.GamePreview;
   const liveBlender = yield* GameBlender.GameBlender;
   const art = yield* GameArt.GameArt;
-  // A landed motion's strip is rendered in the game's live Blender, which reads GameArt's records.
-  yield* art.renderMotionStripsWith(liveBlender.motionStrip);
+  // A landed motion's strip and a model's views before its rig are rendered in the game's live
+  // Blender, which reads GameArt's records.
+  yield* art.renderWith({
+    motionStrip: liveBlender.motionStrip,
+    modelViews: liveBlender.modelViews,
+  });
   const library = yield* GameAssetLibrary.GameAssetLibrary;
   const gameBot = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
