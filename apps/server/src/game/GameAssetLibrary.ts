@@ -109,6 +109,10 @@ export class GameAssetLibrary extends Context.Service<
     readonly packClips: (
       pack: string,
     ) => Effect.Effect<ReadonlyArray<PackClips>, GameOperationError>;
+    /** The pack's own overview picture of its look; refused when it ships none (every KayKit pack). */
+    readonly packPicture: (
+      pack: string,
+    ) => Effect.Effect<{ readonly path: string; readonly file: string }, GameOperationError>;
   }
 >()("kurambit/game/GameAssetLibrary") {}
 
@@ -1390,7 +1394,23 @@ const make = Effect.gen(function* () {
       return found;
     });
 
-  return GameAssetLibrary.of({ search, add, packFile, packClips });
+  const packPicture = (id: string) =>
+    Effect.gen(function* () {
+      const pack = yield* packOf(id);
+      const index = yield* ensure(pack);
+      // Only an overview shows a look: a model's matching PNG is often its texture atlas.
+      const path = index.previews.find((candidate) => /\.(?:png|jpe?g|webp)$/i.test(candidate));
+      if (path === undefined)
+        return yield* fail(
+          "Library",
+          pack.id,
+          "invalid-input",
+          `${pack.id} ships no picture of its look. Use a pack that ships one, or a game image of the look, such as a game_blender_look render of one of its models.`,
+        );
+      return { path, file: yield* packFile(pack.id, path) };
+    });
+
+  return GameAssetLibrary.of({ search, add, packFile, packClips, packPicture });
 });
 
 export const layer = Layer.effect(GameAssetLibrary, make);

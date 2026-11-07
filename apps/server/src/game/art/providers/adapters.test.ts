@@ -13,7 +13,14 @@ import { elevenlabs, elevenLabsRequest } from "./elevenlabs.ts";
 import { google, googleRequest } from "./google.ts";
 import { meshy, meshyMeshRequest } from "./meshy.ts";
 import { openai, openAiRequest } from "./openai.ts";
-import { tripo, tripoMeshBody, tripoModelUrls, tripoRetargetBody, tripoRigBody } from "./tripo.ts";
+import {
+  tripo,
+  tripoMeshBody,
+  tripoModelUrls,
+  tripoPresets,
+  tripoRetargetBody,
+  tripoRigBody,
+} from "./tripo.ts";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 const reference: ArtReference = {
@@ -112,7 +119,7 @@ describe("art adapters: request shapes", () => {
     );
     assert.deepStrictEqual(body.headers, { "x-goog-api-key": "k" });
     assert.deepStrictEqual(body.json.contents[0]?.parts[1], {
-      inline_data: { mime_type: "image/png", data: Buffer.from(PNG).toString("base64") },
+      inlineData: { mimeType: "image/png", data: Buffer.from(PNG).toString("base64") },
     });
     assert.deepStrictEqual(body.json.generationConfig.imageConfig, {
       aspectRatio: "3:4",
@@ -125,7 +132,7 @@ describe("art adapters: request shapes", () => {
   });
 
   it.effect(
-    "Tripo uploads the concept, generates low poly, then rigs on Unreal names and retargets",
+    "Tripo uploads the concept as the generation's input, then rigs on Unreal names and retargets presets",
     () =>
       Effect.gen(function* () {
         const { calls, context } = recording([
@@ -140,14 +147,15 @@ describe("art adapters: request shapes", () => {
             options: { polycount: 8000, height: 1.8 },
           }),
         );
-        assert.strictEqual(calls[0]?.request.url, "https://openapi.tripo3d.com/v3/files");
+        assert.strictEqual(calls[0]?.request.url, "https://openapi.tripo3d.ai/v3/files");
+        assert.isTrue(calls[0]?.request.form?.has("file"));
         assert.strictEqual(
           calls[1]?.request.url,
-          "https://openapi.tripo3d.com/v3/generation/image-to-model",
+          "https://openapi.tripo3d.ai/v3/generation/image-to-model",
         );
         assert.deepStrictEqual(calls[1]?.request.json, {
           model: "v3.1-20260211",
-          file_token: "file_1",
+          input: "file_1",
           texture: true,
           pbr: true,
           smart_low_poly: true,
@@ -155,25 +163,46 @@ describe("art adapters: request shapes", () => {
           auto_size: true,
         });
         assert.strictEqual(step.kind, "making");
+        assert.deepStrictEqual(tripoRigBody({ lane: "character", body: null, mesh: "t_mesh" }), {
+          input: "t_mesh",
+          model: "v3.0-20260909",
+          rig_type: "biped",
+          spec: "unreal",
+          out_format: "glb",
+        });
+        assert.deepStrictEqual(tripoRigBody({ lane: "creature", body: "quadruped", mesh: "t" }), {
+          input: "t",
+          model: "v2.5-20260210",
+          rig_type: "quadruped",
+          out_format: "glb",
+        });
+        assert.deepStrictEqual(tripoRetargetBody("t_rig", ["preset:idle", "preset:walk"]), {
+          input: "t_rig",
+          animations: ["preset:idle", "preset:walk"],
+          animate_in_place: true,
+          export_with_geometry: true,
+          out_format: "glb",
+        });
         assert.deepStrictEqual(
-          tripoRigBody({ lane: "character", body: null, mesh: "t_mesh" }, 1.8),
-          {
-            input: "t_mesh",
-            model: "v3.0-20260909",
-            rig_type: "biped",
-            spec: "unreal",
-            out_format: "glb",
-            height: 1.8,
-          },
+          tripoPresets(request({ lane: "character", options: { clips: ["Jump", "slash"] } })),
+          { presets: ["preset:jump", "preset:slash"] },
         );
-        assert.strictEqual(
-          tripoRigBody({ lane: "creature", body: "quadruped", mesh: "t" }).rig_type,
-          "quadruped",
+        assert.deepStrictEqual(
+          tripoPresets(
+            request({ lane: "creature", options: { body: "serpentine", clips: ["walk"] } }),
+          ),
+          { presets: ["preset:serpentine:march"] },
         );
-        assert.deepStrictEqual(tripoRetargetBody("t_rig", ["Walk", "attack 1"]).animations, [
-          "preset:walk",
-          "preset:attack_1",
-        ]);
+        assert.match(
+          tripo.refuse?.(request({ lane: "character", options: { clips: ["backflip"] } })) ?? "",
+          /no "backflip" clip.*idle, walk, run/,
+        );
+        assert.match(
+          tripo.refuse?.(
+            request({ lane: "creature", options: { body: "avian", clips: ["fly"] } }),
+          ) ?? "",
+          /no clips for a avian body/,
+        );
         assert.propertyVal(
           tripoMeshBody(request({ lane: "model" }), null),
           "prompt",
@@ -181,10 +210,10 @@ describe("art adapters: request shapes", () => {
         );
         assert.deepStrictEqual(
           tripoModelUrls({
-            pbr_model: "https://cdn.tripo/x.glb",
-            rendered_image: "https://cdn.tripo/x.webp",
+            model_url: "https://cdn.tripo3d.ai/output/x.glb",
+            rendered_image_url: "https://cdn.tripo3d.ai/output/x.webp",
           }),
-          ["https://cdn.tripo/x.glb"],
+          ["https://cdn.tripo3d.ai/output/x.glb"],
         );
         // Mesh $0.30 + low poly $0.10 + rig $0.25 + three default clips at $0.10.
         assert.strictEqual(
@@ -192,6 +221,119 @@ describe("art adapters: request shapes", () => {
           0.95,
         );
       }),
+  );
+
+  it.effect(
+    "Tripo polls without buying, names the next stage for advance to start, adds up the credits, and says why a task failed",
+    () =>
+      Effect.gen(function* () {
+        const mesh = {
+          stage: "mesh",
+          task: "t_mesh",
+          mesh: "t_mesh",
+          rig: null,
+          lane: "character",
+          body: null,
+          clips: ["preset:idle"],
+          credits: 0,
+        };
+        const { calls, context } = recording([
+          { code: 0, data: { task_id: "t_mesh", status: "unknown", progress: 50 } },
+          {
+            code: 0,
+            data: {
+              status: "success",
+              credits_consumed: 40,
+              output: { model_url: "https://cdn.tripo3d.ai/m.glb" },
+            },
+          },
+          { code: 0, data: { task_id: "t_rig" } },
+        ]);
+        const unknown = yield* tripo.poll!(context, mesh);
+        assert.strictEqual(unknown.kind, "making");
+        if (unknown.kind !== "making") return;
+        assert.strictEqual(unknown.remote.unknown, 1);
+        const meshDone = yield* tripo.poll!(context, unknown.remote);
+        // The poll only read: the rig is named, not bought.
+        assert.strictEqual(calls.length, 2);
+        assert.strictEqual(meshDone.kind, "making");
+        if (meshDone.kind !== "making") return;
+        assert.deepInclude(meshDone.remote, { stage: "mesh", pending: "rig", credits: 40 });
+        const rigging = yield* tripo.advance!(context, meshDone.remote);
+        assert.strictEqual(calls[2]?.request.url, "https://openapi.tripo3d.ai/v3/animations/rig");
+        assert.strictEqual(rigging.kind, "making");
+        if (rigging.kind !== "making") return;
+        assert.deepInclude(rigging.remote, {
+          stage: "rig",
+          task: "t_rig",
+          credits: 40,
+          pending: null,
+        });
+
+        const retargeted = recording([
+          {
+            code: 0,
+            data: {
+              status: "success",
+              credits_consumed: 10,
+              output: { model_url: "https://cdn.tripo3d.ai/a.glb" },
+            },
+          },
+        ]);
+        const done = yield* tripo.poll!(retargeted.context, {
+          ...rigging.remote,
+          stage: "retarget",
+          task: "t_ret",
+          credits: 65,
+        });
+        assert.strictEqual(done.kind, "done");
+        if (done.kind !== "done") return;
+        assert.strictEqual(done.costUsd, 0.75);
+        assert.strictEqual(done.candidates[0]?.length, 1);
+
+        const failed = recording([
+          { code: 0, data: { status: "failed", error_code: 2001, error_message: "not riggable" } },
+        ]);
+        const error = yield* tripo.poll!(failed.context, { ...rigging.remote, credits: 40 }).pipe(
+          Effect.flip,
+        );
+        assert.match(error.reason, /rig task ended failed: not riggable/);
+        assert.strictEqual(error.costUsd, 0.4);
+      }),
+  );
+
+  it.effect("Meshy names the refine of a text preview, and advance sends it on v2", () =>
+    Effect.gen(function* () {
+      const { calls, context } = recording([
+        { id: "t_prev", status: "SUCCEEDED" },
+        { result: "t_ref" },
+      ]);
+      const polled = yield* meshy.poll!(context, {
+        stage: "mesh",
+        kind: "text-to-3d",
+        task: "t_prev",
+        lane: "model",
+        height: null,
+        clips: [],
+        rig: null,
+      });
+      assert.strictEqual(
+        calls[0]?.request.url,
+        "https://api.meshy.ai/openapi/v2/text-to-3d/t_prev",
+      );
+      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(polled.kind, "making");
+      if (polled.kind !== "making") return;
+      assert.strictEqual(polled.remote.pending, "refine");
+      const step = yield* meshy.advance!(context, polled.remote);
+      assert.strictEqual(calls[1]?.request.url, "https://api.meshy.ai/openapi/v2/text-to-3d");
+      assert.deepStrictEqual(calls[1]?.request.json, {
+        mode: "refine",
+        preview_task_id: "t_prev",
+        enable_pbr: true,
+      });
+      assert.strictEqual(step.kind, "making");
+    }),
   );
 
   it("Meshy picks its endpoint by reference count and refuses creatures and tiles", () => {
@@ -221,6 +363,10 @@ describe("art adapters: request shapes", () => {
       target_polycount: 12000,
       pose_mode: "a-pose",
     });
+    assert.strictEqual(
+      meshyMeshRequest(request({ lane: "model" })).url,
+      "https://api.meshy.ai/openapi/v2/text-to-3d",
+    );
     assert.match(meshy.refuse?.(request({ lane: "creature" })) ?? "", /Tripo/);
     assert.match(meshy.refuse?.(request({ lane: "texture" })) ?? "", /tileable/);
   });

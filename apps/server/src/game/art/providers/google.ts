@@ -1,6 +1,9 @@
 // Google's Nano Banana 2.1 through the Gemini API's generateContent: synchronous, one image per
-// call (candidates are separate calls), up to 14 references as inline images. It documents no
-// transparent background, so a transparent request is refused rather than quietly opaque.
+// call (candidates are separate calls), up to 14 references as inline images. The image guide now
+// shows the Interactions API, but generateContent stays fully supported and its reference
+// (ai.google.dev/api/generate-content) documents responseModalities, imageConfig and inlineData;
+// Interactions would also store every request unless told not to. It documents no transparent
+// background, so a transparent request is refused rather than quietly opaque.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import {
@@ -38,7 +41,7 @@ export const googleRequest = (request: ArtRequest, key: string) => ({
                 : request.prompt,
           },
           ...request.references.slice(0, 14).map((reference) => ({
-            inline_data: { mime_type: reference.mime, data: base64(reference.bytes) },
+            inlineData: { mimeType: reference.mime, data: base64(reference.bytes) },
           })),
         ],
       },
@@ -82,14 +85,9 @@ const start = (context: ArtContext, request: ArtRequest) =>
       }
       candidates.push([image]);
     }
-    // Google's answer reports tokens, not dollars: the cost is the price table's.
-    return {
-      kind: "done" as const,
-      candidates,
-      costUsd: roundUsd(
-        candidates.length * PER_IMAGE_1K + request.references.length * PER_REFERENCE,
-      ),
-    };
+    // Google's answer reports tokens, not dollars: the service records the price table's
+    // estimate, marked as one.
+    return { kind: "done" as const, candidates, costUsd: null };
   });
 
 export const google: ArtAdapter = {
@@ -111,7 +109,7 @@ export const google: ArtAdapter = {
       Effect.flatMap((key) =>
         context.http.json("google", {
           method: "GET",
-          url: `${BASE}/models?pageSize=1`,
+          url: `${BASE}/models`,
           headers: { "x-goog-api-key": key },
         }),
       ),

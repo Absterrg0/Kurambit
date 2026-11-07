@@ -57,6 +57,8 @@ import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettingsService from "../../serverSettings.ts";
 import { GameCaller } from "../GameCaller.ts";
+import * as GameAssetLibrary from "../GameAssetLibrary.ts";
+import { LIBRARY_CATALOG } from "../assetLibraryCatalog.ts";
 import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
 import { lockCharacterRouteRefusal } from "../gameStyle.ts";
@@ -71,6 +73,7 @@ import {
   type ArtStep,
   ArtProviderError,
   makeArtHttp,
+  pendingStage,
   roundUsd,
 } from "./providers/adapter.ts";
 import { ART_ADAPTERS } from "./providers/index.ts";
@@ -148,6 +151,10 @@ export class GameArtHost extends Context.Service<
     >;
     /** True while the thread's turn is a Keep going step's: nobody is there to pick. */
     readonly keepGoingStep: (threadId: ThreadId) => Effect.Effect<boolean>;
+    /** A library pack's picture of its look, as `pack/path` and its absolute cached file. */
+    readonly packPicture: (
+      pack: string,
+    ) => Effect.Effect<{ readonly path: string; readonly file: string }, GameOperationError>;
   }
 >()("kurambit/game/art/GameArt/GameArtHost") {}
 
@@ -155,6 +162,20 @@ const GENERATED_DIR = "art/generated";
 const DEFAULT_WAIT_SECONDS = 120;
 const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
 const POLL_RETRIES = 6;
+/**
+ * How long a generation may take from its start, restarts included, before it is given up with
+ * its estimate counted. 3D runs several provider tasks; Meshy asks for an hour per task.
+ */
+const LANE_DEADLINE: Readonly<Record<GameArtLane, Duration.Duration>> = {
+  image: Duration.minutes(30),
+  texture: Duration.minutes(30),
+  sfx: Duration.minutes(10),
+  music: Duration.minutes(15),
+  voice: Duration.minutes(10),
+  model: Duration.minutes(90),
+  character: Duration.minutes(150),
+  creature: Duration.minutes(150),
+};
 const LIST_LIMIT = 50;
 const KEY_CHECK_TTL_MS = 10 * 60_000;
 const REFERENCE_MIME: Readonly<Record<string, ArtReference["mime"]>> = {
@@ -181,6 +202,8 @@ const Meta = Schema.Struct({
   options: Schema.Record(Schema.String, Schema.Unknown),
   /** The directions' labels, by candidate; absent on a single asset (and on rows from before). */
   labels: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** The style picture each direction was sent with (a game path or `library:pack/path`), by candidate. */
+  styles: Schema.optionalKey(Schema.Array(Schema.NullOr(Schema.String))),
 });
 type Meta = typeof Meta.Type;
 const decodeGeneration = Schema.decodeUnknownOption(Schema.fromJsonString(GameGeneration));
@@ -552,35 +575,88 @@ const make = Effect.gen(function* () {
       };
     });
 
-  // ── References ─────────────────────────────────────────────────────────
+  // ── Images sent with a request ─────────────────────────────────────────
+  const readReference = (root: string, path: string) =>
+    Effect.tryPromise({
+      try: async (): Promise<ArtReference> => {
+        if (NodePath.isAbsolute(path) || path.split(/[\\/]/).includes(".."))
+          throw new Error(`${path}: use a path inside the game.`);
+        const realRoot = await NodeFSP.realpath(root);
+        const absolute = await NodeFSP.realpath(NodePath.join(root, path)).catch(() => {
+          throw new Error(`${path} does not exist.`);
+        });
+        if (!isPathInside(absolute, realRoot))
+          throw new Error(`${path} resolves outside the game.`);
+        const mime = REFERENCE_MIME[NodePath.extname(absolute).toLowerCase()];
+        if (mime === undefined) throw new Error(`${path} is not a PNG, JPEG or WebP image.`);
+        const stat = await NodeFSP.stat(absolute);
+        if (!stat.isFile()) throw new Error(`${path} is not a file.`);
+        if (stat.size > MAX_REFERENCE_BYTES) throw new Error(`${path} is larger than 20 MB.`);
+        return { path, absolute, mime, bytes: new Uint8Array(await NodeFSP.readFile(absolute)) };
+      },
+      catch: (cause) =>
+        opError(
+          "art-generate",
+          `Reference ${cause instanceof Error ? cause.message : String(cause)}`,
+          "invalid-path",
+          path,
+        ),
+    });
+
   const readReferences = (root: string, paths: ReadonlyArray<string>) =>
-    Effect.forEach(paths, (path) =>
-      Effect.tryPromise({
-        try: async (): Promise<ArtReference> => {
-          if (NodePath.isAbsolute(path) || path.split(/[\\/]/).includes(".."))
-            throw new Error(`${path}: use a path inside the game.`);
-          const realRoot = await NodeFSP.realpath(root);
-          const absolute = await NodeFSP.realpath(NodePath.join(root, path)).catch(() => {
-            throw new Error(`${path} does not exist.`);
-          });
-          if (!isPathInside(absolute, realRoot))
-            throw new Error(`${path} resolves outside the game.`);
-          const mime = REFERENCE_MIME[NodePath.extname(absolute).toLowerCase()];
-          if (mime === undefined) throw new Error(`${path} is not a PNG, JPEG or WebP image.`);
-          const stat = await NodeFSP.stat(absolute);
-          if (!stat.isFile()) throw new Error(`${path} is not a file.`);
-          if (stat.size > MAX_REFERENCE_BYTES) throw new Error(`${path} is larger than 20 MB.`);
-          return { path, absolute, mime, bytes: new Uint8Array(await NodeFSP.readFile(absolute)) };
-        },
-        catch: (cause) =>
-          opError(
-            "art-generate",
-            `Reference ${cause instanceof Error ? cause.message : String(cause)}`,
-            "invalid-path",
-            path,
+    Effect.forEach(paths, (path) => readReference(root, path));
+
+  /**
+   * A direction's style picture: a library pack's own picture, or a game image. A pack's picture is
+   * read from the library cache, which is the server's, so it never needs a path inside the game.
+   */
+  const readStyle = (root: string, style: string) =>
+    LIBRARY_CATALOG.some((pack) => pack.id === style)
+      ? host.packPicture(style).pipe(
+          Effect.mapError((error) =>
+            opError(
+              "art-generate",
+              `Style ${style}: ${error.detail ?? error.message}`,
+              error.reason,
+              style,
+            ),
           ),
-      }),
-    );
+          Effect.flatMap(({ path, file }) =>
+            Effect.tryPromise({
+              try: async (): Promise<ArtReference> => {
+                const mime = REFERENCE_MIME[NodePath.extname(file).toLowerCase()];
+                if (mime === undefined)
+                  throw new Error(`${path} is not a PNG, JPEG or WebP image.`);
+                const stat = await NodeFSP.stat(file);
+                if (stat.size > MAX_REFERENCE_BYTES)
+                  throw new Error(`${path} is larger than 20 MB.`);
+                return {
+                  path: `library:${style}/${path}`,
+                  absolute: file,
+                  mime,
+                  bytes: new Uint8Array(await NodeFSP.readFile(file)),
+                };
+              },
+              catch: (cause) =>
+                opError(
+                  "art-generate",
+                  `Style ${style}: ${cause instanceof Error ? cause.message : String(cause)}`,
+                  "io",
+                  style,
+                ),
+            }),
+          ),
+        )
+      : /^[a-z0-9][a-z0-9-]{1,63}$/.test(style)
+        ? Effect.fail(
+            opError(
+              "art-generate",
+              `Style ${style} is no library pack; pass a pack id game_assets_search lists, or a game image path.`,
+              "invalid-input",
+              style,
+            ),
+          )
+        : readReference(root, style);
 
   // ── Files ──────────────────────────────────────────────────────────────
   const gameIo = <A>(root: string, operation: string, run: () => Promise<A>) =>
@@ -615,6 +691,14 @@ const make = Effect.gen(function* () {
       options: row.meta.options,
       files: generation.files,
       candidates: row.meta.candidateFiles,
+      ...(row.meta.labels === undefined
+        ? {}
+        : {
+            directions: row.meta.labels.map((label, index) => ({
+              label,
+              style: row.meta.styles?.[index] ?? null,
+            })),
+          }),
       chosen: generation.chosen,
       chosenBy: generation.chosenBy,
       ai: true,
@@ -752,27 +836,72 @@ const make = Effect.gen(function* () {
                 times: POLL_RETRIES,
               }),
             );
-      let step = yield* first(adapter, context);
+      const label = GAME_ART_PROVIDERS[adapter.id].label;
+      const limit = LANE_DEADLINE[initial.generation.lane];
+      const deadline = Date.parse(initial.generation.createdAt) + Duration.toMillis(limit);
+      const late = () =>
+        new ArtProviderError({
+          reason: `${label} took longer than ${Duration.format(limit)}; Kurambit stopped asking. It may still finish and be charged at ${label}.`,
+          costUsd: initial.generation.estimateUsd,
+        });
+      // Sending a stage again could buy it twice, so only a rate limit (which both providers say
+      // creates nothing) is retried; an unanswered start fails, and the estimate is counted.
+      const advanceOnce = (remote: ArtRemote, stage: string) =>
+        adapter.advance === undefined
+          ? Effect.fail(new ArtProviderError({ reason: `${label} cannot start the ${stage}.` }))
+          : adapter.advance(context, remote).pipe(
+              Effect.retry({
+                while: (error) => error.status === 429,
+                schedule: Schedule.spaced(adapter.pollEvery),
+                times: POLL_RETRIES,
+              }),
+              Effect.mapError(
+                (error) =>
+                  new ArtProviderError({
+                    reason:
+                      error.status !== undefined && error.status < 500
+                        ? error.reason
+                        : `${error.reason} ${label} may have started the ${stage} anyway, so it is not asked again.`,
+                  }),
+              ),
+            );
+      let step = yield* first(adapter, context).pipe(
+        Effect.timeoutOrElse({
+          duration: Duration.millis(Math.max(0, deadline - (yield* Clock.currentTimeMillis))),
+          orElse: () => Effect.fail(late()),
+        }),
+      );
       while (step.kind === "making") {
         const making = step;
-        yield* locks.withLock(
+        const live = yield* locks.withLock(
           id,
           Effect.gen(function* () {
             const row = yield* loadOrFail(root, id, "art-drive");
-            if (row.generation.state !== "making") return;
+            if (row.generation.state !== "making") return false;
             const kept =
               making.files === undefined || making.files.length === 0
                 ? []
                 : (yield* writeFiles(row, [making.files])).flat().map((file) => file.path);
-            if (kept.length === 0 && encodeJson(row.meta.job) === encodeJson(making.remote)) return;
+            if (kept.length === 0 && encodeJson(row.meta.job) === encodeJson(making.remote))
+              return true;
             const next = yield* touch(
               row,
               {},
               { job: making.remote, kept: [...row.meta.kept, ...kept] },
             );
             yield* save(next, countedOf(next.generation));
+            return true;
           }),
         );
+        if (!live) return;
+        // The intent is saved above before the stage is sent: a restart finds it and stops.
+        const stage = pendingStage(making.remote);
+        if (stage !== null) {
+          step = yield* advanceOnce(making.remote, stage);
+          continue;
+        }
+        if ((yield* Clock.currentTimeMillis) + Duration.toMillis(adapter.pollEvery) > deadline)
+          return yield* late();
         yield* Effect.sleep(adapter.pollEvery);
         step = yield* pollOnce(making.remote);
       }
@@ -950,27 +1079,34 @@ const make = Effect.gen(function* () {
             ? `Directions are for images and textures; ask ${input.lane} one at a time.`
             : `Directions are for images: make 2-4 concept images in distinct directions in the image lane, let the person pick one, then make the ${input.lane} from it with the picked image as a reference.`,
         );
-      // Each direction is its own request for one image: the person picks between looks,
-      // never between samples of one prompt (which come back as near-copies).
-      const prompts =
-        directions.length === 0
-          ? [input.prompt]
-          : // The look leads: image models weight a prompt's start, and a style tacked on after a
-            // long subject comes back in the model's own default rendering.
-            directions.map(
-              (direction) =>
-                `Art style (follow it strictly, above everything else): ${direction.prompt}\n\n${input.prompt}\n\nRender every part of the image in that art style, not in a polished 3D movie style.`,
-            );
       const base = { lane: input.lane, prompt: input.prompt, candidates: 1, options };
       const adapter = yield* route(all, base);
       const references = yield* readReferences(root, input.references ?? []);
-      const requests: ReadonlyArray<ArtRequest> = prompts.map((prompt) => ({
-        ...base,
-        prompt,
-        references,
-      }));
-      const estimates = prompts.map((prompt) =>
-        adapter.estimate({ ...base, prompt, references: references.length }),
+      const styles = yield* Effect.forEach(directions, (direction) =>
+        direction.style === undefined ? Effect.succeed(null) : readStyle(root, direction.style),
+      );
+      // Each direction is its own request for one image: the person picks between looks,
+      // never between samples of one prompt (which come back as near-copies).
+      const requests: ReadonlyArray<ArtRequest> =
+        directions.length === 0
+          ? [{ ...base, references }]
+          : directions.map((direction, index) => {
+              const style = styles[index] ?? null;
+              // The look leads: image models weight a prompt's start, and a style tacked on after a
+              // long subject comes back in the model's own default rendering. Words alone still
+              // drift back to that polish; a picture of the look, sent first, holds it.
+              const prompt =
+                style === null
+                  ? `Art style (follow it strictly, above everything else): ${direction.prompt}\n\n${input.prompt}\n\nRender every part of the image in that art style, not in a polished 3D movie style.`
+                  : `Image 1 is the art style to copy exactly: ${direction.prompt}. Copy its rendering, shapes, materials, palette, lighting and level of detail; do not copy what it shows, nor any text or logo on it.${references.length === 0 ? "" : " The other images show what to draw, not how."}\n\n${input.prompt}\n\nRender every part of the image in the art style of image 1, not in a polished 3D movie style.`;
+              return {
+                ...base,
+                prompt,
+                references: style === null ? references : [style, ...references],
+              };
+            });
+      const estimates = requests.map((request) =>
+        adapter.estimate({ ...request, references: request.references.length }),
       );
       const estimate = estimates.some((value) => value === null)
         ? null
@@ -1025,7 +1161,12 @@ const make = Effect.gen(function* () {
             options,
             ...(directions.length === 0
               ? {}
-              : { labels: directions.map((direction) => direction.label) }),
+              : {
+                  labels: directions.map((direction) => direction.label),
+                  ...(styles.every((style) => style === null)
+                    ? {}
+                    : { styles: styles.map((style) => style?.path ?? null) }),
+                }),
           };
           yield* sql`
             INSERT INTO game_art_generations
@@ -1321,6 +1462,18 @@ const make = Effect.gen(function* () {
       if (row === null || (yield* FiberMap.has(fibers, row.generation.id))) continue;
       const adapter = ART_ADAPTERS[row.generation.provider];
       const job = row.meta.job;
+      const stage = job === null ? null : pendingStage(job);
+      if (stage !== null) {
+        yield* locks.withLock(
+          row.generation.id,
+          fail(
+            row,
+            `The server stopped while starting the ${stage}. ${GAME_ART_PROVIDERS[row.generation.provider].label} may have started it already, so Kurambit does not ask again; make it again if it is still wanted.`,
+            row.generation.estimateUsd,
+          ),
+        );
+        continue;
+      }
       if (job === null || adapter?.poll === undefined) {
         yield* locks.withLock(
           row.generation.id,
@@ -1356,7 +1509,9 @@ export const layerHost = Layer.effect(
   Effect.gen(function* () {
     const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const library = yield* GameAssetLibrary.GameAssetLibrary;
     return GameArtHost.of({
+      packPicture: library.packPicture,
       codex: Effect.gen(function* () {
         const instances = yield* registry.listInstances;
         const codex = instances.filter(
