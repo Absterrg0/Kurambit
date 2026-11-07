@@ -200,7 +200,11 @@ def character(params):
     if rates:
         rate = min(rates)
         if render.fps != rate or render.fps_base != 1.0:
-            notes.append(f"the scene now runs at {rate} fps, the library clips' own rate (it was {render.fps / render.fps_base:g}): key your own clips at {rate} fps")
+            was = render.fps / render.fps_base
+            # Every clip already in the scene keeps its seconds: its keys move to the new rate.
+            for act in bpy.data.actions:
+                skeleton.retime(act, rate / was)
+            notes.append(f"the scene now runs at {rate} fps, the library clips' own rate (it was {was:g}; clips already here keep their timing): key your own clips at {rate} fps")
             render.fps, render.fps_base = rate, 1.0
         if len(rates) > 1:
             notes.append(f"the clips were made at {', '.join(str(r) for r in sorted(rates))} fps: those not at {rate} are resampled")

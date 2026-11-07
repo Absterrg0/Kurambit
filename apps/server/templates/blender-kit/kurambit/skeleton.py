@@ -362,6 +362,21 @@ def fit_clip(action, ratio):
                 k.handle_right.y *= ratio
 
 
+def retime(action, k):
+    """Stretches an action's keys (and its manual frame range) by k, so it lasts as many seconds
+    at a frame rate k times the old one."""
+    for fc in action_fcurves(action):
+        for key in fc.keyframe_points:
+            key.co.x *= k
+            key.handle_left.x *= k
+            key.handle_right.x *= k
+        fc.update()
+    if action.use_frame_range:
+        start, end = action.frame_start * k, action.frame_end * k
+        for name, value in (("frame_end", end), ("frame_start", start)) if k > 1 else (("frame_start", start), ("frame_end", end)):
+            setattr(action, name, value)  # in this order neither clamps the other
+
+
 def assign_action(arm, action):
     if arm.animation_data is None:
         arm.animation_data_create()
