@@ -228,13 +228,6 @@ export class GameBuilds extends Context.Service<
       build: GameBuildId,
     ) => Effect.Effect<boolean, GameOperationError>;
     /**
-     * A chat turn's build once its checkpoint is kept, the build the folder
-     * held when the turn started (its recorded base; null when none was
-     * recorded), and how many files of the engine project, art and ASSETS.md
-     * it changed since then (since `fallback` without one); null while the
-     * turn has no kept checkpoint.
-     */
-    /**
      * Writes the Stage's live values to the engine's tune file and keeps the
      * folder as a build, the folder before it kept too so Undo restores it. A
      * repeat with the same `commandId` answers as the first did.
@@ -243,6 +236,13 @@ export class GameBuilds extends Context.Service<
       threadId: ThreadId,
       input: Omit<GameKeepValuesInput, "threadId">,
     ) => Effect.Effect<GameKeepValuesResult, GameOperationError>;
+    /**
+     * A chat turn's build once its checkpoint is kept, the build the folder
+     * held when the turn started (its recorded base; null when none was
+     * recorded), and how many files of the engine project, art and ASSETS.md
+     * it changed since then (since `fallback` without one); null while the
+     * turn has no kept checkpoint.
+     */
     readonly turnBuild: (
       threadId: ThreadId,
       runId: RunId,
