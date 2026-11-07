@@ -492,7 +492,7 @@ def character(params):
     return {
         "armature": arm.name,
         "meshes": [o.name for o in meshes],
-        "clips": [a.name for a, _, _, _ in taken],
+        "clips": [label for _, label, _, _ in taken],
         "chains": chains,
         "restDeviation": round(deviation or 0.0, 2),
         "height": round(height, 3),
