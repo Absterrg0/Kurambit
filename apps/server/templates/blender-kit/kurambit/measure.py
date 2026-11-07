@@ -6,10 +6,12 @@ It measures the candidate GLB itself, imported into an empty scene: exactly what
 Ground speed: an in-place locomotion clip plays right at timeScale = move speed / ground speed;
 any other rate slides the feet by the difference. The support foot is the lower one; while it
 is near the floor it is planted, so its backward speed is the clip's ground speed ("stance"). A
-clip with a flight phase (a sprint) has too few planted samples, so the fallback ("stride")
-takes the backward distance each foot sweeps while it is in the lowest quarter of its lift,
-over the time it spends there."""
+clip with a flight phase (a sprint) touches down for too few samples in that band, so the
+fallback ("stride") widens the band to two, then three times, catching each stride's touchdown.
+(The distance a foot sweeps while low, over the time it is low, underestimates: touchdown and
+lift-off are slow.)"""
 import math
+
 import bpy
 from mathutils import Matrix, Vector
 
@@ -36,25 +38,16 @@ def _bounds(meshes):
 def _ground_speed(ta, tb, fps, height):
     """(m/s, "stance" | "stride") from two foot tracks (world positions per sample), or (None, None)."""
     floor = min(min(p.z for p in ta), min(p.z for p in tb))
-    thr = 0.008 * height
-    speeds = []
-    for i in range(1, len(ta)):
-        t = ta if ta[i].z <= tb[i].z else tb
-        if t[i].z < floor + thr and t[i - 1].z < floor + thr:
-            speeds.append((t[i].y - t[i - 1].y) * fps * SUB)  # it faces -Y: backward is +Y
-    if len(speeds) >= 3:
-        speeds.sort()
-        return speeds[len(speeds) // 2], "stance"
-    swept, time = 0.0, 0.0
-    for track in (ta, tb):
-        low = min(p.z for p in track)
-        band = low + 0.25 * (max(p.z for p in track) - low)
-        for i in range(1, len(track)):
-            if track[i].z <= band and track[i - 1].z <= band:
-                swept += track[i].y - track[i - 1].y
-                time += 1 / (fps * SUB)
-    if time > 0 and swept > 0:
-        return swept / time, "stride"
+    for widen, source in ((1, "stance"), (2, "stride"), (3, "stride")):
+        thr = 0.008 * height * widen
+        speeds = []
+        for i in range(1, len(ta)):
+            t = ta if ta[i].z <= tb[i].z else tb
+            if t[i].z < floor + thr and t[i - 1].z < floor + thr:
+                speeds.append((t[i].y - t[i - 1].y) * fps * SUB)  # it faces -Y: backward is +Y
+        if len(speeds) >= 3:
+            speeds.sort()
+            return speeds[len(speeds) // 2], source
     return None, None
 
 
