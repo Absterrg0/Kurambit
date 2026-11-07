@@ -189,7 +189,33 @@ export const mergeAnchoredCards = <T>(
 
 /** The person's pick, as the message the agent goes on from. */
 export const pickMessage = (generation: GameGeneration, candidate: number): string =>
-  `Use "${generation.candidates[candidate]?.label ?? `candidate ${candidate + 1}`}" for ${generation.name}.`;
+  awaitsModelLook(generation)
+    ? `Rig ${generation.name}: the model looks right.`
+    : `Use "${generation.candidates[candidate]?.label ?? `candidate ${candidate + 1}`}" for ${generation.name}.`;
+
+/**
+ * A character or creature waiting on the person's look at its model before the rig is bought.
+ * The server puts a 3D lane in choosing for nothing else: its one candidate is "Rig this".
+ */
+export const awaitsModelLook = (generation: GameGeneration): boolean =>
+  generation.state === "choosing" &&
+  (generation.lane === "character" || generation.lane === "creature");
+
+/** What the model cost, and what the rig would add, beside "Rig this" and Cancel. */
+export const modelLookLine = (generation: GameGeneration): string => {
+  const cost = generation.costUsd;
+  const more =
+    generation.estimateUsd === null || cost === null ? null : generation.estimateUsd - cost;
+  return [
+    cost === null ? null : `The model cost ${formatUsd(cost)}.`,
+    more === null || more <= 0
+      ? "Rigging and its clips cost more."
+      : `Rigging and its clips add about ${formatUsd(more)}.`,
+    "Cancel keeps only the model's cost.",
+  ]
+    .filter((part) => part !== null)
+    .join(" ");
+};
 
 /**
  * The picture "Change…" names in a settled image or texture generation: the one the game kept
