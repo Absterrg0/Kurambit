@@ -646,6 +646,8 @@ export const GameCreateInput = Schema.Struct({
   artDirection: Schema.optionalKey(Schema.String),
   /** Which lane to build in. Omitted means the Godot native lane. */
   engine: Schema.optionalKey(GameEngineId),
+  /** How the person chose to make its characters, before the first turn builds them. Omitted: library. */
+  characters: Schema.optionalKey(GameCharacterRoute),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });

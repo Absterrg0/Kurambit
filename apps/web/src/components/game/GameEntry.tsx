@@ -9,6 +9,7 @@ import {
   GAME_ENGINES,
   ModelSelection,
   type EnvironmentId,
+  type GameCharacterRoute,
   type GameEngineId,
   type GameToolStatus,
 } from "@kurambit/contracts";
@@ -44,6 +45,7 @@ import { gameEnvironment } from "../../state/game";
 import { engineToolFor } from "./gameStageLogic";
 import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import { GameToolLink } from "./GameToolLink";
+import { CHARACTER_ROUTES } from "./GameCharacterRoute";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { gameSlug } from "./gameLibrary.logic";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -151,6 +153,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const { toolchain, ready: engineReady } = useEngineReadiness(environmentId);
   const [chosenEngine, setEngine] = useState<GameEngineId | null>(draft?.engine ?? null);
   const engine = chooseEngine(chosenEngine, engineReady);
+  const [characters, setCharacters] = useState<GameCharacterRoute>("library");
   const [editingFolder, setEditingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
@@ -201,6 +204,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
             brief,
             artDirection,
             engine,
+            characters,
             modelSelection: model,
           },
         })
@@ -288,6 +292,37 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                       disabled={busy}
                     />
                   ))}
+                </fieldset>
+                <fieldset className="flex flex-col gap-2 text-sm">
+                  <legend className="font-medium">Make characters with</legend>
+                  <div className="grid grid-cols-3 gap-2">
+                    {CHARACTER_ROUTES.map((option) => (
+                      <label
+                        key={option.route}
+                        className={
+                          option.unavailable === null
+                            ? "flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5"
+                            : "flex items-start gap-2 rounded-lg border border-border/70 px-3 py-2 opacity-64"
+                        }
+                      >
+                        <input
+                          type="radio"
+                          name="game-characters"
+                          value={option.route}
+                          checked={characters === option.route}
+                          onChange={() => setCharacters(option.route)}
+                          disabled={busy || option.unavailable !== null}
+                          className="mt-1"
+                        />
+                        <span>
+                          <span className="font-medium">{option.label}</span>
+                          <span className="block text-xs text-muted-foreground">
+                            {option.unavailable ?? option.description}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 </fieldset>
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="flex items-baseline gap-1.5">

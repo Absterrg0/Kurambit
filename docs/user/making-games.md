@@ -113,7 +113,7 @@ then have the art redone. Delete it to lift the lock.
 ## Characters
 
 Each game has one setting for how its characters are made, **Make characters with**: **Library**
-(the default), **Blender** or **Tripo**. Change it from the game's **More** menu (**⋯** above the
+(the default), **Blender** or **Tripo**. Pick it in the **New game** dialog, so the first turn builds the cast your way, and change it later from the game's **More** menu (**⋯** above the
 stage) or the command palette's **Make characters with…**; the stage's build detail shows the
 current choice. On **Library** the agent takes characters from the asset library and will not model
 one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the

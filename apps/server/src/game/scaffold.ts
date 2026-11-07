@@ -86,6 +86,7 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
     // The same folder under its legacy key, for one release, so an older installed Kurambit still opens the game.
     godotProject: engineProfile(engine).projectDirectory,
     assets: [],
+    ...(input.characters === undefined ? {} : { characters: input.characters }),
   };
 }
 

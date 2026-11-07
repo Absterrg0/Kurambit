@@ -17,6 +17,7 @@ import {
   ProjectId,
   ThreadId,
   GameManifest,
+  GAME_CHARACTER_ROUTE_UNAVAILABLE,
   GameOperationError,
   gameTemplateForEngine,
   type GameCreateInput,
@@ -361,6 +362,17 @@ const make = Effect.gen(function* () {
           path: input.name,
           reason: "invalid-path",
           detail: "A game needs a name.",
+        });
+      const unavailable =
+        input.characters === undefined
+          ? undefined
+          : GAME_CHARACTER_ROUTE_UNAVAILABLE[input.characters];
+      if (unavailable !== undefined)
+        return yield* new GameOperationError({
+          operation: "create-game",
+          path: input.name,
+          reason: "invalid-input",
+          detail: `Make characters with ${input.characters}: ${unavailable}`,
         });
       const parent = input.parentDirectory.trim() || NodePath.join(NodeOS.homedir(), "Games");
       const requestedRoot = NodePath.resolve(
