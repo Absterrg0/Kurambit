@@ -32,6 +32,8 @@ import {
   GameExploreStartResult,
   GameExploreActResult,
   GameExploreCloseResult,
+  type GameBlenderCarveInput,
+  type GameBlenderCarveResult,
   type GameBlenderCharacterInput,
   type GameArtProvidersResult,
   type GameGenerateInput,
@@ -40,6 +42,8 @@ import {
   type GameGenerationChangeResult,
   type GameGenerationsResult,
   type GameBlenderCharacterResult,
+  type GameBlenderPaintInput,
+  type GameBlenderPaintResult,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
   GAME_CHARACTER_ROUTE_UNAVAILABLE,
@@ -258,6 +262,16 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderCharacterInput,
     ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
+    /** Live Blender scene: meshes painted from their turnaround sheet. */
+    readonly blenderPaint: (
+      threadId: ThreadId,
+      input: GameBlenderPaintInput,
+    ) => Effect.Effect<GameBlenderPaintResult, GameOperationError>;
+    /** Live Blender scene: an organic hard prop carved from its three-view sheet. */
+    readonly blenderCarve: (
+      threadId: ThreadId,
+      input: GameBlenderCarveInput,
+    ) => Effect.Effect<GameBlenderCarveResult, GameOperationError>;
     /** Generated art (GameArt): never under the game's operation lock, a generation takes minutes. */
     readonly generate: (
       threadId: ThreadId,
@@ -1218,6 +1232,10 @@ const make = Effect.gen(function* () {
       readRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
     blenderCharacter: (threadId, input) =>
       withRoot(threadId, "Blender character", (root) => liveBlender.character(root, input)),
+    blenderPaint: (threadId, input) =>
+      withRoot(threadId, "Blender paint", (root) => liveBlender.paint(root, input)),
+    blenderCarve: (threadId, input) =>
+      withRoot(threadId, "Blender carve", (root) => liveBlender.carve(root, input)),
     generate: (threadId, input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);

@@ -36,11 +36,12 @@ export interface GeneratedSource {
 }
 
 const MODEL = /\.(glb|gltf|fbx)$/i;
+const IMAGE = /\.(png|jpe?g|webp)$/i;
 
 /**
- * The model at a game-relative path under art/generated/ and its generation record. Refused,
- * never guessed: a path outside art/generated/ or the game, a link, another file type, or a
- * folder with no record that reads as one (the ledger could not credit it).
+ * The model (or, with kind image, the image) at a game-relative path under art/generated/ and its
+ * generation record. Refused, never guessed: a path outside art/generated/ or the game, a link,
+ * another file type, or a folder with no record that reads as one (the ledger could not credit it).
  */
 export const generatedSource = (
   realRoot: string,
@@ -51,6 +52,7 @@ export const generatedSource = (
     id: string,
     path: string,
   ) => Effect.Effect<GameArtDelivered | null, GameOperationError>,
+  kind: "model" | "image" = "model",
 ): Effect.Effect<{ readonly file: string; readonly source: GeneratedSource }, GameOperationError> =>
   Effect.gen(function* () {
     const refuse = (detail: string) =>
@@ -58,9 +60,9 @@ export const generatedSource = (
         new GameOperationError({ operation, path: relative, reason: "invalid-input", detail }),
       );
     const normal = NodePath.posix.normalize(relative.replaceAll("\\", "/"));
-    if (!normal.startsWith(`${GENERATED_DIR}/`) || !MODEL.test(normal))
+    if (!normal.startsWith(`${GENERATED_DIR}/`) || !(kind === "model" ? MODEL : IMAGE).test(normal))
       return yield* refuse(
-        `${relative} is not a model game_generate delivered: give the game-relative .glb, .gltf or .fbx under ${GENERATED_DIR}/<lane>/<name>/, as the generation's files list it.`,
+        `${relative} is not ${kind === "model" ? "a model" : "an image"} game_generate delivered: give the game-relative ${kind === "model" ? ".glb, .gltf or .fbx" : ".png, .jpg or .webp"} under ${GENERATED_DIR}/<lane>/<name>/, as the generation's files list it.`,
       );
     const absolute = NodePath.join(realRoot, normal);
     const real = yield* Effect.promise(() => NodeFSP.realpath(absolute).catch(() => null));
@@ -129,3 +131,102 @@ export const motionClipName = (generationName: string, path: string): string => 
   if (label === "") return titleCase(generationName);
   return label === "loop" ? `${titleCase(generationName)}_Loop` : titleCase(label);
 };
+
+/** What a texture painted from a sheet credits: the generation that made the sheet, or the person. */
+export interface SheetSource {
+  readonly file: string;
+  readonly path: string;
+  readonly stamp: {
+    readonly from: string;
+    readonly licence: string;
+    readonly ai: boolean;
+    readonly credits: number | null;
+    readonly generation?: string;
+  };
+}
+
+const sameBytes = async (file: string, candidates: ReadonlyArray<string>) => {
+  const size = (await NodeFSP.stat(file)).size;
+  const own = await NodeFSP.readFile(file);
+  for (const candidate of candidates) {
+    const stat = await NodeFSP.stat(candidate).catch(() => null);
+    if (stat === null || stat.size !== size) continue;
+    if (own.equals(await NodeFSP.readFile(candidate))) return candidate;
+  }
+  return null;
+};
+
+/**
+ * A turnaround sheet by its game path. A generated image credits its generation; a copy of one
+ * elsewhere in the game (the same bytes) credits it too, so a sheet copied out of art/generated/
+ * never passes as the person's own. Anything else is the person's image.
+ */
+export const sheetSource = (
+  realRoot: string,
+  relative: string,
+  operation: string,
+  delivered: (
+    id: string,
+    path: string,
+  ) => Effect.Effect<GameArtDelivered | null, GameOperationError>,
+): Effect.Effect<SheetSource, GameOperationError> =>
+  Effect.gen(function* () {
+    const refuse = (detail: string) =>
+      Effect.fail(
+        new GameOperationError({ operation, path: relative, reason: "invalid-input", detail }),
+      );
+    const normal = NodePath.posix.normalize(relative.replaceAll("\\", "/"));
+    if (NodePath.posix.isAbsolute(normal) || normal.startsWith("../") || !IMAGE.test(normal))
+      return yield* refuse(
+        `${relative} is not a sheet in this game: give the game path of a .png, .jpg or .webp image.`,
+      );
+    const absolute = NodePath.join(realRoot, normal);
+    const real = yield* Effect.promise(() => NodeFSP.realpath(absolute).catch(() => null));
+    if (real === null || real !== absolute)
+      return yield* refuse(
+        `${relative} is not a file in this game${real === null ? "" : " (it is a link)"}.`,
+      );
+    const credit = (path: string) =>
+      generatedSource(realRoot, path, operation, delivered, "image").pipe(
+        Effect.flatMap(({ source }) =>
+          source.lane === "image"
+            ? Effect.succeed<SheetSource>({ file: real, path: normal, stamp: source.stamp })
+            : refuse(
+                `${path} came from the ${source.lane} lane; a sheet is an image-lane picture.`,
+              ),
+        ),
+      );
+    if (normal.startsWith(`${GENERATED_DIR}/`)) return yield* credit(normal);
+    const imageDir = NodePath.join(realRoot, GENERATED_DIR, "image");
+    const candidates = yield* Effect.promise(() =>
+      NodeFSP.readdir(imageDir, { withFileTypes: true })
+        .then((dirs) =>
+          Promise.all(
+            dirs
+              .filter((dir) => dir.isDirectory())
+              .map((dir) =>
+                NodeFSP.readdir(NodePath.join(imageDir, dir.name)).then((names) =>
+                  names
+                    .filter((name) => IMAGE.test(name))
+                    .map((name) => NodePath.join(imageDir, dir.name, name)),
+                ),
+              ),
+          ),
+        )
+        .then((lists) => lists.flat())
+        .catch(() => [] as string[]),
+    );
+    const twin = yield* Effect.promise(() => sameBytes(real, candidates).catch(() => null));
+    if (twin !== null)
+      return yield* credit(NodePath.relative(realRoot, twin).split(NodePath.sep).join("/"));
+    return {
+      file: real,
+      path: normal,
+      stamp: {
+        from: "made",
+        licence: `the person's own image ${normal}`.slice(0, 200),
+        ai: false,
+        credits: null,
+      },
+    };
+  });

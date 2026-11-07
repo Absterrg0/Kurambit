@@ -83,6 +83,12 @@ const handlers = {
   game_blender_character: McpToolAccess.actsAsCaller((input) =>
     withGame((game, threadId) => game.blenderCharacter(threadId, input)),
   ),
+  game_blender_paint: McpToolAccess.actsAsCaller((input) =>
+    withGame((game, threadId) => game.blenderPaint(threadId, input)),
+  ),
+  game_blender_carve: McpToolAccess.actsAsCaller((input) =>
+    withGame((game, threadId) => game.blenderCarve(threadId, input)),
+  ),
   game_generate: McpToolAccess.actsAsCaller((input) =>
     withGame((game, threadId) => game.generate(threadId, input)),
   ),

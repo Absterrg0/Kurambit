@@ -3,8 +3,12 @@ import * as Schema from "effect/Schema";
 import {
   GAME_EXPLORE_BOUNDS,
   GameActionResult,
+  GameBlenderCarveInput,
+  GameBlenderCarveResult,
   GameBlenderCharacterInput,
   GameBlenderCharacterResult,
+  GameBlenderPaintInput,
+  GameBlenderPaintResult,
   GameGenerateInput,
   GameGenerateResult,
   GameGenerateWaitInput,
@@ -181,6 +185,28 @@ const BlenderCharacterTool = Tool.make("game_blender_character", {
     "Build a rigged, animated character in the live Blender scene on the standard skeleton, correct by construction: use this instead of rigging or retargeting yourself. body is a library body ({library: {pack, file}}, as game_assets_search lists them), an MPFB2 human ({mpfb: {age, gender, weight, …}}; needs MPFB2, which the person installs in Settings → Game tools) or a rigged humanoid in this game ({game: path}): an earlier export, or a character-lane model game_generate delivered under art/generated/, whose bones may be named the UE, Mixamo, KayKit or a similar way; it is credited to its provider with its cost. The standard armature is conformed to the body (its rest frames are kept, so every library clip plays unchanged), the body is skinned, and the clips (names from the lock's animation packs, or the game path of a GLB game_generate's motion lane delivered, whose clip is named after the generation and credited to its provider; the standard set when omitted) and chains (extra bones no clip keys, such as a tail or ears, which the game springs) are added in a collection named name. fit is yours to choose from the review's strips, and nothing fits a clip unasked: arms: true swings the arms out of the torso wherever a clip puts them through it (sized from this body's skin, at most 25°), and calm (0..1) calms the hips' roll, yaw and sway together with the spine, neck and head turns (a waddle, or a head rolling on a wide or big-headed body), keeping the feet where the clip put them; the result says what each changed, and replace: true with another fit rebuilds it. Model the rest (head, clothes, props) with game_blender_code and the kurambit helpers, parented to its bones; eyes made with eye_lid (a round eye's lid) or eye_squash (painted eyes) blink in the game on their own. Needs STYLE.json's rig to be standard-humanoid; an MPFB2 body needs the person's character route (characters in game_status) to be blender, a generated body that it is generated. replace rebuilds only the body and armature and keeps your parts. Then game_blender_look mode review, then game_blender_export.",
   parameters: GameBlenderCharacterInput,
   success: GameBlenderCharacterResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const BlenderPaintTool = Tool.make("game_blender_paint", {
+  description:
+    "Paint models in the live Blender scene from their turnaround sheet: the sheet becomes the texture, so a model with the right silhouette and big forms looks like the picture. sheet is a game path: a character sheet game_generate's image lane made (front, side and back on a plain background, nothing overlapping), or the person's own picture; the texture is credited to it (its provider, AI flag and cost, or the person). objects are the meshes, or a character's armature for all its meshes; leave out what keeps its own material (a metal sword, alpha-clipped hair cards). The sheet is measured, never typed in: its views split at the background between them, each view's baseline, crown and centre, front and back by their matching widths, and the side's facing by fit; views (left to right: front, back, left, right) overrides the reading. Each view is fitted to the model's own silhouette and the overlap is reported with an image of the outlines; under 50% it is refused before anything is baked: pose the model as the sheet shows it (pose: {arms, legs} in degrees sets a standard-skeleton character's A-pose for the projection only; the live scene keeps its pose). One side view paints both sides, mirrored; noMirror lists sheet pixel boxes [x0, y0, x1, y1] of one-sided details (a scabbard on one hip) the mirror must not copy. Written: UV atlases (the head on its own atlas at half size), albedo, a detail normal map and ORM (each original material's roughness and metalness), under art/blender/textures/<name>/; painting again keeps the materials it first replaced. A sheet that cannot be read (views touching, no plain background, a figure cut off) is refused with the reason. Then game_blender_look mode review, then game_blender_export.",
+  parameters: GameBlenderPaintInput,
+  success: GameBlenderPaintResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const BlenderCarveTool = Tool.make("game_blender_carve", {
+  description:
+    "Carve an organic hard prop (a statue, a carving, a rock, a tree trunk) into the live Blender scene from its three-view sheet (front, side and back on a plain background, like a character sheet): a visual hull of the views with rounded sections, a relief sculpted from the painting's light and dark, decimated to triangles (default STYLE.json's budget.prop), then painted from the sheet with a normal map baked from the sculpt. It lands as name, in a collection of that name, height metres tall, standing at the origin facing -Y, credited to the sheet's source. box keeps sections below that height square (a plinth); relief scales the carved depth (default 1). Not for buildings, vehicles or anything with straight edges and holes: model those. replace: true carves a name again, where the old one stood. Then game_blender_look mode review, then game_blender_export.",
+  parameters: GameBlenderCarveInput,
+  success: GameBlenderCarveResult,
   failure,
   failureMode: "return",
   dependencies,
@@ -583,6 +609,8 @@ export const GameToolkit = Toolkit.make(
   BlenderAssetsImportTool,
   BlenderExportTool,
   BlenderCharacterTool,
+  BlenderPaintTool,
+  BlenderCarveTool,
   GenerateTool,
   GenerateWaitTool,
   AssetsAddTool,
