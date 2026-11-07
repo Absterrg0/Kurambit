@@ -15,6 +15,7 @@ import {
   lockSpriteInput,
   mayBeCharacter,
   readGameStyle,
+  lockCharacterRouteRefusal,
   styleBudgets,
   styleHash,
 } from "./gameStyle.ts";
@@ -190,4 +191,10 @@ it("hashes a lock by its content, not its key order, and fills budgets from defa
     prop: 500,
     texture: 1024,
   });
+});
+
+it("refuses Blender-made characters only on the library route, naming the setting", () => {
+  expect(lockCharacterRouteRefusal("mpfb-body", null)).toMatch(/characters is library/);
+  expect(lockCharacterRouteRefusal("unstamped-mesh", kaykit)).toMatch(/Make characters with/);
+  expect(lockCharacterRouteRefusal("mpfb-body", { ...kaykit, characters: "blender" })).toBeNull();
 });

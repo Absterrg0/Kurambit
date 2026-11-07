@@ -10,6 +10,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import {
   GAME_STYLE_DEFAULT_BUDGET,
+  GAME_STYLE_DEFAULT_CHARACTERS,
   GAME_STYLE_DEFAULT_MUSIC_LUFS,
   GAME_STYLE_DEFAULT_SFX_PEAK_DBTP,
   GAME_STYLE_FILE,
@@ -304,3 +305,23 @@ export const styleHash = (style: GameStyle | null): string =>
   style === null
     ? "none"
     : NodeCrypto.createHash("sha256").update(stableStringify(style)).digest("hex");
+
+/** How the person chose to make this game's characters. */
+export const characterRoute = (style: GameStyle | null) =>
+  style?.characters ?? GAME_STYLE_DEFAULT_CHARACTERS;
+
+/**
+ * Why the person's character route refuses a character, or null: on library, an MPFB2 body
+ * or a character mesh that came from no stamped source is not theirs to ship.
+ */
+export const lockCharacterRouteRefusal = (
+  what: "mpfb-body" | "unstamped-mesh",
+  style: GameStyle | null,
+): string | null => {
+  if (characterRoute(style) !== "library") return null;
+  const thing =
+    what === "mpfb-body"
+      ? "An MPFB2 body is a Blender-made character"
+      : "A character mesh with no library or import source is a Blender-made character";
+  return `${thing}, and this game makes characters from the library (${GAME_STYLE_FILE}'s characters is library). Use a library body or the lock's packs; only the person changes how characters are made: in the game's settings ("Make characters with"), or by setting ${GAME_STYLE_FILE}'s characters to blender.`;
+};
