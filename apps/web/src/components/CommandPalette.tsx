@@ -2,6 +2,8 @@
 
 import { useGameDialogStore } from "./game/gameDialogStore";
 import { useTurnUndo } from "./game/useBuildActions";
+import { useKeepGoing } from "./game/useKeepGoing";
+import { keepGoingControlView } from "./game/keepGoing.logic";
 import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
@@ -61,6 +63,7 @@ import {
   FolderPlusIcon,
   Gamepad2Icon,
   ColumnsIcon,
+  FastForwardIcon,
   HistoryIcon,
   MessageSquareDashedIcon,
   LinkIcon,
@@ -76,6 +79,7 @@ import {
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
+  SkipForwardIcon,
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
@@ -748,6 +752,7 @@ function OpenCommandPaletteDialog(props: {
   const gameAccess = useGameStageAccess(activeThreadRef);
   // The game's latest turn build: the palette offers the Undo or Redo its strip does.
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
+  const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
 
   const activeThreadReferenceCopyTarget =
     activeThread === null
@@ -1631,6 +1636,67 @@ function OpenCommandPaletteDialog(props: {
       icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
       run: requestStage({ kind: "compare" }),
     });
+    // Keep going (design §7.6): on, off and resume, and the Guided proposal's
+    // answers. A pause's reason rides on the items that resume it.
+    const keepGoingStatus = keepGoing.status;
+    if (keepGoingStatus !== null && gameAccess === "writer") {
+      const control = keepGoingControlView({
+        status: keepGoingStatus,
+        error: keepGoing.error,
+        threadId: threadRef.threadId,
+        canOperate: keepGoing.canOperate,
+        sending: keepGoing.sending,
+        chosenBudget: keepGoing.chosenBudget,
+      });
+      const paused =
+        keepGoingStatus.mode === "off" && keepGoingStatus.ending !== null
+          ? keepGoingStatus.message
+          : undefined;
+      if (control.disabled === null && control.modesDisabled === null)
+        for (const [mode, title] of [
+          ["guided", "Keep going: Guided"],
+          ["autopilot", "Keep going: Autopilot"],
+        ] as const)
+          if (!(control.pressed && control.value === mode))
+            actionItems.push({
+              kind: "action",
+              value: `action:game-keep-going-${mode}`,
+              title,
+              ...(paused === undefined ? {} : { description: paused }),
+              searchTerms: ["keep going", mode, "resume", "continue", "autonomous", "game"],
+              icon: <FastForwardIcon className={ITEM_ICON_CLASS} />,
+              run: () => keepGoing.choose(mode),
+            });
+      if (keepGoingStatus.mode !== "off" && keepGoing.canOperate)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-keep-going-stop",
+          title: "Stop keep going",
+          searchTerms: ["keep going", "stop", "off", "pause", "game"],
+          icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+          run: () => keepGoing.set({ mode: "off" }),
+        });
+      const proposal = keepGoingStatus.proposal;
+      if (proposal !== null && keepGoingStatus.chat === threadRef.threadId && keepGoing.canDecide) {
+        actionItems.push({
+          kind: "action",
+          value: "action:game-keep-going-start",
+          title: "Start the proposed step now",
+          description: proposal.text.split("\n")[0] ?? proposal.text,
+          searchTerms: ["keep going", "start", "proposed", "step", "now", "game"],
+          icon: <PlayIcon className={ITEM_ICON_CLASS} />,
+          run: () => keepGoing.decide(proposal.stepId, "start"),
+        });
+        actionItems.push({
+          kind: "action",
+          value: "action:game-keep-going-skip",
+          title: "Skip the proposed step",
+          searchTerms: ["keep going", "skip", "proposed", "step", "game"],
+          icon: <SkipForwardIcon className={ITEM_ICON_CLASS} />,
+          run: () => keepGoing.decide(proposal.stepId, "skip"),
+        });
+      }
+    }
     if (canGameAction && gameAccess === "writer")
       actionItems.push({
         kind: "action",
