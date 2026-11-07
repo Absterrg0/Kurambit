@@ -97,15 +97,20 @@ type Step = NonNullable<Extract<GameBuild["source"], { _tag: "turn" }>["step"]>;
  * its reason (what got worse) is in the tooltip.
  */
 function StepLine({ step }: { step: Step }) {
-  const line = (
-    <p data-game-step={step.verdict ?? "measuring"} className="text-2xs text-muted-foreground">
-      {stepLine(step)}
-    </p>
-  );
-  if (step.verdict !== "kept-moved-on" || step.reason === "") return line;
+  const verdict = step.verdict ?? "measuring";
+  if (step.verdict !== "kept-moved-on" || step.reason === "")
+    return (
+      <p data-game-step={verdict} className="text-2xs text-muted-foreground">
+        {stepLine(step)}
+      </p>
+    );
   return (
     <Tooltip>
-      <TooltipTrigger render={line} />
+      <TooltipTrigger
+        render={<p data-game-step={verdict} className="text-2xs text-muted-foreground" />}
+      >
+        {stepLine(step)}
+      </TooltipTrigger>
       <TooltipPopup side="top">{step.reason}</TooltipPopup>
     </Tooltip>
   );
