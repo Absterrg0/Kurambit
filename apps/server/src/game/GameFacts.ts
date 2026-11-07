@@ -37,6 +37,8 @@ import {
 } from "@kurambit/contracts";
 import {
   bootsFact,
+  busyReading,
+  FREEZE_BAD,
   faultOf,
   firstResponseOf,
   isStanding,
@@ -604,6 +606,7 @@ const make = Effect.gen(function* () {
               Effect.map(moveEvidence(root, key, name, result), (evidence) => ({
                 result,
                 evidence,
+                machine,
                 fact: tierFact(result, playSeconds, evidence, machine),
               })),
             ),
@@ -612,6 +615,7 @@ const make = Effect.gen(function* () {
                 Effect.succeed({
                   result: null,
                   evidence: null,
+                  machine: null,
                   fact: faultOf(error) ?? didNotBoot(error),
                 }),
             }),
@@ -638,13 +642,17 @@ const make = Effect.gen(function* () {
             const measuredRun = run.fact.status === "measured" && run.result !== null;
             const firstResponse =
               measuredRun && run.result !== null
-                ? firstResponseOf(run.result)
+                ? firstResponseOf(run.result, run.machine)
                 : notFromRun("the random-input run was not measured");
-            const liveness = !measuredRun
+            const read = !measuredRun
               ? notFromRun("the random-input run was not measured")
               : run.evidence === null
                 ? notMeasured("the random-input run's video could not be kept", true)
                 : yield* step(livenessOf(copy, NodePath.join(root, run.evidence), run.result!));
+            const liveness =
+              read.status === "measured" && read.value.longestFreeze >= FREEZE_BAD
+                ? (busyReading("the picture stood still", run.machine) ?? read)
+                : read;
             yield* write({ masher: run.fact, liveness, firstResponse });
           }
         }
