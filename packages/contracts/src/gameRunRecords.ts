@@ -245,7 +245,15 @@ export const GameRunStepResult = Schema.Union([
     runId: Schema.NullOr(RunId),
     outcome: Schema.Literals(["completed", "capped", "stopped-by-person", "superseded", "failed"]),
     build: Schema.NullOr(GameBuildId),
-    /** Files the turn changed in the lane, art/ and ASSETS.md. */
+    /**
+     * The build the folder held when the step's turn started (the turn build's
+     * recorded base): the judge and the undo measure against it. Null when
+     * unknown; absent on records written before it.
+     */
+    startBuild: Schema.NullOr(GameBuildId).pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    ),
+    /** Files the turn changed in the lane, art/ and ASSETS.md, since `startBuild`. */
     files: NonNegativeInt,
     tokens: Schema.NullOr(Schema.Number),
     elapsedMs: Schema.Number,

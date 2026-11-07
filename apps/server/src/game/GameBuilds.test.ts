@@ -21,6 +21,7 @@ import {
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { checkpointRefForGameRun } from "../checkpointing/Utils.ts";
 import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
@@ -122,6 +123,7 @@ const world = Effect.gen(function* () {
         Layer.mock(GameService.GameService)({}),
         Layer.mock(GameOperations.GameOperations)({ current: () => null, events: Stream.empty }),
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
+        Layer.mock(Orchestrator.OrchestratorV2)({}),
       ),
     ),
   );
