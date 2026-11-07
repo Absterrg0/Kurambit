@@ -167,22 +167,20 @@ def drop(obj):
 
 
 def occluders(targets):
-    """The targets and every other rendered mesh standing in their box (a sword, a hat), not the
-    ground or walls around them: a mesh far bigger than the targets is scenery."""
-    pts = evaluated_points(targets)
-    lo, hi = pts.min(0), pts.max(0)
-    span = float((hi - lo).max())
+    """The targets and the meshes that travel with them (a sword or hair cards on the same
+    armature or parent, a part parented to one of them): what the sheet draws in front of them.
+    Nothing else in the scene, not the ground or another prop standing in the same box."""
+    def owners(o):
+        out = {m.object for m in getattr(o, "modifiers", []) if m.type == "ARMATURE" and m.object is not None}
+        if o.parent is not None:
+            out.add(o.parent)
+        return out
+
+    groups = set().union(*(owners(o) for o in targets)) | set(targets)
     out = list(targets)
     for o in bpy.context.scene.objects:
-        if o in out or o.type != "MESH" or o.hide_render:
-            continue
-        p = evaluated_points([o])
-        if not len(p):
-            continue
-        a, b = p.min(0), p.max(0)
-        if (b - a).max() > 2 * span or (a > hi).any() or (b < lo).any():
-            continue
-        out.append(o)
+        if o not in out and o.type == "MESH" and not o.hide_render and (owners(o) & groups):
+            out.append(o)
     return out
 
 
@@ -333,44 +331,41 @@ def silhouette(depth, lo, hi, S):
     return depth.covered(hv, vv).reshape(nr, nc), hmin
 
 
-def align(sv, mask, depth, lo, hi, S, search=16, head=0.18):
+def align(sv, mask, depth, lo, hi, S, search=16):
     """Places the model's silhouette on the sheet view at S metres per pixel, its top on the
-    view's crown (the rows are measured, never fitted: whole-body overlap would trade the face's
-    registration for a robe's). The column shift is the one with the best overlap of the head
-    band, the top `head` of the figure, where a few pixels show most. Returns
-    (iou, c0, r0, hmin, grid): iou over the whole figure."""
+    view's crown: the rows are measured, never fitted, so every view shares them and a face is
+    painted once (whole-body overlap would trade the face's rows for a robe's). The column shift
+    is the one with the best overlap of the whole figure (a band of it, such as the head,
+    registers a side view worse: its overlap peak wanders by 10 px). Returns
+    (iou, c0, r0, hmin, grid)."""
     grid, hmin = silhouette(depth, lo, hi, S)
     r0 = sv.crown
     nr, nc = grid.shape
     view = mask[:, sv.x0:sv.x1] > 0.5
     if not grid.any():
         return 0.0, sv.x0, r0, hmin, grid
-    band = max(int(nr * head), 8)
     pad = nc + search + 2
     canvas = np.zeros((nr, view.shape[1] + 2 * pad), bool)
     rows = view[r0:r0 + nr]
     canvas[: rows.shape[0], pad:pad + view.shape[1]] = rows
-    ys, xs = np.nonzero(rows[:band])
-    gy, gx = np.nonzero(grid[:band])
-    if len(xs) == 0 or len(gx) == 0:
-        ys, xs = np.nonzero(rows)
-        gy, gx = np.nonzero(grid)
+    total, gsum = int(canvas.sum()), int(grid.sum())
+    ys, xs = np.nonzero(rows)
+    gy, gx = np.nonzero(grid)
     c_init = int(round(xs.mean() - gx.mean()))
 
-    def overlap(c, top):
-        g = grid[:top]
-        inter = int((canvas[:top, pad + c:pad + c + nc] & g).sum())
-        return inter / max(int(canvas[:top].sum()) + int(g.sum()) - inter, 1)
+    def overlap(c):
+        inter = int((canvas[:, pad + c:pad + c + nc] & grid).sum())
+        return inter / max(total + gsum - inter, 1)
 
-    c = max(range(c_init - search, c_init + search + 1), key=lambda c: overlap(c, band))
-    return overlap(c, nr), sv.x0 + c, r0, hmin, grid
+    c = max(range(c_init - search, c_init + search + 1), key=overlap)
+    return overlap(c), sv.x0 + c, r0, hmin, grid
 
 
 def place_views(read, depths, lo, hi, no_mirror=()):
-    """The sheet's views on the model, plus the mirrored side when only one side is drawn. A
-    sheet's views share one scale and baseline, so the scale comes from the front's measured
-    height and every view keeps its own measured rows; each takes its own column shift. A side
-    view whose facing the sheet did not show takes the facing whose silhouette fits better."""
+    """The sheet's views on the model, plus the mirrored side when only one side is drawn. The
+    scale is the model's crown-to-sole height over the front's, shared by every view (a sheet's
+    views share one scale and baseline); each view takes its own column shift. A side view whose
+    facing the sheet did not show takes the facing whose silhouette fits better."""
     mask = read["mask"]
     front = next(v for v in read["views"] if v.label == "front")
     S = float(hi[2] - lo[2]) / (front.base - front.crown + 1)
