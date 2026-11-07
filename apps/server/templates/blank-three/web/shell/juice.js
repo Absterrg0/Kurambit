@@ -266,7 +266,7 @@ export const Juice = {
     });
   },
 
-  trail(root, { bone = "hand_r", tip = null, color = 0xffd9a8, strength = 0.55 } = {}) {
+  trail(root, { bone = "hand_r", tip = null, color = 0xffd9a8, strength = 0.3 } = {}) {
     const trail = makeTrail(root, bone, tip, color, strength);
     trails.add(trail);
     return trail;
