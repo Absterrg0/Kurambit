@@ -56,6 +56,7 @@ const layer = (input: {
           codex: Effect.succeed({ ready: false as const, message: "no codex in tests" }),
           keepGoingStep: () => Effect.succeed(false),
           packPicture: () => Effect.die("no library in tests"),
+          standardBody: Effect.die("no library in tests"),
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,

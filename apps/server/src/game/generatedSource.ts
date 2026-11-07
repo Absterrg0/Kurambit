@@ -107,3 +107,22 @@ export const generatedSource = (
       },
     };
   });
+
+const titleCase = (snake: string) =>
+  snake
+    .split("_")
+    .filter((word) => word !== "")
+    .map((word) => word[0]!.toUpperCase() + word.slice(1))
+    .join("_");
+
+/**
+ * The clip a motion-lane GLB adds to a character, from its file name beside the generation's
+ * name: `slam.glb` is Slam, `slam.loop.glb` Slam_Loop, a locomotion set's `walk.walk_fwd_loop.glb`
+ * Walk_Fwd_Loop (the set's own names, which animate() reads as walk and run).
+ */
+export const motionClipName = (generationName: string, path: string): string => {
+  const stem = NodePath.posix.basename(path.replaceAll("\\", "/")).replace(/\.[^.]+$/, "");
+  const label = stem.startsWith(`${generationName}.`) ? stem.slice(generationName.length + 1) : "";
+  if (label === "") return titleCase(generationName);
+  return label === "loop" ? `${titleCase(generationName)}_Loop` : titleCase(label);
+};
