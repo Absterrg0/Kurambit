@@ -327,7 +327,16 @@ it up with `game_generate_wait`.
    it needs in `options.clips`), with the picked sheet as its only
    reference: a 3D generator models everything its picture shows (Tripo
    reads the first image; Meshy reads several as views of one object), so
-   the key art or a second view would be built into the model. Then:
+   the key art or a second view would be built into the model. While the
+   person directs, it stops after its paid model: the card shows the model
+   from the front, side and back, textured and in clay, and the person
+   picks "Rig this" (the rig and clips are bought then) or Cancel (only the
+   model is paid). `game_generate_wait` returns at that look; tell the
+   person, keep building, and wait again after their pick. Keep going's
+   autopilot rigs it without stopping. `options.lowPoly` asks for clean
+   game topology at `options.polycount`, the triangle budget (Tripo 500 to
+   20,000, Meshy 100 to 30,000).
+   Then:
    - a humanoid: `game_blender_character` with `body: {game: "<the .glb it
 delivered>"}` and the clips. It is conformed to the standard skeleton
      whatever its bones are named, so the clip library, `fit`, ground
@@ -338,6 +347,14 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
      creature clips are a walk only), which you may key into a breath;
    - then stand it on the ground facing -Y, review and export it as in
      Made characters 5 and 6.
+   - **A body the game already has.** A creature or humanoid made in
+     Blender, a CC0 library model or the person's own GLB is rigged as it
+     is, with no model made: the same lane with `options.mesh` set to its
+     game path and no references (`options.body` for a creature; a creature
+     with a walk preset gets its walk). Its geometry and textures are kept,
+     and the done text says what was measured; it then goes through the
+     same import, review and export. A GLB that is already rigged is
+     refused: bring it in with its own rig instead. Tripo rigs it.
    - **Moves the library lacks.** Every humanoid shares the standard
      skeleton, so one generated move plays on all of them, on any
      character route (a move adds clips, not a character). Look in the
@@ -361,6 +378,10 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
    `game_blender_assets_import` with `source: "generated"`, review and
    export. Its baked texture is snapped to the palette face by
    face; a lock with no hex palette keeps it, scaled to the budget.
+   `options.lowPoly` makes it at the budget in clean topology. A model
+   with moving parts (a door, a turret, a wheel) takes `options.parts`
+   (Tripo, not with lowPoly): each part comes in as its own object named
+   after it, so set its origin at its hinge or axle and turn it in code.
 5. **Images and sound.** Sprites, UI art, backgrounds and textures: lane
    `image` or `texture` with the key art as reference. Effects and music:
    lanes `sfx` and `music` from the brief's mood (`options.seconds`,
