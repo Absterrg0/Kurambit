@@ -77,6 +77,7 @@ export const AUTOPILOT_TURN: GameKeepGoingStatus = {
 const PROPOSAL = {
   stepId: "run-7:step:14",
   why: "regression",
+  summary: "Try the undone step another way, or a smaller one",
   text: "Your last step (Masher wins at 9 s with no skill.) was undone: Random input now crashes at 12 s.\nReach the same goal another way, or take a smaller step.",
   deadline: "2026-11-06T14:32:00.000Z",
 } as const;

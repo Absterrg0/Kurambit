@@ -91,13 +91,48 @@ export const headline = (proposal: Pick<GameRunProposal, "why" | "text">, max = 
     max,
   );
 
+/** What a fact step asks for, in the creator's terms rather than the agent's. */
+const FACT_GOAL: Readonly<Partial<Record<GameFactId, string>>> = {
+  boots: "Make the game boot cleanly",
+  idle: "Make the game lose when nobody plays",
+  masher: "Make random button-mashing lose",
+  skilled: "Make the game winnable by a skilled player",
+  "winnable-without-skill": "Make winning take skill",
+  freeze: "Remove the stretches where the game stands still",
+  "first-response": "Make the controls respond sooner",
+};
+
+/**
+ * PURE. The one line a person reads for a proposal, composed from its why and
+ * target; the full text stays the agent's prompt, shown on Edit. A note and the
+ * agent's own next line already read as a person would put them.
+ */
+export const proposalSummary = (
+  proposal: Pick<GameRunProposal, "why" | "text" | "target">,
+): string => {
+  switch (proposal.why) {
+    case "bot":
+      return "Write a play bot so Kurambit can measure skilled play";
+    case "regression":
+      return "Try the undone step another way, or a smaller one";
+    case "blocker":
+    case "fact":
+      return proposal.target === null
+        ? headline(proposal, 100)
+        : (FACT_GOAL[proposal.target] ?? `Fix a failing fact (${proposal.target})`);
+    case "steer":
+    case "next":
+      return headline(proposal, 100);
+  }
+};
+
 /** The message a step posts into its chat, and its notification summary. */
 export const stepMessage = (
   n: number,
-  proposal: Pick<GameRunProposal, "why" | "text">,
+  proposal: Pick<GameRunProposal, "why" | "text" | "target">,
 ): { readonly text: string; readonly summary: string } => ({
   text: `Keep going · step ${n} (${WHY_LABEL[proposal.why]})\n\n${proposal.text}\n\n${STEP_TAIL}`,
-  summary: `Keep going · step ${n}: ${headline(proposal, 80)}`,
+  summary: `Keep going · step ${n}: ${proposalSummary(proposal)}`,
 });
 
 /** FNV-1a: a short stable key for a text, never a secret. */
