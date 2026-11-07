@@ -30,6 +30,8 @@ export interface GeneratedSource {
     readonly licence: string;
     readonly ai: true;
     readonly credits: number | null;
+    /** The generation's id: the export's sidecar carries it, joining the generation to its file. */
+    readonly generation: string;
   };
 }
 
@@ -103,6 +105,7 @@ export const generatedSource = (
           licence: row.licence.slice(0, 200),
           ai: true,
           credits: generation.costUsd,
+          generation: generation.id,
         },
       },
     };

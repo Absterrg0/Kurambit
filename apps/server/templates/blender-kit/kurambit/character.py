@@ -107,7 +107,10 @@ def _part(p):
     if not (isinstance(src, str) and 0 < len(src) <= 64 and isinstance(licence, str) and len(licence) <= 200
             and isinstance(ai, bool) and (credits is None or (isinstance(credits, (int, float)) and not isinstance(credits, bool)))):
         return None
-    return {"what": p["what"], "from": src, "licence": licence, "ai": ai, "credits": credits}
+    part = {"what": p["what"], "from": src, "licence": licence, "ai": ai, "credits": credits}
+    if isinstance(p.get("generation"), str):
+        part["generation"] = p["generation"][:64]
+    return part
 
 
 def _game_source(path):

@@ -188,7 +188,8 @@ const sameStamp = (a: GameAssetPart, b: GameAssetPart) =>
   a.from === b.from &&
   a.licence === b.licence &&
   a.ai === b.ai &&
-  a.credits === b.credits;
+  a.credits === b.credits &&
+  a.generation === b.generation;
 
 /**
  * The ledger as a sidecar holds it: every distinct stamp, in order. Past the sidecar's limit,
@@ -219,6 +220,11 @@ export const ledgerParts = (
     else {
       if (!group.froms.includes(part.from)) group.froms.push(part.from);
       if (group.part.what !== part.what) group.part = { ...group.part, what: "parts" };
+      // A merged line credits several sources: it names no one generation.
+      if (group.part.generation !== part.generation) {
+        const { generation: _mixed, ...rest } = group.part;
+        group.part = rest;
+      }
     }
   }
   const merged = groups.map(({ part, froms }) => {

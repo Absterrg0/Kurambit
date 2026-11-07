@@ -18,6 +18,8 @@ export const GameAssetPart = Schema.Struct({
   ai: Schema.Boolean,
   /** What it cost, in USD (a generation's cost); null when free or not measured. */
   credits: Schema.NullOr(Schema.Number),
+  /** The game_generate generation that delivered it, so its card can tell whether it is in the game. */
+  generation: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
 });
 export type GameAssetPart = typeof GameAssetPart.Type;
 

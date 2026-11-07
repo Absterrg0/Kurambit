@@ -43,6 +43,8 @@ def parts_of(objects):
     def add(p):
         part = {"what": p["what"], "from": p["from"], "licence": p.get("licence", ""),
                 "ai": bool(p.get("ai", False)), "credits": p.get("credits")}
+        if isinstance(p.get("generation"), str):  # the generation that delivered it (GameAssetPart)
+            part["generation"] = p["generation"][:64]
         if part not in parts:
             parts.append(part)
 

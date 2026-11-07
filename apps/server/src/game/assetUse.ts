@@ -9,6 +9,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   GAME_ASSET_USE_CAP,
+  GAME_MODEL_SIDECAR_SUFFIX,
   type GameAssetUse,
   type GameEngineId,
   type GameGenerationUse,
@@ -140,12 +141,42 @@ export const shippedFiles = async (
 };
 
 const GenerationRecord = Schema.Struct({ id: Schema.String, files: Schema.Array(Schema.String) });
+/** The one thing a sidecar says here: which generations its export was made from. */
+const SidecarGenerations = Schema.Struct({
+  source: Schema.Struct({
+    parts: Schema.Array(Schema.Struct({ generation: Schema.optionalKey(Schema.String) })),
+  }),
+});
+const decodeSidecarGenerations = Schema.decodeUnknownOption(
+  Schema.fromJsonString(SidecarGenerations),
+);
+
+/**
+ * Shipped models by the generations their sidecars credit: an export rewrites a generated
+ * model's bytes, so a character, creature, prop or motion is joined to its GLB this way.
+ */
+const exportsByGeneration = async (copyRoot: string, shipped: ReadonlyArray<string>) => {
+  const byGeneration = new Map<string, string[]>();
+  for (const path of shipped) {
+    if (!/\.glb$/i.test(path)) continue;
+    const text = await NodeFSP.readFile(
+      NodePath.join(copyRoot, path.replace(/\.glb$/i, GAME_MODEL_SIDECAR_SUFFIX)),
+      "utf8",
+    ).catch(() => "");
+    const decoded = decodeSidecarGenerations(text);
+    if (Option.isNone(decoded)) continue;
+    for (const part of decoded.value.source.parts)
+      if (part.generation !== undefined)
+        byGeneration.set(part.generation, [...(byGeneration.get(part.generation) ?? []), path]);
+  }
+  return byGeneration;
+};
 const decodeRecord = Schema.decodeUnknownOption(Schema.fromJsonString(GenerationRecord));
 
 /**
  * The build's generations (their records under art/generated/) joined to the shipped files by
- * content: a generation is listed when a shipped file has the bytes of a file it delivered, and
- * loaded when a play loaded such a file. Only files of equal length are hashed.
+ * content (a shipped file has the bytes of a file it delivered) or by an exported model's sidecar
+ * crediting it, and loaded when a play loaded such a file. Only files of equal length are hashed.
  */
 export const generationsShipped = async (
   copyRoot: string,
@@ -163,12 +194,13 @@ export const generationsShipped = async (
     const bytes = await sizeOf(NodePath.join(copyRoot, path));
     if (bytes !== null) bySize.set(bytes, [...(bySize.get(bytes) ?? []), path]);
   }
+  const exported = await exportsByGeneration(copyRoot, shipped);
   const hash = hasher();
   const joined: Array<{ id: string; loaded: boolean }> = [];
   for (const record of records) {
     const decoded = decodeRecord(await NodeFSP.readFile(record, "utf8").catch(() => ""));
     if (Option.isNone(decoded)) continue;
-    const matched = new Set<string>();
+    const matched = new Set<string>(exported.get(decoded.value.id) ?? []);
     for (const file of decoded.value.files) {
       const normal = NodePath.posix.normalize(file);
       if (!normal.startsWith(`${GENERATED_DIR}/`)) continue;

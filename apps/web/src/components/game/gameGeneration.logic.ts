@@ -28,7 +28,8 @@ const AUDIO_LANES: ReadonlySet<GameArtLane> = new Set(["sfx", "music", "voice"])
 /**
  * Lanes whose files reach the game as delivered (game_import copies them), so a build that ships
  * none of their bytes does not have them. A 3D lane's model is exported through Blender, which
- * rewrites the bytes: a miss there says nothing.
+ * rewrites the bytes: it joins through its export's sidecar, and a miss (an export from before
+ * sidecars named generations) says nothing.
  */
 const AS_DELIVERED: ReadonlySet<GameArtLane> = new Set([
   "image",
