@@ -343,10 +343,11 @@ describe("the proposal (K3, K10)", () => {
     expect(Loop.applyLook(state(), look({ next: "none" }), NOW).state.ending).toBe("done");
   });
 
-  it("proposes the bot once, only when the game reaches an ending without one", () => {
+  it("proposes the bot once for a booting game without one, ending or not", () => {
     expect(Loop.propose(state(), look({ bot: false }))?.why).toBe("bot");
     const noEnding = facts({ idle: tier("no-ending", null), masher: tier("no-ending", null) });
-    expect(Loop.propose(state(), look({ bot: false, facts: noEnding }))?.why).toBe("next");
+    expect(Loop.propose(state(), look({ bot: false, facts: noEnding }))?.why).toBe("bot");
+    expect(Loop.propose(state(), look({ bot: true, facts: noEnding }))?.why).toBe("next");
     const tried = Loop.applyTurn(
       state(),
       turnStep({ proposal: proposal({ why: "bot", key: "bot" }) }),

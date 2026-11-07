@@ -257,11 +257,10 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     () => {
       if (look.bot || facts === null || views === null) return null;
       if (state.records.some((r) => r.step.why === "bot")) return null;
-      const ended = (id: "idle" | "masher") => {
-        const ending = tierEnding(facts, id);
-        return ending === "won" || ending === "lost";
-      };
-      if (toneOf(views, "boots") !== "good" || !(ended("idle") || ended("masher"))) return null;
+      // Once a booting game has no play bot: the skilled tier is the one fact
+      // that says a real player can win, and a game the idle and masher bots
+      // never finish in their minute is exactly where it is needed.
+      if (toneOf(views, "boots") !== "good") return null;
       return { why: "bot", text: BOT_TEXT, target: null, key: "bot" };
     },
     ...(facts === null || views === null

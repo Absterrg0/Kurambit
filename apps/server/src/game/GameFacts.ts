@@ -663,7 +663,7 @@ const make = Effect.gen(function* () {
           else if (bot === null)
             yield* write({
               skilled: notMeasured(
-                "this game has no play-mode bot yet (a tester writes one in a run)",
+                "this game has no play bot yet (keep going writes one once, or ask your agent for one)",
                 false,
               ),
             });
