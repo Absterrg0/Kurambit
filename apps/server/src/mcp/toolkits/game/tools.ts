@@ -103,7 +103,7 @@ const GameStatusTool = Tool.make("game_status", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderCodeTool = Tool.make("game_blender_code", {
   description:
-    "Run Python bpy code in this game's live Blender scene (pinned mcp-for-blender execute_blender_code, adapted). The scene stays alive across calls on a private display; the first call starts it. Anything Blender can do, you can do, including rendering PNGs and writing WAVs with numpy and wave. Relative paths resolve from the game root; print every path you write. A Python error fails the call with its traceback. The .blend source is saved in the game after each successful call. Use game_blender_look to see the result and game_blender_scene for counts, sizes and positions.",
+    "Run Python bpy code in this game's live Blender scene (pinned mcp-for-blender execute_blender_code, adapted). The scene stays alive across calls on a private display; the first call starts it. Anything Blender can do, you can do, including rendering PNGs and writing WAVs with numpy and wave. Relative paths resolve from the game root; print every path you write. The live Blender has its own private home, so ~ in a path is not yours: write game-relative or absolute paths. A Python error fails the call with its traceback. The .blend source is saved in the game after each successful call. Use game_blender_look to see the result and game_blender_scene for counts, sizes and positions.",
   parameters: GameBlenderCodeInput,
   success: GameBlenderCodeResult,
   failure,
