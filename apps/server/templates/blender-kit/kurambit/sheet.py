@@ -141,11 +141,13 @@ def runs(row):
 def _background(rgb, thr):
     h, w = rgb.shape[:2]
     b = 4
-    border = np.concatenate([rgb[:b].reshape(-1, 3), rgb[-b:].reshape(-1, 3), rgb[:, :b].reshape(-1, 3), rgb[:, -b:].reshape(-1, 3)])
-    bg = np.median(border, axis=0)
-    plain = float((np.abs(border - bg).max(axis=1) < thr).mean())
-    if plain < 0.9:
-        raise Refused("invalid-input", f"the sheet has no plain background: only {plain:.0%} of its border is one colour. A sheet needs its views on a plain, even background (no scenery, gradient or frame), so the figure can be told from it.")
+    sides = [rgb[:b].reshape(-1, 3), rgb[-b:].reshape(-1, 3), rgb[:, :b].reshape(-1, 3), rgb[:, -b:].reshape(-1, 3)]
+    bg = np.median(np.concatenate(sides), axis=0)
+    # A figure may stand on one edge (generated sheets often put the feet there); the other
+    # three edges must be the background.
+    plain = sorted(float((np.abs(side - bg).max(axis=1) < thr).mean()) for side in sides)
+    if plain[1] < 0.9:
+        raise Refused("invalid-input", f"the sheet has no plain background: {', '.join(f'{p:.0%}' for p in plain)} of its four edges are one colour. A sheet needs its views on a plain, even background (no scenery, gradient or frame), so the figure can be told from it.")
     return bg
 
 
@@ -212,6 +214,17 @@ def read_sheet(path, labels=None, thr=0.05):
     H, W = rgb.shape[:2]
     bg = _background(rgb, thr)
     mask = _mask(rgb, bg, thr)
+    notes = []
+    # Generated sheets often stand the figure on the image's edge. Padding with the background
+    # reads it as it is, so nobody has to copy the sheet (a copy loses its generation's credit);
+    # a subject truly cut off there still is, and the note says where to look.
+    touched = [name for name, line in (("top", mask[0]), ("bottom", mask[-1]), ("left", mask[:, 0]), ("right", mask[:, -1])) if line.any()]
+    if touched:
+        pad = max(16, round(0.03 * max(H, W)))
+        rgb = np.concatenate([np.pad(rgb[:, :, c], pad, mode="constant", constant_values=float(bg[c]))[:, :, None] for c in range(3)], axis=2)
+        H, W = rgb.shape[:2]
+        mask = _mask(rgb, bg, thr)
+        notes.append(f"the figure touches the sheet's {' and '.join(touched)} edge: the sheet was read padded with its background, so if the subject is cut off there, that part is missing from the paint; check it in the review")
     share = float(mask.mean())
     if share < 0.01:
         raise Refused("invalid-input", "the sheet shows no figure on its background")
@@ -241,7 +254,6 @@ def read_sheet(path, labels=None, thr=0.05):
             raise Refused("invalid-input", f"the figure in columns {x0}-{x1} is cut off at the sheet's {' and '.join(edge)} edge: every view must show the whole subject with background around it")
         ys, xs = np.nonzero(m)
         views.append({"x0": x0, "x1": x1, "crown": crown, "base": base, "centre": x0 + (xs.min() + xs.max()) / 2, "facing": _facing(m)})
-    notes = []
     if labels:
         names = list(labels)
     else:
