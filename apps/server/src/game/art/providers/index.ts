@@ -6,6 +6,7 @@ import { google } from "./google.ts";
 import { meshy } from "./meshy.ts";
 import { openai } from "./openai.ts";
 import { tripo } from "./tripo.ts";
+import { uthana } from "./uthana.ts";
 
 /** Every built adapter; the Kurambit plan has none yet. */
 export const ART_ADAPTERS: Readonly<Partial<Record<GameArtProviderId, ArtAdapter>>> = {
@@ -15,4 +16,5 @@ export const ART_ADAPTERS: Readonly<Partial<Record<GameArtProviderId, ArtAdapter
   tripo,
   meshy,
   elevenlabs,
+  uthana,
 };
