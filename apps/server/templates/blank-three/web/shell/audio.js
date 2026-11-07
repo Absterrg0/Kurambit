@@ -4,10 +4,15 @@
 //   playMusic("./assets/music/theme.ogg");   // looped on the music gain; replaces the last track
 //   stopMusic();
 //   playSfx("./assets/sfx/hit.wav", { volume: 0.8, pitch: 0.08 }); // or Juice.sfx(...)
+//   playAmbience("./assets/sfx/wind.ogg", { volume: 0.5 }); // a looped bed beside the music
+//   stopAmbience();                                         // (wind, rain, a room's hum)
 //
 // Browsers start audio only after a click or key press, so the context is made
 // on the first one (the shell also tries on a gamepad button); sounds asked for
-// before that are skipped, and music asked for before that starts then.
+// before that are skipped, and music and ambience asked for before that start then.
+// The ambience bed is its own channel under the sound-effects volume: one bed
+// at a time, and a new one crossfades from the last (asking for the playing bed
+// again changes only its volume).
 
 export const VOLUME_NAMES = ["master", "music", "sfx"];
 const MAX_VOICES = 12;
@@ -42,6 +47,7 @@ export function unlockAudio() {
   for (const name of VOLUME_NAMES) gains[name].gain.value = volumes[name];
   if (held) context.suspend().catch(() => undefined);
   if (musicUrl !== null) playMusic(musicUrl);
+  if (bedUrl !== null) startBed();
 }
 window.addEventListener("pointerdown", unlockAudio, { capture: true });
 window.addEventListener("keydown", unlockAudio, { capture: true });
@@ -117,6 +123,66 @@ export function stopMusic() {
   musicToken += 1;
   musicSource?.stop();
   musicSource = null;
+}
+
+let bedUrl = null;
+let bedVolume = 1;
+let bedFade = 1;
+let bed = null;
+let bedToken = 0;
+
+const fadeTo = (level, value, seconds) => {
+  const now = context.currentTime;
+  level.gain.cancelScheduledValues(now);
+  level.gain.setValueAtTime(level.gain.value, now);
+  level.gain.linearRampToValueAtTime(value, now + Math.max(seconds, 0.01));
+};
+
+function startBed() {
+  const token = ++bedToken;
+  const url = bedUrl;
+  load(url).then(
+    (buffer) => {
+      if (token !== bedToken || context === null) return;
+      if (bed !== null) {
+        const old = bed;
+        fadeTo(old.level, 0, bedFade);
+        old.source.stop(context.currentTime + bedFade + 0.05);
+      }
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const level = context.createGain();
+      level.gain.value = 0;
+      source.connect(level).connect(gains.sfx);
+      source.start();
+      fadeTo(level, bedVolume, bedFade);
+      bed = { url, source, level };
+    },
+    () => undefined,
+  );
+}
+
+/** Loops an ambience bed under the sound-effects volume, crossfading from the last one. */
+export function playAmbience(url, { volume = 1, fade = 1 } = {}) {
+  bedVolume = volume;
+  bedFade = fade;
+  if (bedUrl === url && bed?.url === url && context !== null) {
+    fadeTo(bed.level, volume, fade);
+    return;
+  }
+  bedUrl = url;
+  if (context !== null) startBed();
+}
+
+/** Fades the ambience bed out. */
+export function stopAmbience({ fade = 1 } = {}) {
+  bedUrl = null;
+  bedToken += 1;
+  if (bed === null || context === null) return;
+  fadeTo(bed.level, 0, fade);
+  bed.source.stop(context.currentTime + fade + 0.05);
+  bed = null;
 }
 
 /** A short synthesized tick for menu presses, so the shell sounds before any file exists. */
