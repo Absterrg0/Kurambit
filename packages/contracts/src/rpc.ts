@@ -1,22 +1,11 @@
 import {
-  GameRunStartInput,
-  GameRunStartResult,
-  GameRunStatusInput,
-  GameRunStatusResult,
-  GameRunSteerInput,
-  GameRunSteerResult,
-  GameRunProfileInput,
-  GameRunProfileResult,
-  GameRunRoundInput,
+  GameKeepGoingDecideInput,
+  GameKeepGoingDecideResult,
+  GameKeepGoingInput,
+  GameKeepGoingStatus,
+  GameKeepGoingStatusInput,
   GameRunRoundsInput,
   GameRunRoundsResult,
-  GameRunRoundDetail,
-  GameRunPickInput,
-  GameRunPickDetail,
-  GameRunRestoreInput,
-  GameRunRestoreResult,
-  GameRunStopInput,
-  GameRunStopResult,
 } from "./gameRun.ts";
 import {
   GameActionInput,
@@ -361,14 +350,9 @@ export const WS_METHODS = {
   gameWindowsPackage: "game.windowsPackage",
   gameWebPackage: "game.webPackage",
   gameToolchainStatus: "game.toolchainStatus",
-  gameRunStart: "game.runStart",
-  gameRunStatus: "game.runStatus",
-  gameRunStop: "game.runStop",
-  gameRunSteer: "game.runSteer",
-  gameRunProfile: "game.runProfile",
-  gameRunRound: "game.runRound",
-  gameRunPick: "game.runPick",
-  gameRunRestore: "game.runRestore",
+  gameKeepGoing: "game.keepGoing",
+  gameKeepGoingStatus: "game.keepGoingStatus",
+  gameKeepGoingDecide: "game.keepGoingDecide",
   gameMediaSave: "game.mediaSave",
   gameSavedList: "game.savedList",
   gameSavedDelete: "game.savedDelete",
@@ -1477,44 +1461,19 @@ const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   error: gameError,
 });
 
-const WsGameRunStartRpc = Rpc.make(WS_METHODS.gameRunStart, {
-  payload: GameRunStartInput,
-  success: GameRunStartResult,
+const WsGameKeepGoingRpc = Rpc.make(WS_METHODS.gameKeepGoing, {
+  payload: GameKeepGoingInput,
+  success: GameKeepGoingStatus,
   error: gameError,
 });
-const WsGameRunStatusRpc = Rpc.make(WS_METHODS.gameRunStatus, {
-  payload: GameRunStatusInput,
-  success: GameRunStatusResult,
+const WsGameKeepGoingStatusRpc = Rpc.make(WS_METHODS.gameKeepGoingStatus, {
+  payload: GameKeepGoingStatusInput,
+  success: GameKeepGoingStatus,
   error: gameError,
 });
-const WsGameRunStopRpc = Rpc.make(WS_METHODS.gameRunStop, {
-  payload: GameRunStopInput,
-  success: GameRunStopResult,
-  error: gameError,
-});
-const WsGameRunSteerRpc = Rpc.make(WS_METHODS.gameRunSteer, {
-  payload: GameRunSteerInput,
-  success: GameRunSteerResult,
-  error: gameError,
-});
-const WsGameRunProfileRpc = Rpc.make(WS_METHODS.gameRunProfile, {
-  payload: GameRunProfileInput,
-  success: GameRunProfileResult,
-  error: gameError,
-});
-const WsGameRunRoundRpc = Rpc.make(WS_METHODS.gameRunRound, {
-  payload: GameRunRoundInput,
-  success: GameRunRoundDetail,
-  error: gameError,
-});
-const WsGameRunPickRpc = Rpc.make(WS_METHODS.gameRunPick, {
-  payload: GameRunPickInput,
-  success: GameRunPickDetail,
-  error: gameError,
-});
-const WsGameRunRestoreRpc = Rpc.make(WS_METHODS.gameRunRestore, {
-  payload: GameRunRestoreInput,
-  success: GameRunRestoreResult,
+const WsGameKeepGoingDecideRpc = Rpc.make(WS_METHODS.gameKeepGoingDecide, {
+  payload: GameKeepGoingDecideInput,
+  success: GameKeepGoingDecideResult,
   error: gameError,
 });
 const WsGameMediaSaveRpc = Rpc.make(WS_METHODS.gameMediaSave, {
@@ -1591,14 +1550,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameWindowsPackageRpc,
   WsGameWebPackageRpc,
   WsGameToolchainStatusRpc,
-  WsGameRunStartRpc,
-  WsGameRunStatusRpc,
-  WsGameRunStopRpc,
-  WsGameRunSteerRpc,
-  WsGameRunProfileRpc,
-  WsGameRunRoundRpc,
-  WsGameRunPickRpc,
-  WsGameRunRestoreRpc,
+  WsGameKeepGoingRpc,
+  WsGameKeepGoingStatusRpc,
+  WsGameKeepGoingDecideRpc,
   WsGameMediaSaveRpc,
   WsGameSavedListRpc,
   WsGameSavedDeleteRpc,

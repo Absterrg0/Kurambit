@@ -4,7 +4,7 @@ import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
 import { GameBuildId } from "./gameBuildId.ts";
-import { GameRunErrorReason, GameRunProfile } from "./gameRun.ts";
+import { GameRunErrorReason } from "./gameRunReasons.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */

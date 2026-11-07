@@ -21,6 +21,23 @@ export const GAME_FACTS_EVENT = "facts";
 /** A push: files under the live-served folder changed and settled. Its message is "Changed <path>". */
 export const GAME_LIVE_EVENT = "live";
 
+/** How a keep-going step ended, as its record and the strip word it. */
+export const GameStepVerdict = Schema.Literals([
+  /** No watched fact got worse. */
+  "kept",
+  /** The run (or the person, before it) restored the step's base. */
+  "undone",
+  /** It regressed, but the game changed after it, so nothing was undone. */
+  "kept-moved-on",
+  /** The turn changed no game files. */
+  "no-change",
+  /** The facts could not be compared; kept, never undone. */
+  "not-measured",
+  /** The person stopped the step's turn. */
+  "stopped",
+]);
+export type GameStepVerdict = typeof GameStepVerdict.Type;
+
 export const GameBuildSource = Schema.Union([
   Schema.TaggedStruct("turn", {
     threadId: ThreadId,
@@ -31,6 +48,16 @@ export const GameBuildSource = Schema.Union([
     runId: Schema.String,
     /** The person's request, first line, at most 140 characters. */
     request: Schema.String,
+    /** The keep-going step this turn was; null for a person's turn. */
+    step: Schema.NullOr(
+      Schema.Struct({
+        n: PositiveInt,
+        /** Null while the step is still being judged. */
+        verdict: Schema.NullOr(GameStepVerdict),
+        /** One plain line: "no fact got worse", "Random input now crashes at 12 s". */
+        reason: Schema.String,
+      }),
+    ),
   }),
   Schema.TaggedStruct("round", {
     runId: Schema.String,
@@ -609,8 +636,6 @@ export const GameBuildRestoreInput = Schema.Struct({
   threadId: ThreadId,
   build: GameBuildRef,
   commandId: Schema.optionalKey(Schema.String),
-  /** A round's build of a stopped run becomes the run's best (Keep on its card). */
-  asBest: Schema.optionalKey(Schema.Boolean),
 });
 /** Stops one build's play copy; the folder's own Play is never touched. */
 export const GameBuildStopInput = Schema.Struct({ threadId: ThreadId, build: GameBuildRef });

@@ -58,11 +58,10 @@ import {
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import { GameEngineId } from "./game.ts";
-import { GameRunProfile, GameRunSubmission } from "./gameRun.ts";
+import { GameRunProfile } from "./gameRun.ts";
 import {
   GameRun,
   GameRunId,
-  GameRunRestoreOutcome,
   GameRunRound,
   GameRunStep,
   GameRunStepId,
@@ -3024,43 +3023,29 @@ export const OrchestrationV2Command = Schema.Union([
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
 /**
- * The production run, on the game's creator thread. Agents and the Game panel
- * reach these through server services, never `dispatchCommand`: a role's
- * submission or a step's result must come from the harness.
+ * Keep going, on the chat it runs in. Agents and the Game panel reach these
+ * through GameRunControl, never `dispatchCommand`: a step's result must come
+ * from the harness.
  */
 const GameRunCommandFields = { commandId: CommandId, threadId: ThreadId, runId: GameRunId };
 export const OrchestrationV2GameRunCommand = Schema.Union([
+  /** Always a turns run on the command's thread. */
   Schema.Struct({
     type: Schema.Literal("game-run.start"),
     ...GameRunCommandFields,
+    engine: GameEngineId,
     /** The engine project directory the game's manifest names. */
     lane: TrimmedNonEmptyString,
-    /** The game's engine, from its manifest. Absent on commands from older servers; runEngine then derives it from lane. */
-    engine: Schema.optionalKey(GameEngineId),
-    brief: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(8000)),
-    artDirection: Schema.optional(Schema.String),
-    budgetMinutes: Schema.optional(PositiveInt),
-    profile: Schema.optional(GameRunProfile),
-    modelSelection: ModelSelection,
-    runtimeMode: RuntimeMode,
-    /**
-     * Where a run on a game an earlier run already built starts: past its
-     * prototypes, at the rounds (which write a ladder first when none exists).
-     */
-    stage: Schema.optional(Schema.Literal("build")),
-    /** The creator's chat the command came from: the run's questions wake there. Absent on commands from older servers. */
-    chat: Schema.optionalKey(ThreadId),
+    profile: GameRunProfile,
+    /** Null is no limit. */
+    budgetMinutes: Schema.NullOr(PositiveInt),
   }),
-  /** Continues a run that ended resumably (budget, a provider or memory outage, a failure, a stop). */
+  /** Continues a turns run that ended resumably; a stage-era run is refused `not-resumable`. */
   Schema.Struct({
     type: Schema.Literal("game-run.resume"),
     ...GameRunCommandFields,
-    budgetMinutes: Schema.optional(PositiveInt),
-    profile: Schema.optional(GameRunProfile),
-    modelSelection: Schema.optional(ModelSelection),
-    runtimeMode: Schema.optional(RuntimeMode),
-    /** The creator's chat the command came from: the run's questions wake there. Absent on commands from older servers. */
-    chat: Schema.optionalKey(ThreadId),
+    profile: Schema.optionalKey(GameRunProfile),
+    budgetMinutes: Schema.optionalKey(Schema.NullOr(PositiveInt)),
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.stop"),
@@ -3069,12 +3054,12 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     /** The server's own stop for a tool that kept failing: the run pauses as tool-failed with `reason`, not "stopped". */
     ending: Schema.optionalKey(Schema.Literal("tool-failed")),
   }),
-  /** A creator's note for the next round; on a finished run it buys one round. */
+  /** The person's note for the next step. */
   Schema.Struct({
     type: Schema.Literal("game-run.steer"),
     ...GameRunCommandFields,
     note: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4000)),
-    /** The creator's chat the command came from: the run's questions wake there. Absent on commands from older servers. */
+    /** The chat the command came from. Absent on commands from older servers. */
     chat: Schema.optionalKey(ThreadId),
   }),
   Schema.Struct({
@@ -3082,24 +3067,20 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     ...GameRunCommandFields,
     profile: GameRunProfile,
   }),
+  /** The person's answer to a Guided proposal. */
   Schema.Struct({
     type: Schema.Literal("game-run.decide"),
     ...GameRunCommandFields,
+    /** The propose step's id. */
     decisionId: TrimmedNonEmptyString,
-    answer: TrimmedNonEmptyString,
-    notes: Schema.optional(Schema.String.check(Schema.isMaxLength(20_000))),
-    /** The creator's chat the command came from: the run's questions wake there. Absent on commands from older servers. */
+    answer: Schema.Literals(["start", "skip", "hold"]),
+    /** The chat the command came from. Absent on commands from older servers. */
     chat: Schema.optionalKey(ThreadId),
   }),
-  /** A role's typed result, checked against what its step asks for. */
-  Schema.Struct({
-    type: Schema.Literal("game-run.submit"),
-    ...GameRunCommandFields,
-    stepId: GameRunStepId,
-    roleThreadId: ThreadId,
-    submission: GameRunSubmission,
-  }),
-  /** A step's execution began: a role's thread exists, or a decision reached the creator's agent. */
+  /**
+   * A step's execution began. For a turn step the reactor sends it when the
+   * step's T3 run starts running; it drops the captured steer prefix.
+   */
   Schema.Struct({
     type: Schema.Literal("game-run.step.start"),
     ...GameRunCommandFields,
@@ -3126,7 +3107,7 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     reason: Schema.String,
   }),
   /**
-   * The decision's deadline effect fired; the run takes the default if it is
+   * The proposal's deadline effect fired; the run takes the default if it is
    * still due. Its command id derives from that effect's id, so each deadline
    * gets its own receipt and one that fired early never refuses a later one.
    */
@@ -3134,21 +3115,12 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     type: Schema.Literal("game-run.decision.expire"),
     ...GameRunCommandFields,
     decisionId: TrimmedNonEmptyString,
-    /** The decision has nothing on disk to show: its default is taken at once, unasked. */
-    nothingToShow: Schema.optional(Schema.Boolean),
-  }),
-  /** An ending's finish (stops, outputs, exports) completed; recovery owes it no more. */
-  Schema.Struct({
-    type: Schema.Literal("game-run.finished"),
-    ...GameRunCommandFields,
-    endedAt: IsoDateTime,
   }),
   /**
-   * A step's timer, set by its own work: a role's cap again at a later due time
-   * (memory waits extend it), a role turn sent again after a pause, or the
-   * step's work run again once memory may have freed or the game's operation
-   * lock may be free (`n` counts each kind of wait). Durable, so a restart
-   * keeps it.
+   * A step's timer, set by its own work: the turn's cap at a later due time, a
+   * turn sent again after an instant failure, or the step's work run again
+   * after a tool failed or by recovery (`n` counts each kind of wait). Durable,
+   * so a restart keeps it.
    */
   Schema.Struct({
     type: Schema.Literal("game-run.step.schedule"),
@@ -3161,45 +3133,14 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
       Schema.Struct({ kind: Schema.Literal("cap") }),
       Schema.Struct({
         kind: Schema.Literal("resend"),
-        turn: Schema.Literals(["retry", "memory"]),
+        turn: Schema.Literal("retry"),
         n: PositiveInt,
       }),
-      Schema.Struct({ kind: Schema.Literal("memory"), n: PositiveInt }),
-      Schema.Struct({ kind: Schema.Literal("busy"), n: PositiveInt }),
       /** A tool of Kurambit's failed in a way waiting may clear: the step's work runs again later. */
       Schema.Struct({ kind: Schema.Literal("tool"), n: PositiveInt }),
       /** Recovery runs the step again through the outbox, behind whatever its thread still owes. */
       Schema.Struct({ kind: Schema.Literal("recover") }),
     ]),
-  }),
-  /**
-   * The creator asks for a build back on an ended run, a kept round's or a
-   * saved one by its name (exactly one of them); a job moves the folder.
-   */
-  Schema.Struct({
-    type: Schema.Literal("game-run.restore.request"),
-    ...GameRunCommandFields,
-    requestId: TrimmedNonEmptyString,
-    round: Schema.optionalKey(PositiveInt),
-    build: Schema.optionalKey(TrimmedNonEmptyString),
-  }),
-  /** The restore job's outcome; a restored round becomes the ended run's judged best. */
-  Schema.Struct({
-    type: Schema.Literal("game-run.restore"),
-    ...GameRunCommandFields,
-    requestId: TrimmedNonEmptyString,
-    outcome: GameRunRestoreOutcome,
-  }),
-  /**
-   * Storage cleanup asks an ended run to free its copies. The run takes it
-   * only when nothing can resume it any more or it ended `keepMs` ago, and
-   * frees them on its own thread's effects, so a resume either refuses it or
-   * queues behind the release.
-   */
-  Schema.Struct({
-    type: Schema.Literal("game-run.copies.spend"),
-    ...GameRunCommandFields,
-    keepMs: NonNegativeInt,
   }),
 ]);
 export type OrchestrationV2GameRunCommand = typeof OrchestrationV2GameRunCommand.Type;

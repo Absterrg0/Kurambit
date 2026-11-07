@@ -6,27 +6,27 @@ import {
   NonNegativeInt,
   PositiveInt,
   ProjectId,
+  RunId,
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { GameEngineId } from "./game.ts";
-import { GameBotDecider, GameBotPerf } from "./gameBot.ts";
 import {
-  GameRunDecisionKind,
-  GameRunRestoreRefusal,
-  GameRunProfile,
-  GameRunRungFields,
-  GameRunSubmission,
-} from "./gameRun.ts";
+  GameBuildFacts,
+  GameBuildId,
+  GameFactDelta,
+  GameFactId,
+  GameStepVerdict,
+} from "./gameBuilds.ts";
+import { GameRunEnding, GameRunProfile, GameRunStepWhy } from "./gameRun.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
 
 /**
- * The production run as records of the game's creator thread: the run, its
- * steps and its rounds. Each event carries the new full record of one entity.
- * The shapes below the ids are the run policy's own state; bulky evidence
- * (tester notes, sample reports, comparisons, frames) stays under `.studio/`
- * and is referenced by path.
+ * Keep going as records of the chat it runs in: the run, its steps and its
+ * rounds (one per step). Each event carries the new full record of one entity.
+ * A run made by an earlier Kurambit (the stage era) has no `loop`: its records
+ * still decode, so its round cards and Past runs read, but it is never continued.
  */
 
 export const GameRunId = TrimmedNonEmptyString.pipe(Schema.brand("GameRunId"));
@@ -36,7 +36,7 @@ export type GameRunStepId = typeof GameRunStepId.Type;
 const GameRunRoundId = TrimmedNonEmptyString.pipe(Schema.brand("GameRunRoundId"));
 export type GameRunRoundId = typeof GameRunRoundId.Type;
 
-/** A step's id: its number within the run. A pair's halves have numbers of their own. */
+/** A step's id: its number within the run. */
 export const gameRunStepId = (runId: GameRunId, seq: number): GameRunStepId =>
   GameRunStepId.make(`${runId}:step:${seq}`);
 export const gameRunRoundId = (runId: GameRunId, round: number): GameRunRoundId =>
@@ -51,34 +51,7 @@ export const gameRunStepCommandId = (
   action: "start" | "complete" | "fail",
 ): CommandId => CommandId.make(`game-run:${stepId}:attempt:${attempt}:${action}`);
 
-// ── The demo ladder as the run holds it. ───────────────────────────────────
-export const GameRunRung = Schema.Struct({
-  // Stable across a reviewer's insertion, which shifts positions; round records name it.
-  id: Schema.Number,
-  ...GameRunRungFields,
-  status: Schema.Literals(["todo", "done", "set-aside"]),
-  // Rounds that built this rung without landing it since it last opened.
-  fails: Schema.Number,
-  // Older ladders only: a set-aside rung came back once, unchanged. Now one returns only changed.
-  back: Schema.Boolean,
-  // Why it was set aside, or why a reviewer added it.
-  why: Schema.String,
-  // "split": one of the rungs a rung that failed twice was split into; it is never split again.
-  from: Schema.Literals(["plan", "reviewer", "split"]),
-  // The one plan turn the rung waits for before it is built again: its checks
-  // rewritten (one could not be verified in play) or the rung split (it failed twice).
-  need: Schema.optionalKey(Schema.Literals(["rewrite", "split"])),
-  // Its checks were rewritten once; another unverifiable check splits it instead.
-  rewritten: Schema.optionalKey(Schema.Boolean),
-});
-export type GameRunRung = typeof GameRunRung.Type;
-export const GameRunLadderState = Schema.Struct({
-  rungs: Schema.Array(GameRunRung),
-  // Why the ladder is empty when the plan never wrote a valid one; "" otherwise.
-  note: Schema.String,
-});
-export type GameRunLadderState = typeof GameRunLadderState.Type;
-
+// ── Rounds: a keep-going step's record, or a stage-era round. ───────────────
 export const GameRunVerdict = Schema.Struct({
   order: Schema.String,
   verdict: Schema.String,
@@ -92,18 +65,23 @@ const CheckVerdict = Schema.Struct({
   evidence: Schema.String,
 });
 
-// What one round did with its rung, check by check.
+/** What a stage-era round did with its ladder rung, check by check; the round cards read it. */
 export const GameRunRungRecord = Schema.Struct({
   rung: Schema.Number,
   is: Schema.String,
   checks: Schema.Array(CheckVerdict),
   outcome: Schema.Literals(["landed", "failed", "set-aside"]),
   why: Schema.String,
-  /** The rung's checks as this round built them (a hash of their full form); absent on older records. A rewritten rung's earlier rounds are not its own. */
+  /** The rung's checks as this round built them (a hash of their full form); absent on older records. */
   checksKey: Schema.optionalKey(Schema.String),
 });
 export type GameRunRungRecord = typeof GameRunRungRecord.Type;
 
+/**
+ * One round. A keep-going step fills the stage-era fields this way: `round`
+ * is its number, `move` its text's first line, `branch` "", `verdicts` [],
+ * `kept` whether it was not undone, and `steer` the entries it carried.
+ */
 export const GameRunRoundRecord = Schema.Struct({
   round: Schema.Number,
   move: Schema.String,
@@ -114,10 +92,10 @@ export const GameRunRoundRecord = Schema.Struct({
   inconclusive: Schema.optionalKey(Schema.Boolean),
   // A creator's restore of another round dropped this one mid-way.
   abandoned: Schema.optionalKey(Schema.Boolean),
-  // Why a round that did not land failed: the game's (a build, check or
-  // regression failure), the harness's (its evaluation could not judge), or a
-  // check's (it cannot be verified in play). Only "game" counts against the rung.
-  failure: Schema.optionalKey(Schema.Literals(["game", "harness", "check"])),
+  // Why a round or step failed: the game's, the harness's (its measure could
+  // not judge), a stage-era check's (it cannot be verified in play), or a turn
+  // that changed no game files.
+  failure: Schema.optionalKey(Schema.Literals(["game", "harness", "check", "no-change"])),
   durationMs: Schema.Number,
   linesChanged: Schema.Number,
   testerNote: Schema.optionalKey(Schema.String),
@@ -126,714 +104,246 @@ export const GameRunRoundRecord = Schema.Struct({
   rung: Schema.optionalKey(GameRunRungRecord),
   // A finish round: the old fix-the-flaw shape, after the ladder.
   finish: Schema.optionalKey(Schema.Boolean),
-  // The round's candidate build (checkpoint oid): a retry continues it, a kept one is restorable.
+  // The round's build (checkpoint oid).
   build: Schema.optionalKey(Schema.String),
-  // Its comparison record's id ("" before or without one), since round labels
-  // repeat across a game's threads. Absent on rounds recorded before.
+  // A stage-era round's comparison record id ("" before or without one).
   comparison: Schema.optionalKey(Schema.String),
+  /** A keep-going step's record (absent on stage-era rounds): round cards skip these. */
+  step: Schema.optionalKey(
+    Schema.Struct({
+      why: GameRunStepWhy,
+      key: Schema.String,
+      turn: Schema.NullOr(RunId),
+      base: Schema.NullOr(GameBuildId),
+      verdict: GameStepVerdict,
+      reason: Schema.String,
+      gain: Schema.Boolean,
+      delta: Schema.Array(GameFactDelta).check(Schema.isMaxLength(3)),
+      tokens: Schema.NullOr(Schema.Number),
+    }),
+  ),
 });
 export type GameRunRoundRecord = typeof GameRunRoundRecord.Type;
 
-// An inconclusive round's branch, refined by later rounds against the same
-// judged best. Never merged without a decisive win.
-export const GameRunPending = Schema.Struct({
-  branch: Schema.String,
-  // The pending candidate's build (checkpoint oid), which the next round continues.
-  sha: Schema.optionalKey(Schema.String),
-  round: Schema.Number,
-  verdicts: Schema.Array(GameRunVerdict),
-  streak: Schema.Number,
+// ── Steps the decider plans. ───────────────────────────────────────────────
+export const GameRunProposal = Schema.Struct({
+  why: GameRunStepWhy,
+  /** The body the step message carries (design §2.2), without its header and tail. */
+  text: Schema.String.check(Schema.isMaxLength(8000)),
+  /** The fact a blocker or fact step targets; null otherwise. */
+  target: Schema.NullOr(GameFactId),
+  /** Never-repeat identity: fact:<id>, bot, steer:<fnv>, next:<fnv>; a regression carries the undone step's key. */
+  key: Schema.String,
 });
-export type GameRunPending = typeof GameRunPending.Type;
+export type GameRunProposal = typeof GameRunProposal.Type;
 
-export const GameRunEvidence = Schema.Struct({
-  sessions: Schema.Number,
-  actions: Schema.Number,
-  executedInputSteps: Schema.Number,
-  nominalMs: Schema.Number,
-  images: Schema.Number,
-});
-export type GameRunEvidence = typeof GameRunEvidence.Type;
-
-export const GameRunSide = Schema.Literals(["x", "y"]);
-export type GameRunSide = typeof GameRunSide.Type;
-
-// ── Steps the policy plans. ────────────────────────────────────────────────
-export const GameRunRoleStep = Schema.Struct({
-  kind: Schema.Literal("role"),
+export const GameRunLookStep = Schema.Struct({ kind: Schema.Literal("look"), id: Schema.Number });
+export type GameRunLookStep = typeof GameRunLookStep.Type;
+export const GameRunProposeStep = Schema.Struct({
+  kind: Schema.Literal("propose"),
   id: Schema.Number,
-  role: Schema.String,
-  title: Schema.String,
-  // null launches a fresh thread; otherwise a follow-up turn on that thread.
-  thread: Schema.NullOr(ThreadId),
-  // A build plays a plain copy of that build of its own (no git); "blank" an empty
-  // folder of its own; null works in the game root. A build is a checkpoint
-  // commit oid, or the name of one of the run's builds (`proto-1`).
-  at: Schema.NullOr(Schema.String),
-  prompt: Schema.String,
-  // A duration, not a deadline: a resumed step gets a fresh cap after a pause.
+  proposal: GameRunProposal,
+  /** Epoch ms the default (start) fires; null while held. */
+  deadline: Schema.NullOr(Schema.Number),
+});
+export type GameRunProposeStep = typeof GameRunProposeStep.Type;
+export const GameRunTurnStep = Schema.Struct({
+  kind: Schema.Literal("turn"),
+  id: Schema.Number,
+  proposal: GameRunProposal,
+  /** The steer entries this message carries: the captured prefix of GameRun.steer (design §9). */
+  steer: Schema.Array(Schema.String),
+  /** The folder's build at the look; the reactor compares nothing against it, it is for the record. */
+  base: Schema.NullOr(GameBuildId),
   capMs: Schema.Number,
-  read: Schema.Array(Schema.String),
-  clear: Schema.Array(Schema.String),
-  source: Schema.Boolean,
-  bots: Schema.Boolean,
-  release: Schema.Boolean,
-  // Game-root files a blank worktree gets before its first turn, under the names it reads them by.
-  copy: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String })),
-  // Where the runner draws this thread's explore frames as one sheet, game-relative; "" draws none.
-  sheet: Schema.String,
-  // Total explore input this thread may use across its sessions; 0 sets none.
-  inputCapMs: Schema.Number,
-  // A turn whose play is the evidence (a sample, the tester, the ship player):
-  // one whose play a tool or the machine refused is played again, never landed
-  // as "played nothing". Absent on older records: inputCapMs > 0 && !release.
-  plays: Schema.optionalKey(Schema.Boolean),
-  // A source role's build before this turn: its landing captures the folder
-  // and diffs the two for game-code change.
-  since: Schema.optionalKey(Schema.String),
+  /** How the step started: the person's Start now, the Guided default, or Autopilot. */
+  startedBy: Schema.Literals(["creator", "default", "autopilot"]),
 });
-export type GameRunRoleStep = typeof GameRunRoleStep.Type;
-
-/**
- * The run's builds are T3 checkpoints under the run's refs; the run never
- * commits, checks out, merges or writes the user's index. A build is a
- * commit oid, or the name of one of the run's builds.
- */
-export const GameRunBuildOp = Schema.Union([
-  /** The game folder as the build `name`; `changed` and `lines` count game code against `base`. */
-  Schema.TaggedStruct("capture", { name: Schema.String, base: Schema.String }),
-  /**
-   * The build's files back in the folder (engine project, art, ASSETS.md); `keep` names point at it too.
-   * With `save`, the folder as it is first becomes that build, unless it already holds the one restored.
-   */
-  Schema.TaggedStruct("restore", {
-    sha: Schema.String,
-    keep: Schema.Array(Schema.String),
-    save: Schema.optionalKey(Schema.String),
-  }),
-  /** The build is kept under these names; the folder already holds it. */
-  Schema.TaggedStruct("keep", { names: Schema.Array(Schema.String), sha: Schema.String }),
-]);
-export type GameRunBuildOp = typeof GameRunBuildOp.Type;
-
-/** Only a run that versioned on git branches planned these; its steps still decode. */
-export const GameRunGitOp = Schema.Union([
-  Schema.TaggedStruct("init", {}),
-  Schema.TaggedStruct("enter", { branch: Schema.String }),
-  Schema.TaggedStruct("start-round", {
-    trunk: Schema.String,
-    key: Schema.String,
-    from: Schema.NullOr(Schema.String),
-  }),
-  Schema.TaggedStruct("commit", { message: Schema.String, base: Schema.String }),
-  Schema.TaggedStruct("branch-commit", { name: Schema.String, message: Schema.String }),
-  Schema.TaggedStruct("reject", {
-    label: Schema.String,
-    why: Schema.String,
-    trunk: Schema.String,
-    best: Schema.String,
-  }),
-  Schema.TaggedStruct("to-trunk", { trunk: Schema.String, message: Schema.String }),
-  Schema.TaggedStruct("adopt", { trunk: Schema.String, sha: Schema.String, label: Schema.String }),
-  Schema.TaggedStruct("ff-merge", {
-    trunk: Schema.String,
-    branch: Schema.String,
-    // The build of the blind play the run holds, checked against the merged tip; "" checks none.
-    played: Schema.String,
-  }),
-  Schema.TaggedStruct("restore-commit", { sha: Schema.String, message: Schema.String }),
-]);
-export type GameRunGitOp = typeof GameRunGitOp.Type;
-
-const BotFinal = Schema.Record(
-  Schema.String,
-  Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]),
-);
-
-// One scripted bot run on one build, in a checkout of its own at that sha.
-export const GameRunBotStep = Schema.Struct({
-  kind: Schema.Literal("bot"),
+export type GameRunTurnStep = typeof GameRunTurnStep.Type;
+export const GameRunJudgeStep = Schema.Struct({
+  kind: Schema.Literal("judge"),
   id: Schema.Number,
-  sha: Schema.String,
-  file: Schema.String,
-  decider: GameBotDecider,
-  seconds: Schema.Number,
+  build: GameBuildId,
+  /** The turn build's recorded base (phase 1 recordTurn). */
+  base: Schema.NullOr(GameBuildId),
 });
-export type GameRunBotStep = typeof GameRunBotStep.Type;
-
-// How the same bot ended on one build: an ending word ("error" when it could
-// not run), the game's last primitive probe values and, from the Godot runner,
-// its scene node counts.
-const BotFactFields = {
-  ending: Schema.String,
-  seconds: Schema.Number,
-  final: BotFinal,
-  perf: Schema.optionalKey(GameBotPerf),
-  note: Schema.String,
-};
-export const GameRunBotFact = Schema.Struct({ side: GameRunSide, ...BotFactFields });
-export type GameRunBotFact = typeof GameRunBotFact.Type;
+export type GameRunJudgeStep = typeof GameRunJudgeStep.Type;
+export const GameRunUndoStep = Schema.Struct({
+  kind: Schema.Literal("undo"),
+  id: Schema.Number,
+  target: GameBuildId,
+  expect: GameBuildId,
+});
+export type GameRunUndoStep = typeof GameRunUndoStep.Type;
+/** A stage-era step: decoded with its own keys kept (StructWithRest), never planned again. */
+export const GameRunLegacyStep = Schema.StructWithRest(
+  Schema.Struct({
+    kind: Schema.Literals([
+      "role",
+      "build",
+      "git",
+      "boot",
+      "facts",
+      "checks",
+      "bot",
+      "note",
+      "pair",
+      "decide",
+    ]),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
+export type GameRunLegacyStep = typeof GameRunLegacyStep.Type;
+export const GameRunPlannedStep = Schema.Union([
+  GameRunLookStep,
+  GameRunProposeStep,
+  GameRunTurnStep,
+  GameRunJudgeStep,
+  GameRunUndoStep,
+  GameRunLegacyStep,
+]);
+export type GameRunPlannedStep = typeof GameRunPlannedStep.Type;
 
 // ── What a step's execution hands back. ────────────────────────────────────
-/** A role turn's end: the typed submission the role made, if any, and what the harness saw. */
-export const GameRunRoleDone = Schema.Struct({
-  kind: Schema.Literal("done"),
-  threadId: ThreadId,
-  /** Absent when the role made none, which its step's rule then reads as missing. */
-  submission: Schema.optionalKey(GameRunSubmission),
-  evidence: Schema.NullOr(GameRunEvidence),
-  timedOut: Schema.Boolean,
-  budgetCut: Schema.Boolean,
-  elapsedMs: Schema.Number,
-  sourceBefore: Schema.String,
-  sourceAfter: Schema.String,
-  /**
-   * The bot runs the bot service recorded on this thread, never counted from
-   * a file in the game folder. Results landed before the record read as none.
-   */
-  bots: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
-  /** The thread's latest play bot and its decider, null when it ran none. */
-  bot: Schema.NullOr(Schema.Struct({ file: Schema.String, decider: GameBotDecider })),
-  /** The step's sheet when the runner drew one, else "". */
-  sheet: Schema.String,
-  /** For a source role: whether its turn changed game code (an unknown reads as changed). */
-  changed: Schema.optionalKey(Schema.Boolean),
-});
-export type GameRunRoleDone = typeof GameRunRoleDone.Type;
-
-export const GameRunBuildOutcome = Schema.Struct({
-  ok: Schema.Boolean,
-  /** The build's commit oid. */
-  sha: Schema.String,
-  changed: Schema.Boolean,
-  lines: Schema.Number,
-  detail: Schema.String,
-});
-export type GameRunBuildOutcome = typeof GameRunBuildOutcome.Type;
-
-/** One shape for every git op; each op fills the fields it knows. */
-export const GameRunGitOutcome = Schema.Struct({
-  ok: Schema.Boolean,
-  sha: Schema.String,
-  branch: Schema.String,
-  changed: Schema.Boolean,
-  entered: Schema.Boolean,
-  lines: Schema.Number,
-  detail: Schema.String,
-  /** ff-merge: the merged tip is the same blind build as the op's `played` sha. */
-  same: Schema.Boolean,
-});
-export type GameRunGitOutcome = typeof GameRunGitOutcome.Type;
-
-export const GameRunCheckOutcome = Schema.Struct({
-  /** Index into the rung's checks. */
-  k: Schema.Number,
-  what: Schema.String,
-  pass: Schema.Boolean,
-  evidence: Schema.String,
-  /** The check run's last frame (where the scenario ended), "" when none was taken. */
-  frame: Schema.String,
-});
-export type GameRunCheckOutcome = typeof GameRunCheckOutcome.Type;
-
-const GameRunDecidedBy = Schema.Literals(["creator", "default"]);
-export type GameRunDecidedBy = typeof GameRunDecidedBy.Type;
-
 const FailedResult = Schema.Struct({ kind: Schema.Literal("failed"), reason: Schema.String });
-const BotResult = Schema.Struct({
-  kind: Schema.Literal("bot"),
-  fact: Schema.Struct(BotFactFields),
-});
 
-// Usage limits, a provider that stays down, memory that stays short, a busy
-// machine and a tool of Kurambit's that keeps failing end the run resumably:
-// nothing was measured, so nothing is judged.
+// Usage limits, a provider that stays down and a tool of Kurambit's that keeps
+// failing end the run resumably: nothing was measured, so nothing is judged.
+// "low-memory" and "busy" are stage era only.
 const EndedResult = Schema.Struct({
   kind: Schema.Literal("ended"),
   ending: Schema.Literals(["usage-limit", "provider-down", "low-memory", "busy", "tool-failed"]),
   reason: Schema.String,
 });
 
+/** The `Next:` line of the chat's latest settled reply: its text, "none", or null when it had none. */
+const NextLine = Schema.Union([
+  Schema.Struct({ text: Schema.String }),
+  Schema.Literal("none"),
+  Schema.Null,
+]);
+
 export const GameRunStepResult = Schema.Union([
-  GameRunRoleDone,
-  EndedResult,
-  FailedResult,
-  Schema.Struct({ kind: Schema.Literal("build"), build: GameRunBuildOutcome }),
-  Schema.Struct({ kind: Schema.Literal("git"), git: GameRunGitOutcome }),
-  Schema.Struct({ kind: Schema.Literal("boot"), ok: Schema.Boolean, detail: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("facts"), jev: Schema.Boolean, code: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("checks"), results: Schema.Array(GameRunCheckOutcome) }),
-  BotResult,
-  Schema.Struct({ kind: Schema.Literal("note") }),
+  Schema.Struct({
+    kind: Schema.Literal("look"),
+    current: Schema.NullOr(GameBuildId),
+    /** Null when the current build could not be measured. */
+    facts: Schema.NullOr(GameBuildFacts),
+    /** The chat's latest settled reply's line (packages/shared readNextLine). */
+    next: NextLine,
+    /** A play bot exists (GameBot.latestPlayBot). */
+    bot: Schema.Boolean,
+  }),
   Schema.Struct({
     kind: Schema.Literal("decided"),
-    answer: Schema.String,
-    notes: Schema.String,
-    by: GameRunDecidedBy,
+    answer: Schema.Literals(["start", "skip", "superseded"]),
+    by: Schema.Literals(["creator", "default", "server"]),
   }),
+  Schema.Struct({
+    kind: Schema.Literal("turn"),
+    /** The step's T3 run (the last of its restart continuations). */
+    runId: Schema.NullOr(RunId),
+    outcome: Schema.Literals(["completed", "capped", "stopped-by-person", "superseded", "failed"]),
+    build: Schema.NullOr(GameBuildId),
+    /** Files the turn changed in the lane, art/ and ASSETS.md. */
+    files: NonNegativeInt,
+    tokens: Schema.NullOr(Schema.Number),
+    elapsedMs: Schema.Number,
+    /** The person steered this turn (steer_active into it). */
+    personSteered: Schema.Boolean,
+    reason: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("judge"),
+    base: Schema.NullOr(GameBuildFacts),
+    build: Schema.NullOr(GameBuildFacts),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("undo"),
+    restored: Schema.Boolean,
+    why: Schema.Literals(["restored", "moved-on", "undone-by-person", "refused"]),
+    message: Schema.String,
+  }),
+  EndedResult,
+  FailedResult,
+  /** A stage-era step's result, kept as it was. */
+  Schema.StructWithRest(Schema.Struct({ kind: Schema.String }), [
+    Schema.Record(Schema.String, Schema.Unknown),
+  ]),
 ]);
 export type GameRunStepResult = typeof GameRunStepResult.Type;
 
-// How a half of a pair finished, kept with the pair until its partner finishes
-// too, so neither half ever runs twice.
-export const GameRunHalfResult = Schema.Union([GameRunRoleDone, FailedResult, BotResult]);
-export type GameRunHalfResult = typeof GameRunHalfResult.Type;
-
-// A blind comparison's two independent steps, run at once: both builds'
-// samples, or the bot on both builds. Halves are in x-then-y order, which is
-// the order their results apply in; their ids follow the play order, so no
-// id or launch order tells a player which build it has.
-export const GameRunPairStep = Schema.Struct({
-  kind: Schema.Literal("pair"),
-  id: Schema.Number,
-  halves: Schema.Array(Schema.Union([GameRunRoleStep, GameRunBotStep])),
-  results: Schema.Array(Schema.Struct({ id: Schema.Number, result: GameRunHalfResult })),
-});
-export type GameRunPairStep = typeof GameRunPairStep.Type;
-
-// A creator decision in a Guided run: what the creator's agent presents and the
-// answers the run accepts. The policy names what it knows; the executor adds
-// files it resolves on disk (the key art) and drops evidence that is missing.
-export const GameRunQuestion = Schema.Struct({
-  id: Schema.String,
-  kind: GameRunDecisionKind,
-  ask: Schema.String,
-  // Game-relative files to show, with what each one is.
-  evidence: Schema.Array(Schema.Struct({ label: Schema.String, path: Schema.String })),
-  // What to say beside the files: the pitches' branches, the ladder.
-  text: Schema.String,
-  answers: Schema.Array(
-    Schema.Struct({
-      answer: Schema.String,
-      means: Schema.String,
-      // The prototype branch a pick answer continues from.
-      branch: Schema.optionalKey(Schema.String),
-    }),
-  ),
-  // The answer the run takes when nobody answers in time; one of `answers`.
-  fallback: Schema.String,
-  waitMs: Schema.Number,
-});
-export type GameRunQuestion = typeof GameRunQuestion.Type;
-
-export const GameRunDecideStep = Schema.Struct({
-  kind: Schema.Literal("decide"),
-  id: Schema.Number,
-  decision: GameRunQuestion,
-  // When the creator's chat was woken (epoch ms); null until then.
-  sent: Schema.NullOr(Schema.Number),
-  // When the default fires: set once the question reached the creator's agent,
-  // so a busy chat does not spend the wait.
-  deadline: Schema.NullOr(Schema.Number),
-});
-export type GameRunDecideStep = typeof GameRunDecideStep.Type;
-
-/** A decision the run took, by the creator's answer or its own default. */
-export const GameRunDecided = Schema.Struct({
-  id: Schema.String,
-  kind: GameRunDecisionKind,
-  answer: Schema.String,
-  notes: Schema.String,
-  by: GameRunDecidedBy,
-});
-export type GameRunDecided = typeof GameRunDecided.Type;
-
-export const GameRunPlannedStep = Schema.Union([
-  GameRunRoleStep,
-  Schema.Struct({ kind: Schema.Literal("build"), id: Schema.Number, op: GameRunBuildOp }),
-  Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GameRunGitOp }),
-  Schema.Struct({ kind: Schema.Literal("boot"), id: Schema.Number }),
-  // `bots` names the thread whose bot runs the facts state (the round's tester); absent on older records.
-  Schema.Struct({
-    kind: Schema.Literal("facts"),
-    id: Schema.Number,
-    bots: Schema.optionalKey(Schema.NullOr(ThreadId)),
-  }),
-  // Score a rung's state checks on the build that is checked out now.
-  Schema.Struct({ kind: Schema.Literal("checks"), id: Schema.Number, rung: Schema.Number }),
-  GameRunBotStep,
-  Schema.Struct({
-    kind: Schema.Literal("note"),
-    id: Schema.Number,
-    files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
-  }),
-  GameRunPairStep,
-  GameRunDecideStep,
-]);
-export type GameRunPlannedStep = typeof GameRunPlannedStep.Type;
-
-// ── The policy's cursor. ───────────────────────────────────────────────────
-export const GameRunBlock = Schema.Struct({
-  tag: Schema.String,
-  direction: Schema.String,
-  whole: Schema.Boolean,
-  msLeft: Schema.Number,
-  thread: Schema.NullOr(ThreadId),
-  quiet: Schema.Number,
-  source: Schema.String,
-  turns: Schema.Number,
-});
-export type GameRunBlock = typeof GameRunBlock.Type;
-
-export const GameRunSample = Schema.Struct({
-  side: GameRunSide,
-  label: Schema.String,
-  thread: Schema.NullOr(ThreadId),
-  // "more": older records only, one extra play turn; a player's clock is now its input budget.
-  phase: Schema.Literals(["play", "more", "write", "done"]),
-  notes: Schema.String,
-  evidence: Schema.NullOr(GameRunEvidence),
-  // The sheet of this player's own frames, game-relative; "" when it has none.
-  sheet: Schema.String,
-  // True once this sample was given its one extra play turn.
-  extra: Schema.Boolean,
-});
-export type GameRunSample = typeof GameRunSample.Type;
-
-export const GameRunJudge = Schema.Struct({
-  aIs: GameRunSide,
-  id: Schema.String,
-  attempt: Schema.Number,
-  aFirst: Schema.Boolean,
-  thread: Schema.NullOr(ThreadId),
-  phase: Schema.Literals(["compare", "correct", "done"]),
-  verdict: Schema.String,
-  reason: Schema.String,
-  notes: Schema.String,
-});
-export type GameRunJudge = typeof GameRunJudge.Type;
-
-// One blind comparison: x and y each played once by fresh worktree players,
-// then the round's tester bot on each (when it has one), then fresh
-// comparators on those two reports with A=x and (for rounds) A=y.
-export const GameRunCompare = Schema.Struct({
-  question: Schema.String,
-  x: Schema.String,
-  y: Schema.String,
-  xFirst: Schema.Boolean,
-  orders: Schema.Array(GameRunSide),
-  samples: Schema.Array(GameRunSample),
-  bot: Schema.String,
-  botDecider: GameBotDecider,
-  bots: Schema.Array(GameRunBotFact),
-  // Why the comparators got no bot facts although the round had a bot; "" when they did.
-  botWithheld: Schema.String,
-  judges: Schema.Array(GameRunJudge),
-  // The side whose sample is an earlier round's play of the same build, not played here.
-  reused: Schema.NullOr(
-    Schema.Struct({ side: GameRunSide, round: Schema.Number, branch: Schema.String }),
-  ),
-});
-export type GameRunCompare = typeof GameRunCompare.Type;
-
-// The best build's own blind play, kept so the next gate under the same
-// question and sample budget plays only the candidate.
-export const GameRunPlayed = Schema.Struct({
-  sha: Schema.String,
-  question: Schema.String,
-  budget: Schema.String,
-  round: Schema.Number,
-  branch: Schema.String,
-  sample: GameRunSample,
-});
-export type GameRunPlayed = typeof GameRunPlayed.Type;
-
-const GameRunRoundPhase = Schema.Literals([
-  "start",
-  "block",
-  "commit",
-  "retry",
-  "retry-commit",
-  "stall",
-  "boot",
-  "reject",
-  "checks",
-  "tester-facts",
-  "tester",
-  "tester-write",
-  "tester-duty",
-  "restore",
-  "compare",
-  "outcome",
-  "review-facts",
-  "review",
-  "review-write",
-]);
-export type GameRunRoundPhase = typeof GameRunRoundPhase.Type;
-
-export const GameRunRoundTask = Schema.TaggedStruct("round", {
-  n: Schema.Number,
-  branch: Schema.String,
-  phase: GameRunRoundPhase,
-  direction: Schema.String,
-  repeating: Schema.Boolean,
-  move: Schema.String,
-  base: Schema.String,
-  candidate: Schema.String,
-  startedAt: Schema.Number,
-  block: Schema.NullOr(GameRunBlock),
-  jev: Schema.Boolean,
-  thread: Schema.NullOr(ThreadId),
-  // The bot file the tester last ran this round.
-  bot: Schema.String,
-  botDecider: GameBotDecider,
-  testerNotes: Schema.String,
-  // The ladder rung this round builds (its id), null for a finish round.
-  rung: Schema.NullOr(Schema.Number),
-  // A rung retry that started from the previous try's branch, not from the best.
-  continued: Schema.Boolean,
-  // The harness's scoring of the rung's state checks on the latest build (index into the rung's checks).
-  stateChecks: Schema.Array(
-    Schema.Struct({
-      k: Schema.Number,
-      pass: Schema.Boolean,
-      evidence: Schema.String,
-      frame: Schema.String,
-    }),
-  ),
-  // Fix turns the builder got this round after state checks failed.
-  fixes: Schema.Number,
-  // The tester's pass or fail per check, once it submitted them.
-  checks: Schema.Array(CheckVerdict),
-  cmp: Schema.NullOr(GameRunCompare),
-  outcome: Schema.Literals(["", "merge", "drop", "hold"]),
-  reviewed: Schema.String,
-  facts: Schema.String,
-  record: GameRunRoundRecord,
-});
-export type GameRunRoundTask = typeof GameRunRoundTask.Type;
-
-export const GameRunPicked = Schema.Struct({
-  branch: Schema.String,
-  how: Schema.Literals(["won", "selected", "only-booted", "creator"]),
-  comparison: Schema.NullOr(Schema.String),
-});
-export type GameRunPicked = typeof GameRunPicked.Type;
-
-export const GameRunTask = Schema.Union([
-  Schema.TaggedStruct("init", {}),
-  Schema.TaggedStruct("stage", {
-    name: Schema.Literals(["vision", "plan", "art", "build"]),
-    // The art stage alone passes through an independent review and at most one redo;
-    // "revise" is a vision or plan turn on the creator's notes.
-    phase: Schema.Literals(["role", "review", "redo", "revise", "commit", "boot", "reject"]),
-    thread: Schema.NullOr(ThreadId),
-    block: Schema.NullOr(GameRunBlock),
-    sha: Schema.String,
-    why: Schema.String,
-    // The art director's defect list or the creator's notes, the redo's direction.
-    review: Schema.String,
-  }),
-  Schema.TaggedStruct("proto", {
-    // Counts across pairs: a creator's retry builds prototypes 2 and 3.
-    i: Schema.Number,
-    phase: Schema.Literals(["role", "commit", "boot", "keep", "reject"]),
-    branch: Schema.String,
-    // The prototype's build (checkpoint oid), once captured.
-    sha: Schema.optionalKey(Schema.String),
-    why: Schema.String,
-    // The creator's notes for a retried pair.
-    notes: Schema.String,
-  }),
-  Schema.TaggedStruct("pick", {
-    phase: Schema.Literals(["compare", "select", "adopt"]),
-    cmp: GameRunCompare,
-    chosen: Schema.String,
-    notes: Schema.String,
-    // The id of the comparison record this pick wrote ("" before it has one, or with no comparison).
-    comparison: Schema.String,
-  }),
-  GameRunRoundTask,
-  // A run that reached rounds without a ladder writes one first; "revise"
-  // rewrites it once with the creator's notes from a Guided ladder review.
-  // "rewrite" and "split": one plan turn changes the rung `rung` names.
-  Schema.TaggedStruct("ladder", {
-    phase: Schema.Literals(["write", "fix", "revise", "rewrite", "split"]),
-    thread: Schema.NullOr(ThreadId),
-    error: Schema.String,
-    notes: Schema.optionalKey(Schema.String),
-    rung: Schema.optionalKey(Schema.Number),
-  }),
-  Schema.TaggedStruct("ship", {
-    n: Schema.Number,
-    phase: Schema.Literals(["play", "write"]),
-    thread: Schema.NullOr(ThreadId),
-  }),
-  // A budget end inside a round: the round's unfinished work is kept as a
-  // build ("capture"), then the folder returns to the best ("trunk").
-  // "restore" was a git-era phase.
-  Schema.TaggedStruct("leave", {
-    branch: Schema.String,
-    candidate: Schema.String,
-    phase: Schema.Literals(["capture", "restore", "trunk"]),
-  }),
-  // A Guided run waits for the creator here; the step carries the decision.
-  Schema.TaggedStruct("decide", { decision: GameRunQuestion }),
-]);
-export type GameRunTask = typeof GameRunTask.Type;
-
-// ── A creator's restore of a kept round or a saved build. ───────────────────
-export const GameRunRestoreOutcome = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("restored"), sha: Schema.String, message: Schema.String }),
-  Schema.Struct({
-    kind: Schema.Literal("refused"),
-    reason: GameRunRestoreRefusal,
-    message: Schema.String,
-  }),
-]);
-export type GameRunRestoreOutcome = typeof GameRunRestoreOutcome.Type;
-/** What a restore replaced in the run's state, so restoring its folder before undoes it. */
-export const GameRunRestoreReplaced = Schema.Struct({
-  best: Schema.String,
-  pending: Schema.NullOr(GameRunPending),
-  /** Rounds recorded once the restore landed; any later round makes it no undo. */
-  rounds: Schema.Number,
-  /** The round in progress the restore abandoned, which an undo cannot bring back. */
-  abandoned: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
-});
-export type GameRunRestoreReplaced = typeof GameRunRestoreReplaced.Type;
-export const GameRunRestore = Schema.Struct({
-  requestId: Schema.String,
-  /** A kept round's build, which becomes the run's judged best; null for a saved build. */
-  round: Schema.NullOr(Schema.Number),
-  /** A saved build by its name (`endings/…`), which leaves the judged best as it is. */
-  build: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
-  requestedAt: IsoDateTime,
-  /** Null while the job is moving the folder. */
-  outcome: Schema.NullOr(GameRunRestoreOutcome),
-  replaced: Schema.NullOr(GameRunRestoreReplaced).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed(null)),
-  ),
-  /** The earlier restore this one undoes, by what that one replaced; null when it undoes none. */
-  undoes: Schema.NullOr(GameRunRestoreReplaced).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed(null)),
-  ),
-});
-export type GameRunRestore = typeof GameRunRestore.Type;
-
 // ── The three records. ─────────────────────────────────────────────────────
-/** `waiting`: the step in flight is a creator decision. */
+/** `waiting`: the step in flight waits for the person (a stage-era decision). */
 const GameRunStatus = Schema.Literals(["running", "waiting", "ended"]);
 export type GameRunStatus = typeof GameRunStatus.Type;
 
-export const GameRunEnding = Schema.Literals([
-  "ready",
-  "done",
-  "stopped",
-  "stalled",
-  /** The plan wrote no valid ladder: nothing to build without the creator's ask. */
-  "no-ladder",
-  /** The ladder has set-aside rungs, or the ship review said not shippable: not done, resumable. */
-  "incomplete",
-  "budget",
-  "failed",
-  "usage-limit",
-  "provider-down",
-  "low-memory",
-  /** A sample's explore start kept waiting behind other starts on this machine. */
-  "busy",
-  /** A program Kurambit runs kept failing while measuring a build: nothing was judged. */
-  "tool-failed",
-]);
-export type GameRunEnding = typeof GameRunEnding.Type;
-
 export const GameRun = Schema.Struct({
   id: GameRunId,
-  /** The game's creator thread: the chat that runs it and whose stream holds its records. */
+  /** The chat the run lives on: its stream holds the run's records. */
   threadId: ThreadId,
-  /**
-   * The chat the creator last started, resumed, steered or answered the run
-   * from: its questions wake there. Absent until then, and on runs before:
-   * the run's own thread.
-   */
+  /** "turns": a keep-going run on its chat's turns. Absent: a stage-era run, read and stopped, never continued. */
+  loop: Schema.optionalKey(Schema.Literal("turns")),
+  /** Stage era: the chat the creator last moved the run from. */
   chat: Schema.optionalKey(ThreadId),
-  /** Every chat the run's questions may have gone to (the latest 16), so a wake is found wherever it was sent. */
+  /** Stage era: every chat the run's questions may have gone to. */
   chats: Schema.optionalKey(Schema.Array(ThreadId)),
   projectId: ProjectId,
   /** The engine project directory the manifest names (`godot`, `web`, `unity`). */
   lane: Schema.String,
   /** The game's engine; absent on runs started before it was recorded (read through runEngine). */
   engine: Schema.optionalKey(GameEngineId),
-  brief: Schema.String,
-  artDirection: Schema.String,
+  brief: Schema.optionalKey(Schema.String),
+  artDirection: Schema.optionalKey(Schema.String),
   profile: GameRunProfile,
-  /** What every role thread runs on. */
-  modelSelection: ModelSelection,
-  runtimeMode: RuntimeMode,
+  /** Stage era: what every role thread ran on. A step uses its chat's model. */
+  modelSelection: Schema.optionalKey(ModelSelection),
+  runtimeMode: Schema.optionalKey(RuntimeMode),
   budgetMinutes: Schema.NullOr(Schema.Number),
   /** Epoch ms; null without a budget. */
   budgetEndsAt: Schema.NullOr(Schema.Number),
   status: GameRunStatus,
   ending: Schema.NullOr(GameRunEnding),
-  /** The last stage finished ("vision", "plan", "round-3"). */
-  stage: Schema.String,
-  /** Git-era runs only, kept so their records still read: the branch their rounds merged into. */
-  trunk: Schema.optionalKey(Schema.String),
-  /** The best build's checkpoint oid (a git-era run's: a commit on `trunk`). */
-  best: Schema.String,
-  /** Null until the plan wrote one. */
-  ladder: Schema.NullOr(GameRunLadderState),
-  /** The creator's notes for the next round. */
+  /** Stage era: the best build's checkpoint oid. */
+  best: Schema.optionalKey(Schema.String),
+  /** The person's notes for the next step. */
   steer: Schema.Array(Schema.String),
-  decided: Schema.Array(GameRunDecided),
-  /** The decision the run waits on now, as its decide step holds it. */
-  pendingDecision: Schema.NullOr(
-    Schema.Struct({
-      stepId: GameRunStepId,
-      question: GameRunQuestion,
-      /** Epoch ms the creator's chat was woken. */
-      sentAt: Schema.Number,
-      /** Epoch ms the default fires; null until the question reached the creator's agent. */
-      deadline: Schema.NullOr(Schema.Number),
-    }),
+  /** Never-repeat (design §4.2): proposals the run will not make again, with why. */
+  setAside: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ key: Schema.String, text: Schema.String, why: Schema.String })),
   ),
+  /** The quiet streak: steps in a row that gained nothing. */
   stallStreak: Schema.Number,
   lastFailure: Schema.String,
-  shipNoReasons: Schema.String,
-  /** The best build the ship review last judged; another one is judged again. Absent before. */
-  shipCheckedOn: Schema.optionalKey(Schema.String),
-  /** The last reviewer's ledger of bugs and DO NOT REGRESS lines. */
-  ledger: Schema.String,
-  lastDirection: Schema.String,
-  /** The creator's notes for the first full build, from a prototype pick. */
-  buildNotes: Schema.String,
-  pickNotes: Schema.String,
-  /** The prototype the game became, once its adopt succeeded. */
-  picked: Schema.NullOr(GameRunPicked),
-  protos: Schema.Array(
-    Schema.Struct({
-      branch: Schema.String,
-      booted: Schema.Boolean,
-      sha: Schema.optionalKey(Schema.String),
-    }),
-  ),
-  played: Schema.NullOr(GameRunPlayed),
-  pending: Schema.NullOr(GameRunPending),
-  task: GameRunTask,
   /** The number of the last step planned. */
   seq: NonNegativeInt,
   /** The number of the step the run holds in flight; null between steps and once ended. */
   inFlight: Schema.NullOr(Schema.Number),
-  /** When the run last ended; its finish (stops, exports) is owed until `finished` names it. */
+  /** When the run last ended. */
   endedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
-  /** The `endedAt` whose finish completed. */
-  finished: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
-  /** The creator's latest restore of a kept round: pending while its job moves the folder. */
-  restore: Schema.NullOr(GameRunRestore).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
-  /**
-   * Set by a resume (or a note that reopens the run): the name the folder is
-   * kept under by the run's next step that moves it, so the creator's edits
-   * while the run was stopped are never lost. Cleared by that step's commit.
-   */
-  resumeSave: Schema.NullOr(Schema.String).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed(null)),
-  ),
-  /**
-   * How the run keeps its builds: "checkpoints" under its own refs. Absent on a
-   * run from before, which versioned on git branches: such a run is history,
-   * read but never continued.
-   */
+  /** Stage era: "checkpoints" when it kept its builds under its own refs, absent on git-era runs. */
   versions: Schema.optionalKey(Schema.Literal("checkpoints")),
+  // Stage era: what the stage machine, the blind gate, the ladder and the run's
+  // own restore kept. Decoded as they are, so old records still read, and never used.
+  stage: Schema.optionalKey(Schema.Unknown),
+  trunk: Schema.optionalKey(Schema.Unknown),
+  ladder: Schema.optionalKey(Schema.Unknown),
+  decided: Schema.optionalKey(Schema.Unknown),
+  pendingDecision: Schema.optionalKey(Schema.Unknown),
+  shipNoReasons: Schema.optionalKey(Schema.Unknown),
+  shipCheckedOn: Schema.optionalKey(Schema.Unknown),
+  ledger: Schema.optionalKey(Schema.Unknown),
+  lastDirection: Schema.optionalKey(Schema.Unknown),
+  buildNotes: Schema.optionalKey(Schema.Unknown),
+  pickNotes: Schema.optionalKey(Schema.Unknown),
+  picked: Schema.optionalKey(Schema.Unknown),
+  protos: Schema.optionalKey(Schema.Unknown),
+  played: Schema.optionalKey(Schema.Unknown),
+  pending: Schema.optionalKey(Schema.Unknown),
+  task: Schema.optionalKey(Schema.Unknown),
+  finished: Schema.optionalKey(Schema.Unknown),
+  restore: Schema.optionalKey(Schema.Unknown),
+  resumeSave: Schema.optionalKey(Schema.Unknown),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -856,6 +366,12 @@ export const GameRunStep = Schema.Struct({
   /** Counts the times the step was planned: a resume runs an unfinished step again. */
   attempt: PositiveInt,
   kind: Schema.Literals([
+    "look",
+    "propose",
+    "turn",
+    "judge",
+    "undo",
+    // Stage era.
     "role",
     "build",
     "git",
@@ -869,29 +385,11 @@ export const GameRunStep = Schema.Struct({
   ]),
   step: GameRunPlannedStep,
   status: GameRunStepStatus,
-  /** The step's role turns (two for a pair of samples), each with the thread it runs on once launched. */
-  roles: Schema.Array(
-    Schema.Struct({
-      seq: PositiveInt,
-      threadId: Schema.NullOr(ThreadId),
-      submission: Schema.NullOr(GameRunSubmission),
-    }),
-  ),
-  /** A pair keeps its halves' results in `step`; this is a single step's result, or an ending. */
+  // Stage era: role turns, a pair's ended halves, and a landing's outputs.
+  roles: Schema.optionalKey(Schema.Unknown),
+  endedHalves: Schema.optionalKey(Schema.Unknown),
+  outputs: Schema.optionalKey(Schema.Unknown),
   result: Schema.NullOr(GameRunStepResult),
-  /** A pair's halves that ended the run, held until every half is in: then the first one lands. */
-  endedHalves: Schema.Array(
-    Schema.Struct({ seq: PositiveInt, result: Schema.Union([EndedResult, FailedResult]) }),
-  ),
-  /**
-   * What landing this step's result asked of the game folder: records to write
-   * and role threads whose copies go. The game-run.outputs effect each landing
-   * commits does it, before the run's next step.
-   */
-  outputs: Schema.Struct({
-    files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
-    release: Schema.Array(ThreadId),
-  }),
   /** The run's decisions about this step, in order, for the run log. */
   logs: Schema.Array(Schema.String),
   /** Times this attempt's work was handed back to wait for memory; bounds the waits across restarts. */
@@ -914,5 +412,3 @@ export const GameRunRound = Schema.Struct({
   recordedAt: IsoDateTime,
 });
 export type GameRunRound = typeof GameRunRound.Type;
-
-// ── Refusals. ──────────────────────────────────────────────────────────────

@@ -118,7 +118,7 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     type: Schema.Literal("delegated-tasks.stop"),
     reason: Schema.optional(Schema.String),
   }),
-  // A game run's step: its handler starts the work and returns at once; the
+  // A keep-going step: its handler starts the work and returns at once; the
   // work reports back with game-run.step.complete or game-run.step.fail.
   Schema.Struct({
     type: Schema.Literal("game-run.step.execute"),
@@ -126,34 +126,21 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     stepId: GameRunStepId,
     attempt: PositiveInt,
   }),
-  Schema.Struct({
-    type: Schema.Literal("game-run.decision.wake"),
-    runId: GameRunId,
-    stepId: GameRunStepId,
-    decisionId: Schema.String,
-  }),
-  // Due when the default would fire; game-run.decision.expire checks it again.
+  // Due when a Guided proposal's default would fire; game-run.decision.expire checks it again.
   Schema.Struct({
     type: Schema.Literal("game-run.decision.deadline"),
     runId: GameRunId,
     stepId: GameRunStepId,
     decisionId: Schema.String,
   }),
-  // Due at a role turn's cap: the role thread's run is interrupted.
+  // Due at a step turn's cap: the step's T3 run is interrupted.
   Schema.Struct({
     type: Schema.Literal("game-run.step.deadline"),
     runId: GameRunId,
     stepId: GameRunStepId,
     attempt: PositiveInt,
   }),
-  // A run's ending, committed with it: live role turns and jobs stop, the
-  // game folder gets its last outputs and exports; game-run.finished records it.
-  Schema.Struct({
-    type: Schema.Literal("game-run.finish"),
-    runId: GameRunId,
-    endedAt: IsoDateTime,
-  }),
-  // A role turn sent again after a pause (an instant failure, memory short).
+  // A step turn sent again after an instant failure ("memory": stage era only).
   Schema.Struct({
     type: Schema.Literal("game-run.step.resend"),
     runId: GameRunId,
@@ -162,22 +149,31 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     turn: Schema.Literals(["retry", "memory"]),
     n: PositiveInt,
   }),
-  // A step's work run again after it waited for memory, without holding a job meanwhile.
+  // A step's work run again later (a tool that failed, recovery), without holding a job meanwhile.
   Schema.Struct({
     type: Schema.Literal("game-run.step.wake"),
     runId: GameRunId,
     stepId: GameRunStepId,
     attempt: PositiveInt,
   }),
-  // A creator's restore of a kept round: its job moves the folder and lands with game-run.restore.
+  // Retired with the stage era: they still decode, so an outbox row from
+  // before the upgrade never fails, and the worker settles them with no work.
+  Schema.Struct({
+    type: Schema.Literal("game-run.decision.wake"),
+    runId: GameRunId,
+    stepId: GameRunStepId,
+    decisionId: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("game-run.finish"),
+    runId: GameRunId,
+    endedAt: IsoDateTime,
+  }),
   Schema.Struct({
     type: Schema.Literal("game-run.restore.execute"),
     runId: GameRunId,
     requestId: Schema.String,
   }),
-  // What a step's landing asks of the game folder, committed with it so the
-  // outbox does it before the run's next step: records written, and role
-  // threads whose copies go. A stop never cancels it.
   Schema.Struct({
     type: Schema.Literal("game-run.outputs"),
     runId: GameRunId,
@@ -185,7 +181,6 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
     release: Schema.Array(ThreadId),
   }),
-  // A spent run's copies all go, from the commit that found them spent.
   Schema.Struct({
     type: Schema.Literal("game-run.copies.release"),
     runId: GameRunId,
@@ -205,13 +200,14 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "delegated-tasks.stop",
   // Every game-run step is safe to repeat, and each command it leads to is checked again.
   "game-run.step.execute",
-  "game-run.decision.wake",
   "game-run.decision.deadline",
   "game-run.step.deadline",
-  "game-run.finish",
-  "game-run.restore.execute",
   "game-run.step.resend",
   "game-run.step.wake",
+  // Retired: settled with no work.
+  "game-run.decision.wake",
+  "game-run.finish",
+  "game-run.restore.execute",
   "game-run.outputs",
   "game-run.copies.release",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
