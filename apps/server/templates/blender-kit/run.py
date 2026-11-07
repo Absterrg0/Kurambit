@@ -1,4 +1,7 @@
 """The one-shot entry: blender -b <copy of live.blend> --python run.py -- pass <params.json>.
+Also `paint <params.json>` (kurambit.paint) and `carve <params.json>` (kurambit.carve, in an empty
+scene): work that outlasts a live call, done on a copy so the live scene changes only when its
+result is adopted.
 
 params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.json | null,
          budgets: {character, prop, texture}, standardJoints: [...] | null, out: abs dir,
@@ -70,6 +73,10 @@ def parts_of(objects):
         if s is None:
             add({"what": "parts", **MADE})
         elif s.get("what") != "body":
+            add(s)
+    for o in meshes:
+        s = _stamp(o, "kurambit_paint")  # a texture painted from a sheet credits the sheet's source
+        if s is not None:
             add(s)
     return parts
 
@@ -206,7 +213,13 @@ def run_pass(params):
 
 if __name__ == "__main__":
     argv = sys.argv[sys.argv.index("--") + 1:]
-    if len(argv) != 2 or argv[0] != "pass":
-        raise SystemExit("usage: blender -b <scene.blend> --python run.py -- pass <params.json>")
+    if len(argv) != 2 or argv[0] not in ("pass", "paint", "carve"):
+        raise SystemExit("usage: blender -b <scene.blend> --python run.py -- pass|paint|carve <params.json>")
     with open(argv[1]) as f:
-        run_pass(json.load(f))
+        params = json.load(f)
+    if argv[0] == "pass":
+        run_pass(params)
+    else:
+        from kurambit import carve, paint  # noqa: E402
+
+        (paint.paint if argv[0] == "paint" else carve.carve)(params)
