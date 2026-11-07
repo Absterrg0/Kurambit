@@ -613,6 +613,12 @@ type MessagesTimelineRowContent =
       createdAt: string;
       runId: string;
       round: number;
+    }
+  | {
+      kind: "game-generation";
+      id: string;
+      createdAt: string;
+      generationId: string;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -1757,6 +1763,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "game-generation") {
+      nextRows.push({
+        kind: "game-generation",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        generationId: timelineEntry.generationId,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "mcp-app") {
       nextRows.push({
         kind: "mcp-app",
@@ -2192,6 +2208,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "game-round": {
       const bg = b as typeof a;
       return a.createdAt === bg.createdAt && a.runId === bg.runId && a.round === bg.round;
+    }
+
+    case "game-generation": {
+      const bg = b as typeof a;
+      return a.createdAt === bg.createdAt && a.generationId === bg.generationId;
     }
 
     case "mcp-app": {

@@ -14,15 +14,19 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 
 /**
- * Open and Show in folder for a saved file: the system's own apps through the
- * server's file manager when it has one, else the app's file panel.
+ * Open and Show in folder for a file in the game: the system's own apps
+ * through the server's file manager when it has one, else the app's file panel.
  */
-function SavedFileActions({
+export function GameFileActions({
   threadRef,
-  media,
+  path,
+  relativePath,
 }: {
   threadRef: ScopedThreadRef;
-  media: Pick<GameSavedMedia, "name" | "path">;
+  /** Absolute, for the system's file manager. */
+  path: string;
+  /** Game-relative, for the app's file panel. */
+  relativePath: string;
 }) {
   const config = useAtomValue(serverEnvironment.configValueAtom(threadRef.environmentId));
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, { reportFailure: false });
@@ -33,10 +37,10 @@ function SavedFileActions({
     if (!system || (reveal && !canReveal))
       return useRightPanelStore
         .getState()
-        .openFile(threadRef, reveal ? "saved" : `saved/${media.name}`);
+        .openFile(threadRef, reveal ? relativePath.replace(/\/[^/]*$/, "") : relativePath);
     const result = await openInEditor({
       environmentId: threadRef.environmentId,
-      input: { cwd: media.path, editor: "file-manager", ...(reveal ? { reveal: true } : {}) },
+      input: { cwd: path, editor: "file-manager", ...(reveal ? { reveal: true } : {}) },
     });
     setError(result._tag === "Failure" ? String(squashAtomCommandFailure(result)) : null);
   };
@@ -58,6 +62,16 @@ function SavedFileActions({
     </>
   );
 }
+
+const SavedFileActions = ({
+  threadRef,
+  media,
+}: {
+  threadRef: ScopedThreadRef;
+  media: Pick<GameSavedMedia, "name" | "path">;
+}) => (
+  <GameFileActions threadRef={threadRef} path={media.path} relativePath={`saved/${media.name}`} />
+);
 
 /** Keeps a generated video or image past the log cleanup, as a copy in the game's saved/. */
 export function SaveMediaButton({
