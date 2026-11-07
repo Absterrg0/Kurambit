@@ -964,14 +964,15 @@ function createScale(renderer, look, devicePixels, onChange) {
       hold = Math.max(0, hold - since);
       since = 0;
       // The first half second after a change settles (new buffers, first draws).
-      if (settle > 0 || real.length < 8) {
+      // A slow frame rate still steps: three frames are enough to say frames run late.
+      if (settle > 0 || real.length < 3) {
         settle = Math.max(0, settle - 0.5);
         gpu.length = 0;
         real.length = 0;
         return;
       }
       const frame = mean(real);
-      const ms = gpu.length >= 8 ? median(gpu) : null;
+      const ms = gpu.length >= 3 ? median(gpu) : null;
       let next = value;
       if (frame > LATE_MS) {
         const need = ms !== null && ms > GPU_BUDGET_MS ? Math.sqrt(GPU_BUDGET_MS / ms) : 0.9;
