@@ -1,16 +1,26 @@
 // Every pin was hashed from the bytes its URL served on 2026-11-03, the KayKit and new
-// Quaternius pins on 2026-11-06. Licence evidence: the OpenGameArt page's licence field,
-// uploaded by the creator's own account; ambientCG's site licence; or, for KayKit, the
-// LICENSE.txt in the pinned commit of Kay Lousberg's own repository (a GitHub commit
-// archive, the same bytes on every fetch). Each read CC0 1.0 that day. Re-pin only after
-// checking the licence again.
+// Quaternius pins on 2026-11-06, and the two itch-only Quaternius packs (Universal
+// Animation Library [Standard] v2 and Universal Base Characters [Standard]) on 2026-11-07.
+// Licence evidence: the OpenGameArt page's licence field, uploaded by the creator's own
+// account; ambientCG's site licence; for KayKit, the LICENSE.txt in the pinned commit of
+// Kay Lousberg's own repository (a GitHub commit archive, the same bytes on every fetch);
+// for the itch packs, the itch page's licence field and the licence file in the zip. Each
+// read CC0 1.0 that day. Licences are per upload: re-pin only after checking again.
+//
+// itch only hands out download links that expire within a minute, so the two itch packs'
+// bytes are mirrored on a release of the Kurambit repository (library-mirror-2026-11).
+// The mirror is only a byte host: CC0 allows it, `source` and `licenceEvidence` stay the
+// author's pages, and the SHA-256 pin still guards every byte.
 //
 // A pack's rig is the skeleton its characters share, read from the skin joint names of
 // its GLBs at pin time: kaykit-1 (41 joints, Adventurers and Skeletons alike), kenney-mini
-// (7 joints, Mini Characters and Mini Dungeon), quaternius-ual1 (53 joints) and
-// quaternius-ual2 (65 joints; the two libraries do not share a rig). kenney-blocky is a
-// shared node hierarchy without a skin; kenney-character, quaternius-knight and
-// quaternius-ultimate ship as FBX and are named from the author's description.
+// (7 joints, Mini Characters and Mini Dungeon) and standard-humanoid (Quaternius' 65-joint
+// UE-named rig, shared by both animation libraries and the base characters; the base
+// characters' rest frames differ by up to 23 degrees, so game_blender_character conforms
+// every body to it). kenney-blocky is a shared node hierarchy without a skin;
+// kenney-character, quaternius-knight and quaternius-ultimate ship as FBX and are named
+// from the author's description.
+import { STANDARD_SKELETON } from "@kurambit/contracts";
 import type { LibraryFamily, LibraryPack } from "./assetLibraryFiles.ts";
 
 /**
@@ -63,62 +73,7 @@ export const LIBRARY_RIG_JOINTS: Readonly<Record<string, ReadonlyArray<string>>>
     "handIK.r",
   ],
   "kenney-mini": ["root", "leg-left", "leg-right", "torso", "arm-left", "arm-right", "head"],
-  "quaternius-ual1": [
-    "root",
-    "DEF-hips",
-    "DEF-spine.001",
-    "DEF-spine.002",
-    "DEF-spine.003",
-    "DEF-neck",
-    "DEF-head",
-    "DEF-shoulder.L",
-    "DEF-upper_arm.L",
-    "DEF-forearm.L",
-    "DEF-hand.L",
-    "DEF-f_index.01.L",
-    "DEF-f_index.02.L",
-    "DEF-f_index.03.L",
-    "DEF-f_middle.01.L",
-    "DEF-f_middle.02.L",
-    "DEF-f_middle.03.L",
-    "DEF-f_pinky.01.L",
-    "DEF-f_pinky.02.L",
-    "DEF-f_pinky.03.L",
-    "DEF-f_ring.01.L",
-    "DEF-f_ring.02.L",
-    "DEF-f_ring.03.L",
-    "DEF-thumb.01.L",
-    "DEF-thumb.02.L",
-    "DEF-thumb.03.L",
-    "DEF-shoulder.R",
-    "DEF-upper_arm.R",
-    "DEF-forearm.R",
-    "DEF-hand.R",
-    "DEF-f_index.01.R",
-    "DEF-f_index.02.R",
-    "DEF-f_index.03.R",
-    "DEF-f_middle.01.R",
-    "DEF-f_middle.02.R",
-    "DEF-f_middle.03.R",
-    "DEF-f_pinky.01.R",
-    "DEF-f_pinky.02.R",
-    "DEF-f_pinky.03.R",
-    "DEF-f_ring.01.R",
-    "DEF-f_ring.02.R",
-    "DEF-f_ring.03.R",
-    "DEF-thumb.01.R",
-    "DEF-thumb.02.R",
-    "DEF-thumb.03.R",
-    "DEF-thigh.L",
-    "DEF-shin.L",
-    "DEF-foot.L",
-    "DEF-toe.L",
-    "DEF-thigh.R",
-    "DEF-shin.R",
-    "DEF-foot.R",
-    "DEF-toe.R",
-  ],
-  "quaternius-ual2": [
+  [STANDARD_SKELETON]: [
     "root",
     "pelvis",
     "spine_01",
@@ -187,6 +142,39 @@ export const LIBRARY_RIG_JOINTS: Readonly<Record<string, ReadonlyArray<string>>>
   ],
 };
 
+/** The skeleton made characters are conformed to. */
+export const STANDARD_RIG = STANDARD_SKELETON;
+
+/** Rig ids older locks may name that are the same skeleton under another name. */
+export const LIBRARY_RIG_ALIASES: Readonly<Record<string, string>> = {
+  "quaternius-ual2": STANDARD_RIG,
+};
+
+/** Rig ids no pack is on any more, each with the one edit that moves a lock off it. */
+export const RETIRED_RIGS: Readonly<Record<string, string>> = {
+  "quaternius-ual1":
+    "quaternius-ual1 was the 53-joint rig of the old Universal Animation Library pin; the library's UAL1 is now on standard-humanoid. Set STYLE.json's rig to standard-humanoid.",
+};
+
+/** The armature every made character starts from: its rest frames are the ones every library clip expects. */
+export const STANDARD_ARMATURE = {
+  pack: "quaternius-universal-animation-library",
+  file: "Unreal-Godot/UAL1_Standard.glb",
+} as const;
+
+/** The clips a character gets when it names none: idle, locomotion, jump, hit and death. */
+export const STANDARD_CLIPS = [
+  "Idle_Loop",
+  "Walk_Loop",
+  "Jog_Fwd_Loop",
+  "Sprint_Loop",
+  "Jump_Start",
+  "Jump_Loop",
+  "Jump_Land",
+  "Hit_Chest",
+  "Death01",
+] as const;
+
 /** Packs that share one look; a game's STYLE.json picks one, and its packs come from it. */
 export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
   {
@@ -207,7 +195,7 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
   {
     id: "quaternius-universal",
     title: "Quaternius universal animation",
-    look: "plain humanoid mannequins with large animation libraries; each library is its own rig (quaternius-ual1, quaternius-ual2), and a lock on that rig takes its mannequins as the game's characters",
+    look: "humanoid bodies and two animation libraries on one standard skeleton; game_blender_character conforms any body to it",
   },
   {
     id: "kenney-pixel",
@@ -786,20 +774,42 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     id: "quaternius-universal-animation-library",
     title: "Universal Animation Library",
     author: "Quaternius",
-    source: "https://opengameart.org/content/universal-animation-library",
-    download: "https://opengameart.org/sites/default/files/universal_animation_librarystandard.zip",
-    sha256: "18ff1a7215f4852b320203e8aaf02a1578b5c8eef9027fbaedfcedc7b85a3ac2",
-    bytes: 14541205,
+    source: "https://quaternius.itch.io/universal-animation-library",
+    download:
+      "https://github.com/Absterrg0/Kurambit/releases/download/library-mirror-2026-11/UAL1_Standard_itch.zip",
+    sha256: "cc73fc4e495b82958207316596317a3f40b9fa38065bde1027937452da537724",
+    bytes: 15904933,
     licence: "CC0-1.0",
-    licenceEvidence: "https://opengameart.org/content/universal-animation-library",
+    licenceEvidence: "https://quaternius.itch.io/universal-animation-library",
     kinds: ["animation", "character", "model"],
-    formats: ["fbx", "glb", "png"],
+    formats: ["glb", "fbx"],
     style: "humanoid mannequin",
-    tags: "3d animation library humanoid retarget locomotion idle walk run",
-    description:
-      "46 humanoid animations on a mannequin (GLB for Godot, FBX for Unity) to retarget.",
+    tags: "3d animation library humanoid locomotion idle walk run jog sprint jump standard skeleton",
+    description: "43 humanoid animations, in place and with root motion, on the standard skeleton.",
     family: "quaternius-universal",
-    rig: "quaternius-ual1",
+    rig: STANDARD_RIG,
+    root: "Universal Animation Library[Standard]",
+  },
+  {
+    id: "quaternius-universal-base-characters",
+    title: "Universal Base Characters",
+    author: "Quaternius",
+    source: "https://quaternius.itch.io/universal-base-characters",
+    download:
+      "https://github.com/Absterrg0/Kurambit/releases/download/library-mirror-2026-11/UBC_Standard.zip",
+    sha256: "fdbf1804c90dfc1ea03e992bff7da2dfd1a79318e13270a660180f9308455f40",
+    bytes: 128968391,
+    licence: "CC0-1.0",
+    licenceEvidence: "https://quaternius.itch.io/universal-base-characters",
+    kinds: ["character", "model"],
+    formats: ["gltf", "bin", "fbx", "png"],
+    style: "realistic humanoid base body",
+    tags: "3d character humanoid base body male female hair hairstyles eyebrows rigged standard skeleton",
+    description:
+      "Male and female base bodies with rigged hairstyles and eyebrows on the standard skeleton (glTF for Godot and the web, FBX for Unity); game_blender_character conforms them.",
+    family: "quaternius-universal",
+    rig: STANDARD_RIG,
+    root: "Universal Base Characters[Standard]",
   },
   {
     id: "quaternius-universal-animation-library-2",
@@ -817,9 +827,9 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     style: "humanoid mannequin",
     tags: "3d animation library humanoid retarget combat parkour melee farming zombie",
     description:
-      "43 more humanoid animations (combos, parkour, farming, zombie moves) on male and female mannequins (GLB for Godot, FBX for Unity); a rig of its own, not the first library's.",
+      "43 more humanoid animations (combos, parkour, farming, zombie moves) on male and female mannequins (GLB for Godot, FBX for Unity), on the standard skeleton.",
     family: "quaternius-universal",
-    rig: "quaternius-ual2",
+    rig: STANDARD_RIG,
   },
   {
     id: "quaternius-medieval-village",
