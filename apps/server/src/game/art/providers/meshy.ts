@@ -10,9 +10,12 @@ import {
   type ArtFile,
   type ArtRemote,
   type ArtRequest,
+  type ArtStep,
   ArtProviderError,
+  UNKNOWN_STATUS_LIMIT,
   dataUri,
   field,
+  pendingStage,
   requireKey,
   roundUsd,
   stringField,
@@ -38,6 +41,12 @@ interface MeshyRemote {
   readonly clips: ReadonlyArray<string>;
   /** The rigged character and its clips, downloaded as each stage finished. */
   readonly rig: string | null;
+  /** The next paid stage, saved before it is started (see `pendingStage`). */
+  readonly pending?: "refine" | "rig" | "animate" | null;
+  /** The library actions the animate stage asks for, found when the rig finished. */
+  readonly actions?: ReadonlyArray<number>;
+  /** Answers in a row whose status was none of the documented ones. */
+  readonly unknown?: number;
 }
 
 const auth = (key: string) => ({ authorization: `Bearer ${key}` });
@@ -133,8 +142,20 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
       headers: auth(key),
     });
     const status = stringField(task, "status");
-    if (status === "PENDING" || status === "IN_PROGRESS" || status === null)
-      return { kind: "making" as const, remote: stored };
+    if (status === "PENDING" || status === "IN_PROGRESS")
+      return {
+        kind: "making" as const,
+        remote: remote.unknown === undefined ? stored : ({ ...stored, unknown: 0 } as ArtRemote),
+      };
+    // A reshaped answer reads as no status: a few in a row are waited out, then given up.
+    if (status === null) {
+      const unknown = (remote.unknown ?? 0) + 1;
+      if (unknown >= UNKNOWN_STATUS_LIMIT)
+        return yield* new ArtProviderError({
+          reason: `Meshy answered its ${remote.stage} task ${unknown} times in a row with no status; Kurambit stopped asking.`,
+        });
+      return { kind: "making" as const, remote: { ...stored, unknown } as ArtRemote };
+    }
     if (status !== "SUCCEEDED")
       return yield* new ArtProviderError({
         reason: `Meshy's ${remote.stage} task ended ${status.toLowerCase()}${
@@ -143,33 +164,17 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
             : `: ${stringField(task, "task_error", "message")}`
         }.`,
       });
-    const post = (kind: Kind | "rigging" | "animations", body: unknown) =>
-      context.http
-        .json("meshy", { method: "POST", url: urlOf(kind), headers: auth(key), json: body })
-        .pipe(Effect.flatMap(created));
     // A text request's preview is untextured: refine it before anything else.
-    if (remote.stage === "mesh" && remote.kind === "text-to-3d") {
-      const refine = yield* post("text-to-3d", {
-        mode: "refine",
-        preview_task_id: remote.task,
-        enable_pbr: true,
-      });
+    if (remote.stage === "mesh" && remote.kind === "text-to-3d")
       return {
         kind: "making" as const,
-        remote: { ...stored, stage: "refine", task: refine } as ArtRemote,
+        remote: { ...stored, pending: "refine", unknown: 0 } as ArtRemote,
       };
-    }
-    if ((remote.stage === "mesh" || remote.stage === "refine") && remote.lane === "character") {
-      const rig = yield* post("rigging", {
-        input_task_id: remote.task,
-        height_meters: remote.height ?? 1.7,
-      });
+    if ((remote.stage === "mesh" || remote.stage === "refine") && remote.lane === "character")
       return {
         kind: "making" as const,
-        remote: { ...stored, stage: "rig", kind: "rigging", task: rig, rig } as ArtRemote,
-        note: "Rigging.",
+        remote: { ...stored, pending: "rig", unknown: 0 } as ArtRemote,
       };
-    }
     const files: ArtFile[] = [];
     const download = (url: string | null, role: ArtFile["role"], ext: string, label?: string) =>
       url === null
@@ -200,21 +205,13 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
           headers: auth(key),
         });
         const ids = actionIds(library, remote.clips);
-        if (ids.length > 0) {
+        if (ids.length > 0)
           // The rig's files are kept now: Meshy deletes them in 3 days, and the clips may take longer.
-          const animate = yield* post("animations", { rig_task_id: remote.task, action_ids: ids });
           return {
             kind: "making" as const,
-            remote: {
-              ...stored,
-              stage: "animate",
-              kind: "animations",
-              task: animate,
-            } as ArtRemote,
+            remote: { ...stored, pending: "animate", actions: ids, unknown: 0 } as ArtRemote,
             files,
-            note: "Adding clips.",
           };
-        }
       }
     } else if (remote.stage === "animate") {
       yield* download(stringField(task, "result", "animation_glb_url"), "asset", "glb", "clips");
@@ -225,6 +222,67 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
     if (!files.some((file) => file.role === "asset"))
       return yield* new ArtProviderError({ reason: "Meshy finished without a model file." });
     return { kind: "done" as const, candidates: [files], costUsd: null };
+  });
+
+/** Starts the saved pending stage, once. */
+const advance = (context: ArtContext, stored: ArtRemote) =>
+  Effect.gen(function* () {
+    const key = yield* requireKey("meshy", context);
+    const remote = stored as unknown as MeshyRemote;
+    const post = (kind: Kind | "rigging" | "animations", body: unknown) =>
+      context.http
+        .json("meshy", { method: "POST", url: urlOf(kind), headers: auth(key), json: body })
+        .pipe(Effect.flatMap(created));
+    switch (pendingStage(stored)) {
+      case "refine": {
+        const refine = yield* post("text-to-3d", {
+          mode: "refine",
+          preview_task_id: remote.task,
+          enable_pbr: true,
+        });
+        return {
+          kind: "making" as const,
+          remote: { ...stored, stage: "refine", task: refine, pending: null } as ArtRemote,
+        } satisfies ArtStep;
+      }
+      case "rig": {
+        const rig = yield* post("rigging", {
+          input_task_id: remote.task,
+          height_meters: remote.height ?? 1.7,
+        });
+        return {
+          kind: "making" as const,
+          remote: {
+            ...stored,
+            stage: "rig",
+            kind: "rigging",
+            task: rig,
+            rig,
+            pending: null,
+          } as ArtRemote,
+          note: "Rigging.",
+        } satisfies ArtStep;
+      }
+      case "animate": {
+        const animate = yield* post("animations", {
+          rig_task_id: remote.task,
+          action_ids: remote.actions ?? [],
+        });
+        return {
+          kind: "making" as const,
+          remote: {
+            ...stored,
+            stage: "animate",
+            kind: "animations",
+            task: animate,
+            pending: null,
+          } as ArtRemote,
+          note: "Adding clips.",
+        } satisfies ArtStep;
+      }
+      default:
+        return yield* new ArtProviderError({ reason: "Meshy has no stage waiting to start." });
+    }
   });
 
 export const meshy: ArtAdapter = {
@@ -248,6 +306,7 @@ export const meshy: ArtAdapter = {
           : `Meshy makes characters and models, not ${request.lane}.`,
   start,
   poll,
+  advance,
   pollEvery: Duration.seconds(5),
   checkKey: (context) =>
     requireKey("meshy", context).pipe(

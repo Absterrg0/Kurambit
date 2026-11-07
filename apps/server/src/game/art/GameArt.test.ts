@@ -292,4 +292,125 @@ describe("GameArt", () => {
       }).pipe(Effect.provide(sql));
     }).pipe(Effect.scoped),
   );
+
+  /** A Tripo character row left `making` by a server that stopped, picked up by a new one. */
+  const resumed = (input: {
+    readonly id: string;
+    readonly job: Record<string, unknown>;
+    readonly createdAt?: string;
+    readonly answer: (url: string, method: string) => Response;
+  }) =>
+    Effect.gen(function* () {
+      const base = yield* tempGame();
+      const root = NodePath.join(base, "game");
+      const now = DateTime.formatIso(yield* DateTime.now);
+      const generation = {
+        id: input.id,
+        threadId: THREAD,
+        lane: "character",
+        provider: "tripo",
+        name: "hero",
+        prompt: "a hero",
+        references: [],
+        state: "making",
+        candidates: [],
+        chosen: null,
+        chosenBy: null,
+        files: [],
+        estimateUsd: 0.85,
+        costUsd: null,
+        error: null,
+        createdAt: input.createdAt ?? now,
+        updatedAt: now,
+      };
+      const meta = {
+        job: input.job,
+        folder: "art/generated/character/hero",
+        autopilot: false,
+        kept: [],
+        costEstimated: false,
+        candidateFiles: [],
+        options: {},
+      };
+      const asked: string[] = [];
+      const client = yield* SqlClient.SqlClient;
+      yield* client`
+        INSERT INTO game_art_generations
+          (id, root, thread_id, state, cost_usd, payload_json, remote_json, created_at, updated_at)
+        VALUES (${generation.id}, ${root}, ${THREAD}, 'making', 0.85, ${JSON.stringify(generation)},
+          ${JSON.stringify(meta)}, ${now}, ${now})
+      `;
+      const ended = yield* Effect.provide(
+        Effect.gen(function* () {
+          const art = yield* GameArt.GameArt;
+          return yield* art.wait(root, { id: generation.id, seconds: 30 });
+        }),
+        layer({
+          base,
+          settings: { gameTripoApiKey: "tk" },
+          sql: Layer.succeed(SqlClient.SqlClient, client),
+          answer: (url) => {
+            asked.push(url);
+            return input.answer(url, "");
+          },
+        }),
+      );
+      return { ended, asked };
+    }).pipe(Effect.provide(SqlitePersistence.layerMemory), Effect.scoped);
+
+  const meshJob = {
+    stage: "mesh",
+    task: "t_mesh",
+    mesh: "t_mesh",
+    rig: null,
+    lane: "character",
+    body: null,
+    clips: ["preset:idle"],
+    credits: 0,
+  };
+
+  it.live("starts a paid stage once: an unanswered start is not sent again, and counts", () =>
+    Effect.gen(function* () {
+      const { ended, asked } = yield* resumed({
+        id: "gen-stage-once",
+        job: meshJob,
+        answer: (url) =>
+          url.endsWith("/tasks/t_mesh")
+            ? Response.json({ code: 0, data: { status: "success", credits_consumed: 40 } })
+            : new Response("bad gateway", { status: 502 }),
+      });
+      assert.strictEqual(ended.generation.state, "failed");
+      assert.match(ended.generation.error ?? "", /may have started the rig anyway/);
+      assert.strictEqual(asked.filter((url) => url.endsWith("/animations/rig")).length, 1);
+      assert.strictEqual(ended.generation.costUsd, 0.85);
+    }),
+  );
+
+  it.live("never resends a stage whose start was saved before a restart", () =>
+    Effect.gen(function* () {
+      const { ended, asked } = yield* resumed({
+        id: "gen-stage-intent",
+        job: { ...meshJob, pending: "rig", credits: 40 },
+        answer: () => Response.json({ code: 0, data: { task_id: "t_rig_again" } }),
+      });
+      assert.strictEqual(ended.generation.state, "failed");
+      assert.match(ended.generation.error ?? "", /while starting the rig/);
+      assert.deepStrictEqual(asked, []);
+      assert.strictEqual(ended.generation.costUsd, 0.85);
+    }),
+  );
+
+  it.live("gives up a job past its lane's deadline, counting the estimate", () =>
+    Effect.gen(function* () {
+      const { ended } = yield* resumed({
+        id: "gen-too-late",
+        job: meshJob,
+        createdAt: DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { hours: 6 })),
+        answer: () => Response.json({ code: 0, data: { status: "running" } }),
+      });
+      assert.strictEqual(ended.generation.state, "failed");
+      assert.match(ended.generation.error ?? "", /took longer than/);
+      assert.strictEqual(ended.generation.costUsd, 0.85);
+    }),
+  );
 });

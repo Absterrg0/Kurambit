@@ -70,6 +70,7 @@ import {
   type ArtStep,
   ArtProviderError,
   makeArtHttp,
+  pendingStage,
   roundUsd,
 } from "./providers/adapter.ts";
 import { ART_ADAPTERS } from "./providers/index.ts";
@@ -136,6 +137,20 @@ const GENERATED_DIR = "art/generated";
 const DEFAULT_WAIT_SECONDS = 120;
 const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
 const POLL_RETRIES = 6;
+/**
+ * How long a generation may take from its start, restarts included, before it is given up with
+ * its estimate counted. 3D runs several provider tasks; Meshy asks for an hour per task.
+ */
+const LANE_DEADLINE: Readonly<Record<GameArtLane, Duration.Duration>> = {
+  image: Duration.minutes(30),
+  texture: Duration.minutes(30),
+  sfx: Duration.minutes(10),
+  music: Duration.minutes(15),
+  voice: Duration.minutes(10),
+  model: Duration.minutes(90),
+  character: Duration.minutes(150),
+  creature: Duration.minutes(150),
+};
 const LIST_LIMIT = 50;
 const KEY_CHECK_TTL_MS = 10 * 60_000;
 const REFERENCE_MIME: Readonly<Record<string, ArtReference["mime"]>> = {
@@ -726,27 +741,72 @@ const make = Effect.gen(function* () {
                 times: POLL_RETRIES,
               }),
             );
-      let step = yield* first(adapter, context);
+      const label = GAME_ART_PROVIDERS[adapter.id].label;
+      const limit = LANE_DEADLINE[initial.generation.lane];
+      const deadline = Date.parse(initial.generation.createdAt) + Duration.toMillis(limit);
+      const late = () =>
+        new ArtProviderError({
+          reason: `${label} took longer than ${Duration.format(limit)}; Kurambit stopped asking. It may still finish and be charged at ${label}.`,
+          costUsd: initial.generation.estimateUsd,
+        });
+      // Sending a stage again could buy it twice, so only a rate limit (which both providers say
+      // creates nothing) is retried; an unanswered start fails, and the estimate is counted.
+      const advanceOnce = (remote: ArtRemote, stage: string) =>
+        adapter.advance === undefined
+          ? Effect.fail(new ArtProviderError({ reason: `${label} cannot start the ${stage}.` }))
+          : adapter.advance(context, remote).pipe(
+              Effect.retry({
+                while: (error) => error.status === 429,
+                schedule: Schedule.spaced(adapter.pollEvery),
+                times: POLL_RETRIES,
+              }),
+              Effect.mapError(
+                (error) =>
+                  new ArtProviderError({
+                    reason:
+                      error.status !== undefined && error.status < 500
+                        ? error.reason
+                        : `${error.reason} ${label} may have started the ${stage} anyway, so it is not asked again.`,
+                  }),
+              ),
+            );
+      let step = yield* first(adapter, context).pipe(
+        Effect.timeoutOrElse({
+          duration: Duration.millis(Math.max(0, deadline - (yield* Clock.currentTimeMillis))),
+          orElse: () => Effect.fail(late()),
+        }),
+      );
       while (step.kind === "making") {
         const making = step;
-        yield* locks.withLock(
+        const live = yield* locks.withLock(
           id,
           Effect.gen(function* () {
             const row = yield* loadOrFail(root, id, "art-drive");
-            if (row.generation.state !== "making") return;
+            if (row.generation.state !== "making") return false;
             const kept =
               making.files === undefined || making.files.length === 0
                 ? []
                 : (yield* writeFiles(row, [making.files])).flat().map((file) => file.path);
-            if (kept.length === 0 && encodeJson(row.meta.job) === encodeJson(making.remote)) return;
+            if (kept.length === 0 && encodeJson(row.meta.job) === encodeJson(making.remote))
+              return true;
             const next = yield* touch(
               row,
               {},
               { job: making.remote, kept: [...row.meta.kept, ...kept] },
             );
             yield* save(next, countedOf(next.generation));
+            return true;
           }),
         );
+        if (!live) return;
+        // The intent is saved above before the stage is sent: a restart finds it and stops.
+        const stage = pendingStage(making.remote);
+        if (stage !== null) {
+          step = yield* advanceOnce(making.remote, stage);
+          continue;
+        }
+        if ((yield* Clock.currentTimeMillis) + Duration.toMillis(adapter.pollEvery) > deadline)
+          return yield* late();
         yield* Effect.sleep(adapter.pollEvery);
         step = yield* pollOnce(making.remote);
       }
@@ -1207,6 +1267,18 @@ const make = Effect.gen(function* () {
       if (row === null || (yield* FiberMap.has(fibers, row.generation.id))) continue;
       const adapter = ART_ADAPTERS[row.generation.provider];
       const job = row.meta.job;
+      const stage = job === null ? null : pendingStage(job);
+      if (stage !== null) {
+        yield* locks.withLock(
+          row.generation.id,
+          fail(
+            row,
+            `The server stopped while starting the ${stage}. ${GAME_ART_PROVIDERS[row.generation.provider].label} may have started it already, so Kurambit does not ask again; make it again if it is still wanted.`,
+            row.generation.estimateUsd,
+          ),
+        );
+        continue;
+      }
       if (job === null || adapter?.poll === undefined) {
         yield* locks.withLock(
           row.generation.id,

@@ -23,6 +23,8 @@ export class ArtProviderError extends Data.TaggedError("ArtProviderError")<{
   readonly costUsd?: number | null;
   /** Waiting may clear it (unreachable, rate limited, the provider's own fault): a poll tries again. */
   readonly transient?: boolean;
+  /** The provider's HTTP status, when it answered at all. */
+  readonly status?: number;
 }> {}
 
 export interface ArtReference {
@@ -53,6 +55,18 @@ export interface ArtFile {
 
 /** The provider's own job record, kept as JSON in the generation's row. */
 export type ArtRemote = { readonly [key: string]: unknown };
+
+/**
+ * The paid stage a job is about to start, or null. `poll` never starts one: it answers a remote
+ * with `pending` set, the service saves that before calling `advance`, and `advance` sends the
+ * request once. Neither provider has an idempotency key and both say a create whose answer was
+ * lost may have happened, so a saved intent with no task after it is never sent again.
+ */
+export const pendingStage = (remote: ArtRemote): string | null =>
+  typeof remote.pending === "string" ? remote.pending : null;
+
+/** How many answers in a row with no status we know before a job counts as failed. */
+export const UNKNOWN_STATUS_LIMIT = 10;
 
 export type ArtStep =
   | {
@@ -97,8 +111,16 @@ export interface ArtAdapter {
     context: ArtContext,
     request: ArtRequest,
   ) => Effect.Effect<ArtStep, ArtProviderError>;
-  /** For jobs: asks after one, moving it on (a rig after a mesh) until its files are downloaded. */
+  /**
+   * For jobs: asks after one and downloads what finished; safe to repeat. When a paid stage
+   * should follow (a rig after a mesh), it answers `making` with the stage in `pending`.
+   */
   readonly poll?: (
+    context: ArtContext,
+    remote: ArtRemote,
+  ) => Effect.Effect<ArtStep, ArtProviderError>;
+  /** Starts the remote's `pending` stage: one request, sent once, answering the new job. */
+  readonly advance?: (
     context: ArtContext,
     remote: ArtRemote,
   ) => Effect.Effect<ArtStep, ArtProviderError>;
@@ -189,6 +211,7 @@ export const makeArtHttp = (client: HttpClient.HttpClient): ArtHttp => {
         return yield* new ArtProviderError({
           reason: `${label} refused (HTTP ${response.status})${said === null ? "." : `: ${said.slice(0, 400)}`}`,
           transient: response.status === 429 || response.status >= 500,
+          status: response.status,
         });
       }
       return response;

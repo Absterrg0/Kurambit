@@ -224,7 +224,7 @@ describe("art adapters: request shapes", () => {
   );
 
   it.effect(
-    "Tripo moves stage to stage on success, adds up the credits, and says why a task failed",
+    "Tripo polls without buying, names the next stage for advance to start, adds up the credits, and says why a task failed",
     () =>
       Effect.gen(function* () {
         const mesh = {
@@ -251,11 +251,24 @@ describe("art adapters: request shapes", () => {
         ]);
         const unknown = yield* tripo.poll!(context, mesh);
         assert.strictEqual(unknown.kind, "making");
-        const rigging = yield* tripo.poll!(context, mesh);
+        if (unknown.kind !== "making") return;
+        assert.strictEqual(unknown.remote.unknown, 1);
+        const meshDone = yield* tripo.poll!(context, unknown.remote);
+        // The poll only read: the rig is named, not bought.
+        assert.strictEqual(calls.length, 2);
+        assert.strictEqual(meshDone.kind, "making");
+        if (meshDone.kind !== "making") return;
+        assert.deepInclude(meshDone.remote, { stage: "mesh", pending: "rig", credits: 40 });
+        const rigging = yield* tripo.advance!(context, meshDone.remote);
         assert.strictEqual(calls[2]?.request.url, "https://openapi.tripo3d.ai/v3/animations/rig");
         assert.strictEqual(rigging.kind, "making");
         if (rigging.kind !== "making") return;
-        assert.deepInclude(rigging.remote, { stage: "rig", task: "t_rig", credits: 40 });
+        assert.deepInclude(rigging.remote, {
+          stage: "rig",
+          task: "t_rig",
+          credits: 40,
+          pending: null,
+        });
 
         const retargeted = recording([
           {
@@ -289,13 +302,13 @@ describe("art adapters: request shapes", () => {
       }),
   );
 
-  it.effect("Meshy refines a text preview on v2 and polls it there", () =>
+  it.effect("Meshy names the refine of a text preview, and advance sends it on v2", () =>
     Effect.gen(function* () {
       const { calls, context } = recording([
         { id: "t_prev", status: "SUCCEEDED" },
         { result: "t_ref" },
       ]);
-      const step = yield* meshy.poll!(context, {
+      const polled = yield* meshy.poll!(context, {
         stage: "mesh",
         kind: "text-to-3d",
         task: "t_prev",
@@ -308,6 +321,11 @@ describe("art adapters: request shapes", () => {
         calls[0]?.request.url,
         "https://api.meshy.ai/openapi/v2/text-to-3d/t_prev",
       );
+      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(polled.kind, "making");
+      if (polled.kind !== "making") return;
+      assert.strictEqual(polled.remote.pending, "refine");
+      const step = yield* meshy.advance!(context, polled.remote);
       assert.strictEqual(calls[1]?.request.url, "https://api.meshy.ai/openapi/v2/text-to-3d");
       assert.deepStrictEqual(calls[1]?.request.json, {
         mode: "refine",

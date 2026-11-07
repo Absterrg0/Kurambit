@@ -13,9 +13,12 @@ import {
   type ArtFile,
   type ArtRemote,
   type ArtRequest,
+  type ArtStep,
   ArtProviderError,
+  UNKNOWN_STATUS_LIMIT,
   field,
   numberField,
+  pendingStage,
   requireKey,
   roundUsd,
   stringField,
@@ -86,6 +89,10 @@ interface TripoRemote {
   readonly mesh: string;
   /** Credits the finished stages consumed; null once one did not say (rows from before too). */
   readonly credits?: number | null;
+  /** The next paid stage, saved before it is started (see `pendingStage`). */
+  readonly pending?: "rig" | "retarget" | null;
+  /** Answers in a row whose status was none of the documented ones. */
+  readonly unknown?: number;
 }
 
 const clipsOf = (request: Pick<ArtRequest, "lane" | "options">): ReadonlyArray<string> =>
@@ -260,8 +267,11 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
     });
     const status = stringField(answer, "data", "status");
     const spent = remote.credits === undefined ? null : remote.credits;
-    // Documented: queued, running, success, failed, cancelled. Anything else (unknown) is neither
-    // an end nor a failure; the person can cancel a job that never ends.
+    if (status === "queued" || status === "running")
+      return {
+        kind: "making" as const,
+        remote: remote.unknown === undefined ? stored : ({ ...stored, unknown: 0 } as ArtRemote),
+      };
     if (status === "failed" || status === "cancelled") {
       const message = stringField(answer, "data", "error_message");
       return yield* new ArtProviderError({
@@ -270,31 +280,29 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
         ...(spent === null ? {} : { costUsd: roundUsd(spent * USD_PER_CREDIT) }),
       });
     }
-    if (status !== "success") return { kind: "making" as const, remote: stored };
+    // The docs allow other values ("unknown") that are neither an end nor a failure, and a
+    // reshaped answer reads as none: a few in a row are waited out, then the job is given up.
+    if (status !== "success") {
+      const unknown = (remote.unknown ?? 0) + 1;
+      if (unknown >= UNKNOWN_STATUS_LIMIT)
+        return yield* new ArtProviderError({
+          reason: `Tripo answered its ${remote.stage} task ${unknown} times in a row with ${status === null ? "no status" : `status "${status}"`}; Kurambit stopped asking.`,
+        });
+      return { kind: "making" as const, remote: { ...stored, unknown } as ArtRemote };
+    }
     const consumed = numberField(answer, "data", "credits_consumed");
     const credits = spent === null || consumed === null ? null : spent + consumed;
     const output = field(answer, "data", "output");
-    if (remote.stage === "mesh" && remote.lane !== "model") {
-      const rig = yield* post(context, key, "/animations/rig", tripoRigBody(remote));
+    if (remote.stage === "mesh" && remote.lane !== "model")
       return {
         kind: "making" as const,
-        remote: { ...stored, stage: "rig", task: rig, rig, credits } as ArtRemote,
-        note: "Rigging.",
+        remote: { ...stored, pending: "rig", credits, unknown: 0 } as ArtRemote,
       };
-    }
-    if (remote.stage === "rig" && remote.clips.length > 0) {
-      const retarget = yield* post(
-        context,
-        key,
-        "/animations/retarget",
-        tripoRetargetBody(remote.task, remote.clips),
-      );
+    if (remote.stage === "rig" && remote.clips.length > 0)
       return {
         kind: "making" as const,
-        remote: { ...stored, stage: "retarget", task: retarget, credits } as ArtRemote,
-        note: "Adding clips.",
+        remote: { ...stored, pending: "retarget", credits, unknown: 0 } as ArtRemote,
       };
-    }
     const urls = tripoModelUrls(output);
     if (urls.length === 0)
       return yield* new ArtProviderError({ reason: "Tripo finished without a model file." });
@@ -327,6 +335,38 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
     };
   });
 
+/** Starts the saved pending stage, once. */
+const advance = (context: ArtContext, stored: ArtRemote) =>
+  Effect.gen(function* () {
+    const key = yield* requireKey("tripo", context);
+    const remote = stored as unknown as TripoRemote;
+    switch (pendingStage(stored)) {
+      case "rig": {
+        const rig = yield* post(context, key, "/animations/rig", tripoRigBody(remote));
+        return {
+          kind: "making" as const,
+          remote: { ...stored, stage: "rig", task: rig, rig, pending: null } as ArtRemote,
+          note: "Rigging.",
+        } satisfies ArtStep;
+      }
+      case "retarget": {
+        const retarget = yield* post(
+          context,
+          key,
+          "/animations/retarget",
+          tripoRetargetBody(remote.task, remote.clips),
+        );
+        return {
+          kind: "making" as const,
+          remote: { ...stored, stage: "retarget", task: retarget, pending: null } as ArtRemote,
+          note: "Adding clips.",
+        } satisfies ArtStep;
+      }
+      default:
+        return yield* new ArtProviderError({ reason: "Tripo has no stage waiting to start." });
+    }
+  });
+
 export const tripo: ArtAdapter = {
   id: "tripo",
   estimate: (request) => {
@@ -352,6 +392,7 @@ export const tripo: ArtAdapter = {
   },
   start,
   poll,
+  advance,
   pollEvery: Duration.seconds(4),
   checkKey: (context) =>
     requireKey("tripo", context).pipe(
