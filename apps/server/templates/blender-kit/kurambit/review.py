@@ -4,14 +4,23 @@ params: {candidate: abs glb, out: abs png, gamePx, view, palette: [hex] | None, 
          concept_png: abs | None, characterHeight?: STYLE.json scale.character (a prop's scale)}
 
 One PNG shows exactly what the export would write: a turnaround (front, three-quarter, side,
-back), the same views as silhouettes, the model at game distance (gamePx tall, at 1x and 3x with
-nearest filtering), six side-view frames of each locomotion, jump and custom clip, the palette
-with the swatches the model uses marked, and the concept image on the left when there is one.
+back); the same views in clay (every material light grey, with cavity), where paint no longer hides
+a part off-centre, floating or poking out; the same views as silhouettes; the model at game
+distance (gamePx tall, at 1x and 3x with nearest filtering) and, for a character, a close-up of its
+head (the top 45% of its height, three-quarter view); six side-view frames of each locomotion,
+jump and custom clip, with six front-view frames beside each locomotion's, where hip roll and arms
+through the body show; the palette with the swatches the model uses marked; and the concept image
+on the left when there is one. A prop has no close-up: its turnaround already shows all of it at
+one scale, and no rule picks its most detailed region honestly.
+
+Every tile's coverage is checked: one where the subject fills under 1% of it is named in the
+result's problems, never left as a silently empty picture.
 
 The candidate is imported into its own scene and every datablock the review added is removed in
 `finally`, so the live scene never changes (the spriteRenderPy precedent). The turnaround and the
-game-distance view render in EEVEE; the strips and the labels in Workbench, which is about fifty
-times faster on the live session's software GL and keeps the review inside one tool call."""
+game-distance view and the close-up render in EEVEE; the clay row, the strips and the labels in
+Workbench, which is about fifty times faster on the live session's software GL and keeps the
+review inside one tool call."""
 import math
 import os
 import shutil
@@ -26,14 +35,19 @@ from .protocol import Refused, entry
 BG = (0.29, 0.30, 0.33)
 INK = (0.93, 0.93, 0.95)
 SILHOUETTE = (0.08, 0.09, 0.11)
+CLAY = (0.78, 0.76, 0.72)
 PAD = 14
 TURN = (300, 380)
 STRIP = (130, 165)
 LABEL_PX = 20
 TURN_VIEWS = (("front", 0), ("three-quarter", 40), ("side", 90), ("back", 180))
+CLOSE = (300, 300)
+HEAD = 0.45  # the close-up: the top of a character's height
+MIN_COVER = 0.01
 # Where the game's camera sees a character from (azimuth, elevation) per STYLE.json view.
 GAME_VIEWS = {"perspective": (35, 22), "side": (90, 0), "top-down": (20, 55), "isometric": (45, 35.26)}
 STRIP_WORDS = ("walk", "jog", "run", "sprint", "jump")
+LOCOMOTION = ("walk", "jog", "run", "sprint")
 NOT_STRIPS = ("idle", "hit", "death", "die", "pose")
 MAX_STRIPS = 8
 ID_TYPES = ("objects", "meshes", "materials", "images", "actions", "armatures", "cameras", "lights",
@@ -97,15 +111,27 @@ def _setup(sc, engine, size):
     if engine == "BLENDER_WORKBENCH":
         sc.display.shading.light = "STUDIO"
         sc.display.shading.color_type = "TEXTURE"
+        sc.display.shading.show_cavity = False
         sc.display.render_aa = "8"
     else:
         sc.eevee.taa_render_samples = 16
+
+
+def _clay(sc):
+    sc.display.shading.color_type = "SINGLE"
+    sc.display.shading.single_color = CLAY
+    sc.display.shading.show_cavity = True
+    sc.display.shading.cavity_type = "BOTH"
 
 
 def _render(sc, path):
     sc.render.filepath = path
     bpy.ops.render.render(write_still=True, scene=sc.name)
     return _load(path)
+
+
+def _cover(tile):
+    return float((tile[:, :, 3] > 0.5).mean())
 
 
 def _load(path):
@@ -300,13 +326,36 @@ def review(params):
         points = _world_coords(sc, meshes)
         exts = [_extent(points, az, 8) for _, az in TURN_VIEWS]
         span = max(max(e[1] - e[0] for e in exts) * TURN[1] / TURN[0], max(e[3] - e[2] for e in exts)) * 1.1
+        problems = []
+
+        def covered(tile, what):
+            if _cover(tile) < MIN_COVER:
+                problems.append(f"the {what} tile shows the model over {100 * _cover(tile):.2f}% of it (under {100 * MIN_COVER:.0f}%): it is out of frame or too small to judge there")
+            return tile
 
         _setup(sc, "BLENDER_EEVEE_NEXT", TURN)
         turns = []
         for i, (name, az) in enumerate(TURN_VIEWS):
             _camera(cam, az, 8, exts[i], span)
             _aim_lights(lights, az, 8)
-            turns.append(_render(sc, os.path.join(folder, f"turn_{name}.png")))
+            turns.append(covered(_render(sc, os.path.join(folder, f"turn_{name}.png")), f"{name} turnaround"))
+
+        close = None
+        if arm is not None:
+            lo, hi = points[:, 2].min(), points[:, 2].max()
+            head = points[points[:, 2] >= hi - HEAD * (hi - lo)]
+            he = _extent(head, 40, 8)
+            _setup(sc, "BLENDER_EEVEE_NEXT", CLOSE)
+            _camera(cam, 40, 8, he, max(he[1] - he[0], he[3] - he[2]) * 1.08)
+            _aim_lights(lights, 40, 8)
+            close = covered(_render(sc, os.path.join(folder, "close.png")), "head close-up")
+
+        _setup(sc, "BLENDER_WORKBENCH", TURN)
+        _clay(sc)
+        clays = []
+        for i, (name, az) in enumerate(TURN_VIEWS):
+            _camera(cam, az, 8, exts[i], span)
+            clays.append(covered(_render(sc, os.path.join(folder, f"clay_{name}.png")), f"{name} clay"))
 
         gaz, gel = GAME_VIEWS.get(params.get("view") or "perspective", GAME_VIEWS["perspective"])
         game_px = int(params.get("gamePx") or 96)
@@ -324,7 +373,7 @@ def review(params):
         _setup(sc, "BLENDER_EEVEE_NEXT", (size, size))
         _camera(cam, gaz, gel, ge, size / per_m)
         _aim_lights(lights, gaz, gel)
-        game = _render(sc, os.path.join(folder, "game.png"))
+        game = covered(_render(sc, os.path.join(folder, "game.png")), "game-distance")
 
         strips = []
         if arm is not None:
@@ -336,18 +385,29 @@ def review(params):
                     _set_frame(sc, f)
                     sampled.append(_world_coords(sc, meshes))
             if sampled:
-                se = _extent(np.concatenate(sampled), 90, 4)
-                sspan = max((se[1] - se[0]) * STRIP[1] / STRIP[0], se[3] - se[2]) * 1.06
                 _setup(sc, "BLENDER_WORKBENCH", STRIP)
-                _camera(cam, 90, 4, se, sspan)
-                for act, label in clips:
-                    skeleton.assign_action(arm, act)
-                    cells = []
-                    for k, f in enumerate(_frames(act)):
-                        _set_frame(sc, f)
-                        cells.append(_render(sc, os.path.join(folder, f"strip_{len(strips)}_{k}.png")))
+                frames = {}
+                for view, az in (("side", 90), ("front", 0)):
+                    se = _extent(np.concatenate(sampled), az, 4)
+                    sspan = max((se[1] - se[0]) * STRIP[1] / STRIP[0], se[3] - se[2]) * 1.06
+                    _camera(cam, az, 4, se, sspan)
+                    for n, (act, label) in enumerate(clips):
+                        if view == "front" and not any(w in label.lower() for w in LOCOMOTION):
+                            continue
+                        skeleton.assign_action(arm, act)
+                        cells = []
+                        for k, f in enumerate(_frames(act)):
+                            _set_frame(sc, f)
+                            cells.append(_render(sc, os.path.join(folder, f"strip_{view}_{n}_{k}.png")))
+                        empty = [k + 1 for k, c in enumerate(cells) if _cover(c) < MIN_COVER]
+                        if empty:
+                            problems.append(f"the {label} {view} strip's frame{'s' if len(empty) > 1 else ''} {', '.join(map(str, empty))} show the model over under {100 * MIN_COVER:.0f}% of the tile: it leaves the frame there")
+                        frames[(n, view)] = cells
+                for n, (act, label) in enumerate(clips):
                     seconds = (act.frame_range[1] - act.frame_range[0]) / (sc.render.fps / sc.render.fps_base)
-                    strips.append((labels(f"{label}  {seconds:.2f} s"), cells))
+                    front = frames.get((n, "front"))
+                    text = f"{label}  {seconds:.2f} s" + ("   side, then front" if front else "")
+                    strips.append((labels(text), frames[(n, "side")] + (front or [])))
 
         concept = None
         if params.get("concept_png") and os.path.isfile(params["concept_png"]):
@@ -360,14 +420,25 @@ def review(params):
         zoom = max(1, min(3, TURN[1] // game.shape[0]))  # a wide prop at 3x would outgrow the page
         game3 = _nearest(game, zoom)
         turn_w = 4 * TURN[0]
+        gx = left + turn_w + PAD
         strip_w = 6 * STRIP[0] + 2 * PAD
         strip_h = LABEL_PX + 4 + STRIP[1] + PAD
-        width = max(left + turn_w + PAD + game3.shape[0] + PAD + game.shape[1] + PAD,
+        width = max(gx + game3.shape[1] + PAD + game.shape[1] + PAD,
+                    gx + (CLOSE[0] + PAD if close is not None else 0),
                     PAD + 2 * strip_w, PAD + 34 * len(palette) + PAD)
         row_a = PAD + LABEL_PX + 4
-        row_b = row_a + TURN[1] + PAD
+        row_k = row_a + max(TURN[1], game3.shape[0]) + PAD  # the clay row
+        row_b = row_k + LABEL_PX + 4 + TURN[1] + PAD
         row_c = row_b + LABEL_PX + 4 + TURN[1] // 2 + PAD
-        row_p = row_c + (len(strips) + 1) // 2 * strip_h
+        # A clip with a front strip takes a whole row; the others go two to a row.
+        places, x, y = [], 0, row_c
+        for _, cells in strips:
+            wide = len(cells) > 6
+            if x > 0 and (wide or x + strip_w > 2 * strip_w):
+                x, y = 0, y + strip_h
+            places.append((PAD + x, y))
+            x += 2 * strip_w if wide else strip_w
+        row_p = y + strip_h if strips else row_c
         height = row_p + (LABEL_PX + 4 + 40 + PAD if palette else 0)
         canvas = np.zeros((height, width, 4), np.float32)
         canvas[:, :, :3], canvas[:, :, 3] = BG, 1.0
@@ -378,19 +449,23 @@ def review(params):
         _over(canvas, labels("turnaround: front, three-quarter, side, back"), left, PAD)
         for i, t in enumerate(turns):
             _over(canvas, t, left + i * TURN[0], row_a)
-        gx = left + turn_w + PAD
         _over(canvas, labels(f"{game_label}, {zoom}x and 1x" if zoom > 1 else game_label), gx, PAD)
         _over(canvas, game3, gx, row_a)
         if zoom > 1:
             _over(canvas, game, gx + game3.shape[1] + PAD, row_a)
+        _over(canvas, labels("clay: no paint, so parts off-centre, floating or poking out show"), left, row_k)
+        for i, t in enumerate(clays):
+            _over(canvas, t, left + i * TURN[0], row_k + LABEL_PX + 4)
+        if close is not None:
+            _over(canvas, labels("head close-up"), gx, row_k)
+            _over(canvas, close, gx, row_k + LABEL_PX + 4)
         _over(canvas, labels("silhouettes"), left, row_b)
         for i, t in enumerate(turns):
             _over(canvas, _silhouette(t), left + i * TURN[0] + TURN[0] // 4, row_b + LABEL_PX + 4)
-        for i, (label, cells) in enumerate(strips):
-            x, y = PAD + (i % 2) * strip_w, row_c + (i // 2) * strip_h
+        for (label, cells), (x, y) in zip(strips, places):
             _over(canvas, label, x, y)
             for k, cell in enumerate(cells):
-                _over(canvas, cell, x + k * STRIP[0], y + LABEL_PX + 4)
+                _over(canvas, cell, x + k * STRIP[0] + (2 * PAD if k >= 6 else 0), y + LABEL_PX + 4)
         if palette:
             _over(canvas, labels("palette (underlined: used by this model)"), PAD, row_p)
             _over(canvas, _swatch(palette, used), PAD, row_p + LABEL_PX + 4)
@@ -400,7 +475,7 @@ def review(params):
         img.filepath_raw = out
         img.file_format = "PNG"
         img.save()
-        return {"image": out, "width": width, "height": height}
+        return {"image": out, "width": width, "height": height, "problems": problems[:12]}
     finally:
         if window is not None:
             window.scene = shown
