@@ -105,7 +105,9 @@ export const makeThreeBackend = (
           });
           return;
         }
-        if (event.level !== "error" && event.level !== "warning") return;
+        // The shell's animate line says which clip plays each state: the check shows it too.
+        const shellLine = event.level === "info" && event.text.startsWith("animate: ");
+        if (event.level !== "error" && event.level !== "warning" && !shellLine) return;
         const text = event.text.slice(0, 500);
         // The browser's own chrome, not the game: a missing favicon is not
         // a game failure (the starter links a data-URI icon so it never fires).

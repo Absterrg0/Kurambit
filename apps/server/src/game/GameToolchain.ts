@@ -77,7 +77,6 @@ const MPFB = {
     "https://extensions.blender.org/download/sha256:c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad/add-on-mpfb-v2.0.18.zip",
   sha256: "c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad",
   bytes: 45_956_992,
-  page: "https://extensions.blender.org/add-ons/mpfb/",
 } as const;
 const MPFB_ABOUT = `MPFB2 ${MPFB.version}: human bodies for made characters. GPL-3.0 code, downloaded from extensions.blender.org into Kurambit's own Blender folder (46 MB); the bodies are CC0.`;
 /**
@@ -104,6 +103,15 @@ export const toolsDirectory = () =>
     process.env.XDG_DATA_HOME || NodePath.join(NodeOS.homedir(), ".local/share"),
     "kurambit/tools",
   );
+/**
+ * The one uv cache and Python folder every uv child Kurambit runs shares, so a
+ * pinned package downloads once per machine, never once per game, and never
+ * into the person's own uv cache.
+ */
+export const uvCacheEnv = (): Record<string, string> => ({
+  UV_CACHE_DIR: NodePath.join(toolsDirectory(), "uv-cache"),
+  UV_PYTHON_INSTALL_DIR: NodePath.join(toolsDirectory(), "uv-python"),
+});
 type BinaryTool = "blender" | "godot" | "uv";
 type Platform = "linux" | "darwin" | "win32";
 const hostPlatform = (platform: NodeJS.Platform): Platform =>
@@ -887,7 +895,8 @@ const make = Effect.gen(function* () {
       path: null,
       version: null,
       source: null,
-      downloadUrl: MPFB.page,
+      // Install is the way in: a link would invite installing it into the person's own Blender, which Kurambit never reads.
+      downloadUrl: null,
     };
     // MPFB2 is a Blender extension: it needs a usable Blender with the extension platform (4.2+).
     const blender = yield* probe("blender").pipe(Effect.orElseSucceed(() => null));
