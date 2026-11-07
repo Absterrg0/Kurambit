@@ -6,7 +6,7 @@ agent's materials and modifiers. From STYLE.json:
            one small atlas of vertical-gradient swatches (shading.gradient); each face samples its
            swatch by height in the model, so every part gets the same soft top light. Two
            materials result, Palette and Glow (shading.glow), on the one atlas. Without a hex list
-           the materials are kept (D3).
+           the materials are kept (D3), their textures scaled down to budget.texture.
   scale    scale.character: a character is scaled to that standing height on its armature's
            object, so clip units are unchanged (D4). Props keep their modelled metres.
 A character's meshes are joined into one skinned mesh: one mesh, two draw calls."""
@@ -97,7 +97,7 @@ def join_character(arm, meshes):
 
 
 def _image_mean(image):
-    n = image.size[0] * image.size[1]
+    n = len(image.pixels) // 4  # reading pixels loads the buffer; size reads 0 x 0 until then
     if n == 0:
         return None
     px = np.empty(n * 4, np.float32)
@@ -107,6 +107,17 @@ def _image_mean(image):
     rgb = (px[:, :3] * w[:, None]).sum(0) / w.sum()
     # float images hold linear values; byte images hold their sRGB bytes
     return [_srgb(c) for c in rgb] if image.is_float else list(rgb)
+
+
+def _feeding_image(socket, depth=4):
+    """The first image upstream of a socket (glTF imports put a Mix node for vertex colour between)."""
+    nodes = [link.from_node for link in socket.links]
+    for _ in range(depth):
+        for n in nodes:
+            if getattr(n, "image", None) is not None:
+                return n.image
+        nodes = [link.from_node for n in nodes for i in n.inputs for link in i.links]
+    return None
 
 
 def material_colour(m):
@@ -121,12 +132,10 @@ def material_colour(m):
     strength = bsdf.inputs["Emission Strength"].default_value
     glow = strength > 0.01 and max(bsdf.inputs["Emission Color"].default_value[:3]) > 0.01
     base = bsdf.inputs["Base Color"]
-    if base.is_linked:
-        src = base.links[0].from_node
-        image = getattr(src, "image", None)
-        mean = _image_mean(image) if image is not None else None
-        if mean is not None:
-            return mean, glow
+    image = _feeding_image(base)
+    mean = _image_mean(image) if image is not None else None
+    if mean is not None:
+        return mean, glow
     return [_srgb(x) for x in base.default_value[:3]], glow
 
 
@@ -215,6 +224,50 @@ def snap_palette(meshes, hexes, shading, out_dir):
     return [hexes[k] for k in sorted(used)]
 
 
+def fit_textures(meshes, side):
+    """Every texture the meshes use, at most side px on its longer side: one over it is scaled down
+    (Blender's image scale, aspect kept) into a new packed image, so the source file is never
+    written; one that cannot be read is left out of its material. Returns the notes."""
+    notes, done = [], {}
+    mats = {s.material for o in meshes for s in o.material_slots if s.material is not None and s.material.use_nodes}
+    for m in sorted(mats, key=lambda m: m.name):
+        for node in list(m.node_tree.nodes):
+            image = getattr(node, "image", None)
+            if image is None:
+                continue
+            if image.name not in done:
+                done[image.name] = _fit(image, side, notes)
+            if done[image.name] is None:
+                m.node_tree.nodes.remove(node)
+            else:
+                node.image = done[image.name]
+    return notes
+
+
+def _fit(image, side, notes):
+    if len(image.pixels) == 0:  # reading pixels loads the buffer
+        notes.append(f"texture {image.name} could not be read ({os.path.basename(image.filepath)}): left out")
+        return None
+    w, h = image.size
+    if max(w, h) <= side:
+        return image
+    k = side / max(w, h)
+    nw, nh = max(1, round(w * k)), max(1, round(h * k))
+    scratch = image.copy()
+    try:
+        scratch.scale(nw, nh)
+        px = np.empty(nw * nh * 4, np.float32)
+        scratch.pixels.foreach_get(px)
+    finally:
+        bpy.data.images.remove(scratch)
+    out = bpy.data.images.new(f"{image.name}_{nw}", nw, nh, alpha=True, float_buffer=image.is_float)
+    out.colorspace_settings.name = image.colorspace_settings.name
+    out.pixels.foreach_set(px)
+    out.pack()
+    notes.append(f"texture {image.name} {w}x{h} → {nw}x{nh} (STYLE.json budget.texture {side})")
+    return out
+
+
 def rest_height(meshes):
     zs = [helpers.rest_coords(o)[0][:, 2] for o in meshes]
     zs = [z for z in zs if len(z)]
@@ -223,9 +276,9 @@ def rest_height(meshes):
     return float(max(z.max() for z in zs) - min(z.min() for z in zs))
 
 
-def style_pass(objects, style, out_dir):
+def style_pass(objects, style, out_dir, texture_side):
     """Runs the pass on objects (the resolved candidate, in this one-shot copy). Returns
-    {kind, meshes, armatures, usedPalette, scaled}."""
+    {kind, meshes, armatures, usedPalette, scaled, notes}."""
     style = style or {}
     objects = [realize(o) if o.type in helpers.GEOMETRY else o for o in objects]
     arms = [o for o in objects if o.type == "ARMATURE"]
@@ -234,7 +287,12 @@ def style_pass(objects, style, out_dir):
         meshes = join_character(arm, meshes)
     shading = {**DEFAULT_SHADING, **(style.get("shading") or {})}
     palette = style.get("palette")
-    used = snap_palette(meshes, palette, shading, out_dir) if isinstance(palette, list) and palette else []
+    notes = []
+    if isinstance(palette, list) and palette:
+        used = snap_palette(meshes, palette, shading, out_dir)
+    else:
+        used = []
+        notes = fit_textures(meshes, texture_side)
     scaled = None
     want = (style.get("scale") or {}).get("character")
     if arms and want:
@@ -246,4 +304,5 @@ def style_pass(objects, style, out_dir):
             bpy.context.view_layer.update()
     for o in meshes:
         o.data.validate()
-    return {"kind": "character" if arms else "prop", "meshes": meshes, "armatures": arms, "usedPalette": used, "scaled": scaled}
+    return {"kind": "character" if arms else "prop", "meshes": meshes, "armatures": arms, "usedPalette": used,
+            "scaled": scaled, "notes": notes}

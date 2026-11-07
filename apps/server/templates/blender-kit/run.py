@@ -4,7 +4,7 @@ params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.js
          budgets: {character, prop, texture}, standardJoints: [...] | null, out: abs dir,
          standard?: abs path of the standard armature's GLB, rig?: the lock's rig id}
 Writes <out>/candidate.glb and prints KURAMBIT_RESULT {kind, objects, measured, refusals, parts,
-usedPalette, armatures}. It works on its own copy of the scene: the live scene and the game folder
+usedPalette, armatures, notes}. It works on its own copy of the scene: the live scene and the game folder
 are never touched (D7), and what it measures is the GLB it wrote, so the review, the export and
 the sidecar all describe the same bytes."""
 import json
@@ -79,7 +79,7 @@ def refusals_of(measured, info, params):
     side = params["budgets"]["texture"]
     big = [t for t in measured["textures"] if max(t["width"], t["height"]) > side]
     if big:
-        out.append({"code": "texture", "text": f"a {big[0]['width']}x{big[0]['height']} texture is over STYLE.json's budget.texture of {side} px a side: scale it down, or use the palette."})
+        out.append({"code": "texture", "text": f"a {big[0]['width']}x{big[0]['height']} texture is over STYLE.json's budget.texture of {side} px a side and the pass could not scale it: replace it, or use the palette."})
     if kind == "character" and not any("idle" in c["name"].lower() for c in measured["clips"]):
         out.append({"code": "no-idle", "text": "a character needs an idle clip to stand: add Idle_Loop through game_blender_character's clips, or key one."})
     return out
@@ -136,7 +136,7 @@ def run_pass(params):
     _keep_only(objects)
     out = params["out"]
     os.makedirs(out, exist_ok=True)
-    styled = stylepass.style_pass(objects, params.get("style"), out)
+    styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
     candidate = os.path.join(out, "candidate.glb")
     bpy.ops.export_scene.gltf(
         filepath=candidate, export_format="GLB", export_yup=True, export_apply=True,
@@ -155,6 +155,7 @@ def run_pass(params):
         "parts": parts,
         "usedPalette": styled["usedPalette"],
         "armatures": info["armatures"],
+        "notes": [n[:400] for n in styled["notes"]],
     }
 
 
