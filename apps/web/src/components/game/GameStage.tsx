@@ -136,7 +136,7 @@ const rendererHasWebGl = () => {
 
 function NoWebGlCard() {
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center bg-stage p-6">
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-stage p-6">
       <div className="flex max-w-md flex-col gap-2 rounded-xl border border-border bg-background p-5 text-sm">
         <p className="font-medium">This computer's browser can't run 3D here</p>
         <p className="text-muted-foreground">
@@ -554,7 +554,7 @@ function ThreadGameStage({
     (operation !== null && operationVisible && operation.state === "failed"
       ? operation.message
       : null) ??
-    (liveError !== null && !turnRunning && !gameTurnRunning ? liveError : null);
+    (liveError !== null && !noWebGl && !turnRunning && !gameTurnRunning ? liveError : null);
   const failurePrompt =
     failureVisible !== null && failureVisible === liveError
       ? liveErrorPrompt(failureVisible)
