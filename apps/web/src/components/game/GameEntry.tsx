@@ -43,6 +43,8 @@ import {
   getCustomModelOptionsByInstance,
 } from "../../modelSelection";
 import { gameEnvironment } from "../../state/game";
+import { waitForThreadShell } from "../../state/entities";
+import { scopeThreadRef } from "@kurambit/client-runtime/environment";
 import { engineToolFor } from "./gameStageLogic";
 import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import { GameToolLink } from "./GameToolLink";
@@ -225,8 +227,9 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
     setLastGameModel(model);
     refreshLibrary();
     setDialog(null);
-    // The thread's own game stage takes over the workspace once its status
-    // resolves; there is no panel to open here any more.
+    // The thread route sends a thread this client has not received yet back
+    // home, so open the game only once its shell has arrived.
+    await waitForThreadShell(scopeThreadRef(environmentId, result.value.threadId));
     await navigate({
       to: "/$environmentId/$threadId",
       params: { environmentId, threadId: result.value.threadId },
