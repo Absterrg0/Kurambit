@@ -9,7 +9,7 @@
     <name>Kurambit contributors</name>
   </developer>
   <description>
-    <p>Create games locally with coding agents, Blender, and Godot.</p>
+    <p>Make games locally with coding agents: three.js browser games first, plus Godot and Unity games with Blender art.</p>
   </description>
   <launchable type="desktop-id">kurambit.desktop</launchable>
   <icon type="stock">kurambit</icon>
