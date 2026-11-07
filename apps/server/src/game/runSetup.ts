@@ -71,6 +71,36 @@ export const refreshHarnessFiles = (
   }).pipe(Effect.uninterruptible);
 
 /**
+ * The studio skills as this server ships them, for the game's engine only (a role told to read
+ * every skill must not get another engine's rules). Files whose text did not change stay as they
+ * are, so a refresh with nothing new leaves the game's diff empty.
+ */
+const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
+  Effect.tryPromise({
+    try: async () => {
+      const skills = NodePath.join(root, "studio-skills");
+      const own = engineProfile(engine).run.skill;
+      const others = ENGINE_SKILLS.filter((name) => name !== own);
+      await NodeFSP.cp(NodePath.join(templates, "studio"), skills, {
+        recursive: true,
+        force: true,
+        filter: (from) => !others.some((name) => NodePath.basename(from) === `${name}.md`),
+      });
+      await Promise.all(
+        others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
+      );
+      const index = NodePath.join(skills, "AGENTS.md");
+      const text = await NodeFSP.readFile(index, "utf8");
+      const kept = text
+        .split("\n")
+        .filter((line) => !others.some((name) => line.startsWith(`- \`${name}\``)))
+        .join("\n");
+      if (kept !== text) await NodeFSP.writeFile(index, kept);
+    },
+    catch: (cause) => ioError("Studio skills", "studio-skills", cause),
+  });
+
+/**
  * Skill pack, bot kit and the run-state ignores, so every build the run keeps
  * has them. Only a new run refreshes the skills and the kit: a resume after a
  * server update would otherwise change them mid-run, and the next build would
@@ -100,23 +130,13 @@ export const ensureScaffold = (
         await NodeFSP.cp(from, to, { recursive: true, force: true });
         return true;
       });
-    const skills = NodePath.join(root, "studio-skills");
-    if (yield* copy(NodePath.join(templates, "studio"), skills))
-      // A role told to read every skill must not get another engine's rules.
-      yield* io("Run scaffold", "studio-skills", async () => {
-        const own = engineProfile(engine).run.skill;
-        const others = ENGINE_SKILLS.filter((name) => name !== own);
-        await Promise.all(
-          others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
-        );
-        const index = NodePath.join(skills, "AGENTS.md");
-        const text = await NodeFSP.readFile(index, "utf8");
-        const kept = text
-          .split("\n")
-          .filter((line) => !others.some((name) => line.startsWith(`- \`${name}\``)))
-          .join("\n");
-        await NodeFSP.writeFile(index, kept);
-      });
+    const hasSkills = yield* io("Run scaffold", "studio-skills", () =>
+      NodeFSP.access(NodePath.join(root, "studio-skills")).then(
+        () => true,
+        () => false,
+      ),
+    );
+    if (fresh || !hasSkills) yield* writeSkills(templates, root, engine);
     yield* copy(NodePath.join(templates, "bot-kit"), NodePath.join(root, ".studio", "bot", "kit"));
     // The run-state ignores keep every build the run captures free of its
     // notes and records: a start that cannot write them fails, as for the pack.
@@ -162,6 +182,12 @@ export const ensureScaffold = (
 export const ensureTurnSections = (
   root: string,
   engine: GameEngineId,
+  /**
+   * The server's templates: the studio skills are brought up to this server's between turns too,
+   * since a chat game has no run start to refresh them, and guidance written after a game was
+   * made would otherwise never reach it.
+   */
+  templates: string | null = null,
 ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const path = NodePath.join(root, "AGENTS.md");
@@ -169,9 +195,13 @@ export const ensureTurnSections = (
     if (before === null) return;
     const agents = withEveryTurn(before, engine);
     if (agents !== before) yield* writeFileStringAtomically({ filePath: path, contents: agents });
+    if (templates !== null) yield* writeSkills(templates, root, engine);
   }).pipe(
     Effect.catchCause((cause) =>
-      Effect.logWarning("the game's AGENTS.md could not be updated", { game: root, cause }),
+      Effect.logWarning("the game's AGENTS.md or studio skills could not be updated", {
+        game: root,
+        cause,
+      }),
     ),
   );
 

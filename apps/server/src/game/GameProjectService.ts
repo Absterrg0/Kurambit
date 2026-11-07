@@ -170,6 +170,8 @@ export class GameProjectService extends Context.Service<
       owner: string,
     ) => Effect.Effect<void, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
+    /** Between turns: the game's AGENTS.md sections and studio skills brought up to this server. */
+    readonly refreshGuidance: (root: string) => Effect.Effect<void, GameOperationError>;
     /** The manifest and the resolution the game plays at. */
     readonly inventory: (
       root: string,
@@ -268,7 +270,11 @@ const make = Effect.gen(function* () {
     const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
     const manifest = yield* read(canonicalRoot);
     if (options.resume === true)
-      yield* ensureTurnSections(canonicalRoot, manifest.engine.name).pipe(
+      yield* ensureTurnSections(
+        canonicalRoot,
+        manifest.engine.name,
+        yield* templates.directory,
+      ).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
       );
@@ -688,6 +694,14 @@ const make = Effect.gen(function* () {
       }),
     resolve,
     read,
+    refreshGuidance: (root) =>
+      Effect.gen(function* () {
+        const manifest = yield* read(root);
+        yield* ensureTurnSections(root, manifest.engine.name, yield* templates.directory).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        );
+      }),
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
       // An engine with a fixed resolution (three.js, Unity) plays at it; Godot's is in project.godot.

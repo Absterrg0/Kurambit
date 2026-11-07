@@ -1,10 +1,8 @@
 import { GAME_BUILDS_EVENT, type OrchestrationV2DomainEvent } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -17,7 +15,6 @@ import * as GameBuilds from "./GameBuilds.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
-import { ensureTurnSections } from "./runSetup.ts";
 
 /**
  * Keeps the Builds rail current without polling: a turn's checkpoint, a
@@ -50,8 +47,6 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const game = yield* GameService.GameService;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const scope = yield* Effect.scope;
   const perThread = yield* KeyedLock.make<string>();
   const roles = new Map<string, boolean>();
@@ -89,11 +84,8 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const profile = engineProfile(manifest.engine.name);
       if (!profile.turnLoop) return;
-      // A game made before the turn loop learns of it by its next turn, however it was opened.
-      yield* ensureTurnSections(root, manifest.engine.name).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
-      );
+      // A game made before the turn loop learns of it, and of skills written since, by its next turn.
+      yield* projects.refreshGuidance(root).pipe(Effect.ignore);
       // Measured first: the measure registers at once, the play may wait on the game.
       const build = yield* checkpoints
         .listCheckpointRefs({ cwd: root, prefix: ref })

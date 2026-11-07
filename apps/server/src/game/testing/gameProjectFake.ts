@@ -38,6 +38,7 @@ export const layerGameProjectFake = (world: GameProjectWorld) =>
       open: () => notInFake("open"),
       list: () => notInFake("list"),
       inventory: () => notInFake("inventory"),
+      refreshGuidance: () => Effect.void,
       resolve: (threadId: ThreadId) => {
         const root = world.threads.get(String(threadId));
         if (root === undefined)
