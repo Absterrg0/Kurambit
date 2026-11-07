@@ -82,9 +82,11 @@ export const chooseBackend = (
   return { args: SOFTWARE_ARGS, renderer: null, software: true };
 };
 
+// encodeURIComponent leaves ' raw, and headless Chromium then never runs the page: every game
+// browser would fall back to software rendering.
 const PROBE_PAGE = `data:text/html,${encodeURIComponent(
   "<!doctype html><body><script>const c=document.createElement('canvas');const gl=c.getContext('webgl2')||c.getContext('webgl');let r='no-webgl';if(gl){const e=gl.getExtension('WEBGL_debug_renderer_info');r=e?gl.getParameter(e.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER);}document.body.textContent='RENDERER='+r;</script></body>",
-)}`;
+).replaceAll("'", "%27")}`;
 const PROBE_TIMEOUT = "15 seconds" as const;
 
 /**
