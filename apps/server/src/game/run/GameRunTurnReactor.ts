@@ -438,16 +438,18 @@ const make = Effect.gen(function* () {
           return yield* land(located, step, chain, move.run, false);
         // A stopped or cut-off turn's checkpoint may still be on its way; once no
         // capture is owed none will come (T3 records a restart's cut-off with no
-        // checkpoint), so the step's own job lands it rather than wait forever.
-        // Recovery's wake runs that job behind the thread's owed effects, after
-        // any restart continuation, so a turn T3 carries on is never landed.
+        // checkpoint), so the step lands rather than wait forever. A cut-off
+        // lands only from the step's own job: recovery's wake runs it behind
+        // the thread's owed effects, after any restart continuation, so a turn
+        // T3 carries on is never landed. A stopped turn has no continuation.
         case "uncaptured":
         case "cut-off": {
-          if (!options.fromJob) return;
+          if (move.kind === "cut-off" && !options.fromJob) return;
           const owed =
             move.run.checkpointId === null &&
             (yield* outbox.hasUnsettled({ threadId, effectTypes: ["checkpoint.capture"] }));
-          if (owed) return yield* wakeLater(located);
+          // The capture's own run.updated lands it; the job's wake waits behind it.
+          if (owed) return options.fromJob ? yield* wakeLater(located) : undefined;
           return yield* land(located, step, chain, move.run, move.kind === "cut-off");
         }
       }
