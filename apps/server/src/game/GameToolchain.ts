@@ -172,6 +172,11 @@ export class GameToolchain extends Context.Service<
     readonly status: (options?: {
       readonly unityProject?: string | undefined;
     }) => Effect.Effect<GameToolchainStatus>;
+    /** Only the person installs and removes these, from Settings; never into their own Blender config. */
+    readonly install: (tool: "mpfb") => Effect.Effect<GameToolchainStatus, GameOperationError>;
+    readonly remove: (tool: "mpfb") => Effect.Effect<GameToolchainStatus, GameOperationError>;
+    /** The verified MPFB2 zip, or null when it is not installed. */
+    readonly blenderExtension: (id: "mpfb") => Effect.Effect<string | null>;
   }
 >()("kurambit/game/GameToolchain") {}
 export interface UnityExecutables {
@@ -865,6 +870,26 @@ const make = Effect.gen(function* () {
     unityExecutables,
     status,
     revision: () => revision,
+    install: (tool) =>
+      Effect.fail(
+        new GameOperationError({
+          operation: "Install",
+          path: tool,
+          reason: "invalid-input",
+          detail: "not built",
+        }),
+      ),
+    remove: (tool) =>
+      Effect.fail(
+        new GameOperationError({
+          operation: "Remove",
+          path: tool,
+          reason: "invalid-input",
+          detail: "not built",
+        }),
+      ),
+    // Not built: nothing installs MPFB2 yet, so it is never installed.
+    blenderExtension: () => Effect.succeed(null),
   });
 });
 const isExecutable = async (file: string) => {

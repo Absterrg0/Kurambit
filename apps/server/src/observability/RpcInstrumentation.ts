@@ -36,6 +36,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameWindowsPackage]: "game",
   [WS_METHODS.gameWebPackage]: "game",
   [WS_METHODS.gameToolchainStatus]: "game",
+  [WS_METHODS.gameToolchainInstall]: "game",
+  [WS_METHODS.gameToolchainRemove]: "game",
   [WS_METHODS.subscribeGameEvents]: "game",
 
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: "orchestrationV2",

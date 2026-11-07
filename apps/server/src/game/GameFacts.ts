@@ -355,6 +355,8 @@ const make = Effect.gen(function* () {
       measuredAt: stored?.measuredAt ?? null,
       renderer: stored?.renderer ?? null,
       ...facts,
+      // Not built: the static assets tier (assetFacts.ts) is measured and stored with the others.
+      assets: notMeasured("not built", false),
       message,
     };
   };

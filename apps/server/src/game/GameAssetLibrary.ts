@@ -102,6 +102,8 @@ export class GameAssetLibrary extends Context.Service<
       root: string,
       input: GameAssetsAddInput,
     ) => Effect.Effect<GameAssetsAddResult, GameOperationError>;
+    /** The absolute cached path of one pack file, fetching the pack once; refused outside the pack. */
+    readonly packFile: (pack: string, path: string) => Effect.Effect<string, GameOperationError>;
   }
 >()("kurambit/game/GameAssetLibrary") {}
 
@@ -1307,7 +1309,10 @@ const make = Effect.gen(function* () {
       return { text, directory: directoryRel, added: added.length };
     });
 
-  return GameAssetLibrary.of({ search, add });
+  const packFile = (pack: string, path: string) =>
+    Effect.fail(fail("Library file", `${pack}/${path}`, "invalid-input", "not built"));
+
+  return GameAssetLibrary.of({ search, add, packFile });
 });
 
 export const layer = Layer.effect(GameAssetLibrary, make);

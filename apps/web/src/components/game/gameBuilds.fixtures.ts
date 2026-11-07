@@ -186,6 +186,7 @@ export const FAKE_FACTS: GameBuildFacts = {
   winnableWithoutSkill: { status: "measured", value: true },
   liveness: { status: "not-measured", why: "the browser host went away", retry: true },
   firstResponse: { status: "pending" },
+  assets: { status: "measured", value: { models: [], more: 0, libraryFiles: 0 } },
   message: "",
 };
 

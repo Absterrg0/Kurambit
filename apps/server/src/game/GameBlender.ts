@@ -17,6 +17,8 @@ import {
   type GameBlenderAssetsImportResult,
   type GameBlenderAssetsSearchInput,
   type GameBlenderAssetsSearchResult,
+  type GameBlenderCharacterInput,
+  type GameBlenderCharacterResult,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
   type GameBlenderExportInput,
@@ -356,6 +358,11 @@ export class GameBlender extends Context.Service<
       root: string,
       input: GameBlenderLookInput,
     ) => Effect.Effect<GameBlenderLookResult, GameOperationError>;
+    /** Live Blender scene: a rigged, animated character conformed to the standard skeleton. */
+    readonly character: (
+      root: string,
+      input: GameBlenderCharacterInput,
+    ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
     readonly scene: (
       root: string,
       input: GameBlenderSceneInput,
@@ -987,6 +994,8 @@ const make = Effect.gen(function* () {
       holding(
         root,
         Effect.gen(function* () {
+          if (input.mode === "review")
+            return yield* opError("blender-look", root, "invalid-input", "not built");
           if (input.shading === "rendered") {
             const short = yield* memoryShortfall(
               memory,
@@ -1032,6 +1041,8 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
+    character: (root) =>
+      Effect.fail(opError("blender-character", root, "invalid-input", "not built")),
     scene: (root, input) =>
       holding(
         root,
@@ -1265,6 +1276,8 @@ const make = Effect.gen(function* () {
             text: `${exported}\nSaved .blend source: ${blend}\nRun game_import after.`,
             blend,
             export: file,
+            // Not built: the pipeline export writes <stem>.asset.json and names it here.
+            sidecar: "",
           };
         }),
       ),

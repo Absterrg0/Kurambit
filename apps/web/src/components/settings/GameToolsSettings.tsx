@@ -20,6 +20,7 @@ const TOOL_PURPOSE = {
     "The engine for Unity games: a Unity 6 editor from Unity Hub (6000.6.7f1 or later) with Windows Build Support (Mono), and a Unity licence.",
   blender: "Models, rigs and renders game art. Blender 4.2 or later.",
   uv: "Runs the live Blender view's helper. Kurambit fetches it itself when it is not installed.",
+  mpfb: "Makes human bodies for characters in Blender. Installed only into Kurambit's own Blender sessions.",
 } as const satisfies Record<GameToolStatus["tool"], string>;
 
 const SOURCE_LABELS = {

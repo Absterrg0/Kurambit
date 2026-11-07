@@ -163,6 +163,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   winnableWithoutSkill: { status: "measured", value: false },
   liveness: { status: "not-measured", why: "off", retry: false },
   firstResponse: { status: "measured", value: { seconds: 0.1, window: 2, resolution: 0.05 } },
+  assets: { status: "measured", value: { models: [], more: 0, libraryFiles: 0 } },
   message: "",
   ...patch,
 });
