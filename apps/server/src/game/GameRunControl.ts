@@ -1,9 +1,18 @@
 // @effect-diagnostics globalDate:off -- A saved build's time comes from its ref's commit time.
 // What the game_keep_going* tools and the Game panel's keep-going RPCs reach:
-// thin over the run's commands and its records (getGameRunRecords). Stage-era
-// runs are read only: their rounds for the round cards and Past runs, their
-// builds for the timeline.
+// thin over the run's commands and its records (getGameRunRecords). One run
+// per game, on the chat that turned it on; every chat of the game sees it.
+// Stage-era runs are read only: their rounds for the round cards and Past
+// runs, their builds for the timeline.
 import {
+  CommandId,
+  GAME_ENGINES,
+  GameRunId,
+  type OrchestrationV2GameRunCommand,
+  type GameRunStep,
+  type GameRunStepResult,
+  gameRunStepId,
+  manifestProject,
   type GameKeepGoingDecideInput,
   type GameKeepGoingDecideResult,
   type GameKeepGoingInput,
@@ -20,18 +29,27 @@ import {
   type RunId,
   ThreadId,
 } from "@kurambit/contracts";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { gameRunRefsFolder } from "../checkpointing/Utils.ts";
-import { stageEra } from "../orchestration-v2/gameRun/decide.ts";
+import { stopStepTurns } from "../orchestration-v2/gameRun/GameRunRecovery.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { savedBuildOf } from "./run/buildNames.ts";
+import { NO_TURN_LOOP_SENTENCE, keepGoingStatus } from "./run/runView.ts";
+import { RESUMABLE, isStepRecord, stageEra, stepNumber } from "./run/state.ts";
+import { ensureScaffold } from "./runSetup.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
   operation: Schema.String,
@@ -132,16 +150,13 @@ export class GameRunControl extends Context.Service<GameRunControl, Service>()(
 const runError = (operation: string, path: string, reason: GameRunErrorReason, detail: string) =>
   new GameRunError({ operation, path, reason, detail });
 
-// Phase 3's run core (builder R) replaces these.
-const notBuilt = (operation: string, threadId: ThreadId) =>
-  Effect.fail(
-    runError(
-      operation,
-      threadId,
-      "command-failed",
-      `not built: keep going's ${operation} is the run core's (phase 3, R).`,
-    ),
-  );
+/** The T3 run a step turn's result names, once it landed. */
+const turnRunOf = (record: GameRunStep): RunId | null => {
+  const result = record.result;
+  return result !== null && result.kind === "turn" && "outcome" in result
+    ? (result as Extract<GameRunStepResult, { readonly kind: "turn" }>).runId
+    : null;
+};
 
 /** How a stage-era round ended, as its card says. */
 const roundOutcome = (r: GameRunRoundRecord) =>
@@ -189,6 +204,9 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* GameProjectService.GameProjectService;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
+  const engine = yield* Orchestrator.OrchestratorV2;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
 
   /**
    * The caller's game: its folder, and the thread its latest run lives on. The
@@ -232,7 +250,7 @@ const make = Effect.gen(function* () {
                 runError("resolve-game", runThread, "project-not-found", cause.message),
               ),
             );
-    return { root: runRoot, projectId: shell.projectId, runThread };
+    return { root, runRoot, projectId: shell.projectId, runThread, projectRun, shell };
   });
 
   // A finished role thread's tokens never change, so each is read once.
@@ -358,7 +376,7 @@ const make = Effect.gen(function* () {
   const runBuilds: Service["runBuilds"] = Effect.fn("GameRunControl.runBuilds")(function* (
     threadId: ThreadId,
   ) {
-    const { root, runThread } = yield* resolveGame(threadId);
+    const { runRoot: root, runThread } = yield* resolveGame(threadId);
     const records = yield* projections
       .getGameRunRecords(runThread, { steps: [] })
       .pipe(
@@ -409,15 +427,350 @@ const make = Effect.gen(function* () {
     } satisfies RunBuilds;
   });
 
+  const unreadable =
+    (operation: string, threadId: ThreadId) => (cause: { readonly message: string }) =>
+      runError(operation, threadId, "records-unreadable", String(cause.message));
+
+  const dispatch = (operation: string, command: OrchestrationV2GameRunCommand) =>
+    engine.dispatch(command).pipe(
+      Effect.asVoid,
+      Effect.mapError((cause) =>
+        cause._tag === "OrchestratorGameRunRefusedError"
+          ? runError(operation, command.threadId, cause.reason, cause.detail)
+          : runError(operation, command.threadId, "command-failed", cause.message),
+      ),
+    );
+  // A caller's own id makes its retry the same command; the orchestrator's
+  // receipt answers it without applying it again. Receipts are global, so the
+  // id is scoped to the chat and the run it acts on.
+  const fresh = Effect.map(Random.nextIntBetween(0, 2 ** 48), (n) => n.toString(36));
+  const commandId = (kind: string, given: string | undefined, thread: ThreadId, run: string) =>
+    given === undefined
+      ? Effect.map(fresh, (id) => CommandId.make(`server:game-run:${kind}:${id}`))
+      : Effect.succeed(CommandId.make(`client:${kind}:${thread}:${run}:${given}`));
+
+  /**
+   * The game's run as the status reads it: its step records with when each
+   * landed, the step in flight, and the turn an in-flight judge or undo is
+   * judging (planned one or two steps before it).
+   */
+  const readRun = (operation: string, threadId: ThreadId, run: GameRun | null) =>
+    Effect.gen(function* () {
+      if (run === null || stageEra(run))
+        return { records: [], inFlight: null, turn: null, turnRun: null, n: 1 };
+      const fail = unreadable(operation, threadId);
+      const records = yield* projections
+        .getGameRunRecords(run.threadId, { steps: "in-flight" })
+        .pipe(Effect.mapError(fail));
+      const inFlight =
+        records.gameRunSteps.find((step) => step.runId === run.id && step.seq === run.inFlight) ??
+        null;
+      const judging =
+        inFlight !== null && (inFlight.step.kind === "judge" || inFlight.step.kind === "undo");
+      const cycle = judging
+        ? (yield* projections
+            .getGameRunRecords(run.threadId, {
+              steps: [inFlight.seq - 1, inFlight.seq - 2]
+                .filter((seq) => seq > 0)
+                .map((seq) => gameRunStepId(run.id, seq)),
+            })
+            .pipe(Effect.mapError(fail))).gameRunSteps
+        : [];
+      const turnRecord = cycle.find((step) => step.step.kind === "turn") ?? null;
+      return {
+        records: records.gameRunRounds.flatMap((r) =>
+          r.runId === run.id && isStepRecord(r.round)
+            ? [{ record: r.round, at: r.recordedAt }]
+            : [],
+        ),
+        inFlight,
+        turn: turnRecord?.step.kind === "turn" ? turnRecord.step : null,
+        turnRun: turnRecord === null ? null : turnRunOf(turnRecord),
+        n: stepNumber(records.gameRunRounds),
+      };
+    });
+
+  /** Why keep going cannot run from this chat, or null when it can. */
+  const blockedFor = (
+    threadId: ThreadId,
+    root: string,
+    run: GameRun | null,
+  ): Effect.Effect<string | null> =>
+    Effect.gen(function* () {
+      const manifest = yield* projects.read(root).pipe(Effect.orElseSucceed(() => null));
+      if (manifest !== null && !GAME_ENGINES[manifest.engine.name].turnLoop)
+        return NO_TURN_LOOP_SENTENCE;
+      if (run === null || run.status === "ended" || run.threadId === threadId) return null;
+      const shell = yield* threads
+        .getThreadShell(run.threadId)
+        .pipe(Effect.orElseSucceed(() => null));
+      return `Keep going is on in ${shell?.title.trim() || "another chat"}.`;
+    });
+
+  const status: Service["status"] = Effect.fn("GameRunControl.status")(function* (
+    threadId: ThreadId,
+  ) {
+    const { root, projectRun } = yield* resolveGame(threadId);
+    const read = yield* readRun("status", threadId, projectRun);
+    return keepGoingStatus({
+      run: projectRun,
+      records: read.records,
+      inFlight: read.inFlight,
+      turn: read.turn,
+      n: read.n,
+      blocked: yield* blockedFor(threadId, root, projectRun),
+    });
+  });
+
+  const scaffold = (
+    threadId: ThreadId,
+    root: string,
+    engineId: GameRun["engine"],
+    fresh: boolean,
+  ) =>
+    engineId === undefined
+      ? Effect.void
+      : ensureScaffold(root, engineId, fresh).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, pathService),
+          Effect.mapError((cause) =>
+            runError(
+              "set",
+              threadId,
+              "command-failed",
+              `Keep going's skills and bot kit could not be put in the game (${cause.detail ?? cause.reason}).`,
+            ),
+          ),
+        );
+
+  // One run per game: every change reads the game's run and dispatches under
+  // its project's lock, so two chats turning it on at once cannot both find none.
+  const gameLock = yield* KeyedLock.make<string>();
+
+  const set: Service["set"] = Effect.fn("GameRunControl.set")(function* (
+    threadId: ThreadId,
+    input: GameKeepGoingInput,
+  ) {
+    const { projectId } = yield* resolveGame(threadId);
+    yield* gameLock.withLock(projectId, setOnce(threadId, input));
+    return yield* status(threadId);
+  });
+
+  const setOnce = (threadId: ThreadId, input: GameKeepGoingInput) =>
+    Effect.gen(function* () {
+      const { root, projectRun: run, shell } = yield* resolveGame(threadId);
+      const live = run !== null && run.status !== "ended" ? run : null;
+      if (input.mode === "off") {
+        // Stopping is always allowed, from any chat of the game.
+        if (live === null) return;
+        yield* dispatch("set", {
+          type: "game-run.stop",
+          commandId: yield* commandId("keep-going-off", input.commandId, threadId, live.id),
+          threadId: live.threadId,
+          runId: live.id,
+        });
+        // Off interrupts the step turn in flight (K11); the person's own turns are untouched.
+        yield* stopStepTurns(
+          { projections, engine },
+          live.threadId,
+          (step) => step.runId !== live.id,
+        );
+        return;
+      }
+      const profile = input.mode;
+      if (live !== null && !stageEra(live)) {
+        if (live.threadId !== threadId)
+          return yield* runError(
+            "set",
+            threadId,
+            "run-live",
+            (yield* blockedFor(threadId, root, live)) ?? "Keep going is on in another chat.",
+          );
+        if (live.profile === profile) return;
+        yield* dispatch("set", {
+          type: "game-run.profile.set",
+          commandId: yield* commandId("keep-going-mode", input.commandId, threadId, live.id),
+          threadId,
+          runId: live.id,
+          profile,
+        });
+        return;
+      }
+      if (shell.archivedAt !== null)
+        return yield* runError(
+          "set",
+          threadId,
+          "chat-unavailable",
+          "This chat is archived: keep going runs in an open chat.",
+        );
+      // Recovery stops a stage-era run at startup; one still live is stopped
+      // here, and keep going starts beside it.
+      if (live !== null)
+        yield* dispatch("set", {
+          type: "game-run.stop",
+          commandId: CommandId.make(`server:game-run-stage-era:${live.id}`),
+          threadId: live.threadId,
+          runId: live.id,
+          reason: "This run was made by an earlier Kurambit.",
+        });
+      const manifest = yield* projects
+        .read(root)
+        .pipe(
+          Effect.mapError((cause) =>
+            runError(
+              "set",
+              threadId,
+              "project-not-found",
+              `The game's manifest could not be read (${cause.detail ?? cause.reason}).`,
+            ),
+          ),
+        );
+      const engineId = manifest.engine.name;
+      if (!GAME_ENGINES[engineId].turnLoop)
+        return yield* runError("set", threadId, "no-turn-loop", NO_TURN_LOOP_SENTENCE);
+      // A paused run in this chat resumes, keeping its set-aside steps and notes.
+      if (
+        run !== null &&
+        !stageEra(run) &&
+        run.threadId === threadId &&
+        run.ending !== null &&
+        RESUMABLE.has(run.ending)
+      ) {
+        yield* scaffold(threadId, root, engineId, false);
+        yield* dispatch("set", {
+          type: "game-run.resume",
+          commandId: yield* commandId("keep-going-on", input.commandId, threadId, run.id),
+          threadId,
+          runId: run.id,
+          profile,
+          ...(input.budgetMinutes === undefined ? {} : { budgetMinutes: input.budgetMinutes }),
+        });
+        return;
+      }
+      yield* scaffold(threadId, root, engineId, true);
+      yield* dispatch("set", {
+        type: "game-run.start",
+        commandId: yield* commandId("keep-going-on", input.commandId, threadId, run?.id ?? "new"),
+        threadId,
+        runId: GameRunId.make(
+          `run_${DateTime.toEpochMillis(yield* DateTime.now).toString(36)}${yield* fresh}`,
+        ),
+        engine: engineId,
+        lane: manifestProject(manifest),
+        profile,
+        budgetMinutes: input.budgetMinutes === undefined ? 60 : input.budgetMinutes,
+      });
+    });
+
+  /** The game's keep-going run, which the person's answer or note is for. */
+  const turnsRun = (operation: string, threadId: ThreadId) =>
+    Effect.flatMap(resolveGame(threadId), ({ projectRun }) =>
+      projectRun === null || stageEra(projectRun)
+        ? Effect.fail(
+            runError(
+              operation,
+              threadId,
+              "no-run",
+              "Keep going has not run on this game yet: turn it on first.",
+            ),
+          )
+        : Effect.succeed(projectRun),
+    );
+
+  const decide: Service["decide"] = Effect.fn("GameRunControl.decide")(function* (
+    threadId: ThreadId,
+    input: GameKeepGoingDecideInput,
+  ) {
+    const run = yield* turnsRun("decide", threadId);
+    yield* dispatch("decide", {
+      type: "game-run.decide",
+      commandId: yield* commandId("keep-going-decide", input.commandId, threadId, run.id),
+      threadId: run.threadId,
+      runId: run.id,
+      decisionId: input.stepId,
+      answer: input.answer,
+      chat: threadId,
+    });
+    return {
+      message:
+        input.answer === "start"
+          ? "The step starts now."
+          : input.answer === "skip"
+            ? "Skipped: keep going sets that step aside and proposes the next one."
+            : "The proposal waits for you. A message you send goes first.",
+    };
+  });
+
+  const steer: Service["steer"] = Effect.fn("GameRunControl.steer")(function* (
+    threadId: ThreadId,
+    input: GameKeepGoingSteerInput,
+  ) {
+    const text = input.text.trim();
+    if (text.length === 0)
+      return yield* runError("steer", threadId, "empty-note", "The note is empty.");
+    const run = yield* turnsRun("steer", threadId);
+    yield* dispatch("steer", {
+      type: "game-run.steer",
+      commandId: yield* commandId("keep-going-steer", input.commandId, threadId, run.id),
+      threadId: run.threadId,
+      runId: run.id,
+      note: text,
+      chat: threadId,
+    });
+    const after = yield* projections
+      .getGameRunRecords(run.threadId, { steps: [] })
+      .pipe(Effect.mapError(unreadable("steer", threadId)));
+    const now = after.gameRuns.find((each) => each.id === run.id) ?? run;
+    return {
+      pending: now.steer.length,
+      message:
+        now.status === "ended"
+          ? "Keep going keeps your note for when it next runs."
+          : "Keep going takes your note as its next step.",
+    };
+  });
+
+  const steps: Service["steps"] = (threadId) =>
+    Effect.gen(function* () {
+      const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
+      const marks = new Map<RunId, GameRunStepMark>();
+      for (const { round } of records.gameRunRounds)
+        if (isStepRecord(round) && round.step.turn !== null)
+          marks.set(round.step.turn, {
+            n: round.round,
+            verdict: round.step.verdict,
+            reason: round.step.reason,
+          });
+      const run = records.gameRuns.at(-1);
+      if (run !== undefined && run.status !== "ended" && !stageEra(run)) {
+        const read = yield* readRun("steps", threadId, run);
+        if (read.turnRun !== null && read.turnRun !== undefined)
+          marks.set(read.turnRun, {
+            n: read.n,
+            verdict: null,
+            reason:
+              read.inFlight?.step.kind === "undo"
+                ? "undoing it: it made a fact worse"
+                : "measuring before keeping it",
+          });
+      }
+      return marks as ReadonlyMap<RunId, GameRunStepMark>;
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("keep-going step marks could not be read", { threadId, cause }).pipe(
+          Effect.as(new Map<RunId, GameRunStepMark>() as ReadonlyMap<RunId, GameRunStepMark>),
+        ),
+      ),
+    );
+
   return GameRunControl.of({
-    set: (threadId) => notBuilt("set", threadId),
-    status: (threadId) => notBuilt("status", threadId),
-    decide: (threadId) => notBuilt("decide", threadId),
-    steer: (threadId) => notBuilt("steer", threadId),
+    set,
+    status,
+    decide,
+    steer,
     rounds,
     runBuilds,
-    steps: () =>
-      Effect.die(new Error("not built: keep going's steps is the run core's (phase 3, R).")),
+    steps,
   });
 });
 

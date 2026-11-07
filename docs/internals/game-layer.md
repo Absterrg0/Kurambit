@@ -327,123 +327,81 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   `game-builds` run-ref folder. The record is written before the folder moves, and a restart
   settles a restore it cut short by running its moves again.
 
-## The run as an orchestration domain
+## Keep going
 
-The run is records of the game's creator thread (`GameRun`, `GameRunStep`, `GameRunRound` in
-[gameRunRecords.ts](../../packages/contracts/src/gameRunRecords.ts)), changed only by `game-run.*`
-commands. The pure decider ([decide.ts](../../apps/server/src/orchestration-v2/gameRun/decide.ts))
-folds them into the run policy's state, lets [policy.ts](../../apps/server/src/game/run/policy.ts)
-plan or apply, and commits the new records with their outbox effects in one transaction. So a run
-has the guarantees every thread has: a retried command changes nothing, a restart loses no
-decision, and nothing outside the event log is the run's truth. Its events stay off the chat's
-stream; the Run tab and `game_run_status` read the records.
+Keep going takes a game's next step itself, in the chat that turned it on. It is records of that
+chat (`GameRun` with `loop: "turns"`, `GameRunStep`, and one `GameRunRound` per step with its
+`step` record; [gameRunRecords.ts](../../packages/contracts/src/gameRunRecords.ts)), changed only by
+`game-run.*` commands. The pure decider
+([decide.ts](../../apps/server/src/orchestration-v2/gameRun/decide.ts)) folds them into the run's
+state ([state.ts](../../apps/server/src/game/run/state.ts)), lets the policy
+([loop.ts](../../apps/server/src/game/run/loop.ts)) choose, and commits the new records with their
+outbox effects in one transaction, so a retried command changes nothing and a restart loses no
+decision. A game has one run, reached from every chat of its project through `getProjectGameRun`;
+`GameRunControl` reads and dispatches under the project's lock, so two chats turning it on at once
+cannot both find none.
 
-A game has one run, not one per chat: the records sit on the thread that started the run, and every
-chat of the game's project reaches that run through `getProjectGameRun`. Starts read and dispatch
-under the project's lock, so two chats starting the first run at once cannot both find none; a
-start from another chat resumes the live run (an empty brief) or is refused (a new brief), and
-the run's own role threads reach none of its controls.
-
-- **Long work runs in jobs, never in effects.** An effect claim is a short lease on a worker pool
-  every thread's provider work shares. A step's effect (`game-run.step.execute`) hands its work to
-  `GameRunJobs` (in-process, bounded, scoped fibers) and settles at once; the job reports with
-  `game-run.step.complete` or `game-run.step.fail`. A role step's job only launches the role.
-  The step's timers are short (a role's cap is a read and an interrupt or a reschedule; a turn sent
-  again is a read and a dispatch), so they run inside their effects, as the decisions do: the
-  effect stays unsettled until its act is committed, and the outbox runs it again after a failure
-  or a server death. A timer that only forked a job would be done before its work, and a death in
-  between would leave the step running with no job and no timer.
-- **No failure is an answer, and only a measurement is a verdict.** Every step's work, and each
-  half of a pair, reports through one boundary (`GameRunStepRunner.measure`). A measurement
-  completes the step: what the build did, including a crash, a freeze, a failed compile or a game
-  that never boots. What was not measured never does: memory short, the game held, or a tool of
-  Kurambit's that failed (a copy, a launch, a browser, an editor, a record), each read once
-  through `gameOperationFault` ([handBack.ts](../../apps/server/src/game/run/handBack.ts)), hands
-  the step back to a durable timer (memory 7 x 2 min, busy 15 x 1 min, a transient tool 3 x 2 min,
-  one command-id sequence across them), and past its waits, or at once for a fault waiting cannot
-  clear (`isStandingFault`), the run pauses resumably as `tool-failed`, `low-memory` or `busy`
-  with why. The decider hands those pauses, and `failed` (a thread or project deleted), to
-  `Policy.pause`, which keeps the step in flight; `applyResult` takes only a `Measured` result,
-  so no pass, fail, keep, drop or sample can be made of one. A build fault is re-tagged
-  `GameRunBuildFault`, which only the producers with a verdict form for it (boot, the checks, bot
-  facts) turn into one. Quick in-job retries (`retrying`) are only for the run's own record
-  writes. Prompt facts are total: what they could not read they say they did not measure.
-- **Attempts.** A step planned again (a resume) is a new attempt. Every report carries its attempt
-  and a command id derived from step, attempt and action (`gameRunStepCommandId`), so a late report
-  of an earlier try is refused and a retried one is a no-op. Each attempt has its own role thread
-  id; `game-run.step.start` records a role's thread before its first turn, and replaces a thread
-  only when it names the one it replaces.
-- **A landing's outputs are an effect of its commit.** The records a step's result writes (the
-  ladder, notes, comparisons) and the copies it frees go in a `game-run.outputs` effect committed
-  with the landing, ahead of the next step's effect, so the outbox's order writes them before the
-  next step and a stop never cancels them. No later job does an earlier step's work.
-- **Finish is an effect.** The commit that ends a run emits `game-run.finish`; its job stops the
-  run's jobs and live role turns, exports the best build, then records `game-run.finished`. A finish is safe to run twice: an ending mid-round keeps the folder's
-  unfinished work as a build once per ending, restores the best for the exports and puts the work
-  back, so a resume goes on from it. It and a creator's restore swap through `withBuildInFolder`,
-  which parks the work once by name and measures "already in the folder" from the park, so a
-  repeat after a restart answers as the first try did.
-- **Restore is a command first.** `game-run.restore.request` records the pending restore, a job does
-  the git work, and `game-run.restore` lands its outcome. The git work and a run's next move would
-  race on the game folder, so the decider refuses resume, steer and another restore while an ending
-  is unfinished (`finishing`) or a restore is pending (`restoring`), and refuses start and resume
-  during a restore. A stopped run's round in progress is dropped only when a `restored` outcome
-  lands (`Policy.abandonRound`), never at the request: a refused restore leaves it resumable, and a
-  job a restart cut short sees the same round and makes the same choice.
-- **Recovery** (`GameRunRecovery`, at startup): a live run's unfinished step gets its job again,
-  and an ending whose finish is not recorded finishes again. Recovery never jumps the outbox's
-  order: a step whose `game-run.step.execute`, `.wake` or `.resend` is still owed, and an ending whose
-  `game-run.finish` is, are left to those effects, which run behind the outputs before them; any
-  other step is woken with a `game-run.step.schedule` of kind `recover`. Only a finish or restore
-  whose effect was already taken (so everything before it ran) gets its job straight back. Every step is safe to repeat because
-  its job first finds what an earlier try left: a role's thread, a turn of this attempt that ended
-  (landed now), one still running (its cap set again as a timer). A stopped run is never continued except
-  by `game-run.resume`.
-- **The role reactor's rule.** A role turn's message id names its step and attempt; a restart's
-  continuation of a turn (`restartContinuationOfRunId`) is the same turn. `GameRunRoleReactor`
-  lands a settled turn only when the step is still that attempt's, the step record names that
-  thread, the thread is the run's project's and was launched by the run, and the turn is the
-  step's latest. It never goes by role names or launch order. A turn is capped only by the cap's
-  own interrupt (its command id), never by any interrupt.
-- **Decisions** wake the creator's chat the `DelegatedTaskQuestionReactor` way: one queued
-  `message.dispatch` per decision and attempt with a `game_run` notification source (stored as
-  `background_task` for older clients), sent to the chat the creator last started, resumed,
-  steered or answered the run from (`GameRun.chat`), else the run's own thread, never one archived
-  or deleted. The answer's wait starts when that turn, or a restart's continuation of it, finished
-  presenting (`game-run.step.start`), its default fires from the `game-run.decision.deadline`
-  effect with no fiber holding it, and an answer cancels a wake still queued; recovery cleans up a
-  decision that settled while the server was down.
-- **The outbox timer exception.** The outbox runs a thread's effects in order, and an earlier
-  pending effect holds later ones. The run's timers (a role's cap, a decision's deadline) wait
-  minutes on the creator thread, so a pending `game-run.step.deadline`, `game-run.step.resend` or
-  `game-run.decision.deadline` holds nothing back
-  ([EffectOutbox.ts](../../apps/server/src/orchestration-v2/EffectOutbox.ts)); otherwise the next
-  step, the finish and the creator's own turns would wait out every cap and every default. Each
-  timer checks the run again when it fires; a cap extended meanwhile schedules itself again at the
-  new due time (`game-run.step.schedule`) instead of polling.
-
-The run's builds are T3 checkpoints under the run's own refs (`checkpointRefForGameRun`,
-[builds.ts](../../apps/server/src/game/run/builds.ts)), and the game folder is the live build: a
-build step captures the folder, restores a build's engine project, art and `ASSETS.md` (a path-scoped
-`restoreCheckpoint`), or keeps a build under names (`best`, `round-N/kept`; [buildNames.ts](../../apps/server/src/game/run/buildNames.ts):
-git stores refs as files, so no name is both a build and a folder of builds). The run never commits,
-checks out, merges or writes the user's index, HEAD or branches, so the user's git and an agent's
-own git use are theirs, and a cut capture or restore leaves no lock or merge that could fail a
-resume: captures and restores work through private indexes, and a restore writes only the files
-that differ (an unchanged file keeps its mtime, so an engine watching the folder reimports
-nothing). Records hold builds by commit oid; labels (`round-N`, `proto-N`) only name files and
-text. A builder turn's change is measured at its landing: the folder is captured and diffed with
-the build before it, and a diff that cannot be read counts as a change. A run from before kept
-its builds on git branches (`GameRun.versions` absent): it is history. Its records still decode
-and display, a resume or steer of it is refused, one an older Kurambit left live is stopped at
-startup without touching the folder, and a finish it still owes exports its folder as it is.
-
-Files under `.studio/` (the ladder, next.md, tester and reviewer notes, comparator write-ups)
-are written for people and later roles; nothing the run decides reads them. The run keeps no log
-file: its step records are its history, and its jobs' own lines go to the server log. A game
-whose `.studio/run.json` comes from the run's earlier file-based form imports nothing of it but
-the fact that the game was built: its new run starts at the rounds (`stage: "build"`), where the
-plan writes a ladder for the game as it is, so no placeholder prototypes go over a finished game.
+- **A step is an ordinary chat turn.** The cycle is look, then (Guided) a proposal, then the turn,
+  a judge, maybe an undo, then the step's record, then look again. The turn is a message the run
+  posts into the chat; its id names the step and attempt
+  ([ids.ts](../../apps/server/src/orchestration-v2/gameRun/ids.ts)), which is how the reactor, the
+  strip and the timeline know a turn is a step. Everything phases 1 and 2 give a turn (its build,
+  facts, strip, Redo, timeline mark) a step gets for free; the run adds only the choice of message,
+  keep or undo, and when to stop.
+- **The proposal costs no tokens.** The policy writes the step from the facts' own wording and the
+  agent's own `Next:` line (one parser, `packages/shared/src/gameNextLine.ts`, so the person sees in
+  the Next banner exactly the line the run will use), in a fixed order: the person's notes, a
+  blocker, a retry of an undone step, the play bot, a failing fact, the agent's next line. Only
+  watched facts are proposed or guarded: motion, detail and colour are heuristics, and a space
+  game's black sky must never cost a step.
+- **Never two writers.** A look waits until no turn runs or is queued on any chat of the game; a
+  step turn that comes up queued is cancelled and the run looks again; any other turn supersedes a
+  pending proposal. So a step always starts from the folder its proposal read, and a person's turn
+  is never judged or undone.
+- **Worse is a crossing, not a change.** A step regresses a watched fact only on a comparable delta
+  whose reading crosses into `bad` (or skilled stops winning). GPU liveness varies between builds
+  of one tree, so "any change" would undo good work; a fact already bad that gets worse is the
+  next blocker, not an undo. Not-comparable (another harness, renderer or bot) never undoes.
+  Health regressions always undo; design ones (winning without skill, skilled losing) do not on a
+  step the person asked for or steered: difficulty is their call.
+- **The undo cannot hurt the person's work.** It is `GameBuilds.restore(base, { expect: build })`:
+  inside the game lock the folder moves only while it still holds the step's build unedited, else
+  it is refused `moved-on` and the record reads "the game changed after it". A step the person
+  undid first counts as undone.
+- **Gain and stopping.** A step gains when it was kept, changed the game (lane, `art/`,
+  `ASSETS.md`) and made no watched fact worse; a closed target counts too (the person's own step,
+  a kept retry, the bot once skilled is measured). Two steps in a row without gain pause the run
+  `stalled`; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
+  otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`.
+  The budget is checked before each turn against a typical step (8 min), and it is what bounds an
+  Autopilot that keeps adding content. Every ending but `done` resumes.
+- **Never repeat.** Each proposal has a key (`fact:<id>`, `bot`, `steer:<fnv>`, `next:<fnv>`; a
+  retry carries the undone step's). Two misses of a key (undone, or kept with its target still
+  bad), a blocker or fact step that changed nothing (the agent declined it), Skip, or a bot step
+  that left no bot set the key aside for the run.
+- **Notes and the captured prefix.** A steer step carries the run's waiting notes; its turn's
+  start takes exactly that many off the front of `GameRun.steer`, and a turn that never landed
+  (superseded, stopped) gives them back ahead of newer notes. A note only ever appends, so Slice 2
+  can count on that prefix (`capturedSteer`).
+- **Long work runs in jobs, never in effects.** An effect claim is a short lease on a pool every
+  thread's provider work shares. `game-run.step.execute` hands the step to `GameRunJobs` and
+  settles at once; the job reports with `game-run.step.complete` or `.fail`. A turn's cap and a
+  resend are short, so they run inside their effects, which stay unsettled until done. Every
+  report carries its attempt and a derived command id, so a late or repeated report is refused or
+  is a receipt.
+- **The outbox timer exception.** The outbox runs a thread's effects in order. A turn's cap and a
+  proposal's deadline wait minutes on the chat, so a pending `game-run.step.deadline`,
+  `game-run.step.resend` or `game-run.decision.deadline` holds nothing back
+  ([EffectOutbox.ts](../../apps/server/src/orchestration-v2/EffectOutbox.ts)); otherwise the
+  person's own turns would wait out every cap. Each timer checks the run again when it fires.
+- **Recovery** (`GameRunRecovery`, at startup): a step whose job died gets it again through a
+  `recover` timer, behind whatever its thread still owes; a judge or undo a pause cut off runs
+  again on resume. A step turn T3 carried over a restart that its run no longer wants (Off, an
+  ended run, a step moved past) is interrupted, so nothing edits a game the person stopped.
+- **The stage era.** A run without `loop` was made by an earlier Kurambit. Its records decode
+  (stage-era fields as `Schema.Unknown`, steps through `GameRunLegacyStep`), so round cards and
+  Past runs still read; it takes only a stop, one still live is stopped at startup with why, and
+  turning keep going on starts a new run beside it.
 
 `game_blender_render_sprites` exists because weak models cannot write sprite framing: their
 renders cropped heads, drifted across a walk cycle and came out near-black. It fits one fixed
@@ -452,150 +410,6 @@ throwaway scene that links the live objects (the live scene and its .blend never
 batches renders because the pinned server gives each Blender command 180 s. The pixel-art pass
 (downscale, hard alpha, one palette for the whole strip, outline) runs in the server in
 `spriteRender.ts`, so the same renders always give the same bytes.
-
-The creator's session and a live run share the game folder, and the run's build restores would
-overwrite the session's edits. The game's AGENTS.md tells the creator's agent to pass requests to the run with
-`game_run_steer` while one is live; the composer is never rerouted. A note is a `game-run.steer`
-command; the policy leads the next round's direction with it.
-
-A Guided run's decisions (the vision's look, the prototype, the ladder) happen in that same chat,
-presented by the creator's own agent with whatever visuals it can generate, and answered in free
-text; there are no fixed buttons. The policy plans a `decide` step with what to show, the answers
-it accepts and a default; Autopilot never plans one, and a decide task planned after a switch to
-Autopilot is applied with its default inside `plan`. The wake and its wait are above; `sent` and
-`deadline` live on the decide step, so a busy chat does not spend the wait, a resume waits only
-what is left, and a question still undelivered after ten minutes takes the default.
-`game_run_decide` is `game-run.decide`, checked against the waiting decision (a ladder edit through
-`parseLadder`); the decider takes either the answer or the default, never both. Role threads
-never see `game_run_decide`.
-
-## The run's course
-
-Vision, two core-loop prototypes, a blind pick, plan, art, one full build, then rounds until a ship
-review says yes, the run stalls, the creator stops it, or an optional budget ends: builder block, boot check, tester play with a bot run,
-blind compare in both orders, keep or revert, reviewer notes for the next round.
-
-Rounds climb a ladder. The plan submits it, 4 to 7 rungs from the picked
-prototype to a game with the shape of a Steam demo, each a sentence of what the game is after it
-plus 2 to 4 checks with how to observe them; `game-run.submit` refuses a wrong shape in the plan's
-turn, and a plan that submits none gets one fix turn, else the run ends "no-ladder": a creator's
-note still gets a finish round, and a resume plans the ladder again. A new run on the same brief
-builds the ladder the game already has (a new brief plans one): every earlier run on Lantern Marsh
-re-planned, five ladders in five runs. The run's record is the one truth for which rung landed; `.studio/ladder.json` is a
-copy for people and roles. A round builds the first open rung, and the tester submits pass or
-fail per look check. An earlier run measured why this matters: when every round's goal was the last review's top flaw and judges asked
-which build handled that flaw better, a run spent five hours on one flaw while the game never
-grew, and two near-identical builds gave noisy ties. So acceptance is the rung's checks, and blind
-judging is only a regression gate: a round whose checks pass is kept unless the old build wins
-both orders (ties, splits and missing verdicts keep it). A round whose checks fail is not judged
-at all, since no verdict could keep it, and its work stays a build of its own.
-
-A check must be verifiable in play, so the lint in [checks.ts](../../apps/server/src/game/run/checks.ts)
-refuses at every ladder submission (the plan's, a reviewer's rung, the creator's edit) a check
-that starts from a setup state or a teleport (a state check that reads the game's self-report
-after a jump proves nothing a player can reach), a volume reward ("at least N"), and audio or
-sub-second motion as a look check (testers see still frames without sound). One family of such
-checks cost GC-2 54 minutes of identical retries.
-
-Every round that does not land names whose failure it was (`failure` on its record), and only the
-game's counts against the rung and the stall rule: a boot or check failure, a regression, no
-change. The harness's (an unjudged gate, a tester with no play or no result, a git move that
-failed) leaves the rung as it was, and the next round judges the same build again with no builder
-turn; two in a row pause the run `tool-failed`, since a broken evaluation would otherwise repeat
-at the game's cost. A check the tester marks unverifiable gets one plan turn that rewrites the
-rung's checks (submission `rungs`, one rung), and the next round grows the work it judged. The
-game's second failure never builds the rung a third time as it is: Autopilot's plan splits it
-(two or three rungs, never split again), a Guided run asks the creator (`rung` decision, split by
-default), and a change that does not fit sets it aside. A set-aside rung returns only changed (a
-resume splits it) and is never done: a ladder with one, or a ship review that says not
-shippable, ends the run "incomplete", resumably. These rules apply to a game's history too: a
-resume and a reused ladder refold each rung from its rounds (`Policy.recount`), so the rounds an
-earlier harness bug failed no longer count.
-
-A run never pays twice for the same work: a retry right after a try that passed some checks grows
-that try's build (the gate still judges it against the best), a builder block ends on the
-builder's own end of its turn (the harness then scores the build, and a failed state check is a
-fix turn for the same builder: asking a builder that stopped to keep going bought only closing
-turns that changed nothing), a rung round's reviewer writes from the tester's and blind players'
-evidence instead of replaying the build, and a gate whose best is the build an earlier gate's
-blind player saw reuses that play and plays only the candidate. "The same build" is exact: a kept
-round's build is its candidate's own checkpoint, so a play of the candidate is a play of the new
-best. The held play lives in the run's record with its question and sample
-budget, and is never used under another question (finish rounds ask their own), budget or build.
-The comparators cannot tell the reused report from the fresh one; the comparison record names it.
-The bot still plays both builds: each round's tester rewrites `.studio/bot`, so an earlier bot
-result is not known to come from the same bot. The reviewer's ledger (copied to next.md) lists bugs and DO NOT REGRESS that the builder clears beside the
-rung, never a round's goal; the reviewer may add one rung with its ledger
-when something blocks the ladder, one open at a time. The old round shape (the review's top flaw,
-judged on that flaw) runs only as finish rounds, and only on the creator's ask. The run's end
-point is its goal, not a round count: the ladder bounds the building, a finished ladder gets one
-ship check of its best, and the run ends "ready", or "incomplete" with the review's reasons, which
-a resume leads one round with. Polish past
-that is the creator's call: a game_run_steer note resumes an ended run for one round on it, so no
-tokens go to rounds nobody asked for. Three rounds in a row that land nothing for the game's own
-reasons end the run "stalled", resumably, with the last round's reason: otherwise a game whose
-checks can never pass (a broken state hook) works through every rung for nothing. A kept round
-resets the count, a round counts once where it ends (`finishRound` or `stallRound`), and a resume
-or a note's round starts it fresh.
-
-Before the
-comparators run, the tester's last play bot plays both builds in fresh copies for the same real
-time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
-that bot against the candidate, and a bot that fails on only one build would name it, so the
-comparators get bot facts only when the bot ran on both builds; otherwise neither report has them,
-and the step's record and the comparison record say why. Bot facts are withheld only when the bot
-itself did not play (its module would not load, its child broke, the run was stopped); a game
-that crashes, stops answering or never boots under it is a measured fact about that build. A comparison's two plays,
-and its two bot runs, run at once (Unity's one at a time, behind its one editor); that holds only
-because explore sessions, bot runs and game operations are keyed by checkout root, not by game.
-Two starts at once would both pass a free-memory check made before either allocates, so explore
-and bot starts and the live Unity and Blender editor opens hold one gate (`GameMemoryGate`) from
-that check through their import and boot (a Unity open through its launch and its first minute,
-not its whole cold import). A start that imports into the folder (a native explore session, each
-native bot run) takes the game's operation lock first and holds both through its boot; the gate
-is the one place that order is kept, so nothing takes the operation lock while holding the gate.
-Time queued behind the lock or the gate counts against the same 75 s bound, after which the start
-is refused `busy` (contention, not memory), never kept waiting unseen. No gated
-start may open an editor: the gate is one permit and does not nest. A sample's time waiting there is
-given back to its clock. A blind player's clock is its input budget, which the explore service
-enforces across its sessions; its wall cap is only a backstop, since a wall cap near what players
-take cut them short and bought a "plays on" turn each time. A play turn (`plays`: a sample's, the tester's, the ship player's) whose
-play was refused for memory, a busy machine or a tool of ours, and that played nothing (no input
-and no bot run), is played again after a pause rather than landed as "played nothing": memory and
-busy under one count up to their cap, a transient tool once, a standing one never; past it the
-run pauses resumably with that cause, so no sample lands unplayed and no tester's checks fail
-for want of play. Its explore marks reset only as that turn is sent. A step's own work that was
-not measured ends its job and comes back on a durable `game-run.step.wake` timer (above), so a
-wait never holds one of the run jobs' shared step slots. Samples play
-plain copies of their builds with no git (`materializeCheckpoint`, without `.studio` and
-`NOTES.md`), so no history, date or note tells the builds apart. Comparators never work in the
-game folder, whose build refs and notes name every sample's build: each gets a folder of its own, empty
-but for its two frame sheets under neutral names, and submits its verdict; the root keeps the
-write-ups once all verdicts are in. The copies live in a folder of the run's own under
-Kurambit's worktrees folder, never in the game repository. A home inside some repository would
-otherwise lend every copy that repository's git, so the server puts the copies' folder in
-`GIT_CEILING_DIRECTORIES` for itself and everything it starts ([config.ts](../../apps/server/src/config.ts)):
-T3 then treats a copy as the non-repository it is. A copy goes with the commit that frees it, as a
-`game-run.outputs` effect: the landing of a role with no turn left, or the restore that abandons
-its round. An ending nothing can resume (its ending, a deleted chat or project) frees every copy of
-the run in its finish; a resumable one keeps its roles' copies until they are spent (`copiesSpent`,
-under the game-logs period). Storage cleanup never removes a named run's copies itself: it asks the
-run (`game-run.copies.spend`), whose decider frees them with a `game-run.copies.release` effect on
-the run's own thread, so a resume either refuses the ask or queues behind the release and makes
-fresh copies. The game folder stays reachable by
-path, and what is blind by construction is the player's or comparator's folder and prompt. The only hard
-checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
-renders against the vision and may ask for one bounded redo before the art is
-kept; a missing verdict keeps the art.
-
-The Unity lane needs three things the run does nowhere else. A live editor holds the open scene in
-memory and saves it after every edit without reading the disk first, so every restore of the
-root closes the root's live editors before it runs; otherwise the next prototype's first edit
-writes the previous build's scene over its own (seen live). Its boot is the
-editor check plus a Linux player build, because testers and samples play only the player and a
-build can pass the editor (an editor-only API in a runtime script) and still fail as a player.
-And the project's first editor open, a full import of minutes, runs before the first root role's
-clock, so the first prototype is not capped on it while the second opens warm.
 
 ## Why this shape
 

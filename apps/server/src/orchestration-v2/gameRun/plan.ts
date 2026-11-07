@@ -3,12 +3,13 @@
 // commits every game-run command through it, and a chat's deletion (one thread
 // or a whole project's) plans the chat's run stop with it in its own commit,
 // so there is one way a run stops.
-import type {
-  CommandId,
-  GameRunRefusalReason,
-  OrchestrationV2DomainEvent,
-  OrchestrationV2GameRunCommand,
-  ThreadId,
+import {
+  type CommandId,
+  type GameRunRefusalReason,
+  type OrchestrationV2DomainEvent,
+  type OrchestrationV2GameRunCommand,
+  type ThreadId,
+  gameRunStepId,
 } from "@kurambit/contracts";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as DateTime from "effect/DateTime";
@@ -16,6 +17,7 @@ import * as Effect from "effect/Effect";
 import * as Random from "effect/Random";
 import * as Result from "effect/Result";
 
+import * as State from "../../game/run/state.ts";
 import type * as EffectOutbox from "../EffectOutbox.ts";
 import type * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecide from "./decide.ts";
@@ -39,6 +41,8 @@ interface PlanDeps {
   readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
 }
 
+const CYCLE_KINDS: ReadonlySet<string> = new Set(["propose", "judge", "undo"]);
+
 export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameRunCommand) =>
   Effect.gen(function* () {
     const { projections, idAllocator } = deps;
@@ -48,13 +52,27 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
     // run an older server left live there).
     if (thread.deletedAt !== null && command.type !== "game-run.stop")
       return Result.fail<GameRunPlanRefusal>({ kind: "deleted" });
-    // A resume reads every step of the run.
-    const resuming = command.type === "game-run.resume";
-    const records = yield* projections.getGameRunRecords(
-      threadId,
-      resuming ? undefined : { steps: "in-flight" },
-    );
+    const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
     const latest = records.gameRuns.at(-1);
+    const inFlight =
+      records.gameRunSteps.find(
+        (step) => step.runId === latest?.id && step.seq === latest.inFlight,
+      ) ?? null;
+    // The policy reads the cycle the step in flight belongs to: a proposal's
+    // look, a judge's turn, an undo's judge and turn. Each is planned right
+    // after the one before it.
+    const cycle =
+      latest === undefined ||
+      inFlight === null ||
+      inFlight.seq < 2 ||
+      !CYCLE_KINDS.has(inFlight.step.kind) ||
+      State.stageEra(latest)
+        ? []
+        : (yield* projections.getGameRunRecords(threadId, {
+            steps: [inFlight.seq - 1, inFlight.seq - 2]
+              .filter((seq) => seq > 0)
+              .map((seq) => gameRunStepId(latest.id, seq)),
+          })).gameRunSteps;
     const decided = GameRunDecide.decide(
       command,
       {
@@ -62,12 +80,9 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
         projectRun: yield* projections.getProjectGameRun(thread.projectId),
         runs: records.gameRuns,
         rounds: records.gameRunRounds,
-        inFlight:
-          records.gameRunSteps.find(
-            (step) => step.runId === latest?.id && step.seq === latest.inFlight,
-          ) ?? null,
+        inFlight,
         chatDeleted: thread.deletedAt !== null,
-        steps: resuming ? records.gameRunSteps : [],
+        steps: cycle,
       },
       {
         at: yield* DateTime.now,
