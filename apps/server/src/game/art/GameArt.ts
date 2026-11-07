@@ -21,6 +21,7 @@ import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Result from "effect/Result";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -282,6 +283,65 @@ const fileNames = (
       return { path: unique(stem, file.ext), file };
     }),
   );
+};
+
+interface DirectionsSettled {
+  readonly step: Extract<ArtStep, { kind: "done" }>;
+  /** The labels of the looks that came back, in candidate order. */
+  readonly labels: ReadonlyArray<string>;
+  readonly refused: ReadonlyArray<{ readonly label: string; readonly reason: string }>;
+  /** Some look's cost is its estimate: the provider did not report it. */
+  readonly estimated: boolean;
+}
+
+/** One result per direction, in order, into candidates, refusals and what is counted. */
+export const settleDirections = (
+  results: ReadonlyArray<Result.Result<ArtStep, ArtProviderError>>,
+  estimates: ReadonlyArray<number | null>,
+  labels: ReadonlyArray<string>,
+): Effect.Effect<DirectionsSettled, ArtProviderError> => {
+  const arrived: Array<{ readonly files: ReadonlyArray<ArtFile>; readonly label: string }> = [];
+  const refused: Array<{ readonly label: string; readonly reason: string }> = [];
+  const costs: Array<number | null> = [];
+  let estimated = false;
+  results.forEach((result, index) => {
+    const label = labels[index] ?? `Direction ${index + 1}`;
+    if (Result.isFailure(result)) {
+      refused.push({ label, reason: result.failure.reason.slice(0, 1000) });
+      costs.push(result.failure.costUsd ?? null);
+      return;
+    }
+    const step = result.success;
+    // The loop runs every direction to done; a making step here is a bug, counted as sent.
+    const files = step.kind === "done" ? step.candidates[0] : undefined;
+    const reported = step.kind === "done" ? step.costUsd : null;
+    const cost = reported ?? estimates[index] ?? null;
+    if (reported === null && cost !== null) estimated = true;
+    costs.push(cost);
+    if (files === undefined || files.length === 0)
+      refused.push({ label, reason: "The provider answered with no image." });
+    else arrived.push({ files, label });
+  });
+  const costUsd = costs.every((cost) => cost === null)
+    ? null
+    : roundUsd(costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0));
+  if (arrived.length === 0)
+    return Effect.fail(
+      new ArtProviderError({
+        reason:
+          `No direction came back. ${refused.map((refusal) => `${refusal.label}: ${refusal.reason}`).join(" ")}`.slice(
+            0,
+            2000,
+          ),
+        costUsd: costUsd ?? 0,
+      }),
+    );
+  return Effect.succeed({
+    step: { kind: "done", candidates: arrived.map((look) => look.files), costUsd },
+    labels: arrived.map((look) => look.label),
+    refused,
+    estimated,
+  });
 };
 
 const make = Effect.gen(function* () {
@@ -598,7 +658,9 @@ const make = Effect.gen(function* () {
   const finish = (row: Row, step: Extract<ArtStep, { kind: "done" }>) =>
     Effect.gen(function* () {
       const written = yield* writeFiles(row, step.candidates);
-      const estimated = step.costUsd === null && row.generation.estimateUsd !== null;
+      // Directions mark it themselves when one of them reported no cost.
+      const estimated =
+        (step.costUsd === null && row.generation.estimateUsd !== null) || row.meta.costEstimated;
       const costUsd = step.costUsd ?? row.generation.estimateUsd;
       const candidateFiles = written.map((files) => files.map((file) => file.path));
       const previews = written.map((files, index) => {
@@ -616,7 +678,9 @@ const make = Effect.gen(function* () {
         { costUsd, candidates: previews },
         { candidateFiles, costEstimated: estimated, job: row.meta.job },
       );
-      if (written.length === 1) return yield* chooseUnlocked(next, 0, "only");
+      // A direction set with refusals goes to the person even with one look left: they asked to choose.
+      if (written.length === 1 && (next.generation.refused ?? []).length === 0)
+        return yield* chooseUnlocked(next, 0, "only");
       if (next.meta.autopilot) return yield* chooseUnlocked(next, 0, "autopilot");
       const choosing = yield* touch(next, { state: "choosing" });
       yield* writeRecordFile(choosing);
@@ -778,6 +842,10 @@ const make = Effect.gen(function* () {
         return `"${g.name}" was cancelled.${g.costUsd ? ` ${usd(g.costUsd)} counted against today for work already started.` : ""}`;
     }
   };
+  const refusedText = (g: GameGeneration) =>
+    (g.refused ?? []).length === 0
+      ? ""
+      : `; ${g.refused!.map((refusal) => `"${refusal.label}" was refused by the provider (${refusal.reason})`).join("; ")}`;
   const costText = (row: Row) =>
     row.generation.costUsd === null
       ? row.generation.provider === "codex"
@@ -786,14 +854,19 @@ const make = Effect.gen(function* () {
       : `${usd(row.generation.costUsd)}${row.meta.costEstimated ? " (estimated: the provider did not report it)" : ""}`;
 
   /**
-   * Directions: one request per look, each to completion, as one step with a candidate each.
-   * Codex runs them one at a time (one plan, one session at a time); the others together.
+   * Directions: one request per look, each to completion. Codex runs them one at a time (one
+   * plan, one session at a time); the others together. Each settles on its own: every look that
+   * came back is a candidate, a refused one is named with the provider's reason, and only when
+   * none came back does the generation fail. What is counted: each look's reported cost (its
+   * estimate when the provider said none), and what a refusal reported it cost.
    */
   const directionsTogether = (
     adapter: ArtAdapter,
     context: ArtContext,
     requests: ReadonlyArray<ArtRequest>,
-  ): Effect.Effect<ArtStep, ArtProviderError> =>
+    estimates: ReadonlyArray<number | null>,
+    labels: ReadonlyArray<string>,
+  ): Effect.Effect<DirectionsSettled, ArtProviderError> =>
     Effect.forEach(
       requests,
       (request) =>
@@ -808,18 +881,23 @@ const make = Effect.gen(function* () {
             step = yield* adapter.poll(context, step.remote);
           }
           return step;
-        }),
+        }).pipe(Effect.result),
       { concurrency: adapter.id === "codex" ? 1 : "unbounded" },
-    ).pipe(
-      Effect.map((steps): ArtStep => {
-        const costs = steps.map((step) => step.costUsd);
-        return {
-          kind: "done",
-          candidates: steps.flatMap((step) => step.candidates.slice(0, 1)),
-          costUsd: costs.every((cost) => cost === null)
-            ? null
-            : roundUsd(costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0)),
-        };
+    ).pipe(Effect.flatMap((results) => settleDirections(results, estimates, labels)));
+
+  /** Before the files land: which looks came back (their labels), which were refused, and why. */
+  const recordDirections = (root: string, id: string, settled: DirectionsSettled) =>
+    locks.withLock(
+      id,
+      Effect.gen(function* () {
+        const row = yield* loadOrFail(root, id, "art-drive");
+        if (row.generation.state !== "making") return;
+        const next = yield* touch(
+          row,
+          settled.refused.length === 0 ? {} : { refused: settled.refused },
+          { labels: settled.labels, costEstimated: settled.estimated },
+        );
+        yield* save(next, countedOf(next.generation));
       }),
     );
 
@@ -944,12 +1022,26 @@ const make = Effect.gen(function* () {
         }),
       );
       yield* operations.changed(root, GAME_ART_EVENT, `Making ${admitted.row.generation.name}.`);
+      const labels = directions.map((direction) => direction.label);
       yield* startDriver(root, id, (adapter, context) =>
         Effect.promise(() => NodeFSP.mkdir(context.scratch, { recursive: true })).pipe(
           Effect.andThen(
             requests.length === 1
               ? adapter.start(context, requests[0]!)
-              : directionsTogether(adapter, context, requests),
+              : directionsTogether(adapter, context, requests, estimates, labels).pipe(
+                  Effect.flatMap((settled) =>
+                    recordDirections(root, id, settled).pipe(
+                      Effect.mapError(
+                        (error) =>
+                          new ArtProviderError({
+                            reason: error.message,
+                            costUsd: settled.step.costUsd,
+                          }),
+                      ),
+                      Effect.as(settled.step),
+                    ),
+                  ),
+                ),
           ),
         ),
       );
