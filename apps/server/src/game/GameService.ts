@@ -34,6 +34,8 @@ import {
   GameExploreCloseResult,
   type GameBlenderCarveInput,
   type GameBlenderCarveResult,
+  type GameAnimateInput,
+  type GameAnimateResult,
   type GameBlenderCharacterInput,
   type GameArtProvidersResult,
   type GameGenerateInput,
@@ -264,6 +266,11 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderCharacterInput,
     ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
+    /** Live Blender scene: a move spec compiled onto a character as a clip, measured and pictured. */
+    readonly animate: (
+      threadId: ThreadId,
+      input: GameAnimateInput,
+    ) => Effect.Effect<GameAnimateResult, GameOperationError>;
     /** Live Blender scene: meshes painted from their turnaround sheet. */
     readonly blenderPaint: (
       threadId: ThreadId,
@@ -1243,6 +1250,8 @@ const make = Effect.gen(function* () {
       readRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
     blenderCharacter: (threadId, input) =>
       withRoot(threadId, "Blender character", (root) => liveBlender.character(root, input)),
+    animate: (threadId, input) =>
+      withRoot(threadId, "Animate", (root) => liveBlender.animate(root, input)),
     blenderPaint: (threadId, input) =>
       withRoot(threadId, "Blender paint", (root) => liveBlender.paint(root, input)),
     blenderCarve: (threadId, input) =>

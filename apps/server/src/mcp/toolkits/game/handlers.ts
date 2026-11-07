@@ -8,6 +8,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   GameToolkit,
+  GameAnimateToolkit,
   GameAssetsSearchToolkit,
   GameBlenderLookToolkit,
   GameBlenderRenderSpritesToolkit,
@@ -241,6 +242,14 @@ const blenderLookHandlers = {
   ),
 } satisfies McpToolAccess.Handlers<typeof GameBlenderLookToolkit.tools>;
 export const layerBlenderLook = McpToolAccess.toLayer(GameBlenderLookToolkit, blenderLookHandlers);
+
+/** Registered like the Blender look, so the move's pictures become real image content. */
+const animateHandlers = {
+  game_animate: McpToolAccess.actsAsCaller((input) =>
+    withGame((game, threadId) => game.animate(threadId, input)),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameAnimateToolkit.tools>;
+export const layerAnimate = McpToolAccess.toLayer(GameAnimateToolkit, animateHandlers);
 
 /** Registered like the Blender look, so the contact sheet becomes real image content. */
 const blenderRenderSpritesHandlers = {

@@ -19,6 +19,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   GameOperationError,
+  type GameAnimateInput,
+  type GameAnimateResult,
   type GameBlenderAssetsImportInput,
   type GameBlenderAssetsImportResult,
   type GameBlenderAssetsSearchInput,
@@ -346,6 +348,37 @@ const GeneratedMade = Schema.Struct({
 const decodeGeneratedMade = Schema.decodeUnknownEffect(GeneratedMade);
 const decodeCharacterMade = Schema.decodeUnknownEffect(CharacterMade);
 const decodeMotionStrip = Schema.decodeUnknownEffect(Schema.Struct({ image: Schema.String }));
+/** What kurambit.animate prints; the full bundle is its bundle.json. */
+const decodeAnimated = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    action: Schema.String,
+    images: Schema.Array(
+      Schema.Struct({ path: Schema.String, width: Schema.Number, height: Schema.Number }),
+    ),
+    warnings: Schema.Array(Schema.String),
+    summary: Schema.Array(Schema.String),
+  }),
+);
+/** Where each game_animate pass keeps its spec, bundle and pictures: <dir>/<clip>/<n>. */
+const ANIMATE_DIR = "builds/logs/animate";
+/** Words that say nothing about a move when a bar is picked by name. */
+const BAR_FILLER = new Set([
+  "loop",
+  "fwd",
+  "bwd",
+  "rm",
+  "inplace",
+  "anim",
+  "animation",
+  "start",
+  "end",
+]);
+const clipWords = (name: string) =>
+  name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter((word) => word.length > 1 && !BAR_FILLER.has(word));
 const decodeReviewRender = Schema.decodeUnknownEffect(ReviewRender);
 const decodeDigest = Schema.decodeUnknownEffect(KitDigest);
 const decodePass = Schema.decodeUnknownEffect(PassResult);
@@ -605,6 +638,14 @@ export class GameBlender extends Context.Service<
       root: string,
       input: GameBlenderCharacterInput,
     ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
+    /**
+     * Live Blender scene: a move spec compiled onto a character as a clip, measured beside a
+     * library clip and pictured (game_animate).
+     */
+    readonly animate: (
+      root: string,
+      input: GameAnimateInput,
+    ) => Effect.Effect<GameAnimateResult, GameOperationError>;
     /** Live Blender scene: meshes painted from their turnaround sheet (UV atlases, normal, ORM). */
     readonly paint: (
       root: string,
@@ -2156,6 +2197,114 @@ const make = Effect.gen(function* () {
               out: NodePath.join(realRoot, out),
             })})`,
           );
+        }),
+      ),
+    animate: (root, input) =>
+      holding(
+        root,
+        Effect.gen(function* () {
+          const fail = (reason: GameOperationError["reason"], detail: string) =>
+            Effect.fail(opError("blender-animate", root, reason, detail));
+          const realRoot = yield* realRootOf(root);
+          const style = yield* readGameStyle(realRoot);
+          const packs = (style?.packs ?? []).filter((id) => {
+            const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
+            return pack?.rig === STANDARD_RIG && pack.kinds.includes("animation");
+          });
+          // The bar: the named library clip, or the one sharing the most words with the move's name.
+          let barName = input.bar ?? null;
+          if (barName === null && packs.length > 0) {
+            const wanted = new Set([
+              ...clipWords(input.clip),
+              ...(typeof input.spec["name"] === "string" ? clipWords(input.spec["name"]) : []),
+            ]);
+            let best: { name: string; score: number } | null = null;
+            for (const id of packs)
+              for (const entry of yield* library.packClips(id))
+                for (const clip of entry.clips) {
+                  const score = clipWords(clip).filter((word) => wanted.has(word)).length;
+                  if (
+                    score > 0 &&
+                    (best === null ||
+                      score > best.score ||
+                      (score === best.score && clip.length < best.name.length))
+                  )
+                    best = { name: `${id}:${clip}`, score };
+                }
+            barName = best?.name ?? null;
+          }
+          const bar =
+            barName === null
+              ? null
+              : (yield* resolveClips(root, [barName], packs).pipe(
+                  Effect.mapError((cause) =>
+                    opError(
+                      "blender-animate",
+                      root,
+                      "invalid-input",
+                      cause.detail ?? cause.message,
+                    ),
+                  ),
+                ))[0]!;
+          const clipDir = `${ANIMATE_DIR}/${input.clip}`;
+          const passes = yield* Effect.promise(() =>
+            NodeFSP.readdir(NodePath.join(realRoot, clipDir)).catch(() => [] as string[]),
+          );
+          const pass = `${clipDir}/${1 + Math.max(0, ...passes.map(Number).filter(Number.isInteger))}`;
+          const out = yield* Effect.tryPromise({
+            try: () => ensureGameDir(realRoot, pass),
+            catch: (cause) => opError("blender-animate", pass, "invalid-path", undefined, cause),
+          });
+          yield* writeText(
+            NodePath.join(out, "spec.json"),
+            `${JSON.stringify(input.spec, null, 1)}\n`,
+            "blender-animate",
+          );
+          const made = yield* kitCall(
+            root,
+            "blender-animate",
+            decodeAnimated,
+            `kurambit.animate(${pyJson({
+              armature: input.character,
+              clip: input.clip,
+              spec: input.spec,
+              out,
+              bar: bar === null ? null : { path: bar.path, clip: bar.name, pack: bar.pack },
+            })})`,
+          );
+          const blend = yield* saveBlend(root);
+          const screenshots = yield* Effect.forEach(made.images, (image) =>
+            Effect.tryPromise({
+              try: () => NodeFSP.readFile(image.path),
+              catch: (cause) => opError("blender-animate", image.path, "io", undefined, cause),
+            }).pipe(
+              Effect.map((png) => ({
+                mimeType: "image/png" as const,
+                data: png.toString("base64"),
+                width: image.width,
+                height: image.height,
+              })),
+            ),
+          );
+          if (screenshots.length === 0)
+            return yield* fail("tool-failed", "The Blender kit drew no pictures of the move.");
+          return {
+            text: [
+              ...made.summary,
+              ...(bar === null
+                ? [
+                    `No bar: no clip in ${packs.join(", ") || "the lock's animation packs"} shares a word with ${input.clip}; pass bar (a library clip name) to measure one beside it.`,
+                  ]
+                : []),
+              `Pass ${pass}: spec.json, bundle.json (every number) and the pictures, in order: contact sheet (front, side, 3/4; beats marked), onion strip, footprint (top down) and curves. Saved .blend source: ${blend}.`,
+              `Read the pictures and the numbers, change the spec, and animate ${input.clip} again; stop when neither improves. The clip is ${made.action} in the scene and ships with the character: game_blender_look mode review, then game_blender_export.`,
+            ].join("\n"),
+            action: made.action,
+            pass,
+            images: made.images.map((image) => `${pass}/${NodePath.basename(image.path)}`),
+            warnings: made.warnings,
+            screenshots,
+          } satisfies GameAnimateResult;
         }),
       ),
     character: (root, input) =>
