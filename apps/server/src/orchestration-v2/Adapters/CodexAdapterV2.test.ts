@@ -1,6 +1,7 @@
 import * as NodeOS from "node:os";
 
 import { historyResponseItems } from "@kurambit/provider-core/server/handoffBudget";
+import { KURAMBIT_ORCHESTRATION_INSTRUCTIONS } from "@kurambit/provider-core/server/orchestrationInstructions";
 import {
   makeProviderTextDeltaCoalescer,
   type ProviderTextDeltaUpdate,
@@ -509,13 +510,13 @@ describe("CodexAdapterV2 runtime policy", () => {
         });
 
         assert.equal(params.collaborationMode?.mode, "default");
-        assert.include(
-          params.additionalContext?.kurambit_orchestration?.value ?? "",
-          "Use `delegate_task`",
+        assert.equal(
+          params.additionalContext?.kurambit_orchestration?.value,
+          KURAMBIT_ORCHESTRATION_INSTRUCTIONS,
         );
         assert.include(
           params.additionalContext?.kurambit_orchestration?.value ?? "",
-          "structured object, never as JSON text",
+          "Use `delegate_task`",
         );
       }),
   );
