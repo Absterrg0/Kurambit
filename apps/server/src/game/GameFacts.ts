@@ -36,7 +36,9 @@ import {
   GameFactPending,
   type GameBotRunResult,
   GameEngineId,
+  GameManifest,
   GameOperationError,
+  manifestProject,
 } from "@kurambit/contracts";
 import {
   bootsFact,
@@ -68,8 +70,11 @@ import * as GameTemplates from "./GameTemplates.ts";
 import { measureAssets } from "./assetFacts.ts";
 import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 
-/** Changes when the server's reading of a measurement changes; the bot files are hashed besides. */
-const FACTS_VERSION = 3;
+/**
+ * Changes when the server's reading of a measurement changes; the bot files are hashed besides.
+ * A new tier needs no bump: planOf measures each fact a stored row lacks, and nothing else.
+ */
+const FACTS_VERSION = 2;
 /** A measurement's operations on copies are its own: no thread owns them. */
 const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait for the one running. */
@@ -168,6 +173,8 @@ const decodeSidecar = Schema.decodeUnknownOption(
     }),
   ),
 );
+
+const decodeCopyManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 
 /** The facts a tier's run writes. assets is static: read from the copy, never played. */
 type Tier = "assets" | "boots" | "idle" | "masher" | "skilled";
@@ -516,6 +523,14 @@ const make = Effect.gen(function* () {
             : `Compatibility; native exports draw ${method === "mobile" ? "Mobile" : "Forward+"}`;
         });
 
+  // The build's own game.json names its engine folder; a copy that cannot say keeps the engine's default.
+  const projectOf = (copy: string, engine: GameEngineId) =>
+    Effect.promise(() =>
+      NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
+        .then((text) => manifestProject(decodeCopyManifest(text)))
+        .catch(() => ""),
+    ).pipe(Effect.map((project) => project || engineProfile(engine).projectDirectory));
+
   const measureJob = (build: ResolvedBuild, tiers: ReadonlySet<Tier>, found: Found | null) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -552,27 +567,25 @@ const make = Effect.gen(function* () {
           yield* write({
             assets: {
               status: "measured",
-              value: yield* measureAssets(
-                copy,
-                build.engine,
-                engineProfile(build.engine).projectDirectory,
-              ),
+              value: yield* measureAssets(copy, build.engine, yield* projectOf(copy, build.engine)),
             },
           });
         // A browser game's bots draw with the backend the server probed; its
         // renderer is recorded, so facts from the GPU and from SwiftShader are
-        // never compared as alike.
+        // never compared as alike. A static-only measure plays nothing and probes nothing.
+        const plays = TIERS.some((tier) => tier !== "assets" && tiers.has(tier));
         const backend =
-          engineProfile(build.engine).play === "browser"
+          plays && engineProfile(build.engine).play === "browser"
             ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
             : Option.none();
         const software = Option.isSome(backend) && backend.value.software;
-        stored = {
-          ...stored,
-          renderer: Option.isSome(backend)
-            ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
-            : yield* rendererOf(copy, build.engine),
-        };
+        if (plays)
+          stored = {
+            ...stored,
+            renderer: Option.isSome(backend)
+              ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
+              : yield* rendererOf(copy, build.engine),
+          };
         if (tiers.has("boots")) {
           const boots = yield* step(game.checkIn(copy, OWNER)).pipe(
             Effect.map(bootsFact),
