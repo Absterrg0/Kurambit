@@ -140,6 +140,8 @@ describe("GameArt", () => {
             "library",
           );
           assert.strictEqual(started.generation.name, "hero_2");
+          // The limit reserves the estimate before it is spent; the text must not call it spent.
+          assert.match(started.text, /daily limit used today, counting this estimate\)/);
           const ready = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
           assert.strictEqual(ready.generation.state, "choosing");
           assert.deepStrictEqual(

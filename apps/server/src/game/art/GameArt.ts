@@ -1350,7 +1350,12 @@ const make = Effect.gen(function* () {
               ? " on the ChatGPT plan's Codex limits (no dollar cost)"
               : ""
             : `, estimated ${usd(g.estimateUsd)}`
-        }${spent !== null && limit !== null ? ` (${usd(spent)} of the ${usd(limit)} daily limit spent today)` : ""}. Files land in ${where}/.${lookText(row)} Wait with game_generate_wait id ${g.id}.`;
+        }${
+          // `spent` holds this generation's estimate too: the limit reserves it before it is spent.
+          spent !== null && limit !== null
+            ? ` (${usd(spent)} of the ${usd(limit)} daily limit used today${g.estimateUsd === null ? "" : ", counting this estimate"})`
+            : ""
+        }. Files land in ${where}/.${lookText(row)} Wait with game_generate_wait id ${g.id}.`;
       case "choosing":
         if (g.filesUndone === true)
           return `The candidates of "${g.name}" are no longer in the game: ${UNDONE}`;
