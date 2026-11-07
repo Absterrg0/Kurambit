@@ -680,3 +680,333 @@ def model_views(params):
                 bpy.data.scenes.remove(x)
         bpy.data.batch_remove([x for x in added if not isinstance(x, bpy.types.Scene)])
         shutil.rmtree(folder, ignore_errors=True)
+
+
+# ------------------------------------------------------------------------------ a move's pictures
+# game_animate's pictures after every pass: the contact sheet (front, side and three-quarter of the
+# beats and frames between, one fixed camera per view, so root motion shows), the onion strip
+# (ghosts every few frames, blue early to orange late), the footprint plot (top down: the feet,
+# stances thick with their slide, the centre of mass, the support, a held prop's tip and its
+# strikes) and the curves (speeds, jerk, joint angles and balance over time, beats marked). The
+# character's own objects are linked into a throwaway scene for the renders; plots are drawn with
+# numpy and labelled by the Labels scene.
+SHEET_TILE = (170, 215)
+ONION_TILE = (230, 290)
+SHEET_VIEWS = (("front", 0), ("side", 90), ("three-quarter", 40))
+ONION_VIEWS = (("side", 90), ("three-quarter", 40))
+BEAT = (1.0, 0.78, 0.35)
+LEFT = (0.33, 0.58, 0.93)
+RIGHT = (0.92, 0.42, 0.30)
+GREY = (0.62, 0.63, 0.66)
+
+
+def _offsets(r):
+    k = int(math.ceil(r))
+    return [(dy, dx) for dy in range(-k, k + 1) for dx in range(-k, k + 1) if dy * dy + dx * dx <= r * r + 0.25]
+
+
+def _stroke(canvas, xy, colour, width=1.5, dash=0.0, alpha=1.0):
+    """A polyline in pixel coordinates, stamped every half pixel; dash > 0 draws dashes that long."""
+    xy = np.asarray(xy, float)
+    if len(xy) == 0:
+        return
+    pts, run, total = [xy[:1]], [np.zeros(1)], 0.0
+    for a, b in zip(xy[:-1], xy[1:]):
+        d = float(np.linalg.norm(b - a))
+        k = max(1, int(d / 0.5))
+        t = np.arange(1, k + 1)[:, None] / k
+        pts.append(a + (b - a) * t)
+        run.append(total + d * t[:, 0])
+        total += d
+    pts = np.concatenate(pts)
+    run = np.concatenate(run)
+    if dash > 0:
+        pts = pts[(run // dash) % 2 == 0]
+    h, w = canvas.shape[:2]
+    for dy, dx in _offsets(width / 2):
+        ys = np.round(pts[:, 1]).astype(int) + dy
+        xs = np.round(pts[:, 0]).astype(int) + dx
+        ok = (ys >= 0) & (ys < h) & (xs >= 0) & (xs < w)
+        canvas[ys[ok], xs[ok], :3] = canvas[ys[ok], xs[ok], :3] * (1 - alpha) + np.array(colour) * alpha
+
+
+def _say(canvas, labels, text, x, y, colour=INK):
+    tile = labels(text).copy()
+    tile[:, :, :3] = colour
+    _over(canvas, tile, int(x), int(y))
+    return tile.shape[1]
+
+
+def _blank(w, h):
+    c = np.zeros((h, w, 4), np.float32)
+    c[:, :, :3], c[:, :, 3] = BG, 1.0
+    return c
+
+
+def _save(canvas, path):
+    img = bpy.data.images.new("kurambit_motion_out", canvas.shape[1], canvas.shape[0], alpha=False)
+    try:
+        img.pixels.foreach_set(np.flipud(canvas).ravel())
+        img.filepath_raw = path
+        img.file_format = "PNG"
+        img.save()
+    finally:
+        bpy.data.images.remove(img)
+    return path
+
+
+def _floor(sc, size, made):
+    me = bpy.data.meshes.new("kurambit_motion_floor")
+    h = size / 2
+    me.from_pydata([(-h, -h, 0), (h, -h, 0), (h, h, 0), (-h, h, 0)], [], [(0, 1, 2, 3)])
+    ob = bpy.data.objects.new("kurambit_motion_floor", me)
+    mat = bpy.data.materials.new("kurambit_motion_floor")
+    mat.diffuse_color = (0.42, 0.42, 0.40, 1)
+    me.materials.append(mat)
+    sc.collection.objects.link(ob)
+    made.append(ob)
+    return ob
+
+
+def _views(sc, cam, frames, folder, prefix, points, size, views, transparent, floor_ob, el=8.0, margin=0.15):
+    """Renders frames from each view, one fixed camera per view framing every point of the clip."""
+    _setup(sc, "BLENDER_WORKBENCH", size)
+    sc.display.shading.show_shadows = not transparent
+    sc.display.shading.shadow_intensity = 0.55
+    sc.display.light_direction = (0.35, -0.45, 0.82)
+    sc.render.film_transparent = transparent
+    floor_ob.hide_render = transparent
+    aspect = size[0] / size[1]
+    out = {}
+    for name, az in views:
+        ext = _extent(points, az, el)
+        w, h = (ext[1] - ext[0]) + 2 * margin, (ext[3] - ext[2]) + 2 * margin
+        _camera(cam, az, el, ext, max(w, h * aspect) if aspect >= 1 else max(h, w / aspect))
+        tiles = []
+        for f in frames:
+            sc.frame_set(f)
+            tiles.append(_render(sc, os.path.join(folder, f"{prefix}_{name}_{f}.png")))
+        out[name] = tiles
+    return out
+
+
+def _contact_sheet(sc, cam, floor_ob, folder, labels, f0, n, beats, notes, points, title):
+    picks = sorted({f0 + b for b in beats if b < n} | {f0 + int(round(i * (n - 1) / 9)) for i in range(10)})
+    while len(picks) > 12:  # keep the beats; drop the closest in-between frame
+        mids = [p for p in picks if p - f0 not in beats]
+        if not mids:
+            picks = picks[:12]
+            break
+        gaps = [min(abs(p - q) for q in picks if q != p) for p in mids]
+        picks.remove(mids[int(np.argmin(gaps))])
+    tiles = _views(sc, cam, picks, folder, "sheet", points, SHEET_TILE, SHEET_VIEWS, False, floor_ob)
+    tw, th = SHEET_TILE
+    left, top = 96, 30 + LABEL_PX + 6
+    canvas = _blank(left + tw * len(picks) + PAD, top + (th + 4) * len(SHEET_VIEWS) + PAD)
+    _say(canvas, labels, title, PAD, 6)
+    for c, f in enumerate(picks):
+        k = f - f0
+        _say(canvas, labels, f"f{k}" + (" beat" if k in beats else ""), left + c * tw + 4, 32, BEAT if k in beats else INK)
+    for r, (name, _) in enumerate(SHEET_VIEWS):
+        y = top + r * (th + 4)
+        _say(canvas, labels, name if name != "three-quarter" else "3/4", 8, y + th // 2 - 10)
+        for c, tile in enumerate(tiles[name]):
+            _over(canvas, tile, left + c * tw, y)
+            if picks[c] - f0 in beats:
+                canvas[y:y + 3, left + c * tw:left + (c + 1) * tw - 2, :3] = BEAT
+    return canvas, picks
+
+
+def _onion(sc, cam, floor_ob, folder, labels, f0, n, beats, points, parts=4):
+    step = 2 if n <= 60 else 3
+    every = list(range(f0, f0 + n, step))
+    if every[-1] != f0 + n - 1:
+        every.append(f0 + n - 1)
+    tiles = _views(sc, cam, every, folder, "onion", points, ONION_TILE, ONION_VIEWS, True, floor_ob)
+    k = max(1, int(math.ceil(len(every) / parts)))
+    chunks = [list(range(i, min(len(every), i + k + 1))) for i in range(0, len(every), k)][:parts]
+    tw, th = ONION_TILE
+    canvas = _blank(tw * len(chunks), 26 + th * len(ONION_VIEWS))
+    _say(canvas, labels, f"onion: every {'2nd' if step == 2 else '3rd'} frame, blue early to orange late, beats and the last frame stronger", 6, 3)
+    for r, (name, _) in enumerate(ONION_VIEWS):
+        for c, idx in enumerate(chunks):
+            panel = _blank(tw, th)
+            for i, j in enumerate(idx):
+                t = i / max(1, len(idx) - 1)
+                tint = np.array([0.35 + 0.65 * t, 0.55 + 0.16 * (1 - abs(2 * t - 1)), 1.0 - 0.69 * t])
+                tile = tiles[name][j].copy()
+                strong = i == len(idx) - 1 or (every[j] - f0) in beats
+                tile[:, :, :3] = tile[:, :, :3] * 0.5 + tint * 0.5
+                tile[:, :, 3] *= 0.85 if strong else 0.3
+                _over(panel, tile, 0, 0)
+            _over(canvas, panel, c * tw, 26 + r * th)
+            _say(canvas, labels, f"{'3/4' if name == 'three-quarter' else name} f{every[idx[0]] - f0}-{every[idx[-1]] - f0}", c * tw + 6, 26 + r * th + 4)
+    return canvas
+
+
+def _footprint(labels, res, curves, title, size=620):
+    tr = {k: np.array(v) for k, v in curves["track"].items()}
+    keys = [k for k in tr if k.startswith(("ball_", "heel_", "toe_"))] + (["tip"] if "tip" in tr else [])
+    allp = np.concatenate([tr[k][:, :2] for k in keys] + [np.array(curves["com"])[:, :2]])
+    # forward is up, the character's right is right: x = -X, y = -Y in armature space
+    px, py = -allp[:, 0], -allp[:, 1]
+    span = max(px.max() - px.min(), py.max() - py.min(), 0.5) * 1.12
+    cx, cy = (px.max() + px.min()) / 2, (py.max() + py.min()) / 2
+    top = 34
+    canvas = _blank(size, size + top + 30)
+    scale = size / span
+
+    def to_px(p):
+        p = np.asarray(p)
+        return np.stack([size / 2 + (-p[:, 0] - cx) * scale, top + size / 2 - (-p[:, 1] - cy) * scale], 1)
+
+    grid = 0.25 if span < 3 else 0.5
+    for g in np.arange(math.floor((cx - span / 2) / grid) * grid, cx + span / 2, grid):
+        x = size / 2 + (g - cx) * scale
+        _stroke(canvas, [(x, top), (x, top + size)], (0.36, 0.37, 0.40), 1.0)
+    for g in np.arange(math.floor((cy - span / 2) / grid) * grid, cy + span / 2, grid):
+        y = top + size / 2 - (g - cy) * scale
+        _stroke(canvas, [(0, y), (size, y)], (0.36, 0.37, 0.40), 1.0)
+    for i, sup in enumerate(curves["support"]):
+        if i % 6 == 0 and len(sup) >= 3:
+            s = np.array(sup + [sup[0]])
+            _stroke(canvas, to_px(np.c_[s, np.zeros(len(s))]), (0.5, 0.5, 0.52), 1.0, alpha=0.6)
+    if "tip" in tr:
+        _stroke(canvas, to_px(tr["tip"]), (0.8, 0.8, 0.82), 1.0, alpha=0.7)
+    for s, col in (("l", LEFT), ("r", RIGHT)):
+        _stroke(canvas, to_px(tr["ball_" + s]), col, 1.2, alpha=0.7)
+        _stroke(canvas, to_px(tr["heel_" + s]), col, 1.0, dash=3.0, alpha=0.6)
+        for st in res["stances"]:
+            if st["foot"] != s:
+                continue
+            seg = to_px(tr["ball_" + s][st["from"]:st["to"] + 1])
+            _stroke(canvas, seg, col, 6.0)
+            _say(canvas, labels, f"{st['slideMm']:.0f}mm", seg[0][0] + 6, seg[0][1] - 8, col)
+    _stroke(canvas, to_px(np.array(curves["com"])), (0.05, 0.05, 0.06), 2.0)
+    if "tip" in tr:
+        for st in res["strikes"]:
+            if st["by"] != "prop":
+                continue
+            p = to_px(tr["tip"][st["frame"]:st["frame"] + 1])[0]
+            for dy, dx in _offsets(5.5):
+                y, x = int(p[1]) + dy, int(p[0]) + dx
+                if 0 <= y < canvas.shape[0] and 0 <= x < size:
+                    canvas[y, x, :3] = BEAT
+            _say(canvas, labels, f"f{st['frame']} {st['speed']}m/s", p[0] + 8, p[1] + 2, BEAT)
+    _say(canvas, labels, title + ": top down, forward up", 8, 6)
+    x = 8
+    for text, col in (("left foot", LEFT), ("right foot", RIGHT), ("thick: planted, its slide", INK), ("black: centre of mass", INK),
+                      ("grey: support, prop tip", GREY), (f"grid {grid} m", GREY)):
+        x += _say(canvas, labels, text, x, size + top + 6, col) + 14
+    return canvas
+
+
+def _curves(labels, res, curves, beats, title, width=920, panel=170):
+    n = res["frames"]
+    left, top = 64, 30
+    panels = 4
+    canvas = _blank(width, top + panels * (panel + 26) + 24)
+    _say(canvas, labels, title + ": speeds, jerk, joint angles and balance by frame; orange: beats", 8, 4)
+
+    def frame_x(f):
+        return left + (width - left - 12) * f / max(1, n - 1)
+
+    def plot(row, series, lo, hi, name, unit_text, guide=None):
+        y0 = top + row * (panel + 26) + 22
+        canvas[y0:y0 + panel, left:width - 12, :3] = (0.25, 0.26, 0.29)
+        for b in beats:
+            if 0 <= b < n:
+                _stroke(canvas, [(frame_x(b), y0), (frame_x(b), y0 + panel)], BEAT, 1.0, alpha=0.45)
+
+        def y_of(v):
+            return y0 + panel - (np.clip(v, lo, hi) - lo) / max(1e-9, hi - lo) * panel
+
+        if guide is not None:
+            _stroke(canvas, [(left, y_of(guide)), (width - 12, y_of(guide))], (0.9, 0.3, 0.3), 1.0, dash=4.0)
+        x = left
+        for label, values, col in series:
+            v = np.array([np.nan if q is None else q for q in values], float)
+            ok = ~np.isnan(v)
+            for a, b in _runs_of(ok):
+                _stroke(canvas, np.stack([frame_x(np.arange(a, b + 1)), y_of(v[a:b + 1])], 1), col, 1.4)
+            x += _say(canvas, labels, label, x, y0 - 21, col) + 12
+        _say(canvas, labels, f"{hi:g} {unit_text}".strip() + " ", 6, y0 - 2, GREY)
+        _say(canvas, labels, f"{lo:g} {unit_text}".strip() + " ", 6, y0 + panel - 18, GREY)
+        _say(canvas, labels, name, width - 12 - 8 * len(name) - 10, y0 - 21, GREY)
+
+    sp = [("hand_r", "right hand", RIGHT), ("hand_l", "left hand", LEFT), ("foot_r", "right foot", (0.75, 0.3, 0.55)),
+          ("foot_l", "left foot", (0.2, 0.62, 0.5)), ("Head", "head", (0.85, 0.85, 0.88)), ("pelvis", "pelvis", (0.1, 0.1, 0.1))]
+    if "tip" in curves:
+        sp.append(("tip", "prop tip", BEAT))
+    top_speed = max(max(curves[k]["speed"]) for k, _, _ in sp if k in curves)
+    plot(0, [(lab, curves[k]["speed"], c) for k, lab, c in sp if k in curves], 0, round(max(2.0, top_speed) + 0.5), "speed", "m/s")
+    lj = [(lab, np.log10(1 + np.array(curves[k]["jerk"])).tolist(), c) for k, lab, c in sp if k in curves]
+    plot(1, lj, 0, 5, "jerk, log10(1 + m/s3)", "log")
+    ang = curves["angles"]
+    plot(2, [("knee l", ang["knee_flex_l"], (0.2, 0.62, 0.5)), ("knee r", ang["knee_flex_r"], (0.75, 0.3, 0.55)),
+             ("elbow l", ang["elbow_flex_l"], LEFT), ("elbow r", ang["elbow_flex_r"], RIGHT),
+             ("spine twist", ang["spine_twist"], (0.1, 0.1, 0.1)), ("neck turn", ang["neck_turn"], (0.85, 0.85, 0.88))], -90, 160, "joint angles", "deg", guide=0)
+    xo = [None if d is None else d * 100 for d in curves["xcomOut"]]
+    plot(3, [("XCoM outside support (cm), gaps: airborne", xo, (0.95, 0.35, 0.35))], 0, max(20, round(max([v for v in xo if v is not None] or [0]) + 5)),
+         "balance", "cm", guide=5)
+    return canvas
+
+
+def _runs_of(flags):
+    out, k, n = [], 0, len(flags)
+    while k < n:
+        if not flags[k]:
+            k += 1
+            continue
+        j = k
+        while j + 1 < n and flags[j + 1]:
+            j += 1
+        out.append((k, j))
+        k = j + 1
+    return out
+
+
+def motion_pictures(arm, body, act, res, curves, beats, notes, out, title, motion):
+    """game_animate's four pictures of a clip on its character, written under out; their paths."""
+    folder = tempfile.mkdtemp(prefix="kurambit-motion-")
+    before = {t: set(getattr(bpy.data, t)) for t in ID_TYPES}
+    window = bpy.context.window
+    shown = window.scene if window is not None else None
+    live = bpy.context.scene
+    made = []
+    try:
+        sc = bpy.data.scenes.new("kurambit_motion")
+        sc.render.fps, sc.render.fps_base = live.render.fps, live.render.fps_base
+        for o in [arm, *body.meshes]:
+            sc.collection.objects.link(o)
+        cam = bpy.data.objects.new("kurambit_motion_cam", bpy.data.cameras.new("kurambit_motion_cam"))
+        cam.data.type = "ORTHO"
+        sc.collection.objects.link(cam)
+        sc.camera = cam
+        world = bpy.data.worlds.new("kurambit_motion_world")
+        world.color = (0.30, 0.31, 0.34)
+        sc.world = world
+        tr = curves["track"]
+        points = np.concatenate([np.array(v) for v in tr.values()])
+        floor_ob = _floor(sc, 4 * float(np.ptp(points[:, :2], axis=0).max() + 4), made)
+        labels = Labels(folder)
+        if window is not None:
+            window.scene = sc
+        skeleton.assign_action(arm, act)
+        f0 = int(round(act.frame_range[0]))
+        n = res["frames"]
+        sheet, _ = _contact_sheet(sc, cam, floor_ob, folder, labels, f0, n, beats, notes, points, f"{title}: {n} frames, {res['seconds']} s")
+        onion = _onion(sc, cam, floor_ob, folder, labels, f0, n, beats, points)
+        os.makedirs(out, exist_ok=True)
+        pictures = (("contact_sheet", sheet), ("onion", onion), ("footprint", _footprint(labels, res, curves, title)),
+                    ("curves", _curves(labels, res, curves, beats, title)))
+        return [(_save(c, os.path.join(out, name + ".png")), (c.shape[1], c.shape[0])) for name, c in pictures]
+    finally:
+        if window is not None:
+            window.scene = shown
+        added = [x for t in ID_TYPES for x in getattr(bpy.data, t) if x not in before[t]]
+        for x in added:
+            if isinstance(x, bpy.types.Scene):
+                bpy.data.scenes.remove(x)
+        bpy.data.batch_remove([x for x in added if not isinstance(x, bpy.types.Scene)])
+        shutil.rmtree(folder, ignore_errors=True)
