@@ -189,22 +189,23 @@ export const withKeepGoing = (agents: string, engine: GameEngineId): string => {
 
 /**
  * The game chat's first message: the brief, sent as the person's own, so they
- * see exactly what the agent was told. It names AGENTS.md because some
- * providers (Grok, Antigravity) do not load it by themselves.
+ * see exactly what the agent was told, then one instruction line. That line
+ * names AGENTS.md because some providers (Grok, Antigravity) do not load it by
+ * themselves.
  */
 const FIRST_TURN_LEADS = [
   "Make this game. Read AGENTS.md first.",
   'Make this game. Follow "The first turn" in AGENTS.md.',
 ] as const;
 
-/** The instruction line before the brief, which names no game, so a build's summary skips it. */
+/** The first turn's instruction line, which names no game, so a build's summary skips it. */
 export const isFirstTurnLead = (line: string): boolean =>
   (FIRST_TURN_LEADS as ReadonlyArray<string>).includes(line);
 
 export const firstTurnMessage = (manifest: GameManifest): string => {
   const lead = FIRST_TURN_LEADS[FIRST_TURN_SECTIONS[manifest.engine.name] === undefined ? 0 : 1];
   const art = manifest.artDirection.trim();
-  return `${lead}\n\n${manifest.brief.trim()}${art === "" ? "" : `\n\nArt direction: ${art}`}`;
+  return `${manifest.brief.trim()}${art === "" ? "" : `\n\nArt direction: ${art}`}\n\n${lead}`;
 };
 
 /**
