@@ -221,7 +221,7 @@ const spanText = (files: ReadonlyArray<string>) =>
   files.length === 1 ? files[0]! : `${files[0]} … ${NodePath.basename(files.at(-1)!)}`;
 
 /** Where the agent's own words start on a provenance line; a re-render keeps what follows. */
-const FILL_MARKERS = ["Depicts / loaded by: ", "Loaded by: "];
+const FILL_MARKERS = ["Depicts / loaded by: ", "Depicts: ", "Loaded by: "];
 const suffixOf = (line: string) => {
   for (const marker of FILL_MARKERS) {
     const at = line.lastIndexOf(marker);

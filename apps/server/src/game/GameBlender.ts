@@ -1957,11 +1957,15 @@ const make = Effect.gen(function* () {
           yield* writeText(
             NodePath.join(directory, NodePath.posix.basename(sidecar)),
             sidecarText(
-              sidecarOf(candidate, {
-                name: NodePath.posix.basename(file),
-                sha256: glb.sha256,
-                bytes: glb.bytes,
-              }),
+              sidecarOf(
+                candidate,
+                {
+                  name: NodePath.posix.basename(file),
+                  sha256: glb.sha256,
+                  bytes: glb.bytes,
+                },
+                characterRoute(manifest),
+              ),
             ),
             "blender-export",
           );

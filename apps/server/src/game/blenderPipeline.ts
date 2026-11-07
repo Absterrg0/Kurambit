@@ -232,17 +232,11 @@ export const subjectName = (name: string) =>
     .replace(/^_+|_+$/g, "")
     .slice(0, 64) || "model";
 
-/** The route an asset's body came by (a prop's: its first part's). */
-const routeOf = (parts: ReadonlyArray<GameAssetPart>): GameAssetSource["route"] => {
-  const lead = parts.find((part) => part.what === "body") ?? parts[0];
-  if (lead === undefined || lead.from === "made" || lead.from === "mpfb2") return "blender";
-  return lead.from === "tripo" ? "tripo" : "library";
-};
-
 /** `<stem>.asset.json` beside the GLB, as the export writes it. */
 export const sidecarOf = (
   candidate: Candidate,
   glb: { readonly name: string; readonly sha256: string; readonly bytes: number },
+  route: GameAssetSource["route"],
 ): GameModelSidecar => ({
   version: 1,
   model: glb.name,
@@ -251,7 +245,7 @@ export const sidecarOf = (
   ...candidate.measured,
   measured: { kit: candidate.kit, key: candidate.key, reviewedAt: candidate.at },
   source: {
-    route: routeOf(candidate.parts),
+    route,
     parts: candidate.parts,
     standIn: null,
     concept: candidate.concept,
@@ -275,7 +269,7 @@ const partText = (part: GameAssetPart) => {
 
 /** The ASSETS.md line of one export: where every part came from, from the stamps. */
 export const ledgerLine = (file: string, candidate: Candidate) =>
-  `- \`${file}\` — made in Blender by game_blender_export, with its sidecar \`${NodePath.posix.basename(sidecarPathOf(file))}\`: ${[...new Set(candidate.parts.map(partText))].join(", ")}. Depicts / loaded by: (fill in).`;
+  `- \`${file}\` — made in Blender by game_blender_export, with its sidecar \`${NodePath.posix.basename(sidecarPathOf(file))}\`: ${[...new Set(candidate.parts.map(partText))].join(", ")}. Depicts: ${candidate.subject}.`;
 
 const LOCOMOTION = /walk|run|jog|sprint/i;
 /** Clips whose first and last poses should agree. */
