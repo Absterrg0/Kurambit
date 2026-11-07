@@ -275,7 +275,9 @@ const routeRefusalOf = (candidate: Candidate, route: GameCharacterRoute) =>
     ? null
     : candidate.parts.some((part) => part.from === "mpfb2")
       ? lockCharacterRouteRefusal("mpfb-body", route)
-      : candidate.parts.some((part) => part.ai && part.what !== "parts" && part.what !== "texture")
+      : // The body or a creature's own rig: a generated prop it holds (a sword, a hat) is no character.
+        candidate.parts.some((part) => part.ai && part.what === "body") ||
+          Object.keys(candidate.creatures ?? {}).length > 0
         ? lockCharacterRouteRefusal("generated-body", route)
         : candidate.parts.some((part) => part.from === "made" && part.what !== "clips")
           ? lockCharacterRouteRefusal("unstamped-mesh", route)
