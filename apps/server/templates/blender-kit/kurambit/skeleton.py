@@ -59,6 +59,20 @@ def skin_joints(doc):
     return out
 
 
+def clip_rate(doc):
+    """The frame rate a glTF's clips were sampled at (the commonest over its animations), or None.
+    An animation input's accessor carries its count and max (the glTF spec requires both)."""
+    votes = {}
+    accessors = doc.get("accessors", [])
+    for anim in doc.get("animations", []):
+        a = max((accessors[s["input"]] for s in anim.get("samplers", [])), key=lambda x: x.get("count", 0), default=None)
+        if a is None or a.get("count", 0) < 3 or not a.get("max") or a["max"][0] <= 0:
+            continue
+        rate = round((a["count"] - 1) / a["max"][0])
+        votes[rate] = votes.get(rate, 0) + 1
+    return max(votes, key=votes.get) if votes else None
+
+
 def standard_joints(standard_glb):
     """The standard skeleton's joints, read from the standard armature's own file."""
     return skin_joints(gltf_json(standard_glb))
@@ -346,6 +360,21 @@ def fit_clip(action, ratio):
                 k.co.y *= ratio
                 k.handle_left.y *= ratio
                 k.handle_right.y *= ratio
+
+
+def retime(action, k):
+    """Stretches an action's keys (and its manual frame range) by k, so it lasts as many seconds
+    at a frame rate k times the old one."""
+    for fc in action_fcurves(action):
+        for key in fc.keyframe_points:
+            key.co.x *= k
+            key.handle_left.x *= k
+            key.handle_right.x *= k
+        fc.update()
+    if action.use_frame_range:
+        start, end = action.frame_start * k, action.frame_end * k
+        for name, value in (("frame_end", end), ("frame_start", start)) if k > 1 else (("frame_start", start), ("frame_end", end)):
+            setattr(action, name, value)  # in this order neither clamps the other
 
 
 def assign_action(arm, action):

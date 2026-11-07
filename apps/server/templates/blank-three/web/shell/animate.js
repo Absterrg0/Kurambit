@@ -27,9 +27,12 @@
 //     // moveSpeed / its measured ground speed, so the feet stay planted
 //   hero.spring("tail", { stiffness: 0.09, damping: 0.14, gravity: 4 }); // retune a chain
 //   hero.lookAt(target.position);         // the head turns toward a point; null: ahead
+//   hero.blink();                         // blink now (a face blinks on its own anyway)
 // The sidecar's spring chains (a tail, ears) swing on their own from the
 // start; spring(["bone_a", "bone_b"], opts) adds a chain to any model, root
-// to tip. A model with no measured ground speed plays at `speed` (default 1).
+// to tip. A sidecar face (eye bones from the kit's eye helpers) blinks every
+// 2-6 s, sometimes twice. A model with no measured ground speed plays at
+// `speed` (default 1).
 import * as THREE from "../vendor/three.module.js";
 
 const ROLES = {
@@ -87,6 +90,14 @@ const _v3 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _q3 = new THREE.Quaternion();
+const AXES = {
+  x: new THREE.Vector3(1, 0, 0),
+  y: new THREE.Vector3(0, 1, 0),
+  z: new THREE.Vector3(0, 0, 1),
+};
+// How shut the eyes are, one value a frame at 24 fps: 3 frames closing, 1 held, 4 opening.
+const BLINK = [0, 0.35, 0.8, 1, 1, 0.75, 0.45, 0.2, 0];
+const BLINK_SECONDS = (BLINK.length - 1) / 24;
 
 // Bones only: a mesh may share a bone's name ("Head").
 const findBone = (root, name) => {
@@ -242,6 +253,60 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     gaze.wrote.copy(bone.quaternion);
     gaze.written = true;
   };
+  // The sidecar's face: each blink bone keyed on top of the clips, restored first like the gaze.
+  const blinks = (asset?.face?.blink ?? [])
+    .map((part) => ({
+      ...part,
+      bone: findBone(root, part.bone),
+      baseQ: new THREE.Quaternion(),
+      baseS: new THREE.Vector3(),
+      wroteQ: new THREE.Quaternion(),
+      wroteS: new THREE.Vector3(),
+      written: false,
+    }))
+    .filter((part) => part.bone !== null && AXES[part.axis] !== undefined);
+  const blinking = { t: -1, wait: 2 + Math.random() * 4, again: false };
+  const settleBlink = (dt) => {
+    if (blinks.length === 0) return;
+    if (blinking.t < 0 && (blinking.wait -= dt) <= 0) {
+      blinking.t = 0;
+      blinking.again = Math.random() < 0.25;
+    }
+    let shut = 0;
+    if (blinking.t >= 0) {
+      const f = Math.min(blinking.t * 24, BLINK.length - 1);
+      const i = Math.min(Math.floor(f), BLINK.length - 2);
+      shut = BLINK[i] + (BLINK[i + 1] - BLINK[i]) * (f - i);
+      blinking.t += dt;
+      if (blinking.t >= BLINK_SECONDS) {
+        blinking.t = -1;
+        blinking.wait = blinking.again ? 0.12 : 2 + Math.random() * 4;
+        blinking.again = false;
+      }
+    }
+    for (const part of blinks) {
+      const { bone } = part;
+      if (part.written && bone.quaternion.equals(part.wroteQ) && bone.scale.equals(part.wroteS)) {
+        bone.quaternion.copy(part.baseQ);
+        bone.scale.copy(part.baseS);
+      }
+      part.baseQ.copy(bone.quaternion);
+      part.baseS.copy(bone.scale);
+      part.written = shut > 0;
+      if (!part.written) continue;
+      if (part.kind === "turn")
+        bone.quaternion.multiply(_q1.setFromAxisAngle(AXES[part.axis], part.amount * shut));
+      else if (part.kind === "squash")
+        bone.scale.setComponent(
+          "xyz".indexOf(part.axis),
+          part.baseS.getComponent("xyz".indexOf(part.axis)) * (1 + (part.amount - 1) * shut),
+        );
+      // Highlights gone by mid-blink, or they leave a streak on the closed eye.
+      else bone.scale.copy(part.baseS).multiplyScalar(Math.max(1e-4, 1 - 2 * shut));
+      part.wroteQ.copy(bone.quaternion);
+      part.wroteS.copy(bone.scale);
+    }
+  };
   const unmeasured = new Set();
   const rate = (action, options) => {
     if (options.moveSpeed === undefined) return options.speed ?? 1;
@@ -370,10 +435,19 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       gaze.rate = rate;
       return animator;
     },
-    /** After the mixer: springs, then the gaze. The shell calls it. */
+    /** Blink now; a model whose sidecar has no face has nothing to blink. */
+    blink() {
+      if (blinking.t < 0) {
+        blinking.t = 0;
+        blinking.again = false;
+      }
+      return animator;
+    },
+    /** After the mixer: springs, the gaze, then the blink. The shell calls it. */
     settle(dt) {
       for (const chain of springs) chain.update(dt);
       settleGaze(dt);
+      settleBlink(dt);
     },
     /** Back to playing after die (a respawn). */
     revive() {
@@ -410,7 +484,8 @@ export function animate(gltf, { fade = 0.2 } = {}) {
           .join(" ") +
         (springs.length === 0
           ? ""
-          : `; springs ${springs.map((chain) => chain.name ?? chain.key).join(", ")}`),
+          : `; springs ${springs.map((chain) => chain.name ?? chain.key).join(", ")}`) +
+        (blinks.length === 0 ? "" : `; blinks ${blinks.map((part) => part.bone.name).join(", ")}`),
     );
   live.add(animator);
   animator.play("idle");

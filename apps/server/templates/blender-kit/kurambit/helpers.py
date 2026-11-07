@@ -1,5 +1,6 @@
 """Helpers for modelling parts and keying clips on a conformed character: skin_rigid, ring_around,
-tube_along_bones, place_on_surface, aim and key_pose, plus material and place_chain.
+tube_along_bones, place_on_surface, aim and key_pose, plus material and place_chain, and the
+eyes that blink by bones: eye_lid and eye_squash.
 
 Every helper works in world space on the character's rest pose (what the export binds to), even
 while a clip poses it in the viewport. The Blender traps live here, not in the agent's code:
@@ -7,6 +8,7 @@ bone references are fetched again after every edit-mode switch, and geometry is 
 import json
 import math
 
+import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix, Quaternion, Vector
@@ -430,3 +432,123 @@ def place_chain(armature, chain, points=None, *, start=None, direction=None, len
             eb[bone].head = inv @ Vector(points[i])
             eb[bone].tail = inv @ Vector(points[i + 1])
     return {"chain": chain, "bones": bones, "parent": parent}
+
+
+# ---- eyes that blink by bones (face.py reads them for the sidecar) -------------------------------
+
+def _eye_frame(eye, look):
+    """The eye's centre and radius (from its rest bounds), and (look, up, side) unit vectors."""
+    co, _ = rest_coords(eye)
+    if len(co) == 0:
+        raise ValueError(f"{eye.name} has no vertices")
+    lo, hi = co.min(axis=0), co.max(axis=0)
+    centre = Vector(((lo + hi) / 2).tolist())
+    d = Vector(look).normalized()
+    up = Vector((0, 0, 1))
+    up = (up - d * up.dot(d)).normalized()
+    radius = float(max(hi - lo)) / 2
+    return centre, radius, d, up, d.cross(up)
+
+
+def _blink_bone(arm, name, parent, head, d, up, length):
+    """A deforming bone along d (the eye's look) with its z toward up, under parent."""
+    inv = arm.matrix_world.inverted()
+    with skeleton.edit_bones(arm) as eb:
+        b = eb.get(name) or eb.new(name)
+        b.head = inv @ head
+        b.tail = inv @ (head + d * length)
+        b.align_roll(inv.to_3x3() @ up)
+        b.parent = eb[parent]
+        b.use_connect = False
+        b.use_deform = True
+    return name
+
+
+def _side(side):
+    if not (isinstance(side, str) and side.isalnum() and side.islower() and 0 < len(side) <= 8):
+        raise ValueError(f"side {side!r}: one short lowercase word, such as 'l' or 'r'")
+    return side
+
+
+def _bound(obj, arm):
+    return obj.parent == arm or arm in _deforming(obj)
+
+
+def eye_lid(eye, side, *, armature=None, look=(0, -1, 0), open_deg=125.0, cover_deg=100.0, thick=None, material=None):
+    """Round eyes that stand out of the head: an upper lid over eye (a sphere you modelled and
+    placed) that the game shuts to blink. The lid is a shell at 1.085x the eye's radius covering
+    cover_deg around the eye's look direction, turned open by open_deg toward the face's up (open
+    high: low lids read grumpy), on its own bone blink_lid_<side> under Head and bound 100% to it.
+    The eye is bound to Head if nothing binds it yet. Then it measures how the lid shuts, by rays over
+    the eye, and returns that blink ({bone, kind, axis, amount}); a lid that never covers the eye is
+    refused. The sidecar's face carries it, and the game blinks it on its own."""
+    from . import face
+
+    arm = _armature(armature) if armature is not None else armature_of("Head")
+    side = _side(side)
+    centre, radius, d, up, s = _eye_frame(eye, look)
+    if not _bound(eye, arm):
+        skin_rigid(eye, "Head", armature=arm)
+    shell = 1.085 * radius
+    t = thick if thick is not None else 0.07 * radius
+    rings, segs = 10, 24
+    verts, faces = [], []
+    for layer, r in enumerate((shell, shell + t)):
+        for i in range(rings + 1):
+            polar = math.radians(cover_deg) * i / rings
+            for j in range(segs):
+                az = 2 * math.pi * j / segs
+                out = d * math.cos(polar) + (s * math.cos(az) + up * math.sin(az)) * math.sin(polar)
+                verts.append(centre + out * r)
+    per = (rings + 1) * segs
+    for layer in (0, per):
+        for i in range(rings):
+            for j in range(segs):
+                a, b = layer + i * segs + j, layer + i * segs + (j + 1) % segs
+                quad = (a, b, b + segs, a + segs)
+                faces.append(quad if layer else quad[::-1])
+    for j in range(segs):  # the rim joins the two layers
+        a, b = rings * segs + j, rings * segs + (j + 1) % segs
+        faces.append((a, b, b + per, a + per))
+    opened = Matrix.Translation(centre) @ Matrix.Rotation(math.radians(open_deg), 4, s) @ Matrix.Translation(-centre)
+    me = bpy.data.meshes.new(f"lid_{side}")
+    me.from_pydata([tuple(opened @ v) for v in verts], [], faces)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)  # outward, or a one-sided engine shows the lid's inside
+    bm.to_mesh(me)
+    bm.free()
+    me.shade_smooth()
+    lid = _link(bpy.data.objects.new(me.name, me))
+    if material is not None:
+        me.materials.append(material)
+    bone = _blink_bone(arm, f"blink_lid_{side}", "Head", centre, d, up, 1.5 * radius)
+    skin_rigid(lid, bone, armature=arm)
+    blink = face.blink_of(arm, bone)
+    if blink is None:
+        raise ValueError(f"the lid on {eye.name} never covers it when turned: check look (the way the eye faces) and cover_deg")
+    return blink
+
+
+def eye_squash(eye, side, *, shine=(), armature=None, look=(0, -1, 0)):
+    """Painted-on (flat) eyes, where a lid would float in front of the face: the game blinks by
+    squashing the eye along the face's up axis on its own bone blink_eye_<side> under Head, and
+    hiding its highlights (shine: their objects, modelled apart from the eye) on blink_shine_<side>,
+    a child of it. Each part is bound 100% to its bone. Returns the blinks ({bone, kind, axis, amount}),
+    the squash axis measured off the bone."""
+    from . import face
+
+    arm = _armature(armature) if armature is not None else armature_of("Head")
+    side = _side(side)
+    centre, radius, d, up, _ = _eye_frame(eye, look)
+    bone = _blink_bone(arm, f"blink_eye_{side}", "Head", centre, d, up, max(radius, 0.005))
+    skin_rigid(eye, bone, armature=arm)
+    out = [face.blink_of(arm, bone)]
+    shine = list(shine)
+    if shine:
+        at = sum((_eye_frame(o, look)[0] for o in shine), Vector()) / len(shine)
+        lit = _blink_bone(arm, f"blink_shine_{side}", bone, at, d, up, max(radius / 2, 0.003))
+        for o in shine:
+            skin_rigid(o, lit, armature=arm)
+        out.append(face.blink_of(arm, lit))
+    return out

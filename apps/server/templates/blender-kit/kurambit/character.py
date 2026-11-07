@@ -8,6 +8,7 @@ params (the server resolves every path):
     clips     [{pack, name, path, licence?}]
     chains    [{name, parent, bones, direction, length, mirror?}]
     replace   rebuild the body and armature of an existing <name>, re-binding its other objects
+    fit       {arms?, calm?} | None: fit.fit() on every library clip, after the conform
 """
 import importlib
 import json
@@ -17,7 +18,7 @@ import re
 import bpy
 from mathutils import Vector
 
-from . import helpers, skeleton
+from . import fit, helpers, skeleton
 from .protocol import Refused, entry
 
 MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the game)"
@@ -192,6 +193,22 @@ def character(params):
     notes = []
     carried = []
 
+    # The clips keep their own frame rate: imported at another, a 30 fps clip lands between frames
+    # and the export resamples it (a 28-frame jog became 22 frames, its last cut off the loop).
+    rates = {skeleton.clip_rate(skeleton.gltf_json(p)) for p in {c["path"] for c in params.get("clips", [])} if os.path.isfile(p)} - {None}
+    render = bpy.context.scene.render
+    if rates:
+        rate = min(rates)
+        if render.fps != rate or render.fps_base != 1.0:
+            was = render.fps / render.fps_base
+            # Every clip already in the scene keeps its seconds: its keys move to the new rate.
+            for act in bpy.data.actions:
+                skeleton.retime(act, rate / was)
+            notes.append(f"the scene now runs at {rate} fps, the library clips' own rate (it was {was:g}; clips already here keep their timing): key your own clips at {rate} fps")
+            render.fps, render.fps_base = rate, 1.0
+        if len(rates) > 1:
+            notes.append(f"the clips were made at {', '.join(str(r) for r in sorted(rates))} fps: those not at {rate} are resampled")
+
     # The standard armature first: every check below reads its joints.
     standard = params["standard"]
     std_new, std_actions = skeleton.import_gltf(standard)
@@ -269,6 +286,8 @@ def character(params):
     if packs:
         stamp(arm, "clips", packs[0]["from"], packs[0]["licence"])
     arm["kurambit_clips"] = json.dumps(packs)
+    if params.get("fit"):
+        notes += fit.fit(arm, meshes, [a for a, _, _ in taken], params["fit"])
     arm["kurambit_standard_rest"] = json.dumps(skeleton.local_rest(skeleton.gltf_json(standard)))
 
     chains = {}

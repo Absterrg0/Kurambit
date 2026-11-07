@@ -141,7 +141,9 @@ from its sidecar knows more: `hero.play("run", { moveSpeed })` plays at the
 speed the body moves over the clip's measured ground speed, so the feet stay
 planted; its spring chains (a tail, ears) swing on their own, and
 `hero.spring("tail", { stiffness, damping, gravity })` retunes one;
-`hero.lookAt(point)` turns the head. `locomotion(hero, { walk, run })`
+`hero.lookAt(point)` turns the head; a sidecar `face` (eyes made with the
+Blender kit's `eye_lid` or `eye_squash`) blinks on its own every 2–6 s, and
+`hero.blink()` blinks now. `locomotion(hero, { walk, run })`
 (`web/shell/locomotion.js`) drives it: call `loco.update({ speed, grounded,
 vy, dt })` every frame with the speed the body really moved, and
 `loco.act("attack")` for a one-shot move. The console's `animate:` line names
