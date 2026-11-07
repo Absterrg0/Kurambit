@@ -99,9 +99,11 @@ function position(player) {
  * Publishes window.__studio. `player()` returns the run's player (an Object3D
  * or {x,y,z}) or null, `setState` is the game's own, `hold(on)` freezes play
  * and sound while the stage tab is hidden and returns whether sound is muted,
- * `perf()` reads the look's play stats.
+ * `perf()` reads the look's play stats. `bridge`, when the shell has one
+ * (shell/stage-bridge.js), is announced in studio-ready: a shell without it
+ * posts the bare boot signal, and the Stage then offers no selecting.
  */
-export function installStudio({ ui, player, setState, hold, perf }) {
+export function installStudio({ ui, player, setState, hold, perf, bridge }) {
   let ready = false;
   const studio = {
     engine: "three",
@@ -111,7 +113,7 @@ export function installStudio({ ui, player, setState, hold, perf }) {
       return ready;
     },
     set ready(value) {
-      if (value === true && !ready) toStage({ type: "studio-ready" });
+      if (value === true && !ready) toStage({ type: "studio-ready", ...(bridge?.hello ?? {}) });
       ready = value === true;
     },
     errors,

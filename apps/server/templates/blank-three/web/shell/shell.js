@@ -27,6 +27,8 @@
 // the player can rebind: input.down("jump"), input.pressed("action"),
 // input.vector(); the table and the calls are in shell/controls.js), keys
 // (raw keys, kept for older games: keys.down("KeyW"), keys.pressed("Space")),
+// thing(object, { name, kind }) and tune(id, defaults, ranges) for the Stage
+// (selecting things and tuning their values live; shell/stage-bridge.js),
 // mouse (x, y in canvas pixels, ndc.x / ndc.y from -1 to 1 for a Raycaster,
 // movement.x / movement.y this frame, also under pointer lock, and
 // down(button) / pressed(button), 0 the left button), listen(target, type,
@@ -43,6 +45,7 @@
 // Restyle the screens in index.html and style.css.
 import * as THREE from "../vendor/three.module.js";
 import { installStudio } from "./studio.js";
+import { createStageBridge, loadTuning } from "./stage-bridge.js";
 import {
   GameState,
   hasProgress,
@@ -56,7 +59,7 @@ import { animateShell } from "./animate.js";
 import { cameraShell } from "./camera.js";
 import { createLook } from "./look.js";
 import { createHud } from "./hud.js";
-import { assets, preloadAssets } from "./assets.js";
+import { assets, onModelCopy, preloadAssets } from "./assets.js";
 import { createControls, createInput } from "./controls.js";
 import {
   VOLUME_NAMES,
@@ -113,6 +116,9 @@ let endBeat = 0;
 let ending = null;
 let endSerial = 0;
 let held = false;
+// Play holds while the Stage's tab is hidden or the Stage has frozen it.
+let hidden = false;
+let frozen = false;
 let redraw = true;
 let hadPointerLock = false;
 /** The action whose key the Controls screen is waiting for, or null. */
@@ -165,6 +171,10 @@ function newContext() {
     after(seconds, fn) {
       timers.push({ left: seconds, fn });
     },
+    /** Names an object (or null: a rule, the music, a difficulty) so the Stage can select it. */
+    thing: (object, options) => bridge.thing(object, options),
+    /** The live values of a thing: web/tune.json over these defaults, changed live by the Stage. */
+    tune: (id, defaults, ranges) => bridge.tune(id, defaults, ranges),
   };
   ctx.look = look.forRun(ctx);
   return { ctx, input, down, pressed, buttons, clicked, listeners, timers, reported: false };
@@ -212,6 +222,7 @@ function clearRun() {
   animateShell.reset();
   cameraShell.reset();
   look.reset();
+  bridge.reset();
   if (run !== null) {
     const ended = run;
     run = null;
@@ -756,20 +767,52 @@ function fit(camera, aspect) {
   }
 }
 
+function applyHold() {
+  held = hidden || frozen;
+  releaseKeys();
+  return holdAudio(held);
+}
+
+const bridge = createStageBridge({
+  canvas,
+  renderer,
+  view: () => {
+    const shown = run?.ctx ?? titleCtx;
+    return shown?.camera?.isCamera === true ? { scene: shown.scene, camera: shown.camera } : null;
+  },
+  freeze(on) {
+    frozen = on;
+    // The pointer is the Stage's while frozen; giving up the lock is not the pause press.
+    if (on && document.pointerLockElement != null) {
+      hadPointerLock = false;
+      document.exitPointerLock?.();
+    }
+    applyHold();
+  },
+  redraw: () => (redraw = true),
+  drawClean() {
+    if (run?.compiling === true) return;
+    look.update();
+    draw(0);
+  },
+});
+onModelCopy(bridge.assetCopy);
+
 const studio = installStudio({
   ui,
   perf: () => look.stats(),
   player: () => run?.ctx.player ?? null,
   setState: (target, values) => game.setState?.(target, values, run?.ctx ?? null),
   hold(on) {
-    held = on;
-    releaseKeys();
-    return holdAudio(on);
+    hidden = on;
+    return applyHold();
   },
+  bridge,
 });
 
 loadSettings();
 loadProgress(KEEP);
+await loadTuning();
 // Before the loop starts, so studio.ready (the harness's boot signal) waits for the assets,
 // the game's own prepare and the shader warm-up too.
 const assetCount = Object.keys(game.ASSETS ?? {}).length;
@@ -861,8 +904,15 @@ renderer.setAnimationLoop((now) => {
   // A frozen frame stays on the canvas; nothing redraws until something moves.
   if (redraw && run?.compiling !== true) {
     look.update();
-    look.frame(() => draw(dt), { playing: moving && GameState.state === "playing", realMs });
+    look.frame(
+      () => {
+        draw(dt);
+        bridge.overlay();
+      },
+      { playing: moving && GameState.state === "playing", realMs },
+    );
     redraw = false;
   }
+  bridge.tick(dt);
   studio.ready = true;
 });
