@@ -226,16 +226,72 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
    - **Accessories** are big enough to read at game distance; a strap
      that reads as a line is too thin.
 
-4. **Custom clips** with `kurambit.key_pose("Pounce", frame, {"base":
-"Idle_Loop", "move": (0, 0, -0.1), "turn": {"pelvis": ((1, 0, 0), 14)},
-"aim": {"upperarm_l": (0.3, -0.75, -0.2)}}, arm)`: on top of a library
-   pose, by world directions (the character faces -Y, +X is its left),
-   never by a bone's local axes. Give it an anticipation key, an overshoot
-   and a settle; keep it in place (the game moves the character).
-   `kurambit.mirror_pose(pose)` keys the other one of a left and right
-   pair (a dodge left from a dodge right) from the same pose.
-   A clip you key with your own code needs `action.use_fake_user = True`:
-   an action nothing uses is not saved, and the review then refuses.
+4. **Moves the clip library lacks.** Use a library clip whenever one fits:
+   mocap commits harder than any authored move. For a move it has no clip
+   for (a combo, a dodge into guard, a stagger), author it with
+   `game_animate`: you write poses on beats as JSON, the kit adds the craft
+   and keys the clip on the character, and every call returns the pictures
+   (contact sheet, onion, footprint, curves) and the numbers beside a library
+   clip on the same body. Read both, change one thing in the spec, call again
+   with the same clip, and stop when neither improves; a warning (hip drop,
+   reach, clearance) means the spec asked for what this body cannot do, so
+   move the feet in, the grip closer or the hips down. One move, as a spec:
+
+   ```json
+   {
+     "name": "HeavyHit",
+     "start": "guard",
+     "poses": {
+       "guard": {
+         "hips": { "at": [0, -0.04, 0.9], "turn": [-12, 4, 0] },
+         "chest": [10, 6, 0],
+         "prop": { "grip": [0.06, 0.42, 1.06], "tip": [-0.05, 0.75, 0.66] },
+         "hand_l": "grip",
+         "foot_l": { "at": [-0.12, 0.12, 0], "yaw": 10, "space": "root" },
+         "foot_r": { "at": [0.15, -0.16, 0], "yaw": -25, "space": "root" }
+       }
+     },
+     "craft": { "overlap": { "chest": [3.2, 0.45, 15], "head": [2.4, 0.35, 22] } },
+     "beats": [
+       { "at": 0, "pose": "guard" },
+       {
+         "at": 2,
+         "note": "impact",
+         "ease": "out",
+         "over": 0.1,
+         "root": [0, -0.06, 0],
+         "hips": { "at": [0, -0.1, 0.86], "turn": [8, -8, 0] },
+         "chest": [0, -24, -6],
+         "head": [5, -28, 8],
+         "hand_l": { "at": [-0.5, 0.1, 1.1] }
+       },
+       {
+         "at": 7,
+         "note": "stagger",
+         "ease": "out",
+         "root": [0, -0.28, -8],
+         "foot_r": { "at": [0.18, -0.58, 0], "yaw": -30 },
+         "foot_l": { "at": [-0.12, 0.12, 0], "heel": 25 }
+       },
+       { "at": 19, "note": "gather", "ease": "inout", "chest": [0, 22, 0], "hand_l": "grip" },
+       { "at": 36, "note": "guard", "pose": "guard", "root": [0, -0.52, 0] },
+       { "at": 42, "note": "hold" }
+     ]
+   }
+   ```
+
+   Body space: x the character's right, y forward, z up, metres; the
+   result's first lines give this body's hips, legs and arms, so write the
+   numbers for it. A held prop is one you modelled in the hand (parented to
+   `hand_r`, or skinned rigidly to it). The clip keeps its travel on the
+   pelvis like the library's (`rootDrift`); its stances and strike windows go
+   into the sidecar at export. For a small change to a library pose,
+   `kurambit.key_pose("Pounce", frame, {"base": "Idle_Loop", "turn":
+{"pelvis": ((1, 0, 0), 14)}}, arm)` keys one pose by world directions (the
+   character faces -Y, +X is its left), and `kurambit.mirror_pose(pose)` the
+   other side; a clip you key with your own code needs
+   `action.use_fake_user = True`, or it is not saved and the review refuses.
+
 5. **Review:** `game_blender_look` with `mode: "review"`. It runs the
    export's style pass and measurement and shows one image: a turnaround,
    silhouettes, the model at game distance, each walk, run, jump and custom

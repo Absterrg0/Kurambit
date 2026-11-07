@@ -210,6 +210,38 @@ export const GameBlenderCharacterResult = Schema.Struct({
 });
 export type GameBlenderCharacterResult = typeof GameBlenderCharacterResult.Type;
 
+/**
+ * game_animate: a move written as poses on beats, compiled onto a standard-skeleton character as a
+ * clip, then measured and pictured beside a library clip.
+ */
+export const GameAnimateInput = Schema.Struct({
+  /** The character's armature in the live scene: game_blender_character's name. */
+  character: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
+  /** The clip's name in the game; animating it again replaces it. */
+  clip: Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]{0,47}$/)),
+  /** The move: {start?, poses?, craft?, beats: [{at, pose?, ease?, ...pose keys}]}, as the tool describes. */
+  spec: Schema.Record(Schema.String, Schema.Unknown),
+  /**
+   * The library clip measured beside it: "Sword_Regular_Combo" or "<pack-id>:<clip>". Omitted:
+   * the clip in the lock's animation packs whose name shares the most words with clip.
+   */
+  bar: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160))),
+});
+export type GameAnimateInput = typeof GameAnimateInput.Type;
+export const GameAnimateResult = Schema.Struct({
+  text: Schema.String,
+  /** The clip as the scene names it: <character>|<clip>; the export names it clip. */
+  action: Schema.String,
+  /** Game-relative folder of this pass: spec.json, bundle.json and the pictures. */
+  pass: Schema.String,
+  /** Game-relative PNGs: the contact sheet, the onion strip, the footprint and the curves (the screenshots, in order). */
+  images: Schema.Array(Schema.String),
+  /** Hip drop, reach, clearance, slide, joint limits and the prop through the body: facts, never silently fixed. */
+  warnings: Schema.Array(Schema.String),
+  screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
+});
+export type GameAnimateResult = typeof GameAnimateResult.Type;
+
 /** A turnaround sheet's views, left to right: which side of the subject each shows. */
 const SheetViews = Schema.Array(Schema.Literals(["front", "back", "left", "right"])).check(
   Schema.isMinLength(2),

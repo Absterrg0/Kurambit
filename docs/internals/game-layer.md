@@ -114,6 +114,13 @@ matters.
   Painting from a sheet (`game_blender_paint`) and carving (`game_blender_carve`) run in a
   one-shot Blender too, since their bakes outlast the live server's 180 s per command; the live
   scene only adopts the result, after checking its objects did not change meanwhile.
+  `game_animate` compiles a move spec in the live scene itself (a pass takes seconds) and keeps
+  each pass's spec, numbers and pictures under `builds/logs/animate/<clip>/<n>`. Its clips follow
+  the library's conventions so every consumer treats them alike: travel rides the pelvis (the
+  root bone stays at rest; `rootDrift` measures it), and spring chains stay unkeyed because the
+  engine springs them. The measurement it shares with the sidecar gives every clip on the standard
+  skeleton its stances and strike windows, which the shell's foot IK and `striking` read; a foot
+  IK that guesses contacts per frame floats at step edges.
   MPFB2 is GPL code with CC0 output, so it is downloaded into Kurambit's own Blender folder on the
   person's request and never bundled.
 - An engine is two modules, and nothing above them names an engine. Its profile

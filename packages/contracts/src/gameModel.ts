@@ -34,6 +34,26 @@ export const GameAssetSource = Schema.Struct({
 });
 export type GameAssetSource = typeof GameAssetSource.Type;
 
+/** A foot's planted span in a clip, in the clip's seconds. */
+export const GameModelStance = Schema.Struct({
+  foot: Schema.Literals(["foot_l", "foot_r"]),
+  from: Schema.Number,
+  to: Schema.Number,
+});
+export type GameModelStance = typeof GameModelStance.Type;
+
+/** A strike in a clip: the moment something is fastest (at), its window, and what strikes. */
+export const GameModelStrike = Schema.Struct({
+  at: Schema.Number,
+  from: Schema.Number,
+  to: Schema.Number,
+  /** prop: a held prop's tip; otherwise the hand or foot bone. */
+  by: Schema.Literals(["prop", "hand_l", "hand_r", "foot_l", "foot_r"]),
+  /** m/s at its peak. */
+  speed: Schema.Number,
+});
+export type GameModelStrike = typeof GameModelStrike.Type;
+
 export const GameModelClip = Schema.Struct({
   name: Schema.String.check(Schema.isMaxLength(128)),
   seconds: Schema.Number,
@@ -51,6 +71,10 @@ export const GameModelClip = Schema.Struct({
   seam: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   /** One-frame knee snaps of 8° or more; null: no knees. */
   kneePops: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
+  /** Where each foot is planted (standard skeleton): foot IK holds a foot only through these. */
+  stances: Schema.optionalKey(Schema.Array(GameModelStance).check(Schema.isMaxLength(32))),
+  /** Hit windows (standard skeleton, not locomotion): a held prop's tip, a free hand or a foot at speed. */
+  strikes: Schema.optionalKey(Schema.Array(GameModelStrike).check(Schema.isMaxLength(16))),
 });
 export type GameModelClip = typeof GameModelClip.Type;
 

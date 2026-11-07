@@ -2,6 +2,8 @@ import {
   GameToolkit,
   GameAssetsSearchTool,
   GameAssetsSearchToolkit,
+  GameAnimateTool,
+  GameAnimateToolkit,
   GameBlenderLookTool,
   GameBlenderLookToolkit,
   GameBlenderRenderSpritesTool,
@@ -827,6 +829,26 @@ const registerGameBlenderRenderSprites = Effect.fn(
   );
 });
 
+const registerGameAnimate = Effect.fn("McpHttpServer.registerGameAnimate")(function* () {
+  const games = yield* GameService.GameService;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const built = yield* GameAnimateToolkit;
+  yield* registerImageTool(
+    GameAnimateTool,
+    (payload, options) =>
+      built
+        .handle("game_animate", payload, undefined, options)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(GameService.GameService, games),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+      ),
+    "animate",
+    (error) => (error instanceof Error ? error.message : "Game animate failed."),
+  );
+});
+
 const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSearch")(function* () {
   const games = yield* GameService.GameService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -995,6 +1017,11 @@ export const layerGameBlenderRenderSprites = imageToolRegistration(
   GameHandlers.layerBlenderRenderSprites,
 );
 
+export const layerGameAnimate = imageToolRegistration(
+  registerGameAnimate(),
+  GameHandlers.layerAnimate,
+);
+
 export const layerGameUnityScreenshot = imageToolRegistration(
   registerGameUnityScreenshot(),
   GameHandlers.layerUnityScreenshot,
@@ -1007,6 +1034,7 @@ export const layerGameAssetsSearch = imageToolRegistration(
 
 export const layerGameToolkit = Layer.mergeAll(
   layerGameBlenderLook,
+  layerGameAnimate,
   layerGameBlenderRenderSprites,
   layerGameAssetsSearch,
   layerGameUnityScreenshot,

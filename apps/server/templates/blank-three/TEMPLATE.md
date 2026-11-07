@@ -173,8 +173,14 @@ each state's clip and its ground speed. For combat, a call can play a clip by
 its exact name (`hero.play("Sword_Attack", { once: true, fade: 0.08 })`), from
 an offset (`from: 0.25`), backwards (`reverse: true`) or again from its start
 (`restart: true`, a combo's next cut); `hero.time` is the clip's own seconds
-for hit windows (`hero.progress`, `hero.duration`, `hero.clip` beside it), on
-game time. `followCamera2D`
+(`hero.progress`, `hero.duration`, `hero.clip` beside it), on game time, and
+`hero.striking` is the sidecar's measured strike whose window holds it (or
+null). The runtime layer goes on top of any clip, each part off until called:
+`hero.react(clip)` adds a clip's upper body once (a flinch while walking),
+`hero.lean()` leans into turns and forward with speed, `hero.lookAt(point, {
+maxYaw, maxPitch })` turns neck and head within limits, and
+`hero.feetOn((x, z) => height)` holds each foot on the ground through the
+clip's measured stances, dropping the pelvis for the lower foot. `followCamera2D`
 and `followCamera3D` (`web/shell/camera.js`) follow the player with a dead
 zone, look-ahead, damping and level bounds, and in 3D pull in at walls and
 props (its near plane's corners too, so a post never fills the view). For

@@ -295,7 +295,16 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    `reverse: true`, `restart: true` for a combo's next cut) and reads
    `hero.time` for hit windows; frame it with `followCamera3D(ctx, hero.root,
 { shoulder: 0.55, orbitButton: null, blockers: [level, props] })` and
-   `cam.focus = foe.root`, and answer hits with `Juice.sparks(at, away)`,
+   `cam.focus = foe.root`; a clip from the sidecar knows its hit windows, so
+   strike when `hero.striking` (the measured window, `by: "prop"` for a held
+   blade) instead of guessing seconds. On top of any clip:
+   `hero.react("Hit_Chest")` plays a clip's upper body once over the walk (a
+   flinch without a hit clip), `hero.lean()` leans into turns from how the
+   game moves `hero.root`, `hero.lookAt(foe.root.position, { maxYaw: 1,
+maxPitch: 0.5 })` turns neck and head within limits, and
+   `hero.feetOn((x, z) => groundHeight(x, z))` keeps the feet on stairs and
+   slopes through the sidecar's measured stances. Each is off until called and
+   runs on game time. Answer hits with `Juice.sparks(at, away)`,
    `Juice.blood(at, away)`, `Juice.dust(at)` and a
    `Juice.trail(hero.root, { bone: "hand_r" })` switched on through each cut
    (TEMPLATE.md).

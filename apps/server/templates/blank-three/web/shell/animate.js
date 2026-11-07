@@ -36,14 +36,30 @@
 //   hero.play("run", { moveSpeed: 5.5 }); // m/s it moves: the clip plays at
 //     // moveSpeed / its measured ground speed, so the feet stay planted
 //   hero.spring("tail", { stiffness: 0.09, damping: 0.14, gravity: 4 }); // retune a chain
-//   hero.lookAt(target.position);         // the head turns toward a point; null: ahead
+//   hero.lookAt(target.position, { maxYaw: 1, maxPitch: 0.6 }); // neck and head turn
+//     // toward a point within limits; null: ahead
 //   hero.blink();                         // blink now (a face blinks on its own anyway)
+//   if (hero.striking?.by === "prop") hit(); // the clip's measured hit window, not a guess
+// And the runtime layer, each off until asked for and free when off:
+//   hero.react("Hit_Chest");              // any clip's upper body once, on top of a walk
+//   hero.lean();                          // into turns and forward with speed, from how
+//                                         // the game moves hero.root (lean(false): off)
+//   hero.feetOn((x, z) => terrainHeight(x, z)); // feet on stairs and slopes: each foot
+//     // holds the ground through the sidecar's measured stances; null: off
 // The sidecar's spring chains (a tail, ears) swing on their own from the
 // start; spring(["bone_a", "bone_b"], opts) adds a chain to any model, root
 // to tip. A sidecar face (eye bones from the kit's eye helpers) blinks every
 // 2-6 s, sometimes twice. A model with no measured ground speed plays at
 // `speed` (default 1).
 import * as THREE from "../vendor/three.module.js";
+import {
+  findBone,
+  layered,
+  makeFootIK,
+  makeLean,
+  makeReactions,
+  rotateWorld,
+} from "./motion-layer.js";
 
 // Creatures (a generated wolf or dragon on its own rig) name their clips the same way, plus
 // gaits and natural attacks.
@@ -130,23 +146,6 @@ const AXES = {
 // How shut the eyes are, one value a frame at 24 fps: 3 frames closing, 1 held, 4 opening.
 const BLINK = [0, 0.35, 0.8, 1, 1, 0.75, 0.45, 0.2, 0];
 const BLINK_SECONDS = (BLINK.length - 1) / 24;
-
-// Bones only: a mesh may share a bone's name ("Head").
-const findBone = (root, name) => {
-  let found = null;
-  root.traverse((object) => {
-    if (found === null && object.isBone && object.name === name) found = object;
-  });
-  return found;
-};
-
-/** Rotate a bone by an angle about a world axis, keeping its parent's frame. */
-function rotateWorld(bone, axis, angle) {
-  bone.parent.getWorldQuaternion(_q1);
-  _q2.setFromAxisAngle(axis, angle);
-  bone.quaternion.premultiply(_q3.copy(_q1).invert().multiply(_q2).multiply(_q1));
-  bone.updateMatrixWorld(true);
-}
 
 /**
  * A spring chain: each bone's tip is a point mass pulled toward where the clip
@@ -247,6 +246,7 @@ export function animate(gltf, { fade = 0.2 } = {}) {
   const warned = new Set();
   // The pipeline's sidecar (shell/assets.js); a library model has none.
   const asset = gltf.userData?.asset ?? root.userData?.asset ?? null;
+  const strikesOf = new Map((asset?.clips ?? []).map((clip) => [clip.name, clip.strikes ?? []]));
   const groundSpeeds = new Map(
     (asset?.clips ?? [])
       .filter((clip) => typeof clip.groundSpeed === "number" && clip.groundSpeed > 0)
@@ -261,36 +261,47 @@ export function animate(gltf, { fade = 0.2 } = {}) {
   const gaze = {
     target: null,
     name: null,
-    bone: null,
+    parts: [],
     yaw: 0,
+    pitch: 0,
     maxYaw: 1,
+    maxPitch: 0.6,
+    split: 0.4,
     rate: 6,
-    base: new THREE.Quaternion(),
-    wrote: new THREE.Quaternion(),
-    written: false,
   };
   const settleGaze = (dt) => {
-    const { bone } = gaze;
-    if (bone === null) return;
-    // As with springs: a clip that leaves the head unkeyed would otherwise compound the turn.
-    if (gaze.written && bone.quaternion.equals(gaze.wrote)) bone.quaternion.copy(gaze.base);
-    let want = 0;
+    if (gaze.parts.length === 0) return;
+    for (const part of gaze.parts) part.begin();
+    let wantYaw = 0;
+    let wantPitch = 0;
     if (gaze.target !== null) {
-      const facing = _v2.set(0, 0, 1).applyQuaternion(root.getWorldQuaternion(_q1));
-      const to = _v3.subVectors(gaze.target, root.getWorldPosition(_v1));
-      if (to.lengthSq() > 1e-4)
-        want = THREE.MathUtils.clamp(
-          Math.atan2(facing.z * to.x - facing.x * to.z, facing.x * to.x + facing.z * to.z),
-          -gaze.maxYaw,
-          gaze.maxYaw,
+      // The target in the character's own frame, from its head: yaw about up, pitch above level.
+      const head = gaze.parts[gaze.parts.length - 1].bone;
+      root.getWorldQuaternion(_q1);
+      _v3.subVectors(gaze.target, head.getWorldPosition(_v1)).applyQuaternion(_q1.invert());
+      if (_v3.lengthSq() > 1e-4) {
+        wantYaw = THREE.MathUtils.clamp(Math.atan2(_v3.x, _v3.z), -gaze.maxYaw, gaze.maxYaw);
+        wantPitch = THREE.MathUtils.clamp(
+          Math.atan2(_v3.y, Math.hypot(_v3.x, _v3.z)),
+          -gaze.maxPitch,
+          gaze.maxPitch,
         );
+      }
     }
-    gaze.yaw += (want - gaze.yaw) * (1 - Math.exp(-gaze.rate * dt));
-    gaze.base.copy(bone.quaternion);
-    rotateWorld(bone, _v1.set(0, 1, 0), gaze.yaw);
-    gaze.wrote.copy(bone.quaternion);
-    gaze.written = true;
+    const k = 1 - Math.exp(-gaze.rate * dt);
+    gaze.yaw += (wantYaw - gaze.yaw) * k;
+    gaze.pitch += (wantPitch - gaze.pitch) * k;
+    root.getWorldQuaternion(_q1);
+    _v2.set(1, 0, 0).applyQuaternion(_q1);
+    // The neck takes `split` of the turn and the head the rest; a lone head takes all of it.
+    gaze.parts.forEach((part, i) => {
+      const share = gaze.parts.length === 1 ? 1 : i === 0 ? gaze.split : 1 - gaze.split;
+      rotateWorld(part.bone, _v1.set(0, 1, 0), gaze.yaw * share);
+      rotateWorld(part.bone, _v2, -gaze.pitch * share);
+      part.end();
+    });
   };
+  const layers = { lean: null, feet: null, reactions: null };
   // The sidecar's face: each blink bone keyed on top of the clips, restored first like the gaze.
   const blinks = (asset?.face?.blink ?? [])
     .map((part) => ({
@@ -432,6 +443,17 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     get duration() {
       return current?.action.getClip().duration ?? 0;
     },
+    /**
+     * The sidecar's strike whose window holds the playing clip's time ({at, from, to, by,
+     * speed}: by is "prop", "hand_l", "foot_r"...), or null: a measured hit window.
+     */
+    get striking() {
+      if (current === null) return null;
+      const t = current.action.time;
+      for (const strike of strikesOf.get(current.action.getClip().name) ?? [])
+        if (t >= strike.from && t <= strike.to) return strike;
+      return null;
+    },
     /** How far through the playing clip, 0..1. */
     get progress() {
       const length = current?.action.getClip().duration ?? 0;
@@ -487,17 +509,64 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       else addSpring(namesOrChain, options);
       return animator;
     },
-    /** Turn the head toward a world point; null looks ahead again. maxYaw in radians, rate per second. */
-    lookAt(point, { bone = "Head", maxYaw = 1, rate = 6 } = {}) {
-      if (gaze.name !== bone) {
-        gaze.name = bone;
-        gaze.bone = findBone(root, bone);
-        gaze.written = false;
-        if (gaze.bone === null) console.warn(`animate: no bone "${bone}" to look with`);
+    /**
+     * Turn the head toward a world point (a Vector3 the game keeps moving), within limits, split
+     * over the neck and the head; null looks ahead again. maxYaw and maxPitch in radians, split
+     * the neck's share, rate per second.
+     */
+    lookAt(
+      point,
+      { bone = "Head", neck = "neck_01", maxYaw = 1, maxPitch = 0.6, split = 0.4, rate = 6 } = {},
+    ) {
+      const key = `${neck}|${bone}`;
+      if (gaze.name !== key) {
+        gaze.name = key;
+        gaze.parts = [neck, bone]
+          .map((name) => (name === null ? null : findBone(root, name)))
+          .filter((found) => found !== null)
+          .map(layered);
+        if (findBone(root, bone) === null) console.warn(`animate: no bone "${bone}" to look with`);
       }
-      gaze.target = point;
-      gaze.maxYaw = maxYaw;
-      gaze.rate = rate;
+      Object.assign(gaze, { target: point, maxYaw, maxPitch, split, rate });
+      return animator;
+    },
+    /**
+     * Play a clip's upper body once on top of whatever plays (a flinch while walking, a shrug):
+     * additive, so the walk's legs and timing carry on. weight scales it, speed its rate.
+     */
+    react(clip, options = {}) {
+      layers.reactions ??= makeReactions(mixer, clips, findClip);
+      layers.reactions.play(clip, options);
+      return animator;
+    },
+    /**
+     * Lean into turns and forward with speed, from how the game moves root: on (true or options
+     * {max (rad), gain, forward (rad per m/s), rate}) or off (false).
+     */
+    lean(on = true) {
+      if (on === false) layers.lean = null;
+      else {
+        const options = {
+          max: 0.3,
+          gain: 1.6,
+          forward: 0.025,
+          rate: 8,
+          ...(on === true ? {} : on),
+        };
+        if (layers.lean === null) layers.lean = makeLean(root, options);
+        else Object.assign(layers.lean.options, options);
+      }
+      return animator;
+    },
+    /**
+     * Keep the feet on uneven ground: ground(x, z) is the world height there. Each foot holds
+     * the ground where it landed through the sidecar's measured stances of the playing clip;
+     * the pelvis drops for the lower foot. null turns it off. Options: rate (per second).
+     */
+    feetOn(ground, { rate = 18 } = {}) {
+      if (ground === null) layers.feet = null;
+      else if (layers.feet === null) layers.feet = makeFootIK(root, asset, { ground, rate });
+      else Object.assign(layers.feet.options, { ground, rate });
       return animator;
     },
     /** Blink now; a model whose sidecar has no face has nothing to blink. */
@@ -508,10 +577,12 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       }
       return animator;
     },
-    /** After the mixer: springs, the gaze, then the blink. The shell calls it. */
+    /** After the mixer: springs, the lean, the gaze, the feet, then the blink. The shell calls it. */
     settle(dt) {
       for (const chain of springs) chain.update(dt);
+      if (layers.lean !== null) layers.lean.update(dt);
       settleGaze(dt);
+      if (layers.feet !== null) layers.feet.update(dt, current?.action ?? null);
       settleBlink(dt);
     },
     /** Back to playing after die (a respawn). */
