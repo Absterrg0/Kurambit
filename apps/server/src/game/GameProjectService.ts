@@ -34,7 +34,6 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import { isGameRunOperationOwner } from "../orchestration-v2/gameRun/ids.ts";
 import { gameRunHold } from "../orchestration-v2/CommandPolicy.ts";
 import { stepLine } from "./run/runView.ts";
 import { stepNumber } from "./run/state.ts";
@@ -186,17 +185,12 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const vcs = yield* VcsDriverRegistry.VcsDriverRegistry;
   const createLocks = yield* KeyedLock.make<string>();
-  // The game's run as its records hold it: a card says what keep going is
-  // doing, and that it is paused until it is turned on again. A run that
-  // finished, or that an earlier Kurambit made and that ended, reads nothing.
+  // A card says what a live run is doing. A paused or ended run reads nothing
+  // here, so the row never masks "Needs attention"; the chat's banner says paused.
   const liveRun = (projectId: ProjectId) =>
     Effect.gen(function* () {
       const run = yield* projections.getProjectGameRun(projectId);
-      if (run === null) return null;
-      if (run.status === "ended")
-        return run.loop !== "turns" || run.ending === "done"
-          ? null
-          : ({ step: stepLine(run), startedAt: run.startedAt } satisfies GameSummary["run"]);
+      if (run === null || run.status === "ended") return null;
       const n =
         run.loop === "turns"
           ? stepNumber(
@@ -546,14 +540,8 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => "live" as const),
     );
 
-  const admitWrite: GameProjectService["Service"]["admitWrite"] = (
-    threadId,
-    root,
-    operation,
-    owner,
-  ) =>
+  const admitWrite: GameProjectService["Service"]["admitWrite"] = (threadId, root, operation) =>
     Effect.gen(function* () {
-      if (isGameRunOperationOwner(owner)) return;
       // Unknown is held, as for Stop game.
       const run = yield* projectRun(threadId).pipe(Effect.option);
       const hold = Option.isSome(run) ? holdOf(run.value) : "live";
