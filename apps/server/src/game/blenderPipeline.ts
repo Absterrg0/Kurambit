@@ -54,7 +54,8 @@ export type KitOutput =
 export const kitOutput = (stdout: string): KitOutput => {
   const lines = stdout.split("\n");
   for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const match = /^(KURAMBIT_RESULT|KURAMBIT_REFUSED) (.*)$/.exec(lines[index]!.trim());
+    // Not anchored: the MCP reply prefixes the first stdout line ("Code executed successfully: ").
+    const match = /(KURAMBIT_RESULT|KURAMBIT_REFUSED) (\{.*\})\s*$/.exec(lines[index]!);
     if (match === null) continue;
     let value: unknown;
     try {
