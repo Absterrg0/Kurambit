@@ -25,5 +25,17 @@
   models game_blender_export ships, `shell/assets.js`): the same tarball's file,
   unmodified, added 2026-11-08. meshoptimizer, MIT License, copyright (c)
   2016-2024 Arseny Kapoulkine; the notice is in the file's header.
+- `postprocessing/index.js` + `postprocessing/LICENSE.md`: postprocessing 6.38.3 (pmndrs),
+  `build/index.js` from its npm tarball (sha512 integrity matches the registry), added
+  2026-11-08. Zlib License. The look's post chain (`shell/look.js`) runs on it rather than
+  three's own EffectComposer because it merges the effects (bloom, tone mapping, the grade,
+  SMAA) into one full-screen pass, which matters on an integrated GPU.
+- `n8ao/N8AO.js` + `n8ao/LICENSE`: n8ao 2.0.1, `dist/N8AO.js` from its npm tarball
+  (sha512 integrity matches the registry), added 2026-11-08: the look's ambient occlusion,
+  from depth alone at half resolution. Its package.json says ISC and its LICENSE file is
+  CC0 1.0; both allow use, change and redistribution without conditions. It imports
+  `three/examples/jsm/postprocessing/Pass.js`, which the import map points at `addons/`.
+  Both pass through the repository's formatter on commit like the files above (whitespace
+  and quotes only); the import map in `../index.html` names them `postprocessing` and `n8ao`.
 - Keep this pin. A game that needs a newer three.js says why here and vendors
   the new files with their license the same way.

@@ -4,3 +4,5 @@
 # asset whose licence asks for attribution gets its line here.
 Made with three.js
 threejs.org · MIT License
+postprocessing by Raoul van Rüschen · Zlib License
+N8AO by N8python · CC0 1.0
