@@ -807,10 +807,13 @@ const make = Effect.gen(function* () {
         executable: uv.uvx,
         args: [PINNED_PKG, "install-addon"],
         operation: "blender-live-addon",
-        timeoutMs: 120_000,
+        // The first open on a machine downloads the pinned server and its Python
+        // (minutes on a slow network); later opens find them in the shared cache.
+        timeoutMs: 600_000,
         env: withBinDir(
           {
             ...sessionEnv(homeDir),
+            ...GameToolchain.uvCacheEnv(),
             BLENDERMCP_ADDONS_DIR: addonsDir,
             // Fixed installer argv, fetched over the network: proxy/cert
             // variables ride this child only.
@@ -825,7 +828,9 @@ const make = Effect.gen(function* () {
           "blender-live",
           installed.logPath,
           "tool-failed",
-          "Could not install the pinned Blender addon into the isolated config.",
+          installed.timedOut
+            ? `Downloading the pinned Blender MCP server (${PINNED_PKG}) did not finish in 10 minutes. What downloaded is kept, so opening Blender again continues it; check the network if it keeps stopping.`
+            : `Could not install the pinned Blender addon into the isolated config (${PINNED_PKG}); see ${installed.logPath}. A network failure here is uv's download: check the network and retry.`,
           installed,
         );
       // Enable the official module name in the isolated prefs headlessly.
@@ -974,6 +979,10 @@ const make = Effect.gen(function* () {
         withBinDir(
           {
             ...GameProcesses.engineChildEnv(),
+            ...GameToolchain.uvCacheEnv(),
+            // The installer just filled the shared cache with this exact pin: the
+            // child the model reaches never needs the network to start.
+            UV_OFFLINE: "1",
             DISABLE_TELEMETRY: "true",
             LIBGL_ALWAYS_SOFTWARE: "1",
             ...addonKeys,
@@ -993,7 +1002,8 @@ const make = Effect.gen(function* () {
       });
       const client = new Client({ name: "kurambit-game-blender", version: "1.0.0" }, {});
       const connected = yield* Effect.tryPromise({
-        try: () => client.connect(transport),
+        // A cold uv environment build can outlast the SDK's 60 s default.
+        try: () => client.connect(transport, { timeout: 120_000 }),
         catch: (cause) =>
           opError(
             "blender-live",
