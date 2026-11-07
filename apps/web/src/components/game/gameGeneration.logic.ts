@@ -1,8 +1,6 @@
 import {
   GAME_ART_PROVIDERS,
   type GameArtLane,
-  type GameArtLaneChoice,
-  type GameArtLaneChoices,
   type GameArtProviderId,
   type GameArtProvidersResult,
   type GameGeneration,
@@ -144,14 +142,6 @@ export const mergeAnchoredCards = <T>(
   return merged;
 };
 
-/** Settings' lane choices with one lane set; auto is stored as the lane left out. */
-export const withLaneChoice = (
-  choices: GameArtLaneChoices,
-  lane: GameArtLane,
-  choice: GameArtLaneChoice,
-): GameArtLaneChoices => {
-  const next = { ...choices };
-  if (choice === "auto") delete next[lane];
-  else next[lane] = choice;
-  return next;
-};
+/** The person's pick, as the message the agent goes on from. */
+export const pickMessage = (generation: GameGeneration, candidate: number): string =>
+  `Use "${generation.candidates[candidate]?.label ?? `candidate ${candidate + 1}`}" for ${generation.name}.`;

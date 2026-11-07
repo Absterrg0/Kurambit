@@ -21,7 +21,6 @@ import {
   GAME_ART_LANE_LABELS,
   formatUsd,
   providerLabel,
-  withLaneChoice,
 } from "../game/gameGeneration.logic";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -64,8 +63,11 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
   };
   const statusOf = (provider: GameArtProviderId) =>
     providers.data?.providers.find((entry) => entry.provider === provider) ?? null;
+  // One lane per patch: the server merges it into the saved map, so a second pick sent before the
+  // first one's settings arrive keeps both, and auto is saved as itself (a lane left out of a
+  // patch is kept, so leaving it out would never clear a choice).
   const setLane = (lane: GameArtLane, choice: GameArtLaneChoice) => {
-    void save({ gameArtLanes: withLaneChoice(settings.gameArtLanes, lane, choice) });
+    void save({ gameArtLanes: { [lane]: choice } });
   };
   const spent = providers.data?.spentTodayUsd;
   return (
