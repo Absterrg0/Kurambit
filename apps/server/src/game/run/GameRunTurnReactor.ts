@@ -6,8 +6,8 @@
 // someone else's turn, and reports the turn's typed result once its run is
 // over and its checkpoint (the build) has landed. It also does the two things
 // keep going owes the game's other turns: a turn that starts while a proposal
-// waits supersedes it, and a turn that ends wakes a look or an undo waiting
-// for the game to be idle.
+// waits supersedes it, a turn that ends wakes a look or an undo waiting for
+// the game to be idle, and archiving the chat keep going runs in stops it.
 import {
   CommandId,
   type GameOperationError,
@@ -508,30 +508,69 @@ const make = Effect.gen(function* () {
         });
     });
 
+  /**
+   * Keep going runs in an open chat: archiving the chat it runs in stops it
+   * (resumable once the chat is back), and its step turn at work is stopped
+   * with it (K11). The person's own turns there are left to T3.
+   */
+  const onArchived = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
+      const gameRun = records.gameRuns.at(-1);
+      if (gameRun === undefined || gameRun.loop !== "turns" || gameRun.status === "ended") return;
+      yield* refusedOnly(
+        engine.dispatch({
+          type: "game-run.stop",
+          commandId: CommandId.make(`server:game-run-chat-archived:${gameRun.id}`),
+          threadId,
+          runId: gameRun.id,
+          reason: "its chat was archived",
+        }),
+      );
+      const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
+      for (const run of runs)
+        if (
+          isActive(run) &&
+          run.status !== "waiting" &&
+          stepTurnOf(run, runs)?.runId === gameRun.id
+        )
+          yield* interrupt(threadId, run, "archived", "Keep going stopped: its chat was archived.");
+    });
+
   // The event consumer only reads and hands over: landing a turn is the step's job.
   const handle: GameRunTurnReactor["Service"]["handle"] = (event) =>
-    event.type !== "run.updated"
-      ? Effect.void
-      : Effect.gen(function* () {
-          const run = event.payload;
-          const own = parseStepTurn(run.userMessageId);
-          if (own !== null) return yield* onStepRun(event.threadId, own, run);
-          // A continuation names its step only through the run it continues.
-          if (run.restartContinuationOfRunId !== undefined) {
-            const { runs } = yield* threads.getThreadRecords(event.threadId, ["runs"]);
-            const turn = stepTurnOf(run, runs);
-            if (turn !== null) return yield* onStepRun(event.threadId, turn, run);
-          }
-          yield* onOtherRun(event.threadId, run);
-        }).pipe(
+    event.type === "thread.archived"
+      ? onArchived(event.threadId).pipe(
           retrying,
           Effect.catchCause((cause) =>
-            Effect.logWarning("keep going could not follow a turn", {
+            Effect.logWarning("keep going could not stop in an archived chat", {
               threadId: event.threadId,
               cause,
             }),
           ),
-        );
+        )
+      : event.type !== "run.updated"
+        ? Effect.void
+        : Effect.gen(function* () {
+            const run = event.payload;
+            const own = parseStepTurn(run.userMessageId);
+            if (own !== null) return yield* onStepRun(event.threadId, own, run);
+            // A continuation names its step only through the run it continues.
+            if (run.restartContinuationOfRunId !== undefined) {
+              const { runs } = yield* threads.getThreadRecords(event.threadId, ["runs"]);
+              const turn = stepTurnOf(run, runs);
+              if (turn !== null) return yield* onStepRun(event.threadId, turn, run);
+            }
+            yield* onOtherRun(event.threadId, run);
+          }).pipe(
+            retrying,
+            Effect.catchCause((cause) =>
+              Effect.logWarning("keep going could not follow a turn", {
+                threadId: event.threadId,
+                cause,
+              }),
+            ),
+          );
 
   const start: GameRunTurnReactor["Service"]["start"] = () =>
     forkParked(
