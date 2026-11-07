@@ -373,7 +373,10 @@ it up with `game_generate_wait`.
    (`"art/key-art.png"`). Pass the key art in `references` of every later
    image and texture. It is also the title backdrop (TEMPLATE.md or the
    engine skill).
-3. **Characters.** A character sheet first: lane `image`, two or three
+3. **Characters.** First read `artLanes` in `game_status`: when
+   `character` (or `creature`) is null, nothing can model it, so make no
+   sheet for it and tell the person what Settings → Art providers needs.
+   Then a character sheet: lane `image`, two or three
    `directions` when the character's design is open (silhouette, outfit,
    proportions; the key art fixes the rendering), else none, the key art
    as reference, the character alone on a plain background, full body,

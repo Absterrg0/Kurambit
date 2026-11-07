@@ -79,6 +79,44 @@ const openAiImages = (count: number) => () =>
   });
 
 describe("GameArt", () => {
+  it.live("treats a key the provider refused as not set up, so nothing is routed to it", () => {
+    const seen: string[] = [];
+    return Effect.gen(function* () {
+      const base = yield* tempGame();
+      const root = NodePath.join(base, "game");
+      const art = yield* GameArt.GameArt;
+      // Saved and never checked, the key reads as ready.
+      assert.strictEqual((yield* art.lanes).character, "tripo");
+      const tripo = (yield* art.providers).providers.find((entry) => entry.provider === "tripo");
+      assert.strictEqual(tripo?.ready, false);
+      assert.match(tripo?.message ?? "", /refused/);
+      // Once refused, the agent's artLanes and the route both know it.
+      assert.strictEqual((yield* art.lanes).character, null);
+      const before = seen.length;
+      const refused = yield* art
+        .generate(root, THREAD, { lane: "character", prompt: "a cat", name: "cat" }, "generated")
+        .pipe(Effect.flip);
+      assert.match(refused.message, /Tripo key|refused/);
+      assert.strictEqual(seen.length, before);
+      assert.deepStrictEqual((yield* art.list(root)).generations, []);
+    }).pipe(
+      Effect.provide(
+        layer({
+          base: NodePath.join(process.env.TMPDIR ?? NodeOS.tmpdir(), "art-test-refused"),
+          settings: { gameTripoApiKey: "tcli_not_a_secret" },
+          answer: (url) => {
+            seen.push(url);
+            return Response.json(
+              { code: 1002, message: "Invalid API key. API key must start with 'tsk_'." },
+              { status: 401 },
+            );
+          },
+        }),
+      ),
+      Effect.scoped,
+    );
+  });
+
   it.live("refuses over the daily limit, with the numbers, and records nothing", () =>
     Effect.gen(function* () {
       const base = yield* tempGame();
