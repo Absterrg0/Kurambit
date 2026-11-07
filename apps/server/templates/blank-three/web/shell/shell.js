@@ -773,12 +773,17 @@ function applyHold() {
   return holdAudio(held);
 }
 
+// One object, refilled: the bridge's trace reads it 30 times a second.
+const stageView = { scene: null, camera: null };
 const bridge = createStageBridge({
   canvas,
   renderer,
   view: () => {
     const shown = run?.ctx ?? titleCtx;
-    return shown?.camera?.isCamera === true ? { scene: shown.scene, camera: shown.camera } : null;
+    if (shown?.camera?.isCamera !== true) return null;
+    stageView.scene = shown.scene;
+    stageView.camera = shown.camera;
+    return stageView;
   },
   freeze(on) {
     frozen = on;
