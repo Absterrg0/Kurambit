@@ -24,6 +24,8 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   /** Game threads leave the coding access level at the server default. */
   showRuntimeMode?: boolean;
   traitsMenuContent?: ReactNode;
+  /** A game thread's mode block (keep going) when it is hidden. */
+  modeMenuContent?: ReactNode;
   size?: "sm" | "xs";
   /**
    * The resting strip keeps this menu mounted out of flow while every block
@@ -60,6 +62,12 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           <>
             {props.traitsMenuContent}
             <MenuDivider />
+          </>
+        ) : null}
+        {props.modeMenuContent ? (
+          <>
+            {props.modeMenuContent}
+            {props.showInteractionModeToggle || showRuntimeMode ? <MenuDivider /> : null}
           </>
         ) : null}
         {props.showInteractionModeToggle ? (
