@@ -279,6 +279,10 @@
       "types": "./src/filePreview.ts",
       "import": "./src/filePreview.ts"
     },
+    "./stableJson": {
+      "types": "./src/stableJson.ts",
+      "import": "./src/stableJson.ts"
+    },
     "./imageDimensions": {
       "types": "./src/imageDimensions.ts",
       "import": "./src/imageDimensions.ts"
