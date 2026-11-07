@@ -256,7 +256,7 @@ function AgentsStep({
   return (
     <StepShell
       title="Connect your agents"
-      description="Choose the agent that builds your games. You can add more later."
+      description="Choose the agent that builds your games. Using OpenCode, Cursor, Grok or another agent? Add it in Settings → Providers."
     >
       {/* The list gets what the dialog's header, title and button leave, so the
           button stays on screen on short windows. */}
