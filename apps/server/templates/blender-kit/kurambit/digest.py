@@ -6,6 +6,7 @@ session and the one-shot pass compute it from the same saved data, so an equal d
 pass sees exactly what the agent built, and any edit after a review makes the review stale."""
 import hashlib
 import json
+import os
 
 import bpy
 import numpy as np
@@ -96,7 +97,10 @@ def _material(m, cache):
                 h.update(repr((n.name, n.bl_idname)).encode())
                 image = getattr(n, "image", None)
                 if image is not None:
-                    h.update(repr((image.name, tuple(image.size), image.filepath)).encode())
+                    # Never image.size (a reopened file loads image buffers lazily, so it reads 0 x 0) and
+                    # never the raw filepath ("//" paths are rewritten when the pass's copy is saved elsewhere).
+                    path = os.path.normpath(bpy.path.abspath(image.filepath, library=image.library)) if image.filepath else ""
+                    h.update(repr((image.name, path, image.source)).encode())
                 for i in n.inputs:
                     if hasattr(i, "default_value"):
                         v = i.default_value

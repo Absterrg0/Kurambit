@@ -346,12 +346,15 @@ def review(params):
         left = PAD + (concept.shape[1] + PAD if concept is not None else 0)
         game3 = _nearest(game, 3)
         turn_w = 4 * TURN[0]
+        strip_w = 6 * STRIP[0] + 2 * PAD
+        strip_h = LABEL_PX + 4 + STRIP[1] + PAD
         width = max(left + turn_w + PAD + game3.shape[0] + PAD + game.shape[1] + PAD,
-                    PAD + 6 * STRIP[0] + PAD, PAD + 34 * len(palette) + PAD)
+                    PAD + 2 * strip_w, PAD + 34 * len(palette) + PAD)
         row_a = PAD + LABEL_PX + 4
         row_b = row_a + TURN[1] + PAD
         row_c = row_b + LABEL_PX + 4 + TURN[1] // 2 + PAD
-        height = row_c + len(strips) * (LABEL_PX + 4 + STRIP[1] + PAD) + (LABEL_PX + 4 + 40 + PAD if palette else 0)
+        row_p = row_c + (len(strips) + 1) // 2 * strip_h
+        height = row_p + (LABEL_PX + 4 + 40 + PAD if palette else 0)
         canvas = np.zeros((height, width, 4), np.float32)
         canvas[:, :, :3], canvas[:, :, 3] = BG, 1.0
 
@@ -368,15 +371,14 @@ def review(params):
         _over(canvas, labels("silhouettes"), left, row_b)
         for i, t in enumerate(turns):
             _over(canvas, _silhouette(t), left + i * TURN[0] + TURN[0] // 4, row_b + LABEL_PX + 4)
-        y = row_c
-        for label, cells in strips:
-            _over(canvas, label, PAD, y)
+        for i, (label, cells) in enumerate(strips):
+            x, y = PAD + (i % 2) * strip_w, row_c + (i // 2) * strip_h
+            _over(canvas, label, x, y)
             for k, cell in enumerate(cells):
-                _over(canvas, cell, PAD + k * STRIP[0], y + LABEL_PX + 4)
-            y += LABEL_PX + 4 + STRIP[1] + PAD
+                _over(canvas, cell, x + k * STRIP[0], y + LABEL_PX + 4)
         if palette:
-            _over(canvas, labels("palette (underlined: used by this model)"), PAD, y)
-            _over(canvas, _swatch(palette, used), PAD, y + LABEL_PX + 4)
+            _over(canvas, labels("palette (underlined: used by this model)"), PAD, row_p)
+            _over(canvas, _swatch(palette, used), PAD, row_p + LABEL_PX + 4)
 
         img = bpy.data.images.new("kurambit_review_out", width, height, alpha=False)
         img.pixels.foreach_set(np.flipud(canvas).ravel())

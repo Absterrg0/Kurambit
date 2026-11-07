@@ -172,9 +172,12 @@ def snap_palette(meshes, hexes, shading, out_dir):
     nearest = lambda rgb: min(range(len(pal)), key=lambda i: sum((a - b) ** 2 for a, b in zip(_lab(rgb), plab[i])))
     img, rows = _atlas(pal, shading["gradient"], out_dir)
     flat, glow_mat = _palette_material("Palette", img, shading, False), _palette_material("Glow", img, shading, True)
-    used = set()
+    used, seen = set(), set()
     for o in meshes:
         me = o.data
+        if me.as_pointer() in seen:  # a mesh several objects share is styled once
+            continue
+        seen.add(me.as_pointer())
         infos = [material_colour(s.material) for s in o.material_slots] or [([0.8, 0.8, 0.8], False)]
         idx = [nearest(c) for c, _ in infos]
         np_ = len(me.polygons)
@@ -201,8 +204,8 @@ def snap_palette(meshes, hexes, shading, out_dir):
                 t[sel] = (lz[sel] - lo) / (hi - lo)
         u = ((loop_swatch % COLS) + 0.5) / COLS
         v = ((rows - 1 - loop_swatch // COLS) + 0.08 + 0.84 * t) / rows
-        for layer in list(me.uv_layers):
-            me.uv_layers.remove(layer)
+        for name in [layer.name for layer in me.uv_layers]:  # removing a layer invalidates the others' references
+            me.uv_layers.remove(me.uv_layers[name])
         uv = me.uv_layers.new(name="palette")
         uv.data.foreach_set("uv", np.stack([u, v], 1).ravel().astype(np.float32))
         me.materials.clear()  # this resets every face's material index: set them again below
