@@ -13,7 +13,7 @@
 //   if (keys.pressed("Space")) hero.play("attack"); // one-shot, then back to the loop
 //
 // States: idle, walk, run, jump, fall, attack, hit, die, or any word in a clip
-// name ("dance", "roll"). Names match by word, case-insensitive: "Idle",
+// name ("dance", "roll", "roar"); a creature's own clips ("Trot", "Bite") count. Names match by word, case-insensitive: "Idle",
 // "Walk_Loop", "CharacterArmature|Run", "attack-melee-right". A missing run
 // plays walk, then idle (fall plays jump); each miss warns once with the
 // clips the model has. jump, attack and hit play once each time the state is
@@ -35,13 +35,27 @@
 // `speed` (default 1).
 import * as THREE from "../vendor/three.module.js";
 
+// Creatures (a generated wolf or dragon on its own rig) name their clips the same way, plus
+// gaits and natural attacks.
 const ROLES = {
-  idle: ["idle", "fly", "flying", "hover"],
-  walk: ["walk", "walking"],
-  run: ["run", "running", "jog", "sprint"],
-  jump: ["jump"],
+  idle: ["idle", "fly", "flying", "hover", "stand", "breathe", "breathing"],
+  walk: ["walk", "walking", "trot", "crawl", "slither", "swim"],
+  run: ["run", "running", "jog", "sprint", "gallop", "canter", "dash"],
+  jump: ["jump", "leap", "pounce"],
   fall: ["fall", "falling", "air", "airborne"],
-  attack: ["attack", "punch", "slash", "swing", "melee", "kick", "shoot"],
+  attack: [
+    "attack",
+    "punch",
+    "slash",
+    "swing",
+    "melee",
+    "kick",
+    "shoot",
+    "bite",
+    "claw",
+    "peck",
+    "sting",
+  ],
   hit: ["hit", "hurt", "damage", "recievehit", "receivehit"],
   die: ["die", "death", "dead", "defeat", "dying"],
 };

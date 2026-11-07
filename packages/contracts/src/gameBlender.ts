@@ -76,8 +76,12 @@ export const GameBlenderAssetsSearchResult = Schema.Struct({ text: Schema.String
 export type GameBlenderAssetsSearchResult = typeof GameBlenderAssetsSearchResult.Type;
 
 export const GameBlenderAssetsImportInput = Schema.Struct({
-  source: Schema.Literals(["polyhaven", "sketchfab", "polypizza"]),
-  id: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,80}$/)),
+  /** generated: a file game_generate delivered, by its game path (`path`), not a download. */
+  source: Schema.Literals(["polyhaven", "sketchfab", "polypizza", "generated"]),
+  /** The library's asset id; every source but generated needs it. */
+  id: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,80}$/))),
+  /** generated: the game-relative model under art/generated/ (.glb, .gltf or .fbx). */
+  path: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
   assetType: Schema.optionalKey(Schema.String),
   targetSize: Schema.optionalKey(Schema.Number),
   resolution: Schema.optionalKey(Schema.String),
@@ -139,7 +143,7 @@ export const GameBlenderBody = Schema.Union([
       proportions: Schema.optionalKey(Unit),
     }),
   }),
-  /** A model in this game already on the standard skeleton (an earlier export); phase 3 adds Tripo output. */
+  /** A rigged humanoid in this game: an earlier export, or a generated one under art/generated/ (UE, Mixamo or other common bone names). */
   Schema.Struct({ game: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)) }),
 ]);
 export type GameBlenderBody = typeof GameBlenderBody.Type;

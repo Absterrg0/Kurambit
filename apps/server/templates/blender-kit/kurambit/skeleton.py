@@ -11,6 +11,7 @@ joint frames exactly (import then export gives the same node rotations); TEMPERA
 root bone and turns the root and pelvis 90 degrees off the standard."""
 import json
 import math
+import re
 import struct
 from contextlib import contextmanager
 
@@ -22,6 +23,128 @@ NAME_MAPS = {
     # MPFB2's game_engine rig already uses UE names, except these two.
     "mpfb_game_engine": {"Root": "root", "head": "Head"},
 }
+
+# A rigged humanoid from elsewhere (a generator, Mixamo, another pack) names its bones its own way.
+# Each name is read as (side, word): prefixes such as "mixamorig:" or "Armature|" go, a side is
+# found as .L / _l / Left..., and the word picks the standard joint. Earlier words win a joint
+# (KayKit's wrist before its hand); a bone that names no joint lends its weights to the nearest
+# mapped ancestor (merge_unmapped), so nothing is left unweighted.
+_SIDED = [
+    ("clavicle", ("clavicle", "shoulder", "collar", "collarbone")),
+    ("upperarm", ("upperarm", "uparm", "arm")),
+    ("lowerarm", ("lowerarm", "forearm", "elbow")),
+    ("hand", ("wrist", "hand", "fist", "palm")),
+    ("thigh", ("thigh", "upleg", "upperleg", "hip")),
+    ("calf", ("calf", "shin", "lowerleg", "leg", "knee")),
+    ("foot", ("foot", "feet", "ankle")),
+    ("ball", ("ball", "toebase", "toe", "toes")),
+]
+_CENTRE = [
+    ("pelvis", ("pelvis", "hips", "hip")),
+    ("Head", ("head",)),
+    ("root", ("root",)),
+]
+# The spine and the neck are chains: their bones take spine_01..03 and neck_01 root first.
+_SPINE = re.compile(r"^(spine\d*|abdomen|waist|stomach|chest|upperchest|torso)$")
+_NECK = re.compile(r"^neck\d*$")
+def _side_and_word(name):
+    n = name.split("|")[-1].split(":")[-1]
+    n = re.sub(r"^(mixamorig\d*|def|bip\d*|b|bone|j|jnt|cc_base)[_\-. ]", "", n, flags=re.I)
+    side = None
+    m = re.match(r"^(left|right)[_\-. ]?(.*)$", n, re.I) or re.match(r"^([lr])[_\-.](.+)$", n, re.I)
+    if m:
+        side, n = m.group(1)[0].lower(), m.group(2)
+    else:
+        m = re.match(r"^(.*?)[_\-. ]?(left|right)$", n, re.I) or re.match(r"^(.+?)[_\-.]([lr])$", n, re.I)
+        if m:
+            side, n = m.group(2)[0].lower(), m.group(1)
+        else:
+            m = re.match(r"^(.+?)[_\-.]([lr])[_\-.](\d+)$", n, re.I)  # thumb_l_01
+            if m:
+                side, n = m.group(2).lower(), m.group(1) + m.group(3)
+    return side, re.sub(r"[^a-z0-9]", "", n.lower())
+
+
+def _finger_joint(word):
+    """(finger, 1..3) or None: Mixamo's HandThumb1, UE's thumb_01, KayKit-free names."""
+    m = re.match(r"^(?:hand)?(thumb|index|middle|ring|pinky|little)(?:finger)?0?([1-4])$", word)
+    if not m:
+        return None
+    return ("pinky" if m.group(1) == "little" else m.group(1)), int(m.group(2))
+
+
+def humanoid_map(parents):
+    """{bone name: standard joint} for a humanoid's bones ({name: parent name or None}) under any
+    common naming; identity names are left out. A rig already on the standard names maps to {}."""
+    names = list(parents)
+    if all(j in names for j in ("pelvis", "Head", "foot_l", "hand_l")):
+        return {}
+    taken, out = set(), {}
+    parsed = [(n, *_side_and_word(n)) for n in names]
+
+    def depth(n):
+        d = 0
+        while parents.get(n) is not None:
+            n, d = parents[n], d + 1
+        return d
+
+    for pattern, joints in ((_SPINE, ("spine_01", "spine_02", "spine_03")), (_NECK, ("neck_01",))):
+        chain = sorted((n for n, side, w in parsed if side is None and pattern.match(w)), key=depth)
+        for n, joint in zip(chain, joints):
+            out[n] = joint
+            taken.add(joint)
+    for joint, words in _CENTRE:
+        for word in words:
+            hit = next((n for n, side, w in parsed if side is None and w == word and n not in out), None)
+            if hit is not None and joint not in taken:
+                out[hit] = joint
+                taken.add(joint)
+                break
+    for base, words in _SIDED:
+        for side in ("l", "r"):
+            joint = f"{base}_{side}"
+            for word in words:
+                hit = next((n for n, s, w in parsed if s == side and w == word and n not in out), None)
+                if hit is not None and joint not in taken:
+                    out[hit] = joint
+                    taken.add(joint)
+                    break
+    for n, side, word in parsed:
+        f = _finger_joint(word) if side is not None else None
+        if f is not None and f[1] <= 3 and n not in out:
+            joint = f"{f[0]}_0{f[1]}_{side}"
+            if joint not in taken:
+                out[n] = joint
+                taken.add(joint)
+    return {k: v for k, v in out.items() if k != v}
+
+
+def merge_unmapped(meshes, arm, name_map, joints):
+    """Each vertex group of a bone that maps to no standard joint adds its weights to its nearest
+    ancestor that does (a UE5 spine_04 into spine_03, Mixamo's HeadTop_End into Head), then goes."""
+    std = lambda n: name_map.get(n, n)
+    target = {}
+    for b in arm.data.bones:
+        if std(b.name) in joints:
+            continue
+        p = b.parent
+        while p is not None and std(p.name) not in joints:
+            p = p.parent
+        target[b.name] = p.name if p is not None else None
+    for o in meshes:
+        for name, into in target.items():
+            g = o.vertex_groups.get(name)
+            if g is None:
+                continue
+            if into is not None:
+                dst = o.vertex_groups.get(into) or o.vertex_groups.new(name=into)
+                for v in o.data.vertices:
+                    w = next((e.weight for e in v.groups if e.group == g.index), 0.0)
+                    if w > 0:
+                        have = next((e.weight for e in v.groups if e.group == dst.index), 0.0)
+                        dst.add([v.index], have + w, "REPLACE")
+            o.vertex_groups.remove(g)
+
 
 # Limb bones posed onto the standard rest directions before a body is baked (MPFB stands in an
 # A-pose; library bodies are close to the standard T-pose but not exactly on it). Parents first.
@@ -152,6 +275,16 @@ def import_gltf(path):
     return new, [a for a in bpy.data.actions if a not in actions_before]
 
 
+def import_model(path):
+    """import_gltf, or the FBX importer for an .fbx (generators deliver either)."""
+    if not path.lower().endswith(".fbx"):
+        return import_gltf(path)
+    objects_before = set(bpy.data.objects)
+    actions_before = set(bpy.data.actions)
+    bpy.ops.import_scene.fbx(filepath=path, automatic_bone_orientation=False)
+    return [o for o in bpy.data.objects if o not in objects_before], [a for a in bpy.data.actions if a not in actions_before]
+
+
 def remove_objects(objects):
     """Removes objects and the data only they used."""
     for o in list(objects):
@@ -273,7 +406,11 @@ def conform(std_arm, body_arm, body_meshes, name_map):
         for o in body_meshes:
             baked_mesh(o, keep=lambda m: m.type != "ARMATURE")
             if o.parent is not None and o.parent_type == "BONE":
-                bone = o.parent_bone
+                # A part on a bone the standard lacks (KayKit's handslot) rides its nearest joint.
+                b = body_arm.data.bones.get(o.parent_bone)
+                while b is not None and std_name(b.name) not in std_bones:
+                    b = b.parent
+                bone = b.name if b is not None else o.parent_bone
                 to_world(o)
                 for vg in list(o.vertex_groups):
                     o.vertex_groups.remove(vg)

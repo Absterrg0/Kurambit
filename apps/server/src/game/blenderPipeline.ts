@@ -113,6 +113,8 @@ export const PassResult = Schema.Struct({
   usedPalette: Schema.Array(Schema.String),
   /** Every armature the candidate carries, with its bone names: the lock's rig is checked on them. */
   armatures: Schema.Record(Schema.String, Schema.Array(Schema.String)),
+  /** Generated creatures' armatures, each to its own rig id: kept off the lock's rig check. */
+  creatures: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /** What the pass changed on its way, such as a texture it scaled down to the budget; never a refusal. */
   notes: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(400)))),
 });
@@ -262,7 +264,7 @@ const partText = (part: GameAssetPart) => {
   const extra = [
     part.licence,
     ...(part.ai ? ["made by a generative model"] : []),
-    ...(part.credits === null ? [] : [`${part.credits} credits`]),
+    ...(part.credits === null ? [] : [`cost $${part.credits.toFixed(2)}`]),
   ].filter((entry) => entry !== "" && entry !== "made in this game");
   return `${part.what} ${from}${extra.length > 0 ? ` (${extra.join(", ")})` : ""}`;
 };

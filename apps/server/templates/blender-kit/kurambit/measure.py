@@ -5,7 +5,8 @@ arms through the body, the loop seam and knee pops (contact.py).
 It measures the candidate GLB itself, imported into an empty scene: exactly what ships.
 
 Ground speed: an in-place locomotion clip plays right at timeScale = move speed / ground speed;
-any other rate slides the feet by the difference. The support foot is the lower one; while it
+any other rate slides the feet by the difference. The feet are the standard ball (or foot) bones,
+or on another rig the lowest bone of each chain (lowest_chains). The support foot is the lowest; while it
 is near the floor it is planted, so its backward speed is the clip's ground speed ("stance"). A
 clip with a flight phase (a sprint) touches down for too few samples in that band, so the
 fallback ("stride") widens the band to two, then three times, catching each stride's touchdown.
@@ -25,7 +26,7 @@ from mathutils import Matrix, Vector
 
 from . import contact, face, skeleton
 
-LOCOMOTION = ("walk", "run", "jog", "sprint")
+LOCOMOTION = ("walk", "run", "jog", "sprint", "trot", "gallop", "canter")
 SUB = 4  # samples per frame: a sprint's foot contact lasts only a few frames
 KNEE_POP = 8.0
 STILL_METRES = 1e-4
@@ -47,14 +48,15 @@ def _bounds(meshes):
     return lo, hi
 
 
-def _ground_speed(ta, tb, fps, height):
-    """(m/s, "stance" | "stride") from two foot tracks (world positions per sample), or (None, None)."""
-    floor = min(min(p.z for p in ta), min(p.z for p in tb))
+def _ground_speed(tracks, fps, height):
+    """(m/s, "stance" | "stride") from two or more foot tracks (world positions per sample), or
+    (None, None)."""
+    floor = min(p.z for t in tracks for p in t)
     for widen, source in ((1, "stance"), (2, "stride"), (3, "stride")):
         thr = 0.008 * height * widen
         speeds = []
-        for i in range(1, len(ta)):
-            t = ta if ta[i].z <= tb[i].z else tb
+        for i in range(1, len(tracks[0])):
+            t = min(tracks, key=lambda t: t[i].z)
             if t[i].z < floor + thr and t[i - 1].z < floor + thr:
                 speeds.append((t[i].y - t[i - 1].y) * fps * SUB)  # it faces -Y: backward is +Y
         if len(speeds) >= 3:
@@ -96,10 +98,28 @@ def _bend(arm, upper, lower):
     return math.degrees((u.tail - u.head).angle(lo.tail - lo.head, 0.0))
 
 
+def lowest_chains(arm):
+    """The bones a body stands on, on any rig: the lowest bone of each chain whose rest head lies
+    in the bottom tenth of the skeleton (a quadruped's four paws, a bird's two). [] under two."""
+    heads = {b.name: (arm.matrix_world @ b.head_local).z for b in arm.data.bones if b.use_deform}
+    if len(heads) < 2:
+        return []
+    lo, hi = min(heads.values()), max(heads.values())
+    low = {n for n, z in heads.items() if z <= lo + 0.1 * max(hi - lo, 1e-6)}
+
+    def below(b):
+        return any(c.name in low or below(c) for c in b.children)
+
+    # A chain's lowest: in the band, with nothing of the band under it (a toe, not its ankle).
+    feet = [n for n in low if not below(arm.data.bones[n])]
+    return sorted(feet) if len(feet) >= 2 else []
+
+
 def _clips(arm, meshes, height, skin=None):
     sc = bpy.context.scene
     fps = sc.render.fps / sc.render.fps_base
-    feet = [n for n in ("ball_l", "ball_r") if n in arm.pose.bones] or [n for n in ("foot_l", "foot_r") if n in arm.pose.bones]
+    feet = ([n for n in ("ball_l", "ball_r") if n in arm.pose.bones] or [n for n in ("foot_l", "foot_r") if n in arm.pose.bones]
+            or lowest_chains(arm))
     hips = next((n for n in ("pelvis", "root") if n in arm.pose.bones), arm.pose.bones[0].name)
     knees = [k for k in KNEES if all(n in arm.pose.bones for n in k)]
     out = []
@@ -130,8 +150,8 @@ def _clips(arm, meshes, height, skin=None):
             "groundSpeed": None,
             "groundSpeedFrom": None,
         }
-        if any(w in act.name.lower() for w in LOCOMOTION) and len(feet) == 2:
-            speed, source = _ground_speed(track[feet[0]], track[feet[1]], fps, height)
+        if any(w in act.name.lower() for w in LOCOMOTION) and len(feet) >= 2:
+            speed, source = _ground_speed([track[n] for n in feet], fps, height)
             if speed is not None and speed > 0.01:
                 clip["groundSpeed"], clip["groundSpeedFrom"] = round(speed, 3), source
         # A clip whose bones never leave its first pose ships still: its contact numbers would read
@@ -176,8 +196,9 @@ def _unweighted(meshes):
     return n
 
 
-def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, rig=None):
-    """GameModelMeasure of a candidate GLB, plus {armatures: {name: [bones]}, worstJoint}."""
+def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, rig=None, own_rig=None):
+    """GameModelMeasure of a candidate GLB, plus {armatures: {name: [bones]}, worstJoint}. own_rig
+    names a creature's own skeleton ("tripo-quadruped"): its sidecar's skeleton, off the standard."""
     doc = skeleton.gltf_json(glb)
     bpy.ops.wm.read_factory_settings(use_empty=True)  # one-shot only: nothing of the source scene remains
     # At the clips' own rate, or a 30 fps clip lands between 24 fps frames and its length and seam read wrong.
@@ -213,7 +234,7 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
             springs.append({"name": name, "bones": list(bones)})
     measured = {
         "kind": kind,
-        "skeleton": (rig if holds else None) if arm is not None else None,
+        "skeleton": (own_rig or (rig if holds else None)) if arm is not None else None,
         "restDeviation": deviation,
         "height": round(height, 3),
         "footprint": {"width": round(max(0.0, hi.x - lo.x), 3), "depth": round(max(0.0, hi.y - lo.y), 3)},

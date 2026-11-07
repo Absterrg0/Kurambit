@@ -3,7 +3,8 @@
 params (the server resolves every path):
     name      the collection, the armature's name and the export's default stem
     body      {"library": abs, "pack"?: id, "licence"?: str} | {"mpfb": {age, gender, weight, ...}}
-              | {"game": abs}
+              | {"game": abs, "source"?: {from, licence, ai, credits}} (source: a generated file's
+              record, read by the server; without it the sidecar beside the file is the ledger)
     standard  abs path of the standard armature's GLB (STANDARD_ARMATURE)
     clips     [{pack, name, path, licence?}]
     chains    [{name, parent, bones, direction, length, mirror?}]
@@ -77,7 +78,7 @@ def _mpfb_body(spec):
 def _file_body(path):
     if not os.path.isfile(path):
         raise Refused("invalid-input", f"no body file at {path}")
-    new, actions = skeleton.import_gltf(path)
+    new, actions = skeleton.import_model(path)
     for a in actions:
         bpy.data.actions.remove(a)
     rigs = [o for o in new if o.type == "ARMATURE"]
@@ -92,7 +93,7 @@ def _file_body(path):
             o.parent = None
             o.matrix_world = mw
     skeleton.remove_objects([o for o in new if o is not rig and o not in meshes])
-    return rig, meshes, skeleton.NAME_MAPS["identity"]
+    return rig, meshes, skeleton.humanoid_map({b.name: b.parent.name if b.parent else None for b in rig.data.bones})
 
 
 def _part(p):
@@ -227,14 +228,17 @@ def character(params):
         else:
             path = body_spec.get("library") or body_spec.get("game")
             body_arm, meshes, name_map = _file_body(path)
-            if "game" in body_spec:
+            skeleton.merge_unmapped(meshes, body_arm, name_map, set(std_arm.data.bones.keys()))
+            if body_spec.get("source"):
+                body_part = {"what": "body", **body_spec["source"]}
+            elif "game" in body_spec:
                 body_part, carried = _game_source(path)
             else:
                 body_part = {**MADE_BODY, "from": body_spec.get("pack", "library"), "licence": body_spec.get("licence", "")}
         has = {name_map.get(b.name, b.name) for b in body_arm.data.bones}
         missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in has]
         if missing:
-            raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)}: it is not a humanoid on the standard skeleton")
+            raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)} under any name the kit knows (UE, Mixamo, KayKit and similar): it is not a humanoid, or its bones are named another way. A creature keeps its own rig: import it with game_blender_assets_import instead. Its bones: {', '.join(b.name for b in body_arm.data.bones)[:600]}")
         ratio = skeleton.conform(std_arm, body_arm, meshes, name_map)
     except BaseException:
         # a refused or failed build leaves the live scene as it was

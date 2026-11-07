@@ -16,7 +16,7 @@ export const GameAssetPart = Schema.Struct({
   licence: Schema.String.check(Schema.isMaxLength(200)),
   /** Made by a generative model. */
   ai: Schema.Boolean,
-  /** Credits spent, measured; null when free or not measured. */
+  /** What it cost, in USD (a generation's cost); null when free or not measured. */
   credits: Schema.NullOr(Schema.Number),
 });
 export type GameAssetPart = typeof GameAssetPart.Type;
