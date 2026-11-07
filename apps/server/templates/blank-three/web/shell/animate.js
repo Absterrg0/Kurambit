@@ -98,6 +98,8 @@ export function findClip(clips, state) {
 const live = new Set();
 
 const SPRING = { stiffness: 0.15, damping: 0.2, gravity: 0 };
+/** A frame step this long is a hitch, not motion: springs start again from their pose. */
+const HITCH_SECONDS = 0.1;
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
@@ -193,7 +195,13 @@ function makeSpring(root, names, options) {
           .applyQuaternion(bone.getWorldQuaternion(q))
           .multiplyScalar(link.length)
           .add(head);
-        if (link.tip === null || link.tip.distanceTo(goal) > Math.max(link.length * 4, 1)) {
+        // A hitch (a frame far longer than a frame) carries the whole jump on as velocity and
+        // throws the chain past its limits: start it from its pose, as after a teleport.
+        if (
+          link.tip === null ||
+          dt > HITCH_SECONDS ||
+          link.tip.distanceTo(goal) > Math.max(link.length * 4, 1)
+        ) {
           link.tip = goal.clone();
           link.prev.copy(goal);
         }
