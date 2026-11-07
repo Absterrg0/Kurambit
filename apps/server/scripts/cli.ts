@@ -76,6 +76,8 @@ const zipTemplates = Effect.fn("zipTemplates")(function* (source: string, target
   const zip = new JSZip();
   const entries = (yield* fs.readDirectory(source, { recursive: true })).toSorted();
   for (const entry of entries) {
+    // A dev server's Blender compiles the kit in place; its bytecode is not part of the kit.
+    if (entry.split(path.sep).includes("__pycache__")) continue;
     const file = path.join(source, entry);
     if ((yield* fs.stat(file)).type !== "File") continue;
     zip.file(entry.split(path.sep).join("/"), yield* fs.readFile(file), {

@@ -1,5 +1,6 @@
 import {
   GAME_ART_PROVIDERS,
+  GAME_ASSET_USE_CAP,
   type GameArtLane,
   type GameArtProviderId,
   type GameArtProvidersResult,
@@ -41,17 +42,26 @@ const AS_DELIVERED: ReadonlySet<GameArtLane> = new Set([
 
 /**
  * Whether a finished generation is in the game, from the newest build whose asset use was
- * measured: joined by identical bytes, "in" only once a play loaded it. Null when unknown.
+ * measured: joined by identical bytes, "in" only once a play loaded it. Null when unknown: a
+ * generation that delivered nothing (an edit kept as it was), or one missing from a list that
+ * was cut at its cap, where a miss says nothing.
  */
 export const inGameLine = (
   generation: GameGeneration,
   latestUse: Pick<NonNullable<GameBuildsResult["latestUse"]>, "generations"> | null,
 ): "In the game" | "Not in the game yet" | null => {
-  if (generation.state !== "done" || generation.filesUndone === true || latestUse === null)
+  if (
+    generation.state !== "done" ||
+    generation.filesUndone === true ||
+    generation.files.length === 0 ||
+    latestUse === null
+  )
     return null;
   const joined = latestUse.generations.find((entry) => entry.id === generation.id);
   if (joined !== undefined) return joined.loaded ? "In the game" : "Not in the game yet";
-  return AS_DELIVERED.has(generation.lane) ? "Not in the game yet" : null;
+  return AS_DELIVERED.has(generation.lane) && latestUse.generations.length < GAME_ASSET_USE_CAP
+    ? "Not in the game yet"
+    : null;
 };
 
 /**
@@ -161,12 +171,13 @@ export const chatGenerationCardKey = (
     .join("\u0002");
 
 /**
- * Whether a tool call is the agent's game_generate or game_generate_wait, as
+ * Whether a tool call is the agent's game_generate, game_image_edit or game_generate_wait, as
  * any provider names it (`mcp__kurambit__game_generate`, `kurambit.game_generate`,
  * `kurambit-<thread>_game_generate_wait`).
  */
 export const isGameGenerationTool = (toolName: string | null | undefined): boolean =>
-  toolName != null && /(?:^|[_.:/\s-])game_generate(?:_wait)?$/i.test(toolName.trim());
+  toolName != null &&
+  /(?:^|[_.:/\s-])game_(?:generate(?:_wait)?|image_edit)$/i.test(toolName.trim());
 
 // The timeline compares anchored cards by identity, so one merged array per pair of inputs.
 let lastMerge: {
@@ -211,7 +222,10 @@ export const modelLookLine = (generation: GameGeneration): string => {
     more === null || more <= 0
       ? "Rigging and its clips cost more."
       : `Rigging and its clips add about ${formatUsd(more)}.`,
-    "Cancel keeps only the model's cost.",
+    // Cancel counts the cost the generation shows; with none reported, the server counts the estimate.
+    cost === null
+      ? "The model's cost was not reported, so Cancel counts the whole estimate."
+      : "Cancel keeps only the model's cost.",
   ]
     .filter((part) => part !== null)
     .join(" ");

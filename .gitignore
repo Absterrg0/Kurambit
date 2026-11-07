@@ -52,3 +52,5 @@ apps/server/templates/*/godot/**/*.uid
 # Emberward export and import cache
 /builds/
 /godot/.godot/
+__pycache__/
+*.pyc

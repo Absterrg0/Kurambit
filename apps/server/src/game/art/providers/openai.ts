@@ -69,14 +69,21 @@ export const openAiEditSize = (
     ? `${width}x${height}`
     : "auto";
 };
-/** The size an edit is priced at: the one it is asked at, or for "auto" the image's own. */
-const estimateSize = (
+/** The most pixels an edit's output can have (the API's bound). */
+const MAX_EDIT_PIXELS = 8_294_400;
+/**
+ * The pixels an edit is priced at: the size it is asked at, or for "auto" the image's own. An
+ * image whose size is not read here (a JPEG or WebP) is priced at the most the API makes, so
+ * the daily limit still holds it back.
+ */
+const estimatePixels = (
   options: GameArtOptions,
   edited: { readonly width: number; readonly height: number } | null,
-): string => {
-  if (options.edit === undefined) return openAiSize(options);
+): number => {
+  if (options.edit === undefined) return pixels(openAiSize(options));
   const size = openAiEditSize(options, edited);
-  return size === "auto" && edited !== null ? `${edited.width}x${edited.height}` : size;
+  if (size !== "auto") return pixels(size);
+  return edited === null ? MAX_EDIT_PIXELS : edited.width * edited.height;
 };
 const pixels = (size: string) => {
   const [w, h] = size.split("x").map(Number);
@@ -182,7 +189,7 @@ export const openai: ArtAdapter = {
     roundUsd(
       request.candidates *
         OUTPUT_HIGH_1024 *
-        (pixels(estimateSize(request.options, request.edited ?? null)) / 1024 ** 2) +
+        (estimatePixels(request.options, request.edited ?? null) / 1024 ** 2) +
         request.references * PER_REFERENCE,
     ),
   refuse: (request) =>

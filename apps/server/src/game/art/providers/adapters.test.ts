@@ -90,6 +90,14 @@ describe("art adapters: request shapes", () => {
     assert.strictEqual(edit.form?.get("model"), "gpt-image-2.5-sunburst");
   });
 
+  it("OpenAI prices an edit of an image whose size it cannot read, so the daily limit holds", () => {
+    const estimate = openai.estimate({
+      ...request({ options: { edit: "art/key-art.jpg" } }),
+      references: 1,
+    });
+    assert.isTrue(estimate !== null && Number.isFinite(estimate) && estimate > 0);
+  });
+
   it.effect("OpenAI asks again one at a time when n comes back short, and prices from usage", () =>
     Effect.gen(function* () {
       const image = { b64_json: Buffer.from(PNG).toString("base64") };
