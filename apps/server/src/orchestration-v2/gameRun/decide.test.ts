@@ -170,6 +170,12 @@ const crashes = facts({
   boots: { status: "measured", value: { ok: false, detail: "main.js threw" } },
 });
 
+type Sent = OrchestrationV2GameRunCommand extends infer C
+  ? C extends unknown
+    ? Omit<C, "commandId" | "threadId">
+    : never
+  : never;
+
 class Store {
   runs: GameRun[] = [];
   steps = new Map<string, GameRunStep>();
@@ -205,7 +211,7 @@ class Store {
       steps: [...this.steps.values()],
     };
   }
-  send(command: Omit<OrchestrationV2GameRunCommand, "commandId" | "threadId">) {
+  send(command: Sent) {
     const decided = Decide.decide(
       {
         ...command,
@@ -228,7 +234,7 @@ class Store {
     }
     return decided;
   }
-  ok(command: Omit<OrchestrationV2GameRunCommand, "commandId" | "threadId">) {
+  ok(command: Sent) {
     const decided = this.send(command);
     if (Result.isFailure(decided)) throw new Error(decided.failure.message);
     return decided.success;
