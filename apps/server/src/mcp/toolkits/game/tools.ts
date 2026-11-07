@@ -7,8 +7,6 @@ import {
   GameBlenderCharacterResult,
   GameBlenderCodeInput,
   GameBlenderCodeResult,
-  GameCharacterRoute,
-  GameSetCharacterRouteResult,
   GameBlenderExportInput,
   GameBlenderExportResult,
   GameBlenderLookInput,
@@ -155,7 +153,7 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderCharacterTool = Tool.make("game_blender_character", {
   description:
-    "Build a rigged, animated character in the live Blender scene on the standard skeleton, correct by construction: use this instead of rigging or retargeting yourself. body is a library body ({library: {pack, file}}, as game_assets_search lists them), an MPFB2 human ({mpfb: {age, gender, weight, …}}; needs MPFB2, which the person installs in Settings → Game tools) or a model in this game already on the skeleton ({game: path}). The standard armature is conformed to the body (its rest frames are kept, so every library clip plays unchanged), the body is skinned, and the clips (names from the lock's animation packs; the standard set when omitted) and chains (extra bones no clip keys, such as a tail or ears, which the game springs) are added in a collection named name. Model the rest (head, clothes, props) with game_blender_code and the kurambit helpers, parented to its bones. Needs STYLE.json's rig to be standard-humanoid. replace rebuilds only the body and armature and keeps your parts. Then game_blender_look mode review, then game_blender_export.",
+    "Build a rigged, animated character in the live Blender scene on the standard skeleton, correct by construction: use this instead of rigging or retargeting yourself. body is a library body ({library: {pack, file}}, as game_assets_search lists them), an MPFB2 human ({mpfb: {age, gender, weight, …}}; needs MPFB2, which the person installs in Settings → Game tools) or a model in this game already on the skeleton ({game: path}). The standard armature is conformed to the body (its rest frames are kept, so every library clip plays unchanged), the body is skinned, and the clips (names from the lock's animation packs; the standard set when omitted) and chains (extra bones no clip keys, such as a tail or ears, which the game springs) are added in a collection named name. Model the rest (head, clothes, props) with game_blender_code and the kurambit helpers, parented to its bones. Needs STYLE.json's rig to be standard-humanoid; an MPFB2 body needs the person's character route (characters in game_status) to be blender. replace rebuilds only the body and armature and keeps your parts. Then game_blender_look mode review, then game_blender_export.",
   parameters: GameBlenderCharacterInput,
   success: GameBlenderCharacterResult,
   failure,
@@ -164,20 +162,9 @@ const BlenderCharacterTool = Tool.make("game_blender_character", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
-const CharacterRouteTool = Tool.make("game_character_route", {
-  description:
-    "Set how this game's characters are made, only when the person asked for it in this chat, in their words: library (bodies and characters from the library's packs), blender (made in Blender: MPFB2 bodies and modelled characters) or tripo (generated with the person's Tripo key). It is the person's choice: never change it on your own, to get past a refusal or because another route would do better; when the chosen route cannot do what they asked, say so in your reply and name the other routes. game_status shows the current one as characters. Returns the route now set.",
-  parameters: Schema.Struct({ route: GameCharacterRoute }),
-  success: GameSetCharacterRouteResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const BlenderExportTool = Tool.make("game_blender_export", {
   description:
-    "Export the objects you last reviewed (game_blender_look mode review), exactly as reviewed, as a GLB under the game's engine directory with its sidecar <stem>.asset.json (skeleton, clips with ground speed, springs, height, measurements and where every part came from), and record it in ASSETS.md. objects and file as before; file defaults to <engine dir>/assets/blender/<name>.glb. Refused when these objects changed since their review, or when the review's measurements break the lock: an armature not on its rig, rest frames off the standard skeleton, triangles or texture size over STYLE.json's budget, a character with no idle clip. three.js games load the sidecar: ASSETS = { hero: \"assets/blender/hero.asset.json\" }. Run game_import after.",
+    "Export the objects you last reviewed (game_blender_look mode review), exactly as reviewed, as a GLB under the game's engine directory with its sidecar <stem>.asset.json (skeleton, clips with ground speed, springs, height, measurements and where every part came from), and record it in ASSETS.md. objects and file as before; file defaults to <engine dir>/assets/blender/<name>.glb. Refused when these objects changed since their review, or when the review's measurements break the lock: an armature not on its rig, rest frames off the standard skeleton, triangles or texture size over STYLE.json's budget, a character with no idle clip, a made character (an MPFB2 body, or a character mesh with no library or import source) while the person's character route is not blender. three.js games load the sidecar: ASSETS = { hero: \"assets/blender/hero.asset.json\" }. Run game_import after.",
   parameters: GameBlenderExportInput,
   success: GameBlenderExportResult,
   failure,
@@ -571,7 +558,6 @@ export const GameToolkit = Toolkit.make(
   BlenderAssetsImportTool,
   BlenderExportTool,
   BlenderCharacterTool,
-  CharacterRouteTool,
   AssetsAddTool,
   UnityToolsTool,
   UnityEditTool,

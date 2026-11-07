@@ -36,6 +36,7 @@ import {
   type GameBlenderCharacterResult,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
+  GAME_CHARACTER_ROUTE_UNAVAILABLE,
   type GameCharacterRoute,
   type GameSetCharacterRouteResult,
   type GameBlenderExportInput,
@@ -998,6 +999,14 @@ const make = Effect.gen(function* () {
     setCharacterRoute: (threadId, route) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
+        const unavailable = GAME_CHARACTER_ROUTE_UNAVAILABLE[route];
+        if (unavailable !== undefined)
+          return yield* new GameOperationError({
+            operation: "set-characters",
+            path: NodePath.join(root, "game.json"),
+            reason: "invalid-input",
+            detail: `${route}: ${unavailable}`,
+          });
         // A valid manifest first; the write keeps every key it holds, only characters changes.
         yield* projects.read(root);
         const file = NodePath.join(root, "game.json");

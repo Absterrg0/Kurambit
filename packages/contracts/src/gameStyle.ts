@@ -4,13 +4,18 @@ import { GameLibraryPackId } from "./gameLibrary.ts";
 /** The style lock's file, at the game root beside BRIEF.md and ASSETS.md. */
 export const GAME_STYLE_FILE = "STYLE.json";
 
-/** How the game is seen: it sets the views sprites render from. */
 /** How a game's characters are made; the person picks it in game.json, never the harness. */
 export const GameCharacterRoute = Schema.Literals(["library", "blender", "tripo"]);
 export type GameCharacterRoute = typeof GameCharacterRoute.Type;
 
+/** Why a route cannot be chosen yet; a route missing here can be. The server refuses the rest. */
+export const GAME_CHARACTER_ROUTE_UNAVAILABLE: Partial<Record<GameCharacterRoute, string>> = {
+  tripo: "Not available yet",
+};
+
 const Hex = Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/));
 
+/** How the game is seen: it sets the views sprites render from. */
 export const GameStyleView = Schema.Literals(["side", "top-down", "isometric", "perspective"]);
 export type GameStyleView = typeof GameStyleView.Type;
 

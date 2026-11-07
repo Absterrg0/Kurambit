@@ -312,18 +312,25 @@ export const styleHash = (style: GameStyle | null): string =>
 export const characterRoute = (manifest: Pick<GameManifest, "characters">): GameCharacterRoute =>
   manifest.characters ?? GAME_STYLE_DEFAULT_CHARACTERS;
 
+/** The routes whose characters may be made in Blender; the rest ship only library or stamped sources. */
+const MAKES_CHARACTERS: Record<GameCharacterRoute, boolean> = {
+  library: false,
+  blender: true,
+  tripo: false,
+};
+
 /**
- * Why the person's character route refuses a character, or null: on library, an MPFB2 body
- * or a character mesh that came from no stamped source is not theirs to ship.
+ * Why the person's character route refuses a character, or null: off the Blender route,
+ * an MPFB2 body or a character mesh that came from no stamped source is not theirs to ship.
  */
 export const lockCharacterRouteRefusal = (
   what: "mpfb-body" | "unstamped-mesh",
   route: GameCharacterRoute,
 ): string | null => {
-  if (route !== "library") return null;
+  if (MAKES_CHARACTERS[route]) return null;
   const thing =
     what === "mpfb-body"
       ? "An MPFB2 body is a Blender-made character"
       : "A character mesh with no library or import source is a Blender-made character";
-  return `${thing}, and the person chose to make this game's characters from the library. Use a library body or the lock's packs, and if the request needs a made character, say so in your reply: only the person changes how characters are made, in the game's "Make characters with" setting.`;
+  return `${thing}, and the person chose to make this game's characters with ${route}. Use a library body or the lock's packs, and if the request needs a made character, say so in your reply: only the person changes how characters are made, in the game's "Make characters with" setting.`;
 };

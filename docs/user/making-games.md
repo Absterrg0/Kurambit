@@ -118,9 +118,8 @@ stage) or the command palette's **Make characters with…**; the stage's build d
 current choice. On **Library** the agent takes characters from the asset library and will not model
 one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the
 head, clothes, tail or ears it models itself, with the library's animations already fitted. Tripo,
-which generates characters with your own Tripo key, is not available yet. To use another way for one
-character only, say so in your message; the agent never changes the setting itself, and when the
-chosen way cannot make something it says so and names the others.
+which generates characters with your own Tripo key, is not available yet. The agent never changes the setting itself: when the chosen way cannot make
+something, it says so and names the others, and you switch the setting when you want to.
 
 Human bodies on **Blender** come from MPFB2, which you install once: **Settings → General → Game
 tools**, MPFB2, **Install**. Its code is GPL-3.0, so Kurambit does not ship it; Install downloads

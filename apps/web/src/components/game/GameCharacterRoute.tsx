@@ -1,6 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import type { GameCharacterRoute, ScopedThreadRef } from "@kurambit/contracts";
+import {
+  GAME_CHARACTER_ROUTE_UNAVAILABLE,
+  type GameCharacterRoute,
+  type ScopedThreadRef,
+} from "@kurambit/contracts";
 import { Atom } from "effect/reactivity";
 
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
@@ -21,19 +25,19 @@ export const CHARACTER_ROUTES: ReadonlyArray<{
     route: "library",
     label: "Library",
     description: "Characters from the asset library's packs",
-    unavailable: null,
+    unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.library ?? null,
   },
   {
     route: "blender",
     label: "Blender",
     description: "The agent builds each character in Blender",
-    unavailable: null,
+    unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.blender ?? null,
   },
   {
     route: "tripo",
     label: "Tripo",
     description: "Generated with your Tripo key",
-    unavailable: "Not available yet",
+    unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.tripo ?? null,
   },
 ];
 

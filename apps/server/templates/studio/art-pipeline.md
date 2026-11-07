@@ -19,8 +19,8 @@ renders and Blender props come in later turns, for what no pack has.
    rectangles or default UI skin on the played path. Dynamic text stays code.
 3. One look, locked in `STYLE.json` before the first asset (below). The art
    tools hold the game to it.
-4. Characters and creatures come the way STYLE.json's `characters` says
-   (Characters, below): from the lock's packs, or made through the character
+4. Characters and creatures come the way the person chose (`characters`
+   in game_status; Characters, below): from the lock's packs, or made through the character
    pipeline and exported after a review. Blender also builds props, set
    pieces, backgrounds and key art.
 5. One palette, one silhouette language, one ground line. Movement, hurt, win
@@ -75,8 +75,6 @@ look fits the brief (and the key art, once there is one) and write `STYLE.json` 
 - `imports`: outside sources the live Blender may import from (`polyhaven`,
   `sketchfab`, `polypizza`); none when left out. Realistic Poly Haven models
   sit only in a realistic look.
-- `characters`: how characters are made, the person's choice: `library`
-  (the default), `blender` or `tripo`. Only the person changes it.
 - 3D made models: `palette` may also be a hex list (`["#E4E4E3", ...]`, 2 to
   64 colours; take them from the family's own textures so made models sit
   with the packs), `shading` (`gradient` 0.16, `roughness` 0.62, `glow` 2.5),
@@ -102,11 +100,15 @@ to read and edit too.
 
 ## Characters
 
-STYLE.json's `characters` is how this game's characters are made. It is
-the person's choice: follow it, and follow a route the person names in a
-message for that request. Never switch routes yourself. When the route
-cannot do what is asked (the library has no cat), say so in your reply and
-suggest the other routes; the person changes the setting.
+How this game's characters are made is the person's choice, kept in
+game.json and shown by game_status as `characters`: `library` (the
+default), `blender` or `tripo`. Read it before any character; it is not in
+STYLE.json, and you cannot change it. When the route cannot do what is
+asked (the library has no cat), say so in your reply and name the other
+routes: the person changes it under the game's More menu, "Make characters
+with". A message asking for one made character does not change the route;
+the tools refuse it until the person does. An unrigged model is a prop on
+every route.
 
 - `library` (the default): characters come from the lock's packs. 3D:
   `game_assets_add` the family's character models (for `kaykit-1`:
