@@ -346,7 +346,9 @@ game's resolution from the game's own view, with this material, a low sun
 place the game's props on it:
 
 ```python
-mat = bpy.data.materials.new("ground"); mat.use_nodes = True; N, L = mat.node_tree.nodes, mat.node_tree.links
+mat = bpy.data.materials.new("ground")
+if mat.node_tree is None: mat.use_nodes = True  # Blender 4.x only; 5.0+ always has nodes
+N, L = mat.node_tree.nodes, mat.node_tree.links
 noise, ramp, bump, bsdf = N.new("ShaderNodeTexNoise"), N.new("ShaderNodeValToRGB"), N.new("ShaderNodeBump"), N["Principled BSDF"]
 noise.inputs["Scale"].default_value, noise.inputs["Detail"].default_value = 5, 12
 e0, e1 = ramp.color_ramp.elements; e0.position, e1.position = 0.4, 0.65
