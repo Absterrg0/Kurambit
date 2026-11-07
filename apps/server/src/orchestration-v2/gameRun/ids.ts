@@ -43,9 +43,5 @@ export const stepCapCommandId = (stepId: GameRunStepId, attempt: number, t3RunId
 export const stepUndoCommandId = (stepId: GameRunStepId, attempt: number) =>
   `server:game-run-step-undo:${stepId}:attempt:${attempt}`;
 
-/**
- * Who a run's own game operations belong to. A chat's Stop game cancels only
- * its own thread's work, so the run's measures must never carry the chat's id.
- */
-export const gameRunOperationOwner = (runId: string) => `game-run:${runId}`;
+/** A stage-era run's own game operations: a chat's Stop game never cancelled them. */
 export const isGameRunOperationOwner = (owner: string) => owner.startsWith("game-run:");
