@@ -14,7 +14,13 @@ import { useRightPanelStore } from "../../rightPanelStore";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { characterRouteLabel } from "./GameCharacterRoute";
-import { assetLines, deltaLine, factLine, factsSummaryLine } from "./gameBuilds.logic";
+import {
+  assetLines,
+  deltaLine,
+  factLine,
+  factsSummaryLine,
+  assetUseLines,
+} from "./gameBuilds.logic";
 
 const TONE_TEXT: Record<GameFactTone, string> = {
   good: "text-success-foreground",
@@ -89,6 +95,15 @@ export function GameBuildFactsList({
                           it under More, Make characters with….
                         </li>
                       )}
+                    </ul>
+                  </dd>
+                ) : null}
+                {view.id === "use" && facts.use.status === "measured" ? (
+                  <dd className="w-full text-2xs text-muted-foreground">
+                    <ul className="space-y-0.5 break-words">
+                      {assetUseLines(facts.use.value).map((text) => (
+                        <li key={text}>{text}</li>
+                      ))}
                     </ul>
                   </dd>
                 ) : null}

@@ -114,6 +114,7 @@ export const GameFactId = Schema.Literals([
   "colour",
   "first-response",
   "assets",
+  "use",
 ]);
 export type GameFactId = typeof GameFactId.Type;
 export const GameFactTone = Schema.Literals(["good", "bad", "neutral"]);
@@ -207,6 +208,16 @@ export const GameAssetFacts = Schema.Struct({
 });
 export type GameAssetFacts = typeof GameAssetFacts.Type;
 
+/** How many paths each of the use fact's lists holds. */
+export const GAME_ASSET_USE_CAP = 64;
+const UsePaths = Schema.Array(Schema.String).check(Schema.isMaxLength(GAME_ASSET_USE_CAP));
+
+/** Generations whose bytes a build ships, and whether its plays loaded them. */
+export const GameGenerationUse = Schema.Array(
+  Schema.Struct({ id: Schema.String, loaded: Schema.Boolean }),
+).check(Schema.isMaxLength(GAME_ASSET_USE_CAP));
+export type GameGenerationUse = typeof GameGenerationUse.Type;
+
 /**
  * What the plays used of the files the game ships: measured from the running game, never claimed.
  * Library files ASSETS.md credits are left out; everything else under the engine's assets
@@ -214,15 +225,21 @@ export type GameAssetFacts = typeof GameAssetFacts.Type;
  */
 export const GameAssetUse = Schema.Struct({
   /** Game-relative files some play loaded, path order. */
-  used: Schema.Array(Schema.String).check(Schema.isMaxLength(64)),
-  /** Files the game ships that no play loaded. */
-  unused: Schema.Array(Schema.String).check(Schema.isMaxLength(64)),
+  used: UsePaths,
+  /** Files the game ships that no play loaded; filled before `used` reaches its cap. */
+  unused: UsePaths,
   /** Sound files that started playing above silence during the plays. */
-  played: Schema.Array(Schema.String).check(Schema.isMaxLength(64)),
+  played: UsePaths,
   /** Sound files loaded that never started playing. */
-  silent: Schema.Array(Schema.String).check(Schema.isMaxLength(64)),
-  /** Files past the caps, counted only. */
+  silent: UsePaths,
+  /** Used and unused files past the caps, counted only. */
   more: NonNegativeInt,
+  /**
+   * Generations of this build (their records under art/generated/) whose delivered bytes are
+   * also a shipped file, joined by content hash: loaded when some play loaded such a file.
+   * A generation missing here ships no file with its bytes (a Blender export rewrites them).
+   */
+  generations: Schema.optionalKey(GameGenerationUse),
 });
 export type GameAssetUse = typeof GameAssetUse.Type;
 
@@ -369,6 +386,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   colour: "Colour",
   "first-response": "First response",
   assets: "Assets",
+  use: "Asset use",
 };
 
 const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
@@ -517,6 +535,23 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
         const text = `${measured} made model${measured === 1 ? "" : "s"} measured${notMeasured > 0 ? `, ${notMeasured} not measured` : ""}`;
         // A triangle count is not taste: the reading is never better or worse, only different.
         return { text, value: measured, tone: "neutral", kind: text };
+      });
+    case "use":
+      return from(facts.use, (use) => {
+        const shipped = use.used.length + use.unused.length + use.more;
+        // Past the caps the overflow is the used list's while the unused one is not full.
+        const exact = use.unused.length < GAME_ASSET_USE_CAP;
+        const used = exact ? use.used.length + use.more : use.used.length;
+        const parts = [
+          `Uses ${used}${exact ? "" : "+"} of ${shipped} file${shipped === 1 ? "" : "s"}`,
+          ...(use.unused.length > 0 ? [`${use.unused.length}${exact ? "" : "+"} unused`] : []),
+          ...(use.silent.length > 0
+            ? [`${use.silent.length} sound${use.silent.length === 1 ? "" : "s"} never played`]
+            : []),
+        ];
+        const text = parts.join(" · ");
+        // Evidence for the next step, never a verdict: unused art is no worse a game.
+        return { text, value: used, tone: "neutral", kind: "use" };
       });
   }
 };
@@ -703,6 +738,16 @@ export const GameBuildsResult = Schema.Struct({
   folderEdited: Schema.Union([Schema.Boolean, Schema.Literal("unknown")]),
   /** The game's latest restore, from any source. */
   restore: Schema.NullOr(GameBuildRestoreRef),
+  /**
+   * The first page only: the newest listed build whose asset use was measured, and which of the
+   * game's generations it ships (their bytes) and loaded. The generation cards read it.
+   */
+  latestUse: Schema.optionalKey(
+    Schema.Struct({
+      build: GameBuildId,
+      generations: GameGenerationUse,
+    }),
+  ),
 });
 export type GameBuildsResult = typeof GameBuildsResult.Type;
 

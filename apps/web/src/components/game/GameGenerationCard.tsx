@@ -5,6 +5,7 @@ import { BoxIcon, CheckIcon, PencilIcon, SparklesIcon, XIcon } from "lucide-reac
 import {
   EnvironmentId,
   ThreadId,
+  type GameBuildsResult,
   type GameGeneration,
   type GameGenerationsResult,
   type ScopedThreadRef,
@@ -38,6 +39,7 @@ import {
   fileName,
   generationCostLine,
   generationResultImage,
+  inGameLine,
   laneMedium,
   pickMessage,
   providerLabel,
@@ -51,6 +53,18 @@ const generationsTarget = (threadRef: ScopedThreadRef) =>
     environmentId: threadRef.environmentId,
     input: { threadId: threadRef.threadId },
   });
+
+const selectLatestUse = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
+  AsyncResult.isSuccess(result) ? (result.value.latestUse ?? null) : null;
+/** The newest measured asset use, from the Builds list's first page (reread on facts pushes). */
+const useLatestUse = (threadRef: ScopedThreadRef) =>
+  useEnvironmentQuerySelector(
+    gameEnvironment.builds({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+    selectLatestUse,
+  );
 
 /** The game's generations, read once per game thread and reread on its art pushes. */
 export const useGameGenerations = (threadRef: ScopedThreadRef | null) =>
@@ -494,6 +508,7 @@ export function GameGenerationBody({
   const error = actions.errorFor(generation.id);
   const undone = generation.filesUndone === true;
   const settled = generation.state === "done" && !undone;
+  const inGame = inGameLine(generation, useLatestUse(threadRef));
   const refused =
     generation.state === "choosing" || generation.state === "done"
       ? (generation.refused ?? [])
@@ -503,6 +518,7 @@ export function GameGenerationBody({
     settled ? `Made with ${providerLabel(generation.provider)}` : null,
     cost,
     settled ? chosenByNote(generation) : null,
+    inGame,
   ].filter((part) => part !== null);
   return (
     <div className="flex flex-col gap-2">

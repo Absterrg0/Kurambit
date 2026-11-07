@@ -173,6 +173,9 @@ game's colours and every later asset come from it. Human characters share the an
 creatures (animals, monsters) keep their own skeleton and animations. **Cancel** stops a generation still being made.
 **Generated art…** in the game's **More** menu (**⋯**) or the command palette lists everything the game
 has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
+Once a three.js build has been measured, a finished image or sound reads **In the game** when the
+build's plays loaded it, or **Not in the game yet**; it is recognised by its file's bytes, so a copy
+the agent changed (or a model exported through Blender) is not matched.
 
 To change an image you kept instead of making it again, choose **Change…** under it (in the chat card
 or in **Generated art…**), say what should change, and press Enter. Your words go to the agent as
@@ -339,7 +342,9 @@ keyboard, and its keys never reach Kurambit: click the chat or press Tab before 
 **Facts** are what Kurambit measured by playing the build: whether it boots, what happens when a
 player does nothing (idle) or presses keys at random (masher), what the game's own bot does
 (skilled), whether it can be won without skill, how long the picture freezes and how much it moves,
-and how soon the game answers the first input. Opening or playing a build that was never measured
+and how soon the game answers the first input. For a three.js game it also lists which files under
+its assets folder those plays loaded and which sounds started playing, so art that was made but never
+wired in shows up as unused. Opening or playing a build that was never measured
 measures it, one build at a time; a run measures its builds itself, and a three.js game measures
 each turn's build in the background when the turn ends. A fact Kurambit could not
 measure says **Not measured** and why, and never counts as a result: if a tool failed, **Measure

@@ -3,6 +3,7 @@ import {
   type GameArtLane,
   type GameArtProviderId,
   type GameArtProvidersResult,
+  type GameBuildsResult,
   type GameGeneration,
 } from "@kurambit/contracts";
 
@@ -27,6 +28,34 @@ const THREE_D_LANES: ReadonlySet<GameArtLane> = new Set([
   "motion",
 ]);
 const AUDIO_LANES: ReadonlySet<GameArtLane> = new Set(["sfx", "music", "voice"]);
+
+/**
+ * Lanes whose files reach the game as delivered (game_import copies them), so a build that ships
+ * none of their bytes does not have them. A 3D lane's model is exported through Blender, which
+ * rewrites the bytes: a miss there says nothing.
+ */
+const AS_DELIVERED: ReadonlySet<GameArtLane> = new Set([
+  "image",
+  "texture",
+  "sfx",
+  "music",
+  "voice",
+]);
+
+/**
+ * Whether a finished generation is in the game, from the newest build whose asset use was
+ * measured: joined by identical bytes, "in" only once a play loaded it. Null when unknown.
+ */
+export const inGameLine = (
+  generation: GameGeneration,
+  latestUse: Pick<NonNullable<GameBuildsResult["latestUse"]>, "generations"> | null,
+): "In the game" | "Not in the game yet" | null => {
+  if (generation.state !== "done" || generation.filesUndone === true || latestUse === null)
+    return null;
+  const joined = latestUse.generations.find((entry) => entry.id === generation.id);
+  if (joined !== undefined) return joined.loaded ? "In the game" : "Not in the game yet";
+  return AS_DELIVERED.has(generation.lane) ? "Not in the game yet" : null;
+};
 
 /** What the card shows of a delivered file: a picture, a model chip, or a sound. */
 export const laneMedium = (lane: GameArtLane): "image" | "model" | "audio" =>

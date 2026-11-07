@@ -46,6 +46,7 @@ import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { PlayDidNotBoot, openPagePlay, openRunnerPlay } from "./playLaunch.ts";
+import { encodePlayUse, PLAY_USE_FILE } from "./assetUse.ts";
 import {
   appendNoFollow,
   ensureGameDir,
@@ -812,6 +813,7 @@ const make = Effect.gen(function* () {
                       viewport,
                       bootTimeoutMs: PLAY_BOUNDS.bootMs,
                       keptStorage: keptWebStorage(saves),
+                      recordUse: true,
                     })
                   : openRunnerPlay(processes, {
                       operation: "Bot run",
@@ -934,6 +936,15 @@ const make = Effect.gen(function* () {
                     const stopped = yield* Effect.promise(() => opened.stop());
                     if (stopped.keptStorage !== null)
                       yield* fileServices(writeKeptStorage(stopped.keptStorage));
+                    // Evidence beside the trace: the build's facts read it (asset use).
+                    const use = stopped.use;
+                    if (use !== null)
+                      yield* Effect.promise(() =>
+                        NodeFSP.writeFile(
+                          NodePath.join(runDir, PLAY_USE_FILE),
+                          encodePlayUse(use),
+                        ).catch(() => undefined),
+                      );
                   }),
               ).pipe(
                 // The game never booted: measured, and a run on the record.

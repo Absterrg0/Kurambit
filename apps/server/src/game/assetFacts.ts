@@ -206,18 +206,23 @@ const modelFact = async (copyRoot: string, path: string): Promise<GameModelFact>
 };
 
 /**
- * Library files ASSETS.md credits, as the library's add writes them: each file by its path, or
- * a folder's files by one `dir/*.ext` glob. Counted, never measured one by one.
+ * Library files ASSETS.md credits, game-relative, as the library's add writes them: each file
+ * by its path, or a folder's files by one `dir/*.ext` glob. Counted, never measured one by one.
  */
-const libraryCredits = async (copyRoot: string, library: string) => {
+export const creditedLibraryFiles = async (
+  copyRoot: string,
+  library: string,
+): Promise<ReadonlySet<string>> => {
   const text = await NodeFSP.readFile(NodePath.join(copyRoot, "ASSETS.md"), "utf8").catch(() => "");
-  if (text === "") return 0;
+  if (text === "") return new Set();
   const files = await walkFiles(library, { limit: 20_000 });
-  return files.filter((full) => {
-    const relative = NodePath.relative(copyRoot, full).split(NodePath.sep).join("/");
-    const glob = `${NodePath.posix.dirname(relative)}/*${NodePath.posix.extname(relative)}`;
-    return text.includes(`\`${relative}\``) || text.includes(`\`${glob}\``);
-  }).length;
+  return new Set(
+    files.flatMap((full) => {
+      const relative = NodePath.relative(copyRoot, full).split(NodePath.sep).join("/");
+      const glob = `${NodePath.posix.dirname(relative)}/*${NodePath.posix.extname(relative)}`;
+      return text.includes(`\`${relative}\``) || text.includes(`\`${glob}\``) ? [relative] : [];
+    }),
+  );
 };
 
 export const measureAssets = (
@@ -239,6 +244,6 @@ export const measureAssets = (
     return {
       models,
       more: Math.max(0, found.length - MAX_MODELS),
-      libraryFiles: await libraryCredits(copyRoot, library),
+      libraryFiles: (await creditedLibraryFiles(copyRoot, library)).size,
     };
   });

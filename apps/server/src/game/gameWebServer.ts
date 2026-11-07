@@ -31,6 +31,10 @@ export interface WebStaticServer {
 export const serveGameDirectory = async (
   root: string,
   directory: string,
+  options: {
+    /** Each file a GET is answered with, by its path inside the directory ("assets/hero.glb"). */
+    readonly onServed?: (path: string) => void;
+  } = {},
 ): Promise<WebStaticServer> => {
   const webRoot = await NodeFSP.realpath(NodePath.join(root, directory));
   await NodeFSP.access(NodePath.join(webRoot, "index.html"));
@@ -68,10 +72,12 @@ export const serveGameDirectory = async (
         "Cache-Control": "no-store",
       });
       if (request.method === "HEAD") response.end();
-      else
+      else {
+        options.onServed?.(NodePath.relative(webRoot, real).split(NodePath.sep).join("/"));
         NodeFS.createReadStream(real)
           .on("error", () => response.destroy())
           .pipe(response);
+      }
     })().catch(() => {
       if (!response.headersSent) response.writeHead(404);
       response.end();
