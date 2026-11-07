@@ -7,7 +7,7 @@ import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
-import { OrchestrationDispatchCommandError, type GameRunComparison } from "@kurambit/contracts";
+import { OrchestrationDispatchCommandError } from "@kurambit/contracts";
 import * as Crypto from "effect/Crypto";
 
 import * as DateTime from "effect/DateTime";
@@ -235,17 +235,7 @@ import {
 } from "@kurambit/shared/usageLimits";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 
-// Run evidence streams through a capability minted here: the asset route
-// serves that exact file (path and inode), with range requests for video.
-// Read scope is enough because the client never names the path: the run
-// service resolves it inside the game folder. A file that cannot be signed is just absent.
-const signRunFile = (threadId: ThreadId, path: string) =>
-  issueAssetUrl({ resource: { _tag: "media-file", threadId, path } }).pipe(
-    Effect.map((asset): string | null => asset.relativeUrl),
-    Effect.orElseSucceed(() => null),
-  );
-
-// A package downloads through the same capability, served as an attachment.
+// A package downloads through a capability minted here, served as an attachment.
 // A download URL is bound to the archive's inode, size and mtime, so a
 // re-packaged archive retires it even when the filesystem hands the new archive
 // a freed inode; a Web archive's path names its build, so its URL never serves
@@ -276,24 +266,6 @@ const signPackage = <P extends { readonly archivePath: string; readonly fileName
         }),
     ),
   );
-
-// The frame sheets a blind comparison's players made, signed the same way.
-const signComparisonSheets = (
-  threadId: ThreadId,
-  comparison: GameRunComparison | null,
-  sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>,
-) =>
-  comparison === null
-    ? Effect.succeed(null)
-    : Effect.map(
-        Effect.forEach(comparison.sheets, (sheet) => {
-          const file = sheetFiles.find((each) => each.build === sheet.build);
-          return file === undefined
-            ? Effect.succeed(sheet)
-            : Effect.map(signRunFile(threadId, file.path), (url) => ({ ...sheet, url }));
-        }),
-        (sheets) => ({ ...comparison, sheets }),
-      );
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
@@ -1800,88 +1772,6 @@ const layerWsRpc = (
       const handlers = ServerWsRpcGroup.of({
         [WS_METHODS.gameStatus]: ({ threadId, checkSources }) =>
           game.status(threadId, { checkSources }),
-        [WS_METHODS.gameRunStart]: (input) =>
-          gameRun
-            .runStart(input)
-            .pipe(
-              Effect.mapError((cause) =>
-                GameRunControl.GameRunError.toOperationError("game-run-start", cause),
-              ),
-            ),
-        [WS_METHODS.gameRunStatus]: ({ threadId }) =>
-          gameRun
-            .runStatus(threadId)
-            .pipe(
-              Effect.mapError((cause) =>
-                GameRunControl.GameRunError.toOperationError("game-run-status", cause),
-              ),
-            ),
-        [WS_METHODS.gameRunStop]: ({ threadId, commandId }) =>
-          gameRun
-            .runStop(threadId, commandId)
-            .pipe(
-              Effect.mapError((cause) =>
-                GameRunControl.GameRunError.toOperationError("game-run-stop", cause),
-              ),
-            ),
-        [WS_METHODS.gameRunSteer]: ({ threadId, text, commandId }) =>
-          gameRun
-            .runSteer(threadId, text, commandId)
-            .pipe(
-              Effect.mapError((cause) =>
-                GameRunControl.GameRunError.toOperationError("game-run-steer", cause),
-              ),
-            ),
-        [WS_METHODS.gameRunProfile]: ({ threadId, profile, commandId }) =>
-          gameRun
-            .runProfile(threadId, profile, commandId)
-            .pipe(
-              Effect.mapError((cause) =>
-                GameRunControl.GameRunError.toOperationError("game-run-profile", cause),
-              ),
-            ),
-        [WS_METHODS.gameRunRound]: ({ threadId, round }) =>
-          gameRun.roundDetail(threadId, round).pipe(
-            Effect.mapError((cause) =>
-              GameRunControl.GameRunError.toOperationError("game-run-round", cause),
-            ),
-            // roundDetail builds the video path from the run id inside builds/logs.
-            Effect.flatMap(({ detail, videoFile, sheetFiles }) =>
-              Effect.gen(function* () {
-                const video = detail.video;
-                const videoUrl =
-                  videoFile === null || video === null
-                    ? null
-                    : yield* signRunFile(threadId, videoFile);
-                return {
-                  ...detail,
-                  video: video === null || videoUrl === null ? video : { ...video, url: videoUrl },
-                  comparison: yield* signComparisonSheets(threadId, detail.comparison, sheetFiles),
-                };
-              }),
-            ),
-          ),
-        // The pick's frame sheets are signed exactly like a round's.
-        [WS_METHODS.gameRunPick]: ({ threadId }) =>
-          gameRun.pickDetail(threadId).pipe(
-            Effect.mapError((cause) =>
-              GameRunControl.GameRunError.toOperationError("game-run-pick", cause),
-            ),
-            Effect.flatMap(({ detail, sheetFiles }) =>
-              Effect.map(
-                signComparisonSheets(threadId, detail.comparison, sheetFiles),
-                (comparison) => ({ ...detail, comparison }),
-              ),
-            ),
-          ),
-        [WS_METHODS.gameRunRestore]: (input) =>
-          gameRun
-            .runRestore(input)
-            .pipe(
-              Effect.mapError((cause) =>
-                GameRunControl.GameRunError.toOperationError("game-run-restore", cause),
-              ),
-            ),
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
@@ -1912,13 +1802,13 @@ const layerWsRpc = (
         [WS_METHODS.gameBuildMeasure]: ({ threadId, build }) =>
           gameBuilds.measure(threadId, build, { queue: "person" }),
         [WS_METHODS.gameBuildPlay]: ({ threadId, build }) => gameBuilds.play(threadId, build),
-        [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId, asBest }) =>
-          gameBuilds.restore(threadId, build, commandId, asBest === undefined ? {} : { asBest }),
+        [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId }) =>
+          gameBuilds.restore(threadId, build, commandId),
         [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
           gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
         [WS_METHODS.gameRunRounds]: ({ threadId }) =>
           gameRun
-            .runRounds(threadId)
+            .rounds(threadId)
             .pipe(
               Effect.mapError((cause) =>
                 GameRunControl.GameRunError.toOperationError("game-run-rounds", cause),

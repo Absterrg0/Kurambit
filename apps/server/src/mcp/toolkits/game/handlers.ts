@@ -2,7 +2,6 @@ import * as Effect from "effect/Effect";
 import { GameOperationError, type ThreadId } from "@kurambit/contracts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
 import { GameCaller } from "../../../game/GameCaller.ts";
-import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -16,8 +15,6 @@ import {
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
-const runFailure = (cause: GameRunControl.GameRunError) =>
-  GameRunControl.GameRunError.toOperationError(`game-${cause.operation}`, cause);
 /**
  * One tool call: the calling thread's work on the game service, as an agent's.
  * Whether it is a production run's own role comes from the MCP session, never
@@ -30,19 +27,6 @@ const withGame = <A, E>(
     const scope = yield* caller;
     return yield* work(yield* GameService.GameService, scope.thread.threadId).pipe(
       Effect.provideService(GameCaller, { kind: "agent", runRole: scope.gameRunRole === "run" }),
-    );
-  });
-/** One tool call on the calling thread's production run, its refusals as operation errors. */
-const withRuns = <A>(
-  work: (
-    runs: GameRunControl.GameRunControl["Service"],
-    threadId: ThreadId,
-  ) => Effect.Effect<A, GameRunControl.GameRunError>,
-) =>
-  Effect.gen(function* () {
-    const scope = yield* caller;
-    return yield* work(yield* GameRunControl.GameRunControl, scope.thread.threadId).pipe(
-      Effect.mapError(runFailure),
     );
   });
 /** One tool call on the calling thread's game builds, as an agent's. */
@@ -141,42 +125,6 @@ const handlers = {
   ),
   game_bot_report: McpToolAccess.actsAsCaller(() =>
     withGame((game, threadId) => game.botReport(threadId)),
-  ),
-  game_run_status: McpToolAccess.readsAsCaller(() =>
-    withRuns((runs, threadId) => runs.runStatus(threadId)),
-  ),
-  game_run_round: McpToolAccess.readsAsCaller((input) =>
-    withRuns((runs, threadId) =>
-      runs.roundDetail(threadId, input.round).pipe(Effect.map(({ detail }) => detail)),
-    ),
-  ),
-  game_run_checks: McpToolAccess.actsAsCaller(() =>
-    withRuns((runs, threadId) => runs.runChecks(threadId)),
-  ),
-  game_run_steer: McpToolAccess.actsAsCaller((input) =>
-    withRuns((runs, threadId) => runs.runSteer(threadId, input.text, input.commandId)),
-  ),
-  game_run_decide: McpToolAccess.actsAsCaller((input) =>
-    withRuns((runs, threadId) => runs.runDecide({ threadId: threadId, ...input })),
-  ),
-  game_run_start: McpToolAccess.actsAsCaller((input) =>
-    withRuns((runs, threadId) => runs.runStart({ threadId: threadId, ...input })),
-  ),
-  game_run_stop: McpToolAccess.actsAsCaller((input) =>
-    withRuns((runs, threadId) => runs.runStop(threadId, input.commandId)),
-  ),
-  game_run_submit: McpToolAccess.actsAsCaller((input) =>
-    withRuns((runs, threadId) => runs.runSubmit(threadId, input.submission)),
-  ),
-  game_run_restore: McpToolAccess.actsAsCaller((input) =>
-    // The agent tells the creator how it went in the same turn, so it waits a
-    // little; a restore still moving past that answers with where to look.
-    withRuns((runs, threadId) =>
-      runs.runRestore({ threadId, ...input }, { waitFor: TOOL_RESTORE_WAIT }),
-    ),
-  ),
-  game_run_profile: McpToolAccess.actsAsCaller((input) =>
-    withRuns((runs, threadId) => runs.runProfile(threadId, input.profile, input.commandId)),
   ),
   game_builds: McpToolAccess.readsAsCaller((input) =>
     withBuilds((builds, threadId) =>

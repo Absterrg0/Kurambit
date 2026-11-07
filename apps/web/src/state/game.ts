@@ -186,32 +186,6 @@ const gameListSignal = Atom.family((environmentId: string) => {
 });
 
 /**
- * Changes when an ended run's record changes on one thread's game: a restore
- * requested or landed (from any client or an agent), a note, its finish. Each
- * may change which round is the game's current build. A live run's step
- * pushes leave it as it is, so an open round is never reread mid-run.
- */
-const endedRunGameSignal = Atom.family((key: string) => {
-  const [environmentId = "", threadId = ""] = key.split("\0");
-  let last = "";
-  return Atom.make((get) => {
-    const result = get(
-      gameEvents({
-        environmentId: EnvironmentId.make(environmentId),
-        input: { threadId: ThreadId.make(threadId) },
-      }),
-    );
-    if (
-      AsyncResult.isSuccess(result) &&
-      result.value.name === "run" &&
-      result.value.state === "succeeded"
-    )
-      last = `${result.value.at}\0${result.value.revision ?? ""}`;
-    return last;
-  }).pipe(Atom.withLabel(`game:ended-run-signal:${key}`));
-});
-
-/**
  * Changes when the server pushes a change to one thread's game's saved/
  * folder: a save or delete from this client, another one, or an agent's tool.
  */
@@ -442,36 +416,6 @@ export const gameEnvironment = {
     label: "game:checkSources",
     tag: WS_METHODS.gameStatus,
   }),
-  runStart: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:runStart",
-    tag: WS_METHODS.gameRunStart,
-  }),
-  runStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:runStatus",
-    tag: WS_METHODS.gameRunStatus,
-    staleTimeMs: 5_000,
-    idleTtlMs: 60_000,
-    refreshTrigger: threadSignal("run"),
-  }),
-  // Read when a round row opens, never for every round; a finished round's
-  // evidence does not change, so an open row is not polled, only reread when
-  // an ended run's record changes (a restore makes another round current).
-  runRound: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:runRound",
-    tag: WS_METHODS.gameRunRound,
-    staleTimeMs: 60_000,
-    idleTtlMs: 60_000,
-    refreshTrigger: (target) =>
-      endedRunGameSignal(`${target.environmentId}\0${target.input.threadId}`),
-  }),
-  // Read when the pick row opens; reread on the run's step pushes while the pick is open.
-  runPick: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:runPick",
-    tag: WS_METHODS.gameRunPick,
-    staleTimeMs: 60_000,
-    idleTtlMs: 60_000,
-    refreshTrigger: threadSignal("run"),
-  }),
   builds: buildsQuery,
   // A measured build's facts never change, so they are read once; others
   // reread only when that build's own facts moved (see buildFactsSignal).
@@ -535,18 +479,6 @@ export const gameEnvironment = {
   deleteSaved: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:deleteSaved",
     tag: WS_METHODS.gameSavedDelete,
-  }),
-  runStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:runStop",
-    tag: WS_METHODS.gameRunStop,
-  }),
-  runSteer: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:runSteer",
-    tag: WS_METHODS.gameRunSteer,
-  }),
-  runProfile: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:runProfile",
-    tag: WS_METHODS.gameRunProfile,
   }),
   events: gameEvents,
   create: createEnvironmentRpcCommand(connectionAtomRuntime, {

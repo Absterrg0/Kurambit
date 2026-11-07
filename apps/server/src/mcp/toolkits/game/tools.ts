@@ -37,19 +37,6 @@ import {
   GameUnityTextResult,
   GameUnityToolsResult,
   GameOperationFailure,
-  GameRunRoundDetail,
-  GameRunStatusResult,
-  GameRunChecksResult,
-  GameRunStartResult,
-  GameRunRestoreResult,
-  GameRunStopResult,
-  GameRunSteerResult,
-  GameRunDecideInput,
-  GameRunDecideResult,
-  GameRunProfile,
-  GameRunProfileResult,
-  GameRunSubmitInput,
-  GameRunSubmitResult,
   GameStatus,
   GameExploreStartInput,
   GameExploreActInput,
@@ -72,7 +59,6 @@ import {
 } from "@kurambit/contracts";
 import { PROFILES, type GameEngineProfile } from "../../../game/engineProfile.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
-import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -92,7 +78,6 @@ const perEngine = (line: (tools: GameEngineProfile["tools"]) => string) =>
  */
 const visibleToRunThreads = () => true;
 const hiddenFromRunThreads = () => !McpInvocationContext.isGameRunThread();
-const onlyForRunThreads = () => McpInvocationContext.isGameRunThread();
 const GameStatusTool = Tool.make("game_status", {
   description:
     "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
@@ -454,155 +439,12 @@ const BotViewTool = Tool.make("game_bot_view", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
-const runDependencies = [
-  GameRunControl.GameRunControl,
-  McpInvocationContext.McpInvocationContext,
-  ThreadManagementService.ThreadManagementService,
-];
-const RunStatusTool = Tool.make("game_run_status", {
-  description:
-    "Whether this game's production run is live, what it is doing now (step), its profile (guided or autopilot), its rounds with their verdicts (the comparators' reasons and the tester's note are in game_run_round) and the creator notes waiting for the next round. While a Guided run waits for the creator, decision holds what to present: the evidence files (absolute paths), what goes with them, the answers the run accepts, its default and when the default fires; record the creator's answer with game_run_decide. A run that ended says why in message and whether it can be resumed: tool-failed (a program Kurambit runs kept failing), low-memory and busy are pauses in which nothing was judged, resumed with game_run_start and an empty brief once the cause is fixed. Read-only. While a run is live, do not edit the game's files; pass the creator's requests to it with game_run_steer.",
-  success: GameRunStatusResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
-const RunRoundTool = Tool.make("game_run_round", {
-  description:
-    "One finished round of this game's production run, read from the run's records: the move, the outcome (kept, inconclusive, rejected, unjudged, or abandoned by a restore), each blind comparator's verdict and reasoning, the blind players' reports, bot facts and bot runs, the tester's note and the reviewer's direction for the next round. Long texts are cut and end in an ellipsis. Read-only; use game_run_status for the round numbers.",
-  parameters: Schema.Struct({
-    round: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-  }),
-  success: GameRunRoundDetail,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
-const RunChecksTool = Tool.make("game_run_checks", {
-  description:
-    "Score the current rung's state checks on the build in this game folder now: the harness boots it, plays each check's scenario and reads the game's state, as the run does after a build. Returns pass or fail per check with the values it read and the scenario's last frame. Use it while building to know the rung holds before you stop. Look checks are a tester's; this scores state checks only. Takes a minute or two.",
-  success: GameRunChecksResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, false)
-  // The run's builder scores its rung with it; it names no build, so blind roles may see it too.
-  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
-
 const commandId = Schema.optionalKey(
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)).annotate({
     description:
       "Any id of yours for this request. Pass the same one when you retry a call that may have gone through, so it applies once.",
   }),
 );
-const RunSteerTool = Tool.make("game_run_steer", {
-  description:
-    "Pass the creator's request to this game's production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. A run that reached its goal (its ladder done or shipped), or whose plan wrote no ladder, comes back for one round on the note, then stops again: this is how the creator asks for polish after the run's goal is met. A stopped or interrupted run keeps the note for when it is resumed with game_run_start. Fails plainly when the game never had a run: then work on the game directly. Say the creator's request in their words, one request per call.",
-  parameters: Schema.Struct({
-    text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
-    commandId,
-  }),
-  success: GameRunSteerResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
-const RunDecideTool = Tool.make("game_run_decide", {
-  description:
-    "Record the creator's answer to the decision this game's Guided production run is waiting on (game_run_status shows it). decisionId is the decision's id; answer is one of its answers (for a prototype pick-<n>, retry or run; for the style approve or redo; for the ladder approve, edit or rewrite). notes carries the creator's own words: what to take from the other prototype, what to change on a redo, retry or rewrite (required there), or for a ladder edit the full ladder JSON. An answer that does not fit is refused with the reason, so fix it and call again. Only after the creator answered; when nobody does, the run takes its default by itself.",
-  parameters: Schema.Struct({
-    decisionId: GameRunDecideInput.fields.decisionId,
-    answer: GameRunDecideInput.fields.answer,
-    notes: GameRunDecideInput.fields.notes,
-    commandId,
-  }),
-  success: GameRunDecideResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
-const RunStartTool = Tool.make("game_run_start", {
-  description:
-    "Start this game's production run, or resume a stopped or ended one, when the creator asks. A new run needs the creator's brief; an empty brief resumes the existing run where it left off (an ended run whose ladder is done stays done; pass the creator's polish request with game_run_steer instead). While a run is live a new brief is refused: pass it on with game_run_steer, or stop the run first. A run paused as tool-failed, low-memory or busy resumes with an empty brief once the cause in game_run_status is fixed. budgetMinutes, profile (guided or autopilot), artDirection and the provider, model and variant its roles run on only when the creator gives them; by default the roles run on this chat's model. The run plays in its own threads and asks its questions in the chat the creator last used for it; tell the creator it started and that its rounds show in the chat and on the build timeline.",
-  parameters: Schema.Struct({
-    brief: Schema.String.check(Schema.isMaxLength(8000)),
-    artDirection: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(8000))),
-    budgetMinutes: Schema.optionalKey(Schema.Number),
-    profile: Schema.optionalKey(GameRunProfile),
-    provider: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-    model: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-    variant: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-    commandId,
-  }),
-  success: GameRunStartResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
-
-const RunStopTool = Tool.make("game_run_stop", {
-  description:
-    "Stop this game's live production run when the creator asks. The run keeps its current step, which a resume with game_run_start and an empty brief runs again.",
-  parameters: Schema.Struct({ commandId }),
-  success: GameRunStopResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
-
-const RunRestoreTool = Tool.make("game_run_restore", {
-  description:
-    "Put this game back to an earlier build when the creator asks, with no run live (stop it first). Pass `round` for a kept round's build: it becomes the run's best, and a resumed run judges its next round against it. Or pass `build` with a name from game_run_status `builds` (the game as the run left it, a round's unfinished work, the game before an earlier restore, a round's build that was not kept): it comes back to the folder but the run's best stays as it was, so a resume starts from the best. Either way the engine project, art and ASSETS.md return, and what the folder held before is saved first as a build of its own in `builds`. Restoring the build saved before the latest restore, while no round has run since, undoes that restore: the run's best and the line it was continuing come back too, though a round in progress that restore abandoned stays abandoned. Restoring an older one brings back only its folder. A stopped run's round in progress is abandoned. The result says whether the folder has moved (`done`); a restore still moving after half a minute goes on, and game_run_status `restore` shows its outcome. A restore that does not fit is refused with the reason.",
-  parameters: Schema.Struct({
-    round: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-    build: Schema.optionalKey(Schema.String),
-    commandId,
-  }),
-  success: GameRunRestoreResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
-
-const RunProfileTool = Tool.make("game_run_profile", {
-  description:
-    "Switch this game's live production run between guided (it asks the creator in this chat at its decision points and takes a default when nobody answers in time) and autopilot (it decides everything itself; a question it is waiting on takes its default now). Only when the creator asks for it.",
-  parameters: Schema.Struct({ profile: GameRunProfile, commandId }),
-  success: GameRunProfileResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
-// A run role's result: the run reads this, never a file the role wrote, so a
-// slip in its shape is refused in the role's own turn and fixed there.
-const RunSubmitTool = Tool.make("game_run_submit", {
-  description:
-    'Hand your role\'s result to this game\'s production run, in the shape your prompt names: {"_tag":"checks",...}, {"_tag":"ladder",...}, {"_tag":"rungs",...}, {"_tag":"verdict",...}, {"_tag":"select",...}, {"_tag":"ship",...}, {"_tag":"ledger",...}, {"_tag":"report",...} or {"_tag":"art",...}. A submission that does not fit what your step asks for is refused with the reason: fix it and submit again. A later submission replaces an earlier one. Then finish your turn.',
-  parameters: GameRunSubmitInput,
-  success: GameRunSubmitResult,
-  failure,
-  failureMode: "return",
-  dependencies: runDependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, onlyForRunThreads);
 /** The studio toolkit: status, export and play-level tools for every thread. */
 const buildDependencies = [
   GameBuilds.GameBuilds,
@@ -611,7 +453,7 @@ const buildDependencies = [
 ];
 const BuildsTool = Tool.make("game_builds", {
   description:
-    "This game's builds, newest first: every turn of any chat that changed the engine project, art or ASSETS.md, and every round and saved build of its production run, each with when, which turn or round, what changed (files and a line), its `base` and its facts once measured (`facts.chips`, the few that matter, and how many were not measured). `base` is the build it was made from (a turn's: the game as the turn began), so restoring `base` with game_build_restore undoes that build; null when unknown. `current` is the build the folder was last made from; `restore` is the latest restore, whose `undo` build, restored with game_build_restore, undoes it (a redo after an undo). A three.js chat turn's build is played and measured by itself when the turn ends. Pass `before` with a `next` cursor for older builds. Pass `compare` with two build ids instead to diff their facts: each delta reads up, down, same or changed, or not-comparable with why (a side not measured, or measured by another harness or another tester bot); both builds play side by side in the Game panel. Facts are read as measured; game_facts measures. Read-only.",
+    "This game's builds, newest first: every turn of any chat that changed the engine project, art or ASSETS.md, and every round and saved build of a production run an earlier Kurambit made, each with when, which turn or round, what changed (files and a line), its `base` and its facts once measured (`facts.chips`, the few that matter, and how many were not measured). `base` is the build it was made from (a turn's: the game as the turn began), so restoring `base` with game_build_restore undoes that build; null when unknown. `current` is the build the folder was last made from; `restore` is the latest restore, whose `undo` build, restored with game_build_restore, undoes it (a redo after an undo). A three.js chat turn's build is played and measured by itself when the turn ends. Pass `before` with a `next` cursor for older builds. Pass `compare` with two build ids instead to diff their facts: each delta reads up, down, same or changed, or not-comparable with why (a side not measured, or measured by another harness or another tester bot); both builds play side by side in the Game panel. Facts are read as measured; game_facts measures. Read-only.",
   parameters: Schema.Struct({
     compare: Schema.optionalKey(Schema.Tuple([GameBuildId, GameBuildId])),
     before: Schema.optionalKey(Schema.String),
@@ -637,7 +479,7 @@ const FactsTool = Tool.make("game_facts", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const BuildRestoreTool = Tool.make("game_build_restore", {
   description:
-    "Put one of this game's builds (an id from game_builds) back in the game folder when the creator asks: its engine project, art and ASSETS.md return, and what the folder held before is kept first as a build of its own, so restoring that one undoes it (game_builds `restore.undo`). To undo a turn, restore its build's `base`; to go back to an older build, restore that build. Refused while a production run is live (stop it first). With a run, it goes through the run's restore: a kept round becomes the run's best, any other build leaves the best as it is. The result says whether the folder has moved (`done`).",
+    "Put one of this game's builds (an id from game_builds) back in the game folder when the creator asks: its engine project, art and ASSETS.md return, and what the folder held before is kept first as a build of its own, so restoring that one undoes it (game_builds `restore.undo`). To undo a turn, restore its build's `base`; to go back to an older build, restore that build. The result says whether the folder has moved (`done`).",
   parameters: Schema.Struct({ build: GameBuildId, commandId }),
   success: GameBuildRestoreResult,
   failure,
@@ -677,16 +519,6 @@ export const GameToolkit = Toolkit.make(
   BotRunTool,
   BotViewTool,
   BotReportTool,
-  RunStatusTool,
-  RunRoundTool,
-  RunSteerTool,
-  RunChecksTool,
-  RunStartTool,
-  RunStopTool,
-  RunDecideTool,
-  RunProfileTool,
-  RunRestoreTool,
-  RunSubmitTool,
   BuildsTool,
   FactsTool,
   BuildRestoreTool,

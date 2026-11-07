@@ -44,19 +44,11 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
     const { projections, idAllocator } = deps;
     const threadId = command.threadId;
     const thread = yield* projections.getThread(threadId);
-    // A deleted chat's run keeps only its ways out: a stop (recovery stops a
-    // run an older server left live there), the records of the finish and
-    // restore already under way, so nothing waits on it after a restart, and
-    // the release of its copies.
-    if (
-      thread.deletedAt !== null &&
-      command.type !== "game-run.stop" &&
-      command.type !== "game-run.finished" &&
-      command.type !== "game-run.restore" &&
-      command.type !== "game-run.copies.spend"
-    )
+    // A deleted chat's run keeps only its way out: a stop (recovery stops a
+    // run an older server left live there).
+    if (thread.deletedAt !== null && command.type !== "game-run.stop")
       return Result.fail<GameRunPlanRefusal>({ kind: "deleted" });
-    // A resume writes what the run's last landings owe, so it reads every step.
+    // A resume reads every step of the run.
     const resuming = command.type === "game-run.resume";
     const records = yield* projections.getGameRunRecords(
       threadId,
@@ -120,8 +112,7 @@ const NOTHING: GameRunPlan = { events: [], effects: [] };
 
 /**
  * A chat's deletion stops the run it holds, in the deletion's own commit (its
- * command id), so its finish stops the roles and no run stays live where no
- * chat reaches it. A run that is not live, or a stop the run refuses, plans
+ * command id), so no run stays live where no chat reaches it. A run that is not live, or a stop the run refuses, plans
  * nothing. Records that cannot be read fail the deletion: a chat deleted
  * over a run nothing then stops would leave the run working its folder.
  */

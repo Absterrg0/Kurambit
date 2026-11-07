@@ -54,7 +54,6 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const scope = yield* Effect.scope;
   const perThread = yield* KeyedLock.make<string>();
-  const announced = new Set<string>();
   const roles = new Map<string, boolean>();
   const isRole = (threadId: OrchestrationV2DomainEvent["threadId"]) =>
     roles.has(threadId)
@@ -144,14 +143,6 @@ const make = Effect.gen(function* () {
           ),
           Effect.ignore,
         );
-      }
-      case "game-run.updated": {
-        const restore = event.payload.restore;
-        if (restore === null || restore.outcome === null || announced.has(restore.requestId))
-          return Effect.void;
-        if (announced.size > 1000) announced.clear();
-        announced.add(restore.requestId);
-        return pushTo(event, restore.outcome.message).pipe(Effect.ignore);
       }
       default:
         return Effect.void;

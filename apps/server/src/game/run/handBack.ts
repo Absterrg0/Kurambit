@@ -231,26 +231,18 @@ const nextMove = (
 ):
   | {
       readonly kind: "wait";
-      readonly timer: { readonly kind: "memory" | "busy" | "tool"; readonly n: number };
+      readonly timer: { readonly kind: "tool"; readonly n: number };
       readonly pause: Duration.Input;
       readonly line: string;
     }
   | { readonly kind: "end"; readonly result: Ended } => {
   const spec = KINDS[cause._tag];
   const n = waitsOf(record, spec.kind) + 1;
-  if ((cause._tag === "GameRunToolFailed" && cause.standing) || n > spec.limit)
+  // Only a tool's failure has a durable wait now; memory and a busy game pause at once.
+  if (cause._tag !== "GameRunToolFailed" || cause.standing || n > spec.limit)
     return { kind: "end", result: endedBy(cause) };
-  const why =
-    cause._tag === "GameRunToolFailed"
-      ? cause.reason
-      : plainReason(cause.error.detail ?? cause.error.reason);
-  const line =
-    cause._tag === "GameRunMemoryShort"
-      ? `${cause.what} refused, memory short (${why}); the step waits ${spec.pause} (${n} of ${spec.limit})`
-      : cause._tag === "GameRunGameBusy"
-        ? `${cause.what} could not start yet (${why}); the step waits ${spec.pause} (${n} of ${spec.limit})`
-        : `${cause.what}: a tool failed (${why}); the step waits ${spec.pause} (${n} of ${spec.limit})`;
-  return { kind: "wait", timer: { kind: spec.kind, n }, pause: spec.pause, line };
+  const line = `${cause.what}: a tool failed (${cause.reason}); the step waits ${spec.pause} (${n} of ${spec.limit})`;
+  return { kind: "wait", timer: { kind: "tool", n }, pause: spec.pause, line };
 };
 
 /** The step the hand-back is for: a pair's half names itself, its record counts the waits. */

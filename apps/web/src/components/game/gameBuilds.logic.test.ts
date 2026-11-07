@@ -18,17 +18,7 @@ describe("roundCardAction", () => {
     expect(roundCardAction(fakeRound({}), stopped)).toMatchObject({
       kind: "revert",
       target: BUILD_A,
-      asBest: false,
       blocked: null,
-    });
-  });
-
-  it("keeps a round that was not kept by making its own build the run's best", () => {
-    const round = fakeRound({ outcome: "rejected", kept: false, build: BUILD_C, base: BUILD_B });
-    expect(roundCardAction(round, stopped)).toMatchObject({
-      kind: "keep",
-      target: BUILD_C,
-      asBest: true,
     });
   });
 
@@ -40,6 +30,10 @@ describe("roundCardAction", () => {
     // A later round moved the best: reverting this one would skip that round's work.
     expect(roundCardAction(fakeRound({}), { active: false, best: BUILD_C })).toBeNull();
     expect(roundCardAction(fakeRound({ outcome: "abandoned" }), stopped)).toBeNull();
+    // A round that was not kept can no longer become the run's best: no run continues.
+    expect(
+      roundCardAction(fakeRound({ outcome: "rejected", kept: false, build: BUILD_C }), stopped),
+    ).toBeNull();
   });
 
   it("waits for a live run to stop and the chat's turn to end", () => {

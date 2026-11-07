@@ -60,19 +60,13 @@ export function useBuildRestore(
   const waiting = shared !== null && (latest?.requestId ?? null) === shared.since;
   const pending = waiting || (latest !== null && latest.outcome === null);
   /**
-   * `asBest` keeps a run round's build as the run's best (CONTRACT A1). A null
-   * question sends at once: Undo and Redo are each other's way back. Answers
-   * the failure's text, or null.
+   * A null question sends at once: Undo and Redo are each other's way back.
+   * Answers the failure's text, or null.
    */
-  const send = async (
-    target: GameBuildId,
-    question: string | null,
-    asBest = false,
-  ): Promise<string | null> => {
+  const send = async (target: GameBuildId, question: string | null): Promise<string | null> => {
     if (threadRef === null || pending) return null;
     if (question !== null && (await requestConfirmDialog(question)) !== true) return null;
-    const name = asBest ? `${target}:best` : target;
-    if (key.current?.target !== name) key.current = { target: name, id: randomUUID() };
+    if (key.current?.target !== target) key.current = { target, id: randomUUID() };
     const since = latest?.requestId ?? null;
     setBuildRestoreSending(threadRef, { target, since });
     setError(null);
@@ -82,7 +76,6 @@ export function useBuildRestore(
         threadId: threadRef.threadId,
         build: { _tag: "build", build: target },
         commandId: key.current.id,
-        ...(asBest ? { asBest: true } : {}),
       },
     });
     if (result._tag === "Failure") {

@@ -3,7 +3,6 @@
 // both a build and a folder of builds: every top-level name here is one or the
 // other, and a build's own name never has anything below it. Every part is
 // reduced to characters a ref name may hold.
-import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 
 /** A ref name component from anything (an ISO time, a step id). */
 const part = (text: string) => text.replace(/[^0-9A-Za-z_-]+/g, "-").replace(/^-+|-+$/g, "") || "x";
@@ -65,21 +64,3 @@ export const savedBuildOf = (name: string): SavedBuild | null => {
  * engine caches (`.godot`, `Library`) are never touched.
  */
 export const restoredPaths = (lane: string) => [lane, "art", "ASSETS.md", "STYLE.json"];
-
-/**
- * How a person puts a kept build's engine project and art back, run in the
- * game folder. It names only the paths the build holds, since git refuses a
- * restore naming any it lacks; a build made before its game had a style lock
- * holds none, so the lock is removed as the app's restore removes it.
- */
-export const wayBack = (runId: string, name: string, lane: string) => {
-  const ref = checkpointRefForGameRun(runId, name);
-  return `git restore --source ${ref} -- $(git ls-tree --name-only ${ref} -- ${restoredPaths(lane).join(" ")}) && { git cat-file -e ${ref}:STYLE.json 2>/dev/null || rm -f STYLE.json; }`;
-};
-
-/**
- * A kept build as the run's log lines name it: game_run_restore brings it
- * back, and the git command is the fallback when the app cannot.
- */
-export const keptBuild = (runId: string, name: string, lane: string, sha: string) =>
-  `build ${name}${sha.length > 0 ? ` (${sha.slice(0, 8)})` : ""}; restore it with game_run_restore once the run is stopped, or run in the game folder: ${wayBack(runId, name, lane)}`;

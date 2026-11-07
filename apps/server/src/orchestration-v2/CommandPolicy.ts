@@ -141,18 +141,12 @@ export function threadTurnsOwnedByRun(thread: {
 export const threadCheckpointsOwnedByRun = threadTurnsOwnedByRun;
 
 /**
- * How a production run holds its game's folder: while live, while its ending
- * still exports, and while a creator's restore moves a round back. The run is
- * then the folder's one writer; null when no run holds it.
+ * Whether a run holds its game's folder: only a stage-era run while it is
+ * live, until recovery stops it at startup. A keep-going run never holds the
+ * folder: its writer is its chat, whose turns are ordinary turns.
  */
-export function gameRunHold(
-  run: Pick<GameRun, "status" | "endedAt" | "finished" | "restore"> | null,
-): "live" | "finishing" | "restoring" | null {
-  if (run === null) return null;
-  if (run.status !== "ended") return "live";
-  if (run.endedAt !== null && run.finished !== run.endedAt) return "finishing";
-  if (run.restore !== null && run.restore.outcome === null) return "restoring";
-  return null;
+export function gameRunHold(run: Pick<GameRun, "status" | "loop"> | null): "live" | null {
+  return run !== null && run.loop !== "turns" && run.status !== "ended" ? "live" : null;
 }
 
 export const GAME_RUN_HOLDS_FOLDER_MESSAGE =

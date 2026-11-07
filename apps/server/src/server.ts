@@ -6,9 +6,7 @@ import * as GameBuilds from "./game/GameBuilds.ts";
 import * as GameBuildsReactor from "./game/GameBuildsReactor.ts";
 import * as GameFacts from "./game/GameFacts.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
-import * as GameRunRoleReactor from "./game/run/GameRunRoleReactor.ts";
 import * as GameRunStepRunner from "./game/run/GameRunStepRunner.ts";
-import * as GameRunDecisions from "./orchestration-v2/gameRun/GameRunDecisions.ts";
 import * as GameRunRecovery from "./orchestration-v2/gameRun/GameRunRecovery.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
@@ -425,12 +423,6 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       yield* service.start();
     }),
   ).pipe(Layer.provide(DelegatedTaskQuestionReactor.layer), Layer.provide(ProjectionStoreV2.layer)),
-  Layer.effectDiscard(
-    Effect.gen(function* () {
-      const decisions = yield* GameRunDecisions.GameRunDecisions;
-      yield* decisions.start();
-    }),
-  ),
   ProviderUsageLimitsIngestion.layer,
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,
@@ -511,12 +503,8 @@ const layerCommandReadiness = HttpRouter.middleware(
   { global: true },
 );
 
-// The production run's game-side work: the role reactor lands role turns, the
-// step runner gives GameRunJobs its work; both read the run's records.
-const layerGameRunWork = GameRunStepRunner.layer.pipe(
-  Layer.provideMerge(GameRunRoleReactor.layer),
-  Layer.provide(ProjectionStoreV2.layer),
-);
+// Keep going's game-side work: the step runner gives GameRunJobs its work.
+const layerGameRunWork = GameRunStepRunner.layer.pipe(Layer.provide(ProjectionStoreV2.layer));
 const layerGameServices = GameBuilds.layer.pipe(
   Layer.provideMerge(GameFacts.layer),
   Layer.provideMerge(GameRunControl.layer),
@@ -549,15 +537,13 @@ const layerMakeRoutes = Layer.mergeAll(
       yield* reactor.start();
     }),
   ).pipe(Layer.provide(GameBuildsReactor.layer.pipe(Layer.provide(ProjectionStoreV2.layer)))),
-  // A production run is a long-lived job: a restart (an update, a crash, a
-  // dev reload) re-runs what it cut off instead of leaving it dead mid-round.
+  // Keep going is a long-lived job: a restart (an update, a crash, a dev
+  // reload) re-runs the step it cut off instead of leaving it dead.
   Layer.effectDiscard(
     Effect.gen(function* () {
       const runner = yield* GameRunStepRunner.GameRunStepRunner;
-      const roles = yield* GameRunRoleReactor.GameRunRoleReactor;
       const recovery = yield* GameRunRecovery.GameRunRecovery;
       yield* runner.start();
-      yield* roles.start();
       yield* forkParked(recovery.recover());
     }),
   ),

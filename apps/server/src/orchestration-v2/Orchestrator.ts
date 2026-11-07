@@ -494,16 +494,11 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-run.steer":
     case "game-run.profile.set":
     case "game-run.decide":
-    case "game-run.submit":
     case "game-run.step.start":
     case "game-run.step.complete":
     case "game-run.step.fail":
     case "game-run.decision.expire":
-    case "game-run.finished":
-    case "game-run.restore.request":
-    case "game-run.restore":
     case "game-run.step.schedule":
-    case "game-run.copies.spend":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -10800,16 +10795,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "game-run.steer":
       case "game-run.profile.set":
       case "game-run.decide":
-      case "game-run.submit":
       case "game-run.step.start":
       case "game-run.step.complete":
       case "game-run.step.fail":
       case "game-run.decision.expire":
-      case "game-run.finished":
-      case "game-run.restore.request":
-      case "game-run.restore":
       case "game-run.step.schedule":
-      case "game-run.copies.spend":
         cancelUnsettledEffects = yield* dispatchGameRun(command, events, effects);
         break;
       default:

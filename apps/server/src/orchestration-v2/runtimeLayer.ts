@@ -310,19 +310,11 @@ const layerThreadTitleRegenerationProvided = ThreadTitleRegenerationService.laye
 // layer attaches the work, recovery restarts what a restart cut off.
 const layerGameRunJobsProvided = GameRunJobs.layer;
 const layerGameRunDecisionsProvided = GameRunDecisions.layer.pipe(
-  Layer.provide(
-    Layer.mergeAll(layerOrchestratorProvided, ProjectionStore.layer, layerGameRunJobsProvided),
-  ),
+  Layer.provide(layerOrchestratorProvided),
 );
 const layerGameRunRecoveryProvided = GameRunRecovery.layer.pipe(
   Layer.provide(
-    Layer.mergeAll(
-      EffectOutbox.layer,
-      layerGameRunJobsProvided,
-      layerGameRunDecisionsProvided,
-      layerOrchestratorProvided,
-      ProjectionStore.layer,
-    ),
+    Layer.mergeAll(EffectOutbox.layer, layerOrchestratorProvided, ProjectionStore.layer),
   ),
 );
 const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(

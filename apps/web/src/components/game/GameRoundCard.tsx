@@ -213,13 +213,7 @@ export function GameRoundCard({
             variant="ghost"
             disabled={action.blocked !== null || !restores.canRestore || restores.pending}
             onClick={() =>
-              void restores.send(
-                action.target,
-                action.kind === "revert"
-                  ? restoreQuestion(`the build before round ${round}`)
-                  : `Keep round ${round}'s build as the run's best?\nIt goes into the game folder and the run's best becomes it, so a resume continues from it. What the folder holds now is saved as a build first, so you can undo this.`,
-                action.asBest,
-              )
+              void restores.send(action.target, restoreQuestion(`the build before round ${round}`))
             }
           >
             <HistoryIcon aria-hidden="true" />

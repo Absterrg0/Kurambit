@@ -85,6 +85,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -347,11 +348,22 @@ export interface GameRunThreadRecords {
   readonly gameRunSteps: ReadonlyArray<GameRunStep>;
   readonly gameRunRounds: ReadonlyArray<GameRunRound>;
 }
-/** A run that no longer works the game folder: it ended, its finish was recorded and no restore is pending. */
-const gameRunSettled = (run: GameRun) =>
-  run.status === "ended" &&
-  run.finished === run.endedAt &&
-  (run.restore === null || run.restore.outcome !== null);
+// A stage-era step's role turns and a pair's halves, read for Past runs and round tokens.
+const decodeStageRoles = Schema.decodeUnknownOption(
+  Schema.Array(Schema.Struct({ seq: Schema.Number, threadId: Schema.NullOr(ThreadId) })),
+);
+const decodeStageHalves = Schema.decodeUnknownOption(
+  Schema.Array(
+    Schema.Struct({
+      kind: Schema.String,
+      id: Schema.Number,
+      role: Schema.optionalKey(Schema.String),
+    }),
+  ),
+);
+
+/** A run that no longer works the game folder: it ended. */
+const gameRunSettled = (run: GameRun) => run.status === "ended";
 
 const emptyGameRunRecords: GameRunThreadRecords = {
   gameRuns: [],
@@ -5341,11 +5353,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql<{ readonly thread_id: string }>`
         SELECT DISTINCT thread_id FROM orchestration_v2_projection_game_runs
         WHERE status != 'ended'
-          OR json_extract(payload_json, '$.finished') IS NOT json_extract(payload_json, '$.endedAt')
-          OR (
-            json_extract(payload_json, '$.restore') IS NOT NULL
-            AND json_extract(payload_json, '$.restore.outcome') IS NULL
-          )
       `.pipe(
         Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
         Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
@@ -6960,21 +6967,26 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             (state.gameRunRecords.get(threadId)?.gameRunSteps ?? [])
               .filter((step) => step.runId === runId)
               .toSorted((a, b) => a.seq - b.seq)
-              .flatMap(({ step, roles, kind, startedAt, plannedAt }) =>
-                roles.flatMap(({ seq, threadId: roleThreadId }) => {
-                  const own = step.kind === "pair" ? step.halves : [step];
+              .flatMap(({ step, roles, kind, startedAt, plannedAt }) => {
+                // Stage-era records only: the step and its roles decode as they were written.
+                const entries = Option.getOrElse(decodeStageRoles(roles), () => []);
+                const own = Option.getOrElse(
+                  decodeStageHalves(step.kind === "pair" ? step.halves : [step]),
+                  () => [],
+                );
+                return entries.flatMap(({ seq, threadId: roleThreadId }) => {
                   const named = own.find((h) => h.kind === "role" && h.id === seq);
                   return roleThreadId === null
                     ? []
                     : [
                         {
-                          role: named?.kind === "role" ? named.role : kind,
+                          role: named?.role ?? kind,
                           threadId: roleThreadId,
                           startedAt: startedAt ?? plannedAt,
                         },
                       ];
-                }),
-              ),
+                });
+              }),
           ),
         ),
       getProjectGameRun: (projectId) =>
@@ -7072,14 +7084,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
         Ref.get(replayState).pipe(
           Effect.map((state) =>
             [...state.gameRunRecords].flatMap(([threadId, records]) =>
-              records.gameRuns.some(
-                (run) =>
-                  run.status !== "ended" ||
-                  run.finished !== run.endedAt ||
-                  (run.restore !== null && run.restore.outcome === null),
-              )
-                ? [threadId]
-                : [],
+              records.gameRuns.some((run) => run.status !== "ended") ? [threadId] : [],
             ),
           ),
         ),

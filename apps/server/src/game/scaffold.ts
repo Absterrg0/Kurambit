@@ -7,7 +7,9 @@ import {
   type GameStageKind,
 } from "@kurambit/contracts";
 import { engineProfile } from "./engineProfile.ts";
-import { CHECK_BOT_DIR } from "./run/checkRunner.ts";
+
+// Where stage-era runs kept their ladder's state-check bots; old games still ignore it.
+const CHECK_BOT_DIR = ".studio/bot/checks";
 
 // Run notes and reports are harness output, never game content: ignoring them
 // keeps the tree clean so build swaps never need a stash (T28 wedged on a

@@ -72,7 +72,6 @@ const TURN_REFS = "refs/kurambit/orchestration-v2/checkpoints/";
 const MAX_FILES = 8;
 const UNITY_NO_PLAY =
   "Unity builds play as a Linux player for facts and bots; the Game panel has no Unity Play yet.";
-const LIVE_RUN = "A production run is working on this game: stop the run to restore a build.";
 const isGameBuildId = Schema.is(GameBuildId);
 
 /** One build before its facts are read. */
@@ -180,14 +179,13 @@ export class GameBuilds extends Context.Service<
     ) => Effect.Effect<void, GameOperationError>;
     /**
      * Puts the build's engine project, art and ASSETS.md back in the game
-     * folder, keeping the folder before as a build. With `asBest`, a round's
-     * build of a stopped run becomes the run's best (Keep on its card).
+     * folder, keeping the folder before as a build.
      */
     readonly restore: (
       threadId: ThreadId,
       build: GameBuildRef,
       commandId: string | undefined,
-      options?: { readonly waitFor?: Duration.Input; readonly asBest?: boolean },
+      options?: { readonly waitFor?: Duration.Input },
     ) => Effect.Effect<typeof GameBuildRestoreResult.Type, GameOperationError>;
   }
 >()("kurambit/game/GameBuilds") {}
@@ -318,13 +316,8 @@ const make = Effect.gen(function* () {
       const inGame = (path: string) =>
         prefix === "" ? path : path.startsWith(prefix) ? path.slice(prefix.length) : null;
       const noRun = yield* noRunRestoreOf(g.root);
-      const runRestore = g.run?.restore ?? null;
-      const restoreTargets = [
-        ...(noRun?.outcome?.restored === true ? [{ id: noRun.target, at: noRun.requestedAt }] : []),
-        ...(runRestore?.outcome?.restored === true && runRestore.target !== null
-          ? [{ id: runRestore.target, at: runRestore.requestedAt }]
-          : []),
-      ];
+      const restoreTargets =
+        noRun?.outcome?.restored === true ? [{ id: noRun.target, at: noRun.requestedAt }] : [];
       const restoreBefore = (e: Entry) =>
         e.source._tag === "saved" &&
         (("build" in e.handle && /^restores\/.+-before$/.test(e.handle.build)) ||
@@ -650,11 +643,7 @@ const make = Effect.gen(function* () {
             : g.engine === "unity"
               ? UNITY_NO_PLAY
               : null,
-          noRestore: !available
-            ? "This build is no longer kept."
-            : g.run?.live === true
-              ? LIVE_RUN
-              : null,
+          noRestore: !available ? "This build is no longer kept." : null,
           facts:
             read === undefined ? { state: "never", chips: [], notMeasured: 0 } : summaryOf(read),
         };
@@ -736,19 +725,6 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const newerThan = (at: string) =>
         entries.some((entry) => entry.source._tag === "turn" && entry.at > at);
-      if (g.run !== null) {
-        const r = g.run.restore;
-        if (r === null || r.target === null || !isGameBuildId(r.target)) return null;
-        const before = r.before !== null && isGameBuildId(r.before) ? r.before : null;
-        return {
-          requestId: r.requestId,
-          target: r.target,
-          label: r.label,
-          requestedAt: r.requestedAt,
-          undo: r.outcome?.restored === true && !newerThan(r.requestedAt) ? before : null,
-          outcome: r.outcome,
-        };
-      }
       const r = yield* noRunRestoreOf(g.root);
       if (r === null) return null;
       return {
@@ -914,50 +890,6 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
-      if (options.asBest === true) {
-        if (g.run === null)
-          return yield* failed(
-            "Restore build",
-            g.root,
-            "invalid-input",
-            "This game has no production run, so it has no best to set.",
-          );
-        if (g.run.live) return yield* failed("Restore build", g.root, "busy", LIVE_RUN);
-      }
-      if (g.run !== null) {
-        const { entries } = yield* allEntries(g, 50, undefined);
-        const entry = entries.find((each) => each.id === build.build);
-        const round = entry?.source._tag === "round" ? entry.source.round : null;
-        if (options.asBest === true && round === null)
-          return yield* failed(
-            "Restore build",
-            g.root,
-            "invalid-input",
-            "Only a round's build can become the run's best; this build is not a round's.",
-          );
-        const handle =
-          options.asBest === true && round !== null
-            ? { round }
-            : (entry?.handle ?? { build: build.build });
-        const result = yield* runs
-          .runRestore(
-            {
-              threadId,
-              ...(commandId === undefined ? {} : { commandId }),
-              ...("round" in handle ? { round: handle.round } : { build: handle.build }),
-              ...(options.asBest === true ? { asBest: true } : {}),
-            },
-            options.waitFor === undefined ? {} : { waitFor: options.waitFor },
-          )
-          .pipe(
-            Effect.mapError((cause) =>
-              GameRunControl.GameRunError.toOperationError("Restore build", cause),
-            ),
-          );
-        yield* operations.changed(g.root, GAME_BUILDS_EVENT, result.message);
-        if (result.done) yield* playRestored(threadId, g);
-        return result;
-      }
       const result = yield* restoreWithoutRun(threadId, g, build, commandId);
       yield* playRestored(threadId, g);
       return result;

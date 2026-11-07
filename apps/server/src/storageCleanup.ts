@@ -1,6 +1,5 @@
 import {
   CommandId,
-  GameRunId,
   GitCommandError,
   OrchestrationV2AppThreadJson,
   OrchestrationV2ProviderSessionJson,
@@ -1002,17 +1001,15 @@ const make = Effect.gen(function* () {
     return false;
   });
 
-  // A production run's copies (worktreesDir/game-runs/<run>) follow the
-  // game-logs bound. A run's own copies are never removed here: the sweep asks
-  // the run (game-run.copies.spend), which frees them on its own thread's
-  // effects only if nothing can resume it, so a resume either refuses the ask
-  // or queues behind the release. Folders no run of this database names go
-  // here once a day old; a role thread bound to one loses the binding first,
-  // and one still at work keeps the folder this sweep.
+  // A stage-era production run's copies (worktreesDir/game-runs/<run>)
+  // follow the game-logs bound: a live run's stay, an ended run's and folders
+  // no run of this database names go here once a day old (no run resumes into
+  // them any more). A role thread bound to one loses the binding first, and
+  // one still at work keeps the folder this sweep.
   const cleanRunCopies = Effect.fn("StorageCleanup.cleanRunCopies")(function* (
     days: number,
     now: number,
-    removed: { copies: number; spent: number; bytes: number },
+    removed: { copies: number; bytes: number },
   ) {
     const root = path.join(config.worktreesDir, GAME_RUN_COPIES);
     if (!(yield* fs.exists(root))) return;
@@ -1049,34 +1046,20 @@ const make = Effect.gen(function* () {
     name: string,
     days: number,
     now: number,
-    removed: { copies: number; spent: number; bytes: number },
+    removed: { copies: number; bytes: number },
     realRoot: string,
     bound: ReadonlyArray<{ readonly threadId: string; readonly worktreePath: string }>,
   ) {
     const folder = path.join(realRoot, name);
     if ((yield* fs.realPath(folder).pipe(Effect.orElseSucceed(() => ""))) !== folder) return false;
-    const owner = yield* sql<{ readonly threadId: string }>`
-      SELECT thread_id AS "threadId"
+    // A run's copies go like any other once it ended: no run resumes into them any more.
+    const owner = yield* sql<{ readonly status: string }>`
+      SELECT status
       FROM orchestration_v2_projection_game_runs
       WHERE game_run_id = ${name}
     `;
     if ((yield* settingsService.getSettings).storageCleanup.gameLogsAfterDays !== days) return true;
-    if (owner[0] !== undefined) {
-      const asked = yield* engine
-        .dispatch({
-          type: "game-run.copies.spend",
-          commandId: CommandId.make(`server:game-run-copies-spend:${name}:${now}`),
-          threadId: ThreadId.make(owner[0].threadId),
-          runId: GameRunId.make(name),
-          keepMs: days * DAY_MS,
-        })
-        .pipe(
-          Effect.as(true),
-          Effect.catchTags({ OrchestratorGameRunRefusedError: () => Effect.succeed(false) }),
-        );
-      if (asked) removed.spent++;
-      return false;
-    }
+    if (owner[0] !== undefined && owner[0].status !== "ended") return false;
     const modified = Option.getOrNull((yield* fs.stat(folder)).mtime)?.getTime() ?? now;
     if (modified >= now - GAME_LOG_LIVE_MS) return false;
     const threads = bound.filter((row) => inside(folder, path.resolve(row.worktreePath)));
@@ -1152,7 +1135,7 @@ const make = Effect.gen(function* () {
     ]) {
       const days = category.days;
       if (days === null) continue;
-      const removed = { files: 0, bytes: 0, games: 0, unreadable: 0, copies: 0, spent: 0 };
+      const removed = { files: 0, bytes: 0, games: 0, unreadable: 0, copies: 0 };
       const clean: Effect.Effect<
         { readonly files: number; readonly bytes: number },
         PlatformError | ProjectStore.ProjectStoreV2Error | ServerSettingsError
@@ -1172,21 +1155,14 @@ const make = Effect.gen(function* () {
       yield* clean.pipe(
         Effect.map(({ files, bytes }) =>
           // With no game registered there is nothing to report on game logs.
-          category.root === null &&
-          removed.games === 0 &&
-          removed.copies === 0 &&
-          removed.spent === 0
+          category.root === null && removed.games === 0 && removed.copies === 0
             ? undefined
             : entries.push({
                 kind: category.kind,
-                outcome: files > 0 || removed.copies > 0 || removed.spent > 0 ? "removed" : "kept",
+                outcome: files > 0 || removed.copies > 0 ? "removed" : "kept",
                 reason: `${files === 0 ? "No expired files" : `Removed ${files} ${category.label}`}${
                   removed.copies > 0
-                    ? `; removed ${removed.copies} production-run ${removed.copies === 1 ? "copy" : "copies"} no run names`
-                    : ""
-                }${
-                  removed.spent > 0
-                    ? `; freeing the copies of ${removed.spent} spent production ${removed.spent === 1 ? "run" : "runs"}`
+                    ? `; removed ${removed.copies} production-run ${removed.copies === 1 ? "copy" : "copies"} no live run uses`
                     : ""
                 }${
                   removed.unreadable > 0

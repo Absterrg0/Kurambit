@@ -310,7 +310,11 @@ const cleanupFixture = (
           strings.join("").includes("FROM orchestration_v2_projection_game_runs")
             ? [...gameRuns.entries()]
                 .filter(([id]) => id === values[0])
-                .map(([, each]) => ({ threadId: each.threadId, deletedAt: null }))
+                .map(([, each]) => ({
+                  threadId: each.threadId,
+                  deletedAt: null,
+                  status: (each.run as { readonly status?: string }).status,
+                }))
             : openSessionCwd !== null && strings.join("").includes("projection_provider_sessions")
               ? [
                   {
@@ -1668,7 +1672,7 @@ describe("storage cleanup reports and local file policies", () => {
         const report = yield* service.runNow;
         expect(report.entries.find((entry) => entry.kind === "game-logs")).toMatchObject({
           outcome: "removed",
-          reason: "No expired files; removed 1 production-run copy no run names",
+          reason: "No expired files; removed 1 production-run copy no live run uses",
         });
         expect((yield* fs.readDirectory(copies)).toSorted()).toEqual(["run-fresh", "run-link"]);
         expect(yield* fs.exists(outside)).toBe(true);
@@ -1698,35 +1702,24 @@ describe("storage cleanup reports and local file policies", () => {
       }),
     ),
   );
-  it.live("asks a named run to spend its copies, and never removes them itself", () =>
+  it.live("removes an ended run's old copies and keeps a live run's", () =>
     runCleanupTest(
       Effect.gen(function* () {
-        const { service, fs, config, disable, gameRuns, dispatched } = yield* cleanupFixture();
+        const { service, fs, config, disable, gameRuns } = yield* cleanupFixture();
         disable();
-        // A run stopped long ago, whose creator could still resume it at any moment.
-        gameRuns.set("run-stopped", {
-          threadId: "thread-creator",
-          run: {
-            id: "run-stopped",
-            status: "ended",
-            ending: "stopped",
-            endedAt: "2020-01-01T00:00:00.000Z",
-            finished: "2020-01-01T00:00:00.000Z",
-            restore: null,
-          },
-        });
-        const copy = `${config.worktreesDir}/game-runs/run-stopped/step-3`;
-        yield* fs.makeDirectory(copy, { recursive: true });
-        yield* fs.utimes(`${config.worktreesDir}/game-runs/run-stopped`, 1, 1);
-        const report = yield* service.runNow;
-        // The run decides, on its own thread, behind any resume: the folder is not the sweep's.
-        expect(yield* fs.exists(copy)).toBe(true);
-        expect(dispatched).toMatchObject([
-          { type: "game-run.copies.spend", runId: "run-stopped", threadId: "thread-creator" },
-        ]);
-        expect(report.entries.find((entry) => entry.kind === "game-logs")?.reason).toContain(
-          "freeing the copies of 1 spent production run",
-        );
+        // No run resumes into its copies any more: an ended one's go, a live one's stay.
+        for (const [id, status] of [
+          ["run-stopped", "ended"],
+          ["run-live", "running"],
+        ] as const) {
+          gameRuns.set(id, { threadId: "thread-creator", run: { id, status } });
+          yield* fs.makeDirectory(`${config.worktreesDir}/game-runs/${id}/step-3`, {
+            recursive: true,
+          });
+          yield* fs.utimes(`${config.worktreesDir}/game-runs/${id}`, 1, 1);
+        }
+        yield* service.runNow;
+        expect(yield* fs.readDirectory(`${config.worktreesDir}/game-runs`)).toEqual(["run-live"]);
       }),
     ),
   );

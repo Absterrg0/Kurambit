@@ -34,10 +34,9 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import { toState } from "../orchestration-v2/gameRun/decide.ts";
 import { isGameRunOperationOwner } from "../orchestration-v2/gameRun/ids.ts";
 import { gameRunHold } from "../orchestration-v2/CommandPolicy.ts";
-import { currentStep } from "./run/runView.ts";
+import { stepLine } from "./run/runView.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
@@ -191,13 +190,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const run = yield* projections.getProjectGameRun(projectId);
       if (run === null || run.status === "ended") return null;
-      const records = yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" });
-      const held =
-        records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight) ?? null;
-      return {
-        step: currentStep(toState(run, records.gameRunRounds, held)),
-        startedAt: run.startedAt,
-      } satisfies GameSummary["run"];
+      return { step: stepLine(run), startedAt: run.startedAt } satisfies GameSummary["run"];
     }).pipe(Effect.orElseSucceed(() => null));
   const path = yield* Path.Path;
   /**

@@ -3,20 +3,32 @@
 // writes the user's index, HEAD or branches. A build is its commit oid.
 import { CheckpointRef } from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
-import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 
 import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
-import { checkpointRefForGameRun, gameRunRefsFolder } from "../../checkpointing/Utils.ts";
+import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import type * as GameOperations from "../GameOperations.ts";
 import type * as GameService from "../GameService.ts";
 import { causeText } from "../runSetup.ts";
 import { restoredPaths } from "./buildNames.ts";
-import { type BuildOutcome, classifyComparePair } from "./policy.ts";
-import type { BuildOp, RunState } from "./state.ts";
 
 type Checkpoints = CheckpointStore.CheckpointStore["Service"];
+
+/** A move of the game folder: a capture under a name, a build brought back, or names kept. */
+type BuildOp =
+  | { readonly _tag: "capture"; readonly name: string; readonly base: string }
+  | { readonly _tag: "restore"; readonly sha: string; readonly keep: ReadonlyArray<string> }
+  | { readonly _tag: "keep"; readonly names: ReadonlyArray<string>; readonly sha: string };
+
+interface BuildOutcome {
+  readonly ok: boolean;
+  /** The build's commit oid. */
+  readonly sha: string;
+  readonly changed: boolean;
+  readonly lines: number;
+  readonly detail: string;
+}
 
 /** What a blind player must not see: files that differ by round, not by game. */
 export const NOT_IN_SAMPLE = [".studio", "NOTES.md"];
@@ -72,64 +84,6 @@ export const measureChange = (
         );
 
 /**
- * A finished run's transient builds go: every turn's, and the candidate of
- * each round recorded as kept (its kept build holds it) or beaten in both
- * orders. Every other build stays: the run log tells a person it keeps a
- * round's candidate (unjudged, inconclusive, failed checks, a failed merge,
- * a budget leave, a round never recorded, a round a restore abandoned: the
- * restore's before build may hold the best a step was putting back at the
- * stop, not the candidate), its unfinished work and the work
- * each ending found, and gives the command that brings it back. A build the
- * run still holds (its best, a pending candidate, the round or block a resume
- * continues) stays whatever its name. Round records are history (each names
- * its candidate), so only the rest of the state counts as held.
- */
-const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
-// Every build the state names, wherever it names one: records hold builds by oid.
-const oidsIn = (value: unknown, into: Set<string>): void => {
-  if (typeof value === "string") {
-    if (OID.test(value)) into.add(value);
-  } else if (Array.isArray(value)) for (const each of value) oidsIn(each, into);
-  else if (typeof value === "object" && value !== null)
-    for (const each of Object.values(value)) oidsIn(each, into);
-};
-
-export const pruneBuilds = (checkpoints: Checkpoints, root: string, state: RunState) =>
-  Effect.gen(function* () {
-    const folder = gameRunRefsFolder(state.runId);
-    const entries = yield* checkpoints.listCheckpointRefs({ cwd: root, prefix: folder });
-    const held = new Set<string>();
-    oidsIn({ ...state, rounds: [] }, held);
-    // The latest record of each round label decides its candidate.
-    const recorded = new Map(state.rounds.map((r) => [r.branch, r]));
-    const spent = (label: string) => {
-      const r = recorded.get(label);
-      if (r === undefined) return false;
-      const [o1, o2] = r.verdicts;
-      return (
-        r.kept ||
-        (r.unjudged !== true &&
-          r.inconclusive !== true &&
-          classifyComparePair(o1?.verdict ?? "NONE", o2?.verdict ?? "NONE") === "best-wins")
-      );
-    };
-    const transient = entries
-      .map((entry) => ({ ...entry, name: entry.checkpointRef.slice(folder.length) }))
-      .filter(
-        ({ name, oid }) =>
-          !held.has(oid) &&
-          (name.startsWith("turns/") ||
-            (name.endsWith("/candidate") && spent(name.slice(0, -"/candidate".length)))),
-      );
-    if (transient.length > 0)
-      yield* checkpoints.deleteCheckpointRefs({
-        cwd: root,
-        checkpointRefs: transient.map((entry) => entry.checkpointRef),
-      });
-    return transient.length;
-  });
-
-/**
  * How the run takes the game folder for one of its own moves (a capture, a
  * restore, a kept name): as one operation of the game, owned by the run, so
  * no export, check or Play of another owner reads a half-moved folder. With
@@ -147,13 +101,6 @@ export interface FolderLock {
   readonly owner: string;
   readonly waitUntil: number | null;
 }
-
-// The end of a run, a restore and a turn's capture wait out a creator's Play
-// or an operation begun before the run, all of their moves within this one
-// bound; past it they fail as they found the game.
-const FREE_WAIT_MS = 10 * 60_000;
-/** The one deadline every wait of a finish, restore or landing shares. */
-export const freeBy = Effect.map(Clock.currentTimeMillis, (now) => now + FREE_WAIT_MS);
 
 const asRunOperation = <A, E extends { readonly message: string }>(
   lock: FolderLock,
@@ -231,17 +178,6 @@ export const buildStep = (
       }
       case "restore": {
         yield* deps.game.closeLiveEditors(root);
-        // The folder a resume found is kept once under `save`: a repeat after
-        // a restart finds the name and never keeps the restored folder there.
-        // A folder that already holds the build needs no keeping.
-        if (op.save !== undefined) {
-          const saveRef = checkpointRefForGameRun(runId, op.save);
-          if (!(yield* checkpoints.hasCheckpointRef({ cwd: root, checkpointRef: saveRef }))) {
-            const found = yield* capture(checkpoints, root, runId, op.save);
-            if (!(yield* measureChange(checkpoints, root, isRestored(lane), found, op.sha)).changed)
-              yield* checkpoints.deleteCheckpointRefs({ cwd: root, checkpointRefs: [saveRef] });
-          }
-        }
         const restored = yield* checkpoints.withWorkspaceLock(
           root,
           checkpoints.restoreCheckpoint({

@@ -221,9 +221,6 @@ it.effect("a production run's role thread gets no thread, worktree or project to
         "kurambit_worktree_handoff",
         "kurambit_project_list",
         "delegate_task",
-        "game_run_steer",
-        "game_run_decide",
-        "game_run_restore",
       ];
       const names = (threadId: ThreadId) =>
         Effect.map(listTools(threadId), (tools) => tools.map((tool) => tool.name));

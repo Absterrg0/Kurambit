@@ -352,7 +352,6 @@ import { useEnvironmentQuery } from "../state/query";
 import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
 import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
 import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
-import { useGameRunComposerNotice } from "./game/useGameRunComposerNotice";
 import { useGameNextBanner } from "./game/GameNextBanner";
 import { useGameRoundCards } from "./game/GameRoundCard";
 import { useEnvironmentScope } from "~/state/session";
@@ -1649,7 +1648,6 @@ export default function ChatView(props: ChatViewProps) {
     selectThreadPreviewMiniPlayer(state.byThreadKey, activeThreadRef),
   );
   const isGameThread = useIsGameThread(activeThreadRef);
-  const gameRunNotice = useGameRunComposerNotice(isGameThread ? activeThreadRef : null);
   const gameChatWidth = useGameWorkspaceStore((state) => state.chatWidth);
   const gameChatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
   // A remembered dock width only means something while both panes fit. The
@@ -5224,7 +5222,7 @@ export default function ChatView(props: ChatViewProps) {
         })
       : null;
   const composerBannerItems = (() => {
-    const gameRunItems = [gameRunNotice, gameNextBanner].filter((item) => item !== null);
+    const gameRunItems = gameNextBanner === null ? [] : [gameNextBanner];
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [
       childInputBannerItem,

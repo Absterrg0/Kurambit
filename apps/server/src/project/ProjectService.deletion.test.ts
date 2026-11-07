@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   EventId,
+  type GameRun,
   GameRunId,
   type OrchestrationV2AppThread,
   ProjectId,
@@ -13,7 +14,6 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -22,7 +22,6 @@ import * as ServerConfig from "../config.ts";
 import { OrchestrationEffectRequestV2 } from "../orchestration-v2/EffectOutbox.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
-import { planGameRunCommand } from "../orchestration-v2/gameRun/plan.ts";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as LegacyV1ThreadImporter from "../orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
 import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenance.ts";
@@ -272,41 +271,52 @@ it.effect(
       yield* Effect.gen(function* () {
         const eventSink = yield* EventSink.EventSinkV2;
         const projections = yield* ProjectionStore.ProjectionStoreV2;
-        const idAllocator = yield* IdAllocator.IdAllocatorV2;
-        yield* eventSink.write({ events: [nativeThreadCreated(projectId, chat)] });
-        const start = {
-          type: "game-run.start" as const,
-          commandId: CommandId.make("command:game-run-start"),
+        const at = "2026-09-04T12:00:00.000Z";
+        const live: GameRun = {
+          id: GameRunId.make("run_deleted_chat"),
           threadId: chat,
-          runId: GameRunId.make("run_deleted_chat"),
-          lane: "godot",
-          brief: "A small arena game.",
-          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
-          runtimeMode: "full-access" as const,
+          loop: "turns",
+          projectId,
+          lane: "web",
+          engine: "three",
+          profile: "autopilot",
+          budgetMinutes: 60,
+          budgetEndsAt: null,
+          status: "running",
+          ending: null,
+          steer: [],
+          stallStreak: 0,
+          lastFailure: "",
+          seq: 0,
+          inFlight: null,
+          endedAt: null,
+          startedAt: at,
+          updatedAt: at,
         };
-        const started = yield* planGameRunCommand({ projections, idAllocator }, start);
-        if (Result.isFailure(started)) return assert.fail("The run did not start");
-        yield* eventSink.commitCommand({
-          commandId: start.commandId,
-          commandType: start.type,
-          threadId: chat,
-          acceptedAt: yield* DateTime.now,
-          events: started.success.events,
-          effects: [],
+        yield* eventSink.write({
+          events: [
+            nativeThreadCreated(projectId, chat),
+            {
+              id: EventId.make("created:run_deleted_chat"),
+              type: "game-run.created",
+              threadId: chat,
+              occurredAt: DateTime.makeUnsafe(at),
+              payload: live,
+            },
+          ],
         });
-
         const service = yield* ProjectService.make;
         yield* service.delete({ commandId, projectId, force: true });
         const run = (yield* projections.getGameRunRecords(chat)).gameRuns.at(-1);
         assert.equal(run?.status, "ended");
         assert.equal(run?.ending, "stopped");
-        // Its finish, which stops the run's roles, was committed with the deletion.
-        const finish = yield* sql<{ readonly command_id: string }>`
-        SELECT command_id FROM orchestration_v2_effect_outbox
-        WHERE thread_id = ${chat} AND effect_type = 'game-run.finish'
+        // The stop was committed with the deletion itself.
+        const stops = yield* sql<{ readonly command_id: string }>`
+        SELECT command_id FROM orchestration_events
+        WHERE stream_id = ${chat} AND event_type = 'game-run.updated'
       `;
         assert.deepEqual(
-          finish.map((row) => row.command_id),
+          stops.map((row) => row.command_id),
           [`${commandId}:delete-thread:${chat}`],
         );
       }).pipe(Effect.provide(layerServices));

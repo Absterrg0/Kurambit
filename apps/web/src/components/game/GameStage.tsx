@@ -39,7 +39,7 @@ import {
   turnBuild,
 } from "../../state/game";
 import { useQuietThreadShell } from "../../state/entities";
-import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
+import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -159,12 +159,10 @@ function ThreadGameStage({
   const navigate = useNavigate();
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
-  const canRunStop = useAtomValue(gameEnvironment.runStop.permissionAtom(threadRef.environmentId));
   // A run's role thread shows the game but never writes beside the run.
   const access = useGameStageAccess(threadRef);
   const canOperate = canAct && access === "writer";
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
-  const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
   const chatWidth = useGameWorkspaceStore((state) => state.chatWidth);
   const chatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
   const setChatWidth = useGameWorkspaceStore((state) => state.setChatWidth);
@@ -212,12 +210,6 @@ function ThreadGameStage({
   const [playRef, setPlayRef] = useState<GameBuildRef | null>(null);
   const [askedSeen, setAskedSeen] = useState(asked);
   const [askedStatus, setAskedStatus] = useState<typeof query.data>(null);
-  const runStatus = useEnvironmentQuery(
-    gameEnvironment.runStatus({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-  );
   const [busy, setBusy] = useState<{ action: GameAction; startedAt: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -558,37 +550,34 @@ function ThreadGameStage({
             label: heldTurn === null ? "New build" : `New build from turn ${heldTurn}`,
             action: "Play",
           };
-  const run = runStatus.data?.active === true ? runStatus.data : null;
   const stagePhaseLabel =
-    run !== null
-      ? `Production run · ${run.step ?? run.stage}`
-      : stageKind === "live"
-        ? phase.kind === "playing"
-          ? live.revision === 0
-            ? "Live"
-            : `Live · reloaded when ${changedFile(live.message)} changed, ${clockTime(live.at)}`
-          : phase.kind === "stopped"
-            ? "Stopped"
-            : null
-        : phase.kind === "playing"
+    stageKind === "live"
+      ? phase.kind === "playing"
+        ? live.revision === 0
+          ? "Live"
+          : `Live · reloaded when ${changedFile(live.message)} changed, ${clockTime(live.at)}`
+        : phase.kind === "stopped"
+          ? "Stopped"
+          : null
+      : phase.kind === "playing"
+        ? data.webBuildStale
+          ? "Playing · older than the game"
+          : "Playing"
+        : phase.kind === "ready"
           ? data.webBuildStale
-            ? "Playing · older than the game"
-            : "Playing"
-          : phase.kind === "ready"
-            ? data.webBuildStale
-              ? "Ready · older than the game"
-              : "Ready to play"
-            : phase.kind === "first-build"
-              ? "Making the first build"
-              : phase.kind === "never-built"
-                ? "No build yet"
-                : phase.kind === "failed"
-                  ? "Build failed"
-                  : phase.kind === "tools-missing"
-                    ? "Engine not ready"
-                    : phase.kind === "window"
-                      ? "Plays in its own window"
-                      : null;
+            ? "Ready · older than the game"
+            : "Ready to play"
+          : phase.kind === "first-build"
+            ? "Making the first build"
+            : phase.kind === "never-built"
+              ? "No build yet"
+              : phase.kind === "failed"
+                ? "Build failed"
+                : phase.kind === "tools-missing"
+                  ? "Engine not ready"
+                  : phase.kind === "window"
+                    ? "Plays in its own window"
+                    : null;
   const runningSomething =
     busy !== null ||
     operationState === "running" ||
@@ -604,13 +593,6 @@ function ThreadGameStage({
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void stageRef.current?.requestFullscreen();
-  };
-  const stopRun = async () => {
-    const result = await runStop({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    });
-    if (result._tag === "Failure") setError(String(squashAtomCommandFailure(result)));
   };
   const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -634,7 +616,7 @@ function ThreadGameStage({
   const stageSubtitle =
     stagePhaseLabel === null
       ? templateName
-      : run !== null || stageKind === "live"
+      : stageKind === "live"
         ? `${engine.name} · ${stagePhaseLabel}`
         : template === undefined
           ? stagePhaseLabel
@@ -735,7 +717,7 @@ function ThreadGameStage({
             <h2 className="min-w-0 truncate text-base font-semibold leading-5 tracking-tight">
               <TruncatedText text={data.manifest.name} />
             </h2>
-            {building && stageKind !== "live" && run === null ? (
+            {building && stageKind !== "live" ? (
               <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
                 {/* Static: the elapsed timer already shows it is live. */}
                 <RefreshCwIcon className="size-3 shrink-0" aria-hidden="true" />
@@ -831,12 +813,6 @@ function ThreadGameStage({
                   <SquareIcon />
                   Stop the game
                 </MenuItem>
-                {run !== null && access === "writer" ? (
-                  <MenuItem disabled={!canRunStop} onClick={() => void stopRun()}>
-                    <SquareIcon />
-                    Stop production run
-                  </MenuItem>
-                ) : null}
                 <MenuSeparator />
                 <MenuItem
                   onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}

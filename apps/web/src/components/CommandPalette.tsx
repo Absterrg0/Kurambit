@@ -733,7 +733,6 @@ function OpenCommandPaletteDialog(props: {
       ? null
       : GAME_ENGINES[gameStatus.manifest.engine.name].stage;
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
-  const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
   const canRestore = useAtomValue(
     activeThreadRef === null
       ? NO_PERMISSION
@@ -746,22 +745,9 @@ function OpenCommandPaletteDialog(props: {
       ? NO_PERMISSION
       : gameEnvironment.action.permissionAtom(activeThreadRef.environmentId),
   );
-  const canRunStop = useAtomValue(
-    activeThreadRef === null
-      ? NO_PERMISSION
-      : gameEnvironment.runStop.permissionAtom(activeThreadRef.environmentId),
-  );
   const gameAccess = useGameStageAccess(activeThreadRef);
   // The game's latest turn build: the palette offers the Undo or Redo its strip does.
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
-  const gameRun = useEnvironmentQuery(
-    isGameThread && activeThreadRef !== null
-      ? gameEnvironment.runStatus({
-          environmentId: activeThreadRef.environmentId,
-          input: { threadId: activeThreadRef.threadId },
-        })
-      : null,
-  ).data;
 
   const activeThreadReferenceCopyTarget =
     activeThread === null
@@ -1601,7 +1587,7 @@ function OpenCommandPaletteDialog(props: {
       });
     }
     // The latest build's detail, where Go back picks any build on the timeline.
-    if (canRestore && gameAccess === "writer" && gameRun?.active !== true && latestBuild !== null)
+    if (canRestore && gameAccess === "writer" && latestBuild !== null)
       actionItems.push({
         kind: "action",
         value: "action:game-build-restore",
@@ -1662,23 +1648,6 @@ function OpenCommandPaletteDialog(props: {
         ],
         icon: <PackageIcon className={ITEM_ICON_CLASS} />,
         run: requestStage({ kind: "export" }),
-      });
-    // A stage-era run is shown and stoppable; nothing starts or resumes one
-    // from the app. Its controls belong to the game's own chats, never a role's.
-    if (gameAccess === "writer" && gameRun?.active === true && canRunStop)
-      actionItems.push({
-        kind: "action",
-        value: "action:game-run-stop",
-        title: "Stop production run",
-        searchTerms: ["stop", "run", "production", "game"],
-        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          const result = await runStop({
-            environmentId: threadRef.environmentId,
-            input: { threadId: threadRef.threadId },
-          });
-          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        },
       });
   }
   for (const [mode, title] of [
