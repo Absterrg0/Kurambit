@@ -1,4 +1,4 @@
-import type { GameBuild, GameBuildsResult } from "@kurambit/contracts";
+import { ownsUndo, type GameBuild, type GameBuildsResult } from "@kurambit/contracts";
 
 /**
  * A chat turn's build as its changed-files card shows it, with what the list
@@ -6,7 +6,7 @@ import type { GameBuild, GameBuildsResult } from "@kurambit/contracts";
  */
 export interface TurnBuildView {
   readonly build: GameBuild;
-  /** The game's latest turn build: the one Undo belongs to. */
+  /** The game's latest build Undo belongs to (a turn's, or a person's kept edit). */
   readonly latest: boolean;
   readonly restore: GameBuildsResult["restore"];
   readonly current: GameBuildsResult["current"];
@@ -22,7 +22,7 @@ export const selectTurnBuild = (
   list: GameBuildsResult,
   runId: string | null,
 ): TurnBuildView | null => {
-  const latest = list.builds.find((build) => build.source._tag === "turn");
+  const latest = list.builds.find((build) => ownsUndo(build.source));
   const build =
     runId === null
       ? latest

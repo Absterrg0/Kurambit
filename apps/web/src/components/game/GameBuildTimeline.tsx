@@ -10,12 +10,13 @@ import {
   Undo2Icon,
   XIcon,
 } from "lucide-react";
-import type {
-  GameBuild,
-  GameBuildId,
-  GameBuildRef,
-  GameBuildsResult,
-  ScopedThreadRef,
+import {
+  ownsUndo,
+  type GameBuild,
+  type GameBuildId,
+  type GameBuildRef,
+  type GameBuildsResult,
+  type ScopedThreadRef,
 } from "@kurambit/contracts";
 
 import type { GameStageRequest } from "../../gameWorkspaceStore";
@@ -208,7 +209,7 @@ export function GameBuildTimeline({
     if (asked !== null && requestN !== mountRequest) answer(asked);
   }, [requestN, asked, mountRequest, answer]);
 
-  const latestTurn = loaded.find((build) => build.source._tag === "turn") ?? null;
+  const latestUndoable = loaded.find((build) => ownsUndo(build.source)) ?? null;
   const shown =
     selected === "now"
       ? null
@@ -219,7 +220,7 @@ export function GameBuildTimeline({
       : turnStripRestore(
           {
             build: shown,
-            latest: shown.id === latestTurn?.id,
+            latest: shown.id === latestUndoable?.id,
             restore: list.restore,
             current: list.current,
             folderEdited: list.folderEdited,

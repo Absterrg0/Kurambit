@@ -1831,6 +1831,11 @@ const layerWsRpc = (
           gameBuilds.restore(threadId, build, commandId),
         [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
           gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
+        [WS_METHODS.gameKeepValues]: ({ threadId, things, commandId }) =>
+          gameBuilds.keepValues(threadId, {
+            things,
+            ...(commandId === undefined ? {} : { commandId }),
+          }),
         [WS_METHODS.gameRunRounds]: ({ threadId }) =>
           gameRun
             .rounds(threadId)
