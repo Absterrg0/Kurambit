@@ -77,12 +77,20 @@ def surface_hit(targets, origin, direction, distance=10.0):
     return None if best is None else best[:3]
 
 
+def use_nodes(idb):
+    """Gives a material or world its node tree. Blender before 5.0 creates them without one;
+    5.0 always has one and 6.0 removes the use_nodes flag, so it is set only when missing."""
+    if idb.node_tree is None:
+        idb.use_nodes = True
+    return idb.node_tree
+
+
 def material(hex_colour, glow=0.0, name=None, roughness=0.55):
     """A material of one sRGB colour ("#RRGGBB"); glow > 0 makes it emissive (the style pass turns
     emissive materials into the Glow material and snaps every colour to STYLE.json's palette)."""
     name = name or f"pal:{hex_colour.lower()}"
     m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
-    m.use_nodes = True
+    use_nodes(m)
     bsdf = next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
     rgb = [int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
     lin = [((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92 for c in rgb] + [1.0]

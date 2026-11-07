@@ -356,7 +356,8 @@ def studio_lights(sc, made):
         made.append(ob)
         lights.append(ob)
     world = bpy.data.worlds.new("studio_sprite_world")
-    world.use_nodes = True
+    if world.node_tree is None:  # Blender 5.0 always has one; 6.0 removes the flag
+        world.use_nodes = True
     bg = world.node_tree.nodes.get("Background")
     if bg is not None:
         bg.inputs[0].default_value = (0.42, 0.42, 0.45, 1.0)

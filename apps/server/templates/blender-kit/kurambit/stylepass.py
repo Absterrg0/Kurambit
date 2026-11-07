@@ -123,7 +123,7 @@ def _feeding_image(socket, depth=4):
 def material_colour(m):
     """(sRGB colour, emissive) of a material: its Principled base colour, or the mean of the image
     feeding it."""
-    if m is None or not m.use_nodes:
+    if m is None or m.node_tree is None:
         c = m.diffuse_color if m is not None else (0.8, 0.8, 0.8, 1)
         return [_srgb(x) for x in c[:3]], False
     bsdf = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
@@ -158,7 +158,7 @@ def _atlas(palette, gradient, out_dir):
 
 def _palette_material(name, img, shading, glow):
     m = bpy.data.materials.new(name)
-    m.use_nodes = True
+    helpers.use_nodes(m)
     m.use_backface_culling = True  # closed shapes: single-sided in glTF, half the fill cost
     nt = m.node_tree
     bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
@@ -229,7 +229,7 @@ def fit_textures(meshes, side):
     (Blender's image scale, aspect kept) into a new packed image, so the source file is never
     written; one that cannot be read is left out of its material. Returns the notes."""
     notes, done = [], {}
-    mats = {s.material for o in meshes for s in o.material_slots if s.material is not None and s.material.use_nodes}
+    mats = {s.material for o in meshes for s in o.material_slots if s.material is not None and s.material.node_tree is not None}
     for m in sorted(mats, key=lambda m: m.name):
         for node in list(m.node_tree.nodes):
             image = getattr(node, "image", None)

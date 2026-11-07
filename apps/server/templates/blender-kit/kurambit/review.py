@@ -20,7 +20,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import skeleton
+from . import helpers, skeleton
 from .protocol import Refused, entry
 
 BG = (0.29, 0.30, 0.33)
@@ -143,7 +143,7 @@ def _studio(sc, made):
         made.append(ob)
         lights.append(ob)
     world = bpy.data.worlds.new("kurambit_review_world")
-    world.use_nodes = True
+    helpers.use_nodes(world)
     bg = world.node_tree.nodes.get("Background")
     bg.inputs[0].default_value = (0.42, 0.42, 0.45, 1.0)
     bg.inputs[1].default_value = 1.0
