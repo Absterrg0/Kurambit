@@ -49,16 +49,13 @@ Unity, whose builds bring their own tools, and 1.5 GB for the live Blender view,
 more for a rendered look. Play sessions and bot runs check too, after waiting up to about a minute
 for memory to free: about 1.3 GB for a Godot session, 1 GB for a browser session and 1.5 GB for a
 bot run. Work started with less tends to be killed by the system midway, or to make the whole
-machine hang on swap; a production run waits for memory rather than failing, and if memory stays
-short it pauses, ready to resume. The refusal says how much is needed and how much is free; close
-other apps or wait a few minutes, then ask again. Starts also take turns across the machine, so a
-start can wait behind another game's: a run that keeps waiting behind other starts pauses as
-**Machine busy**, ready to resume once they finish. A run whose own tools keep failing while they
-measure a build (the browser, an engine editor, a copy of the game) pauses as **Tool failed** after
-a few minutes of waiting, with what failed; it never judges the build on it, and resuming the run
-with an empty brief goes on once the cause is fixed. Kurambit never closes your other apps to make
-room. If free memory falls under about 1 GB while an editor sits idle, Kurambit closes it and
-reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB`,
+machine hang on swap. The refusal says how much is needed and how much is free; close other apps or
+wait a few minutes, then ask again. Starts also take turns across the machine, so a start can wait
+behind another game's. If Kurambit cannot measure two keep-going steps in a row (the browser, an
+engine editor or a copy of the game kept failing), keep going pauses with what failed; it never
+judges or undoes a step on it, and **Resume** goes on once the cause is fixed. Kurambit never closes
+your other apps to make room. If free memory falls under about 1 GB while an editor sits idle,
+Kurambit closes it and reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB`,
 `KURAMBIT_BLENDER_MEMORY_MB`, `KURAMBIT_EXPLORE_NATIVE_MEMORY_MB`,
 `KURAMBIT_EXPLORE_WEB_MEMORY_MB`, `KURAMBIT_EXPLORE_UNITY_MEMORY_MB` (1 GB for a Unity session),
 `KURAMBIT_BLENDER_RENDER_MEMORY_MB` (sprite renders and rendered looks) and
@@ -94,9 +91,7 @@ browser lane: a static browser game with three.js vendored (no install step), pl
 through the same tools, with a Web export only. Play, preview and web packaging work the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
 editor on a private display, plays real Linux builds of it, and exports Linux and Windows builds.
 Unity games have no Web export, so Play and web packaging are not available for them; explore
-sessions and bot runs play a Linux player of the current sources, built once per change. In a production run, each blind comparison builds a Unity game in a separate
-checkout of it, which takes over the one Unity editor for that build; the game's own editor reopens
-on its next Unity call.
+sessions and bot runs play a Linux player of the current sources, built once per change.
 
 To continue an existing game, choose its card under **Your games** or its row in the sidebar, or use
 **Open game** and pick a folder that contains `game.json`. A game opens on its main chat: the first
@@ -113,23 +108,54 @@ it: art from other packs, characters on another skeleton and sprites in another 
 until the file changes. To change the game's direction, edit `STYLE.json` or ask your agent to,
 then have the art redone. Delete it to lift the lock.
 
-## Past runs
+## Keep going
 
-Games made before the turn loop may have production runs: a vision, prototypes, a blind pick, a
-plan, then rounds of building, playtesting and judging. Nothing in the app starts or resumes a run
-any more, but a past run stays readable:
+Keep going lets your agent take the next step itself, turn after turn, in the chat you turn it on
+in. It works on games whose engine Kurambit plays after every turn (three.js); on other games the
+control is disabled and says why.
 
-- its round cards stay in the chat it talked to, with what each round tried, whether it was kept,
-  and its build, facts and evidence;
-- its rounds are marks on the build timeline, so you can play, compare or go back to them like any
-  build;
-- the chats its roles worked in are under **Past runs** in the game's sidebar row. Open one, and its
-  relationship control leads to the rest.
+To start, open the **Keep going** control in the composer, where a coding chat picks its mode
+(`mod+Shift+A`, the composer's mode shortcut, opens it), and choose:
 
-A run that is still live shows on the stage's subtitle with what it is doing. **Stop production
-run**, in the stage's **More** menu or the command palette, stops it; its kept builds stay. While a
-run is live, exports, going back to a build and your agent's editing tools are refused, so stop the
-run first. The run never commits or touches your git: its builds are Kurambit checkpoints.
+- **Guided:** each next step is proposed above the composer, "Step 3 · a failing fact: …", and
+  starts at the time shown unless you act. **Start now** starts it, **Skip** sets it aside for this
+  run, and **Edit** puts its text in the composer and holds it, so you can change it and send it as
+  your own message.
+- **Autopilot:** the agent takes each step at once.
+
+Pick a budget in the same menu (1 hour unless you change it); while keep going runs, the menu shows
+when it ends. Choose **Off** to stop it: a step that is running stops and still becomes a build.
+
+Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
+and why: a crash or freeze first, then a step that was undone, then a missing bot for the skilled
+fact, then a failing fact, then the agent's own `Next:` line. The step's build is played and
+measured like any turn, and its strip in the chat says what happened to it:
+
+- **kept**: no fact Kurambit watches got worse;
+- **undone**: a fact got worse (the game stopped booting, a bot now crashes, it froze, it answers
+  later, or it can now be won without skill), so Kurambit put back the build the step started from.
+  The strip says what got worse. **Redo** on the strip or the timeline puts the step back if you
+  want it anyway, and keep going goes on from there. A step undone twice is not tried again in this
+  run;
+- **not undone: the game changed after it**: it made a fact worse, but a later turn had already
+  changed the game, so nothing was undone;
+- **not measured**: the facts could not be compared, so the step is kept.
+
+Your messages always go first: a message you send is an ordinary turn, never judged or undone, and
+keep going waits for it to end. Stopping a step's turn with the chat's Stop pauses keep going.
+
+Keep going stops by itself when two steps in a row are undone or change nothing, when its budget is
+up, or when your agent says `Next: none`. The banner above the composer says why in one line, and
+**Resume** (or choosing a mode again) carries on with the same run. After the agent says the game is
+done, ask it for more and turn keep going on again. The command palette has **Keep going: Guided**,
+**Keep going: Autopilot**, **Stop keep going**, and the proposal's **Start the proposed step now** and
+**Skip the proposed step**. Your agent can turn keep going on or off and leave it notes itself.
+
+**Past runs.** Games made by an earlier Kurambit may have production runs: a vision, prototypes, a
+blind pick, a plan, then rounds of building, playtesting and judging. They never continue, but stay
+readable: their round cards stay in the chat, their rounds are marks on the build timeline, and the
+chats their roles worked in are under **Past runs** in the game's sidebar row. A run that was live
+when Kurambit updated is stopped, and keep going starts from the game as it is now.
 
 ## Play and revise
 
@@ -185,15 +211,17 @@ keeps running; use **Stop game** to close it.
 
 ## Builds and undo
 
-Every agent turn that changes the game is a build, in any of the game's chats, and so is every
-round of a past production run. A build is the game folder as its turn left it. A three.js game's
-stage shows the folder live, so while your agent works it can be ahead of the latest build.
+Every agent turn that changes the game is a build, in any of the game's chats, keep-going steps
+included, and so is every round of a past production run. A build is the game folder as its turn
+left it. A three.js game's stage shows the folder live, so while your agent works it can be ahead of
+the latest build.
 
 The build timeline under the game has one mark per build, oldest to newest, then **Now**, the game
 folder itself; while the agent is mid-turn or someone edited the folder, Now says what it changed
 since. **Older** pages back. A mark's bar takes the tone of its worst fact, an undone build is dimmed,
-and a round's mark reads R and its number. The selected mark, by default the latest, shows its
-summary, changed files, time and up to three facts, with:
+a keep-going step's mark carries a step sign before its number, and a round's mark reads R and its
+number. The selected mark, by default the latest, shows its summary, changed files, time and up to
+three facts, with:
 
 - **Play**, which plays it from a copy on the stage, even an old one; the game folder is never
   touched. **Back to the current game** returns to the live game, and **Stop game** ends the copies
@@ -219,14 +247,12 @@ Under a turn's changed files in the chat, the turn's build shows the same: up to
 
 Undo changes the game's files, not the chat: the conversation stays as it is, so your agent still
 knows what it tried, and it sees from the files that you undid it. Undo, Redo and going back wait
-for the agent's turn to end and for a live run to be stopped. The chat's own **Edit from here**
+for the agent's turn to end. The chat's own **Edit from here**
 still rewinds the conversation itself.
 
 After each round of a past production run, the run's chat shows a round card: the round's build,
-what changed, its facts against the build before it, and the minutes and tokens it took. On a
-stopped run, **Keep this build as the run's best** puts a round that was not kept in the folder and
-makes it the best; **Revert to the build before it** puts back the best a kept round was judged
-against. While the run is live, the card shows the run's own decision.
+what changed, its facts against the build before it, and the minutes and tokens it took. **Revert to
+the build before it** puts back the build a kept round was judged against.
 
 **Keys.** `mod+Alt+Z` undoes the latest turn's change and `mod+Alt+Shift+Z` redoes it; `mod+Alt+[`
 and `mod+Alt+]` play the previous and next build on the timeline (past the newest, back to the live
@@ -260,9 +286,8 @@ icons, fonts, sound effects, short music, animated 3D characters, 3D kits and te
 creators such as Kenney, Quaternius and ambientCG. Everything in it is CC0 (public domain), so you
 can ship and sell games that use it without credit. No account or API key is needed.
 
-A production run looks through it on its own: the vision step can choose one pack as the game's
-style source, and the art step takes what fits from it before making the rest to match. In a chat
-you can ask for it too, for example "use library characters and UI". The agent looks at a contact
+Agents use it when a game needs art or sound, and you can ask for it too, for example "use library
+characters and UI". The agent looks at a contact
 sheet of the files before it picks, copies them into the game under
 `assets/library/<pack>/` (`unity/Assets/Library/<pack>/` for Unity), and lists each file, its pack
 and source page in `ASSETS.md`. It never replaces a file already in the game.
@@ -293,5 +318,5 @@ Each game is a self-contained git repository you can move, back up, or open on a
   the executable.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
-- `.studio/` holds the production run's rounds, notes, bots and videos.
+- `.studio/` holds the game's bots, notes and videos, and a past production run's rounds.
 - `saved/` holds the videos and images you chose to keep; it is not committed.
