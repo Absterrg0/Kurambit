@@ -1,14 +1,15 @@
 // PURE. How keep going reads to people and tools: the status the control,
 // the banner and game_keep_going_status share, the game card's line, and the
 // one plain sentence for each way it stops (design §4.3, §7.2).
-import type {
-  GameKeepGoingPhase,
-  GameKeepGoingStatus,
-  GameKeepGoingStepRef,
-  GameRun,
-  GameRunStep,
-  GameRunTurnStep,
-  ThreadId,
+import {
+  GAME_RUN_STAGE_ERA_SENTENCE,
+  type GameKeepGoingPhase,
+  type GameKeepGoingStatus,
+  type GameKeepGoingStepRef,
+  type GameRun,
+  type GameRunStep,
+  type GameRunTurnStep,
+  type ThreadId,
 } from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 
@@ -16,22 +17,19 @@ import { headline } from "./loop.ts";
 import { RESUMABLE, type StepRecord, stageEra } from "./state.ts";
 
 /** Why a run made by an earlier Kurambit is never continued (design §6.4). */
-export const STAGE_ERA_SENTENCE =
-  "This run was made by an earlier Kurambit whose stages (vision, prototypes, plan) no longer exist. Its builds stay on the timeline. Keep going starts from the game as it is now.";
+export const STAGE_ERA_SENTENCE = GAME_RUN_STAGE_ERA_SENTENCE;
 
 /** The engine refusal and the control's tooltip. */
 export const NO_TURN_LOOP_SENTENCE =
   "Keep going needs an engine Kurambit plays after every turn (three.js).";
 
-/** The game card's line: "Keep going · step 3" while live, "Keep going · paused" once paused. */
-export const stepLine = (run: GameRun, n: number | null = null): string => {
-  if (stageEra(run)) return "Stopping: made by an earlier Kurambit";
-  if (run.status === "ended")
-    return run.ending !== null && RESUMABLE.has(run.ending)
-      ? "Keep going · paused"
-      : "Keep going · finished";
-  return n === null ? "Keep going" : `Keep going · step ${n}`;
-};
+/** A live run's line on the game's row and card: "Keep going · step 3". A paused run is not live. */
+export const stepLine = (run: GameRun, n: number | null = null): string =>
+  stageEra(run)
+    ? "Stopping: made by an earlier Kurambit"
+    : n === null
+      ? "Keep going"
+      : `Keep going · step ${n}`;
 
 const budgetText = (minutes: number) =>
   minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}` : `${minutes} minutes`;
@@ -118,6 +116,8 @@ export interface StatusInput {
   readonly turn: GameRunTurnStep | null;
   /** The number the in-flight step has. */
   readonly n: number;
+  /** While undoing: what the step made worse (loop.undoReason). */
+  readonly undoing: string | null;
   readonly blocked: string | null;
 }
 
@@ -173,7 +173,11 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
                   : null,
             verdict: null,
             reason:
-              phase === "turn" ? "your agent is working on it" : "measuring before keeping it",
+              phase === "turn"
+                ? "your agent is working on it"
+                : phase === "undoing"
+                  ? (input.undoing ?? "")
+                  : "measuring before keeping it",
             gain: false,
             delta: [],
             minutes: null,
@@ -190,7 +194,9 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
         ? "Keep going is reading the current build's facts."
         : proposal !== null
           ? `Step ${n} · ${headline(proposal)}`
-          : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`
+          : phase === "undoing"
+            ? `Keep going · undoing step ${n}${input.undoing === null || input.undoing === "" ? "" : `: ${input.undoing}`}`
+            : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`
     : endingMessage(run, records);
   return {
     runId: run.id,
