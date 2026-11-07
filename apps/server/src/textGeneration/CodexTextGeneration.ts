@@ -14,6 +14,10 @@ import {
   TextGenerationError,
 } from "@kurambit/contracts";
 import { resolveSpawnCommand } from "@kurambit/shared/shell";
+import type {
+  ProviderImageGenerationInput,
+  ProviderImageGenerationResult,
+} from "@kurambit/provider-core/server/driver";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -285,6 +289,159 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     Effect.orElseSucceed((): ReadonlyArray<string> => []),
   );
 
+  /**
+   * One `codex exec` on the person's Codex: their runtime, launch args and home, with plugins,
+   * apps and their own MCP servers off and nothing persisted. `args` are the request's own,
+   * before the prompt (read from stdin). Answers its stdout.
+   */
+  const execCodex = Effect.fn("execCodex")(function* (input: {
+    readonly operation: string;
+    readonly cwd: string;
+    readonly prompt: string;
+    readonly args: (resolved: boolean) => ReadonlyArray<string>;
+  }) {
+    const { operation, cwd, prompt } = input;
+    const resolved = resolveRuntime
+      ? yield* resolveRuntime.pipe(
+          Effect.mapError((cause) => new TextGenerationError({ operation, detail: cause.detail })),
+        )
+      : undefined;
+    const effectiveConfig = resolved?.config ?? codexConfig;
+    const effectiveEnvironment = resolved?.environment ?? resolvedEnvironment;
+    const launchArgs = resolveCodexLaunchArgs(effectiveConfig.launchArgs, effectiveEnvironment);
+    const binary = effectiveConfig.binaryPath || "codex";
+    const env = {
+      ...effectiveEnvironment,
+      ...(effectiveConfig.homePath
+        ? {
+            CODEX_HOME: expandHomePath(effectiveConfig.homePath, yield* HostProcess.HomeDirectory),
+          }
+        : {}),
+    };
+    const execLaunchArgs = codexExecLaunchArgs(launchArgs);
+    const mcpServersOff = yield* listEnabledMcpServers({
+      binary,
+      cwd,
+      env,
+      // `codex mcp` rejects --strict-config; the overrides still apply.
+      launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
+    }).pipe(Effect.map(codexMcpServersOff));
+    const spawnCommand = yield* resolveSpawnCommand(
+      binary,
+      [
+        "exec",
+        ...execLaunchArgs,
+        // A request needs only its prompt. A user's MCP server would
+        // otherwise start and could act on it, as Claude's --strict-mcp-config
+        // prevents for Claude.
+        ...CODEX_NO_PLUGIN_ARGS,
+        ...(mcpServersOff ? ["--config", mcpServersOff] : []),
+        "--ephemeral",
+        "--skip-git-repo-check",
+        ...input.args(resolved !== undefined),
+        "-",
+      ],
+      { env: effectiveEnvironment },
+    );
+    const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      env,
+      cwd,
+      shell: spawnCommand.shell,
+      stdin: {
+        stream: Stream.encodeText(Stream.make(prompt)),
+      },
+    });
+
+    const child = yield* commandSpawner
+      .spawn(command)
+      .pipe(
+        Effect.mapError((cause) =>
+          normalizeCliError("codex", operation, cause, "Failed to spawn Codex CLI process"),
+        ),
+      );
+
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        readStreamAsString(operation, child.stdout),
+        readStreamAsString(operation, child.stderr),
+        child.exitCode.pipe(
+          Effect.mapError((cause) =>
+            normalizeCliError("codex", operation, cause, "Failed to read Codex CLI exit code"),
+          ),
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    if (exitCode !== 0) {
+      return yield* new TextGenerationError({
+        operation,
+        detail: codexExitDetail({ exitCode, stderr, stdout, prompt }),
+      });
+    }
+    return stdout;
+  });
+
+  /**
+   * Codex's image generation on the person's plan, as a hidden one-shot `codex exec` in the
+   * caller's own folder: read-only sandbox, so the agent can run nothing that writes, and its
+   * images are the `image_generation` items it reports (their saved paths), else the files
+   * Codex saved under the folder's generated_images/.
+   */
+  const generateImages = (
+    input: ProviderImageGenerationInput,
+  ): Effect.Effect<ProviderImageGenerationResult, TextGenerationError> => {
+    const operation = "generateImages";
+    return Effect.gen(function* () {
+      const stdout = yield* execCodex({
+        operation,
+        cwd: input.cwd,
+        prompt: input.prompt,
+        args: () => [
+          "--json",
+          "-s",
+          "read-only",
+          "--config",
+          `model_reasoning_effort="low"`,
+          "-C",
+          input.cwd,
+          ...input.referencePaths.flatMap((imagePath) => ["--image", imagePath]),
+        ],
+      }).pipe(
+        Effect.scoped,
+        Effect.timeoutOption(input.timeoutMs),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(
+                new TextGenerationError({ operation, detail: "Codex image request timed out." }),
+              ),
+            onSome: Effect.succeed,
+          }),
+        ),
+      );
+      const reported = codexSavedImagePaths(stdout);
+      const saved = yield* fileSystem
+        .readDirectory(path.join(input.cwd, "generated_images"), { recursive: true })
+        .pipe(
+          Effect.map((entries) =>
+            entries
+              .filter((entry) => /\.(png|webp|jpe?g)$/i.test(entry))
+              .toSorted()
+              .map((entry) => path.join(input.cwd, "generated_images", entry)),
+          ),
+          Effect.orElseSucceed((): ReadonlyArray<string> => []),
+        );
+      const files = [...new Set([...reported, ...saved])];
+      if (files.length === 0)
+        return yield* new TextGenerationError({
+          operation,
+          detail: `Codex made no image. ${codexLastMessage(stdout) ?? ""}`.trim(),
+        });
+      return { files };
+    });
+  };
+
   const runCodexJson = Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
     operation,
     cwd,
@@ -313,15 +470,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     );
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
-      const resolved = resolveRuntime
-        ? yield* resolveRuntime.pipe(
-            Effect.mapError(
-              (cause) => new TextGenerationError({ operation, detail: cause.detail }),
-            ),
-          )
-        : undefined;
-      const effectiveConfig = resolved?.config ?? codexConfig;
-      const effectiveEnvironment = resolved?.environment ?? resolvedEnvironment;
       const models = yield* getModels;
       const requestedModel = modelSelection.model;
       const model =
@@ -330,95 +478,31 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           (candidate) => !candidate.isCustom && codexModelFamily(candidate.slug) === requestedModel,
         )?.slug ??
         requestedModel;
-      const launchArgs = resolveCodexLaunchArgs(effectiveConfig.launchArgs, effectiveEnvironment);
       const reasoningEffort =
         getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
         DEFAULT_TEXT_GENERATION_REASONING_EFFORT;
-      const serviceTier = resolved ? undefined : getCodexServiceTierOptionValue(modelSelection);
-      const binary = effectiveConfig.binaryPath || "codex";
-      const env = {
-        ...effectiveEnvironment,
-        ...(effectiveConfig.homePath
-          ? {
-              CODEX_HOME: expandHomePath(
-                effectiveConfig.homePath,
-                yield* HostProcess.HomeDirectory,
-              ),
-            }
-          : {}),
-      };
-      const execLaunchArgs = codexExecLaunchArgs(launchArgs);
-      const mcpServersOff = yield* listEnabledMcpServers({
-        binary,
+      yield* execCodex({
+        operation,
         cwd,
-        env,
-        // `codex mcp` rejects --strict-config; the overrides still apply.
-        launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
-      }).pipe(Effect.map(codexMcpServersOff));
-      const spawnCommand = yield* resolveSpawnCommand(
-        binary,
-        [
-          "exec",
-          ...execLaunchArgs,
-          // Text generation needs only the prompt. A user's MCP server would
-          // otherwise start and could act on it, as Claude's --strict-mcp-config
-          // prevents for Claude.
-          ...CODEX_NO_PLUGIN_ARGS,
-          ...(mcpServersOff ? ["--config", mcpServersOff] : []),
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "-s",
-          "read-only",
-          "--model",
-          model,
-          "--config",
-          `model_reasoning_effort="${reasoningEffort}"`,
-          ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
-          "--output-schema",
-          schemaPath,
-          "--output-last-message",
-          outputPath,
-          ...images.flatMap((imagePath) => ["--image", imagePath]),
-          "-",
-        ],
-        { env: effectiveEnvironment },
-      );
-      const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env,
-        cwd,
-        shell: spawnCommand.shell,
-        stdin: {
-          stream: Stream.encodeText(Stream.make(prompt)),
+        prompt,
+        args: (resolved) => {
+          const serviceTier = resolved ? undefined : getCodexServiceTierOptionValue(modelSelection);
+          return [
+            "-s",
+            "read-only",
+            "--model",
+            model,
+            "--config",
+            `model_reasoning_effort="${reasoningEffort}"`,
+            ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
+            "--output-schema",
+            schemaPath,
+            "--output-last-message",
+            outputPath,
+            ...images.flatMap((imagePath) => ["--image", imagePath]),
+          ];
         },
       });
-
-      const child = yield* commandSpawner
-        .spawn(command)
-        .pipe(
-          Effect.mapError((cause) =>
-            normalizeCliError("codex", operation, cause, "Failed to spawn Codex CLI process"),
-          ),
-        );
-
-      const [stdout, stderr, exitCode] = yield* Effect.all(
-        [
-          readStreamAsString(operation, child.stdout),
-          readStreamAsString(operation, child.stderr),
-          child.exitCode.pipe(
-            Effect.mapError((cause) =>
-              normalizeCliError("codex", operation, cause, "Failed to read Codex CLI exit code"),
-            ),
-          ),
-        ],
-        { concurrency: "unbounded" },
-      );
-
-      if (exitCode !== 0) {
-        return yield* new TextGenerationError({
-          operation,
-          detail: codexExitDetail({ exitCode, stderr, stdout, prompt }),
-        });
-      }
     });
 
     const cleanup = Effect.all([removeTempFileDir(schemaPath), removeTempFileDir(outputPath)], {
@@ -466,7 +550,54 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     }).pipe(Effect.ensuring(cleanup));
   });
 
-  return TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson, {
-    images: true,
-  });
+  return {
+    ...TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson, {
+      images: true,
+    }),
+    generateImages,
+  };
 });
+
+/**
+ * The saved paths `codex exec --json` reports for its image generation items. The item's
+ * field names have moved between Codex versions (savedPath, saved_path), so any key that names
+ * a saved path on an image item is read.
+ */
+export const codexSavedImagePaths = (stdout: string): ReadonlyArray<string> => {
+  const paths: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.includes("image")) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const item =
+      typeof event === "object" && event !== null && "item" in event
+        ? (event as { readonly item: unknown }).item
+        : null;
+    if (typeof item !== "object" || item === null) continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.type !== "string" || !/image_?generation/i.test(record.type)) continue;
+    const saved = record.savedPath ?? record.saved_path ?? record.path;
+    if (typeof saved === "string" && saved !== "" && !paths.includes(saved)) paths.push(saved);
+  }
+  return paths;
+};
+
+/** The agent's last message in a `codex exec --json` stream: why it made nothing, usually. */
+const codexLastMessage = (stdout: string): string | null => {
+  let last: string | null = null;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.includes("agent_message")) continue;
+    try {
+      const event = JSON.parse(line) as { readonly item?: { type?: unknown; text?: unknown } };
+      if (event.item?.type === "agent_message" && typeof event.item.text === "string")
+        last = event.item.text.slice(0, 400);
+    } catch {
+      // Not an event line.
+    }
+  }
+  return last;
+};

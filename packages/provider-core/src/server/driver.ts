@@ -13,6 +13,7 @@ import type {
   ProviderInstanceId,
   ServerProvider,
   ServerProviderWorkspaceSnapshot,
+  TextGenerationError,
 } from "@kurambit/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -34,6 +35,23 @@ export interface ProviderDriverMetadata {
    */
   readonly supportsMultipleInstances?: boolean;
   readonly hasDefaultInstance?: boolean;
+}
+
+/**
+ * One hidden, one-shot image request on the person's own provider (Codex's image generation on
+ * their plan). It runs in `cwd`, a folder of the caller's own, with no tools beyond generating
+ * images; the answer is the saved image files.
+ */
+export interface ProviderImageGenerationInput {
+  readonly cwd: string;
+  readonly prompt: string;
+  /** Images attached to the request as references. */
+  readonly referencePaths: ReadonlyArray<string>;
+  readonly timeoutMs: number;
+}
+export interface ProviderImageGenerationResult {
+  /** Absolute paths of the images the provider saved, in the order it made them. */
+  readonly files: ReadonlyArray<string>;
 }
 
 export type ProviderWorkspaceSnapshot = ServerProvider &
@@ -58,6 +76,10 @@ export interface ProviderInstance {
   >;
   readonly orchestrationAdapter: ProviderAdapter.ProviderAdapterV2["Service"];
   readonly textGeneration: ProviderTextGeneration;
+  /** Present only on drivers whose provider generates images (Codex). */
+  readonly generateImages?: (
+    input: ProviderImageGenerationInput,
+  ) => Effect.Effect<ProviderImageGenerationResult, TextGenerationError>;
   readonly auth?: ProviderAuthController;
   readonly acpSessionManagement?: {
     readonly listSessions: (input: {
