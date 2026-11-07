@@ -163,6 +163,10 @@ const make = Effect.gen(function* () {
     // Checked to be inside the root, links followed: a log never lands through
     // a builds/ an agent pointed elsewhere.
     const logs = keepsLog ? await ensureGameDir(input.root, "builds/logs") : "";
+    // The root is the default working folder, and a missing one fails the spawn
+    // itself (ENOENT): on a fresh install the tools folder does not exist yet,
+    // so every tool's `--version` probe read as a broken tool.
+    if (!keepsLog && input.cwd === undefined) await NodeFSP.mkdir(input.root, { recursive: true });
     signal?.throwIfAborted();
     const logPath = keepsLog
       ? NodePath.join(logs, `${Date.now()}-${input.operation}-${NodeCrypto.randomUUID()}.log`)
