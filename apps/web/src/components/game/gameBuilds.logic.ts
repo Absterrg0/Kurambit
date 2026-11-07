@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import {
   GameBuildId,
+  type GameAssetFacts,
   type GameBuild,
   type GameBuildFactsSummary,
   type GameBuildSource,
@@ -99,6 +100,32 @@ export const factLine = (view: GameFactView): FactLine => {
       return { label: view.label, text: "Not measured yet", tone: null };
   }
 };
+
+/**
+ * The Assets row's detail: one line per made model, then what was only
+ * counted. A model's numbers are measurements, never a verdict on its look.
+ */
+export const assetLines = (assets: GameAssetFacts): ReadonlyArray<string> => [
+  ...assets.models.map((model) => {
+    const triangles = `${model.triangles.toLocaleString("en-US")} triangles`;
+    const pipeline = model.pipeline;
+    if (pipeline.status === "not-measured")
+      return `${model.path}: ${triangles}; not measured: ${pipeline.why}`;
+    const notes = [
+      pipeline.seamsBroken.length > 0 ? `loop seams in ${pipeline.seamsBroken.join(", ")}` : null,
+      pipeline.drifting.length > 0 ? `root drifts in ${pipeline.drifting.join(", ")}` : null,
+    ].filter((note) => note !== null);
+    return `${model.path}: ${pipeline.kind}, ${pipeline.height.toFixed(2)} m, ${triangles}, reviewed${
+      notes.length > 0 ? `; ${notes.join("; ")}` : ""
+    }`;
+  }),
+  ...(assets.more > 0 ? [`${assets.more} more not listed`] : []),
+  ...(assets.libraryFiles > 0
+    ? [
+        `${assets.libraryFiles} library file${assets.libraryFiles === 1 ? "" : "s"} credited in ASSETS.md`,
+      ]
+    : []),
+];
 
 export interface DeltaLine {
   readonly label: string;
