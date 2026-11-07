@@ -714,7 +714,7 @@ function draw(dt) {
     return;
   }
   const camera = run.ctx.camera;
-  juiceShell.beforeRender(camera);
+  juiceShell.beforeRender(camera, renderer);
   if (game.render !== undefined) {
     try {
       game.render(run.ctx, dt);
