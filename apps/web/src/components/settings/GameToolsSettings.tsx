@@ -27,7 +27,7 @@ const SOURCE_LABELS = {
   settings: "path set here",
   env: "environment variable",
   "unity-hub": "Unity Hub",
-  kurambit: "earlier Kurambit install",
+  kurambit: "Kurambit's tools folder",
   path: "PATH",
 } as const satisfies Record<NonNullable<GameToolStatus["source"]>, string>;
 
