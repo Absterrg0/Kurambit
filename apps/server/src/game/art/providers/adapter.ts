@@ -228,7 +228,7 @@ export const makeArtHttp = (client: HttpClient.HttpClient): ArtHttp => {
               ? message
               : `${message}. ${suggestion}`;
         return yield* new ArtProviderError({
-          reason: `${label} refused (HTTP ${response.status})${said === null ? "." : `: ${said.slice(0, 400)}`}`,
+          reason: `${label} refused (HTTP ${response.status})${said === null ? "." : `: ${said.slice(0, 400).replace(/[^.!?]$/, "$&.")}`}`,
           transient: response.status === 429 || response.status >= 500,
           status: response.status,
         });
