@@ -1,10 +1,10 @@
 import { ArrowRightIcon } from "lucide-react";
 import { useState } from "react";
+import { gameNextLine } from "@kurambit/shared/gameNextLine";
 
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerBannerStackItem } from "../chat/ComposerBannerStack";
-import { gameNextLine } from "./gameNextLine";
 
 /**
  * The agent's `Next:` line as a one-click ask, like a plan turn's "Plan

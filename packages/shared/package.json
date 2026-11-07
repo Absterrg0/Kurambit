@@ -95,6 +95,10 @@
       "types": "./src/KeyedCoalescingWorker.ts",
       "import": "./src/KeyedCoalescingWorker.ts"
     },
+    "./gameNextLine": {
+      "types": "./src/gameNextLine.ts",
+      "import": "./src/gameNextLine.ts"
+    },
     "./KeyedLock": {
       "types": "./src/KeyedLock.ts",
       "import": "./src/KeyedLock.ts"

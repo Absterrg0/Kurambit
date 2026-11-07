@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { gameNextLine } from "./gameNextLine";
+import { gameNextLine, readNextLine } from "./gameNextLine.ts";
 
 describe("gameNextLine", () => {
   it("reads the reply's last line", () => {
@@ -17,5 +17,11 @@ describe("gameNextLine", () => {
     expect(gameNextLine("Next: a boss\n\nI also fixed the camera.")).toBeNull();
     expect(gameNextLine("Next:")).toBeNull();
     expect(gameNextLine("")).toBeNull();
+  });
+
+  it("tells a done brief from a reply with no line", () => {
+    expect(readNextLine("All of the brief plays.\n**Next:** none.")).toBe("none");
+    expect(readNextLine("Next: a boss\n\nI also fixed the camera.")).toBeNull();
+    expect(readNextLine("Done.\nNext: a pause menu")).toEqual({ text: "a pause menu" });
   });
 });
