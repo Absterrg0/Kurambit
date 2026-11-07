@@ -9,9 +9,7 @@ export const GameCharacterRoute = Schema.Literals(["library", "blender", "genera
 export type GameCharacterRoute = typeof GameCharacterRoute.Type;
 
 /** Why a route cannot be chosen yet; a route missing here can be. The server refuses the rest. */
-export const GAME_CHARACTER_ROUTE_UNAVAILABLE: Partial<Record<GameCharacterRoute, string>> = {
-  generated: "Not available yet",
-};
+export const GAME_CHARACTER_ROUTE_UNAVAILABLE: Partial<Record<GameCharacterRoute, string>> = {};
 
 const Hex = Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/));
 
