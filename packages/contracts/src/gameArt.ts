@@ -91,7 +91,7 @@ export const GAME_ART_PROVIDERS: Readonly<Record<GameArtProviderId, GameArtProvi
     label: "Tripo",
     lanes: ["character", "creature", "model"],
     keySetting: "gameTripoApiKey",
-    hosts: ["api.tripo3d.ai"],
+    hosts: ["openapi.tripo3d.com"],
     site: "https://platform.tripo3d.ai",
   },
   meshy: {

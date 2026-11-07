@@ -519,7 +519,8 @@ const layerGameServices = layerGameRunWork.pipe(
   Layer.provideMerge(GameFacts.layer),
   Layer.provideMerge(GameRunControl.layer),
   Layer.provide(ProjectionStoreV2.layer),
-  Layer.provideMerge(GameService.layer),
+  // The art service reads whether a turn is a Keep going step from the run's records.
+  Layer.provideMerge(GameService.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
   Layer.provideMerge(GameProjectService.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
