@@ -510,6 +510,8 @@ export class GameBlender extends Context.Service<
      * a throwaway scene like the review, so the live scene does not change.
      */
     readonly motionStrip: GameArt.MotionStripRender;
+    /** A model's front, side and back, textured and in clay, as one PNG; the live scene does not change. */
+    readonly modelViews: GameArt.ModelViewsRender;
     /** Live Blender scene: a rigged, animated character conformed to the standard skeleton. */
     readonly character: (
       root: string,
@@ -1499,7 +1501,7 @@ const make = Effect.gen(function* () {
         root,
         "blender-assets-import",
         decodeGeneratedMade,
-        `kurambit.generated(${pyJson({ path: file, name, lane: source.lane, stamp: source.stamp, rig: source.rig, generation: source.generation })})`,
+        `kurambit.generated(${pyJson({ path: file, name, lane: source.lane, stamp: source.stamp, rig: source.rig, generation: source.generation, restore: source.restore })})`,
       );
       const blend = yield* saveBlend(root);
       const cost =
@@ -1781,6 +1783,22 @@ const make = Effect.gen(function* () {
                 path: NodePath.join(realRoot, clip.path),
                 label: clip.label,
               })),
+              out: NodePath.join(realRoot, out),
+            })})`,
+          );
+        }),
+      ),
+    modelViews: (root, model, out) =>
+      holding(
+        root,
+        Effect.gen(function* () {
+          const realRoot = yield* realRootOf(root);
+          yield* kitCall(
+            root,
+            "blender-model-views",
+            decodeMotionStrip,
+            `kurambit.model_views(${pyJson({
+              model: NodePath.join(realRoot, model),
               out: NodePath.join(realRoot, out),
             })})`,
           );

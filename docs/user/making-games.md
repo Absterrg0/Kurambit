@@ -174,6 +174,15 @@ creatures (animals, monsters) keep their own skeleton and animations. Because hu
 share one skeleton, a move the library lacks (a boss's slam, a victory dance), made by Uthana from
 words or from a video of someone doing it, plays on every human character in the game; its card
 shows a strip of the move. **Cancel** stops a generation still being made.
+
+A character or creature the agent makes while you direct stops once, after its model and before the
+rig is bought: its card shows the model from the front, side and back, with its textures and in plain
+clay, and the cost so far. **Rig this** has it rigged and given its moves; **Cancel** stops there, and
+only the model is paid for. Keep going rigs without stopping and says so. The agent can also rig a
+model the game already has, such as a creature you modelled in Blender or a free library model, with
+no new model made: its shape and textures stay as they were, and only the skeleton and moves are
+added. A model that already has a skeleton is refused. Props can be made in clean low-poly at the
+game's triangle budget, or in separate parts (a door, a turret, a wheel) that the game can move.
 **Generated art…** in the game's **More** menu (**⋯**) or the command palette lists everything the game
 has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
 Once a three.js build has been measured, a finished image or sound reads **In the game** when the

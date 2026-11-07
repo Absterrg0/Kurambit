@@ -44,9 +44,15 @@ export interface ArtRequest {
   readonly references: ReadonlyArray<ArtReference>;
   /**
    * Files the provider uploads, as absolute paths the service checked (inside the game, or the
-   * library cache): the body a motion is made on, a video it copies. Read when they are sent.
+   * library cache): the body a motion is made on, a video it copies, a game mesh it rigs. Read
+   * when they are sent.
    */
-  readonly uploads?: { readonly body?: string; readonly video?: string };
+  readonly uploads?: { readonly body?: string; readonly video?: string; readonly mesh?: string };
+  /**
+   * The person looks at the model before it is rigged: when the paid model stage finishes, the
+   * step that saves the pending rig also carries the model's files (label "model") and its cost.
+   */
+  readonly review?: boolean;
 }
 
 /** A file the provider made: `asset` is what the game uses, `preview` only shows it. */
@@ -81,6 +87,8 @@ export type ArtStep =
       readonly note?: string;
       /** Files to keep now (a provider that deletes them soon); they join the one candidate. */
       readonly files?: ReadonlyArray<ArtFile>;
+      /** What the finished paid stages cost, on a reviewed model's step; estimated when unreported. */
+      readonly spent?: { readonly usd: number; readonly estimated: boolean };
     }
   | {
       readonly kind: "done";
@@ -88,7 +96,17 @@ export type ArtStep =
       readonly candidates: ReadonlyArray<ReadonlyArray<ArtFile>>;
       /** What the provider reported it cost; null when it did not say. */
       readonly costUsd: number | null;
+      /**
+       * An uploaded mesh the provider normalized (normalized = original × scale + translation, in
+       * glTF axes): the import puts it back at the size and place it was made at.
+       */
+      readonly restore?: ArtRestore;
     };
+
+export interface ArtRestore {
+  readonly scale: number;
+  readonly translation: readonly [number, number, number];
+}
 
 export interface ArtContext {
   /** The person's key for this provider; null for Codex. */
@@ -116,7 +134,9 @@ export interface ArtAdapter {
     },
   ) => number | null;
   /** Why this provider cannot make this request (a lane or option it lacks); null when it can. */
-  readonly refuse?: (request: Omit<ArtRequest, "references">) => string | null;
+  readonly refuse?: (
+    request: Omit<ArtRequest, "references"> & { readonly references: number },
+  ) => string | null;
   readonly start: (
     context: ArtContext,
     request: ArtRequest,

@@ -33,6 +33,8 @@ export interface GeneratedSource {
     /** The generation's id: the export's sidecar carries it, joining the generation to its file. */
     readonly generation: string;
   };
+  /** How the provider normalized the game's own mesh it rigged; the import puts it back. */
+  readonly restore: GameArtDelivered["restore"];
 }
 
 const MODEL = /\.(glb|gltf|fbx)$/i;
@@ -100,6 +102,7 @@ export const generatedSource = (
         lane: generation.lane,
         generation: { id: generation.id, path: normal },
         rig: `${generation.provider}-${row.body ?? "creature"}`,
+        restore: row.restore,
         stamp: {
           from: generation.provider,
           licence: row.licence.slice(0, 200),

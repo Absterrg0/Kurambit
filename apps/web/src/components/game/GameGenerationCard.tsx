@@ -40,6 +40,7 @@ import { GameElapsed } from "./GameElapsed";
 import { GameFileActions } from "./GameSavedMedia";
 import {
   GAME_ART_LANE_LABELS,
+  awaitsModelLook,
   changeMessage,
   changeableImage,
   chatGenerationCardKey,
@@ -48,6 +49,7 @@ import {
   generationResultImage,
   inGameLine,
   laneMedium,
+  modelLookLine,
   pickMessage,
   providerLabel,
   stepCandidate,
@@ -385,6 +387,67 @@ export function CandidatePicker({
   );
 }
 
+/**
+ * A character's or creature's model before its rig: its front, side and back, textured and in
+ * clay. "Rig this" buys the rig (and tells the agent, like a pick); Cancel stops it there.
+ */
+function ModelLook({
+  threadRef,
+  root,
+  generation,
+  actions,
+}: {
+  threadRef: ScopedThreadRef;
+  root: string | null;
+  generation: GameGeneration;
+  actions: GenerationActions;
+}) {
+  const preview = generation.candidates[0]?.preview ?? null;
+  const busy = actions.pending !== null;
+  const sending = actions.pending === generation.id;
+  return (
+    <div className="flex flex-col gap-2">
+      {preview !== null && /\.(png|jpe?g|webp)$/i.test(preview) ? (
+        <GameImage
+          environmentId={threadRef.environmentId}
+          root={root}
+          path={preview}
+          alt={`The model of ${generation.name}: front, side and back, textured and in clay`}
+          className="aspect-[12/11] w-full"
+        />
+      ) : (
+        <Badge variant="outline" size="default">
+          <BoxIcon aria-hidden="true" />
+          3D model
+        </Badge>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="xs"
+          disabled={!actions.canChoose || busy}
+          onClick={() => void actions.choose(generation, 0)}
+        >
+          {sending ? "Sending…" : "Rig this"}
+        </Button>
+        <Button
+          size="xs"
+          variant="ghost"
+          disabled={!actions.canCancel || busy}
+          onClick={() => void actions.cancel(generation.id)}
+        >
+          <XIcon aria-hidden="true" />
+          Cancel
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          {actions.canChoose
+            ? modelLookLine(generation)
+            : "The person directing this game decides whether to rig it."}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** "Change…" on a kept image: the person's words go to the agent, which makes the edit. */
 function ChangeImage({
   generation,
@@ -562,7 +625,9 @@ export function GameGenerationBody({
           brings them back.
         </p>
       ) : null}
-      {generation.state === "choosing" && !undone ? (
+      {generation.state === "choosing" && !undone && awaitsModelLook(generation) ? (
+        <ModelLook threadRef={threadRef} root={root} generation={generation} actions={actions} />
+      ) : generation.state === "choosing" && !undone ? (
         <>
           <CandidatePicker
             threadRef={threadRef}
@@ -630,7 +695,9 @@ export function GenerationHeading({ generation }: { generation: GameGeneration }
   const badge =
     generation.filesUndone === true
       ? ({ label: "Undone", variant: "outline" } as const)
-      : STATE_BADGES[generation.state];
+      : awaitsModelLook(generation)
+        ? ({ label: "Look at it", variant: "warning" } as const)
+        : STATE_BADGES[generation.state];
   return (
     <div className="flex min-w-0 items-center gap-2">
       <SparklesIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />

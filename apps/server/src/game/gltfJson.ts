@@ -200,3 +200,34 @@ const readBufferRange = async (
     return "its buffer could not be read";
   }
 };
+
+/**
+ * A glTF document's triangle count (each mesh once, however many nodes use it; triangle-list
+ * primitives, by their index count or else their vertex count) and its image count; null when
+ * it holds no mesh. What a provider did to a mesh it was sent is read by these two.
+ */
+export const gltfMeshSize = (
+  doc: unknown,
+): { readonly triangles: number; readonly images: number } | null => {
+  const gltf = doc as {
+    readonly accessors?: ReadonlyArray<{ readonly count?: number }>;
+    readonly images?: ReadonlyArray<unknown>;
+    readonly meshes?: ReadonlyArray<{
+      readonly primitives?: ReadonlyArray<{
+        readonly mode?: number;
+        readonly indices?: number;
+        readonly attributes?: { readonly POSITION?: number };
+      }>;
+    }>;
+  } | null;
+  if (gltf === null || typeof gltf !== "object" || (gltf.meshes ?? []).length === 0) return null;
+  let triangles = 0;
+  for (const mesh of gltf.meshes ?? [])
+    for (const primitive of mesh.primitives ?? []) {
+      if ((primitive.mode ?? 4) !== 4) continue;
+      const accessor = primitive.indices ?? primitive.attributes?.POSITION;
+      const count = accessor === undefined ? undefined : gltf.accessors?.[accessor]?.count;
+      if (typeof count === "number") triangles += Math.floor(count / 3);
+    }
+  return { triangles, images: (gltf.images ?? []).length };
+};

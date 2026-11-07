@@ -20,6 +20,7 @@ import {
   tripoPresets,
   tripoRetargetBody,
   tripoRigBody,
+  tripoTextureBody,
 } from "./tripo.ts";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
@@ -37,6 +38,8 @@ const request = (overrides: Partial<ArtRequest> = {}): ArtRequest => ({
   references: [],
   ...overrides,
 });
+/** A request as routing asks a provider's refusal: its pictures counted. */
+const asked = (art: ArtRequest) => ({ ...art, references: art.references.length });
 
 /** A context whose HTTP records every call and answers from `answers`, in order. */
 const recording = (answers: ReadonlyArray<unknown>) => {
@@ -126,7 +129,7 @@ describe("art adapters: request shapes", () => {
       imageSize: "1K",
     });
     assert.match(
-      google.refuse?.({ ...request(), options: { transparent: true } }) ?? "",
+      google.refuse?.(asked({ ...request(), options: { transparent: true } })) ?? "",
       /transparent/,
     );
   });
@@ -144,7 +147,7 @@ describe("art adapters: request shapes", () => {
           request({
             lane: "character",
             references: [reference],
-            options: { polycount: 8000, height: 1.8 },
+            options: { polycount: 8000, height: 1.8, lowPoly: true },
           }),
         );
         assert.strictEqual(calls[0]?.request.url, "https://openapi.tripo3d.ai/v3/files");
@@ -194,12 +197,13 @@ describe("art adapters: request shapes", () => {
           { presets: ["preset:serpentine:march"] },
         );
         assert.match(
-          tripo.refuse?.(request({ lane: "character", options: { clips: ["backflip"] } })) ?? "",
+          tripo.refuse?.(asked(request({ lane: "character", options: { clips: ["backflip"] } }))) ??
+            "",
           /no "backflip" clip.*idle, walk, run/,
         );
         assert.match(
           tripo.refuse?.(
-            request({ lane: "creature", options: { body: "avian", clips: ["fly"] } }),
+            asked(request({ lane: "creature", options: { body: "avian", clips: ["fly"] } })),
           ) ?? "",
           /no clips for a avian body/,
         );
@@ -215,10 +219,55 @@ describe("art adapters: request shapes", () => {
           }),
           ["https://cdn.tripo3d.ai/output/x.glb"],
         );
-        // Mesh $0.30 + low poly $0.10 + rig $0.25 + three default clips at $0.10.
+        // Mesh $0.30 + rig $0.25 + three default clips at $0.10; low-poly adds $0.10.
         assert.strictEqual(
           tripo.estimate({ ...request({ lane: "character" }), references: 1 }),
+          0.85,
+        );
+        assert.strictEqual(
+          tripo.estimate({
+            ...request({ lane: "character", options: { lowPoly: true } }),
+            references: 1,
+          }),
           0.95,
+        );
+        // Parts: an untextured mesh $0.20 + parts $0.20, then a texture task $0.10.
+        const parts = request({ lane: "model", options: { parts: true, polycount: 30000 } });
+        assert.strictEqual(tripo.estimate({ ...parts, references: 1 }), 0.5);
+        assert.deepStrictEqual(tripoMeshBody(parts, "file_1"), {
+          model: "v3.1-20260211",
+          input: "file_1",
+          texture: false,
+          pbr: false,
+          generate_parts: true,
+          face_limit: 30000,
+          auto_size: true,
+        });
+        assert.deepStrictEqual(
+          tripoTextureBody({ mesh: "t_parts", texturePrompt: { image: "file_1" } }),
+          {
+            input: "t_parts",
+            model: "v3.0-20250812",
+            pbr: true,
+            texture_prompt: { image: "file_1" },
+          },
+        );
+        // A game mesh is uploaded, not made: the rig and the creature's one preset.
+        assert.strictEqual(
+          tripo.estimate({
+            ...request({
+              lane: "creature",
+              options: { mesh: "art/dragon.glb", body: "quadruped" },
+            }),
+            references: 0,
+          }),
+          0.35,
+        );
+        assert.match(
+          tripo.refuse?.(
+            asked(request({ lane: "model", options: { parts: true, lowPoly: true } })),
+          ) ?? "",
+          /parts or smart low-poly/,
         );
       }),
   );
@@ -367,8 +416,38 @@ describe("art adapters: request shapes", () => {
       meshyMeshRequest(request({ lane: "model" })).url,
       "https://api.meshy.ai/openapi/v2/text-to-3d",
     );
-    assert.match(meshy.refuse?.(request({ lane: "creature" })) ?? "", /Tripo/);
-    assert.match(meshy.refuse?.(request({ lane: "texture" })) ?? "", /tileable/);
+    assert.deepStrictEqual(
+      meshyMeshRequest(
+        request({
+          lane: "model",
+          references: [reference],
+          options: { lowPoly: true, polycount: 50000 },
+        }),
+      ).body,
+      {
+        image_url: `data:image/png;base64,${Buffer.from(PNG).toString("base64")}`,
+        should_texture: true,
+        enable_pbr: true,
+        target_formats: ["glb"],
+        model_type: "smart-topology",
+        ai_model: "meshy-t2.5",
+        target_polycount: 30000,
+      },
+    );
+    // Smart Topology: 15 credits for the textured mesh, not 30.
+    assert.strictEqual(
+      meshy.estimate({ ...request({ lane: "model", options: { lowPoly: true } }), references: 1 }),
+      0.3,
+    );
+    assert.match(
+      meshy.refuse?.({
+        ...request({ lane: "model", options: { lowPoly: true } }),
+        references: 2,
+      }) ?? "",
+      /one picture/,
+    );
+    assert.match(meshy.refuse?.(asked(request({ lane: "creature" }))) ?? "", /Tripo/);
+    assert.match(meshy.refuse?.(asked(request({ lane: "texture" }))) ?? "", /tileable/);
   });
 
   it("ElevenLabs asks sfx, music and voice with their models, and prices by length", () => {

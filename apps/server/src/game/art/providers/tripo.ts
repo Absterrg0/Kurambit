@@ -1,9 +1,11 @@
 // Tripo (API v3, https://developers.tripo3d.ai/en/docs/introduction): every step is a task polled
-// by id. A model is one task (H3.1 image or text to 3D, smart low poly, textured); a character
-// adds a rig on the Unreal bone names and a few preset clips; a creature is rigged on its own body
-// plan's skeleton with the one clip Tripo has for it. Credits are frozen at a task's start and
-// released if it fails, so a failed stage costs what the stages before it did. Each task reports
-// the credits it consumed. Result URLs expire after 5 minutes: files are downloaded at once.
+// by id. A model is one task (H3.1 image or text to 3D, textured, smart low poly when asked); a
+// model in parts is made untextured (Tripo makes parts only so) and textured by a second task; a
+// character adds a rig on the Unreal bone names and a few preset clips; a creature is rigged on its
+// own body plan's skeleton with the one clip Tripo has for it. A game's own mesh is uploaded and
+// rigged as it is (the rig takes a file token as its input). Credits are frozen at a task's start
+// and released if it fails, so a failed stage costs what the stages before it did. Each task
+// reports the credits it consumed. Result URLs expire after 5 minutes: files are downloaded at once.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { GameArtBodyPlan } from "@kurambit/contracts";
@@ -13,6 +15,7 @@ import {
   type ArtFile,
   type ArtRemote,
   type ArtRequest,
+  type ArtRestore,
   type ArtStep,
   ArtProviderError,
   UNKNOWN_STATUS_LIMIT,
@@ -28,6 +31,10 @@ const BASE = "https://openapi.tripo3d.ai/v3";
 export const TRIPO_MODEL = "v3.1-20260211";
 const RIG_BIPED = "v3.0-20260909";
 const RIG_CREATURE = "v2.5-20260210";
+/** The texture model the docs recommend for v3.x geometry (docs/models-texture). */
+const TEXTURE_MODEL = "v3.0-20250812";
+/** smart_low_poly's fixed triangle range (docs/generation-image-to-model). */
+const LOW_POLY_FACES = { min: 500, max: 20_000 } as const;
 /** A character's clips when none are asked. */
 const CHARACTER_CLIPS = ["idle", "walk", "run"];
 const MAX_CLIPS = 5;
@@ -61,7 +68,11 @@ const USD_PER_CREDIT = 0.01;
 const PRICE = {
   imageTextured: 0.3,
   textTextured: 0.2,
+  imageBare: 0.2,
+  textBare: 0.1,
   smartLowPoly: 0.1,
+  parts: 0.2,
+  texture: 0.1,
   rig: 0.25,
   clip: 0.1,
 } as const;
@@ -76,7 +87,7 @@ const RIG_TYPE: Record<GameArtBodyPlan, string> = {
   other: "others",
 };
 
-type Stage = "mesh" | "rig" | "retarget";
+type Stage = "upload" | "mesh" | "texture" | "rig" | "retarget";
 interface TripoRemote {
   readonly stage: Stage;
   readonly task: string;
@@ -90,18 +101,35 @@ interface TripoRemote {
   /** Credits the finished stages consumed; null once one did not say (rows from before too). */
   readonly credits?: number | null;
   /** The next paid stage, saved before it is started (see `pendingStage`). */
-  readonly pending?: "rig" | "retarget" | null;
+  readonly pending?: "texture" | "rig" | "retarget" | null;
   /** Answers in a row whose status was none of the documented ones. */
   readonly unknown?: number;
+  /** The person looks at the model before the rig: its files come with the pending rig. */
+  readonly review?: boolean;
+  /** A model in parts: textured by its own task after the untextured parts are made. */
+  readonly parts?: boolean;
+  /** The texture task's guide: the reference's file token (the docs recommend re-sending it), else the prompt. */
+  readonly texturePrompt?: { readonly image: string } | { readonly text: string } | null;
+  /** How Tripo normalized an uploaded mesh it rigged (the rig task reports it). */
+  readonly restore?: ArtRestore | null;
 }
 
+/**
+ * The asked clips; unasked, a character's idle, walk and run, and a creature rigged from the game's
+ * own mesh its body plan's one preset (a hand-made dragon gets a walk). A generated creature asks.
+ */
 const clipsOf = (request: Pick<ArtRequest, "lane" | "options">): ReadonlyArray<string> =>
   request.lane === "model"
     ? []
-    : (request.options.clips ?? (request.lane === "character" ? CHARACTER_CLIPS : [])).slice(
-        0,
-        MAX_CLIPS,
-      );
+    : (
+        request.options.clips ??
+        (request.lane === "character"
+          ? CHARACTER_CLIPS
+          : request.options.mesh !== undefined &&
+              CREATURE_PRESET[request.options.body ?? "other"] !== undefined
+            ? ["walk"]
+            : [])
+      ).slice(0, MAX_CLIPS);
 
 const clipKey = (clip: string) => clip.trim().toLowerCase();
 
@@ -128,21 +156,44 @@ export const tripoPresets = (
 
 const auth = (key: string) => ({ authorization: `Bearer ${key}` });
 
-/** The generation task's body: the shape the fixtures check. */
+/**
+ * The generation task's body: the shape the fixtures check. Parts are refused with a texture
+ * (error 1004) and dropped under smart_low_poly, so a model in parts asks for neither.
+ */
 export const tripoMeshBody = (
   request: Omit<ArtRequest, "references">,
   fileToken: string | null,
-) => ({
-  model: TRIPO_MODEL,
-  // image-to-model takes the uploaded file's token as its `input`.
-  ...(fileToken === null ? { prompt: request.prompt.slice(0, 1024) } : { input: fileToken }),
-  texture: true,
+) => {
+  const parts = request.options.parts === true;
+  const lowPoly = request.options.lowPoly === true && !parts;
+  const polycount = request.options.polycount;
+  return {
+    model: TRIPO_MODEL,
+    // image-to-model takes the uploaded file's token as its `input`.
+    ...(fileToken === null ? { prompt: request.prompt.slice(0, 1024) } : { input: fileToken }),
+    texture: !parts,
+    pbr: !parts,
+    ...(parts ? { generate_parts: true } : {}),
+    ...(lowPoly ? { smart_low_poly: true } : {}),
+    ...(polycount === undefined
+      ? {}
+      : {
+          face_limit: lowPoly
+            ? Math.min(LOW_POLY_FACES.max, Math.max(LOW_POLY_FACES.min, Math.round(polycount)))
+            : Math.round(polycount),
+        }),
+    auto_size: true,
+  };
+};
+
+/** The texture task over a model in parts: every part is textured (no part_names), with PBR. */
+export const tripoTextureBody = (remote: Pick<TripoRemote, "mesh" | "texturePrompt">) => ({
+  input: remote.mesh,
+  model: TEXTURE_MODEL,
   pbr: true,
-  smart_low_poly: true,
-  ...(request.options.polycount !== undefined
-    ? { face_limit: Math.min(20_000, Math.round(request.options.polycount)) }
-    : {}),
-  auto_size: true,
+  ...(remote.texturePrompt === null || remote.texturePrompt === undefined
+    ? {}
+    : { texture_prompt: remote.texturePrompt }),
 });
 
 export const tripoRigBody = (remote: Pick<TripoRemote, "lane" | "body" | "mesh">) =>
@@ -208,30 +259,71 @@ const extOf = (url: string) => {
   return ext === "fbx" || ext === "obj" ? ext : "glb";
 };
 
+/** Uploads a file (an image or a model) and answers its token. */
+const upload = (context: ArtContext, key: string, bytes: Uint8Array, mime: string, name: string) =>
+  Effect.gen(function* () {
+    const form = new FormData();
+    form.append("file", new Blob([bytes], { type: mime }), name);
+    const uploaded = yield* context.http.json("tripo", {
+      method: "POST",
+      url: `${BASE}/files`,
+      headers: auth(key),
+      form,
+    });
+    const token = stringField(uploaded, "data", "file_token");
+    if (token === null)
+      return yield* new ArtProviderError({ reason: "Tripo took the file but gave no file token." });
+    return token;
+  });
+
+/**
+ * The game's own mesh: uploaded (free), then rigged from its file token as the rig's first and only
+ * model stage. The rig is the first paid request, saved as pending before it is sent.
+ */
+const startUpload = (context: ArtContext, key: string, request: ArtRequest, path: string) =>
+  Effect.gen(function* () {
+    const bytes = yield* context.readFile(path);
+    const token = yield* upload(
+      context,
+      key,
+      bytes,
+      "model/gltf-binary",
+      path.split(/[\\/]/).pop() ?? "mesh.glb",
+    );
+    const resolved = tripoPresets(request);
+    const remote: TripoRemote = {
+      stage: "upload",
+      task: token,
+      mesh: token,
+      rig: null,
+      lane: request.lane as TripoRemote["lane"],
+      body: request.options.body ?? null,
+      clips: "presets" in resolved ? resolved.presets : [],
+      credits: 0,
+      pending: "rig",
+    };
+    return {
+      kind: "making" as const,
+      remote: remote as unknown as ArtRemote,
+      note: "Rigging the game's mesh.",
+    };
+  });
+
 const start = (context: ArtContext, request: ArtRequest) =>
   Effect.gen(function* () {
     const key = yield* requireKey("tripo", context);
+    if (request.uploads?.mesh !== undefined)
+      return yield* startUpload(context, key, request, request.uploads.mesh);
     let fileToken: string | null = null;
     const reference = request.references[0];
-    if (reference !== undefined) {
-      const form = new FormData();
-      form.append(
-        "file",
-        new Blob([reference.bytes], { type: reference.mime }),
+    if (reference !== undefined)
+      fileToken = yield* upload(
+        context,
+        key,
+        reference.bytes,
+        reference.mime,
         reference.path.split("/").pop() ?? "reference.png",
       );
-      const uploaded = yield* context.http.json("tripo", {
-        method: "POST",
-        url: `${BASE}/files`,
-        headers: auth(key),
-        form,
-      });
-      fileToken = stringField(uploaded, "data", "file_token");
-      if (fileToken === null)
-        return yield* new ArtProviderError({
-          reason: "Tripo took the reference but gave no file token.",
-        });
-    }
     const task = yield* post(
       context,
       key,
@@ -248,6 +340,14 @@ const start = (context: ArtContext, request: ArtRequest) =>
       body: request.options.body ?? null,
       clips: "presets" in resolved ? resolved.presets : [],
       credits: 0,
+      ...(request.review === true ? { review: true } : {}),
+      ...(request.options.parts === true
+        ? {
+            parts: true,
+            texturePrompt:
+              fileToken === null ? { text: request.prompt.slice(0, 1024) } : { image: fileToken },
+          }
+        : {}),
     };
     return {
       kind: "making" as const,
@@ -293,15 +393,44 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
     const consumed = numberField(answer, "data", "credits_consumed");
     const credits = spent === null || consumed === null ? null : spent + consumed;
     const output = field(answer, "data", "output");
-    if (remote.stage === "mesh" && remote.lane !== "model")
+    if (remote.stage === "mesh" && remote.parts === true)
       return {
         kind: "making" as const,
-        remote: { ...stored, pending: "rig", credits, unknown: 0 } as ArtRemote,
+        remote: { ...stored, pending: "texture", credits, unknown: 0 } as ArtRemote,
       };
+    if (remote.stage === "mesh" && remote.lane !== "model") {
+      const next = { ...stored, pending: "rig", credits, unknown: 0 } as ArtRemote;
+      if (remote.review !== true) return { kind: "making" as const, remote: next };
+      // The person looks at the model before the rig is bought: it comes now, while its URL lives.
+      const urls = tripoModelUrls(output);
+      if (urls.length === 0)
+        return yield* new ArtProviderError({
+          reason: "Tripo finished the model without a model file.",
+          ...(credits === null ? {} : { costUsd: roundUsd(credits * USD_PER_CREDIT) }),
+        });
+      const files: ArtFile[] = [
+        {
+          role: "asset",
+          ext: extOf(urls[0]!),
+          bytes: yield* context.http.download(urls[0]!),
+          label: "model",
+        },
+      ];
+      return {
+        kind: "making" as const,
+        remote: next,
+        files,
+        ...(credits === null
+          ? {}
+          : { spent: { usd: roundUsd(credits * USD_PER_CREDIT), estimated: false } }),
+      };
+    }
+    // A mesh Tripo imported (an upload) comes back normalized, and the rig says how.
+    const restore = remote.stage === "rig" ? (restoreOf(output) ?? null) : (remote.restore ?? null);
     if (remote.stage === "rig" && remote.clips.length > 0)
       return {
         kind: "making" as const,
-        remote: { ...stored, pending: "retarget", credits, unknown: 0 } as ArtRemote,
+        remote: { ...stored, pending: "retarget", credits, unknown: 0, restore } as ArtRemote,
       };
     const urls = tripoModelUrls(output);
     if (urls.length === 0)
@@ -332,8 +461,23 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
       kind: "done" as const,
       candidates: [files.filter((file) => file.bytes.byteLength > 0)],
       costUsd: credits === null ? null : roundUsd(credits * USD_PER_CREDIT),
+      ...(restore === null ? {} : { restore }),
     };
   });
+
+/** `normalize_scale` and `normalize_translation` of a task whose input was a file token. */
+const restoreOf = (output: unknown): ArtRestore | undefined => {
+  const scale = numberField(output, "normalize_scale");
+  const translation = field(output, "normalize_translation");
+  if (scale === null || scale <= 0) return undefined;
+  const moved =
+    Array.isArray(translation) &&
+    translation.length === 3 &&
+    translation.every((value) => typeof value === "number" && Number.isFinite(value))
+      ? (translation as unknown as readonly [number, number, number])
+      : ([0, 0, 0] as const);
+  return { scale, translation: moved };
+};
 
 /** Starts the saved pending stage, once. */
 const advance = (context: ArtContext, stored: ArtRemote) =>
@@ -341,6 +485,14 @@ const advance = (context: ArtContext, stored: ArtRemote) =>
     const key = yield* requireKey("tripo", context);
     const remote = stored as unknown as TripoRemote;
     switch (pendingStage(stored)) {
+      case "texture": {
+        const texture = yield* post(context, key, "/models/texture", tripoTextureBody(remote));
+        return {
+          kind: "making" as const,
+          remote: { ...stored, stage: "texture", task: texture, pending: null } as ArtRemote,
+          note: "Texturing the parts.",
+        } satisfies ArtStep;
+      }
       case "rig": {
         const rig = yield* post(context, key, "/animations/rig", tripoRigBody(remote));
         return {
@@ -370,8 +522,15 @@ const advance = (context: ArtContext, stored: ArtRemote) =>
 export const tripo: ArtAdapter = {
   id: "tripo",
   estimate: (request) => {
+    const image = request.references > 0;
+    const parts = request.options.parts === true;
     const mesh =
-      (request.references > 0 ? PRICE.imageTextured : PRICE.textTextured) + PRICE.smartLowPoly;
+      request.options.mesh !== undefined
+        ? 0
+        : parts
+          ? (image ? PRICE.imageBare : PRICE.textBare) + PRICE.parts + PRICE.texture
+          : (image ? PRICE.imageTextured : PRICE.textTextured) +
+            (request.options.lowPoly === true ? PRICE.smartLowPoly : 0);
     if (request.lane === "model") return roundUsd(mesh);
     const resolved = tripoPresets(request);
     return roundUsd(
@@ -381,6 +540,8 @@ export const tripo: ArtAdapter = {
   refuse: (request) => {
     if (request.lane !== "character" && request.lane !== "creature" && request.lane !== "model")
       return `Tripo makes characters, creatures and models, not ${request.lane}.`;
+    if (request.options.parts === true && request.options.lowPoly === true)
+      return "Tripo makes parts or smart low-poly, not both (its low-poly drops the parts): ask for one.";
     const resolved = tripoPresets(request);
     if (!("missing" in resolved)) return null;
     if (request.lane === "character")

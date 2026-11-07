@@ -595,3 +595,88 @@ def motion_strip(params):
                 bpy.data.scenes.remove(x)
         bpy.data.batch_remove([x for x in added if not isinstance(x, bpy.types.Scene)])
         shutil.rmtree(folder, ignore_errors=True)
+
+
+MODEL_VIEWS = (("front", 0), ("side", 90), ("back", 180))
+
+
+@entry
+def model_views(params):
+    """model_views(): a generated model's card picture before it is rigged, so the person sees what
+    the rig would be bought for. Front, side and back with its textures, then the same views in
+    clay, where paint no longer hides a part off-centre, floating or poking out. Rendered in a
+    throwaway scene in Workbench like the strips; the live scene does not change.
+
+    params: {model: abs glb, out: abs png}"""
+    out = params["out"]
+    folder = tempfile.mkdtemp(prefix="kurambit-views-")
+    before = {t: set(getattr(bpy.data, t)) for t in ID_TYPES}
+    window = bpy.context.window
+    shown = window.scene if window is not None else None
+    live, layer = bpy.context.scene, bpy.context.view_layer
+    kept = (live.frame_start, live.frame_end, live.frame_current)
+    active, selected = layer.objects.active, [o for o in layer.objects if o.select_get()]
+    try:
+        sc = bpy.data.scenes.new("kurambit_views")
+        try:
+            new, _ = skeleton.import_gltf(params["model"])  # the importer works in the context's scene only
+        finally:
+            for o in [x for x in bpy.data.objects if x not in before["objects"]]:
+                for c in list(o.users_collection):
+                    c.objects.unlink(o)
+                sc.collection.objects.link(o)
+        if window is not None:
+            window.scene = sc
+        meshes = [o for o in new if o.type == "MESH"]
+        if not meshes:
+            raise Refused("invalid-input", f"{os.path.basename(params['model'])} holds no mesh")
+        cam = bpy.data.objects.new("kurambit_views_cam", bpy.data.cameras.new("kurambit_views_cam"))
+        cam.data.type = "ORTHO"
+        sc.collection.objects.link(cam)
+        sc.camera = cam
+        labels = Labels(folder)
+        points = _world_coords(sc, meshes)
+        exts = [_extent(points, az, 8) for _, az in MODEL_VIEWS]
+        span = max(max(e[1] - e[0] for e in exts) * TURN[1] / TURN[0], max(e[3] - e[2] for e in exts)) * 1.1
+        _setup(sc, "BLENDER_WORKBENCH", TURN)
+        rows, problems = [], []
+        for kind in ("textured", "clay"):
+            if kind == "clay":
+                _clay(sc)
+            tiles = []
+            for i, (name, az) in enumerate(MODEL_VIEWS):
+                _camera(cam, az, 8, exts[i], span)
+                tile = _render(sc, os.path.join(folder, f"{kind}_{name}.png"))
+                if _cover(tile) < MIN_COVER:
+                    problems.append(f"the {kind} {name} view shows almost nothing")
+                tiles.append(tile)
+            rows.append((labels(f"{kind}: front, side, back"), tiles))
+        width = PAD * 2 + len(MODEL_VIEWS) * TURN[0]
+        row_h = LABEL_PX + 4 + TURN[1] + PAD
+        canvas = np.zeros((PAD + row_h * len(rows), width, 4), np.float32)
+        canvas[:, :, :3], canvas[:, :, 3] = BG, 1.0
+        for r, (label, tiles) in enumerate(rows):
+            y = PAD + r * row_h
+            _over(canvas, label, PAD, y)
+            for i, tile in enumerate(tiles):
+                _over(canvas, tile, PAD + i * TURN[0], y + LABEL_PX + 4)
+        img = bpy.data.images.new("kurambit_views_out", width, canvas.shape[0], alpha=False)
+        img.pixels.foreach_set(np.flipud(canvas).ravel())
+        img.filepath_raw = out
+        img.file_format = "PNG"
+        img.save()
+        return {"image": out, "problems": problems[:12]}
+    finally:
+        if window is not None:
+            window.scene = shown
+        live.frame_start, live.frame_end, _ = kept
+        live.frame_set(kept[2])
+        for o in layer.objects:
+            o.select_set(o in selected)
+        layer.objects.active = active
+        added = [x for t in ID_TYPES for x in getattr(bpy.data, t) if x not in before[t]]
+        for x in added:
+            if isinstance(x, bpy.types.Scene):
+                bpy.data.scenes.remove(x)
+        bpy.data.batch_remove([x for x in added if not isinstance(x, bpy.types.Scene)])
+        shutil.rmtree(folder, ignore_errors=True)

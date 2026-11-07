@@ -192,6 +192,22 @@ export const GameArtOptions = Schema.Struct({
   polycount: Schema.optionalKey(
     Schema.Number.check(Schema.isBetween({ minimum: 500, maximum: 200_000 })),
   ),
+  /**
+   * character, creature, model: clean, game-ready low-poly topology made at the polycount budget
+   * (Tripo's smart low-poly, 500-20,000 triangles; Meshy's Smart Topology, 100-30,000).
+   */
+  lowPoly: Schema.optionalKey(Schema.Boolean),
+  /**
+   * model: separate named parts (a door, a turret, a wheel) the game can move on their own. Tripo
+   * only; the parts come untextured and are textured in a second paid task, keeping the parts.
+   */
+  parts: Schema.optionalKey(Schema.Boolean),
+  /**
+   * character, creature: a game GLB that is not rigged yet (made in Blender, a CC0 library model
+   * or the person's own) to rig instead of making a model. It is uploaded as it is and keeps its
+   * geometry and textures; only the skeleton, its skin and the clips are made.
+   */
+  mesh: Schema.optionalKey(GamePath),
   /** character, creature: standing height in metres. */
   height: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0.1, maximum: 50 }))),
   /** creature: its body plan, so the generator rigs it on the right kind of skeleton. */
@@ -260,7 +276,10 @@ export type GameGenerateInput = typeof GameGenerateInput.Type;
 export const GameGenerationState = Schema.Literals([
   /** Sent to the provider; waiting on it. */
   "making",
-  /** Candidates are in; waiting for the person's pick. */
+  /**
+   * Candidates are in; waiting for the person's pick. A character or creature waits here once,
+   * after its paid model and before its rig: one candidate, the model's render, labelled "Rig this".
+   */
   "choosing",
   /** The files are in the game. */
   "done",
