@@ -282,6 +282,8 @@ export const GameArtProvidersResult = Schema.Struct({
   providers: Schema.Array(GameArtProviderStatus),
   /** Per lane, the provider "auto" would use now; null when none is ready. */
   lanes: Schema.Record(GameArtLane, Schema.NullOr(GameArtProviderId)),
+  /** Spent today across every game (USD), for Settings, which has no game thread to ask. */
+  spentTodayUsd: Schema.optionalKey(Schema.Number),
 });
 export type GameArtProvidersResult = typeof GameArtProvidersResult.Type;
 

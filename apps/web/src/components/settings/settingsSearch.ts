@@ -116,6 +116,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["blender godot unity hub executable paths install download toolchain"],
   },
   {
+    id: "art-providers",
+    title: "Art providers",
+    to: "/settings/general",
+    scope: "environment",
+    environmentOnly: true,
+    searchTerms: [
+      "generated art keys codex chatgpt openai gemini google tripo meshy elevenlabs daily limit spend licence",
+    ],
+  },
+  {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
     title: "Keep worktrees with local changes",

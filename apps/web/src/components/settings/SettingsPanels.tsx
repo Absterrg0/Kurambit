@@ -1,4 +1,5 @@
 import { GameToolsSettings } from "./GameToolsSettings";
+import { GameArtSettings } from "./GameArtSettings";
 import {
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
@@ -1905,7 +1906,10 @@ export function GeneralSettingsPanel() {
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="general" />
       {isEnvironmentScope ? (
-        <GameToolsSettings key={environmentId} environmentId={environmentId} />
+        <>
+          <GameToolsSettings key={environmentId} environmentId={environmentId} />
+          <GameArtSettings key={`art:${environmentId}`} environmentId={environmentId} />
+        </>
       ) : null}
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
