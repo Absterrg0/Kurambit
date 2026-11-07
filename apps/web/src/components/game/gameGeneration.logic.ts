@@ -161,12 +161,13 @@ export const chatGenerationCardKey = (
     .join("\u0002");
 
 /**
- * Whether a tool call is the agent's game_generate or game_generate_wait, as
+ * Whether a tool call is the agent's game_generate, game_image_edit or game_generate_wait, as
  * any provider names it (`mcp__kurambit__game_generate`, `kurambit.game_generate`,
  * `kurambit-<thread>_game_generate_wait`).
  */
 export const isGameGenerationTool = (toolName: string | null | undefined): boolean =>
-  toolName != null && /(?:^|[_.:/\s-])game_generate(?:_wait)?$/i.test(toolName.trim());
+  toolName != null &&
+  /(?:^|[_.:/\s-])game_(?:generate(?:_wait)?|image_edit)$/i.test(toolName.trim());
 
 // The timeline compares anchored cards by identity, so one merged array per pair of inputs.
 let lastMerge: {
