@@ -102,18 +102,22 @@ const turnStep = (patch: Partial<GameRunTurnStep> = {}): GameRunTurnStep => ({
   startedBy: "autopilot",
   ...patch,
 });
-const turnResult = (patch: Partial<Loop.TurnResult> = {}): Loop.TurnResult => ({
-  kind: "turn",
-  runId: RunId.make("run-t3-1"),
-  outcome: "completed",
-  build: BUILD,
-  files: 2,
-  tokens: 40_000,
-  elapsedMs: 180_000,
-  personSteered: false,
-  reason: "",
-  ...patch,
-});
+// `startBuild` is the folder's build when the turn started (T's report).
+type Turned = Loop.TurnResult & { readonly startBuild?: GameBuildId | null };
+const turnResult = (patch: Partial<Turned> = {}): Loop.TurnResult =>
+  ({
+    kind: "turn",
+    startBuild: BASE,
+    runId: RunId.make("run-t3-1"),
+    outcome: "completed",
+    build: BUILD,
+    files: 2,
+    tokens: 40_000,
+    elapsedMs: 180_000,
+    personSteered: false,
+    reason: "",
+    ...patch,
+  }) as Loop.TurnResult;
 const look = (patch: Partial<Loop.LookResult> = {}): Loop.LookResult => ({
   kind: "look",
   current: BASE,
@@ -425,5 +429,66 @@ describe("the captured prefix (K14)", () => {
       },
     );
     expect(kept.state.steer).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("a step acts only on the build it was planned on (TW1)", () => {
+  const started = { now: NOW, since: NOW, started: true };
+
+  it("never judges a turn that started on another build, or on an unknown one", () => {
+    // A person's turn landed while the look waited for facts: the step's turn started on it.
+    const moved = Loop.applyTurn(state(), turnStep(), turnResult({ startBuild: BUILD }), started);
+    expect(moved.plan).toEqual({ kind: "look" });
+    expect(moved.record).toBeNull();
+    const unknown = Loop.applyTurn(state(), turnStep(), turnResult({ startBuild: null }), started);
+    expect(unknown.plan).toEqual({ kind: "look" });
+    // An unknown start is never looped on: two in a row pause the run.
+    expect(moved.state.stallStreak).toBe(0);
+    expect(
+      Loop.applyTurn(unknown.state, turnStep(), turnResult({ startBuild: null }), started).state
+        .ending,
+    ).toBe("stalled");
+    // A turn that started where its look read is judged against that build.
+    expect(Loop.applyTurn(state(), turnStep(), turnResult(), started).plan).toEqual({
+      kind: "judge",
+      build: BUILD,
+      base: BASE,
+    });
+  });
+
+  it("never retries a step the person redid", () => {
+    const easier = facts({ winnableWithoutSkill: { status: "measured", value: true } });
+    const undone = Loop.applyUndo(
+      state(),
+      { ...cycle(), judge: { kind: "judge", base: facts(), build: easier } },
+      { kind: "undo", restored: true, why: "restored", message: "" },
+      NOW,
+    );
+    expect(Loop.propose(undone.state, look({ current: BASE }))?.why).toBe("regression");
+    // Redo put the step's build back in the folder: the agent's own line comes next.
+    expect(Loop.propose(undone.state, look({ current: BUILD }))?.why).toBe("next");
+  });
+
+  it("words a failed undo as failed, and only a moved folder as moved on", () => {
+    const easier = facts({ winnableWithoutSkill: { status: "measured", value: true } });
+    const judged = { ...cycle(), judge: { kind: "judge" as const, base: facts(), build: easier } };
+    expect(Loop.undoReason(judged)).toContain("Winnable without skill");
+    const failed = Loop.applyUndo(
+      state(),
+      judged,
+      { kind: "undo", restored: false, why: "refused", message: "the copy could not be made" },
+      NOW,
+    );
+    expect(failed.record?.step).toMatchObject({ verdict: "kept", gain: false });
+    expect(failed.record?.step.reason).toMatch(
+      /^the copy could not be made \(Winnable without skill/,
+    );
+    const moved = Loop.applyUndo(
+      state(),
+      judged,
+      { kind: "undo", restored: false, why: "moved-on", message: "" },
+      NOW,
+    );
+    expect(moved.record?.step.verdict).toBe("kept-moved-on");
   });
 });
