@@ -1,11 +1,14 @@
 import type { GameBuild, GameBuildsResult, GameFactTone } from "@kurambit/contracts";
 
-/** A mark's short name: the turn number, `R<n>` for a run round, a saved build's first word. */
+/**
+ * A mark's short name: the turn number, a keep-going step's number (its mark
+ * adds a step glyph), `R<n>` for a stage-era round, a saved build's first word.
+ */
 export const markLabel = (build: GameBuild): string => {
   const source = build.source;
   switch (source._tag) {
     case "turn":
-      return String(source.turn);
+      return String(source.step?.n ?? source.turn);
     case "round":
       return `R${source.round}`;
     case "saved":

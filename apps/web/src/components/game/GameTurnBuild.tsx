@@ -1,10 +1,12 @@
 import { ArrowUpRightIcon, HistoryIcon, PlayIcon, Redo2Icon, Undo2Icon } from "lucide-react";
-import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
+import type { GameBuild, RunId, ScopedThreadRef } from "@kurambit/contracts";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildFactChips } from "./GameBuildFacts";
 import { turnBuildIsFolder } from "./gameTurnBuild.logic";
+import { stepLine } from "./keepGoing.logic";
 import { useTurnUndo } from "./useBuildActions";
 
 const RESTORE_LABEL = {
@@ -34,8 +36,10 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
       );
   const action = undo.writer ? undo.action : null;
   const label = action === null ? null : RESTORE_LABEL[action.kind];
+  const step = build.source._tag === "turn" ? build.source.step : null;
   return (
     <div data-game-turn-build={build.id} className="mt-1.5 space-y-1">
+      {step === null ? null : <StepLine step={step} />}
       <div className="flex flex-wrap items-center gap-1.5">
         {/* Never narrower than its widest chip: the buttons wrap below instead. */}
         <span className="flex-1">
@@ -58,7 +62,7 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
           <PlayIcon className="fill-current" aria-hidden="true" />
           Play
         </Button>
-        {action?.kind === "redo" ? (
+        {action?.kind === "redo" && step?.verdict !== "undone" ? (
           <span className="text-2xs text-muted-foreground">Undone</span>
         ) : null}
         {action !== null && label !== null ? (
@@ -83,6 +87,27 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
         </p>
       ) : null}
     </div>
+  );
+}
+
+type Step = NonNullable<Extract<GameBuild["source"], { _tag: "turn" }>["step"]>;
+
+/**
+ * A keep-going step's verdict (design §7.4). Left alone after a regression,
+ * its reason (what got worse) is in the tooltip.
+ */
+function StepLine({ step }: { step: Step }) {
+  const line = (
+    <p data-game-step={step.verdict ?? "measuring"} className="text-2xs text-muted-foreground">
+      {stepLine(step)}
+    </p>
+  );
+  if (step.verdict !== "kept-moved-on" || step.reason === "") return line;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={line} />
+      <TooltipPopup side="top">{step.reason}</TooltipPopup>
+    </Tooltip>
   );
 }
 
