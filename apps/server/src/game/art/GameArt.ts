@@ -38,6 +38,7 @@ import {
   type GameArtProviderId,
   type GameArtProviderStatus,
   type GameArtProvidersResult,
+  type GameCharacterRoute,
   type GameGenerateInput,
   type GameGenerateResult,
   type GameGenerateWaitInput,
@@ -57,6 +58,7 @@ import * as ServerSettingsService from "../../serverSettings.ts";
 import { GameCaller } from "../GameCaller.ts";
 import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
+import { lockCharacterRouteRefusal } from "../gameStyle.ts";
 import { isPathInside } from "../gameNativeUserDir.ts";
 import {
   type ArtAdapter,
@@ -75,11 +77,16 @@ import { ART_ADAPTERS } from "./providers/index.ts";
 export class GameArt extends Context.Service<
   GameArt,
   {
-    /** Starts a generation and answers at once with its record (state making). */
+    /**
+     * Starts a generation and answers at once with its record (state making). `route` is the
+     * game's character route: off the generated route, characters and creatures are refused
+     * before anything is asked or spent.
+     */
     readonly generate: (
       root: string,
       threadId: ThreadId,
       input: GameGenerateInput,
+      route: GameCharacterRoute,
     ) => Effect.Effect<GameGenerateResult, GameOperationError>;
     /** Until done, choosing (the person's pick), failed or cancelled, or `seconds` pass. */
     readonly wait: (
@@ -816,8 +823,17 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const generate: GameArt["Service"]["generate"] = (root, threadId, input) =>
+  const generate: GameArt["Service"]["generate"] = (root, threadId, input, characterRoute) =>
     Effect.gen(function* () {
+      // Before any provider is asked: the person's route decides who makes characters.
+      if (input.lane === "character" || input.lane === "creature") {
+        const refused = lockCharacterRouteRefusal("generated-body", characterRoute);
+        if (refused !== null)
+          return yield* opError(
+            "art-generate",
+            `Nothing was asked of a provider or spent. ${refused}`,
+          );
+      }
       const all = yield* settings;
       const directions = input.directions ?? [];
       const options = input.options ?? {};

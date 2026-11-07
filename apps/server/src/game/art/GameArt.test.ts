@@ -83,12 +83,17 @@ describe("GameArt", () => {
       const root = NodePath.join(base, "game");
       const art = yield* GameArt.GameArt;
       const refused = yield* art
-        .generate(root, THREAD, {
-          lane: "music",
-          prompt: "a calm loop",
-          name: "theme",
-          options: { seconds: 120 },
-        })
+        .generate(
+          root,
+          THREAD,
+          {
+            lane: "music",
+            prompt: "a calm loop",
+            name: "theme",
+            options: { seconds: 120 },
+          },
+          "library",
+        )
         .pipe(Effect.flip);
       assert.match(refused.message, /\$0\.00 spent today.*\$0\.30.*\$0\.10 limit/);
       assert.deepStrictEqual((yield* art.list(root)).generations, []);
@@ -113,15 +118,20 @@ describe("GameArt", () => {
       yield* Effect.provide(
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
-          const started = yield* art.generate(root, THREAD, {
-            lane: "image",
-            prompt: "a hero",
-            name: "hero",
-            directions: [
-              { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
-              { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
-            ],
-          });
+          const started = yield* art.generate(
+            root,
+            THREAD,
+            {
+              lane: "image",
+              prompt: "a hero",
+              name: "hero",
+              directions: [
+                { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
+                { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
+              ],
+            },
+            "library",
+          );
           assert.strictEqual(started.generation.name, "hero_2");
           const ready = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
           assert.strictEqual(ready.generation.state, "choosing");
@@ -176,19 +186,29 @@ describe("GameArt", () => {
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
           const escaped = yield* art
-            .generate(root, THREAD, {
+            .generate(
+              root,
+              THREAD,
+              {
+                lane: "image",
+                prompt: "x",
+                name: "x",
+                references: ["../secret.png"],
+              },
+              "library",
+            )
+            .pipe(Effect.flip);
+          assert.match(escaped.message, /inside the game/);
+          const started = yield* art.generate(
+            root,
+            THREAD,
+            {
               lane: "image",
               prompt: "x",
               name: "x",
-              references: ["../secret.png"],
-            })
-            .pipe(Effect.flip);
-          assert.match(escaped.message, /inside the game/);
-          const started = yield* art.generate(root, THREAD, {
-            lane: "image",
-            prompt: "x",
-            name: "x",
-          });
+            },
+            "library",
+          );
           const ended = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
           assert.strictEqual(ended.generation.state, "failed");
           assert.match(ended.generation.error ?? "", /outside the game folder/);
