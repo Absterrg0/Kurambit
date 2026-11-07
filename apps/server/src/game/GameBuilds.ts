@@ -689,7 +689,7 @@ const make = Effect.gen(function* () {
         entries.map((entry) => entry.id),
       );
       const measured = yield* facts.readMany([...resolved.values()]);
-      return entries.map((entry): GameBuild => {
+      const builds = entries.map((entry): GameBuild => {
         const available = kept.has(entry.id) && resolved.has(entry.id);
         const read = measured.get(entry.id);
         return {
@@ -715,6 +715,7 @@ const make = Effect.gen(function* () {
             read === undefined ? { state: "never", chips: [], notMeasured: 0 } : summaryOf(read),
         };
       });
+      return { builds, measured };
     });
 
   // The folder captured (T3's capture, its kept index makes it cheap) and its
@@ -765,7 +766,17 @@ const make = Effect.gen(function* () {
       const limit = Math.min(50, Math.max(1, input.limit ?? 30));
       const { entries, kept, more } = yield* allEntries(g, limit, input.before);
       const page = entries.slice(0, limit);
-      const builds = yield* rowsOf(g, page, kept);
+      const { builds, measured } = yield* rowsOf(g, page, kept);
+      // The generation cards read the newest build whose asset use was measured.
+      const latestUse =
+        input.before === undefined
+          ? builds.flatMap((build) => {
+              const use = measured.get(build.id)?.use;
+              return use?.status === "measured"
+                ? [{ build: build.id, generations: use.value.generations ?? [] }]
+                : [];
+            })[0]
+          : undefined;
       const newestTurn = entries.find((entry) => entry.source._tag === "turn");
       // The latest restore, the run's or (with no run) the game's own.
       const restore = yield* restoreRefOf(g, entries);
@@ -792,6 +803,7 @@ const make = Effect.gen(function* () {
             ? yield* folderEditedSince(g, candidates[0].id)
             : "unknown",
         restore,
+        ...(latestUse === undefined ? {} : { latestUse }),
       } satisfies GameBuildsResult;
     });
 
@@ -873,7 +885,7 @@ const make = Effect.gen(function* () {
           base: null,
           handle: { build: id },
         } satisfies Entry);
-      const [row] = yield* rowsOf(g, [entry], new Set([...listed.kept, id]));
+      const [row] = (yield* rowsOf(g, [entry], new Set([...listed.kept, id]))).builds;
       return row!;
     });
 

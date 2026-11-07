@@ -149,6 +149,162 @@ const FRAME_COUNTER = `(() => {
   Object.defineProperty(window, "__kurambitTime", { get: () => seconds });
 })()`;
 
+/** The page calls it once per sound that started playing above silence. */
+const SOUND_BINDING = "__kurambitSoundStarted";
+
+/**
+ * Which sounds started playing, without unmuting anything (Chromium runs with
+ * --mute-audio; the graph still runs). Web Audio: an AudioBufferSourceNode's
+ * start, its buffer known by the SHA-256 and length of the bytes
+ * decodeAudioData decoded (loaders rewrap responses, so a URL does not survive
+ * to the decode; the bytes do), counted once its context runs, the buffer
+ * holds more than silence and a path of non-zero gains reaches the speakers.
+ * Media elements: by their URL, once playing, unmuted and with volume, or
+ * routed into such a path. Anything not yet audible is looked at again twice
+ * a second while it plays. "Started playing" is all it says: nobody listened.
+ */
+const SOUND_TAP = `(() => {
+  if (typeof BaseAudioContext === "undefined") return;
+  const reported = new Set();
+  const started = (key) => {
+    if (typeof key !== "string" || key === "" || reported.has(key)) return;
+    reported.add(key);
+    try { window[${JSON.stringify(SOUND_BINDING)}]?.(key); } catch {}
+  };
+  const keys = new WeakMap();
+  const decode = BaseAudioContext.prototype.decodeAudioData;
+  BaseAudioContext.prototype.decodeAudioData = function (data, onDecoded, ...rest) {
+    // Decoding detaches the bytes: they are hashed from a copy.
+    let key = null;
+    if (data instanceof ArrayBuffer && crypto.subtle) {
+      const bytes = data.byteLength;
+      key = crypto.subtle.digest("SHA-256", data.slice(0)).then(
+        (digest) =>
+          "sha256:" +
+          [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("") +
+          ":" +
+          bytes,
+        () => null,
+      );
+    }
+    const tag = (buffer) => {
+      if (key && buffer) keys.set(buffer, key);
+      return buffer;
+    };
+    const decoded = decode.call(
+      this,
+      data,
+      typeof onDecoded === "function" ? (buffer) => onDecoded(tag(buffer)) : onDecoded,
+      ...rest,
+    );
+    if (decoded && typeof decoded.then === "function") decoded.then(tag, () => undefined);
+    return decoded;
+  };
+  const edges = new WeakMap();
+  const connect = AudioNode.prototype.connect;
+  AudioNode.prototype.connect = function (target, ...rest) {
+    let out = edges.get(this);
+    if (!out) edges.set(this, (out = new Set()));
+    if (target instanceof AudioNode) out.add(target);
+    return connect.call(this, target, ...rest);
+  };
+  const disconnect = AudioNode.prototype.disconnect;
+  AudioNode.prototype.disconnect = function (...args) {
+    const out = edges.get(this);
+    if (out) {
+      if (args.length === 0 || typeof args[0] === "number") out.clear();
+      else out.delete(args[0]);
+    }
+    return disconnect.apply(this, args);
+  };
+  const reaches = (node) => {
+    if (!(node.context instanceof AudioContext) || node.context.state !== "running") return false;
+    const seen = new Set();
+    const stack = [node];
+    while (stack.length > 0) {
+      const at = stack.pop();
+      if (seen.has(at)) continue;
+      seen.add(at);
+      if (at instanceof AudioDestinationNode) return true;
+      if (at instanceof GainNode && Math.abs(at.gain.value) < 1e-4) continue;
+      for (const next of edges.get(at) ?? []) stack.push(next);
+    }
+    return false;
+  };
+  const loud = new WeakMap();
+  const notSilent = (buffer) => {
+    let known = loud.get(buffer);
+    if (known === undefined) {
+      known = false;
+      for (let c = 0; c < buffer.numberOfChannels && !known; c++) {
+        const samples = buffer.getChannelData(c);
+        for (let i = 0; i < samples.length; i++)
+          if (Math.abs(samples[i]) > 1e-3) {
+            known = true;
+            break;
+          }
+      }
+      loud.set(buffer, known);
+    }
+    return known;
+  };
+  const waiting = new Set();
+  let timer = null;
+  const look = (entry) => {
+    if (entry.done()) waiting.delete(entry);
+    else if (entry.audible()) {
+      waiting.delete(entry);
+      Promise.resolve(entry.key).then(started);
+    }
+    if (waiting.size === 0 && timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+  const watch = (entry) => {
+    waiting.add(entry);
+    look(entry);
+    if (waiting.size > 0 && timer === null) timer = setInterval(() => waiting.forEach(look), 500);
+  };
+  const start = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function (...args) {
+    const result = start.apply(this, args);
+    const key = this.buffer ? keys.get(this.buffer) : undefined;
+    if (key) {
+      let ended = false;
+      this.addEventListener("ended", () => (ended = true), { once: true });
+      watch({ key, done: () => ended, audible: () => notSilent(this.buffer) && reaches(this) });
+    }
+    return result;
+  };
+  const routed = new WeakMap();
+  const fromElement = AudioContext.prototype.createMediaElementSource;
+  AudioContext.prototype.createMediaElementSource = function (element) {
+    const node = fromElement.call(this, element);
+    routed.set(element, node);
+    return node;
+  };
+  const watched = new WeakSet();
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...args) {
+    const element = this;
+    if (!watched.has(element)) {
+      watched.add(element);
+      element.addEventListener("playing", () =>
+        watch({
+          key: element.currentSrc,
+          done: () => element.paused || element.ended,
+          audible: () => {
+            const node = routed.get(element);
+            return node ? reaches(node) : !element.muted && element.volume > 0;
+          },
+        }),
+      );
+    }
+    return play.apply(element, args);
+  };
+})()`;
+
 const READY = "window.__studio?.ready === true";
 
 /** What a kept session's page left in its storage, for the caller to write back. */
@@ -188,6 +344,11 @@ export const openWebPlaySession = async (input: {
   readonly keptStorage?: string | null | undefined;
   /** Sees each console message, page error and failed script as the page reports it. */
   readonly onPageEvent?: ((event: WebPageEvent) => void) | undefined;
+  /**
+   * Hears, once each, the sounds that started playing above silence (SOUND_TAP): a media
+   * element's URL, or "sha256:<hex>:<bytes>" of the bytes a Web Audio buffer was decoded from.
+   */
+  readonly onSoundStarted?: ((sound: string) => void) | undefined;
   /**
    * Ends the boot wait once a page error or a failed script came before the
    * bridge: the check reports that page as broken. A player's page (explore,
@@ -249,6 +410,13 @@ export const openWebPlaySession = async (input: {
           }),
     });
     await context.addInitScript(FRAME_COUNTER);
+    const onSound = input.onSoundStarted;
+    if (onSound !== undefined) {
+      await context.exposeBinding(SOUND_BINDING, (_source, sound: unknown) => {
+        if (typeof sound === "string") onSound(sound.slice(0, 2000));
+      });
+      await context.addInitScript(SOUND_TAP);
+    }
     const page = await context.newPage();
     page.on("crash", () => settleEnded({ by: "game", detail: new WebPageCrashed().message }));
     const pending: GameConsoleMessage[] = [];

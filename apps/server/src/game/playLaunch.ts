@@ -27,6 +27,7 @@ import {
   type KeptStorage,
 } from "./webPlaySession.ts";
 import { isHostExit, type WindowHost } from "./windowHost.ts";
+import { type PlayUse, resolvePlayUse } from "./assetUse.ts";
 
 export interface PlayLaunch {
   readonly play: PlaySession;
@@ -40,7 +41,11 @@ export interface PlayLaunch {
    * to its exit, so nothing still writes into its folder. Idempotent; a kept
    * page's storage comes back for the caller to write.
    */
-  readonly stop: () => Promise<{ readonly keptStorage: KeptStorage | null }>;
+  readonly stop: () => Promise<{
+    readonly keptStorage: KeptStorage | null;
+    /** What a recorded page loaded and played (`recordUse`); null for every other launch. */
+    readonly use: PlayUse | null;
+  }>;
   readonly bootMs: number;
   /** Folders the runner writes that go with the session. */
   readonly scratch: ReadonlyArray<string>;
@@ -215,7 +220,7 @@ export const openRunnerPlay = (
               // writing its saves before it is stopped.
               if (input.saves !== null) await bounded(started.exited, PLAY_BOUNDS.keptSavesMs);
               await end();
-              return { keptStorage: null };
+              return { keptStorage: null, use: null };
             }),
             bootMs,
             scratch: spec.scratch,
@@ -235,14 +240,24 @@ export const openPagePlay = (input: {
   readonly viewport: GameViewport;
   readonly bootTimeoutMs: number;
   readonly keptStorage: string | null;
+  /** Record which files the page loads and which sounds start playing (asset use). */
+  readonly recordUse?: boolean;
 }): Effect.Effect<PlayLaunch, GameOperationError | PlayDidNotBoot> =>
   Effect.gen(function* () {
     const { operation, root } = input;
+    const project = NodePath.relative(root, input.projectDir);
+    const loads = new Set<string>();
+    const sounds = new Set<string>();
     // Interruptible only while the page boots, which ends its browser on abort.
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         const served = yield* Effect.tryPromise({
-          try: () => serveGameDirectory(root, NodePath.relative(root, input.projectDir) || "."),
+          try: () =>
+            serveGameDirectory(
+              root,
+              project || ".",
+              input.recordUse === true ? { onServed: (path) => loads.add(path) } : {},
+            ),
           catch: failure(operation, root, "io", "The static project could not be served."),
         });
         const unserve = () => served.close().catch(() => undefined);
@@ -258,6 +273,8 @@ export const openPagePlay = (input: {
                 bootTimeoutMs: input.bootTimeoutMs,
                 signal,
                 keptStorage: input.keptStorage,
+                onSoundStarted:
+                  input.recordUse === true ? (sound) => void sounds.add(sound) : undefined,
               }),
             // The page not booting or crashing is the game's; the browser is ours.
             catch: (cause) =>
@@ -276,7 +293,19 @@ export const openPagePlay = (input: {
           stop: once(async () => {
             await play.close();
             await unserve();
-            return { keptStorage: play.keptStorage() };
+            return {
+              keptStorage: play.keptStorage(),
+              use:
+                input.recordUse === true
+                  ? await resolvePlayUse({
+                      webRoot: input.projectDir,
+                      project: project.split(NodePath.sep).join("/"),
+                      origin: new URL(served.url).origin,
+                      served: loads,
+                      sounds,
+                    }).catch(() => null)
+                  : null,
+            };
           }),
           bootMs: Date.now() - bootStart,
           scratch: [],
