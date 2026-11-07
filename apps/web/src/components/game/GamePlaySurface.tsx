@@ -13,7 +13,7 @@ import type { GameViewport } from "@kurambit/contracts";
 import { Button } from "../ui/button";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
-import { useStageBridgeFrame } from "./gameStageBridge";
+import { useStageBridgeFrame, useThreadStageBridge } from "./gameStageBridge";
 import type { GameStagePhase } from "./gameStageLogic";
 
 /**
@@ -113,6 +113,8 @@ export function GamePlaySurface({
 }) {
   const playing = phase.kind === "playing" && previewUrl !== null;
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
+  // Frozen, the game is pointed at, not played: its "Click to play" cover would sit on the selection.
+  const frozen = useThreadStageBridge(bridge.threadKey, (state) => state.frozen, false);
   useStageBridgeFrame(`${bridge.threadKey}\0${frameKey}`, playing ? frame : null, bridge.enabled);
   return (
     <div
@@ -129,6 +131,7 @@ export function GamePlaySurface({
             onStudioMessage={onStudioMessage}
             focusRequest={focusRequest}
             onFrame={setFrame}
+            frozen={frozen}
           />
         ) : (
           <StageStateCard
@@ -205,6 +208,7 @@ export function GameFrame({
   onStudioMessage,
   focusRequest = 0,
   onFrame,
+  frozen = false,
 }: {
   url: string;
   title: string;
@@ -215,6 +219,8 @@ export function GameFrame({
   focusRequest?: number;
   /** Hands the iframe to the Stage bridge. */
   onFrame?: ((frame: HTMLIFrameElement | null) => void) | undefined;
+  /** The Stage froze the game to point at it: no "Click to play" cover. */
+  frozen?: boolean;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const setFrameRef = (node: HTMLIFrameElement | null) => {
@@ -314,7 +320,7 @@ export function GameFrame({
           Game may still be running
         </div>
       ) : null}
-      {frameFocused ? null : (
+      {frameFocused || frozen ? null : (
         <button
           type="button"
           className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-black/35"

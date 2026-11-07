@@ -226,11 +226,13 @@ function LookSection({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: 
         <code className="text-xs break-all text-muted-foreground">{asset.sidecar}</code>
       )}
       {root === null ? null : (
-        <GameFileActions
-          threadRef={threadRef}
-          path={`${root}/${asset.path}`}
-          relativePath={asset.path}
-        />
+        <div className="-ms-2 flex flex-wrap items-center gap-1">
+          <GameFileActions
+            threadRef={threadRef}
+            path={`${root}/${asset.path}`}
+            relativePath={asset.path}
+          />
+        </div>
       )}
     </Section>
   );

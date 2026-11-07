@@ -912,10 +912,7 @@ function ThreadGameStage({
                     />
                   }
                 >
-                  <FastForwardIcon
-                    className={cn("size-3.5", keepGoingView.pressed && "text-stage-mark")}
-                    aria-hidden="true"
-                  />
+                  <FastForwardIcon className="size-3.5" aria-hidden="true" />
                   <span className="hidden @[52rem]/stage-header:inline">{keepGoingView.label}</span>
                 </TooltipTrigger>
                 <TooltipPopup side="bottom">{keepGoingView.tooltip}</TooltipPopup>
