@@ -26,5 +26,6 @@ OhMyGame's sprite-pipeline quality gates (Apache-2.0).
    made a way the person's character route, `characters` in game_status, does not allow), a character off the
    lock's rig, or art outside its packs and palette is a defect. Judge a made
    character by its last review image and in play: silhouette, read at game
-   distance, palette roles, feet planted. A new look is a change to
+   distance, palette roles, feet planted, and every line of its design sheet
+   in `art/CONCEPT.md` showing. A new look is a change to
    STYLE.json first, never a drift.

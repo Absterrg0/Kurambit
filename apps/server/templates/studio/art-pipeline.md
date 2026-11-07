@@ -139,11 +139,22 @@ measurement. You own the shape, the pose and the judgment, and you judge
 from the review image, never from your code. A character that did not go
 through the review and the export is not finished.
 
-1. **Concept first.** Add the subject's section to `art/CONCEPT.md`: three
-   adjectives; one primary shape (round, square or triangle); the head's
-   share of the height (about 40% for a chibi); the two features that must
-   read at game distance; the palette roles (main, accent, one glow).
+1. **Design sheet first.** Add the subject's section to `art/CONCEPT.md`
+   before the first shape. A character built without one comes out plain
+   (a child in a T-shirt and shorts):
+   - its role and one signature shape that makes the silhouette (a hood's
+     point, a flame lock, a backpack);
+   - one primary shape (round, square or triangle) and the head's share of
+     the height (about 40% for a chibi);
+   - the two features that must read at game distance;
+   - the palette roles (main, secondary, accent, one glow);
+   - the costume in layers (a base garment, an over-garment, a belt or a
+     strap) and a prop or accessory that says the role;
+   - three finishes at least (cuffs, a buckle, stitching, an emblem): they
+     are what reads as made rather than generated.
+
    `art/concepts/<name>.png`, when it exists, is shown beside every review.
+
 2. **Body.** `game_blender_character` with an `mpfb` body (age 0 is a
    toddler, 0.5 an adult; needs MPFB2, which the person installs in
    Settings → Game tools) or a library body, the clips (the standard set
@@ -177,7 +188,28 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
      the hood, a curled tail). Do it before skinning parts to the chain.
 
    Model shapes, not boxes: bevels, subdivided spheres, boolean openings.
-   One glow accent per character. Eyes always get a highlight.
+   One glow accent per character. The craft that separates a made
+   character from a cheap one:
+   - **Hair**: a thin cap ending low at the nape, then about 20 to 25
+     chunky locks lying on the head and lifting toward flicked tips, with
+     one signature lock; the under-locks a shade darker. Never one smooth
+     shell: it reads as a helmet, and cones on it read as horns.
+   - **Eyes** stand out of the face (about 60% of their depth), with an
+     iris and a highlight lit from one side. Lids sit high: low lids read
+     grumpy. Cheeks sink into the skull rather than sit on it.
+   - **Face**: a small nose (it sticks out in profile sooner than you
+     think); an open smile sunk into the skin.
+   - **Hands**: a flatter palm with a thumb. Round mittens read as stumps.
+     Paws get pads.
+   - **Clothes**: a garment lying on the body (an apron, a tabard) is
+     projected onto the skin and lifted a few millimetres; a cuff or band
+     is one object per limb (`ring_around`). A part lying across a joint
+     takes weights over its region's bones (a `{bone: weight}` dict or a
+     function), never 100% on one bone.
+   - **Joins**: a part that meets another enters it. Nothing rests on a
+     surface, floats, or pokes through, on the back and from the side too.
+   - **Accessories** are big enough to read at game distance; a strap
+     that reads as a line is too thin.
 
 4. **Custom clips** with `kurambit.key_pose("Pounce", frame, {"base":
 "Idle_Loop", "move": (0, 0, -0.1), "turn": {"pelvis": ((1, 0, 0), 14)},
@@ -197,13 +229,31 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
    3. Palette roles: main, accent and the one glow are where the concept
       put them; no part is a surprise colour.
    4. Side by side with the concept: proportions, head share, features.
-   5. Clips: feet stay under the body, the head is not hidden in the jump
+   5. Craft: hair, eyes, hands, joins and accessories as above, and every
+      line of the design sheet shows (each layer, the prop, each finish).
+   6. Clips: feet stay under the body, the head is not hidden in the jump
       and run, arms clear the body, the custom clip has its anticipation.
 
-   Name each defect concretely (what, where, what it should be), fix it, and
-   review again. Stop at a pass, or after 8 reviews with what is left named
-   in your reply. The text lists what the export would refuse: fix those
-   first.
+   The text lists what the export would refuse: fix those first. Then
+   write the critique before changing anything: each defect numbered, with
+   its tile, where, blocking or detail, and the fix; or "nothing blocking"
+   with what you checked. "Looks good" is not a review.
+
+   You read your own render as its author and see what you meant to make.
+   For a character or a hero piece, when you can start a subagent, have a
+   fresh one read each review: give it only the person's brief, the
+   subject's section of `art/CONCEPT.md` and the review image's path (never
+   your code, your notes or what you fixed), and ask for every defect
+   (tile, where, blocking or detail) and one line: would it show this to
+   the person as is? Fix what it marks blocking, or say why not; it can be
+   wrong (a shadow read as a hole).
+
+   Fix every defect of a round when they touch different parts; two
+   changes to the same region go one per round. A defect back after two
+   fixes is the method's, not the amount's: rebuild that part another
+   way. Stop when the fresh reading and yours find nothing blocking, or
+   after 8 reviews with what is left named in your reply. A background
+   prop needs one reading.
 
 6. **Export:** `game_blender_export` writes exactly the reviewed model, its
    `<name>.asset.json` sidecar (clips with their ground speed, springs,
