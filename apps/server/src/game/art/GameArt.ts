@@ -105,11 +105,28 @@ export class GameArt extends Context.Service<
       root: string,
       id: string,
     ) => Effect.Effect<GameGenerationChangeResult, GameOperationError>;
+    /**
+     * The finished generation of this game that delivered `path` (game-relative), with its
+     * licence and a creature's body plan; null when none did. The pipeline trusts a generated
+     * file by this row, never by a record file or a custom property in the scene.
+     */
+    readonly delivered: (
+      root: string,
+      id: string,
+      path: string,
+    ) => Effect.Effect<GameArtDelivered | null, GameOperationError>;
     readonly providers: Effect.Effect<GameArtProvidersResult, GameOperationError>;
     /** The lane map alone, from saved keys and Codex's sign-in: no network, for game_status. */
     readonly lanes: Effect.Effect<GameArtLanes, GameOperationError>;
   }
 >()("kurambit/game/art/GameArt") {}
+
+export interface GameArtDelivered {
+  readonly generation: GameGeneration;
+  readonly licence: string;
+  /** A creature's body plan, as it was asked for. */
+  readonly body: string | null;
+}
 
 /**
  * What GameArt reads from the rest of the server: the person's Codex (for images on their
@@ -187,6 +204,8 @@ const opError = (
 
 const usd = (value: number) => `$${value.toFixed(value < 0.1 && value > 0 ? 3 : 2)}`;
 const TERMINAL = new Set(["done", "failed", "cancelled"]);
+const UNDONE =
+  "a build from before them was restored (undo). Make it again if it is still wanted; restoring a later build brings them back.";
 
 /** Local midnight today, as the ISO instant rows are compared with. */
 const localMidnightIso = (nowMs: number): string => {
@@ -577,7 +596,13 @@ const make = Effect.gen(function* () {
         }),
     });
 
-  const recordFile = (row: Row, adapter: ArtAdapter | undefined) => {
+  const licenceOf = (row: Row) => {
+    const adapter = ART_ADAPTERS[row.generation.provider];
+    return (
+      adapter?.laneLicence?.[row.generation.lane] ?? adapter?.licence ?? "Unknown provider terms."
+    );
+  };
+  const recordFile = (row: Row) => {
     const generation = row.generation;
     return encodeJson({
       id: generation.id,
@@ -595,8 +620,7 @@ const make = Effect.gen(function* () {
       ai: true,
       costUsd: generation.costUsd,
       costEstimated: row.meta.costEstimated,
-      licence:
-        adapter?.laneLicence?.[generation.lane] ?? adapter?.licence ?? "Unknown provider terms.",
+      licence: licenceOf(row),
       createdAt: generation.createdAt,
     });
   };
@@ -605,7 +629,7 @@ const make = Effect.gen(function* () {
       writeGameFile(
         row.root,
         `${row.meta.folder}/${row.generation.name}.generation.json`,
-        new TextEncoder().encode(`${recordFile(row, ART_ADAPTERS[row.generation.provider])}\n`),
+        new TextEncoder().encode(`${recordFile(row)}\n`),
       ),
     );
 
@@ -825,10 +849,14 @@ const make = Effect.gen(function* () {
             : `, estimated ${usd(g.estimateUsd)}`
         }${spent !== null && limit !== null ? ` (${usd(spent)} of the ${usd(limit)} daily limit spent today)` : ""}. Files land in ${where}/. Wait with game_generate_wait id ${g.id}.`;
       case "choosing":
-        return `${g.candidates.length} candidates of "${g.name}" are ready (${g.candidates
+        if (g.filesUndone === true)
+          return `The candidates of "${g.name}" are no longer in the game: ${UNDONE}`;
+        return `${g.candidates.length} ${g.candidates.length === 1 ? "candidate" : "candidates"} of "${g.name}" ${g.candidates.length === 1 ? "is" : "are"} ready (${g.candidates
           .map((candidate) => candidate.preview)
-          .join(", ")}); the person picks one in the chat. Cost ${costText(row)}.`;
+          .join(", ")})${refusedText(g)}; the person picks one in the chat. Cost ${costText(row)}.`;
       case "done":
+        if (g.filesUndone === true)
+          return `"${g.name}" was made (${g.files.join(", ")}), but its files are no longer in the game: ${UNDONE}`;
         return `"${g.name}" is in the game: ${g.files.join(", ")}${
           g.chosenBy === "autopilot"
             ? " (Keep going took the first candidate)"
@@ -1051,6 +1079,49 @@ const make = Effect.gen(function* () {
       };
     });
 
+  /**
+   * A checkpoint restore (undo) puts art/ back as a build had it, so files a generation wrote
+   * after that build are removed while its row still lists them. Checked when read, so a later
+   * restore that brings them back reads as it is.
+   */
+  const withUndone = (row: Row): Effect.Effect<Row> => {
+    const files =
+      row.generation.state === "done"
+        ? row.generation.files
+        : row.generation.state === "choosing"
+          ? row.meta.candidateFiles.flat()
+          : [];
+    if (files.length === 0) return Effect.succeed(row);
+    return Effect.promise(async () => {
+      for (const file of files)
+        if (
+          await NodeFSP.lstat(NodePath.join(row.root, file)).then(
+            () => true,
+            () => false,
+          )
+        )
+          return false;
+      return true;
+    }).pipe(
+      Effect.map((undone) =>
+        undone ? { ...row, generation: { ...row.generation, filesUndone: true } } : row,
+      ),
+    );
+  };
+
+  const delivered: GameArt["Service"]["delivered"] = (root, id, path) =>
+    load(root, id).pipe(
+      Effect.map((row) =>
+        row === null || row.generation.state !== "done" || !row.generation.files.includes(path)
+          ? null
+          : {
+              generation: row.generation,
+              licence: licenceOf(row),
+              body: typeof row.meta.options.body === "string" ? row.meta.options.body : null,
+            },
+      ),
+    );
+
   // ── wait, list, choose, cancel ─────────────────────────────────────────
   const wait: GameArt["Service"]["wait"] = (root, input) =>
     Effect.scoped(
@@ -1061,8 +1132,10 @@ const make = Effect.gen(function* () {
         while (true) {
           const row = yield* loadOrFail(root, input.id, "art-wait");
           const left = deadline - (yield* Clock.currentTimeMillis);
-          if (row.generation.state !== "making" || left <= 0)
-            return { text: describe(row, null, null), generation: row.generation };
+          if (row.generation.state !== "making" || left <= 0) {
+            const read = yield* withUndone(row);
+            return { text: describe(read, null, null), generation: read.generation };
+          }
           // Every change wakes the wait; one for another generation is read and ignored.
           yield* PubSub.take(subscription).pipe(Effect.timeoutOption(Duration.millis(left)));
         }
@@ -1077,7 +1150,13 @@ const make = Effect.gen(function* () {
         readonly remote_json: string;
       }>`
         SELECT root, payload_json, remote_json FROM game_art_generations
-        WHERE root = ${root} ORDER BY created_at DESC LIMIT ${LIST_LIMIT}
+        WHERE root = ${root} AND (
+          state IN ('making', 'choosing') OR id IN (
+            SELECT id FROM game_art_generations WHERE root = ${root}
+            ORDER BY created_at DESC LIMIT ${LIST_LIMIT}
+          )
+        )
+        ORDER BY created_at DESC
       `.pipe(
         Effect.mapError(
           (cause) =>
@@ -1085,11 +1164,14 @@ const make = Effect.gen(function* () {
         ),
       );
       const all = yield* settings;
+      const decoded = rows.flatMap((row) => {
+        const read = toRow(row);
+        return read === null ? [] : [read];
+      });
       return {
-        generations: rows.flatMap((row) => {
-          const decoded = toRow(row);
-          return decoded === null ? [] : [decoded.generation];
-        }),
+        generations: yield* Effect.forEach(decoded, (row) =>
+          withUndone(row).pipe(Effect.map((read) => read.generation)),
+        ),
         spentTodayUsd: yield* spentToday,
         dailyLimitUsd: all.gameArtDailyLimitUsd,
       };
@@ -1115,6 +1197,11 @@ const make = Effect.gen(function* () {
             candidate >= row.meta.candidateFiles.length
           )
             return yield* opError("art-choose", `There is no candidate ${candidate + 1}.`);
+          if ((yield* withUndone(row)).generation.filesUndone === true)
+            return yield* opError(
+              "art-choose",
+              `The candidates of "${row.generation.name}" are no longer in the game: ${UNDONE}`,
+            );
           return { generation: (yield* chooseUnlocked(row, candidate, "person")).generation };
         }),
       );
@@ -1260,7 +1347,7 @@ const make = Effect.gen(function* () {
   // one the last server left behind. Each resumed driver is its own fiber.
   yield* recover;
 
-  return GameArt.of({ generate, wait, list, choose, cancel, providers, lanes });
+  return GameArt.of({ generate, wait, list, choose, cancel, delivered, providers, lanes });
 });
 
 /** The server's host: the provider registry's Codex and the run's in-flight step. */
