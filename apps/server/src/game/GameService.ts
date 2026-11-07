@@ -6,8 +6,12 @@ import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Cache from "effect/Cache";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import {
   GameOperationError,
   gameOperationFault,
@@ -28,8 +32,12 @@ import {
   GameExploreStartResult,
   GameExploreActResult,
   GameExploreCloseResult,
+  type GameBlenderCharacterInput,
+  type GameBlenderCharacterResult,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
+  type GameCharacterRoute,
+  type GameSetCharacterRouteResult,
   type GameBlenderExportInput,
   type GameBlenderExportResult,
   type GameBlenderRenderSpritesInput,
@@ -92,6 +100,12 @@ import {
 import type { GameSourceRules } from "./engineProfile.ts";
 import { type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
 import { COPY_OF } from "./unityPlayerCache.ts";
+import { characterRoute } from "./gameStyle.ts";
+
+/** game.json as a plain object, so a write that sets one key keeps every other as it was. */
+const decodeManifestObject = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
 
 export class GameService extends Context.Service<
   GameService,
@@ -231,6 +245,19 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderLookInput,
     ) => Effect.Effect<GameBlenderLookResult, GameOperationError>;
+    /** Live Blender scene: a rigged, animated character conformed to the standard skeleton. */
+    readonly blenderCharacter: (
+      threadId: ThreadId,
+      input: GameBlenderCharacterInput,
+    ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
+    /**
+     * The person's choice of how this game's characters are made, written into game.json.
+     * Only the person makes it: the client's control, or the agent when they asked in chat.
+     */
+    readonly setCharacterRoute: (
+      threadId: ThreadId,
+      route: GameCharacterRoute,
+    ) => Effect.Effect<GameSetCharacterRouteResult, GameOperationError>;
     /** Live Blender scene: facts as text (objects, sizes, health). */
     readonly blenderScene: (
       threadId: ThreadId,
@@ -460,6 +487,8 @@ const make = Effect.gen(function* () {
   const players = yield* GamePlayer.GamePlayer;
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
   // Status is read on every push for the thread, so its freshness answer reuses
   // hashes of files whose stat identity is unchanged. An explicit check rereads
   // every byte and refreshes the cache. The most recently read checkouts keep
@@ -961,10 +990,63 @@ const make = Effect.gen(function* () {
         previewUrl: live ? preview.liveUrl(root) : preview.url(root),
         // Phase 2 fix round (L): the serve's state, held by GamePreview.
         live: live ? preview.liveState(root) : ("off" as const),
+        characters: characterRoute(manifest),
         buildPlays: copies.plays(root),
         operation: operations.current(root),
       };
     }),
+    setCharacterRoute: (threadId, route) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        // A valid manifest first; the write keeps every key it holds, only characters changes.
+        yield* projects.read(root);
+        const file = NodePath.join(root, "game.json");
+        const raw = yield* Effect.tryPromise({
+          try: () => NodeFSP.readFile(file, "utf8"),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "set-characters",
+              path: file,
+              reason: "io",
+              cause,
+            }),
+        }).pipe(
+          Effect.flatMap((text) =>
+            decodeManifestObject(text).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new GameOperationError({
+                    operation: "set-characters",
+                    path: file,
+                    reason: "invalid-project",
+                    cause,
+                  }),
+              ),
+            ),
+          ),
+        );
+        yield* writeFileStringAtomically({
+          filePath: file,
+          // @effect-diagnostics-next-line preferSchemaOverJson:off -- game.json keeps the indented form people read and diff.
+          contents: `${JSON.stringify({ ...raw, characters: route }, null, 2)}\n`,
+          followLink: false,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, pathService),
+          Effect.mapError(
+            (cause) =>
+              new GameOperationError({
+                operation: "set-characters",
+                path: file,
+                reason: "io",
+                cause,
+              }),
+          ),
+        );
+        // Every client's status signal rereads on an operation push.
+        yield* operations.changed(root, "characters", `Make characters with ${route}`);
+        return { route };
+      }),
     import: (threadId) => withRoot(threadId, "Import", engines.importProject),
     export: (threadId, target, owner, waitUntil) =>
       withRoot(
@@ -1089,6 +1171,8 @@ const make = Effect.gen(function* () {
       withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
     blenderLook: (threadId, input) =>
       readRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
+    blenderCharacter: (threadId, input) =>
+      withRoot(threadId, "Blender character", (root) => liveBlender.character(root, input)),
     blenderScene: (threadId, input) =>
       readRoot(threadId, "Blender scene", (root) => liveBlender.scene(root, input)),
     blenderAssetsSearch: (threadId, input) =>

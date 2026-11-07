@@ -15,6 +15,8 @@ import {
   GAME_STYLE_DEFAULT_SFX_PEAK_DBTP,
   GAME_STYLE_FILE,
   type GameBlenderRenderSpritesInput,
+  type GameCharacterRoute,
+  type GameManifest,
   GameOperationError,
   GameStyle,
 } from "@kurambit/contracts";
@@ -306,9 +308,9 @@ export const styleHash = (style: GameStyle | null): string =>
     ? "none"
     : NodeCrypto.createHash("sha256").update(stableStringify(style)).digest("hex");
 
-/** How the person chose to make this game's characters. */
-export const characterRoute = (style: GameStyle | null) =>
-  style?.characters ?? GAME_STYLE_DEFAULT_CHARACTERS;
+/** How the person chose to make this game's characters: game.json's choice, or library. */
+export const characterRoute = (manifest: Pick<GameManifest, "characters">): GameCharacterRoute =>
+  manifest.characters ?? GAME_STYLE_DEFAULT_CHARACTERS;
 
 /**
  * Why the person's character route refuses a character, or null: on library, an MPFB2 body
@@ -316,12 +318,12 @@ export const characterRoute = (style: GameStyle | null) =>
  */
 export const lockCharacterRouteRefusal = (
   what: "mpfb-body" | "unstamped-mesh",
-  style: GameStyle | null,
+  route: GameCharacterRoute,
 ): string | null => {
-  if (characterRoute(style) !== "library") return null;
+  if (route !== "library") return null;
   const thing =
     what === "mpfb-body"
       ? "An MPFB2 body is a Blender-made character"
       : "A character mesh with no library or import source is a Blender-made character";
-  return `${thing}, and this game makes characters from the library (${GAME_STYLE_FILE}'s characters is library). Use a library body or the lock's packs; only the person changes how characters are made: in the game's settings ("Make characters with"), or by setting ${GAME_STYLE_FILE}'s characters to blender.`;
+  return `${thing}, and the person chose to make this game's characters from the library. Use a library body or the lock's packs, and if the request needs a made character, say so in your reply: only the person changes how characters are made, in the game's "Make characters with" setting.`;
 };

@@ -1845,6 +1845,8 @@ const layerWsRpc = (
         [WS_METHODS.gameToolchainStatus]: ({ threadId }) => game.toolchain(threadId),
         [WS_METHODS.gameToolchainInstall]: ({ tool }) => gameToolchain.install(tool),
         [WS_METHODS.gameToolchainRemove]: ({ tool }) => gameToolchain.remove(tool),
+        [WS_METHODS.gameSetCharacterRoute]: ({ threadId, route }) =>
+          game.setCharacterRoute(threadId, route),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

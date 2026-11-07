@@ -5,7 +5,7 @@ import { GameLibraryPackId } from "./gameLibrary.ts";
 export const GAME_STYLE_FILE = "STYLE.json";
 
 /** How the game is seen: it sets the views sprites render from. */
-/** How a game's characters are made; the person picks it, never the harness. */
+/** How a game's characters are made; the person picks it in game.json, never the harness. */
 export const GameCharacterRoute = Schema.Literals(["library", "blender", "tripo"]);
 export type GameCharacterRoute = typeof GameCharacterRoute.Type;
 
@@ -78,11 +78,6 @@ export const GameStyle = Schema.Struct({
   rig: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
   /** The library packs the game's visuals come from; a pack-id palette is allowed without listing it. */
   packs: Schema.Array(GameLibraryPackId).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
-  /**
-   * The person's choice of how characters are made: from the library's packs, built in
-   * Blender, or generated with Tripo. Default library. The agent never changes it.
-   */
-  characters: Schema.optionalKey(GameCharacterRoute),
   /** Outside sources the live Blender may import from; none when omitted. */
   imports: Schema.optionalKey(
     Schema.Array(Schema.Literals(["polyhaven", "sketchfab", "polypizza"])).check(

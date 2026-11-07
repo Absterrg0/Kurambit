@@ -72,6 +72,7 @@ describe("command permissions", () => {
           WS_METHODS.gameBuildPlay,
           WS_METHODS.gameBuildRestore,
           WS_METHODS.gameBuildStop,
+          WS_METHODS.gameSetCharacterRoute,
         ] as const) {
           const command = createCommandPermissions(runtime, tag);
           registry.set(sessions(env), AsyncResult.success(grant(false)));
@@ -92,30 +93,38 @@ describe("command permissions", () => {
       }),
     ),
   );
-  it.effect("requires the destination settings grant to run storage cleanup", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const registry = yield* setup;
-        const cleanup = createCommandPermissions(runtime, WS_METHODS.serverRunStorageCleanup);
-        registry.set(sessions(env), AsyncResult.success(grant(true)));
-        expect(registry.get(cleanup.permissionAtom(env))).toBe(false);
-        expect((yield* cleanup.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
-          "EnvironmentAuthorizationError",
-        );
-        registry.set(
-          sessions(env),
-          AsyncResult.success({
-            ...grant(true),
-            scopes: [AuthSettingsWriteScope],
-            permissions: [AuthSettingsWriteScope],
-          }),
-        );
-        expect(registry.get(cleanup.permissionAtom(env))).toBe(true);
-        yield* cleanup.authorize(registry, env);
-        registry.set(sessions(other), AsyncResult.success(grant(false)));
-        expect(registry.get(cleanup.permissionAtom(other))).toBe(false);
-      }),
-    ),
+  it.effect(
+    "requires the destination settings grant to clean up storage and install game tools",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* setup;
+          for (const tag of [
+            WS_METHODS.serverRunStorageCleanup,
+            WS_METHODS.gameToolchainInstall,
+            WS_METHODS.gameToolchainRemove,
+          ] as const) {
+            const command = createCommandPermissions(runtime, tag);
+            registry.set(sessions(env), AsyncResult.success(grant(true)));
+            expect(registry.get(command.permissionAtom(env))).toBe(false);
+            expect((yield* command.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+              "EnvironmentAuthorizationError",
+            );
+            registry.set(
+              sessions(env),
+              AsyncResult.success({
+                ...grant(true),
+                scopes: [AuthSettingsWriteScope],
+                permissions: [AuthSettingsWriteScope],
+              }),
+            );
+            expect(registry.get(command.permissionAtom(env))).toBe(true);
+            yield* command.authorize(registry, env);
+            registry.set(sessions(other), AsyncResult.success(grant(false)));
+            expect(registry.get(command.permissionAtom(other))).toBe(false);
+          }
+        }),
+      ),
   );
 
   it.effect("requires the destination settings grant to check OTLP endpoints", () =>
