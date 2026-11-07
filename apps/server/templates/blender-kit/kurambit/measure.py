@@ -28,6 +28,7 @@ from . import contact, face, skeleton
 LOCOMOTION = ("walk", "run", "jog", "sprint")
 SUB = 4  # samples per frame: a sprint's foot contact lasts only a few frames
 KNEE_POP = 8.0
+STILL_METRES = 1e-4
 ARM_EVERY = 2
 KNEES = (("thigh_l", "calf_l"), ("thigh_r", "calf_r"))
 
@@ -102,6 +103,7 @@ def _clips(arm, meshes, height, skin=None):
     hips = next((n for n in ("pelvis", "root") if n in arm.pose.bones), arm.pose.bones[0].name)
     knees = [k for k in KNEES if all(n in arm.pose.bones for n in k)]
     out = []
+    frozen = []
     for o in meshes:  # only bones are sampled: skinning every mesh at every subframe is wasted
         o.hide_viewport = True
     for act in sorted(bpy.data.actions, key=lambda a: a.name):
@@ -132,6 +134,13 @@ def _clips(arm, meshes, height, skin=None):
             speed, source = _ground_speed(track[feet[0]], track[feet[1]], fps, height)
             if speed is not None and speed > 0.01:
                 clip["groundSpeed"], clip["groundSpeedFrom"] = round(speed, 3), source
+        # A clip whose bones never leave its first pose ships still: its contact numbers would read
+        # as perfect, so they are left unmeasured and the clip is named instead.
+        still = len(poses) < 2 or max(
+            (a - b).length for frame in poses[1:] for a, b in zip(frame, poses[0])
+        ) < STILL_METRES
+        if still:
+            frozen.append(act.name)
         loop = act.name.lower().endswith("_loop")
         clip["seam"] = _seam(np.array(poses), np.array([h[i].to_tuple() for i in range(0, len(h), SUB)])) if loop else None
         clip["kneePops"] = _knee_pops(bends) if knees else None
@@ -146,13 +155,15 @@ def _clips(arm, meshes, height, skin=None):
             for o in meshes:
                 o.hide_viewport = True
             clip["armThroughBody"] = round(sum(through) / len(through), 1) if through else None
+        if still:
+            clip["seam"] = clip["kneePops"] = clip["armThroughBody"] = None
         out.append(clip)
     skeleton.assign_action(arm, None)
     for pb in arm.pose.bones:
         pb.matrix_basis = Matrix()
     for o in meshes:
         o.hide_viewport = False
-    return out
+    return out, frozen
 
 
 def _unweighted(meshes):
@@ -195,6 +206,7 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
     if kind == "character" and skinned:
         skin = contact.Skin(arm, skinned)
         through = {"rest": skin.pct(skin.rest_hits), "bent": skin.bent() if holds else None}
+    clips, frozen = _clips(arm, meshes, height, skin if skin is not None and skin.has_arms else None) if arm is not None else ([], [])
     springs = []
     for name, bones in (chains or {}).items():
         if bones and all(b in joints for b in bones):
@@ -208,7 +220,7 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
         "triangles": sum(len(p.vertices) - 2 for o in meshes for p in o.data.polygons),
         "materials": len({s.material.name for o in meshes for s in o.material_slots if s.material}),
         "textures": textures[:32],
-        "clips": _clips(arm, meshes, height, skin if skin is not None and skin.has_arms else None)[:128] if arm is not None else [],
+        "clips": clips[:128],
         "springs": springs[:8],
     }
     if through is not None:
@@ -217,4 +229,4 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
     if blink is not None:
         measured["face"] = blink
     return measured, {"armatures": {a.name: [b.name for b in a.data.bones] for a in arms}, "joints": joints, "worstJoint": worst,
-                      "unweighted": _unweighted(meshes)}
+                      "unweighted": _unweighted(meshes), "frozen": frozen}

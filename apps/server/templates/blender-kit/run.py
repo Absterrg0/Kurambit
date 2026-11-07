@@ -92,6 +92,9 @@ def refusals_of(measured, info, params):
         out.append({"code": "texture", "text": f"a {big[0]['width']}x{big[0]['height']} texture is over STYLE.json's budget.texture of {side} px a side and the pass could not scale it: replace it, or use the palette."})
     if kind == "character" and not any("idle" in c["name"].lower() for c in measured["clips"]):
         out.append({"code": "no-idle", "text": "a character needs an idle clip to stand: add Idle_Loop through game_blender_character's clips, or key one."})
+    clips = measured["clips"]
+    if kind == "character" and clips and len(info["frozen"]) == len(clips):
+        out.append({"code": "frozen-clips", "text": "no clip moves a bone in the exported model, so the character would slide around in one pose. If the armature was left in rest position (Armature > Pose Position: Rest), the pass already exports it posed; otherwise check that each action keys this armature's bones."})
     if kind == "character" and info["unweighted"]:
         out.append({"code": "unweighted", "text": f"{info['unweighted']} vertices are weighted to no bone (no vertex group, or groups naming no bone): they stay where they are while the character moves. Weight them to its bones with helpers.skin_rigid, or parent the part to a bone."})
     return out
@@ -146,6 +149,12 @@ def run_pass(params):
     rig = params.get("rig") or ("standard-humanoid" if standard_rest else None)
 
     _keep_only(objects)
+    notes = []
+    # Rest position is a modelling view: exported in it, every clip samples the rest pose and ships still.
+    for o in objects:
+        if o.type == "ARMATURE" and o.data.pose_position != "POSE":
+            o.data.pose_position = "POSE"
+            notes.append(f"{o.name} was shown in rest position; its clips were exported posed (the live scene is unchanged)")
     out = params["out"]
     os.makedirs(out, exist_ok=True)
     # Before the style pass, which joins a character's meshes into one.
@@ -165,6 +174,7 @@ def run_pass(params):
     if gaps is not None:
         k = styled["scaled"] or 1.0  # in the shipped size
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]
+    still = ["clips that move no bone: " + ", ".join(info["frozen"])[:300]] if info["frozen"] else []
     return {
         "kind": styled["kind"],
         "objects": names,
@@ -173,7 +183,7 @@ def run_pass(params):
         "parts": parts,
         "usedPalette": styled["usedPalette"],
         "armatures": info["armatures"],
-        "notes": [n[:400] for n in styled["notes"]],
+        "notes": [n[:400] for n in notes + styled["notes"] + still],
     }
 
 

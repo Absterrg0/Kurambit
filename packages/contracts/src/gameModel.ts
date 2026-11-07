@@ -141,6 +141,7 @@ export const GameModelRefusalCode = Schema.Literals([
   "texture", // a side over budget.texture
   "no-idle", // a character with no idle clip
   "unweighted", // character vertices bound to no bone: they never move with it
+  "frozen-clips", // a character none of whose clips moves a bone
 ]);
 export const GameModelRefusal = Schema.Struct({
   code: GameModelRefusalCode,
