@@ -66,6 +66,8 @@ export default defineConfig({
       "**/routeTree.gen.ts",
       "**/*.graphql.ts",
       "*.icon/**",
+      // Sample games on the site are shipped builds (vendored three.js among them), not source.
+      "apps/marketing/site/hill-temple-three/**",
     ],
     sortPackageJson: {},
     overrides: [
@@ -88,6 +90,7 @@ export default defineConfig({
       "*.tsbuildinfo",
       "**/routeTree.gen.ts",
       "**/*.graphql.ts",
+      "apps/marketing/site/hill-temple-three/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-kurambit/index.ts", "@shadcn/lint"],

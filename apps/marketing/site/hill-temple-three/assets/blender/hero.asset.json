@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "model": "hero.glb",
+  "sha256": "a35340bf7e4e0bf04777fd85d45ecf15eb3d0f3e5a06686841f816de26767e7f",
+  "bytes": 10746452,
+  "kind": "character",
+  "skeleton": "standard-humanoid",
+  "restDeviation": 0,
+  "height": 1.78,
+  "footprint": {
+    "width": 1.925,
+    "depth": 0.954
+  },
+  "triangles": 55756,
+  "materials": 6,
+  "textures": [
+    {
+      "width": 128,
+      "height": 256
+    },
+    {
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "width": 1024,
+      "height": 1024
+    }
+  ],
+  "clips": [
+    {
+      "name": "Death01",
+      "seconds": 2.4,
+      "loops": false,
+      "rootDrift": 0.438,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 309387.7,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "DodgeBack",
+      "seconds": 0.467,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 358417.1,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "DodgeLeft",
+      "seconds": 0.467,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 391257.4,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "DodgeRight",
+      "seconds": 0.467,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 373188.2,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "Hit_Chest",
+      "seconds": 0.333,
+      "loops": false,
+      "rootDrift": 0.026,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 514741.2,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "Hit_Head",
+      "seconds": 0.433,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 547057.8,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "Idle_Loop",
+      "seconds": 2.5,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 605534.5,
+      "seam": 0.87,
+      "kneePops": 0
+    },
+    {
+      "name": "Jog_Fwd_Loop",
+      "seconds": 0.933,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": 5.851,
+      "groundSpeedFrom": "stance",
+      "armThroughBody": 314985.6,
+      "seam": 0.55,
+      "kneePops": 4
+    },
+    {
+      "name": "Roll",
+      "seconds": 1.467,
+      "loops": false,
+      "rootDrift": 0.095,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 433452.9,
+      "seam": null,
+      "kneePops": 4
+    },
+    {
+      "name": "Slash2",
+      "seconds": 1,
+      "loops": false,
+      "rootDrift": 0.109,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 553326,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "Sprint_Loop",
+      "seconds": 0.667,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": 8.919,
+      "groundSpeedFrom": "stride",
+      "armThroughBody": 351541.5,
+      "seam": 0.4,
+      "kneePops": 2
+    },
+    {
+      "name": "Sword_Attack",
+      "seconds": 1.533,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 245281.1,
+      "seam": null,
+      "kneePops": 3
+    },
+    {
+      "name": "Sword_Idle",
+      "seconds": 1.667,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 357563.7,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "Walk_Loop",
+      "seconds": 1.333,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": 0.97,
+      "groundSpeedFrom": "stance",
+      "armThroughBody": 675841.8,
+      "seam": 0.77,
+      "kneePops": 0
+    }
+  ],
+  "springs": [],
+  "skinThrough": {
+    "rest": 24.885,
+    "bent": 8.771
+  },
+  "measured": {
+    "kit": "610d2f66d101",
+    "key": "40c0f7da11ba0bdde6e7802fcf20762787c9a4b64276b3cdabcaa0cdd592ad4f",
+    "reviewedAt": "2026-11-07T17:13:05.693Z"
+  },
+  "source": {
+    "route": "blender",
+    "parts": [
+      {
+        "what": "body",
+        "from": "made",
+        "licence": "made in this game",
+        "ai": false,
+        "credits": null
+      },
+      {
+        "what": "clips",
+        "from": "quaternius-universal-animation-library",
+        "licence": "CC0-1.0",
+        "ai": false,
+        "credits": null
+      }
+    ],
+    "standIn": null,
+    "concept": null
+  }
+}

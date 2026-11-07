@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "model": "temple.glb",
+  "sha256": "11d4dd13e9aefd8b26d8625350c6de8f02f9ebd64a8c5238af07e290a409058d",
+  "bytes": 2381440,
+  "kind": "prop",
+  "skeleton": null,
+  "restDeviation": null,
+  "height": 6.578,
+  "footprint": {
+    "width": 9.339,
+    "depth": 8
+  },
+  "triangles": 83204,
+  "materials": 8,
+  "textures": [],
+  "clips": [],
+  "springs": [],
+  "measured": {
+    "kit": "610d2f66d101",
+    "key": "9418ffe42e5e68e4acbb8be3003faea583c70023b1d834f1cad12b0470c28660",
+    "reviewedAt": "2026-11-07T17:46:50.811Z"
+  },
+  "source": {
+    "route": "blender",
+    "parts": [
+      {
+        "what": "parts",
+        "from": "made",
+        "licence": "made in this game",
+        "ai": false,
+        "credits": null
+      }
+    ],
+    "standIn": null,
+    "concept": null
+  }
+}

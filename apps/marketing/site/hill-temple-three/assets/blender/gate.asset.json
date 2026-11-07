@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "model": "gate.glb",
+  "sha256": "0b068ef5c23e407c28cba66dc8f3b6d95c4b0762df291f1eeaca377c810072ec",
+  "bytes": 529736,
+  "kind": "prop",
+  "skeleton": null,
+  "restDeviation": null,
+  "height": 4.488,
+  "footprint": {
+    "width": 5.001,
+    "depth": 1.392
+  },
+  "triangles": 23752,
+  "materials": 6,
+  "textures": [],
+  "clips": [],
+  "springs": [],
+  "measured": {
+    "kit": "610d2f66d101",
+    "key": "26715b607bc58ea48d6c867776a301a0242d885a9aacc1c96c4f96f5f615bae1",
+    "reviewedAt": "2026-11-07T17:13:51.568Z"
+  },
+  "source": {
+    "route": "blender",
+    "parts": [
+      {
+        "what": "parts",
+        "from": "made",
+        "licence": "made in this game",
+        "ai": false,
+        "credits": null
+      }
+    ],
+    "standIn": null,
+    "concept": null
+  }
+}

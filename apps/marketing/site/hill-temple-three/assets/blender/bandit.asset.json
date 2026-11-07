@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "model": "bandit.glb",
+  "sha256": "6e2b41035fedcdd3cdb26d0cb623463f21fa00365969982e7324f54a2bcc02c0",
+  "bytes": 10539620,
+  "kind": "character",
+  "skeleton": "standard-humanoid",
+  "restDeviation": 0,
+  "height": 1.78,
+  "footprint": {
+    "width": 1.916,
+    "depth": 0.92
+  },
+  "triangles": 53696,
+  "materials": 6,
+  "textures": [
+    {
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "width": 128,
+      "height": 256
+    }
+  ],
+  "clips": [
+    {
+      "name": "Death01",
+      "seconds": 2.4,
+      "loops": false,
+      "rootDrift": 0.436,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 213046.3,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "Hit_Chest",
+      "seconds": 0.333,
+      "loops": false,
+      "rootDrift": 0.026,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 391681.9,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "Hit_Head",
+      "seconds": 0.433,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 409531.2,
+      "seam": null,
+      "kneePops": 0
+    },
+    {
+      "name": "Idle_Loop",
+      "seconds": 2.5,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 468791.6,
+      "seam": 0.87,
+      "kneePops": 0
+    },
+    {
+      "name": "Jog_Fwd_Loop",
+      "seconds": 0.933,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": 5.824,
+      "groundSpeedFrom": "stance",
+      "armThroughBody": 215400.6,
+      "seam": 0.55,
+      "kneePops": 4
+    },
+    {
+      "name": "Sword_Attack",
+      "seconds": 1.533,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": null,
+      "groundSpeedFrom": null,
+      "armThroughBody": 137353.2,
+      "seam": null,
+      "kneePops": 3
+    },
+    {
+      "name": "Walk_Loop",
+      "seconds": 1.333,
+      "loops": true,
+      "rootDrift": 0,
+      "groundSpeed": 0.966,
+      "groundSpeedFrom": "stance",
+      "armThroughBody": 507314.4,
+      "seam": 0.77,
+      "kneePops": 0
+    }
+  ],
+  "springs": [],
+  "skinThrough": {
+    "rest": 21.693,
+    "bent": 6.419
+  },
+  "measured": {
+    "kit": "610d2f66d101",
+    "key": "44ee9339ecf4a7560ccb72f179177c97f9c6004f879b71ef3d73f3ad6071286b",
+    "reviewedAt": "2026-11-07T16:41:01.082Z"
+  },
+  "source": {
+    "route": "blender",
+    "parts": [
+      {
+        "what": "body",
+        "from": "made",
+        "licence": "made in this game",
+        "ai": false,
+        "credits": null
+      },
+      {
+        "what": "clips",
+        "from": "quaternius-universal-animation-library",
+        "licence": "CC0-1.0",
+        "ai": false,
+        "credits": null
+      }
+    ],
+    "standIn": null,
+    "concept": null
+  }
+}

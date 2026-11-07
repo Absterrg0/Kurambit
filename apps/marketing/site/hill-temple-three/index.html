@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Hill Temple</title>
+    <link rel="icon" href="assets/ui/icon.png" />
+    <link rel="stylesheet" href="./style.css" />
+    <!-- Vendored addons import the bare "three"; this maps it to the same file
+         the game imports, so every module shares one three.js instance. -->
+    <script type="importmap">
+      { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/", "three/examples/jsm/": "./vendor/addons/", "postprocessing": "./vendor/postprocessing/index.js", "n8ao": "./vendor/n8ao/N8AO.js" } }
+    </script>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <!-- The demo shell's screens (shell/shell.js). Restyle them in style.css;
+         keep the ids and data-action attributes the shell looks for. -->
+    <div id="ui">
+      <div id="hud" aria-live="polite"></div>
+      <div id="hud-kit" aria-live="polite"></div>
+      <div id="flash"></div>
+      <div id="backdrop" hidden></div>
+
+      <section id="loading" class="screen screen-title" hidden>
+        <p class="loading-text">Loading</p>
+        <div class="loading-bar"><div id="loading-fill"></div></div>
+      </section>
+
+      <section id="title" class="screen screen-title" hidden>
+        <header class="title-block">
+          <h1 class="title-name">The Hill Temple</h1>
+          <p class="title-sub">Warring States. Bandits hold the old path; cut your way up to the temple before the sun goes down.</p>
+        </header>
+        <nav class="menu" aria-label="Main menu">
+          <button type="button" data-action="play">Play</button>
+          <button type="button" data-action="settings">Settings</button>
+          <button type="button" data-action="credits">Credits</button>
+        </nav>
+        <p class="hint">WASD move · Shift sprint · click or J strike, twice for the combo · Space or right click dodge · C roll · mouse look · Esc pauses</p>
+      </section>
+
+      <section id="pause" class="screen screen-card" hidden>
+        <div class="card">
+          <h2 class="card-heading">Paused</h2>
+          <nav class="menu" aria-label="Pause menu">
+            <button type="button" data-action="resume">Resume</button>
+            <button type="button" data-action="settings">Settings</button>
+            <button type="button" data-action="menu">Main menu</button>
+          </nav>
+        </div>
+      </section>
+
+      <section id="settings" class="screen screen-card" hidden>
+        <div class="card">
+          <h2 class="card-heading">Settings</h2>
+          <div class="settings-grid">
+            <label for="volume-master">Master</label>
+            <input
+              id="volume-master"
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              data-volume="master"
+            />
+            <output data-volume-value="master">100%</output>
+            <label for="volume-music">Music</label>
+            <input id="volume-music" type="range" min="0" max="100" step="5" data-volume="music" />
+            <output data-volume-value="music">100%</output>
+            <label for="volume-sfx">Sound effects</label>
+            <input id="volume-sfx" type="range" min="0" max="100" step="5" data-volume="sfx" />
+            <output data-volume-value="sfx">100%</output>
+          </div>
+          <button
+            type="button"
+            id="fullscreen"
+            class="toggle"
+            data-action="fullscreen"
+            aria-pressed="false"
+          >
+            <span>Fullscreen</span><span class="toggle-state">Off</span>
+          </button>
+          <nav class="menu">
+            <button type="button" data-action="controls">Controls</button>
+            <button type="button" id="reset-progress" data-action="reset-progress" hidden>
+              Reset progress
+            </button>
+            <button type="button" data-action="back">Back</button>
+          </nav>
+        </div>
+      </section>
+
+      <section id="end" class="screen screen-card" hidden>
+        <div class="card">
+          <h2 id="end-heading" class="card-heading end-heading"></h2>
+          <dl id="end-stats" class="stats" hidden></dl>
+          <nav class="menu menu-row">
+            <button type="button" data-action="retry">Retry</button>
+            <button type="button" data-action="menu">Main menu</button>
+          </nav>
+        </div>
+      </section>
+
+      <section id="controls" class="screen screen-card" hidden>
+        <div class="card">
+          <h2 class="card-heading">Controls</h2>
+          <div class="controls-grid">
+            <span class="controls-head">Action</span>
+            <span class="controls-head">Keyboard</span>
+            <span class="controls-head">Gamepad</span>
+            <div id="controls-list" class="controls-rows"></div>
+          </div>
+          <p id="controls-note" class="controls-note"></p>
+          <nav class="menu menu-row">
+            <button type="button" data-action="reset-controls">Reset to defaults</button>
+            <button type="button" data-action="back">Back</button>
+          </nav>
+        </div>
+      </section>
+
+      <section id="credits" class="screen screen-card" hidden>
+        <div class="card">
+          <h2 class="card-heading">Credits</h2>
+          <div id="credits-text" class="credits-text"></div>
+          <nav class="menu">
+            <button type="button" data-action="back">Back</button>
+          </nav>
+        </div>
+      </section>
+    </div>
+    <!-- The studio bridge loads on its own first, so a main.js that does not
+         parse or imports a missing module still reports the error. -->
+    <script type="module" src="./shell/studio.js"></script>
+    <script type="module" src="./shell/shell.js"></script>
+  </body>
+</html>

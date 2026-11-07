@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "model": "pine_2.glb",
+  "sha256": "15e66259aaf82705752a88415cd9be3b336503066ee64c16417fa5609587cc33",
+  "bytes": 81976,
+  "kind": "prop",
+  "skeleton": null,
+  "restDeviation": null,
+  "height": 8.511,
+  "footprint": {
+    "width": 6.788,
+    "depth": 4.296
+  },
+  "triangles": 4332,
+  "materials": 2,
+  "textures": [],
+  "clips": [],
+  "springs": [],
+  "measured": {
+    "kit": "610d2f66d101",
+    "key": "022d64b1f5147eb63abff5ee3f4d84df2157862d44599a57a5d80fdffac647aa",
+    "reviewedAt": "2026-11-07T17:48:29.429Z"
+  },
+  "source": {
+    "route": "blender",
+    "parts": [
+      {
+        "what": "parts",
+        "from": "made",
+        "licence": "made in this game",
+        "ai": false,
+        "credits": null
+      }
+    ],
+    "standIn": null,
+    "concept": null
+  }
+}
