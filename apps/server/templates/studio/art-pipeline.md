@@ -188,7 +188,10 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
 5. **Review:** `game_blender_look` with `mode: "review"`. It runs the
    export's style pass and measurement and shows one image: a turnaround,
    silhouettes, the model at game distance, each walk, run, jump and custom
-   clip, the palette, and the concept. Walk it in this order:
+   clip, the palette, and the concept. A texture you painted or edited in
+   the scene is reviewed only once saved (`image.save()`) or packed
+   (`image.pack()`); a file you rewrote needs only `image.reload()`. Walk
+   it in this order:
    1. Silhouette: the primary shape and the two features read in black.
    2. Game distance: at 1x, can you tell what it is and which way it faces?
    3. Palette roles: main, accent and the one glow are where the concept
