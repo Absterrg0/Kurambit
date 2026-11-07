@@ -374,9 +374,11 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     );
 
     if (exitCode !== 0) {
+      // A --json run says why its turn failed (a usage limit, a refusal) on stdout.
+      const failed = codexTurnFailure(stdout);
       return yield* new TextGenerationError({
         operation,
-        detail: codexExitDetail({ exitCode, stderr, stdout, prompt }),
+        detail: failed ?? codexExitDetail({ exitCode, stderr, stdout, prompt }),
       });
     }
     return stdout;
@@ -584,6 +586,31 @@ export const codexSavedImagePaths = (stdout: string): ReadonlyArray<string> => {
     if (typeof saved === "string" && saved !== "" && !paths.includes(saved)) paths.push(saved);
   }
   return paths;
+};
+
+/** Why a `codex exec --json` turn failed, as Codex said it; null when it said nothing. */
+export const codexTurnFailure = (stdout: string): string | null => {
+  let reason: string | null = null;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.includes("failed") && !line.includes('"error"')) continue;
+    try {
+      const event = JSON.parse(line) as {
+        readonly type?: unknown;
+        readonly message?: unknown;
+        readonly error?: { readonly message?: unknown };
+      };
+      const message =
+        event.type === "turn.failed"
+          ? event.error?.message
+          : event.type === "error"
+            ? event.message
+            : null;
+      if (typeof message === "string" && message !== "") reason = `Codex: ${message.slice(0, 600)}`;
+    } catch {
+      // Not an event line.
+    }
+  }
+  return reason;
 };
 
 /** The agent's last message in a `codex exec --json` stream: why it made nothing, usually. */

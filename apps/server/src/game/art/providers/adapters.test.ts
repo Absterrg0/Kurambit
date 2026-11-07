@@ -5,7 +5,10 @@ import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import type { ArtContext, ArtHttpRequest, ArtReference, ArtRequest } from "./adapter.ts";
 import { isProviderUrl, makeArtHttp } from "./adapter.ts";
-import { codexSavedImagePaths } from "../../../textGeneration/CodexTextGeneration.ts";
+import {
+  codexSavedImagePaths,
+  codexTurnFailure,
+} from "../../../textGeneration/CodexTextGeneration.ts";
 import { elevenlabs, elevenLabsRequest } from "./elevenlabs.ts";
 import { google, googleRequest } from "./google.ts";
 import { meshy, meshyMeshRequest } from "./meshy.ts";
@@ -311,5 +314,14 @@ describe("Codex image items", () => {
       "/s/generated_images/a.png",
       "/s/generated_images/b.png",
     ]);
+  });
+
+  it("says why a turn failed in Codex's own words (a usage limit)", () => {
+    const stdout = [
+      JSON.stringify({ type: "turn.started" }),
+      JSON.stringify({ type: "turn.failed", error: { message: "You've hit your usage limit." } }),
+    ].join("\n");
+    assert.strictEqual(codexTurnFailure(stdout), "Codex: You've hit your usage limit.");
+    assert.isNull(codexTurnFailure("plain text output"));
   });
 });
