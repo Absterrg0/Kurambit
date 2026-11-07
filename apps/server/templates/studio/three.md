@@ -330,13 +330,40 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
 8. Keep `window.__studio`: `ready` after the first frame, `getState()`
    returning `{gameState, player, hudText}`, page errors in `errors[]`,
    `setState(target, values)` for named late content (the starter refuses).
-   Extend `GameState`, not the bridge.
-9. Keep `GameState` the single source of truth with public primitives only
-   (the probe reports those; Retry resets them too). Build meshes, class
-   instances and functions in `start(ctx)`, never on `GameState`.
-   Keep the values that matter on screen too (the probe reports the overlay).
-   Set `ctx.player` so the probe reports the player's position.
-10. Play-test with `game_explore_*` only when you need to see play: in a
+   Extend `GameState`, not the bridge. Keep `web/shell/stage-bridge.js` and
+   `web/tune.json` too: they are how the person points at the running game.
+9. Name what a person would point at, and put every number they would tune
+   in `ctx.tune`. On the Stage the person freezes the game, selects things,
+   drags their values live and asks you about one. `ASSETS` models select by
+   themselves (by their path, with their sidecar); name the player, each kind
+   of enemy, the level and the pickups in `start(ctx)` with
+   `ctx.thing(object, { name: "Cat", kind: "character" })` (`character`,
+   `creature`, `prop`, `level`, `effect`, `ui`, `rule`, `sound`, `other`), and
+   what has no body with `ctx.thing(null, { name: "Music", kind: "sound" })`.
+   Speeds, jump height, gravity, spawn rates, lives, damage and timers come
+   from `const cat = ctx.tune("Cat", { jump: 8, speed: 5 }, { jump: [2, 20],
+speed: [1, 12, 0.5] })` and are read where they are used, every frame
+   (`cat.jump`), never copied into a constant. Give each number its range
+   `[min, max, step]`. The id is the thing's name (an id with no `ctx.thing`
+   becomes a rule of its own, like `ctx.tune("Difficulty", …)`), and the same
+   id returns the same live object, so a retry keeps what the person set.
+   Their "Keep as a build" writes the values into `web/tune.json` by id and
+   key, which the shell reads at boot over your defaults; `game_tune` does
+   the same when the person asks you to keep values.
+10. A message that starts "The person selected this in the running game"
+    is an Ask from the Stage's Inspector. The attached image is the canvas
+    as they asked; the block names the thing (its id: a `ctx.thing` name, a
+    `ctx.tune` id or an `ASSETS` path), its asset and sidecar, its live values
+    (the ones the person was trying, which may differ from `web/tune.json`
+    and your defaults), where it sits on that frame and its path over the
+    last 10 s in canvas pixels. Find it in the code by its id and answer
+    about that thing.
+11. Keep `GameState` the single source of truth with public primitives only
+    (the probe reports those; Retry resets them too). Build meshes, class
+    instances and functions in `start(ctx)`, never on `GameState`.
+    Keep the values that matter on screen too (the probe reports the overlay).
+    Set `ctx.player` so the probe reports the player's position.
+12. Play-test with `game_explore_*` only when you need to see play: in a
     chat turn when the person asks or a fact names something the code cannot
     show, in a run when your role says so. Real keys
     (`"Enter"`, `"w"`, `"ArrowLeft"`, not Godot action names), real clicks.
@@ -344,6 +371,6 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
     Bots read the probe and write `clickAt(x, y)`; id-clicks have no control
     to land on. `setState` reaches late content; verdicts still come from
     real input after.
-11. Export checklist before calling it done: web export builds, the page
+13. Export checklist before calling it done: web export builds, the page
     stays clean in `game_check`, the game is playable from `web/index.html`
     on a fresh checkout.

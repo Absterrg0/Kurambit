@@ -76,9 +76,15 @@ export const GameBuildSource = Schema.Union([
   Schema.TaggedStruct("saved", {
     runId: Schema.NullOr(Schema.String),
     label: Schema.String,
+    /** A person's edit kept as a build outside a turn: what it kept ("values": the Stage's Keep as a build). */
+    edit: Schema.optionalKey(Schema.Literals(["values"])),
   }),
 ]);
 export type GameBuildSource = typeof GameBuildSource.Type;
+
+/** A build Undo belongs to while it is the game's newest: a chat turn's, or a person's kept edit. */
+export const ownsUndo = (source: GameBuildSource) =>
+  source._tag === "turn" || (source._tag === "saved" && source.edit !== undefined);
 
 /** A saved build's label for what the folder held when a restore replaced it. */
 export const RESTORE_BEFORE_LABEL = "The game before a restore";

@@ -56,6 +56,8 @@ import {
   GameExploreCloseResult,
   GameKeepGoingInput,
   GameKeepGoingStatus,
+  GameKeepValuesInput,
+  GameKeepValuesResult,
   GameKeepGoingSteerInput,
   GameKeepGoingSteerResult,
   GameBotRunInput,
@@ -611,6 +613,18 @@ const BuildRestoreTool = Tool.make("game_build_restore", {
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const TuneTool = Tool.make("game_tune", {
+  description:
+    "Keep live values as a build, as the person's Keep as a build on the Stage does: writes each thing's values (by the id its ctx.tune uses) into web/tune.json, which the game reads at boot, and keeps the game folder as a build whose `base` (the folder just before) game_build_restore restores to undo it. Pass min and max with a number to have it checked against the range; values merge with the file's others. Use it when the person asks to keep values; to change what a value means or its defaults, edit the code. three.js games only.",
+  parameters: Schema.Struct({ things: GameKeepValuesInput.fields.things, commandId }),
+  success: GameKeepValuesResult,
+  failure,
+  failureMode: "return",
+  dependencies: buildDependencies,
+})
+  .annotate(Tool.Strict, true)
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 
 /** Keep going: the same service the composer control and the banner reach. */
 const keepGoingDependencies = [
@@ -697,6 +711,7 @@ export const GameToolkit = Toolkit.make(
   BuildsTool,
   FactsTool,
   BuildRestoreTool,
+  TuneTool,
   KeepGoingTool,
   KeepGoingStatusTool,
   KeepGoingSteerTool,

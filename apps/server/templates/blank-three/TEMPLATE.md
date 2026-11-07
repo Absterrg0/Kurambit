@@ -251,6 +251,37 @@ refuses; `ctx` is `null` when no run is going, so return `false` then).
 Keep the shape; extend `GameState`, not the bridge. While the stage tab is hidden the bridge
 holds play and suspends sound, then restores what it found.
 
+## Things and live values (the Stage)
+
+`web/shell/stage-bridge.js` lets the Kurambit Stage that frames the game
+freeze it (play, timers and sound hold with no menu), point at things
+(outlined while frozen), tune their values live and see where a thing went
+over the last 10 s. It does nothing until the Stage asks, so plays,
+recordings and an exported build never pay for it.
+
+```js
+// in start(ctx): name what a person would select
+ctx.thing(cat, { name: "Cat", kind: "character" });
+ctx.thing(null, { name: "Music", kind: "sound" }); // no body
+// every number a person would tune, read every frame, never copied
+const cat = ctx.tune("Cat", { jump: 8, speed: 5 }, { jump: [2, 20], speed: [1, 12, 0.5] });
+const rules = ctx.tune("Difficulty", { spawnEvery: 2.5, hard: false }, { spawnEvery: [0.5, 6] });
+// in update: cat.jump, rules.spawnEvery
+```
+
+- Every `ctx.assets.model` copy is a thing already, named after its `ASSETS`
+  key with its path and sidecar; `ctx.thing` on it renames it. Kinds:
+  `character`, `creature`, `prop`, `level`, `effect`, `ui`, `rule`, `sound`,
+  `other`. A name used twice is numbered ("Slime", "Slime 2").
+- `ctx.tune(id, defaults, ranges)` returns one live object per id, lasting
+  across retries: numbers and booleans, each number clamped to its range
+  (`[min, max, step]` or `{ min, max, step, label }`). An id no `ctx.thing`
+  names is listed as a rule of its own.
+- `web/tune.json` holds kept values by id and key
+  (`{ "Cat": { "jump": 9.5 } }`) and is read once at boot over the defaults.
+  The Stage's "Keep as a build" and `game_tune` write it and keep the game as
+  a build Undo takes back. Keep the file, even as `{}`.
+
 ## Conventions
 
 - ES modules only, no build step: the file the browser loads is the file you

@@ -10,6 +10,7 @@ export const THREE_PROFILE: GameEngineProfile = {
   id: "three",
   turnLoop: GAME_ENGINES.three.turnLoop,
   stage: GAME_ENGINES.three.stage,
+  tuneFile: "tune.json",
   displayName: "three.js",
   projectDirectory: THREE_PROJECT_DIRECTORY,
   exportTargets: ["Web"],

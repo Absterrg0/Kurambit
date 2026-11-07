@@ -5,6 +5,7 @@ export const GODOT_PROFILE: GameEngineProfile = {
   id: "godot",
   turnLoop: GAME_ENGINES.godot.turnLoop,
   stage: GAME_ENGINES.godot.stage,
+  tuneFile: null,
   displayName: "Godot",
   projectDirectory: "godot",
   exportTargets: ["Web", "Linux", "Windows"],

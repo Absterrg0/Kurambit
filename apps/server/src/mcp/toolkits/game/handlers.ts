@@ -199,6 +199,14 @@ const handlers = {
       }),
     ),
   ),
+  game_tune: McpToolAccess.actsAsCaller((input) =>
+    withBuilds((builds, threadId) =>
+      builds.keepValues(threadId, {
+        things: input.things,
+        ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+      }),
+    ),
+  ),
   game_keep_going: McpToolAccess.actsAsCaller((input) =>
     withKeepGoing((runs, threadId) =>
       runs.set(threadId, {

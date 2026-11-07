@@ -27,6 +27,12 @@ import { clone as cloneObject } from "three/addons/utils/SkeletonUtils.js";
 
 const models = new Map();
 const textures = new Map();
+// The shell's Stage bridge hears of each copy, so ASSETS models are things the
+// Stage can select with no code in the game (shell/stage-bridge.js).
+let copied = null;
+export const onModelCopy = (fn) => {
+  copied = fn;
+};
 
 const SIDECAR = ".asset.json";
 // The sidecar names its GLB by file name only, so it can never reach outside its folder.
@@ -54,6 +60,7 @@ export const assets = {
     const copy = cloneObject(gltf.scene);
     copy.animations = gltf.animations;
     if (gltf.userData.asset !== undefined) copy.userData.asset = gltf.userData.asset;
+    copied?.(copy, name, gltf.userData.source);
     return copy;
   },
   /** The loaded texture (shared; colour textures are already sRGB). */
@@ -95,13 +102,22 @@ export async function preloadAssets(manifest, onProgress) {
     entries.map(async ([name, path]) => {
       try {
         const kind = typeof path === "string" ? kindOf(path) : null;
-        if (kind === "model") models.set(name, withShadows(await gltfLoader.loadAsync(path)));
-        else if (kind === "sidecar") {
+        if (kind === "model") {
+          const gltf = withShadows(await gltfLoader.loadAsync(path));
+          // A plain GLB says nothing of what it is: one that moves is taken for a character.
+          gltf.userData.source = { path, kind: gltf.animations.length > 0 ? "character" : "prop" };
+          models.set(name, gltf);
+        } else if (kind === "sidecar") {
           const asset = await readSidecar(path);
           const model = path.slice(0, path.lastIndexOf("/") + 1) + asset.model;
           listed.add(model);
           const gltf = withShadows(await gltfLoader.loadAsync(model));
           gltf.userData.asset = asset;
+          gltf.userData.source = {
+            path: model,
+            sidecar: path,
+            kind: asset.kind === "character" ? "character" : "prop",
+          };
           models.set(name, gltf);
         } else if (kind === "texture") {
           const texture = await textureLoader.loadAsync(path);

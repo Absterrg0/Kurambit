@@ -48,6 +48,12 @@ export interface GameEngineProfile {
   readonly turnLoop: boolean;
   /** How the Stage shows this engine's game (GAME_ENGINES' own answer). */
   readonly stage: GameStageKind;
+  /**
+   * The values file the Stage bridge's Keep as a build writes, under the
+   * engine directory, which the game reads at boot; null where the engine's
+   * games have no Stage bridge yet.
+   */
+  readonly tuneFile: string | null;
   /** Short human name for honest operation messages ("Godot", "three.js", "Unity"). */
   readonly displayName: string;
   /** The engine project directory a new game gets; the run calls it the lane. */
