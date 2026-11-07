@@ -1,8 +1,17 @@
-import type { GameBuild, GameBuildsResult, GameFactTone } from "@kurambit/contracts";
+import {
+  RESTORE_BEFORE_LABEL,
+  type GameBuild,
+  type GameBuildsResult,
+  type GameFactTone,
+} from "@kurambit/contracts";
+
+const isRestoreBefore = (build: GameBuild) =>
+  build.source._tag === "saved" && build.source.label === RESTORE_BEFORE_LABEL;
 
 /**
  * A mark's short name: the turn number, a keep-going step's number (its mark
- * adds a step glyph), `R<n>` for a stage-era round, a saved build's first word.
+ * adds a step glyph), `R<n>` for a stage-era round, "Before" for the folder a
+ * restore replaced, another saved build's first word.
  */
 export const markLabel = (build: GameBuild): string => {
   const source = build.source;
@@ -12,8 +21,24 @@ export const markLabel = (build: GameBuild): string => {
     case "round":
       return `R${source.round}`;
     case "saved":
-      return source.label.split(/\s+/)[0] ?? "Saved";
+      return isRestoreBefore(build) ? "Before" : (source.label.split(/\s+/)[0] ?? "Saved");
   }
+};
+
+/**
+ * PURE. The builds that get a mark, oldest first. Every undo and go-back saves
+ * what the folder held, so only the newest of those (the one Go back reaches)
+ * and the one the folder holds now keep a mark; older ones would stack up as
+ * a row of identical "Before" marks.
+ */
+export const timelineMarks = (
+  newestFirst: ReadonlyArray<GameBuild>,
+  current: string | null,
+): ReadonlyArray<GameBuild> => {
+  const newestBefore = newestFirst.find(isRestoreBefore)?.id;
+  return newestFirst
+    .filter((build) => !isRestoreBefore(build) || build.id === newestBefore || build.id === current)
+    .toReversed();
 };
 
 /** PURE. The worst tone among a build's chips: one bad fact marks it, then a good one; else none. */

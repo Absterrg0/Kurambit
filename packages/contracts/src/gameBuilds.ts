@@ -78,6 +78,9 @@ export const GameBuildSource = Schema.Union([
 ]);
 export type GameBuildSource = typeof GameBuildSource.Type;
 
+/** A saved build's label for what the folder held when a restore replaced it. */
+export const RESTORE_BEFORE_LABEL = "The game before a restore";
+
 export const GameBuildFile = Schema.Struct({
   path: Schema.String,
   additions: NonNegativeInt,
