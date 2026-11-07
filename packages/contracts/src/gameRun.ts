@@ -10,6 +10,7 @@ import { GameBuildId, GameFactDelta, GameStepVerdict } from "./gameBuilds.ts";
 
 // The profile and the refusal reasons live in a leaf module: game.ts names them
 // and sits under gameBuilds.ts's imports, which this module needs.
+import { GameRunProfile } from "./gameRunReasons.ts";
 export { GameRunErrorReason, GameRunProfile, GameRunRefusalReason } from "./gameRunReasons.ts";
 
 /** The caller's id for one request: a retry with the same id is the same command, applied once. */
@@ -107,6 +108,8 @@ export const GameKeepGoingStatus = Schema.Struct({
   chat: Schema.NullOr(ThreadId),
   /** "off" unless a run is live. */
   mode: GameKeepGoingMode,
+  /** The run's last mode, kept while paused or ended (a resume sends it); null when the game never ran keep going. */
+  profile: Schema.NullOr(GameRunProfile),
   phase: Schema.NullOr(GameKeepGoingPhase),
   step: Schema.NullOr(PositiveInt),
   proposal: Schema.NullOr(
