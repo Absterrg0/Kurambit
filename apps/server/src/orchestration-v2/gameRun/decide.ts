@@ -723,7 +723,14 @@ const nextOf = (
   record: GameRunStep,
   result: GameRunStepResult,
 ): Result.Result<Loop.Next, GameRunRefusal> => {
-  const state = stateOf(work, run);
+  // A started turn that ends without landing gives back the notes its start
+  // took (K14), whichever way it ends.
+  const state =
+    (result.kind === "ended" || result.kind === "failed") &&
+    record.step.kind === "turn" &&
+    record.status === "running"
+      ? Loop.giveBackSteer(stateOf(work, run), record.step, true)
+      : stateOf(work, run);
   // Nothing was measured: the run pauses with why, and judges nothing (a
   // judge or undo runs again on resume).
   const ended = resultOf(result, "ended");
