@@ -24,6 +24,8 @@ something, press **Check again**.
   active; it never asks for or stores your Unity account. Unity games run on Linux only for now.
 - **Blender** makes game art for every engine. Use Blender 4.2 or later from
   [blender.org/download](https://www.blender.org/download/).
+- **MPFB2** is optional: it gives characters built in Blender a human body. See
+  [Characters](#characters).
 
 Kurambit looks for each tool in this order: the path you enter in **Game tools**, the
 `KURAMBIT_GODOT`, `KURAMBIT_UNITY_EDITOR` or `KURAMBIT_BLENDER` environment variable, known install
@@ -107,6 +109,34 @@ music and effects. The agent writes it when it chooses the look, and its art too
 it: art from other packs, characters on another skeleton and sprites in another palette are refused
 until the file changes. To change the game's direction, edit `STYLE.json` or ask your agent to,
 then have the art redone. Delete it to lift the lock.
+
+## Characters
+
+Each game has one setting for how its characters are made, **Make characters with**: **Library**
+(the default), **Blender** or **Tripo**. Change it from the game's **More** menu (**⋯** above the
+stage) or the command palette's **Make characters with…**; the stage's build detail shows the
+current choice. On **Library** the agent takes characters from the asset library and will not model
+one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the
+head, clothes, tail or ears it models itself, with the library's animations already fitted. Tripo,
+which generates characters with your own Tripo key, is not available yet. To use another way for one
+character only, say so in your message; the agent never changes the setting itself, and when the
+chosen way cannot make something it says so and names the others.
+
+Human bodies on **Blender** come from MPFB2, which you install once: **Settings → General → Game
+tools**, MPFB2, **Install**. Its code is GPL-3.0, so Kurambit does not ship it; Install downloads
+it from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender
+settings, and the bodies it makes are CC0. **Remove** deletes it again; a live Blender view already
+open keeps it until it reopens. Without MPFB2, Blender characters use library bodies.
+
+Before a character or prop made in Blender reaches the game, the agent reviews it: one image with a
+turnaround, silhouettes, the model at the size it appears in play, its walk, run and jump, the
+palette, and the concept art when the game has one, beside the measurements (height, triangles,
+texture size) and anything the export would refuse. An export is refused unless the model was
+reviewed exactly as it is now, so change anything and the agent reviews again. Each export writes the
+model and a `.asset.json` file beside it that records its measurements and where every part came
+from; three.js games play its animations at the speed the character moves, so its feet stay
+planted, and swing its tail and ears. The turn's build lists the model under **Assets**, and undo
+brings back the model the game had before.
 
 ## Keep going
 
