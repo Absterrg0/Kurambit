@@ -10,6 +10,7 @@ export const UNITY_PROFILE: GameEngineProfile = {
   id: "unity",
   turnLoop: GAME_ENGINES.unity.turnLoop,
   stage: GAME_ENGINES.unity.stage,
+  tuneFile: null,
   displayName: "Unity",
   projectDirectory: UNITY_PROJECT_DIRECTORY,
   exportTargets: ["Linux", "Windows"],

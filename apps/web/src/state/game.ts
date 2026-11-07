@@ -515,6 +515,11 @@ export const gameEnvironment = {
     label: "game:buildStop",
     tag: WS_METHODS.gameBuildStop,
   }),
+  // The Stage's Keep as a build: the live values written and kept as a build Undo takes back.
+  keepValues: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:keepValues",
+    tag: WS_METHODS.gameKeepValues,
+  }),
   // Every run whose chat is this thread, for the round cards: reread on run pushes only.
   runRounds: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:runRounds",

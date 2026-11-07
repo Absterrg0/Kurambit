@@ -49,6 +49,7 @@ import {
   GameBuildsInput,
   GameBuildsResult,
 } from "./gameBuilds.ts";
+import { GameKeepValuesInput, GameKeepValuesResult } from "./gameStageBridge.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -380,6 +381,7 @@ export const WS_METHODS = {
   gameBuildPlay: "game.buildPlay",
   gameBuildRestore: "game.buildRestore",
   gameBuildStop: "game.buildStop",
+  gameKeepValues: "game.keepValues",
   gameRunRounds: "game.runRounds",
   subscribeGameEvents: "subscribeGameEvents",
 
@@ -1582,6 +1584,11 @@ const WsGameBuildRestoreRpc = Rpc.make(WS_METHODS.gameBuildRestore, {
   success: GameBuildRestoreResult,
   error: gameError,
 });
+const WsGameKeepValuesRpc = Rpc.make(WS_METHODS.gameKeepValues, {
+  payload: GameKeepValuesInput,
+  success: GameKeepValuesResult,
+  error: gameError,
+});
 const WsGameSavedDeleteRpc = Rpc.make(WS_METHODS.gameSavedDelete, {
   payload: GameSavedDeleteInput,
   success: Schema.Struct({}),
@@ -1626,6 +1633,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameBuildPlayRpc,
   WsGameBuildRestoreRpc,
   WsGameBuildStopRpc,
+  WsGameKeepValuesRpc,
   WsGameRunRoundsRpc,
   WsSubscribeGameEventsRpc,
   WsServerProbeRpc,

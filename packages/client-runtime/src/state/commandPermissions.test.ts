@@ -72,6 +72,7 @@ describe("command permissions", () => {
           WS_METHODS.gameBuildPlay,
           WS_METHODS.gameBuildRestore,
           WS_METHODS.gameBuildStop,
+          WS_METHODS.gameKeepValues,
           WS_METHODS.gameSetCharacterRoute,
           WS_METHODS.gameChooseGeneration,
           WS_METHODS.gameCancelGeneration,

@@ -34,6 +34,8 @@ import {
   GameBuildRestoreResult,
   type GameBuildsResult,
   type GameEngineId,
+  type GameKeepValuesInput,
+  type GameKeepValuesResult,
   GameOperationError,
   manifestProject,
   RESTORE_BEFORE_LABEL,
@@ -58,6 +60,7 @@ import { engineProfile } from "./engineProfile.ts";
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 import { isFirstTurnLead } from "./scaffold.ts";
+import { tuneFileText, tuneFileWith } from "./gameTune.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */
 const NO_RUN = "game-builds";
@@ -68,6 +71,13 @@ const NO_RUN = "game-builds";
  * restore replaced the first. The refs also keep every base restorable.
  */
 const BASES = `${gameRunRefsFolder(NO_RUN)}bases/`;
+/**
+ * A person's edit kept as a build outside a turn (the Stage's Keep as a
+ * build): `edits/<request>-values` is the build, `edits/<request>-from` the
+ * folder just before it, which restoring undoes it to.
+ */
+const EDITS = "edits/";
+const VALUES_LABEL = "Values kept";
 /** The folder as last compared with the build it was made from (folderEdited); no build of its own. */
 const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
 const MOVED_ON =
@@ -80,6 +90,7 @@ const MAX_FILES = 8;
 const UNITY_NO_PLAY =
   "Unity builds play as a Linux player for facts and bots; the Game panel has no Unity Play yet.";
 const isGameBuildId = Schema.is(GameBuildId);
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 /** One build before its facts are read. */
 interface Entry {
@@ -223,6 +234,15 @@ export class GameBuilds extends Context.Service<
      * it changed since then (since `fallback` without one); null while the
      * turn has no kept checkpoint.
      */
+    /**
+     * Writes the Stage's live values to the engine's tune file and keeps the
+     * folder as a build, the folder before it kept too so Undo restores it. A
+     * repeat with the same `commandId` answers as the first did.
+     */
+    readonly keepValues: (
+      threadId: ThreadId,
+      input: Omit<GameKeepValuesInput, "threadId">,
+    ) => Effect.Effect<GameKeepValuesResult, GameOperationError>;
     readonly turnBuild: (
       threadId: ThreadId,
       runId: RunId,
@@ -629,7 +649,32 @@ const make = Effect.gen(function* () {
             ]
           : [],
       );
-      const allRun = yield* runEntries(g, noRunSaved);
+      const editsFolder = `${noRunFolder}${EDITS}`;
+      const edits = yield* Effect.forEach(
+        refs.filter(
+          (ref) =>
+            ref.checkpointRef.startsWith(editsFolder) && ref.checkpointRef.endsWith("-values"),
+        ),
+        (ref) =>
+          Effect.gen(function* () {
+            if (!isGameBuildId(ref.oid)) return [];
+            const base = byRef.get(ref.checkpointRef.replace(/-values$/, "-from")) ?? null;
+            const change = yield* changeOf(g.root, g.lane, base, ref.oid);
+            return [
+              {
+                id: ref.oid,
+                at: isoOfSeconds(ref.committedAt),
+                source: { _tag: "saved", runId: null, label: VALUES_LABEL, edit: "values" },
+                summary: VALUES_LABEL,
+                files: change.files,
+                fileCount: change.count,
+                base,
+                handle: { build: ref.oid },
+              } satisfies Entry,
+            ];
+          }),
+      ).pipe(Effect.map((each) => each.flat()));
+      const allRun = [...(yield* runEntries(g, noRunSaved)), ...edits];
       const recorded = new Map(
         refs.flatMap((ref) =>
           ref.checkpointRef.startsWith(BASES)
@@ -778,6 +823,9 @@ const make = Effect.gen(function* () {
             })[0]
           : undefined;
       const newestTurn = entries.find((entry) => entry.source._tag === "turn");
+      const newestEdit = entries.find(
+        (entry) => entry.source._tag === "saved" && entry.source.edit !== undefined,
+      );
       // The latest restore, the run's or (with no run) the game's own.
       const restore = yield* restoreRefOf(g, entries);
       const last =
@@ -789,6 +837,7 @@ const make = Effect.gen(function* () {
           : null;
       const candidates = [
         ...(newestTurn === undefined ? [] : [{ id: newestTurn.id, at: newestTurn.at }]),
+        ...(newestEdit === undefined ? [] : [{ id: newestEdit.id, at: newestEdit.at }]),
         ...(last === null ? [] : [last]),
         ...(restore !== null && restore.outcome?.restored === true
           ? [{ id: restore.target, at: restore.requestedAt }]
@@ -1236,6 +1285,114 @@ const make = Effect.gen(function* () {
       };
     });
 
+  const keepValues: GameBuilds["Service"]["keepValues"] = (threadId, input) =>
+    Effect.gen(function* () {
+      const g = yield* gameOf(threadId);
+      const profile = engineProfile(g.engine);
+      if (profile.tuneFile === null)
+        return yield* failed(
+          "Keep values",
+          g.root,
+          "invalid-input",
+          `Live values are not in ${profile.displayName} games yet.`,
+        );
+      const file = `${g.lane}/${profile.tuneFile}`;
+      const request =
+        input.commandId === undefined
+          ? NodeCrypto.randomUUID()
+          : NodeCrypto.createHash("sha256")
+              .update(`${g.root}\0keep-values\0${input.commandId}`)
+              .digest("hex")
+              .slice(0, 32);
+      const fromRef = checkpointRefForGameRun(NO_RUN, `${EDITS}${request}-from`);
+      const keptRef = checkpointRefForGameRun(NO_RUN, `${EDITS}${request}-values`);
+      const oidOf = (ref: CheckpointRef) =>
+        checkpoints.listCheckpointRefs({ cwd: g.root, prefix: ref }).pipe(
+          Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid ?? null),
+          Effect.mapError((cause) =>
+            failed("Keep values", g.root, "io", "the game's builds could not be read", cause),
+          ),
+        );
+      const capture = (ref: CheckpointRef) =>
+        checkpoints
+          .withWorkspaceLock(
+            g.root,
+            checkpoints.captureCheckpoint({ cwd: g.root, checkpointRef: ref }),
+          )
+          .pipe(
+            Effect.mapError((cause) =>
+              failed("Keep values", g.root, "io", "the game folder could not be kept", cause),
+            ),
+          );
+      const answer = (build: string, base: string, summary: string) =>
+        isGameBuildId(build) && isGameBuildId(base)
+          ? Effect.succeed({
+              build,
+              base,
+              message: `Kept as a build: ${summary}. Undo restores the game as it was.`,
+            })
+          : failed("Keep values", g.root, "io", "the kept build is not one of this game's builds");
+      const said = (things: GameKeepValuesInput["things"]) =>
+        things
+          .map(
+            (thing) =>
+              `${thing.id} ${thing.values.map((v) => `${v.key} ${String(v.value)}`).join(", ")}`,
+          )
+          .join("; ");
+      // A repeat answers as the first try did.
+      const [doneFrom, doneKept] = yield* Effect.all([oidOf(fromRef), oidOf(keptRef)]);
+      if (doneFrom !== null && doneKept !== null)
+        return yield* answer(doneKept, doneFrom, said(input.things));
+      const owner = String(threadId);
+      yield* projects.admitWrite(threadId, g.root, "Keep values", owner);
+      const path = NodePath.join(g.root, g.lane, profile.tuneFile);
+      const kept = yield* operations.exclusive(
+        g.root,
+        "Keep values",
+        Effect.gen(function* () {
+          const text = yield* Effect.tryPromise({
+            try: () =>
+              NodeFSP.readFile(path, "utf8").catch((cause: NodeJS.ErrnoException) => {
+                if (cause?.code === "ENOENT") return null;
+                throw cause;
+              }),
+            catch: (cause) => failed("Keep values", path, "io", `${file} could not be read`, cause),
+          });
+          const parsed = text === null ? Option.some(null) : decodeJson(text);
+          if (Option.isNone(parsed))
+            return yield* failed(
+              "Keep values",
+              path,
+              "invalid-input",
+              `${file} is not JSON: fix or remove it, then keep again.`,
+            );
+          const existing = parsed.value;
+          const merged = tuneFileWith(file, existing, input.things);
+          if ("refusal" in merged)
+            return yield* failed("Keep values", path, "invalid-input", merged.refusal);
+          // A try cut short after its first capture keeps that one as the base.
+          const base = doneFrom ?? (yield* capture(fromRef));
+          yield* Effect.tryPromise({
+            try: async () => {
+              const temporary = `${path}.${request}.tmp`;
+              await NodeFSP.writeFile(temporary, tuneFileText(merged.file));
+              await NodeFSP.rename(temporary, path);
+            },
+            catch: (cause) =>
+              failed("Keep values", path, "io", `${file} could not be written`, cause),
+          });
+          const build = yield* capture(keptRef);
+          return { base, build, summary: merged.summary };
+        }),
+        owner,
+      );
+      const result = yield* answer(kept.build, kept.base, kept.summary);
+      yield* operations.changed(g.root, GAME_BUILDS_EVENT, result.message);
+      // Measured like a turn's build, so its facts sit beside the build before it.
+      yield* measureIn(g.root, kept.build, { supersede: true });
+      return result;
+    });
+
   /** Finishes every no-run restore a restart cut short, by running its moves again. */
   const settleRestores = Effect.gen(function* () {
     const rows = yield* sql<{ readonly root: string; readonly payload_json: string }>`
@@ -1337,6 +1494,7 @@ const make = Effect.gen(function* () {
     play,
     restore,
     holds,
+    keepValues,
     turnBuild,
   });
 });
