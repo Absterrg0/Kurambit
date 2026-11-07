@@ -75,7 +75,7 @@ export function start(ctx) {
   ctx.scene.add(hero.root, foe.root);
   ctx.player = hero.root;
   ctx.look.sun({ follow: hero.root, size: 30 });
-  cam = followCamera3D(ctx, hero.root, { blockers: level.walls, distance: 8, height: 2.5 });
+  cam = followCamera3D(ctx, hero.root, { blockers: level.walls }); // framed by the hero's height
 }
 
 export function update(dt, ctx) {

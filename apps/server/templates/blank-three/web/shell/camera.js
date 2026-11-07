@@ -20,7 +20,9 @@
 // of them) is between it and the target, so it never ends inside a wall.
 // Drag with the right mouse button (or under pointer lock) or the right
 // stick to orbit; without input it settles behind the target's facing.
-//   const cam = followCamera3D(ctx, player, { blockers: [level], distance: 6, height: 2 });
+//   const cam = followCamera3D(ctx, player, { blockers: [level] });
+//   // framed by the target's own height (measured once): it looks at its chest
+//   // (height: 0.6 of it) from 3 heights away (distance), so any size stays in frame
 //   // move relative to the view: forward is (-sin(cam.yaw), -cos(cam.yaw)) on x/z,
 //   // and face the move direction with player.rotation.y = Math.atan2(dir.x, dir.z)
 import * as THREE from "../vendor/three.module.js";
@@ -108,9 +110,10 @@ export function followCamera2D(ctx, target, options = {}) {
 }
 
 export function followCamera3D(ctx, target, options = {}) {
+  const tall = standingHeight(target);
   const {
-    distance = 6,
-    height = 2,
+    distance = Math.max(3, tall * 3),
+    height = tall * 0.6,
     lag = 10,
     lookAhead = 1.5,
     blockers = [],
@@ -190,6 +193,13 @@ export function followCamera3D(ctx, target, options = {}) {
   live.add(rig);
   rig.update(1e-3);
   return rig;
+}
+
+/** How tall the target stands, in world units, from its bounds; 2 when it has none yet. */
+function standingHeight(target) {
+  target.updateWorldMatrix(true, true);
+  const y = new THREE.Box3().setFromObject(target).getSize(new THREE.Vector3()).y;
+  return Number.isFinite(y) && y > 0.05 ? y : 2;
 }
 
 // The shell's side: move every follow camera after the game's update; a new run starts empty.
