@@ -42,6 +42,45 @@ export const readGltfJson = async (path: string, maxBytes: number): Promise<Gltf
   }
 };
 
+/** A .glb's JSON chunk from bytes already in memory (a download), or null when it is not one. */
+export const glbJson = (bytes: Uint8Array): unknown => {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (
+    buffer.length < 20 ||
+    buffer.toString("latin1", 0, 4) !== "glTF" ||
+    buffer.toString("latin1", 16, 20) !== "JSON"
+  )
+    return null;
+  const length = buffer.readUInt32LE(12);
+  if (20 + length > buffer.length) return null;
+  try {
+    return JSON.parse(buffer.toString("utf8", 20, 20 + length));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The longest animation's length in seconds, from its samplers' input accessors' max (the glTF
+ * spec requires min and max on them); null when the document has no animation.
+ */
+export const longestAnimationSeconds = (doc: unknown): number | null => {
+  const gltf = doc as {
+    readonly accessors?: ReadonlyArray<{ readonly max?: ReadonlyArray<number> }>;
+    readonly animations?: ReadonlyArray<{
+      readonly samplers?: ReadonlyArray<{ readonly input?: number }>;
+    }>;
+  } | null;
+  let longest: number | null = null;
+  for (const animation of gltf?.animations ?? [])
+    for (const sampler of animation.samplers ?? []) {
+      const end = gltf?.accessors?.[sampler.input ?? -1]?.max?.[0];
+      if (typeof end === "number" && Number.isFinite(end) && end >= 0)
+        longest = Math.max(longest ?? 0, end);
+    }
+  return longest;
+};
+
 interface AccessorDoc {
   readonly accessors?: ReadonlyArray<{
     readonly bufferView?: number;

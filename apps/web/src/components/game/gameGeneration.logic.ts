@@ -21,12 +21,8 @@ export const GAME_ART_LANE_LABELS = {
 
 export const GAME_ART_LANES = Object.keys(GAME_ART_LANE_LABELS) as ReadonlyArray<GameArtLane>;
 
-const THREE_D_LANES: ReadonlySet<GameArtLane> = new Set([
-  "character",
-  "creature",
-  "model",
-  "motion",
-]);
+/** Lanes that make the generated route's characters and props (a motion adds clips to them). */
+const THREE_D_LANES: ReadonlySet<GameArtLane> = new Set(["character", "creature", "model"]);
 const AUDIO_LANES: ReadonlySet<GameArtLane> = new Set(["sfx", "music", "voice"]);
 
 /**
@@ -57,9 +53,20 @@ export const inGameLine = (
   return AS_DELIVERED.has(generation.lane) ? "Not in the game yet" : null;
 };
 
-/** What the card shows of a delivered file: a picture, a model chip, or a sound. */
-export const laneMedium = (lane: GameArtLane): "image" | "model" | "audio" =>
-  THREE_D_LANES.has(lane) ? "model" : AUDIO_LANES.has(lane) ? "audio" : "image";
+/**
+ * What the card shows of a delivered file when it has no picture: a model chip, a motion chip (a
+ * landed motion shows its strip instead), a sound, or the image itself.
+ */
+export const laneMedium = (lane: GameArtLane): "image" | "model" | "motion" | "audio" =>
+  lane === "motion"
+    ? "motion"
+    : THREE_D_LANES.has(lane)
+      ? "model"
+      : AUDIO_LANES.has(lane)
+        ? "audio"
+        : "image";
+
+const isImage = (path: string) => /\.(png|jpe?g|webp)$/i.test(path);
 
 export const providerLabel = (provider: GameArtProviderId): string =>
   GAME_ART_PROVIDERS[provider].label;
@@ -84,12 +91,14 @@ export const generationCostLine = (generation: GameGeneration): string | null =>
 
 /** The picture a settled generation shows: its kept candidate's preview, else its first image file. */
 export const generationResultImage = (generation: GameGeneration): string | null => {
+  // A model with no preview picture names its GLB as the preview: that is a chip, not a picture.
   const chosen =
     generation.chosen === null ? undefined : generation.candidates[generation.chosen]?.preview;
-  if (chosen !== undefined) return chosen;
-  if (generation.candidates.length === 1) return generation.candidates[0]!.preview;
+  if (chosen !== undefined && isImage(chosen)) return chosen;
+  const only = generation.candidates.length === 1 ? generation.candidates[0]!.preview : undefined;
+  if (only !== undefined && isImage(only)) return only;
   if (laneMedium(generation.lane) !== "image") return null;
-  return generation.files.find((file) => /\.(png|jpe?g|webp)$/i.test(file)) ?? null;
+  return generation.files.find(isImage) ?? null;
 };
 
 export const fileName = (path: string): string => path.replace(/^.*\//, "");

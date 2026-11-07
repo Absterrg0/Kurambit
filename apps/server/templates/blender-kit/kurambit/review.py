@@ -24,6 +24,7 @@ review inside one tool call."""
 import math
 import os
 import shutil
+import tempfile
 
 import bpy
 import numpy as np
@@ -484,6 +485,110 @@ def review(params):
     finally:
         if window is not None:
             window.scene = shown
+        added = [x for t in ID_TYPES for x in getattr(bpy.data, t) if x not in before[t]]
+        for x in added:
+            if isinstance(x, bpy.types.Scene):
+                bpy.data.scenes.remove(x)
+        bpy.data.batch_remove([x for x in added if not isinstance(x, bpy.types.Scene)])
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+@entry
+def motion_strip(params):
+    """motion_strip(): a generated motion's card picture. Each clip plays on the body its GLB holds
+    (the body it was made on): six side-view frames, and six front-view frames beside a walk or a
+    run, labelled with its name and length, one row per clip. Rendered in a throwaway scene in
+    Workbench like the review's strips; the live scene does not change.
+
+    params: {clips: [{path: abs glb, label}], out: abs png}"""
+    out = params["out"]
+    folder = tempfile.mkdtemp(prefix="kurambit-strip-")
+    before = {t: set(getattr(bpy.data, t)) for t in ID_TYPES}
+    window = bpy.context.window
+    shown = window.scene if window is not None else None
+    live, layer = bpy.context.scene, bpy.context.view_layer
+    kept = (live.frame_start, live.frame_end, live.frame_current, live.render.fps, live.render.fps_base)
+    active, selected = layer.objects.active, [o for o in layer.objects if o.select_get()]
+    try:
+        sc = bpy.data.scenes.new("kurambit_strip")
+        cam = bpy.data.objects.new("kurambit_strip_cam", bpy.data.cameras.new("kurambit_strip_cam"))
+        cam.data.type = "ORTHO"
+        sc.collection.objects.link(cam)
+        sc.camera = cam
+        labels = Labels(folder)
+        if window is not None:
+            window.scene = sc
+        rows, problems = [], []
+        for n, clip in enumerate(params["clips"]):
+            rate = skeleton.clip_rate(skeleton.gltf_json(clip["path"])) or 30
+            live.render.fps = sc.render.fps = round(rate)
+            live.render.fps_base = sc.render.fps_base = 1.0
+            objects_before = set(bpy.data.objects)
+            if window is not None:
+                window.scene = live  # the glTF importer works in the context's own scene only
+            try:
+                new, actions = skeleton.import_gltf(clip["path"])
+            finally:
+                for o in [x for x in bpy.data.objects if x not in objects_before]:
+                    for c in list(o.users_collection):
+                        c.objects.unlink(o)
+                    sc.collection.objects.link(o)
+                if window is not None:
+                    window.scene = sc
+            for o in sc.collection.objects:  # the previous clip's body leaves the frame
+                if o is not cam and o not in new:
+                    o.hide_render = True
+            meshes = [o for o in new if o.type == "MESH"]
+            arm = next((o for o in new if o.type == "ARMATURE"), None)
+            if arm is None or not meshes or not actions:
+                raise Refused("invalid-input", f"{os.path.basename(clip['path'])} holds no body playing a clip")
+            act = max(actions, key=lambda a: a.frame_range[1] - a.frame_range[0])
+            skeleton.assign_action(arm, act)
+            frames = _frames(act)
+            sampled = []
+            for f in frames:
+                _set_frame(sc, f)
+                sampled.append(_world_coords(sc, meshes))
+            _setup(sc, "BLENDER_WORKBENCH", STRIP)
+            views = [("side", 90)] + ([("front", 0)] if any(w in clip["label"].lower() for w in ("walk", "run", "jog", "sprint")) else [])
+            cells = []
+            for view, az in views:
+                se = _extent(np.concatenate(sampled), az, 4)
+                _camera(cam, az, 4, se, max((se[1] - se[0]) * STRIP[1] / STRIP[0], se[3] - se[2]) * 1.06)
+                for k, f in enumerate(frames):
+                    _set_frame(sc, f)
+                    cell = _render(sc, os.path.join(folder, f"strip_{n}_{view}_{k}.png"))
+                    if _cover(cell) < MIN_COVER:
+                        problems.append(f"{clip['label']} {view} frame {k + 1} shows almost nothing")
+                    cells.append(cell)
+            seconds = (act.frame_range[1] - act.frame_range[0]) / rate
+            text = f"{clip['label']}  {seconds:.2f} s" + ("   side, then front" if len(views) > 1 else "")
+            rows.append((labels(text), cells))
+
+        strip_w = 6 * STRIP[0]
+        width = PAD + max(len(cells) // 6 for _, cells in rows) * (strip_w + 2 * PAD)
+        row_h = LABEL_PX + 4 + STRIP[1] + PAD
+        canvas = np.zeros((PAD + row_h * len(rows), width, 4), np.float32)
+        canvas[:, :, :3], canvas[:, :, 3] = BG, 1.0
+        for i, (label, cells) in enumerate(rows):
+            y = PAD + i * row_h
+            _over(canvas, label, PAD, y)
+            for k, cell in enumerate(cells):
+                _over(canvas, cell, PAD + k * STRIP[0] + (2 * PAD if k >= 6 else 0), y + LABEL_PX + 4)
+        img = bpy.data.images.new("kurambit_strip_out", width, canvas.shape[0], alpha=False)
+        img.pixels.foreach_set(np.flipud(canvas).ravel())
+        img.filepath_raw = out
+        img.file_format = "PNG"
+        img.save()
+        return {"image": out, "problems": problems[:12]}
+    finally:
+        if window is not None:
+            window.scene = shown
+        live.frame_start, live.frame_end, _, live.render.fps, live.render.fps_base = kept
+        live.frame_set(kept[2])
+        for o in layer.objects:
+            o.select_set(o in selected)
+        layer.objects.active = active
         added = [x for t in ID_TYPES for x in getattr(bpy.data, t) if x not in before[t]]
         for x in added:
             if isinstance(x, bpy.types.Scene):

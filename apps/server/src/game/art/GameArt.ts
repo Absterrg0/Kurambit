@@ -21,6 +21,7 @@ import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -58,7 +59,14 @@ import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegist
 import * as ServerSettingsService from "../../serverSettings.ts";
 import { GameCaller } from "../GameCaller.ts";
 import * as GameAssetLibrary from "../GameAssetLibrary.ts";
-import { LIBRARY_CATALOG } from "../assetLibraryCatalog.ts";
+import {
+  LIBRARY_CATALOG,
+  LIBRARY_RIG_JOINTS,
+  STANDARD_ARMATURE,
+  STANDARD_RIG,
+} from "../assetLibraryCatalog.ts";
+import { motionClipName } from "../generatedSource.ts";
+import { readGltfJson } from "../gltfJson.ts";
 import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
 import { lockCharacterRouteRefusal } from "../gameStyle.ts";
@@ -122,8 +130,20 @@ export class GameArt extends Context.Service<
     readonly providers: Effect.Effect<GameArtProvidersResult, GameOperationError>;
     /** The lane map alone, from saved keys and Codex's sign-in: no network, for game_status. */
     readonly lanes: Effect.Effect<GameArtLanes, GameOperationError>;
+    /**
+     * Who renders a landed motion's review strip. GameBlender reads this service's records, so
+     * it cannot be one of its dependencies; GameService, which holds both, hands it in at start.
+     */
+    readonly renderMotionStripsWith: (render: MotionStripRender) => Effect.Effect<void>;
   }
 >()("kurambit/game/art/GameArt") {}
+
+/** Renders strips of motion clips on the bodies their GLBs hold into `out` (all game-relative). */
+export type MotionStripRender = (
+  root: string,
+  clips: ReadonlyArray<{ readonly path: string; readonly label: string }>,
+  out: string,
+) => Effect.Effect<void, GameOperationError>;
 
 export interface GameArtDelivered {
   readonly generation: GameGeneration;
@@ -156,6 +176,8 @@ export class GameArtHost extends Context.Service<
     readonly packPicture: (
       pack: string,
     ) => Effect.Effect<{ readonly path: string; readonly file: string }, GameOperationError>;
+    /** The standard armature's GLB in the library cache: the body a motion is made on by default. */
+    readonly standardBody: Effect.Effect<string, GameOperationError>;
   }
 >()("kurambit/game/art/GameArt/GameArtHost") {}
 
@@ -213,6 +235,11 @@ export const editPrompt = (change: string, transparent: boolean, styled: boolean
         ]
       : []),
   ].join("\n");
+
+/** Uthana's limits on what a motion is made from: a body under 30 MB, a video in these formats. */
+const MOTION_BODY_BYTES = 30 * 1024 * 1024;
+const MOTION_VIDEO_BYTES = 128 * 1024 * 1024;
+const MOTION_VIDEO = /\.(mp4|mov|avi)$/i;
 
 /** What the service keeps beside the provider's own job ids. */
 const Meta = Schema.Struct({
@@ -427,6 +454,7 @@ const make = Effect.gen(function* () {
   // One gate for the day's spend: the sum and the insert that counts against it are one step.
   const spendGate = yield* Semaphore.make(1);
   const changes = yield* PubSub.unbounded<string>();
+  const stripRenderer = yield* Ref.make<MotionStripRender | null>(null);
   const keyChecks = new Map<
     GameArtProviderId,
     { key: string; at: number; status: GameArtProviderStatus }
@@ -633,6 +661,89 @@ const make = Effect.gen(function* () {
 
   const readReferences = (root: string, paths: ReadonlyArray<string>) =>
     Effect.forEach(paths, (path) => readReference(root, path));
+
+  /** A plain file inside the game, as its real absolute path, or the refusal saying why not. */
+  const gameUpload = (
+    root: string,
+    path: string,
+    what: string,
+    ext: { readonly test: RegExp; readonly name: string },
+    limit: number,
+  ) =>
+    Effect.tryPromise({
+      try: async () => {
+        if (NodePath.isAbsolute(path) || path.split(/[\\/]/).includes(".."))
+          throw new Error("use a path inside the game.");
+        const realRoot = await NodeFSP.realpath(root);
+        const absolute = await NodeFSP.realpath(NodePath.join(root, path)).catch(() => {
+          throw new Error("does not exist.");
+        });
+        if (!isPathInside(absolute, realRoot)) throw new Error("resolves outside the game.");
+        if (!ext.test.test(absolute)) throw new Error(`is not ${ext.name}.`);
+        const stat = await NodeFSP.stat(absolute);
+        if (!stat.isFile()) throw new Error("is not a file.");
+        if (stat.size > limit)
+          throw new Error(`is larger than ${Math.round(limit / 1024 / 1024)} MB.`);
+        return absolute;
+      },
+      catch: (cause) =>
+        opError(
+          "art-generate",
+          `${what} ${path} ${cause instanceof Error ? cause.message : String(cause)}`,
+          "invalid-path",
+          path,
+        ),
+    });
+
+  /**
+   * What a motion is made from: the game's character (an export on the standard skeleton, so the
+   * clip comes back on the joints every humanoid here shares) or the standard body, and a video.
+   */
+  const motionUploads = (root: string, options: GameGenerateInput["options"] & {}) =>
+    Effect.gen(function* () {
+      let body: string;
+      if (options.character === undefined) body = yield* host.standardBody;
+      else {
+        body = yield* gameUpload(
+          root,
+          options.character,
+          "The character",
+          { test: /\.glb$/i, name: "a .glb file" },
+          MOTION_BODY_BYTES,
+        );
+        const read = yield* Effect.promise(() => readGltfJson(body, 8 * 1024 * 1024));
+        const doc = (read.kind === "json" ? read.json : null) as {
+          readonly nodes?: ReadonlyArray<{ readonly name?: string }>;
+          readonly skins?: ReadonlyArray<{ readonly joints?: ReadonlyArray<number> }>;
+        } | null;
+        const joints = new Set(
+          (doc?.skins ?? []).flatMap((skin) =>
+            (skin.joints ?? []).map((index) => doc?.nodes?.[index]?.name ?? ""),
+          ),
+        );
+        const missing = (LIBRARY_RIG_JOINTS[STANDARD_RIG] ?? []).filter(
+          (joint) => !joints.has(joint),
+        );
+        if (missing.length > 0)
+          return yield* opError(
+            "art-generate",
+            `${options.character} is not a character on the standard skeleton (it lacks ${missing.slice(0, 6).join(", ")}${missing.length > 6 ? ` and ${missing.length - 6} more` : ""}), so a motion made on it would not play on the game's humanoids. Pass a character game_blender_export wrote after game_blender_character, or leave character out for the standard body. Nothing was asked of a provider or spent.`,
+            "invalid-input",
+            options.character,
+          );
+      }
+      const video =
+        options.video === undefined
+          ? undefined
+          : yield* gameUpload(
+              root,
+              options.video,
+              "The video",
+              { test: MOTION_VIDEO, name: "an .mp4, .mov or .avi video" },
+              MOTION_VIDEO_BYTES,
+            );
+      return { body, ...(video === undefined ? {} : { video }) };
+    });
 
   /**
    * A direction's style picture: a library pack's own picture, or a game image. A pack's picture is
@@ -924,14 +1035,16 @@ const make = Effect.gen(function* () {
                 schedule: Schedule.spaced(adapter.pollEvery),
                 times: POLL_RETRIES,
               }),
-              Effect.mapError(
-                (error) =>
-                  new ArtProviderError({
-                    reason:
-                      error.status !== undefined && error.status < 500
-                        ? error.reason
-                        : `${error.reason} ${label} may have started the ${stage} anyway, so it is not asked again.`,
-                  }),
+              Effect.mapError((error) =>
+                error.status !== undefined && error.status < 500
+                  ? // A clean refusal created nothing; what the stages before it cost, the adapter says.
+                    new ArtProviderError({
+                      reason: error.reason,
+                      ...(error.costUsd === undefined ? {} : { costUsd: error.costUsd }),
+                    })
+                  : new ArtProviderError({
+                      reason: `${error.reason} ${label} may have started the ${stage} anyway, so it is not asked again.`,
+                    }),
               ),
             );
       let step = yield* first(adapter, context).pipe(
@@ -982,6 +1095,7 @@ const make = Effect.gen(function* () {
           if (row.generation.state === "making") yield* finish(row, done);
         }),
       );
+      if (initial.generation.lane === "motion") yield* addMotionStrip(root, id);
     }).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.void;
@@ -1023,6 +1137,41 @@ const make = Effect.gen(function* () {
           ),
         ),
       ),
+    );
+
+  /**
+   * A landed motion's review strip, rendered on the body its GLB holds and shown on its card in
+   * place of a model chip. Best effort: without it the card shows the clip's files.
+   */
+  const addMotionStrip = (root: string, id: string) =>
+    Effect.gen(function* () {
+      const render = yield* Ref.get(stripRenderer);
+      const row = yield* loadOrFail(root, id, "art-strip");
+      if (render === null || row.generation.state !== "done") return;
+      const clips = row.generation.files
+        .filter((file) => /\.glb$/i.test(file))
+        .map((path) => ({ path, label: motionClipName(row.generation.name, path) }));
+      // A locomotion set shows its forward walk and run; one clip shows itself.
+      const forward = clips.filter((clip) => /^(Walk|Run)_Fwd_Loop$/.test(clip.label));
+      const shown = (forward.length > 0 ? forward : clips).slice(0, 2);
+      if (shown.length === 0) return;
+      const out = `${row.meta.folder}/${row.generation.name}.strip.png`;
+      yield* render(root, shown, out);
+      yield* locks.withLock(
+        id,
+        Effect.gen(function* () {
+          const now = yield* loadOrFail(root, id, "art-strip");
+          if (now.generation.state !== "done" || now.generation.files.includes(out)) return;
+          const next = yield* touch(now, {
+            files: [...now.generation.files, out],
+            candidates: [{ preview: out }],
+          });
+          yield* writeRecordFile(next);
+          yield* save(next, countedOf(next.generation));
+        }),
+      );
+    }).pipe(
+      Effect.catchCause((cause) => Effect.logWarning("motion strip not rendered", { id, cause })),
     );
 
   const startDriver = (
@@ -1090,6 +1239,11 @@ const make = Effect.gen(function* () {
   };
   /** Where a delivered file goes next, so the agent reads the call instead of guessing it. */
   const nextStep = (g: GameGeneration) => {
+    if (g.lane === "motion") {
+      const clips = g.files.filter((file) => /\.glb$/i.test(file));
+      const names = clips.map((file) => motionClipName(g.name, file));
+      return ` Clip${clips.length === 1 ? "" : "s"} ${names.join(", ")}, on the standard skeleton: every humanoid in the game can play ${clips.length === 1 ? "it" : "them"}. Next: game_blender_character with clips that list ${clips.length === 1 ? "this file" : "the files the game needs"} beside the clips the character keeps (replace: true rebuilds one already made): ${clips.map((file) => JSON.stringify(file)).join(", ")}.`;
+    }
     const model = g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file));
     if (model === undefined) return " Next: add it to the game with game_import.";
     return g.lane === "character"
@@ -1190,6 +1344,11 @@ const make = Effect.gen(function* () {
       }
       const base = { lane: input.lane, prompt: input.prompt, candidates: 1, options };
       const adapter = yield* route(all, base);
+      if (input.lane === "motion" && (input.references ?? []).length > 0)
+        return yield* opError(
+          "art-generate",
+          "A motion is made from words or a video, not from pictures: leave references out (options.character names the body it is made on).",
+        );
       // Read before anything is asked: an image that is not there is refused with nothing spent.
       const edited =
         options.edit === undefined
@@ -1198,6 +1357,7 @@ const make = Effect.gen(function* () {
       const editedSize =
         edited !== null && edited.mime === "image/png" ? readPng(edited.bytes) : null;
       const references = yield* readReferences(root, input.references ?? []);
+      const uploads = input.lane === "motion" ? yield* motionUploads(root, options) : undefined;
       const styles = yield* Effect.forEach(directions, (direction) =>
         direction.style === undefined ? Effect.succeed(null) : readStyle(root, direction.style),
       );
@@ -1207,7 +1367,7 @@ const make = Effect.gen(function* () {
         directions.length === 0
           ? [
               edited === null
-                ? { ...base, references }
+                ? { ...base, references, ...(uploads === undefined ? {} : { uploads }) }
                 : {
                     ...base,
                     prompt: editPrompt(
@@ -1638,7 +1798,17 @@ const make = Effect.gen(function* () {
   // one the last server left behind. Each resumed driver is its own fiber.
   yield* recover;
 
-  return GameArt.of({ generate, wait, list, choose, cancel, delivered, providers, lanes });
+  return GameArt.of({
+    generate,
+    wait,
+    list,
+    choose,
+    cancel,
+    delivered,
+    providers,
+    lanes,
+    renderMotionStripsWith: (render) => Ref.set(stripRenderer, render),
+  });
 });
 
 /** The server's host: the provider registry's Codex and the run's in-flight step. */
@@ -1650,6 +1820,7 @@ export const layerHost = Layer.effect(
     const library = yield* GameAssetLibrary.GameAssetLibrary;
     return GameArtHost.of({
       packPicture: library.packPicture,
+      standardBody: library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
       codex: Effect.gen(function* () {
         const instances = yield* registry.listInstances;
         const codex = instances.filter(

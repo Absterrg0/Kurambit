@@ -42,6 +42,11 @@ export interface ArtRequest {
   readonly candidates: number;
   readonly options: GameArtOptions;
   readonly references: ReadonlyArray<ArtReference>;
+  /**
+   * Files the provider uploads, as absolute paths the service checked (inside the game, or the
+   * library cache): the body a motion is made on, a video it copies. Read when they are sent.
+   */
+  readonly uploads?: { readonly body?: string; readonly video?: string };
 }
 
 /** A file the provider made: `asset` is what the game uses, `preview` only shows it. */
@@ -150,6 +155,8 @@ const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024;
 const messageOf = (body: unknown): string | null => {
   if (typeof body !== "object" || body === null) return null;
   const record = body as Record<string, unknown>;
+  // GraphQL answers its errors as a list (Uthana's 429 is one).
+  if (Array.isArray(record.errors)) return messageOf(record.errors[0]);
   for (const key of ["message", "detail", "error", "task_error"]) {
     const value = record[key];
     if (typeof value === "string" && value !== "") return value;

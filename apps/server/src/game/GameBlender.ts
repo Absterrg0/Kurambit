@@ -101,7 +101,7 @@ import {
   styleHash,
 } from "./gameStyle.ts";
 import { gamePaths } from "./engineProfile.ts";
-import { GENERATED_DIR, generatedSource } from "./generatedSource.ts";
+import { GENERATED_DIR, generatedSource, motionClipName } from "./generatedSource.ts";
 import { breakSession, HeldSources, type LiveHealth, makeLiveRecords } from "./liveEditor.ts";
 import {
   commandFlag,
@@ -260,6 +260,7 @@ const GeneratedMade = Schema.Struct({
 });
 const decodeGeneratedMade = Schema.decodeUnknownEffect(GeneratedMade);
 const decodeCharacterMade = Schema.decodeUnknownEffect(CharacterMade);
+const decodeMotionStrip = Schema.decodeUnknownEffect(Schema.Struct({ image: Schema.String }));
 const decodeReviewRender = Schema.decodeUnknownEffect(ReviewRender);
 const decodeDigest = Schema.decodeUnknownEffect(KitDigest);
 const decodePass = Schema.decodeUnknownEffect(PassResult);
@@ -504,6 +505,11 @@ export class GameBlender extends Context.Service<
       root: string,
       input: GameBlenderLookInput,
     ) => Effect.Effect<GameBlenderLookResult, GameOperationError>;
+    /**
+     * Strips of motion-lane clips, each on the body its GLB holds, written as one PNG; rendered in
+     * a throwaway scene like the review, so the live scene does not change.
+     */
+    readonly motionStrip: GameArt.MotionStripRender;
     /** Live Blender scene: a rigged, animated character conformed to the standard skeleton. */
     readonly character: (
       root: string,
@@ -1761,6 +1767,25 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
+    motionStrip: (root, clips, out) =>
+      holding(
+        root,
+        Effect.gen(function* () {
+          const realRoot = yield* realRootOf(root);
+          yield* kitCall(
+            root,
+            "blender-motion-strip",
+            decodeMotionStrip,
+            `kurambit.motion_strip(${pyJson({
+              clips: clips.map((clip) => ({
+                path: NodePath.join(realRoot, clip.path),
+                label: clip.label,
+              })),
+              out: NodePath.join(realRoot, out),
+            })})`,
+          );
+        }),
+      ),
     character: (root, input) =>
       holding(
         root,
@@ -1845,7 +1870,44 @@ const make = Effect.gen(function* () {
               );
             body = { game: real };
           }
-          const clips = yield* resolveClips(root, input.clips ?? STANDARD_CLIPS, standardPacks);
+          // A clip is a library name, or the game path of a GLB the motion lane delivered: the
+          // generation that delivered it is checked, and its clip carries that generation's stamp.
+          const asked = input.clips ?? STANDARD_CLIPS;
+          const isMotion = (clip: string) =>
+            clip.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`);
+          const fromLibrary = yield* resolveClips(
+            root,
+            asked.filter((clip) => !isMotion(clip)),
+            standardPacks,
+          );
+          const fromMotion = yield* Effect.forEach(asked.filter(isMotion), (clip) =>
+            Effect.gen(function* () {
+              const generated = yield* generatedSource(
+                realRoot,
+                clip,
+                "blender-character",
+                (id, delivered) => art.delivered(root, id, delivered),
+              );
+              if (generated.source.lane !== "motion")
+                return yield* fail(
+                  "invalid-input",
+                  `${clip} came from the ${generated.source.lane} lane; clips take a library clip name or a GLB the motion lane delivered.`,
+                );
+              const delivered = generated.source.generation.path;
+              return {
+                pack: generated.source.stamp.from,
+                name: motionClipName(
+                  NodePath.posix.basename(NodePath.posix.dirname(delivered)),
+                  delivered,
+                ),
+                path: generated.file,
+                licence: generated.source.stamp.licence,
+                source: generated.source.stamp,
+                motion: true,
+              };
+            }),
+          );
+          const clips = [...fromLibrary, ...fromMotion];
           const made = yield* kitCall(
             root,
             "blender-character",

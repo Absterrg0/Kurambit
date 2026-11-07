@@ -100,7 +100,9 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
             description={
               keySetting === null
                 ? `${lanesLine(provider)} Uses your ChatGPT plan through Codex; no key needed.`
-                : lanesLine(provider)
+                : info.note === undefined
+                  ? lanesLine(provider)
+                  : `${lanesLine(provider)} ${info.note}`
             }
             status={
               status === null ? null : (

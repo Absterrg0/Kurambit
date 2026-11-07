@@ -144,13 +144,13 @@ brings back the model the game had before.
 
 Agents can have art made by specialist providers: images (key art, concepts, character sheets,
 sprites, UI art) and textures by Codex, OpenAI or Google Gemini; characters, creatures and props by
-Tripo or Meshy; sound effects, music and voice by ElevenLabs. Whatever comes back goes through the
+Tripo or Meshy; moves for human characters by Uthana; sound effects, music and voice by ElevenLabs. Whatever comes back goes through the
 same pipeline as everything else, matched to the game's key art and style, reviewed, recorded in
 `ASSETS.md` with its source, an AI flag and its cost, and undone like any other change. Files land
 under `art/generated/`. When an undo removes a generation's files, its card says so; restoring a
 later build brings them back. Characters and creatures are generated only on a game whose
 characters are made with **Generated**, so nothing is spent on one the game could not use; images,
-props, textures and sound can be generated on every game.
+props, textures, sound and moves can be generated on every game.
 
 Set it up in **Settings → General → Art providers**. Codex needs no key: it uses your ChatGPT plan
 through the Codex you already run in Kurambit. Every other provider takes your own API key; each row
@@ -170,7 +170,10 @@ still arrive and the card names the refused one with the provider's reason. Keep
 first candidate and says so. A new game on **Generated** starts from key
 art: the agent asks for three while it builds the first playable version, you pick one, and the
 game's colours and every later asset come from it. Human characters share the animation library;
-creatures (animals, monsters) keep their own skeleton and animations. **Cancel** stops a generation still being made.
+creatures (animals, monsters) keep their own skeleton and animations. Because human characters
+share one skeleton, a move the library lacks (a boss's slam, a victory dance), made by Uthana from
+words or from a video of someone doing it, plays on every human character in the game; its card
+shows a strip of the move. **Cancel** stops a generation still being made.
 **Generated art…** in the game's **More** menu (**⋯**) or the command palette lists everything the game
 has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
 Once a three.js build has been measured, a finished image or sound reads **In the game** when the
@@ -186,6 +189,8 @@ since Google's images have no transparency.
 
 Generated assets are yours on a paid plan; free plans of these providers do not allow commercial use.
 ElevenLabs music also has a studio-size limit, so check its terms before you ship a game that uses it.
+Uthana's moves made on its free sign-up credit belong to Uthana under CC BY 4.0, so a game that uses
+them credits Uthana; moves made on bought credit are yours.
 
 ## Keep going
 
