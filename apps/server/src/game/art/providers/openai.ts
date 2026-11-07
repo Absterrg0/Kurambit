@@ -52,12 +52,13 @@ export const openAiSize = (options: GameArtOptions): string => {
  * multiples of 16, at most 3840, between 1:3 and 3:1, 655,360 to 8,294,400 pixels); otherwise
  * the API sizes it ("auto"). An aspect asked outright wins.
  */
-export const openAiEditSize = (request: ArtRequest): string => {
-  if (request.options.aspect !== undefined) return openAiSize(request.options);
-  const first = request.references[0];
-  const png = first?.mime === "image/png" ? readPng(first.bytes) : null;
-  if (png === null) return "auto";
-  const { width, height } = png;
+export const openAiEditSize = (
+  options: GameArtOptions,
+  edited: { readonly width: number; readonly height: number } | null,
+): string => {
+  if (options.aspect !== undefined) return openAiSize(options);
+  if (edited === null) return "auto";
+  const { width, height } = edited;
   const area = width * height;
   return width % 16 === 0 &&
     height % 16 === 0 &&
@@ -67,6 +68,15 @@ export const openAiEditSize = (request: ArtRequest): string => {
     area <= 8_294_400
     ? `${width}x${height}`
     : "auto";
+};
+/** The size an edit is priced at: the one it is asked at, or for "auto" the image's own. */
+const estimateSize = (
+  options: GameArtOptions,
+  edited: { readonly width: number; readonly height: number } | null,
+): string => {
+  if (options.edit === undefined) return openAiSize(options);
+  const size = openAiEditSize(options, edited);
+  return size === "auto" && edited !== null ? `${edited.width}x${edited.height}` : size;
 };
 const pixels = (size: string) => {
   const [w, h] = size.split("x").map(Number);
@@ -100,7 +110,12 @@ const imagesOf = (answer: unknown): ReadonlyArray<ArtFile> => {
 /** One call for `n` images: the body every test fixture checks. */
 export const openAiRequest = (request: ArtRequest, n: number, key: string) => {
   const size =
-    request.options.edit === undefined ? openAiSize(request.options) : openAiEditSize(request);
+    request.options.edit === undefined
+      ? openAiSize(request.options)
+      : openAiEditSize(
+          request.options,
+          request.references[0]?.mime === "image/png" ? readPng(request.references[0].bytes) : null,
+        );
   const transparent = request.options.transparent === true;
   const headers = { authorization: `Bearer ${key}` };
   if (request.references.length === 0)
@@ -165,7 +180,9 @@ export const openai: ArtAdapter = {
   id: "openai",
   estimate: (request) =>
     roundUsd(
-      request.candidates * OUTPUT_HIGH_1024 * (pixels(openAiSize(request.options)) / 1024 ** 2) +
+      request.candidates *
+        OUTPUT_HIGH_1024 *
+        (pixels(estimateSize(request.options, request.edited ?? null)) / 1024 ** 2) +
         request.references * PER_REFERENCE,
     ),
   refuse: (request) =>

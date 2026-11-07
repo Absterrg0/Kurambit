@@ -1193,6 +1193,8 @@ const make = Effect.gen(function* () {
         options.edit === undefined
           ? null
           : yield* readReference(root, options.edit, "The image to change:");
+      const editedSize =
+        edited !== null && edited.mime === "image/png" ? readPng(edited.bytes) : null;
       const references = yield* readReferences(root, input.references ?? []);
       const styles = yield* Effect.forEach(directions, (direction) =>
         direction.style === undefined ? Effect.succeed(null) : readStyle(root, direction.style),
@@ -1230,7 +1232,11 @@ const make = Effect.gen(function* () {
               };
             });
       const estimates = requests.map((request) =>
-        adapter.estimate({ ...request, references: request.references.length }),
+        adapter.estimate({
+          ...request,
+          references: request.references.length,
+          ...(editedSize === null ? {} : { edited: editedSize }),
+        }),
       );
       const estimate = estimates.some((value) => value === null)
         ? null

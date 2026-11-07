@@ -104,7 +104,11 @@ export interface ArtAdapter {
   readonly id: GameArtProviderId;
   /** USD this request should cost, from the provider's price table; null when it is free (plan usage). */
   readonly estimate: (
-    request: Omit<ArtRequest, "references"> & { readonly references: number },
+    request: Omit<ArtRequest, "references"> & {
+      readonly references: number;
+      /** An edit's image size, when it reads as a PNG: an edit keeps it, and pays for it. */
+      readonly edited?: { readonly width: number; readonly height: number };
+    },
   ) => number | null;
   /** Why this provider cannot make this request (a lane or option it lacks); null when it can. */
   readonly refuse?: (request: Omit<ArtRequest, "references">) => string | null;
