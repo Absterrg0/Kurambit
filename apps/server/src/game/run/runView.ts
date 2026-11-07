@@ -38,7 +38,7 @@ const budgetText = (minutes: number) =>
 const sentence = (text: string) => text.trim().replace(/[.\s]+$/, "");
 
 /** Why keep going stopped, in one plain line for the paused and done states. */
-export const endingMessage = (run: GameRun, records: ReadonlyArray<StepRecord>): string => {
+const endingMessage = (run: GameRun, records: ReadonlyArray<StepRecord>): string => {
   if (stageEra(run)) return STAGE_ERA_SENTENCE;
   const why = sentence(run.lastFailure);
   switch (run.ending) {

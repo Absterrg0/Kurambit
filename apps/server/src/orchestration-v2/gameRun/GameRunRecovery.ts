@@ -79,7 +79,7 @@ export const stopStepTurns = (
   );
 
 /** Every step turn but the one a live turns run holds in flight. */
-export const stepTurnsWanted =
+const stepTurnsWanted =
   (
     run: { readonly id: GameRunId; readonly live: boolean } | null,
     inFlight: { readonly id: string; readonly attempt: number; readonly turn: boolean } | null,

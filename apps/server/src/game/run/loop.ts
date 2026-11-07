@@ -30,11 +30,11 @@ export type UndoResult = Result<"undo">;
 
 const MIN = 60_000;
 /** A typical step: a turn of about 5 min, then facts of about 3 (K7). */
-export const STEP_TYPICAL_MS = 8 * MIN;
+const STEP_TYPICAL_MS = 8 * MIN;
 const CAP_FLOOR_MS = 5 * MIN;
 const CAP_CEILING_MS = 15 * MIN;
 /** Guided starts its proposal after this unless the person answers (K9). */
-export const PROPOSAL_WAIT_MS = 60_000;
+const PROPOSAL_WAIT_MS = 60_000;
 /** Steps in a row with no gain before the run pauses (F2). */
 const STALL_LIMIT = 2;
 /** Misses of one key (undone, or its target still bad) before it is set aside (K8). */
@@ -57,7 +57,7 @@ const WATCHED: ReadonlySet<GameFactId> = new Set([
 const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 
 // ── The step's text (design §2.2): four templates, the facts' own wording and the agent's own line.
-export const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
+const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
   steer: "your note",
   blocker: "blocker",
   regression: "after an undo",
@@ -285,10 +285,10 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
 const remaining = (state: RunState, now: number) =>
   state.budgetEndsAt === null ? Number.POSITIVE_INFINITY : state.budgetEndsAt - now;
 /** Another step fits: a turn and its facts take about 8 minutes. */
-export const fitsBudget = (state: RunState, now: number): boolean =>
+const fitsBudget = (state: RunState, now: number): boolean =>
   remaining(state, now) >= STEP_TYPICAL_MS;
 /** The turn's cap: the time left, clamped to 5–15 minutes. */
-export const turnCap = (state: RunState, now: number): number =>
+const turnCap = (state: RunState, now: number): number =>
   Math.max(CAP_FLOOR_MS, Math.min(CAP_CEILING_MS, remaining(state, now)));
 
 // ── Steer and its captured prefix (K14, design §9). ─────────────────────────
