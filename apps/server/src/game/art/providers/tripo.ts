@@ -403,7 +403,19 @@ export const tripo: ArtAdapter = {
           headers: auth(key),
         }),
       ),
-      Effect.asVoid,
+      Effect.map((answer) => {
+        const balance = Number(
+          (answer as { data?: { balance?: unknown } } | null)?.data?.balance ?? Number.NaN,
+        );
+        if (!Number.isFinite(balance)) return undefined;
+        // A key with no credits works but cannot make anything: say so before a turn finds out.
+        return balance > 0
+          ? { ready: true, note: `Key works. ${balance} credits left.` }
+          : {
+              ready: false,
+              note: "Key works, but the account has no credits: buy some at platform.tripo3d.ai.",
+            };
+      }),
     ),
   licence:
     "Tripo API output (paid credits): the user has all rights, including commercial use. Free-tier output belongs to Tripo.",

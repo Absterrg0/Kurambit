@@ -131,7 +131,13 @@ export interface ArtAdapter {
   /** A lane whose terms differ from the provider's usual ones (ElevenLabs music). */
   readonly laneLicence?: Partial<Record<GameArtLane, string>>;
   /** A free request that says whether a key works; absent when the provider has none we trust. */
-  readonly checkKey?: (context: ArtContext) => Effect.Effect<void, ArtProviderError>;
+  /**
+   * A free check of the person's key. It may answer what the key can do now: `ready: false`
+   * when it works but cannot pay (an empty balance), with the note shown in Settings.
+   */
+  readonly checkKey?: (
+    context: ArtContext,
+  ) => Effect.Effect<void | { readonly ready: boolean; readonly note: string }, ArtProviderError>;
 }
 
 const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024;

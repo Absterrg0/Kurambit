@@ -1404,7 +1404,10 @@ const make = Effect.gen(function* () {
       const status: GameArtProviderStatus = yield* adapter.checkKey(context).pipe(
         Effect.timeout(Duration.seconds(8)),
         Effect.match({
-          onSuccess: () => ({ provider, ready: true, message: "Key works." }),
+          onSuccess: (answer) =>
+            answer === undefined
+              ? { provider, ready: true, message: "Key works." }
+              : { provider, ready: answer.ready, message: answer.note },
           onFailure: (error) =>
             error instanceof ArtProviderError && error.transient !== true
               ? { provider, ready: false, message: `The key was refused: ${error.reason}` }
