@@ -3,8 +3,12 @@ import * as Schema from "effect/Schema";
 import {
   GAME_EXPLORE_BOUNDS,
   GameActionResult,
+  GameBlenderCharacterInput,
+  GameBlenderCharacterResult,
   GameBlenderCodeInput,
   GameBlenderCodeResult,
+  GameCharacterRoute,
+  GameSetCharacterRouteResult,
   GameBlenderExportInput,
   GameBlenderExportResult,
   GameBlenderLookInput,
@@ -85,7 +89,7 @@ const visibleToRunThreads = () => true;
 const hiddenFromRunThreads = () => !McpInvocationContext.isGameRunThread();
 const GameStatusTool = Tool.make("game_status", {
   description:
-    "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
+    "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes, playable preview URL and `characters`: how the person chose to make this game's characters (library, blender or tripo; only they change it). Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
   parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
   success: GameStatus,
   failure,
@@ -107,7 +111,7 @@ const BlenderCodeTool = Tool.make("game_blender_code", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameBlenderLookTool = Tool.make("game_blender_look", {
   description:
-    "See the live Blender scene as one image (pinned mcp-for-blender look, adapted). Choose where from: viewport (what the scene shows; default), camera (through the scene camera), angles (the target from several sides) or frames (a strip over the animation). Shading: solid, material, rendered, wireframe or xray. Use it as much as you need; for counts, sizes and positions, use game_blender_scene. Every setting changed to take the picture is restored afterwards.",
+    "See the live Blender scene as one image (pinned mcp-for-blender look, adapted). Choose where from: viewport (what the scene shows; default), camera (through the scene camera), angles (the target from several sides) or frames (a strip over the animation). Shading: solid, material, rendered, wireframe or xray. Use it as much as you need; for counts, sizes and positions, use game_blender_scene. Every setting changed to take the picture is restored afterwards. mode review shows exactly what game_blender_export would write: the objects go through the style pass and are measured in a separate Blender, then one image shows a turnaround, silhouettes, the model at game distance (gamePx), each walk, run and jump clip, the palette, and art/concepts/<name>.png beside them when it exists; the text gives the concept from art/CONCEPT.md, the measurements and what the export would refuse. Look at it, fix what is wrong, and review again before exporting.",
   parameters: GameBlenderLookInput,
   success: GameBlenderLookResult,
   failure,
@@ -140,7 +144,7 @@ const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   description:
-    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB of only the objects the import added is exported under <engine dir>/assets/blender/ (godot/ or web/; unity/Assets/Blender/ for Unity) that the game can load, with its source and licence recorded in ASSETS.md (CC-BY models must be credited); an HDRI or texture import adds no object, so no GLB. Run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them. With a STYLE.json, a source its imports does not list is refused before anything downloads, and a rigged model not on its rig (or any rigged model when it names no rig) is refused and taken out of the scene again.",
+    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend). The import stays in the live scene, marked with its source and licence; review and export it like anything you build (game_blender_look mode review, then game_blender_export). Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them. With a STYLE.json, a source its imports does not list is refused before anything downloads, and a rigged model not on its rig (or any rigged model when it names no rig) is refused and taken out of the scene again.",
   parameters: GameBlenderAssetsImportInput,
   success: GameBlenderAssetsImportResult,
   failure,
@@ -149,9 +153,31 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const BlenderCharacterTool = Tool.make("game_blender_character", {
+  description:
+    "Build a rigged, animated character in the live Blender scene on the standard skeleton, correct by construction: use this instead of rigging or retargeting yourself. body is a library body ({library: {pack, file}}, as game_assets_search lists them), an MPFB2 human ({mpfb: {age, gender, weight, …}}; needs MPFB2, which the person installs in Settings → Game tools) or a model in this game already on the skeleton ({game: path}). The standard armature is conformed to the body (its rest frames are kept, so every library clip plays unchanged), the body is skinned, and the clips (names from the lock's animation packs; the standard set when omitted) and chains (extra bones no clip keys, such as a tail or ears, which the game springs) are added in a collection named name. Model the rest (head, clothes, props) with game_blender_code and the kurambit helpers, parented to its bones. Needs STYLE.json's rig to be standard-humanoid. replace rebuilds only the body and armature and keeps your parts. Then game_blender_look mode review, then game_blender_export.",
+  parameters: GameBlenderCharacterInput,
+  success: GameBlenderCharacterResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const CharacterRouteTool = Tool.make("game_character_route", {
+  description:
+    "Set how this game's characters are made, only when the person asked for it in this chat, in their words: library (bodies and characters from the library's packs), blender (made in Blender: MPFB2 bodies and modelled characters) or tripo (generated with the person's Tripo key). It is the person's choice: never change it on your own, to get past a refusal or because another route would do better; when the chosen route cannot do what they asked, say so in your reply and name the other routes. game_status shows the current one as characters. Returns the route now set.",
+  parameters: Schema.Struct({ route: GameCharacterRoute }),
+  success: GameSetCharacterRouteResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const BlenderExportTool = Tool.make("game_blender_export", {
   description:
-    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's project) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb (unity/Assets/Blender/scene.glb for Unity). The .blend source is saved in the game with the export. With a STYLE.json, an export carrying an armature not on its rig (or any armature when it names no rig) is refused before anything is written: characters come from the lock's packs. Run game_import after.",
+    "Export the objects you last reviewed (game_blender_look mode review), exactly as reviewed, as a GLB under the game's engine directory with its sidecar <stem>.asset.json (skeleton, clips with ground speed, springs, height, measurements and where every part came from), and record it in ASSETS.md. objects and file as before; file defaults to <engine dir>/assets/blender/<name>.glb. Refused when these objects changed since their review, or when the review's measurements break the lock: an armature not on its rig, rest frames off the standard skeleton, triangles or texture size over STYLE.json's budget, a character with no idle clip. three.js games load the sidecar: ASSETS = { hero: \"assets/blender/hero.asset.json\" }. Run game_import after.",
   parameters: GameBlenderExportInput,
   success: GameBlenderExportResult,
   failure,
@@ -544,6 +570,8 @@ export const GameToolkit = Toolkit.make(
   BlenderAssetsSearchTool,
   BlenderAssetsImportTool,
   BlenderExportTool,
+  BlenderCharacterTool,
+  CharacterRouteTool,
   AssetsAddTool,
   UnityToolsTool,
   UnityEditTool,

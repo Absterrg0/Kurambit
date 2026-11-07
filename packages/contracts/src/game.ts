@@ -5,6 +5,7 @@ import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason } from "./gameRunReasons.ts";
+import { GameCharacterRoute } from "./gameStyle.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -233,6 +234,11 @@ export const GameManifest = Schema.Struct({
    * missing everything. At most 16 families with at most 16 paths each.
    */
   families: Schema.optionalKey(Schema.Array(GameAssetFamily).check(Schema.isMaxLength(16))),
+  /**
+   * The person's choice of how characters are made: from the library's packs, built in
+   * Blender, or generated with Tripo. Default library. Only the person changes it.
+   */
+  characters: Schema.optionalKey(GameCharacterRoute),
 }).check(
   Schema.makeFilter((manifest) => (manifest.project ?? manifest.godotProject) !== undefined, {
     description: "a game.json that names its engine project folder (project)",
@@ -593,6 +599,11 @@ export const GameStatus = Schema.Struct({
    * Always "off" for engines not staged live.
    */
   live: Schema.Literals(["off", "serving", "stopped"]),
+  /**
+   * How the person chose to make this game's characters (game.json's characters, default
+   * library). Only the person changes it.
+   */
+  characters: GameCharacterRoute,
   /** The builds being played from copies of their own (Play of a build), with their URLs. */
   buildPlays: Schema.Array(
     Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),
@@ -673,6 +684,14 @@ export const GameThreadInput = Schema.Struct({
    */
   checkSources: Schema.optionalKey(Schema.Boolean),
 });
+/** The person's choice of how this game's characters are made, written into its game.json. */
+export const GameSetCharacterRouteInput = Schema.Struct({
+  threadId: ThreadId,
+  route: GameCharacterRoute,
+});
+export type GameSetCharacterRouteInput = typeof GameSetCharacterRouteInput.Type;
+export const GameSetCharacterRouteResult = Schema.Struct({ route: GameCharacterRoute });
+export type GameSetCharacterRouteResult = typeof GameSetCharacterRouteResult.Type;
 export const GameAction = Schema.Literals([
   "preview",
   "rebuild",

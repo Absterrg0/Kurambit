@@ -125,6 +125,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.gameToolchainStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.gameToolchainInstall]: AuthSettingsWriteScope,
   [WS_METHODS.gameToolchainRemove]: AuthSettingsWriteScope,
+  [WS_METHODS.gameSetCharacterRoute]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeGameEvents]: AuthOrchestrationReadScope,
   [WS_METHODS.shellOpenInEditor]: AuthOrchestrationOperateScope,
   [WS_METHODS.filesystemBrowse]: AuthFilesystemReadScope,

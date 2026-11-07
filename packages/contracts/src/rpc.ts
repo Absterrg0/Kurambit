@@ -16,6 +16,8 @@ import {
   GameOperationError,
   GameOperationEvent,
   GameProjectResult,
+  GameSetCharacterRouteInput,
+  GameSetCharacterRouteResult,
   GameStatus,
   GameThreadInput,
   GameToolchainStatus,
@@ -352,6 +354,7 @@ export const WS_METHODS = {
   gameToolchainStatus: "game.toolchainStatus",
   gameToolchainInstall: "game.toolchainInstall",
   gameToolchainRemove: "game.toolchainRemove",
+  gameSetCharacterRoute: "game.setCharacterRoute",
   gameKeepGoing: "game.keepGoing",
   gameKeepGoingStatus: "game.keepGoingStatus",
   gameKeepGoingDecide: "game.keepGoingDecide",
@@ -1475,6 +1478,11 @@ const WsGameToolchainRemoveRpc = Rpc.make(WS_METHODS.gameToolchainRemove, {
   success: GameToolchainStatus,
   error: gameError,
 });
+const WsGameSetCharacterRouteRpc = Rpc.make(WS_METHODS.gameSetCharacterRoute, {
+  payload: GameSetCharacterRouteInput,
+  success: GameSetCharacterRouteResult,
+  error: gameError,
+});
 
 const WsGameKeepGoingRpc = Rpc.make(WS_METHODS.gameKeepGoing, {
   payload: GameKeepGoingInput,
@@ -1567,6 +1575,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameToolchainStatusRpc,
   WsGameToolchainInstallRpc,
   WsGameToolchainRemoveRpc,
+  WsGameSetCharacterRouteRpc,
   WsGameKeepGoingRpc,
   WsGameKeepGoingStatusRpc,
   WsGameKeepGoingDecideRpc,

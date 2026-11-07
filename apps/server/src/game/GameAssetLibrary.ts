@@ -27,6 +27,7 @@ import {
   readGameStyle,
 } from "./gameStyle.ts";
 import { hashFile } from "./sourceSnapshot.ts";
+import { readGltfJson } from "./gltfJson.ts";
 import {
   INDEX_VERSION,
   UNPACK_LIMITS,
@@ -104,8 +105,20 @@ export class GameAssetLibrary extends Context.Service<
     ) => Effect.Effect<GameAssetsAddResult, GameOperationError>;
     /** The absolute cached path of one pack file, fetching the pack once; refused outside the pack. */
     readonly packFile: (pack: string, path: string) => Effect.Effect<string, GameOperationError>;
+    /** The pack's in-place clip libraries (GLBs with clips), each with every clip name it holds. */
+    readonly packClips: (
+      pack: string,
+    ) => Effect.Effect<ReadonlyArray<PackClips>, GameOperationError>;
   }
 >()("kurambit/game/GameAssetLibrary") {}
+
+export interface PackClips {
+  /** Pack-relative, as the index lists it. */
+  readonly path: string;
+  /** Absolute, in the library cache. */
+  readonly file: string;
+  readonly clips: ReadonlyArray<string>;
+}
 
 /**
  * The kinds a pack offers a game of this engine. A pack that ships models in no
@@ -1309,10 +1322,75 @@ const make = Effect.gen(function* () {
       return { text, directory: directoryRel, added: added.length };
     });
 
-  const packFile = (pack: string, path: string) =>
-    Effect.fail(fail("Library file", `${pack}/${path}`, "invalid-input", "not built"));
+  // The path must be a file the pack's own index lists, so nothing outside the unpacked pack
+  // is ever named, whatever the caller passed; the real path is checked besides.
+  const packFile = (id: string, path: string) =>
+    Effect.gen(function* () {
+      const segments = path.split("/");
+      if (
+        path.includes("\\") ||
+        path.includes("\0") ||
+        segments.some((segment) => segment === "" || segment === "." || segment === "..")
+      )
+        return yield* fail(
+          "Library file",
+          `${id}/${path}`,
+          "invalid-path",
+          "A pack file is named by its pack-relative path, as game_assets_search lists it.",
+        );
+      const pack = yield* packOf(id);
+      const index = yield* ensure(pack);
+      if (!index.files.some((file) => file.path === path))
+        return yield* fail(
+          "Library file",
+          `${id}/${path}`,
+          "invalid-input",
+          `${pack.id} has no file ${path}; game_assets_search with pack "${pack.id}" lists its files.`,
+        );
+      const files = NodePath.join(packDir(pack), "files");
+      const absolute = NodePath.join(files, ...segments);
+      const inside = yield* Effect.promise(async () => {
+        const [realFiles, real] = await Promise.all([
+          NodeFSP.realpath(files).catch(() => null),
+          NodeFSP.realpath(absolute).catch(() => null),
+        ]);
+        return realFiles !== null && real !== null && real.startsWith(realFiles + NodePath.sep);
+      });
+      if (!inside)
+        return yield* fail("Library file", `${id}/${path}`, "invalid-path", "Not inside the pack.");
+      return absolute;
+    });
 
-  return GameAssetLibrary.of({ search, add, packFile });
+  // A pack's clip libraries: its glTF binaries with clips, read whole from their JSON (the
+  // index keeps only a few names). Root-motion copies (_RM) are never a default.
+  const clipLibraries = new Map<string, ReadonlyArray<PackClips>>();
+  const packClips = (id: string) =>
+    Effect.gen(function* () {
+      const pack = yield* packOf(id);
+      const known = clipLibraries.get(pack.id);
+      if (known !== undefined) return known;
+      const index = yield* ensure(pack);
+      const found: PackClips[] = [];
+      for (const file of index.files) {
+        if (!/\.glb$/i.test(file.path) || /_RM\.glb$/i.test(file.path)) continue;
+        if ((file.clipCount ?? 0) === 0 && file.clipsUnread !== true) continue;
+        const absolute = yield* packFile(pack.id, file.path);
+        const read = yield* Effect.promise(() => readGltfJson(absolute, 64 * 1024 * 1024));
+        const animations =
+          read.kind === "json"
+            ? (read.json as { readonly animations?: ReadonlyArray<{ readonly name?: unknown }> })
+                .animations
+            : undefined;
+        const clips = (animations ?? []).flatMap((clip) =>
+          typeof clip.name === "string" && clip.name !== "" ? [clip.name] : [],
+        );
+        if (clips.length > 0) found.push({ path: file.path, file: absolute, clips });
+      }
+      clipLibraries.set(pack.id, found);
+      return found;
+    });
+
+  return GameAssetLibrary.of({ search, add, packFile, packClips });
 });
 
 export const layer = Layer.effect(GameAssetLibrary, make);

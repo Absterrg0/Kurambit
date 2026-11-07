@@ -29,8 +29,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import {
   GAME_FACTS_BOUNDS,
   GAME_FACTS_EVENT,
+  GameAssetFacts,
   GameBuildFacts,
   GameBuildId,
+  GameFactNotMeasured,
+  GameFactPending,
   type GameBotRunResult,
   GameEngineId,
   GameOperationError,
@@ -62,10 +65,11 @@ import { findExecutable } from "./GameProcesses.ts";
 import * as GameService from "./GameService.ts";
 import { HOST_OS } from "./processHost.ts";
 import * as GameTemplates from "./GameTemplates.ts";
+import { measureAssets } from "./assetFacts.ts";
 import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 
 /** Changes when the server's reading of a measurement changes; the bot files are hashed besides. */
-const FACTS_VERSION = 2;
+const FACTS_VERSION = 3;
 /** A measurement's operations on copies are its own: no thread owns them. */
 const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait for the one running. */
@@ -138,6 +142,13 @@ const Stored = Schema.Struct({
   skilled: Schema.optionalKey(GameBuildFacts.fields.skilled),
   liveness: Schema.optionalKey(GameBuildFacts.fields.liveness),
   firstResponse: Schema.optionalKey(GameBuildFacts.fields.firstResponse),
+  assets: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ status: Schema.Literal("measured"), value: GameAssetFacts }),
+      GameFactNotMeasured,
+      GameFactPending,
+    ]),
+  ),
   /** The facts not measured for a standing tool or machine fault: a person's measure tries them again. */
   standing: Schema.optionalKey(Schema.Array(Schema.String)),
 });
@@ -158,19 +169,21 @@ const decodeSidecar = Schema.decodeUnknownOption(
   ),
 );
 
-/** The facts a tier's run writes. */
-type Tier = "boots" | "idle" | "masher" | "skilled";
-type FactName = "boots" | "idle" | "masher" | "skilled" | "liveness" | "firstResponse";
+/** The facts a tier's run writes. assets is static: read from the copy, never played. */
+type Tier = "assets" | "boots" | "idle" | "masher" | "skilled";
+type FactName = "assets" | "boots" | "idle" | "masher" | "skilled" | "liveness" | "firstResponse";
 const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
+  assets: ["assets"],
   boots: ["boots"],
   idle: ["idle"],
   masher: ["masher", "liveness", "firstResponse"],
   skilled: ["skilled"],
 };
-const TIERS: ReadonlyArray<Tier> = ["boots", "idle", "masher", "skilled"];
+const TIERS: ReadonlyArray<Tier> = ["assets", "boots", "idle", "masher", "skilled"];
 const FACT_NAMES: ReadonlyArray<FactName> = TIERS.flatMap((tier) => TIER_FACTS[tier]);
 /** About how long each tier takes, for the message. */
 const TIER_SECONDS: Readonly<Record<Tier, number>> = {
+  assets: 2,
   boots: 20,
   idle: 80,
   masher: 85,
@@ -313,6 +326,7 @@ const make = Effect.gen(function* () {
       winnableWithoutSkill: winnableOf(idle, masher),
       liveness: get("liveness"),
       firstResponse: get("firstResponse"),
+      assets: get("assets"),
     };
     const anyMeasured = FACT_NAMES.some((fact) => stored?.[fact] !== undefined);
     const state =
@@ -355,8 +369,6 @@ const make = Effect.gen(function* () {
       measuredAt: stored?.measuredAt ?? null,
       renderer: stored?.renderer ?? null,
       ...facts,
-      // Not built: the static assets tier (assetFacts.ts) is measured and stored with the others.
-      assets: notMeasured("not built", false),
       message,
     };
   };
@@ -517,22 +529,7 @@ const make = Effect.gen(function* () {
           found !== null && found.harness === harness
             ? found.stored
             : { build: build.build, measuredAt: null, renderer: null };
-        // A browser game's bots draw with the backend the server probed; its
-        // renderer is recorded, so facts from the GPU and from SwiftShader are
-        // never compared as alike.
-        const backend =
-          engineProfile(build.engine).play === "browser"
-            ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
-            : Option.none();
-        const software = Option.isSome(backend) && backend.value.software;
-        stored = {
-          ...stored,
-          root,
-          engine: build.engine,
-          renderer: Option.isSome(backend)
-            ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
-            : yield* rendererOf(copy, build.engine),
-        };
+        stored = { ...stored, root, engine: build.engine };
         const write = (patch: Partial<Record<FactName, unknown>>) =>
           Effect.gen(function* () {
             const names = Object.keys(patch) as FactName[];
@@ -550,6 +547,32 @@ const make = Effect.gen(function* () {
             yield* announce(`Build ${build.build.slice(0, 8)}: ${names.join(", ")} measured.`);
           });
 
+        // The static tier reads the copy's files only: it needs no browser and no engine.
+        if (tiers.has("assets"))
+          yield* write({
+            assets: {
+              status: "measured",
+              value: yield* measureAssets(
+                copy,
+                build.engine,
+                engineProfile(build.engine).projectDirectory,
+              ),
+            },
+          });
+        // A browser game's bots draw with the backend the server probed; its
+        // renderer is recorded, so facts from the GPU and from SwiftShader are
+        // never compared as alike.
+        const backend =
+          engineProfile(build.engine).play === "browser"
+            ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
+            : Option.none();
+        const software = Option.isSome(backend) && backend.value.software;
+        stored = {
+          ...stored,
+          renderer: Option.isSome(backend)
+            ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
+            : yield* rendererOf(copy, build.engine),
+        };
         if (tiers.has("boots")) {
           const boots = yield* step(game.checkIn(copy, OWNER)).pipe(
             Effect.map(bootsFact),

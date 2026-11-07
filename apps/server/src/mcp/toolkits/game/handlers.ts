@@ -80,6 +80,12 @@ const handlers = {
   game_blender_export: McpToolAccess.actsAsCaller((input) =>
     withGame((game, threadId) => game.blenderExport(threadId, input)),
   ),
+  game_blender_character: McpToolAccess.actsAsCaller((input) =>
+    withGame((game, threadId) => game.blenderCharacter(threadId, input)),
+  ),
+  game_character_route: McpToolAccess.actsAsCaller((input) =>
+    withGame((game, threadId) => game.setCharacterRoute(threadId, input.route)),
+  ),
   game_unity_tools: McpToolAccess.readsAsCaller(() =>
     withGame((game, threadId) => game.unityTools(threadId)),
   ),
