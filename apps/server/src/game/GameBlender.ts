@@ -1789,7 +1789,7 @@ const make = Effect.gen(function* () {
             code: [
               "import bpy, json",
               `before = set(${known})`,
-              `stamp = json.dumps(${JSON.stringify({ what: "mesh", from: input.source, licence: licence.slice(0, 200), ai: false, credits: null })})`,
+              `stamp = ${JSON.stringify(JSON.stringify({ what: "mesh", from: input.source, licence: licence.slice(0, 200), ai: false, credits: null }))}`,
               "added = [o for o in bpy.context.scene.objects if o.name not in before and o.type in ('MESH', 'ARMATURE')]",
               "for o in added: o['kurambit_source'] = stamp",
               "print(f'STUDIO_STAMPED {len(added)}')",
