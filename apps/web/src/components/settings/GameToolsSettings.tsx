@@ -90,7 +90,14 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
                   {tool.source === null ? "" : ` · ${SOURCE_LABELS[tool.source]}`}
                 </p>
               )}
-              <p className="whitespace-pre-wrap text-xs text-muted-foreground">{tool.message}</p>
+              {tool.installed || tool.status === "ready" ? (
+                <p className="whitespace-pre-wrap text-xs text-muted-foreground">{tool.message}</p>
+              ) : (
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer">Not installed · Details</summary>
+                  <p className="mt-1 whitespace-pre-wrap">{tool.message}</p>
+                </details>
+              )}
               {tool.status === "ready" ? null : (
                 <div>
                   <GameToolLink tool={tool} />
@@ -109,7 +116,11 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
         >
           Check again
         </Button>
-        {query.error ? <p role="alert">{query.error}</p> : null}
+        {/* A refetch cut off by the next one (a save, Check again) fails with no
+            error of its own; with the last results on screen it says nothing. */}
+        {query.error !== null && (query.failure !== null || query.data === null) ? (
+          <p role="alert">{query.error}</p>
+        ) : null}
       </div>
       {PATH_ROWS.map((row) => (
         <SettingsRow
