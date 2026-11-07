@@ -5,10 +5,10 @@ generated and review. resolve returns names. The helpers model parts and key cli
 from .character import character
 from .digest import digest, resolve
 from .generated import generated
-from .helpers import (aim, eye_lid, eye_squash, key_pose, material, place_chain, place_on_surface, ring_around, skin_rigid,
+from .helpers import (aim, eye_lid, eye_squash, key_pose, material, palette_of, place_chain, place_on_surface, ring_around, skin_rigid,
                       surface_hit, tube_along_bones, turn)
 from .protocol import Refused
 from .review import review
 
-__all__ = ["aim", "character", "digest", "eye_lid", "eye_squash", "generated", "key_pose", "material", "place_chain", "place_on_surface",
+__all__ = ["aim", "character", "digest", "eye_lid", "eye_squash", "generated", "key_pose", "material", "palette_of", "place_chain", "place_on_surface",
            "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface_hit", "tube_along_bones", "turn"]
