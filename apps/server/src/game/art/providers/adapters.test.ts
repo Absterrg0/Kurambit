@@ -119,7 +119,7 @@ describe("art adapters: request shapes", () => {
     );
     assert.deepStrictEqual(body.headers, { "x-goog-api-key": "k" });
     assert.deepStrictEqual(body.json.contents[0]?.parts[1], {
-      inline_data: { mime_type: "image/png", data: Buffer.from(PNG).toString("base64") },
+      inlineData: { mimeType: "image/png", data: Buffer.from(PNG).toString("base64") },
     });
     assert.deepStrictEqual(body.json.generationConfig.imageConfig, {
       aspectRatio: "3:4",

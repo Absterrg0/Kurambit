@@ -1,6 +1,7 @@
-// ElevenLabs: synchronous, the answer is the audio. Sound effects (v3, up to 30 s, seamless
-// loops), music (v2.5, 3 s to 5 min) and voice lines (v4, one default voice). The cost is the
-// price table's: the answer does not report dollars.
+// ElevenLabs (https://elevenlabs.io/docs/api-reference): synchronous, the answer is the audio.
+// Sound effects (v3, up to 30 s, seamless loops), music (v2.5, 3 s to 5 min) and voice lines (v4,
+// one default voice). Each model id is set explicitly: the reference still defaults to sound v2
+// and music v1, both deprecated. The cost is the price table's: the answer reports no dollars.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import {
@@ -17,7 +18,7 @@ export const ELEVENLABS_MODELS = {
   music: "music_v2_5",
   voice: "eleven_v4",
 } as const;
-/** A premade voice every account has ("George"): the default until the person picks one. */
+/** The voice ElevenLabs' own text-to-speech examples use: the default until the person picks one. */
 export const ELEVENLABS_DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb";
 /** USD, 2026-11: per minute of sound effects and of music, per 1K characters spoken. */
 const PRICE = { sfxMinute: 0.12, musicMinute: 0.15, voiceKChars: 0.08 } as const;
