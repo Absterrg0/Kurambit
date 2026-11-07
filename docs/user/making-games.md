@@ -127,8 +127,8 @@ Pick a budget in the same menu (1 hour unless you change it); while keep going r
 when it ends. Choose **Off** to stop it: a step that is running stops and still becomes a build.
 
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
-and why: a crash or freeze first, then a step that was undone, then a missing bot for the skilled
-fact, then a failing fact, then the agent's own `Next:` line. The step's build is played and
+and why: notes you left for it first, then a crash or freeze, then a step that was undone, then a
+missing bot for the skilled fact, then a failing fact, then the agent's own `Next:` line. The step's build is played and
 measured like any turn, and its strip in the chat says what happened to it:
 
 - **kept**: no fact Kurambit watches got worse;
@@ -137,8 +137,8 @@ measured like any turn, and its strip in the chat says what happened to it:
   The strip says what got worse. **Redo** on the strip or the timeline puts the step back if you
   want it anyway, and keep going goes on from there. A step undone twice is not tried again in this
   run;
-- **not undone: the game changed after it**: it made a fact worse, but a later turn had already
-  changed the game, so nothing was undone;
+- **not undone**: it made a fact worse but was left in place, with why: a later turn had already
+  changed the game, or the undo itself failed and the strip says what failed;
 - **not measured**: the facts could not be compared, so the step is kept.
 
 Your messages always go first: a message you send is an ordinary turn, never judged or undone, and
