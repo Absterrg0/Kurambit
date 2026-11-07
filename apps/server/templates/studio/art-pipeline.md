@@ -217,6 +217,8 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
    pose, by world directions (the character faces -Y, +X is its left),
    never by a bone's local axes. Give it an anticipation key, an overshoot
    and a settle; keep it in place (the game moves the character).
+   A clip you key with your own code needs `action.use_fake_user = True`:
+   an action nothing uses is not saved, and the review then refuses.
 5. **Review:** `game_blender_look` with `mode: "review"`. It runs the
    export's style pass and measurement and shows one image: a turnaround,
    silhouettes, the model at game distance, each walk, run, jump and custom

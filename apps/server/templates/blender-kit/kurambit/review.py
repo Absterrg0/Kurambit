@@ -293,6 +293,11 @@ def review(params):
         live, layer = bpy.context.scene, bpy.context.view_layer
         kept = (live.frame_start, live.frame_end, live.frame_current, live.render.fps, live.render.fps_base)
         active, selected = layer.objects.active, [o for o in layer.objects if o.select_get()]
+        # The clips land on frames at the rate they were sampled at, so a clip's frames and seconds
+        # agree in both scenes; the live scene's own rate is put back with the rest below.
+        rate = skeleton.clip_rate(skeleton.gltf_json(params["candidate"])) or live.render.fps / live.render.fps_base
+        live.render.fps = sc.render.fps = round(rate)
+        live.render.fps_base = sc.render.fps_base = 1.0
         try:
             new, actions = skeleton.import_gltf(params["candidate"])
         finally:

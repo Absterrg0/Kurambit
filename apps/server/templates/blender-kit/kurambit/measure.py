@@ -169,6 +169,8 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
     """GameModelMeasure of a candidate GLB, plus {armatures: {name: [bones]}, worstJoint}."""
     doc = skeleton.gltf_json(glb)
     bpy.ops.wm.read_factory_settings(use_empty=True)  # one-shot only: nothing of the source scene remains
+    # At the clips' own rate, or a 30 fps clip lands between 24 fps frames and its length and seam read wrong.
+    bpy.context.scene.render.fps, bpy.context.scene.render.fps_base = skeleton.clip_rate(doc) or 24, 1.0
     skeleton.import_gltf(glb)
     meshes = [o for o in bpy.data.objects if o.type == "MESH"]
     arms = [o for o in bpy.data.objects if o.type == "ARMATURE"]
