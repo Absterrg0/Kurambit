@@ -5,7 +5,6 @@ modifiers, the stamps, bone rest frames and every key of the clips an armature e
 session and the one-shot pass compute it from the same saved data, so an equal digest means the
 pass sees exactly what the agent built, and any edit after a review makes the review stale."""
 import hashlib
-import json
 import os
 
 import bpy

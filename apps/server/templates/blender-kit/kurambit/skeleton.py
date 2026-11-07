@@ -15,7 +15,7 @@ import struct
 from contextlib import contextmanager
 
 import bpy
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Matrix
 
 NAME_MAPS = {
     "identity": {},
