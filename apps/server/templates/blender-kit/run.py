@@ -2,8 +2,9 @@
 
 params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.json | null,
          budgets: {character, prop, texture}, standardJoints: [...] | null, out: abs dir,
-         standard?: abs path of the standard armature's GLB, rig?: the lock's rig id}
-Writes <out>/candidate.glb and prints KURAMBIT_RESULT {kind, objects, measured, refusals, parts,
+         standard?: abs path of the standard armature's GLB, rig?: the lock's rig id,
+         glb?: abs path to write the GLB to (default <out>/candidate.glb)}
+Writes the GLB and prints KURAMBIT_RESULT {kind, objects, measured, refusals, parts,
 usedPalette, armatures, notes}. It works on its own copy of the scene: the live scene and the game folder
 are never touched (D7), and what it measures is the GLB it wrote, so the review, the export and
 the sidecar all describe the same bytes."""
@@ -137,7 +138,8 @@ def run_pass(params):
     out = params["out"]
     os.makedirs(out, exist_ok=True)
     styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
-    candidate = os.path.join(out, "candidate.glb")
+    # The server names the file (a temporary one it renames into place), so nothing reads half of it.
+    candidate = params.get("glb") or os.path.join(out, "candidate.glb")
     bpy.ops.export_scene.gltf(
         filepath=candidate, export_format="GLB", export_yup=True, export_apply=True,
         export_animations=True, export_animation_mode="ACTIONS", export_force_sampling=True,

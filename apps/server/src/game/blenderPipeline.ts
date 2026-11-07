@@ -2,7 +2,9 @@
 // The asset pipeline's server side, beside GameBlender: a review is a candidate GLB the
 // one-shot pass wrote under builds/logs/blender-pipeline/<key>/, keyed by exactly what was
 // reviewed (each object's digest, the style lock and the kit), and an export promotes that
-// candidate as it is, or refuses. Nothing here runs Blender; GameBlender does.
+// candidate as it is, or refuses. The pass's result (pass.json) is kept so a retried review
+// skips the pass; only a review whose image was rendered leaves candidate.json, the one record
+// an export promotes. Nothing here runs Blender; GameBlender does.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -24,6 +26,7 @@ export const PIPELINE_DIR = "builds/logs/blender-pipeline";
 /** The Blender kit's folder in the templates. */
 export const KIT_DIR = "blender-kit";
 const CANDIDATE_JSON = "candidate.json";
+const PASS_JSON = "pass.json";
 export const CANDIDATE_GLB = "candidate.glb";
 const MAX_CANDIDATE_BYTES = 4 * 1024 * 1024;
 
@@ -111,8 +114,8 @@ export const PassResult = Schema.Struct({
   notes: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(400)))),
 });
 
-/** `candidate.json`: the pass's result as measured, plus what makes it this review's. */
-const Candidate = Schema.Struct({
+/** `pass.json`: the pass's result as measured, plus what makes it this key's. */
+const PassRecord = Schema.Struct({
   ...PassResult.fields,
   key: Schema.String,
   kit: Schema.String,
@@ -120,28 +123,46 @@ const Candidate = Schema.Struct({
   at: Schema.String,
   /** The export's default stem, and the name the concept is looked up by. */
   subject: Schema.String.check(Schema.isPattern(/^[a-z0-9_]{1,64}$/)),
+});
+export type PassRecord = typeof PassRecord.Type;
+const PassRecordJson = Schema.fromJsonString(PassRecord);
+export const encodePassRecord = Schema.encodeSync(PassRecordJson);
+
+/** `candidate.json`: a pass record whose review was rendered. */
+const Candidate = Schema.Struct({
+  ...PassRecord.fields,
   concept: Schema.NullOr(Schema.String),
 });
 export type Candidate = typeof Candidate.Type;
 const CandidateJson = Schema.fromJsonString(Candidate);
-const decodeCandidate = Schema.decodeUnknownOption(CandidateJson);
 export const encodeCandidate = Schema.encodeSync(CandidateJson);
 
 /**
- * The candidate a review left at `dir`, or null: no review, an unreadable record, or a GLB that
- * is not there as a plain file. A link is never followed, so the export never promotes one.
+ * A record beside the candidate GLB, or null: none, an unreadable record, or a GLB that is not
+ * there as a plain file. A link is never followed, so the export never promotes one.
  */
-export const readCandidate = async (dir: string): Promise<Candidate | null> => {
+const readRecord = async <A>(
+  dir: string,
+  name: string,
+  decode: (text: string) => Option.Option<A>,
+): Promise<A | null> => {
   const plainFile = async (path: string, max: number) => {
     const stat = await NodeFSP.lstat(path).catch(() => null);
     return stat !== null && stat.isFile() && stat.size <= max;
   };
   if (!(await plainFile(NodePath.join(dir, CANDIDATE_GLB), Number.MAX_SAFE_INTEGER))) return null;
-  if (!(await plainFile(NodePath.join(dir, CANDIDATE_JSON), MAX_CANDIDATE_BYTES))) return null;
-  const text = await NodeFSP.readFile(NodePath.join(dir, CANDIDATE_JSON), "utf8").catch(() => null);
-  return text === null ? null : Option.getOrNull(decodeCandidate(text));
+  if (!(await plainFile(NodePath.join(dir, name), MAX_CANDIDATE_BYTES))) return null;
+  const text = await NodeFSP.readFile(NodePath.join(dir, name), "utf8").catch(() => null);
+  return text === null ? null : Option.getOrNull(decode(text));
 };
+const decodeCandidate = Schema.decodeUnknownOption(CandidateJson);
+const decodePassRecord = Schema.decodeUnknownOption(PassRecordJson);
+/** The candidate a rendered review left at `dir`: the only thing an export promotes. */
+export const readCandidate = (dir: string) => readRecord(dir, CANDIDATE_JSON, decodeCandidate);
+/** The pass a review of this key already ran, rendered or not. */
+export const readPassRecord = (dir: string) => readRecord(dir, PASS_JSON, decodePassRecord);
 export const candidateJsonPath = (dir: string) => NodePath.join(dir, CANDIDATE_JSON);
+export const passJsonPath = (dir: string) => NodePath.join(dir, PASS_JSON);
 
 /** A name fit for a file stem and the concept lookup. */
 export const subjectName = (name: string) =>
