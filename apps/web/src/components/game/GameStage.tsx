@@ -775,8 +775,8 @@ function ThreadGameStage({
         if (isFolderGameFrame(event.target)) setGameFocused(false);
       }}
       onKeyDown={(event) => {
-        // Tab freezes and plays on while the Stage itself has focus (a focused game
-        // keeps its own keys); Esc clears the selection. Controls keep their keys.
+        // Tab freezes and plays on, and Esc clears the selection, when the Stage itself
+        // has focus; a focused game sends both up as studio-key. Controls keep their keys.
         if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey)
           return;
         if (
@@ -877,7 +877,7 @@ function ThreadGameStage({
                       disabled={phase.kind !== "playing" || bridgeStatus === null}
                       onClick={() => {
                         toggleStageFreeze();
-                        // Tab plays on from here, and Esc clears, while the Stage has focus.
+                        // Focus the Stage, so Tab and Esc work here for a game without the bridge's keys.
                         stageRef.current?.focus({ preventScroll: true });
                       }}
                     />
@@ -890,9 +890,7 @@ function ThreadGameStage({
                   <Kbd className="hidden @[44rem]/stage-header:inline-flex">Tab</Kbd>
                 </TooltipTrigger>
                 <TooltipPopup side="bottom">
-                  {frozen
-                    ? "Play on (Tab)"
-                    : "Freeze the game to point at things (Tab, while the Stage has focus)"}
+                  {frozen ? "Play on (Tab)" : "Freeze the game to point at things (Tab)"}
                 </TooltipPopup>
               </Tooltip>
             ) : null}
