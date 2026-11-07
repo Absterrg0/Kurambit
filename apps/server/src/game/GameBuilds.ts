@@ -179,13 +179,15 @@ export class GameBuilds extends Context.Service<
     ) => Effect.Effect<void, GameOperationError>;
     /**
      * Puts the build's engine project, art and ASSETS.md back in the game
-     * folder, keeping the folder before as a build.
+     * folder, keeping the folder before as a build. With `expect`, inside the
+     * game lock, only when the folder still holds that build and is unedited;
+     * else it is refused "moved-on" and nothing moves (keep going's undo).
      */
     readonly restore: (
       threadId: ThreadId,
       build: GameBuildRef,
       commandId: string | undefined,
-      options?: { readonly waitFor?: Duration.Input },
+      options?: { readonly waitFor?: Duration.Input; readonly expect?: GameBuildId },
     ) => Effect.Effect<typeof GameBuildRestoreResult.Type, GameOperationError>;
   }
 >()("kurambit/game/GameBuilds") {}
@@ -397,6 +399,8 @@ const make = Effect.gen(function* () {
                 turn: row.runOrdinal,
                 runId: row.runId,
                 request: firstLine(row.request, "(no request text)"),
+                // The keep-going step the turn was (GameRunControl.steps), once the turns builder fills it.
+                step: null,
               },
               summary: shared
                 ? `${summary} (may include the run's changes: it was building at the same time)`
@@ -890,6 +894,14 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
+      // Phase 3's turns builder (T) builds `expect`.
+      if (options.expect !== undefined)
+        return yield* failed(
+          "Restore build",
+          g.root,
+          "command-failed",
+          "not built: restore's expect is the turns builder's (phase 3, T).",
+        );
       const result = yield* restoreWithoutRun(threadId, g, build, commandId);
       yield* playRestored(threadId, g);
       return result;

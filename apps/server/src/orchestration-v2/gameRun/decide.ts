@@ -103,6 +103,10 @@ export const stageEra = (run: GameRun): boolean => run.loop !== "turns";
 const refuse = (reason: GameRunRefusalReason, message: string) =>
   Result.fail<GameRunRefusal>({ reason, message });
 
+// Phase 3's run core (builder R) replaces this with the turns cycle.
+const notBuilt = (command: OrchestrationV2GameRunCommand) =>
+  refuse("wrong-kind", `not built: keep going's ${command.type} is the run core's (phase 3, R).`);
+
 interface Work {
   readonly command: OrchestrationV2GameRunCommand;
   readonly records: GameRunRecords;
@@ -193,8 +197,9 @@ export const decide = (
 ): Result.Result<GameRunDecision, GameRunRefusal> => {
   const work: Work = { command, records, input, at: DateTime.formatIso(input.at) };
   if (command.type === "game-run.stop") return stop(work, command);
+  if (command.type === "game-run.start") return notBuilt(command);
   const latest = records.runs.at(-1);
   if (latest !== undefined && latest.id === command.runId && stageEra(latest))
     return stageEraRefusal();
-  return refuse("no-run", "This chat has no keep-going run.");
+  return notBuilt(command);
 };

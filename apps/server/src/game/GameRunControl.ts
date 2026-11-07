@@ -1,14 +1,23 @@
 // @effect-diagnostics globalDate:off -- A saved build's time comes from its ref's commit time.
-// What the Game panel's run RPCs reach: thin over the run's records
-// (getGameRunRecords). Stage-era runs are read only: their rounds for the round cards and Past runs, their
+// What the game_keep_going* tools and the Game panel's keep-going RPCs reach:
+// thin over the run's commands and its records (getGameRunRecords). Stage-era
+// runs are read only: their rounds for the round cards and Past runs, their
 // builds for the timeline.
 import {
+  type GameKeepGoingDecideInput,
+  type GameKeepGoingDecideResult,
+  type GameKeepGoingInput,
+  type GameKeepGoingStatus,
+  type GameKeepGoingSteerInput,
+  type GameKeepGoingSteerResult,
   type GameRun,
   type GameRunRound,
   type GameRunRoundRecord,
   type GameRunRoundsResult,
+  type GameStepVerdict,
   GameOperationError,
   GameRunErrorReason,
+  type RunId,
   ThreadId,
 } from "@kurambit/contracts";
 import * as Context from "effect/Context";
@@ -87,11 +96,33 @@ export interface RunBuilds {
   } | null;
 }
 
+/** A turn build's keep-going step, for its strip and its timeline mark. */
+export interface GameRunStepMark {
+  readonly n: number;
+  readonly verdict: GameStepVerdict | null;
+  readonly reason: string;
+}
+
 type Service = {
+  /** Off, Guided or Autopilot for the caller's chat: starts, resumes, switches or stops keep going. */
+  readonly set: (threadId: ThreadId, input: GameKeepGoingInput) => Fails<GameKeepGoingStatus>;
+  readonly status: (threadId: ThreadId) => Fails<GameKeepGoingStatus>;
+  /** The person's answer to the Guided proposal. */
+  readonly decide: (
+    threadId: ThreadId,
+    input: GameKeepGoingDecideInput,
+  ) => Fails<GameKeepGoingDecideResult>;
+  /** The person's words for the next step, from any chat of the game. */
+  readonly steer: (
+    threadId: ThreadId,
+    input: GameKeepGoingSteerInput,
+  ) => Fails<GameKeepGoingSteerResult>;
   /** Every stage-era run whose chat is this thread, newest first (at most 10), with its rounds, for the round cards. */
   readonly rounds: (threadId: ThreadId) => Fails<GameRunRoundsResult>;
   /** The game's latest stage-era run as the build timeline lists it; null when it has none. */
   readonly runBuilds: (threadId: ThreadId) => Fails<RunBuilds | null>;
+  /** The keep-going step each turn of this chat was, by its T3 run. */
+  readonly steps: (threadId: ThreadId) => Effect.Effect<ReadonlyMap<RunId, GameRunStepMark>>;
 };
 
 export class GameRunControl extends Context.Service<GameRunControl, Service>()(
@@ -100,6 +131,17 @@ export class GameRunControl extends Context.Service<GameRunControl, Service>()(
 
 const runError = (operation: string, path: string, reason: GameRunErrorReason, detail: string) =>
   new GameRunError({ operation, path, reason, detail });
+
+// Phase 3's run core (builder R) replaces these.
+const notBuilt = (operation: string, threadId: ThreadId) =>
+  Effect.fail(
+    runError(
+      operation,
+      threadId,
+      "command-failed",
+      `not built: keep going's ${operation} is the run core's (phase 3, R).`,
+    ),
+  );
 
 /** How a stage-era round ended, as its card says. */
 const roundOutcome = (r: GameRunRoundRecord) =>
@@ -367,7 +409,16 @@ const make = Effect.gen(function* () {
     } satisfies RunBuilds;
   });
 
-  return GameRunControl.of({ rounds, runBuilds });
+  return GameRunControl.of({
+    set: (threadId) => notBuilt("set", threadId),
+    status: (threadId) => notBuilt("status", threadId),
+    decide: (threadId) => notBuilt("decide", threadId),
+    steer: (threadId) => notBuilt("steer", threadId),
+    rounds,
+    runBuilds,
+    steps: () =>
+      Effect.die(new Error("not built: keep going's steps is the run core's (phase 3, R).")),
+  });
 });
 
 export const layer = Layer.effect(GameRunControl, make);
