@@ -65,6 +65,8 @@ export interface GameArtProviderInfo {
     | "gameElevenLabsApiKey"
     | "gameUthanaApiKey"
     | null;
+  /** Terms the person should know before they ship what it makes, shown in its Settings row. */
+  readonly note?: string;
   /** The hosts its adapter talks to, shown in Settings. */
   readonly hosts: ReadonlyArray<string>;
   /** Where the person gets a key or reads the terms. */
@@ -119,6 +121,7 @@ export const GAME_ART_PROVIDERS: Readonly<Record<GameArtProviderId, GameArtProvi
     label: "Uthana",
     lanes: ["motion"],
     keySetting: "gameUthanaApiKey",
+    note: "Clips made on bought credit are yours; clips made on the free sign-up credit are Uthana's, licensed CC BY 4.0 (credit Uthana in the game).",
     hosts: ["uthana.com"],
     site: "https://uthana.com",
   },

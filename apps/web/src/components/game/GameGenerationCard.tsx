@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { BoxIcon, CheckIcon, SparklesIcon, XIcon } from "lucide-react";
+import { BoxIcon, CheckIcon, PersonStandingIcon, SparklesIcon, XIcon } from "lucide-react";
 import {
   EnvironmentId,
   ThreadId,
@@ -381,6 +381,13 @@ function GenerationResult({
       <Badge variant="outline" size="default">
         <BoxIcon aria-hidden="true" />
         3D model
+      </Badge>
+    );
+  if (medium === "motion")
+    return (
+      <Badge variant="outline" size="default">
+        <PersonStandingIcon aria-hidden="true" />
+        Motion clip
       </Badge>
     );
   return null;

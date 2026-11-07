@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { BoxIcon, ChevronDownIcon, ChevronRightIcon, MusicIcon } from "lucide-react";
+import {
+  BoxIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  MusicIcon,
+  PersonStandingIcon,
+} from "lucide-react";
 import type { GameGeneration, ScopedThreadRef } from "@kurambit/contracts";
 
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
@@ -28,7 +34,10 @@ function Thumbnail({
   root: string | null;
   generation: GameGeneration;
 }) {
-  const image = generationResultImage(generation) ?? generation.candidates[0]?.preview ?? null;
+  const first = generation.candidates[0]?.preview;
+  const image =
+    generationResultImage(generation) ??
+    (first !== undefined && /\.(png|jpe?g|webp)$/i.test(first) ? first : null);
   if (image !== null)
     return (
       <GameImage
@@ -39,7 +48,8 @@ function Thumbnail({
         className="size-12 shrink-0"
       />
     );
-  const Icon = laneMedium(generation.lane) === "audio" ? MusicIcon : BoxIcon;
+  const medium = laneMedium(generation.lane);
+  const Icon = medium === "audio" ? MusicIcon : medium === "motion" ? PersonStandingIcon : BoxIcon;
   return (
     <span className="flex size-12 shrink-0 items-center justify-center rounded-md bg-muted/50 text-muted-foreground">
       <Icon className="size-4" aria-hidden="true" />
