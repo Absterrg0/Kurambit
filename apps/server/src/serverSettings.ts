@@ -178,6 +178,13 @@ export class ServerSettingsService extends Context.Service<
 
     readonly ready: Effect.Effect<void, ServerSettingsError>;
 
+    /**
+     * No settings file existed when this server started: a fresh home, read
+     * before anything could write one. First-run defaults key off it; absent
+     * reads as an existing home.
+     */
+    readonly startedWithoutSettingsFile?: boolean;
+
     readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;
 
     readonly updateSettings: (
@@ -591,6 +598,10 @@ const make = Effect.gen(function* () {
         }),
     ),
   );
+
+  const startedWithoutSettingsFile = !(yield* readConfigExists.pipe(
+    Effect.orElseSucceed(() => true),
+  ));
 
   const readRawConfig = fs.readFileString(settingsPath).pipe(
     Effect.mapError(
@@ -1181,6 +1192,7 @@ const make = Effect.gen(function* () {
   return {
     start,
     ready: Deferred.await(startedDeferred),
+    startedWithoutSettingsFile,
     getSettings: getSettingsFromCache.pipe(
       Effect.flatMap(materializeSettingsSecrets),
       Effect.map(resolveTextGenerationProvider),

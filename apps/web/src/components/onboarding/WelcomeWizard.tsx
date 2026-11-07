@@ -256,7 +256,7 @@ function AgentsStep({
   return (
     <StepShell
       title="Connect your agents"
-      description="Choose the agent that builds your games. Using OpenCode, Cursor, Grok or another agent? Add it in Settings → Providers."
+      description="Choose the agent that builds your games. Agents already installed here are listed; add another, such as Cursor, in Settings → Providers."
     >
       {/* The list gets what the dialog's header, title and button leave, so the
           button stays on screen on short windows. */}
@@ -310,6 +310,13 @@ function ConnectedAgentsStep({
   }, [environmentId, refreshProviders]);
 
   const byDriver = selectOnboardingProvidersByDriver(providers);
+  // Codex and Claude always show, to sign in or install; any other agent shows
+  // once it is on (a fresh home turns on the ones already installed).
+  const otherAgents = (providers ?? []).filter(
+    (provider) =>
+      provider.enabled &&
+      !(PRIMARY_AGENT_DRIVERS as ReadonlyArray<string>).includes(provider.driver),
+  );
 
   const primaryAgents = PRIMARY_AGENT_DRIVERS.flatMap((driver) => {
     const instances =
@@ -413,6 +420,13 @@ function ConnectedAgentsStep({
           ),
         )}
       </div>
+      {otherAgents.length > 0 ? (
+        <div className="mt-1.5 space-y-1.5">
+          {otherAgents.map((provider) => (
+            <OtherAgentCard key={provider.instanceId} provider={provider} />
+          ))}
+        </div>
+      ) : null}
       {providers?.some(
         (provider) =>
           provider.driver === "codex" && getOnboardingProviderState(provider) === "ready",
@@ -588,6 +602,39 @@ function AgentCard({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** An agent with no sign-in flow here: its status, and where to fix it. */
+function OtherAgentCard({ provider }: { readonly provider: ServerProvider }) {
+  const meta = providerClients.get(provider.driver);
+  const displayName = provider.displayName || (meta?.label ?? provider.driver);
+  const summary = getProviderSummary(provider);
+  const providerState = getOnboardingProviderState(provider);
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-4">
+      <ProviderInstanceIcon
+        driverKind={provider.driver}
+        displayName={displayName}
+        iconClassName="size-5"
+      />
+      <div className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-foreground">{displayName}</span>
+        <p className="mt-0.5 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
+          {providerState === "ready"
+            ? "Ready."
+            : providerState === "checking"
+              ? "Checking..."
+              : `${summary.headline}${summary.detail ? ` · ${summary.detail}` : ""} Fix it in Settings → Providers.`}
+        </p>
+      </div>
+      {providerState === "ready" ? (
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-success-foreground">
+          <CheckIcon className="size-3.5" />
+          Ready
+        </span>
+      ) : null}
     </div>
   );
 }
