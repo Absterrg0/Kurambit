@@ -353,6 +353,7 @@ import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceSt
 import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
 import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useGameNextBanner } from "./game/GameNextBanner";
+import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
 import { useGameRoundCards } from "./game/GameRoundCard";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -3291,7 +3292,14 @@ export default function ChatView(props: ChatViewProps) {
       ? null
       : { key: `${routeThreadKey}:${reply.id}`, text: reply.text };
   })();
-  const gameNextBanner = useGameNextBanner(gameNextReply, askAgentToFixStable);
+  const keepGoingBanner = useKeepGoingBanner(
+    isGameThread && isServerThread ? activeThreadRef : null,
+    askAgentToFixStable,
+  );
+  const gameNextBanner = useGameNextBanner(
+    keepGoingBanner.hidesNext ? null : gameNextReply,
+    askAgentToFixStable,
+  );
   const sendAppMessage = async (text: string) => {
     if (!isServerThread || activeThreadId === null) {
       throw new Error("Messages from apps need a started thread.");
@@ -5222,7 +5230,7 @@ export default function ChatView(props: ChatViewProps) {
         })
       : null;
   const composerBannerItems = (() => {
-    const gameRunItems = gameNextBanner === null ? [] : [gameNextBanner];
+    const gameRunItems = [keepGoingBanner.item, gameNextBanner].filter((item) => item !== null);
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [
       childInputBannerItem,

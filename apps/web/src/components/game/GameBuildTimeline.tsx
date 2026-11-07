@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
-import { GitCompareIcon, HistoryIcon, PlayIcon, Redo2Icon, Undo2Icon, XIcon } from "lucide-react";
+import {
+  FastForwardIcon,
+  GitCompareIcon,
+  HistoryIcon,
+  PlayIcon,
+  Redo2Icon,
+  Undo2Icon,
+  XIcon,
+} from "lucide-react";
 import type {
   GameBuild,
   GameBuildId,
@@ -23,6 +31,7 @@ import { GameBuildFactChips } from "./GameBuildFacts";
 import { buildName, formatBuildTime } from "./gameBuilds.logic";
 import { isUndone, markLabel, markTone, stepMark } from "./gameBuildTimeline.logic";
 import { turnStripRestore } from "./gameTurnBuild.logic";
+import { stepVerdictText } from "./keepGoing.logic";
 import { restoreQuestion, useBuildRestore } from "./useBuildActions";
 
 /** How many older pages an "Open build" reads to find its build before it says so. */
@@ -260,6 +269,7 @@ export function GameBuildTimeline({
           ) : null}
           {marks.map((build) => {
             const undone = list !== null && isUndone(build, list);
+            const step = build.source._tag === "turn" ? build.source.step : null;
             return (
               <Popover
                 key={build.id}
@@ -279,6 +289,7 @@ export function GameBuildTimeline({
                     <button
                       type="button"
                       data-game-build-mark={build.id}
+                      data-step={step === null ? undefined : step.n}
                       aria-current={shown?.id === build.id ? "true" : undefined}
                       aria-label={`${buildName(build)}, ${formatBuildTime(build.at)}`}
                       className={cn(
@@ -291,11 +302,15 @@ export function GameBuildTimeline({
                 >
                   <span
                     className={cn(
-                      "font-mono text-2xs leading-none",
+                      "flex items-center gap-px font-mono text-2xs leading-none",
                       undone && "line-through",
                       playing === build.id && "text-primary",
                     )}
                   >
+                    {/* A keep-going step, told apart from a person's turn. */}
+                    {step === null ? null : (
+                      <FastForwardIcon className="size-2.5" aria-hidden="true" />
+                    )}
                     {markLabel(build)}
                   </span>
                   <span
@@ -394,6 +409,11 @@ export function GameBuildTimeline({
             <span className="min-w-0 max-w-full truncate font-medium">
               {buildName(shown)} · {shown.summary}
             </span>
+            {shown.source._tag === "turn" && shown.source.step !== null ? (
+              <span className="shrink-0 text-muted-foreground">
+                {stepVerdictText(shown.source.step)}
+              </span>
+            ) : null}
             <span className="shrink-0 text-muted-foreground">
               {shown.fileCount === null
                 ? ""

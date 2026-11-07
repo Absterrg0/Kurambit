@@ -39,7 +39,7 @@ export const buildName = (build: Pick<GameBuild, "source">): string => {
   const source = build.source;
   switch (source._tag) {
     case "turn":
-      return `Turn ${source.turn}'s build`;
+      return source.step === null ? `Turn ${source.turn}'s build` : `Step ${source.step.n}'s build`;
     case "round":
       return `Round ${source.round}'s build`;
     case "saved":
