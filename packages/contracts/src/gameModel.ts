@@ -43,8 +43,41 @@ export const GameModelClip = Schema.Struct({
   groundSpeed: Schema.NullOr(Schema.Number),
   /** stance: from the planted foot; stride: stride length over the cycle (a clip with a flight phase). */
   groundSpeedFrom: Schema.NullOr(Schema.Literals(["stance", "stride"])),
+  /** Arm skin inside the torso's, mm² per sampled frame; null: not a humanoid, or not measured. */
+  armThroughBody: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /** The loop's last-to-first pose step over its mean frame step: about 1 is seamless; null: not a loop. */
+  seam: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /** One-frame knee snaps of 8° or more; null: no knees. */
+  kneePops: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
 });
 export type GameModelClip = typeof GameModelClip.Type;
+
+/** A separate part whose nearest surface is this far from every other part's. */
+export const GameModelFloating = Schema.Struct({
+  part: Schema.String.check(Schema.isMaxLength(128)),
+  gap: Metres,
+});
+export type GameModelFloating = typeof GameModelFloating.Type;
+
+const Percent = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
+
+/**
+ * How a face blinks, by bones (never morph targets): turn a lid bone about its own axis, squash
+ * a flat eye's bone along one, or hide a highlight's bone. The engine keys these over the clips.
+ */
+export const GameModelBlink = Schema.Struct({
+  bone: Schema.String.check(Schema.isMaxLength(64)),
+  kind: Schema.Literals(["turn", "squash", "hide"]),
+  /** The bone's own axis it turns about or squashes along; ignored for hide. */
+  axis: Schema.Literals(["x", "y", "z"]),
+  /** Closed: radians turned (turn), or the scale left along the axis (squash, about 0.1). */
+  amount: Schema.Number,
+});
+export type GameModelBlink = typeof GameModelBlink.Type;
+export const GameModelFace = Schema.Struct({
+  blink: Schema.Array(GameModelBlink).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+});
+export type GameModelFace = typeof GameModelFace.Type;
 
 /** Bones no clip keys, root to tip, that the engine springs on top of the clips. */
 export const GameModelSpring = Schema.Struct({
@@ -73,6 +106,11 @@ export const GameModelMeasure = Schema.Struct({
   ),
   clips: Schema.Array(GameModelClip).check(Schema.isMaxLength(128)),
   springs: Schema.Array(GameModelSpring).check(Schema.isMaxLength(8)),
+  /** Separate parts not touching the rest, over 0.5 mm away; omitted on a single mesh. */
+  floating: Schema.optionalKey(Schema.Array(GameModelFloating).check(Schema.isMaxLength(32))),
+  /** Share of the skin's area passing through other skin, %: at rest, and on one fixed bent pose (null off the standard skeleton). */
+  skinThrough: Schema.optionalKey(Schema.Struct({ rest: Percent, bent: Schema.NullOr(Percent) })),
+  face: Schema.optionalKey(GameModelFace),
 });
 export type GameModelMeasure = typeof GameModelMeasure.Type;
 
@@ -102,6 +140,7 @@ export const GameModelRefusalCode = Schema.Literals([
   "triangles", // over budget.character / budget.prop
   "texture", // a side over budget.texture
   "no-idle", // a character with no idle clip
+  "unweighted", // character vertices bound to no bone: they never move with it
 ]);
 export const GameModelRefusal = Schema.Struct({
   code: GameModelRefusalCode,

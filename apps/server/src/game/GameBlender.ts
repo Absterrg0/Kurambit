@@ -1734,6 +1734,7 @@ const make = Effect.gen(function* () {
               clips,
               chains: input.chains ?? [],
               replace: input.replace ?? false,
+              fit: input.fit ?? null,
             })})`,
           );
           const blend = yield* saveBlend(root);

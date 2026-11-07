@@ -171,6 +171,16 @@ export const GameBlenderCharacterInput = Schema.Struct({
   chains: Schema.optionalKey(Schema.Array(GameBlenderChain).check(Schema.isMaxLength(6))),
   /** Rebuild the body and armature of an existing <name>, re-binding its other objects by parent bone. */
   replace: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Fit the library clips to this body: arms swung clear of the torso, and hips, spine and head
+   * turns calmed (0 none, 1 full). Chosen from the review's strips, never applied unasked.
+   */
+  fit: Schema.optionalKey(
+    Schema.Struct({
+      arms: Schema.optionalKey(Schema.Boolean),
+      calm: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+    }),
+  ),
 });
 export type GameBlenderCharacterInput = typeof GameBlenderCharacterInput.Type;
 

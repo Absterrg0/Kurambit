@@ -15,7 +15,7 @@ import math
 import bpy
 from mathutils import Matrix, Vector
 
-from . import skeleton
+from . import face, skeleton
 
 LOCOMOTION = ("walk", "run", "jog", "sprint")
 SUB = 4  # samples per frame: a sprint's foot contact lasts only a few frames
@@ -130,4 +130,7 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
         "clips": _clips(arm, meshes, height)[:128] if arm is not None else [],
         "springs": springs[:8],
     }
+    blink = face.face_of(arm) if arm is not None else None
+    if blink is not None:
+        measured["face"] = blink
     return measured, {"armatures": {a.name: [b.name for b in a.data.bones] for a in arms}, "joints": joints, "worstJoint": worst}
