@@ -154,6 +154,8 @@ const Meta = Schema.Struct({
   /** The candidates' files, by candidate, until one is chosen. */
   candidateFiles: Schema.Array(Schema.Array(Schema.String)),
   options: Schema.Record(Schema.String, Schema.Unknown),
+  /** The directions' labels, by candidate; absent on a single asset (and on rows from before). */
+  labels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 type Meta = typeof Meta.Type;
 const decodeGeneration = Schema.decodeUnknownOption(Schema.fromJsonString(GameGeneration));
@@ -592,12 +594,16 @@ const make = Effect.gen(function* () {
       const estimated = step.costUsd === null && row.generation.estimateUsd !== null;
       const costUsd = step.costUsd ?? row.generation.estimateUsd;
       const candidateFiles = written.map((files) => files.map((file) => file.path));
-      const previews = written.map((files) => ({
-        preview:
-          files.find((file) => file.role === "preview")?.path ??
-          files.find((file) => /\.(png|jpe?g|webp)$/i.test(file.path))?.path ??
-          files[0]!.path,
-      }));
+      const previews = written.map((files, index) => {
+        const label = row.meta.labels?.[index];
+        return {
+          preview:
+            files.find((file) => file.role === "preview")?.path ??
+            files.find((file) => /\.(png|jpe?g|webp)$/i.test(file.path))?.path ??
+            files[0]!.path,
+          ...(label === undefined ? {} : { label }),
+        };
+      });
       const next = yield* touch(
         row,
         { costUsd, candidates: previews },
@@ -772,24 +778,77 @@ const make = Effect.gen(function* () {
         : "unknown"
       : `${usd(row.generation.costUsd)}${row.meta.costEstimated ? " (estimated: the provider did not report it)" : ""}`;
 
+  /**
+   * Directions: one request per look, each to completion, as one step with a candidate each.
+   * Codex runs them one at a time (one plan, one session at a time); the others together.
+   */
+  const directionsTogether = (
+    adapter: ArtAdapter,
+    context: ArtContext,
+    requests: ReadonlyArray<ArtRequest>,
+  ): Effect.Effect<ArtStep, ArtProviderError> =>
+    Effect.forEach(
+      requests,
+      (request) =>
+        Effect.gen(function* () {
+          let step = yield* adapter.start(context, request);
+          while (step.kind === "making") {
+            if (adapter.poll === undefined)
+              return yield* new ArtProviderError({
+                reason: `${GAME_ART_PROVIDERS[adapter.id].label} cannot be asked about a job again.`,
+              });
+            yield* Effect.sleep(adapter.pollEvery);
+            step = yield* adapter.poll(context, step.remote);
+          }
+          return step;
+        }),
+      { concurrency: adapter.id === "codex" ? 1 : "unbounded" },
+    ).pipe(
+      Effect.map((steps): ArtStep => {
+        const costs = steps.map((step) => step.costUsd);
+        return {
+          kind: "done",
+          candidates: steps.flatMap((step) => step.candidates.slice(0, 1)),
+          costUsd: costs.every((cost) => cost === null)
+            ? null
+            : roundUsd(costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0)),
+        };
+      }),
+    );
+
   const generate: GameArt["Service"]["generate"] = (root, threadId, input) =>
     Effect.gen(function* () {
       const all = yield* settings;
-      const candidates = Math.round(input.candidates ?? 1);
+      const directions = input.directions ?? [];
       const options = input.options ?? {};
-      if (candidates > 1 && !MULTI_CANDIDATE_LANES.includes(input.lane))
+      if (directions.length > 0 && !MULTI_CANDIDATE_LANES.includes(input.lane))
         return yield* opError(
           "art-generate",
           input.lane === "sfx" || input.lane === "music" || input.lane === "voice"
-            ? `Candidates are for images and textures; ask ${input.lane} one at a time.`
-            : `Candidates are for images: make 2-4 concept images in the image lane, let the person pick one, then make the ${input.lane} from it with candidates 1 and the picked image as a reference.`,
+            ? `Directions are for images and textures; ask ${input.lane} one at a time.`
+            : `Directions are for images: make 2-4 concept images in distinct directions in the image lane, let the person pick one, then make the ${input.lane} from it with the picked image as a reference.`,
         );
-      const base = { lane: input.lane, prompt: input.prompt, candidates, options };
+      // Each direction is its own request for one image: the person picks between looks,
+      // never between samples of one prompt (which come back as near-copies).
+      const prompts =
+        directions.length === 0
+          ? [input.prompt]
+          : directions.map((direction) => `${input.prompt}\n\nThe look: ${direction.prompt}`);
+      const base = { lane: input.lane, prompt: input.prompt, candidates: 1, options };
       const adapter = yield* route(all, base);
       const references = yield* readReferences(root, input.references ?? []);
-      const request: ArtRequest = { ...base, references };
-      const estimate = adapter.estimate({ ...base, references: references.length });
-      const autopilot = candidates > 1 && (yield* host.keepGoingStep(threadId));
+      const requests: ReadonlyArray<ArtRequest> = prompts.map((prompt) => ({
+        ...base,
+        prompt,
+        references,
+      }));
+      const estimates = prompts.map((prompt) =>
+        adapter.estimate({ ...base, prompt, references: references.length }),
+      );
+      const estimate = estimates.some((value) => value === null)
+        ? null
+        : roundUsd(estimates.reduce<number>((sum, value) => sum + (value ?? 0), 0));
+      const autopilot = directions.length > 1 && (yield* host.keepGoingStep(threadId));
       const id = NodeCrypto.randomUUID();
       const limit = all.gameArtDailyLimitUsd;
       const admitted = yield* spendGate.withPermits(1)(
@@ -836,7 +895,10 @@ const make = Effect.gen(function* () {
             kept: [],
             costEstimated: false,
             candidateFiles: [],
-            options: { ...options, candidates },
+            options,
+            ...(directions.length === 0
+              ? {}
+              : { labels: directions.map((direction) => direction.label) }),
           };
           yield* sql`
             INSERT INTO game_art_generations
@@ -863,7 +925,11 @@ const make = Effect.gen(function* () {
       yield* operations.changed(root, GAME_ART_EVENT, `Making ${admitted.row.generation.name}.`);
       yield* startDriver(root, id, (adapter, context) =>
         Effect.promise(() => NodeFSP.mkdir(context.scratch, { recursive: true })).pipe(
-          Effect.andThen(adapter.start(context, request)),
+          Effect.andThen(
+            requests.length === 1
+              ? adapter.start(context, requests[0]!)
+              : directionsTogether(adapter, context, requests),
+          ),
         ),
       );
       return {

@@ -262,7 +262,7 @@ export function CandidatePicker({
             type="button"
             role="radio"
             aria-checked={selected === index}
-            aria-label={`Candidate ${index + 1}`}
+            aria-label={candidate.label ?? `Candidate ${index + 1}`}
             tabIndex={(selected ?? 0) === index ? 0 : -1}
             disabled={disabled}
             onClick={() => setSelected(index)}
@@ -280,8 +280,16 @@ export function CandidatePicker({
               root={root}
               path={candidate.preview}
               alt=""
-              className="aspect-square w-full"
+              // Key art and concepts are wide; a square tile would shrink them to a strip.
+              className={
+                generation.lane === "image" ? "aspect-video w-full" : "aspect-square w-full"
+              }
             />
+            {candidate.label === undefined ? null : (
+              <span className="block truncate px-1 pt-1 pb-0.5 text-left text-xs">
+                {candidate.label}
+              </span>
+            )}
             {selected === index ? (
               <span className="absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
                 <CheckIcon className="size-3.5" aria-hidden="true" />

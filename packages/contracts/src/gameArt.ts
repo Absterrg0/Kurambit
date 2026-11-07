@@ -176,7 +176,19 @@ export const GameArtOptions = Schema.Struct({
 });
 export type GameArtOptions = typeof GameArtOptions.Type;
 
-/** game_generate: one request for one asset (or candidates of one asset to pick from). */
+/**
+ * One look the person may choose, for the image and texture lanes: a different rendering, palette,
+ * shape language or camera, never another sample of the same idea.
+ */
+export const GameArtDirection = Schema.Struct({
+  /** What the person reads on the pick card: "Low-poly pastel", "Chunky toon". */
+  label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(40)),
+  /** How this direction looks, added to the shared prompt. */
+  prompt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+});
+export type GameArtDirection = typeof GameArtDirection.Type;
+
+/** game_generate: one asset, or 2-4 distinct directions of it for the person to pick from. */
 export const GameGenerateInput = Schema.Struct({
   lane: GameArtLane,
   /** What to make, the thing itself; the game's look comes from references and the style anchor. */
@@ -185,8 +197,10 @@ export const GameGenerateInput = Schema.Struct({
   name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,47}$/)),
   /** Game-relative images it must match: the key art, a picked concept, a character sheet. */
   references: Schema.optionalKey(Schema.Array(GamePath).check(Schema.isMaxLength(4))),
-  /** 2-4 asks for candidates the person picks from; 1 or omitted makes one. */
-  candidates: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 1, maximum: 4 }))),
+  /** image and texture: 2-4 distinct looks, one image each, that the person picks from; omitted makes one. */
+  directions: Schema.optionalKey(
+    Schema.Array(GameArtDirection).check(Schema.isMinLength(2), Schema.isMaxLength(4)),
+  ),
   options: Schema.optionalKey(GameArtOptions),
 });
 export type GameGenerateInput = typeof GameGenerateInput.Type;
@@ -206,6 +220,8 @@ export type GameGenerationState = typeof GameGenerationState.Type;
 export const GameGenerationCandidate = Schema.Struct({
   /** Game-relative preview image of this candidate. */
   preview: GamePath,
+  /** The direction it was made from, as the pick card shows it. */
+  label: Schema.optionalKey(Schema.String),
 });
 export type GameGenerationCandidate = typeof GameGenerationCandidate.Type;
 

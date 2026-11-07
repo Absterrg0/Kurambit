@@ -117,7 +117,10 @@ describe("GameArt", () => {
             lane: "image",
             prompt: "a hero",
             name: "hero",
-            candidates: 2,
+            directions: [
+              { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
+              { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
+            ],
           });
           assert.strictEqual(started.generation.name, "hero_2");
           const ready = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
@@ -128,6 +131,10 @@ describe("GameArt", () => {
               "art/generated/image/hero_2/hero_2.c1.png",
               "art/generated/image/hero_2/hero_2.c2.png",
             ],
+          );
+          assert.deepStrictEqual(
+            ready.generation.candidates.map((candidate) => candidate.label),
+            ["Warm toon", "Cold low-poly"],
           );
           const picked = yield* art.choose(root, started.generation.id, 1);
           assert.strictEqual(picked.generation.chosenBy, "person");

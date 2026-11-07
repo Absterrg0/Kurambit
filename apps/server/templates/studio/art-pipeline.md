@@ -285,10 +285,18 @@ play until each piece arrives. Start a generation, keep building, and pick
 it up with `game_generate_wait`.
 
 1. **Key art, in the first turn.** Lane `image`, name `key_art`,
-   `candidates: 3`, `options.aspect` `"16:9"`, and a prompt holding the
-   game's world, mood and palette in one image (from BRIEF.md and its art
-   direction; no text or UI in it). End the turn asking the person to pick
-   one in the chat.
+   `options.aspect` `"16:9"`, a prompt holding the game's world and moment
+   in one image (from BRIEF.md; no text or UI in it), and three
+   `directions`: the person is choosing a look, so make three looks, not
+   three samples of one. Make them differ in rendering (flat-shaded
+   low-poly, chunky toon with outlines, soft clay or vinyl toy, painterly),
+   palette (warm, cool, pastel, neon) and shape language (round and soft,
+   blocky, angular). Each must be a look this game can reach in its engine
+   with generated and library models, drawn as an in-game screenshot at
+   the game's camera, never a movie poster or a cinematic render. Label
+   each in two or three words. If the brief's art direction already fixes
+   the look, keep it and vary only what it leaves open. End the turn asking
+   the person to pick one in the chat.
 2. **After the pick, lock the look to it.** Copy the picked file to
    `art/key-art.png`, read its colours with
    `print(kurambit.palette_of("art/key-art.png", 8))` in
@@ -298,8 +306,10 @@ it up with `game_generate_wait`.
    (`"art/key-art.png"`). Pass the key art in `references` of every later
    generation. It is also the title backdrop (TEMPLATE.md or the engine
    skill).
-3. **Characters.** A character sheet first: lane `image`, `candidates` 2 or
-   3, the key art as reference, the character alone on a plain background
+3. **Characters.** A character sheet first: lane `image`, two or three
+   `directions` when the character's design is open (silhouette, outfit,
+   proportions; the key art fixes the rendering), else none, the key art
+   as reference, the character alone on a plain background
    in a front and side view, arms down and apart. The person picks. Then
    lane `character` (a humanoid) or `creature` (`options.body`, and the
    clips it needs in `options.clips`), with the picked sheet and the key

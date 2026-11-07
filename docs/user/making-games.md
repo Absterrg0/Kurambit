@@ -159,7 +159,7 @@ Paid generations cost money on your provider account. Each one shows its estimat
 made and its cost when it is done, and every paid call counts against the **Daily limit** (5 USD a day
 across all games by default). A generation that would go over it is refused, with the numbers.
 
-For key art and hero characters the agent asks for a few candidates. They appear as a card in the
+For key art and hero characters the agent asks for a few candidates, each a different look (a different rendering, palette or shape) with a short label. They appear as a card in the
 chat: click one, then **Use this** (or use the arrow keys and Enter), and the agent carries on with
 it. Keep going takes the first candidate and says so. A new game on **Generated** starts from key
 art: the agent asks for three while it builds the first playable version, you pick one, and the
