@@ -418,7 +418,7 @@ const make = Effect.gen(function* () {
           return yield* opError(
             "art-generate",
             `Settings → Art providers sends ${request.lane} to ${label}, which cannot make it yet; the person chooses another there.`,
-            "tool-missing",
+            "setup-missing",
           );
         const refusal = adapter.refuse?.(request) ?? null;
         if (refusal !== null) return yield* opError("art-generate", refusal);
@@ -427,7 +427,7 @@ const make = Effect.gen(function* () {
           return yield* opError(
             "art-generate",
             `Settings → Art providers sends ${request.lane} to ${label}: ${status.message}`,
-            "tool-missing",
+            "setup-missing",
           );
         return adapter;
       }
@@ -442,7 +442,7 @@ const make = Effect.gen(function* () {
         }
         return adapter;
       }
-      return yield* opError("art-generate", refused ?? setupHint(request.lane), "tool-missing");
+      return yield* opError("art-generate", refused ?? setupHint(request.lane), "setup-missing");
     });
 
   const contextFor = (
@@ -799,6 +799,7 @@ const make = Effect.gen(function* () {
             return yield* opError(
               "art-generate",
               `Over the daily art limit: ${usd(spent)} spent today, and this would cost about ${usd(estimate)}, past the ${usd(limit)} limit. The person can raise it in Settings → Art providers.`,
+              "setup-missing",
             );
           const live = yield* sql<{ readonly name: string }>`
             SELECT json_extract(payload_json, '$.name') AS name FROM game_art_generations
