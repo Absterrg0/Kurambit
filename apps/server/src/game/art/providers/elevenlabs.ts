@@ -1,7 +1,7 @@
 // ElevenLabs (https://elevenlabs.io/docs/api-reference): synchronous, the answer is the audio.
 // Sound effects (v3, up to 30 s, seamless loops), music (v2.5, 3 s to 5 min) and voice lines (v4,
 // one default voice). Each model id is set explicitly: the reference still defaults to sound v2
-// and music v1, both deprecated. The cost is the price table's: the answer reports no dollars.
+// and music v1, both deprecated.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import {
@@ -88,7 +88,8 @@ const start = (context: ArtContext, request: ArtRequest) =>
     return {
       kind: "done" as const,
       candidates: [[{ role: "asset" as const, ext: "mp3", bytes }]],
-      costUsd: estimate(request),
+      // The answer reports no dollars: the service records the estimate, marked as one.
+      costUsd: null,
     };
   });
 

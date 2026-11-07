@@ -85,14 +85,9 @@ const start = (context: ArtContext, request: ArtRequest) =>
       }
       candidates.push([image]);
     }
-    // Google's answer reports tokens, not dollars: the cost is the price table's.
-    return {
-      kind: "done" as const,
-      candidates,
-      costUsd: roundUsd(
-        candidates.length * PER_IMAGE_1K + request.references.length * PER_REFERENCE,
-      ),
-    };
+    // Google's answer reports tokens, not dollars: the service records the price table's
+    // estimate, marked as one.
+    return { kind: "done" as const, candidates, costUsd: null };
   });
 
 export const google: ArtAdapter = {
