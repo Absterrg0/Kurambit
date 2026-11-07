@@ -16,7 +16,7 @@ import * as Fiber from "effect/Fiber";
 import * as GameOperations from "../GameOperations.ts";
 import type * as GameService from "../GameService.ts";
 import { BuildName } from "./buildNames.ts";
-import { buildStep, captureBuild } from "./builds.ts";
+import { buildStep, captureBuild, withBuildInFolder } from "./builds.ts";
 
 const layer = Layer.mergeAll(
   CheckpointStore.layer.pipe(
@@ -106,4 +106,44 @@ it.effect(
       yield* Fiber.interrupt(held);
       NodeFS.rmSync(root, { recursive: true, force: true });
     }).pipe(Effect.provide(layer)),
+);
+
+// Keep going's undo restores a step's base only while the folder still holds
+// the step's build: a person's turn or edit after it is never thrown away.
+it.effect("an undo with expect moves nothing once the folder moved on, and undoes otherwise", () =>
+  Effect.gen(function* () {
+    const lock = yield* lockOf;
+    const { root } = repo();
+    const checkpoints = yield* CheckpointStore.CheckpointStore;
+    const main = NodePath.join(root, "web", "main.js");
+    NodeFS.mkdirSync(NodePath.dirname(main), { recursive: true });
+    const write = (text: string) => NodeFS.writeFileSync(main, text);
+    const read = () => NodeFS.readFileSync(main, "utf8");
+    const runId = "game-builds";
+    write("base\n");
+    const base = yield* captureBuild({ checkpoints, lock }, root, runId, "t/base");
+    write("step\n");
+    const step = yield* captureBuild({ checkpoints, lock }, root, runId, "t/step");
+    const undo = (park: string) =>
+      withBuildInFolder(
+        { game, checkpoints, lock },
+        { root, runId, lane: "web" },
+        { sha: base, park, expect: step },
+        (current) => Effect.succeed({ value: current, putBack: false }),
+      );
+
+    // The person's turn changed the game after the step: refused, their work stays.
+    write("the person's work\n");
+    const refused = yield* undo("restores/moved-before");
+    expect(refused).toMatchObject({ kind: "refused", why: "moved-on" });
+    expect(read()).toBe("the person's work\n");
+
+    // The folder holds the step's build: the base comes back, and a repeat agrees.
+    write("step\n");
+    expect((yield* undo("restores/held-before")).kind).toBe("done");
+    expect(read()).toBe("base\n");
+    expect((yield* undo("restores/held-before")).kind).toBe("done");
+    expect(read()).toBe("base\n");
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }).pipe(Effect.provide(layer)),
 );

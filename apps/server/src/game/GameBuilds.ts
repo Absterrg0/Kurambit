@@ -1,12 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off -- A restore's request id is a hash of the caller's command id, as the run's restore makes it; a game's place in its repository is read from disk.
 // The Builds rail, for the Game panel and the agent tools alike: every turn
-// that changed the game (its T3 checkpoint) and every build of the game's run
-// (its rounds, prototypes, stages and saved builds), newest first, each with
-// what changed and its facts. Builds are not a record of their own: the list
-// is read from the checkpoints and the run's records each time. A build plays
-// and is measured in a copy of its own, and goes back into the game folder
-// through the run's restore, or the same moves the run's restore makes when
-// the game has no run.
+// that changed the game (its T3 checkpoint, marked with the keep-going step it
+// was) and every build of a stage-era run (its rounds, prototypes, stages and
+// saved builds), newest first, each with what changed and its facts. Builds
+// are not a record of their own: the list is read from the checkpoints and the
+// run's records each time. A build plays and is measured in a copy of its own,
+// and goes back into the game folder through one restore, the person's Undo
+// and keep going's alike.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Cause from "effect/Cause";
@@ -36,6 +36,7 @@ import {
   type GameEngineId,
   GameOperationError,
   manifestProject,
+  type RunId,
   type ThreadId,
 } from "@kurambit/contracts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
@@ -65,6 +66,8 @@ const NO_RUN = "game-builds";
 const BASES = `${gameRunRefsFolder(NO_RUN)}bases/`;
 /** The folder as last compared with the build it was made from (folderEdited); no build of its own. */
 const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
+const MOVED_ON =
+  "The game changed after the build this would undo, so nothing was restored and nothing was lost.";
 /** Where a build with no known time sorts: last. */
 const EPOCH = "1970-01-01T00:00:00.000Z";
 const isoOfSeconds = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe(seconds * 1000));
@@ -89,13 +92,25 @@ interface Entry {
   readonly handle: { readonly round: number } | { readonly build: string };
 }
 
+/** What a restore did to the folder; a failure is the restore's error instead. */
+export type RestoreMoved = "restored" | "current" | "moved-on";
+
 const NoRunRestore = Schema.Struct({
   requestId: Schema.String,
   target: GameBuildId,
   label: Schema.String,
   requestedAt: Schema.String,
   before: Schema.NullOr(GameBuildId),
-  outcome: Schema.NullOr(Schema.Struct({ restored: Schema.Boolean, message: Schema.String })),
+  /** Restore only while the folder holds this build (keep going's undo); kept so a settle honours it. */
+  expect: Schema.optionalKey(GameBuildId),
+  outcome: Schema.NullOr(
+    Schema.Struct({
+      restored: Schema.Boolean,
+      message: Schema.String,
+      /** Absent on records written before it: read from `restored`. */
+      moved: Schema.optionalKey(Schema.Literals(["restored", "current", "moved-on", "refused"])),
+    }),
+  ),
 });
 type NoRunRestore = typeof NoRunRestore.Type;
 const NoRunRestoreJson = Schema.fromJsonString(NoRunRestore);
@@ -188,7 +203,23 @@ export class GameBuilds extends Context.Service<
       build: GameBuildRef,
       commandId: string | undefined,
       options?: { readonly waitFor?: Duration.Input; readonly expect?: GameBuildId },
-    ) => Effect.Effect<typeof GameBuildRestoreResult.Type, GameOperationError>;
+    ) => Effect.Effect<
+      typeof GameBuildRestoreResult.Type & { readonly moved: RestoreMoved },
+      GameOperationError
+    >;
+    /**
+     * A chat turn's build once its checkpoint is kept, and how many files of
+     * the engine project, art and ASSETS.md it changed since `base`; null
+     * while the turn has no kept checkpoint.
+     */
+    readonly turnBuild: (
+      threadId: ThreadId,
+      runId: RunId,
+      base: GameBuildId | null,
+    ) => Effect.Effect<
+      { readonly build: GameBuildId; readonly files: number } | null,
+      GameOperationError
+    >;
   }
 >()("kurambit/game/GameBuilds") {}
 
@@ -289,6 +320,25 @@ const make = Effect.gen(function* () {
       return prefix;
     });
 
+  // Checkpoint paths are the repository's; a game in a subfolder of it strips its own prefix.
+  const gamePaths = (root: string) =>
+    Effect.map(
+      repoPrefix(root),
+      (prefix) => (path: string) =>
+        prefix === "" ? path : path.startsWith(prefix) ? path.slice(prefix.length) : null,
+    );
+
+  // A step mark is the strip's line, never the list's reason to fail.
+  const stepsOf = (threadIds: ReadonlySet<ThreadId>) =>
+    Effect.forEach([...threadIds], (threadId) => runs.steps(threadId), { concurrency: 4 }).pipe(
+      Effect.map((maps) => new Map(maps.flatMap((each) => [...each]))),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Keep-going step marks could not be read.", { cause }).pipe(
+          Effect.as(new Map<RunId, GameRunControl.GameRunStepMark>()),
+        ),
+      ),
+    );
+
   /**
    * The turn checkpoints, each a build listing only its own turn's changes.
    * T3 diffs a turn's checkpoint against its thread's previous one, so a turn
@@ -313,10 +363,8 @@ const make = Effect.gen(function* () {
           ),
         );
       const restored = isRestored(g.lane);
-      // Checkpoint paths are the repository's; a game in a subfolder of it strips its own prefix.
-      const prefix = yield* repoPrefix(g.root);
-      const inGame = (path: string) =>
-        prefix === "" ? path : path.startsWith(prefix) ? path.slice(prefix.length) : null;
+      const inGame = yield* gamePaths(g.root);
+      const steps = yield* stepsOf(new Set(rows.map((row) => row.threadId)));
       const noRun = yield* noRunRestoreOf(g.root);
       const restoreTargets =
         noRun?.outcome?.restored === true ? [{ id: noRun.target, at: noRun.requestedAt }] : [];
@@ -399,8 +447,7 @@ const make = Effect.gen(function* () {
                 turn: row.runOrdinal,
                 runId: row.runId,
                 request: firstLine(row.request, "(no request text)"),
-                // The keep-going step the turn was (GameRunControl.steps), once the turns builder fills it.
-                step: null,
+                step: steps.get(row.runId) ?? null,
               },
               summary: shared
                 ? `${summary} (may include the run's changes: it was building at the same time)`
@@ -655,8 +702,8 @@ const make = Effect.gen(function* () {
     });
 
   // The folder captured (T3's capture, its kept index makes it cheap) and its
-  // restored paths compared with the build it was made from.
-  const folderEditedSince = (g: Game, current: string) =>
+  // restored paths compared with each build; a diff that cannot be read is a change.
+  const folderAgainst = (g: Game, builds: ReadonlyArray<string>) =>
     checkpoints
       .withWorkspaceLock(
         g.root,
@@ -664,11 +711,18 @@ const make = Effect.gen(function* () {
       )
       .pipe(
         Effect.flatMap((folder) =>
-          measureChange(checkpoints, g.root, isRestored(g.lane), current, folder),
+          Effect.forEach(builds, (build) =>
+            measureChange(checkpoints, g.root, isRestored(g.lane), build, folder).pipe(
+              Effect.map((change) => change.changed),
+            ),
+          ),
         ),
-        Effect.map((change) => change.changed),
-        Effect.orElseSucceed(() => "unknown" as const),
       );
+  const folderEditedSince = (g: Game, current: string) =>
+    folderAgainst(g, [current]).pipe(
+      Effect.map(([changed]) => changed ?? true),
+      Effect.orElseSucceed(() => "unknown" as const),
+    );
 
   const recordTurn: GameBuilds["Service"]["recordTurn"] = (threadId, checkpointRef) =>
     Effect.gen(function* () {
@@ -894,17 +948,43 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
-      // Phase 3's turns builder (T) builds `expect`.
-      if (options.expect !== undefined)
-        return yield* failed(
-          "Restore build",
-          g.root,
-          "command-failed",
-          "not built: restore's expect is the turns builder's (phase 3, T).",
-        );
-      const result = yield* restoreWithoutRun(threadId, g, build, commandId);
-      yield* playRestored(threadId, g);
+      const result = yield* restoreWithoutRun(threadId, g, build, commandId, options.expect);
+      if (result.moved !== "moved-on") yield* playRestored(threadId, g);
       return result;
+    });
+
+  const turnBuild: GameBuilds["Service"]["turnBuild"] = (threadId, runId, base) =>
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId);
+      const lane = manifestProject(yield* projects.read(root));
+      const { checkpoints: captured } = yield* projections
+        .getThreadRecords(threadId, ["checkpoints"])
+        .pipe(
+          Effect.mapError((cause) =>
+            failed("Builds", root, "io", "the turn's checkpoint could not be read", cause),
+          ),
+        );
+      const checkpoint = captured.find((each) => each.runId === runId && each.status === "ready");
+      if (checkpoint === undefined) return null;
+      const id = yield* checkpoints.listCheckpointRefs({ cwd: root, prefix: checkpoint.ref }).pipe(
+        Effect.map((refs) => refs.find((each) => each.checkpointRef === checkpoint.ref)?.oid),
+        Effect.mapError((cause) =>
+          failed("Builds", root, "io", "the turn's build could not be read", cause),
+        ),
+      );
+      if (id === undefined || !isGameBuildId(id)) return null;
+      const counted = base === null ? null : (yield* changeOf(root, lane, base, id)).count;
+      if (counted !== null) return { build: id, files: counted };
+      // No base to diff against: T3's own change list for the turn.
+      const inGame = yield* gamePaths(root);
+      const restored = isRestored(lane);
+      return {
+        build: id,
+        files: checkpoint.files.filter((file) => {
+          const path = inGame(file.path);
+          return path !== null && restored(path);
+        }).length,
+      };
     });
 
   // On the turn loop's engines whose Stage plays a Web export, a restore that
@@ -941,6 +1021,7 @@ const make = Effect.gen(function* () {
           sha: record.target,
           park: BuildName.restoreBefore(record.requestId),
           check: BuildName.restoreAfter(record.requestId),
+          ...(record.expect === undefined ? {} : { expect: record.expect }),
         },
         (current) => Effect.succeed({ value: current, putBack: false }),
       ).pipe(
@@ -967,33 +1048,42 @@ const make = Effect.gen(function* () {
         before === null
           ? ""
           : ` What the folder held is kept as a build ("The game before a restore").`;
+      const movedOn = moved.kind === "refused" && moved.why === "moved-on";
       const outcome =
         moved.kind === "current"
           ? {
               restored: false,
               message: `The folder already holds ${record.label}; nothing was restored.`,
+              moved: "current" as const,
             }
           : moved.kind === "done"
             ? {
                 restored: true,
                 message: `${record.label}: its ${what} are back in the game folder.${kept} Restoring that build undoes this.`,
+                moved: "restored" as const,
               }
-            : {
-                restored: false,
-                message: `${record.label} could not be restored (${moved.detail}). ${moved.back === null ? "The folder is back as it was." : `Putting the folder back failed too (${moved.back}).`}${kept}`,
-              };
-      if (moved.kind === "current")
+            : movedOn
+              ? { restored: false, message: MOVED_ON, moved: "moved-on" as const }
+              : {
+                  restored: false,
+                  message: `${record.label} could not be restored (${moved.detail}). ${moved.back === null ? "The folder is back as it was." : `Putting the folder back failed too (${moved.back}).`}${kept}`,
+                  moved: "refused" as const,
+                };
+      // Nothing moved: the park is the folder as it still is, no build of its own.
+      if (moved.kind === "current" || movedOn)
         yield* checkpoints
           .deleteCheckpointRefs({ cwd: root, checkpointRefs: [beforeRef] })
           .pipe(Effect.ignore);
       yield* saveNoRunRestore(root, {
         ...record,
         before:
-          moved.kind !== "current" && before !== null && isGameBuildId(before) ? before : null,
+          moved.kind !== "current" && !movedOn && before !== null && isGameBuildId(before)
+            ? before
+            : null,
         outcome,
       });
       yield* operations.changed(root, GAME_BUILDS_EVENT, outcome.message);
-      return { refused: moved.kind === "refused", outcome };
+      return outcome;
     });
 
   const restoreWithoutRun = (
@@ -1001,6 +1091,7 @@ const make = Effect.gen(function* () {
     g: Game,
     build: GameFacts.ResolvedBuild,
     commandId: string | undefined,
+    expect: GameBuildId | undefined,
   ) =>
     Effect.gen(function* () {
       const requestId =
@@ -1011,10 +1102,44 @@ const make = Effect.gen(function* () {
               .digest("hex")
               .slice(0, 32);
       const earlier = yield* noRunRestoreOf(g.root);
-      if (earlier?.requestId === requestId && earlier.outcome !== null)
-        return { requestId, done: true, message: earlier.outcome.message };
+      // A repeat answers as the first try did.
+      if (earlier?.requestId === requestId && earlier.outcome !== null) {
+        const moved = earlier.outcome.moved ?? (earlier.outcome.restored ? "restored" : "current");
+        if (moved === "refused")
+          return yield* failed("Restore build", g.root, "tool-failed", earlier.outcome.message);
+        return {
+          requestId,
+          done: moved !== "moved-on",
+          message: earlier.outcome.message,
+          moved,
+        };
+      }
       const owner = String(threadId);
       yield* projects.admitWrite(threadId, g.root, "Restore build", owner);
+      // Checked first, under the game's lock, so a folder that moved on keeps
+      // the game's restore record (and its Redo) as it was. The move checks
+      // again against its park, which a repeat after a restart reads too.
+      if (expect !== undefined && earlier?.requestId !== requestId) {
+        const [atTarget, movedOn] = yield* operations.exclusive(
+          g.root,
+          "Restore check",
+          folderAgainst(g, [build.build, expect]).pipe(
+            Effect.mapError((cause) =>
+              failed("Restore build", g.root, "io", "the folder could not be compared", cause),
+            ),
+          ),
+          owner,
+        );
+        if (atTarget === false)
+          return {
+            requestId,
+            done: true,
+            message: `The folder already holds Build ${build.build.slice(0, 8)}; nothing was restored.`,
+            moved: "current" as const,
+          };
+        if (movedOn !== false)
+          return { requestId, done: false, message: MOVED_ON, moved: "moved-on" as const };
+      }
       const record: NoRunRestore =
         earlier?.requestId === requestId
           ? earlier
@@ -1024,15 +1149,22 @@ const make = Effect.gen(function* () {
               label: `Build ${build.build.slice(0, 8)}`,
               requestedAt: DateTime.formatIso(yield* DateTime.now),
               before: null,
+              ...(expect === undefined ? {} : { expect }),
               outcome: null,
             };
       yield* saveNoRunRestore(g.root, record);
       // In the service's own fiber: a caller that goes away (a closed client)
       // stops waiting, never the folder's move.
       const fiber = yield* Effect.forkIn(moveWithoutRun(g.root, g.lane, record, owner), scope);
-      const { refused, outcome } = yield* Fiber.join(fiber);
-      if (refused) return yield* failed("Restore build", g.root, "tool-failed", outcome.message);
-      return { requestId, done: true, message: outcome.message };
+      const outcome = yield* Fiber.join(fiber);
+      if (outcome.moved === "refused")
+        return yield* failed("Restore build", g.root, "tool-failed", outcome.message);
+      return {
+        requestId,
+        done: outcome.moved !== "moved-on",
+        message: outcome.message,
+        moved: outcome.moved,
+      };
     });
 
   /** Finishes every no-run restore a restart cut short, by running its moves again. */
@@ -1135,6 +1267,7 @@ const make = Effect.gen(function* () {
     recordTurn,
     play,
     restore,
+    turnBuild,
   });
 });
 
