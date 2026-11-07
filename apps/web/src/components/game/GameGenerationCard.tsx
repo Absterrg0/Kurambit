@@ -9,16 +9,22 @@ import {
   type GameGenerationsResult,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
-import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
+import {
+  type AtomCommandResult,
+  squashAtomCommandFailure,
+} from "@kurambit/client-runtime/state/runtime";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
-import { cn } from "../../lib/utils";
+import { cn, newMessageId } from "../../lib/utils";
 import type { TimelineAnchoredCard } from "../../session-logic";
+import { readThreadShell } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
+import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { GameElapsed } from "./GameElapsed";
@@ -30,6 +36,7 @@ import {
   generationCostLine,
   generationResultImage,
   laneMedium,
+  pickMessage,
   providerLabel,
   stepCandidate,
 } from "./gameGeneration.logic";
@@ -98,10 +105,15 @@ export function useGameGenerationCards(
   return cardsOf(key);
 }
 
+const failureText = (result: AtomCommandResult<unknown, unknown>) =>
+  result._tag === "Failure" ? String(squashAtomCommandFailure(result)) : null;
+
 /** Pick and Cancel for a game's generations, as the chat card and the Generated art view share them. */
 export function useGenerationActions(threadRef: ScopedThreadRef) {
   const choose = useAtomCommand(gameEnvironment.chooseGeneration, { reportFailure: false });
   const cancel = useAtomCommand(gameEnvironment.cancelGeneration, { reportFailure: false });
+  // The composer's own send, queued behind a turn still running.
+  const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
   const canChoose = useAtomValue(
     gameEnvironment.chooseGeneration.permissionAtom(threadRef.environmentId),
   );
@@ -113,36 +125,60 @@ export function useGenerationActions(threadRef: ScopedThreadRef) {
   const generations = useGameGenerations(threadRef);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<{ readonly id: string; readonly text: string } | null>(null);
-  const run = async (
-    id: string,
-    send: () => Promise<Awaited<ReturnType<typeof choose>> | Awaited<ReturnType<typeof cancel>>>,
-  ) => {
+  /** `send` answers what to tell the person when it did not all go through, else null. */
+  const run = async (id: string, send: () => Promise<string | null>) => {
     if (pending !== null) return;
     setPending(id);
     setError(null);
-    const result = await send();
+    const failure = await send();
     setPending(null);
-    if (result._tag === "Failure") setError({ id, text: String(squashAtomCommandFailure(result)) });
+    if (failure !== null) setError({ id, text: failure });
     generations.refresh();
+  };
+  // The agent ended its turn waiting on this pick: the pick is the person's message in that
+  // generation's chat, so the agent carries on with it.
+  const tellAgent = async (generation: GameGeneration, text: string) => {
+    const target = { environmentId: threadRef.environmentId, threadId: generation.threadId };
+    const shell = readThreadShell(target);
+    if (shell === null) return `Picked. Its chat is not loaded here, so tell the agent: ${text}`;
+    const sent = await startTurn({
+      environmentId: target.environmentId,
+      input: {
+        threadId: target.threadId,
+        message: { messageId: newMessageId(), role: "user", text, attachments: [] },
+        runtimeMode: shell.runtimeMode,
+        interactionMode: shell.interactionMode,
+        dispatchMode: "queue",
+      },
+    });
+    const failure = failureText(sent);
+    return failure === null
+      ? null
+      : `Picked, but the message to the agent was not sent (${failure}). Tell it: ${text}`;
   };
   return {
     canChoose: canChoose && writer,
     canCancel: canCancel && writer,
     pending,
     errorFor: (id: string) => (error?.id === id ? error.text : null),
-    choose: (id: string, candidate: number) =>
-      run(id, () =>
-        choose({
+    choose: (generation: GameGeneration, candidate: number) =>
+      run(generation.id, async () => {
+        // Read before the pick: a picked generation keeps only its one candidate.
+        const text = pickMessage(generation, candidate);
+        const picked = await choose({
           environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId, id, candidate },
-        }),
-      ),
+          input: { threadId: threadRef.threadId, id: generation.id, candidate },
+        });
+        return failureText(picked) ?? (await tellAgent(generation, text));
+      }),
     cancel: (id: string) =>
-      run(id, () =>
-        cancel({
-          environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId, id },
-        }),
+      run(id, async () =>
+        failureText(
+          await cancel({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId, id },
+          }),
+        ),
       ),
   };
 }
@@ -228,7 +264,7 @@ export function CandidatePicker({
   const disabled = !actions.canChoose || actions.pending !== null;
   const use = () => {
     if (selected === null || disabled) return;
-    void actions.choose(generation.id, selected);
+    void actions.choose(generation, selected);
   };
   return (
     <div className="flex flex-col gap-2">
@@ -268,7 +304,7 @@ export function CandidatePicker({
             onClick={() => setSelected(index)}
             onDoubleClick={() => {
               setSelected(index);
-              if (!disabled) void actions.choose(generation.id, index);
+              if (!disabled) void actions.choose(generation, index);
             }}
             className={cn(
               "relative rounded-lg border-2 p-0.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
@@ -304,7 +340,7 @@ export function CandidatePicker({
         </Button>
         <span className="text-xs text-muted-foreground">
           {actions.canChoose
-            ? "Pick one; the agent goes on with it."
+            ? "Pick one; it goes to the agent as your message."
             : "The person directing this game picks one."}
         </span>
       </div>
@@ -379,7 +415,12 @@ export function GameGenerationBody({
 }) {
   const cost = generationCostLine(generation);
   const error = actions.errorFor(generation.id);
-  const settled = generation.state === "done";
+  const undone = generation.filesUndone === true;
+  const settled = generation.state === "done" && !undone;
+  const refused =
+    generation.state === "choosing" || generation.state === "done"
+      ? (generation.refused ?? [])
+      : [];
   const meta = [
     settled ? `Made with ${providerLabel(generation.provider)}` : null,
     cost,
@@ -407,7 +448,13 @@ export function GameGenerationBody({
           </Button>
         </div>
       ) : null}
-      {generation.state === "choosing" ? (
+      {undone ? (
+        <p className="text-xs text-muted-foreground">
+          Its files were undone: a build from before them was restored. Restoring a later build
+          brings them back.
+        </p>
+      ) : null}
+      {generation.state === "choosing" && !undone ? (
         <>
           <CandidatePicker
             threadRef={threadRef}
@@ -438,6 +485,15 @@ export function GameGenerationBody({
           )}
         </>
       ) : null}
+      {refused.length === 0 ? null : (
+        <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+          {refused.map((refusal) => (
+            <li key={refusal.label}>
+              {refusal.label}: refused by {providerLabel(generation.provider)}. {refusal.reason}
+            </li>
+          ))}
+        </ul>
+      )}
       {generation.state === "failed" || generation.state === "cancelled" ? (
         <p
           className={cn(
@@ -460,7 +516,10 @@ export function GameGenerationBody({
 }
 
 export function GenerationHeading({ generation }: { generation: GameGeneration }) {
-  const badge = STATE_BADGES[generation.state];
+  const badge =
+    generation.filesUndone === true
+      ? ({ label: "Undone", variant: "outline" } as const)
+      : STATE_BADGES[generation.state];
   return (
     <div className="flex min-w-0 items-center gap-2">
       <SparklesIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -511,7 +570,9 @@ export function GameGenerationCard({
 /** Whether any generation of the game waits on the person's pick, for the Stage's menu. */
 export const selectChoosingCount = (result: GenerationsResult): number =>
   AsyncResult.isSuccess(result)
-    ? result.value.generations.filter((generation) => generation.state === "choosing").length
+    ? result.value.generations.filter(
+        (generation) => generation.state === "choosing" && generation.filesUndone !== true,
+      ).length
     : 0;
 export const useChoosingCount = (threadRef: ScopedThreadRef) =>
   useEnvironmentQuerySelector(generationsTarget(threadRef), selectChoosingCount);

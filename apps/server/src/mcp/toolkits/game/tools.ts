@@ -167,7 +167,7 @@ const GenerateTool = Tool.make("game_generate", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const GenerateWaitTool = Tool.make("game_generate_wait", {
   description:
-    "Wait for a generation from game_generate: it returns when the files are in the game (done), when its candidates wait for the person's pick (choosing: tell the person to pick one in the chat, and end your turn unless other work remains), when it failed or was cancelled, or after seconds (default 120, up to 540) with it still making. Never start the same generation again while one is making: each start is paid.",
+    "Wait for a generation from game_generate: it returns when the files are in the game (done), when its candidates wait for the person's pick (choosing: tell the person to pick one in the chat, and end your turn unless other work remains; their pick arrives as their next message; a direction the provider refused is named with its reason), when it failed or was cancelled, or after seconds (default 120, up to 540) with it still making. Never start the same generation again while one is making: each start is paid.",
   parameters: GameGenerateWaitInput,
   success: GameGenerateResult,
   failure,

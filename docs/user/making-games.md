@@ -147,7 +147,10 @@ sprites, UI art) and textures by Codex, OpenAI or Google Gemini; characters, cre
 Tripo or Meshy; sound effects, music and voice by ElevenLabs. Whatever comes back goes through the
 same pipeline as everything else, matched to the game's key art and style, reviewed, recorded in
 `ASSETS.md` with its source, an AI flag and its cost, and undone like any other change. Files land
-under `art/generated/`.
+under `art/generated/`. When an undo removes a generation's files, its card says so; restoring a
+later build brings them back. Characters and creatures are generated only on a game whose
+characters are made with **Generated**, so nothing is spent on one the game could not use; images,
+props, textures and sound can be generated on every game.
 
 Set it up in **Settings → General → Art providers**. Codex needs no key: it uses your ChatGPT plan
 through the Codex you already run in Kurambit. Every other provider takes your own API key; each row
@@ -160,8 +163,11 @@ made and its cost when it is done, and every paid call counts against the **Dail
 across all games by default). A generation that would go over it is refused, with the numbers.
 
 For key art and hero characters the agent asks for a few candidates, each a different look (a different rendering, palette or shape) with a short label. They appear as a card in the
-chat: click one, then **Use this** (or use the arrow keys and Enter), and the agent carries on with
-it. Keep going takes the first candidate and says so. A new game on **Generated** starts from key
+chat: click one, then **Use this** (or use the arrow keys and Enter). Your pick goes into the chat as
+your message (`Use "Warm toon" for key_art.`), queued behind the agent's turn if it is still
+working, and the agent carries on from it. If the provider refuses one of the looks, the others
+still arrive and the card names the refused one with the provider's reason. Keep going takes the
+first candidate and says so. A new game on **Generated** starts from key
 art: the agent asks for three while it builds the first playable version, you pick one, and the
 game's colours and every later asset come from it. Human characters share the animation library;
 creatures (animals, monsters) keep their own skeleton and animations. **Cancel** stops a generation still being made.
