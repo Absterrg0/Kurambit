@@ -332,6 +332,7 @@ const make = Effect.gen(function* () {
       // A turn that ran lands as started: the captured steer it carried is spent.
       if (located.record.status === "planned" && chain.some((run) => run.startedAt !== null))
         yield* startStep(located, latest);
+      let failed = "its turn failed";
       if (latest.status === "failed") {
         const { turnItems } = yield* threads.getThreadRecords(threadId, ["turnItems"], {
           turnItemRunId: latest.id,
@@ -340,6 +341,7 @@ const make = Effect.gen(function* () {
         const failure = latestRootProviderFailure(latest, turnItems);
         const ended = providerEnding(failure);
         if (ended !== null) return yield* complete(located, ended);
+        if (failure !== null) failed = `its turn failed: ${failure.message}`.slice(0, 300);
       }
       const capped =
         latest.status === "interrupted" &&
@@ -374,7 +376,7 @@ const make = Effect.gen(function* () {
               : cutOff
                 ? "the server restarted during its turn and did not continue it"
                 : latest.status === "failed"
-                  ? "its turn failed"
+                  ? failed
                   : "";
       yield* complete(located, {
         kind: "turn",
