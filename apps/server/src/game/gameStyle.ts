@@ -2,12 +2,14 @@
 // The style lock's one reader: STYLE.json at the game root, decoded and checked
 // against the library, for the art tools that fill defaults from it and refuse
 // what drifts from it.
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import {
+  GAME_STYLE_DEFAULT_BUDGET,
   GAME_STYLE_DEFAULT_MUSIC_LUFS,
   GAME_STYLE_DEFAULT_SFX_PEAK_DBTP,
   GAME_STYLE_FILE,
@@ -16,7 +18,15 @@ import {
   GameStyle,
 } from "@kurambit/contracts";
 import type { LibraryFile, LibraryPack } from "./assetLibraryFiles.ts";
-import { LIBRARY_CATALOG, LIBRARY_FAMILIES, LIBRARY_RIG_JOINTS } from "./assetLibraryCatalog.ts";
+import { stableStringify } from "@kurambit/shared/stableJson";
+import {
+  LIBRARY_CATALOG,
+  LIBRARY_FAMILIES,
+  LIBRARY_RIG_ALIASES,
+  LIBRARY_RIG_JOINTS,
+  RETIRED_RIGS,
+  STANDARD_RIG,
+} from "./assetLibraryCatalog.ts";
 
 /** A lock is a few hundred bytes; anything this large is not one. */
 const MAX_STYLE_BYTES = 64 * 1024;
@@ -44,6 +54,9 @@ const near = (wanted: string, ids: ReadonlyArray<string>) => {
 
 const PACK_ID = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
+/** The rig id a lock's rig names, through the aliases older locks may use. */
+export const resolveRig = (rig: string) => LIBRARY_RIG_ALIASES[rig] ?? rig;
+
 /** What in a decoded lock names nothing in the library, or null. */
 export const styleProblem = (style: GameStyle): string | null => {
   const packIds = LIBRARY_CATALOG.map((pack) => pack.id);
@@ -57,15 +70,20 @@ export const styleProblem = (style: GameStyle): string | null => {
   const familyIds = LIBRARY_FAMILIES.map((family) => family.id);
   if (style.family !== undefined && !familyIds.includes(style.family))
     return `family: no library family "${style.family}"; the families are ${familyIds.join(", ")}`;
+  if (style.mode === "pixel" && Array.isArray(style.palette))
+    return "palette: pixel mode reads its palette from a pack id or a PNG";
   // A palette named like a pack is a pack id, not a path (a path has a slash or a .png).
   if (
-    style.palette !== undefined &&
+    typeof style.palette === "string" &&
     PACK_ID.test(style.palette) &&
     !packIds.includes(style.palette)
   )
     return `palette: no library pack "${style.palette}"${near(style.palette, packIds)}; a palette is a pack id or a PNG or folder in the game`;
+  if (style.rig === undefined) return null;
+  const retired = RETIRED_RIGS[style.rig];
+  if (retired !== undefined) return `rig: ${retired}`;
   const rigs = [...new Set(LIBRARY_CATALOG.flatMap((pack) => (pack.rig ? [pack.rig] : [])))];
-  if (style.rig !== undefined && !rigs.includes(style.rig))
+  if (!rigs.includes(resolveRig(style.rig)))
     return `rig: no library rig "${style.rig}"; the rigs are ${rigs.join(", ")}`;
   return null;
 };
@@ -144,23 +162,25 @@ export const lockSpriteInput = (
         refusal: `${GAME_STYLE_FILE} locks this game to smooth art, so its sprites are not quantised: leave out pixelArt, or change ${GAME_STYLE_FILE}'s mode to pixel (with tile and palette) to make the whole game pixel art.`,
       };
   } else {
+    // The lock's filter refuses a hex list in pixel mode, so only a pack id or a path reaches sprites.
+    const palette = typeof style.palette === "string" ? style.palette : undefined;
     const asked = input.pixelArt?.palette;
-    if (asked !== undefined && asked !== style.palette)
+    if (asked !== undefined && asked !== palette)
       return {
-        refusal: `${GAME_STYLE_FILE} locks this game's palette to ${style.palette}; leave out pixelArt.palette (the lock fills it) or pass that one. To change every sprite's palette, change ${GAME_STYLE_FILE}'s palette first and render the strips again.`,
+        refusal: `${GAME_STYLE_FILE} locks this game's palette to ${palette}; leave out pixelArt.palette (the lock fills it) or pass that one. To change every sprite's palette, change ${GAME_STYLE_FILE}'s palette first and render the strips again.`,
       };
     const outline = input.pixelArt?.outline ?? style.outline;
     locked = {
       ...locked,
       pixelArt: {
         ...input.pixelArt,
-        ...(style.palette === undefined ? {} : { palette: style.palette }),
+        ...(palette === undefined ? {} : { palette }),
         ...(outline === undefined ? {} : { outline }),
       },
     };
     if (input.pixelArt === undefined)
       notes.push(
-        `${GAME_STYLE_FILE}: pixel art, palette ${style.palette}${outline === undefined || outline === false ? "" : ", outlined"}.`,
+        `${GAME_STYLE_FILE}: pixel art, palette ${palette}${outline === undefined || outline === false ? "" : ", outlined"}.`,
       );
     if (input.size === undefined && style.tile !== undefined) {
       const size = Math.min(512, Math.max(8, style.tile * 2));
@@ -213,12 +233,19 @@ export const mayBeCharacter = (file: LibraryFile) =>
     file.format === "blend" ||
     file.format === "dae");
 
-/** Why the lock refuses a pack's characters on another rig, or null. */
+/**
+ * Why the lock refuses a pack's characters on another rig, or null. The rig names the
+ * skeleton made characters are conformed to; a pack the lock lists brings its characters
+ * on its own rig with its own clips (KayKit foes beside a standard-skeleton hero).
+ */
 export const lockRigRefusal = (pack: LibraryPack, style: GameStyle | null): string | null => {
-  if (style?.rig === undefined || pack.rig === undefined || pack.rig === style.rig) return null;
-  const same = LIBRARY_CATALOG.filter((other) => other.rig === style.rig).map((other) => other.id);
+  if (style?.rig === undefined || pack.rig === undefined || style.packs.includes(pack.id))
+    return null;
+  const rig = resolveRig(style.rig);
+  if (pack.rig === rig) return null;
+  const same = LIBRARY_CATALOG.filter((other) => other.rig === rig).map((other) => other.id);
   const from = same.length > 1 ? `${same.slice(0, -1).join(", ")} or ${same.at(-1)}` : same[0];
-  return `${pack.id}'s characters are on the ${pack.rig} rig and ${GAME_STYLE_FILE}'s rig is ${style.rig}, so their clips would not fit the game's other characters. Take characters from ${from}; from this pack add only props known to have no clips (glTF without animations: an FBX's clips cannot be read, so it counts as a character); or change ${GAME_STYLE_FILE}'s rig to move every character to ${pack.rig}.`;
+  return `${pack.id}'s characters are on the ${pack.rig} rig and ${GAME_STYLE_FILE}'s rig is ${style.rig}, so their clips would not fit the game's other characters. Take characters from ${from}; from this pack add only props known to have no clips (glTF without animations: an FBX's clips cannot be read, so it counts as a character); or, if its characters belong in the game on their own rig, add "${pack.id}" to ${GAME_STYLE_FILE}'s packs.`;
 };
 
 /** The loudness targets a lock sets, or the defaults without one. */
@@ -250,13 +277,30 @@ export const lockArmatureRefusal = (
   if (style === null || names.length === 0) return null;
   if (style.rig === undefined)
     return `${names.join(", ")} ${names.length === 1 ? "is an armature" : "are armatures"}, and ${GAME_STYLE_FILE} names no rig: its characters are not rigged. Characters come from the lock's packs; to bring rigged characters in, set ${GAME_STYLE_FILE}'s rig to the rig they share first.`;
-  const joints = LIBRARY_RIG_JOINTS[style.rig];
+  const rig = resolveRig(style.rig);
+  const joints = LIBRARY_RIG_JOINTS[rig];
   if (joints === undefined) return null;
   const off = names.filter((name) => {
     const bones = new Set(armatures[name]);
     return joints.some((joint) => !bones.has(joint));
   });
   if (off.length === 0) return null;
-  const packs = LIBRARY_CATALOG.filter((pack) => pack.rig === style.rig).map((pack) => pack.id);
-  return `${off.join(", ")} ${off.length === 1 ? "is not" : "are not"} on ${GAME_STYLE_FILE}'s rig ${style.rig}, so ${off.length === 1 ? "its" : "their"} clips would not fit the game's other characters. Characters come from ${packs.join(", ")}; build only props in Blender, or change ${GAME_STYLE_FILE}'s rig to move every character.`;
+  const packs = LIBRARY_CATALOG.filter((pack) => pack.rig === rig).map((pack) => pack.id);
+  return `${off.join(", ")} ${off.length === 1 ? "is not" : "are not"} on ${GAME_STYLE_FILE}'s rig ${rig}, so ${off.length === 1 ? "its" : "their"} clips would not fit the game's other characters. ${rig === STANDARD_RIG ? `Build characters with game_blender_character, which puts them on it, or take them from ${packs.join(", ")}` : `Characters come from ${packs.join(", ")}; build only props in Blender`}, or change ${GAME_STYLE_FILE}'s rig to move every character.`;
 };
+
+/** The export budgets a lock sets, each falling back to its default. */
+export const styleBudgets = (style: GameStyle | null) => ({
+  character: style?.budget?.character ?? GAME_STYLE_DEFAULT_BUDGET.character,
+  prop: style?.budget?.prop ?? GAME_STYLE_DEFAULT_BUDGET.prop,
+  texture: style?.budget?.texture ?? GAME_STYLE_DEFAULT_BUDGET.texture,
+});
+
+/**
+ * The lock's identity for a review key: any change to STYLE.json, even one a pass would
+ * not notice, makes an earlier review stale. Key order and spacing do not count.
+ */
+export const styleHash = (style: GameStyle | null): string =>
+  style === null
+    ? "none"
+    : NodeCrypto.createHash("sha256").update(stableStringify(style)).digest("hex");

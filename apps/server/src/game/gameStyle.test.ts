@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import type { GameStyle } from "@kurambit/contracts";
-import { LIBRARY_CATALOG, LIBRARY_RIG_JOINTS } from "./assetLibraryCatalog.ts";
+import { LIBRARY_CATALOG, LIBRARY_RIG_JOINTS, STANDARD_RIG } from "./assetLibraryCatalog.ts";
 import {
   lockArmatureRefusal,
   lockImportRefusal,
@@ -15,6 +15,8 @@ import {
   lockSpriteInput,
   mayBeCharacter,
   readGameStyle,
+  styleBudgets,
+  styleHash,
 } from "./gameStyle.ts";
 
 const roots: string[] = [];
@@ -71,6 +73,10 @@ it.effect("reads no lock as none, and refuses a link, a folder or a lock that is
     expect(failure(yield* Effect.exit(readGameStyle(root)))).toMatch(/kaykit-dungeon-remastered/);
     yield* write({ ...kaykit, rig: "mixamo" });
     expect(failure(yield* Effect.exit(readGameStyle(root)))).toMatch(/no library rig/);
+    yield* write({ ...kaykit, mode: "pixel", tile: 16, palette: ["#000000", "#ffffff"] });
+    expect(failure(yield* Effect.exit(readGameStyle(root)))).toMatch(
+      /pixel mode reads its palette from a pack id or a PNG/,
+    );
     yield* write(kaykit);
     expect(yield* readGameStyle(root)).toEqual(kaykit);
   }),
@@ -89,8 +95,11 @@ it("refuses packs outside the lock and characters on another rig, never props", 
   // A pixel lock's palette pack is part of the look without being listed.
   const pixel = { ...kaykit, mode: "pixel" as const, tile: 16, palette: "kenney-tiny-dungeon" };
   expect(lockPackRefusal(pack("kenney-tiny-dungeon"), pixel)).toBeNull();
-  // Listed, but its characters are on another rig: the add refuses them, though its props may come.
-  expect(lockRigRefusal(pack("kenney-mini-characters"), kaykit)).toMatch(/kaykit-adventurers/);
+  // A listed pack brings its characters on its own rig; an unlisted one on another rig does not.
+  expect(lockRigRefusal(pack("kenney-mini-characters"), kaykit)).toBeNull();
+  expect(lockRigRefusal(pack("quaternius-universal-base-characters"), kaykit)).toMatch(
+    /kaykit-adventurers/,
+  );
   expect(lockRigRefusal(pack("kaykit-dungeon-remastered"), kaykit)).toBeNull();
   // A model whose clips cannot be read is a possible character; only a model known to have none is a prop.
   const model = { path: "a", bytes: 1, media: "model" as const };
@@ -139,5 +148,46 @@ it("fills sprite renders from a pixel lock and refuses a palette it does not hol
   ).toMatchObject({ refusal: expect.stringMatching(/palette to kenney-tiny-dungeon/) });
   expect(lockSpriteInput({ output: "x", pixelArt: {} }, kaykit)).toMatchObject({
     refusal: expect.stringMatching(/smooth/),
+  });
+});
+
+it.effect("reads an old rig id through its alias and refuses a retired one with the edit", () =>
+  Effect.gen(function* () {
+    const root = yield* Effect.promise(game);
+    const standard: GameStyle = {
+      ...kaykit,
+      family: "quaternius-universal",
+      rig: "quaternius-ual2",
+      packs: ["quaternius-universal-animation-library-2"],
+    };
+    const write = (value: unknown) =>
+      Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "STYLE.json"), JSON.stringify(value)),
+      );
+    yield* write(standard);
+    expect(yield* readGameStyle(root)).toEqual(standard);
+    const bones = [...LIBRARY_RIG_JOINTS[STANDARD_RIG]!, "tail_01"];
+    expect(lockArmatureRefusal({ cat: bones }, standard)).toBeNull();
+    expect(lockArmatureRefusal({ cat: ["root"] }, standard)).toMatch(/rig standard-humanoid/);
+    expect(lockRigRefusal(pack("quaternius-universal-base-characters"), standard)).toBeNull();
+
+    yield* write({ ...standard, rig: "quaternius-ual1" });
+    expect(failure(yield* Effect.exit(readGameStyle(root)))).toMatch(
+      /Set STYLE.json's rig to standard-humanoid/,
+    );
+  }),
+);
+
+it("hashes a lock by its content, not its key order, and fills budgets from defaults", () => {
+  const reordered = Object.fromEntries(Object.entries(kaykit).toReversed()) as GameStyle;
+  expect(styleHash(reordered)).toBe(styleHash(kaykit));
+  expect(styleHash(kaykit)).toMatch(/^[0-9a-f]{64}$/);
+  expect(styleHash({ ...kaykit, view: "side" })).not.toBe(styleHash(kaykit));
+  expect(styleHash(null)).toBe("none");
+  expect(styleBudgets(null)).toEqual({ character: 20_000, prop: 8_000, texture: 1024 });
+  expect(styleBudgets({ ...kaykit, budget: { prop: 500 } })).toEqual({
+    character: 20_000,
+    prop: 500,
+    texture: 1024,
   });
 });
