@@ -1051,7 +1051,7 @@ const make = Effect.gen(function* () {
     `;
     for (const raw of rows) {
       const row = toRow(raw);
-      if (row === null) continue;
+      if (row === null || (yield* FiberMap.has(fibers, row.generation.id))) continue;
       const adapter = ART_ADAPTERS[row.generation.provider];
       const job = row.meta.job;
       if (job === null || adapter?.poll === undefined) {
@@ -1076,7 +1076,9 @@ const make = Effect.gen(function* () {
       Effect.logWarning("art generations could not be recovered", { cause }),
     ),
   );
-  yield* Effect.forkScoped(recover);
+  // Before the service is handed out: a generation started after this is never mistaken for
+  // one the last server left behind. Each resumed driver is its own fiber.
+  yield* recover;
 
   return GameArt.of({ generate, wait, list, choose, cancel, providers, lanes });
 });
