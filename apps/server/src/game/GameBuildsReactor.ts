@@ -164,7 +164,24 @@ const make = Effect.gen(function* () {
           ),
         ),
       ),
-      forkParked(builds.reconcile),
+      Effect.andThen(
+        forkParked(builds.reconcile),
+        // Guidance arrives with a new server: every game's skills follow it before its next turn.
+        forkParked(
+          projects.list().pipe(
+            Effect.flatMap((games) =>
+              Effect.forEach(
+                games,
+                (game) => projects.refreshGuidance(game.root).pipe(Effect.ignore),
+                {
+                  discard: true,
+                },
+              ),
+            ),
+            Effect.ignore,
+          ),
+        ),
+      ),
     );
 
   return GameBuildsReactor.of({ start, handle });
