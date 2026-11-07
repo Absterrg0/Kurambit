@@ -75,5 +75,6 @@ export * from "./gameRun.ts";
 export * from "./gameRunRecords.ts";
 export * from "./gameBlender.ts";
 export * from "./gameLibrary.ts";
+export * from "./gameModel.ts";
 export * from "./gameStyle.ts";
 export * from "./gameUnity.ts";

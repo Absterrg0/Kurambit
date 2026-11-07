@@ -1,4 +1,6 @@
 import * as Schema from "effect/Schema";
+import { GameLibraryPackId } from "./gameLibraryPackId.ts";
+import { GameModelMeasure, GameModelRefusal } from "./gameModel.ts";
 
 /** Live Blender through the pinned mcp-for-blender server, behind GameBlender. */
 
@@ -10,7 +12,7 @@ export const GameBlenderCodeResult = Schema.Struct({ output: Schema.String });
 export type GameBlenderCodeResult = typeof GameBlenderCodeResult.Type;
 
 export const GameBlenderLookInput = Schema.Struct({
-  mode: Schema.optionalKey(Schema.Literals(["viewport", "camera", "angles", "frames"])),
+  mode: Schema.optionalKey(Schema.Literals(["viewport", "camera", "angles", "frames", "review"])),
   target: Schema.optionalKey(Schema.Array(Schema.String)),
   views: Schema.optionalKey(Schema.Array(Schema.String)),
   distance: Schema.optionalKey(Schema.Number),
@@ -21,6 +23,8 @@ export const GameBlenderLookInput = Schema.Struct({
   frameCount: Schema.optionalKey(Schema.Number),
   view: Schema.optionalKey(Schema.String),
   maxSize: Schema.optionalKey(Schema.Number),
+  /** review: the character's height on screen at game distance, px. Default from STYLE.json view: perspective 96, side 96, top-down 64, isometric 64. */
+  gamePx: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 16, maximum: 512 }))),
 });
 export type GameBlenderLookInput = typeof GameBlenderLookInput.Type;
 export const GameBlenderLookScreenshot = Schema.Struct({
@@ -30,9 +34,23 @@ export const GameBlenderLookScreenshot = Schema.Struct({
   height: Schema.Number,
 });
 export type GameBlenderLookScreenshot = typeof GameBlenderLookScreenshot.Type;
+export const GameBlenderReview = Schema.Struct({
+  /** The candidate's key; game_blender_export promotes exactly this. */
+  key: Schema.String,
+  objects: Schema.Array(Schema.String),
+  /** Game-relative composite PNG under builds/logs/blender-pipeline/<key>/ (also the screenshot). */
+  image: Schema.String,
+  measured: GameModelMeasure,
+  /** Empty when the export would go through. */
+  refusals: Schema.Array(GameModelRefusal),
+  /** The concept set beside it, or null. */
+  concept: Schema.NullOr(Schema.String),
+});
+export type GameBlenderReview = typeof GameBlenderReview.Type;
 export const GameBlenderLookResult = Schema.Struct({
   text: Schema.String,
   screenshot: Schema.optionalKey(GameBlenderLookScreenshot),
+  review: Schema.optionalKey(GameBlenderReview),
 });
 export type GameBlenderLookResult = typeof GameBlenderLookResult.Type;
 
@@ -95,8 +113,78 @@ export const GameBlenderExportResult = Schema.Struct({
   blend: Schema.String,
   /** Game-relative GLB under the engine directory the game can load; run game_import after. */
   export: Schema.String,
+  /** Game-relative sidecar written beside the GLB. */
+  sidecar: Schema.String,
 });
 export type GameBlenderExportResult = typeof GameBlenderExportResult.Type;
+
+const Unit = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
+
+export const GameBlenderBody = Schema.Union([
+  /** A library body on the standard skeleton (UBC, a UAL mannequin): pack-relative path as game_assets_search lists it. */
+  Schema.Struct({
+    library: Schema.Struct({
+      pack: GameLibraryPackId,
+      file: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300)),
+    }),
+  }),
+  /** An MPFB2 human (needs MPFB2 installed). age 0 is a toddler, 0.5 an adult; gender 0 female, 1 male. */
+  Schema.Struct({
+    mpfb: Schema.Struct({
+      age: Unit,
+      gender: Unit,
+      weight: Unit,
+      muscle: Schema.optionalKey(Unit),
+      height: Schema.optionalKey(Unit),
+      proportions: Schema.optionalKey(Unit),
+    }),
+  }),
+  /** A model in this game already on the standard skeleton (an earlier export); phase 3 adds Tripo output. */
+  Schema.Struct({ game: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)) }),
+]);
+export type GameBlenderBody = typeof GameBlenderBody.Type;
+
+export const GameBlenderChain = Schema.Struct({
+  /** Bones are <name>_01..; mirrored chains <name>_l_01.. and <name>_r_01... */
+  name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9]{0,15}$/)),
+  /** The standard joint it hangs from (pelvis for a tail, Head for ears). */
+  parent: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  bones: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 8 })),
+  /** Rest direction in Blender's axes, the character facing -Y: +Z up, +Y behind, +X its left. */
+  direction: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+  /** Whole chain length in metres at the body's built size. */
+  length: Schema.Number.check(Schema.isBetween({ minimum: 0.01, maximum: 5 })),
+  /** Also make the chain mirrored across X (ears). */
+  mirror: Schema.optionalKey(Schema.Boolean),
+});
+
+export const GameBlenderCharacterInput = Schema.Struct({
+  /** The collection, the armature's name and the export's default stem. */
+  name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
+  body: GameBlenderBody,
+  /** "Walk_Loop" or "<pack-id>:Walk_Loop", from the lock's packs on standard-humanoid. Omitted: STANDARD_CLIPS. */
+  clips: Schema.optionalKey(
+    Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160))).check(
+      Schema.isMaxLength(48),
+    ),
+  ),
+  chains: Schema.optionalKey(Schema.Array(GameBlenderChain).check(Schema.isMaxLength(6))),
+  /** Rebuild the body and armature of an existing <name>, re-binding its other objects by parent bone. */
+  replace: Schema.optionalKey(Schema.Boolean),
+});
+export type GameBlenderCharacterInput = typeof GameBlenderCharacterInput.Type;
+
+export const GameBlenderCharacterResult = Schema.Struct({
+  text: Schema.String,
+  armature: Schema.String,
+  meshes: Schema.Array(Schema.String),
+  clips: Schema.Array(Schema.String),
+  /** Chain name to its bones. */
+  chains: Schema.Record(Schema.String, Schema.Array(Schema.String)),
+  restDeviation: Schema.Number,
+  height: Schema.Number,
+});
+export type GameBlenderCharacterResult = typeof GameBlenderCharacterResult.Type;
 
 /** Named views; the four sides take `elevation`, top looks straight down, isometric is 45° round and 30° down. */
 export const GameBlenderSpriteViewName = Schema.Literals([

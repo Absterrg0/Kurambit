@@ -1,5 +1,8 @@
 import * as Schema from "effect/Schema";
 import { GameBlenderLookScreenshot } from "./gameBlender.ts";
+import { GameLibraryPackId } from "./gameLibraryPackId.ts";
+
+export { GameLibraryPackId } from "./gameLibraryPackId.ts";
 
 /** The pinned CC0 asset library behind game_assets_search and game_assets_add. */
 export const GameLibraryKind = Schema.Literals([
@@ -17,8 +20,6 @@ export const GameLibraryKind = Schema.Literals([
 ]);
 export type GameLibraryKind = typeof GameLibraryKind.Type;
 
-/** A library pack's id, as game_assets_search lists it. */
-export const GameLibraryPackId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{1,63}$/));
 const packPath = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300));
 
 export const GameAssetsSearchInput = Schema.Struct({

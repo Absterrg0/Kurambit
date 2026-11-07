@@ -350,6 +350,8 @@ export const WS_METHODS = {
   gameWindowsPackage: "game.windowsPackage",
   gameWebPackage: "game.webPackage",
   gameToolchainStatus: "game.toolchainStatus",
+  gameToolchainInstall: "game.toolchainInstall",
+  gameToolchainRemove: "game.toolchainRemove",
   gameKeepGoing: "game.keepGoing",
   gameKeepGoingStatus: "game.keepGoingStatus",
   gameKeepGoingDecide: "game.keepGoingDecide",
@@ -1460,6 +1462,19 @@ const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   success: GameToolchainStatus,
   error: gameError,
 });
+/** The tools only the person installs and removes, from Settings: MPFB2 for Blender. */
+export const GameToolchainChangeInput = Schema.Struct({ tool: Schema.Literal("mpfb") });
+export type GameToolchainChangeInput = typeof GameToolchainChangeInput.Type;
+const WsGameToolchainInstallRpc = Rpc.make(WS_METHODS.gameToolchainInstall, {
+  payload: GameToolchainChangeInput,
+  success: GameToolchainStatus,
+  error: gameError,
+});
+const WsGameToolchainRemoveRpc = Rpc.make(WS_METHODS.gameToolchainRemove, {
+  payload: GameToolchainChangeInput,
+  success: GameToolchainStatus,
+  error: gameError,
+});
 
 const WsGameKeepGoingRpc = Rpc.make(WS_METHODS.gameKeepGoing, {
   payload: GameKeepGoingInput,
@@ -1550,6 +1565,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameWindowsPackageRpc,
   WsGameWebPackageRpc,
   WsGameToolchainStatusRpc,
+  WsGameToolchainInstallRpc,
+  WsGameToolchainRemoveRpc,
   WsGameKeepGoingRpc,
   WsGameKeepGoingStatusRpc,
   WsGameKeepGoingDecideRpc,

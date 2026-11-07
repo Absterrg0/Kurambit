@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { diffBuildFacts, type GameBuildFacts, GameBuildId, gameFactsView } from "./gameBuilds.ts";
+import * as Schema from "effect/Schema";
+
+import { diffBuildFacts, GameBuildFacts, GameBuildId, gameFactsView } from "./gameBuilds.ts";
 
 const tier = (ending: "won" | "lost" | "no-ending", at: number | null) => ({
   status: "measured" as const,
@@ -28,6 +30,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   winnableWithoutSkill: { status: "measured", value: true },
   liveness: { status: "not-measured", why: "ffmpeg failed", retry: true },
   firstResponse: { status: "pending" },
+  assets: { status: "not-measured", why: "not built", retry: false },
   message: "",
   ...patch,
 });
@@ -79,5 +82,60 @@ describe("gameFactsView", () => {
     expect(rows["motion"]?.reading).toEqual({ _tag: "not-measured", why: "ffmpeg failed" });
     expect(rows["motion"]?.evidence).toEqual([]);
     expect(rows["first-response"]?.reading).toEqual({ _tag: "pending" });
+  });
+});
+
+describe("assets", () => {
+  const model = (status: "measured" | "not-measured") => ({
+    path: "web/assets/blender/cat.glb",
+    triangles: 1,
+    bytes: 1,
+    maxTextureSide: 64,
+    skeleton: null,
+    clips: 0,
+    pipeline:
+      status === "measured"
+        ? {
+            status,
+            sidecar: "web/assets/blender/cat.asset.json",
+            kind: "prop" as const,
+            height: 1,
+            reviewedAt: "2026-11-07T00:00:00.000Z",
+            groundSpeeds: [],
+            seamsBroken: [],
+            drifting: [],
+            source: {
+              route: "blender" as const,
+              parts: [
+                { what: "parts" as const, from: "made", licence: "", ai: false, credits: null },
+              ],
+              standIn: null,
+              concept: null,
+            },
+          }
+        : { status, why: "no sidecar: not exported through the pipeline", retry: false },
+  });
+  const assets = (...models: ReturnType<typeof model>[]) =>
+    facts({ assets: { status: "measured", value: { models, more: 0, libraryFiles: 3 } } });
+
+  it("is never better or worse, and a row written before it decodes as not measured", () => {
+    const row = Object.fromEntries(
+      gameFactsView(assets(model("measured"), model("not-measured"))).map((r) => [r.id, r]),
+    )["assets"];
+    expect(row?.reading).toEqual({
+      _tag: "measured",
+      text: "1 made model measured, 1 not measured",
+      value: 1,
+      tone: "neutral",
+    });
+    const delta = byId(diffBuildFacts(assets(), assets(model("measured"))))["assets"];
+    expect(delta).toMatchObject({ change: "changed", tone: "neutral" });
+
+    const { assets: _, ...old } = Schema.encodeSync(GameBuildFacts)(facts());
+    expect(Schema.decodeSync(GameBuildFacts)(old).assets).toEqual({
+      status: "not-measured",
+      why: "measured before asset facts existed",
+      retry: false,
+    });
   });
 });

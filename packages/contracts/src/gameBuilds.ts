@@ -1,7 +1,9 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
 import { GameBotDecider } from "./gameBot.ts";
 import { GameBuildId } from "./gameBuildId.ts";
+import { GameAssetSource } from "./gameModel.ts";
 
 // GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
 // it without importing this module, which would close an import cycle through gameBot.ts.
@@ -111,6 +113,7 @@ export const GameFactId = Schema.Literals([
   "detail",
   "colour",
   "first-response",
+  "assets",
 ]);
 export type GameFactId = typeof GameFactId.Type;
 export const GameFactTone = Schema.Literals(["good", "bad", "neutral"]);
@@ -164,6 +167,45 @@ const gameFact = <S extends Schema.Top>(value: S) =>
     GameFactNotMeasured,
     GameFactPending,
   ]);
+
+export const GameModelFact = Schema.Struct({
+  /** Game-relative GLB. */
+  path: Schema.String,
+  /** Read from the GLB's JSON. */
+  triangles: NonNegativeInt,
+  bytes: NonNegativeInt,
+  maxTextureSide: NonNegativeInt,
+  /** The rig id whose joints its skin holds (aliases resolved); null when unskinned or on no known rig. */
+  skeleton: Schema.NullOr(Schema.String),
+  clips: NonNegativeInt,
+  /** The export's measurement, valid only while the GLB's bytes match its sidecar. */
+  pipeline: Schema.Union([
+    Schema.Struct({
+      status: Schema.Literal("measured"),
+      sidecar: Schema.String,
+      kind: Schema.Literals(["character", "prop"]),
+      height: Schema.Number,
+      reviewedAt: IsoDateTime,
+      groundSpeeds: Schema.Array(
+        Schema.Struct({ clip: Schema.String, speed: Schema.NullOr(Schema.Number) }),
+      ).check(Schema.isMaxLength(16)),
+      seamsBroken: Schema.Array(Schema.String).check(Schema.isMaxLength(16)),
+      drifting: Schema.Array(Schema.String).check(Schema.isMaxLength(16)),
+      source: GameAssetSource,
+    }),
+    GameFactNotMeasured,
+  ]),
+});
+export type GameModelFact = typeof GameModelFact.Type;
+export const GameAssetFacts = Schema.Struct({
+  /** Models under the engine's assets folder, outside library/, path order. */
+  models: Schema.Array(GameModelFact).check(Schema.isMaxLength(24)),
+  /** Models past the cap, counted only. */
+  more: NonNegativeInt,
+  /** Library files ASSETS.md credits; not measured one by one. */
+  libraryFiles: NonNegativeInt,
+});
+export type GameAssetFacts = typeof GameAssetFacts.Type;
 
 export const GameBotEnding = Schema.Literals([
   "won",
@@ -228,6 +270,16 @@ export const GameBuildFacts = Schema.Struct({
   winnableWithoutSkill: gameFact(Schema.Boolean),
   liveness: gameFact(GameLiveness),
   firstResponse: gameFact(GameFirstResponse),
+  /** Static: read from the build's GLBs and sidecars, never played; Keep going does not watch it. */
+  assets: gameFact(GameAssetFacts).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        status: "not-measured" as const,
+        why: "measured before asset facts existed",
+        retry: false,
+      }),
+    ),
+  ),
   /** For people and agents: what is measuring, queued behind what, about how long is left. */
   message: Schema.String,
 });
@@ -287,6 +339,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   detail: "Detail",
   colour: "Colour",
   "first-response": "First response",
+  assets: "Assets",
 };
 
 const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
@@ -426,6 +479,16 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
               : "neutral",
         kind: response.seconds === null ? "none" : "moved",
       }));
+    case "assets":
+      return from(facts.assets, (assets) => {
+        const measured = assets.models.filter(
+          (model) => model.pipeline.status === "measured",
+        ).length;
+        const notMeasured = assets.models.length - measured;
+        const text = `${measured} made model${measured === 1 ? "" : "s"} measured${notMeasured > 0 ? `, ${notMeasured} not measured` : ""}`;
+        // A triangle count is not taste: the reading is never better or worse, only different.
+        return { text, value: measured, tone: "neutral", kind: text };
+      });
   }
 };
 
