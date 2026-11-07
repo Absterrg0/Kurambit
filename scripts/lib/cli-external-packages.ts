@@ -16,6 +16,8 @@ export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "@cursor/sdk",
   // Playwright reads package.json and browsers.json beside its runtime modules.
   "playwright-core",
+  // gltfpack reads its library.wasm beside its module.
+  "gltfpack",
   "node-pty",
   "ffi-rs",
   "@yuuang/",

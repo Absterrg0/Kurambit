@@ -123,6 +123,10 @@ const triangles = (doc: Doc) => {
   return count;
 };
 
+/** The triangles a model's glTF JSON draws (a GLB's JSON chunk), compressed or not. */
+export const gltfTriangles = (json: unknown) =>
+  typeof json === "object" && json !== null ? triangles(json as Doc) : 0;
+
 /**
  * The export's measurement, valid only while the GLB's bytes are the ones its sidecar names.
  * A sidecar is a file in the game, so an agent could forge one; the hash stops staleness, the

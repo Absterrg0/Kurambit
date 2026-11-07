@@ -31,6 +31,7 @@ export const UNITY_PROFILE: GameEngineProfile = {
   resourcePath: (projectRelative) => projectRelative,
   importRoot: "Assets",
   importStep: true,
+  compressedModels: false,
   groundHint: (_width, height, ground) => {
     const up = Number(((height - ground) / height).toFixed(4));
     return `Unity: set the sprite's Pivot to Custom (0.5, ${up}) in its import settings (Pixels Per Unit is yours to match the tiles) to put the transform on the ground line.`;

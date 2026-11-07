@@ -73,7 +73,9 @@ The rest of this file is reference: read a section when you use its kit.
   (with `.animations`) and `ctx.assets.texture(name)` a texture, ready in
   `start`. A model `game_blender_export` made is named by its sidecar,
   `cat: "assets/blender/space_cat.asset.json"`: the GLB beside it loads, and
-  every copy carries the sidecar as `userData.asset` for `animate`. A path
+  every copy carries the sidecar as `userData.asset` for `animate`. That GLB
+  ships compressed (WebP images, meshopt geometry; the loader decodes it), and
+  its sidecar names those bytes: never re-compress it by hand. A path
   that fails to load is reported as a page error. The
   loading screen also compiles the models' shaders, lit as a run is, so the
   first frame of play does not stall on them.

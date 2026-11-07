@@ -270,7 +270,10 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
 6. **Export:** `game_blender_export` writes exactly the reviewed model, its
    `<name>.asset.json` sidecar (clips with their ground speed, springs,
    height) and an ASSETS.md line. Any change after the review needs a new
-   review. In three.js, point `ASSETS` at the sidecar
+   review. In three.js the GLB ships compressed (WebP images, meshopt
+   geometry and clips) and the sidecar names the shipped bytes, so never
+   compress it afterwards; `simplify` caps its triangles (a character drawn
+   about 100 px tall rarely needs over 20000). In three.js, point `ASSETS` at the sidecar
    (`cat: "assets/blender/space_cat.asset.json"`) and drive it with
    `locomotion()` and `play(state, { moveSpeed })` so the feet stay planted
    (TEMPLATE.md).
