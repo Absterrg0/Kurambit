@@ -358,7 +358,9 @@ player does nothing (idle) or presses keys at random (masher), what the game's o
 (skilled), whether it can be won without skill, how long the picture freezes and how much it moves,
 and how soon the game answers the first input. For a three.js game it also lists which files under
 its assets folder those plays loaded and which sounds started playing, so art that was made but never
-wired in shows up as unused. Opening or playing a build that was never measured
+wired in shows up as unused, and how smoothly the random-input play ran: frames per second, the
+slowest 1% of frames, the GPU's time per frame and the share of the resolution the game drew at.
+On a machine where Kurambit's browser cannot use the GPU, performance says so instead of guessing. Opening or playing a build that was never measured
 measures it, one build at a time; a run measures its builds itself, and a three.js game measures
 each turn's build in the background when the turn ends. A fact Kurambit could not
 measure says **Not measured** and why, and never counts as a result: if a tool failed, **Measure

@@ -52,6 +52,7 @@ describe("web play session", () => {
             args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
             renderer: null,
             software: true,
+            probe: "",
           },
           url: `http://127.0.0.1:${port}/`,
           width: 320,

@@ -13,7 +13,7 @@ The first playable build, in this order (the game's AGENTS.md, "The first turn")
    props. They land under `web/assets/library/<pack>/`; name them in `ASSETS`
    by the path the add reports. The shell loads them and compiles their
    shaders behind the loading screen, so play never starts on a freeze; keep
-   the default `LOOK` (no bloom, no lights besides `ctx.look.sun`) for it.
+   the default look (or name one preset, below; no lights besides `ctx.look.sun`).
 2. The game: paste the recipe for your view from `studio-skills/three.md`
    (third person, top-down, side view) over `web/main.js`, swap in your
    models, and grow it into the brief's core loop with the kits below.
@@ -42,6 +42,16 @@ The rest of this file is reference: read a section when you use its kit.
   level; split it into more modules under `web/` as it grows. An optional
   `resize(ctx)` runs on every window resize, paused or not; the shell
   already refits a perspective or orthographic `ctx.camera`.
+- Three more optional exports, for a game that outgrows the starter's shape
+  without forking the shell: `async prepare({ renderer, assets, look,
+progress })` runs once behind the loading bar, after `ASSETS` (build a big
+  world kept across runs, `look.bake` its shadow, compile its shaders;
+  `progress(0..1)` fills the bar); `render(ctx, dt)` draws each frame instead
+  of the shell (`ctx.look.render(scene, camera)` still draws through the look);
+  `title(dt, ctx)` makes the title live: `ctx` (`scene`, `camera`, `renderer`,
+  `assets`, `look`) lasts across visits and the shell draws it through the look
+  every frame the title is up. A world kept across runs comes out of
+  `ctx.scene` in `stop(ctx)`, or the shell disposes it with the run.
 - `ctx` also carries `renderer`, `canvas`, `hud` (the game's DOM overlay,
   emptied each run), `player` (set it to the player object so the probe
   reports its position), `input` (the controls, below), `mouse` (`x`, `y` in canvas pixels, `ndc.x` / `ndc.y` for a `Raycaster`,
@@ -94,8 +104,10 @@ The rest of this file is reference: read a section when you use its kit.
   restyles both to the game's key art; keep the element ids and
   `data-action` attributes. `CLICK_SOUND` in `shell.js` names a file to
   replace the synthesized menu tick.
-- Play music with `playMusic(url)` and effects with `Juice.sfx(url)` (or
-  `playSfx`) from `./shell/audio.js`, so the volume sliders reach them.
+- Play music with `playMusic(url)`, an ambience bed (wind, rain, a room's hum)
+  with `playAmbience(url, { volume })` (one at a time, crossfading;
+  `stopAmbience()`), and effects with `Juice.sfx(url)` (or `playSfx`) from
+  `./shell/audio.js`, so the volume sliders reach them.
 
 ## Controls
 
@@ -131,6 +143,11 @@ The rest of this file is reference: read a section when you use its kit.
 `Juice.shake(0.4)`, `Juice.hitPause()`, `Juice.pop(mesh)`,
 `Juice.squash(mesh)`, `Juice.flash(mesh)`, `Juice.flashScreen(color)`,
 `Juice.burst(position, color)` and `Juice.sfx("./assets/sfx/hit.wav")`.
+A fight wants more: `Juice.sparks(at, away)`, `Juice.blood(at, away)`,
+`Juice.dust(at)` and `Juice.emit(at, { ... })` draw from one pooled particle
+system (one draw call for every kind), and `Juice.trail(hero.root, { bone:
+"hand_r" })` is a weapon trail measured from what that hand holds, shown while
+`trail.on`. All of it runs on game time, so `Juice.hitPause()` holds it too.
 The comment block at the top of the file shows each call.
 
 ## Characters and cameras
@@ -152,28 +169,54 @@ Blender kit's `eye_lid` or `eye_squash`) blinks on its own every 2–6 s, and
 (`web/shell/locomotion.js`) drives it: call `loco.update({ speed, grounded,
 vy, dt })` every frame with the speed the body really moved, and
 `loco.act("attack")` for a one-shot move. The console's `animate:` line names
-each state's clip and its ground speed. `followCamera2D`
+each state's clip and its ground speed. For combat, a call can play a clip by
+its exact name (`hero.play("Sword_Attack", { once: true, fade: 0.08 })`), from
+an offset (`from: 0.25`), backwards (`reverse: true`) or again from its start
+(`restart: true`, a combo's next cut); `hero.time` is the clip's own seconds
+for hit windows (`hero.progress`, `hero.duration`, `hero.clip` beside it), on
+game time. `followCamera2D`
 and `followCamera3D` (`web/shell/camera.js`) follow the player with a dead
-zone, look-ahead, damping and level bounds, and in 3D pull in at walls.
+zone, look-ahead, damping and level bounds, and in 3D pull in at walls and
+props (its near plane's corners too, so a post never fills the view). For
+action, `followCamera3D` takes `shoulder` (an over-the-shoulder offset),
+`orbitButton` (which mouse button drags the view; `null` keeps right-click free
+for a dodge) and `ground` (a height function to stay above), and
+`cam.focus = foe.root` turns it to keep a foe in frame.
 The shell ticks both after `update` and drops them between runs. The comment
 block at the top of each file shows each call.
 
 ## The look
 
-`web/shell/look.js` draws every frame: Neutral tone mapping (base colours
-shift little, highlights roll off), a sky light from above and the ground, soft
-shadows and the canvas's anti-aliasing. `ctx.look.sun({ follow: ctx.player,
-size: 30 })` adds a sun whose shadows follow the player, as the starter does;
-models from `ASSETS` cast and receive shadows, and a mesh you build needs
-`castShadow` (and `receiveShadow` for the ground). Tune it with one export in
-`main.js`: `export const LOOK = { exposure: 1.1, environment: "room", bloom: true }`.
-Bloom (emissive and HDR colours above 1 glow) is off unless asked for: it
-costs several times the plain look every frame, and its add-ons load only
-then. Through an orthographic camera nothing is tone mapped unless `LOOK`
-names a `toneMapping`, so a 2D or pixel-art game's sprites draw their files'
-exact colours; such a game also sets `export const LOOK = { environment:
-false, shadows: false }`. The comment block at the top of the
-file lists every option.
+`web/shell/look.js` draws every frame. A preset picks the light, the sky, the
+fog and the post chain, in one line in `main.js`:
+`export const LOOK = { preset: "golden" }`. `day` is the default: a soft sky
+that lights the scene (an environment probe drawn from it), height fog, soft
+sun shadows, Neutral tone mapping and a light grade, drawn straight to the
+canvas with its anti-aliasing, so it costs what a plain three.js frame costs.
+`golden` (a low warm sun, long shadows), `night` (moonlight, glows) and
+`interior` (a studio light, no sky) add the post chain: ambient occlusion,
+bloom, filmic tone mapping, the grade and SMAA in one merged pass. `flat` is
+the stylised one, bright and ungraded. Any part can be overridden (`exposure`,
+`sun`, `sky`, `fog`, `ao`, `bloom`, `grade`); `ao: true` or `bloom: true` turns
+the chain on for any preset. The render scale adapts: when frames run late, the
+look draws fewer pixels (down to half per side) and sharpens, and comes back up
+when the GPU has room; `resolution: 1` fixes it. A browser drawing in software
+always gets the plain path. The comment block at the top of the file lists
+every option.
+
+`ctx.look.sun({ follow: ctx.player, size: 30 })` adds a sun whose soft shadows
+follow the player, as the starter does; models from `ASSETS` cast and receive
+shadows, and a mesh you build needs `castShadow` (and `receiveShadow` for the
+ground). A big static level renders its shadow once with
+`ctx.look.bake(level)` (or `look.bake` in `prepare`): the sun's own shadow then
+holds only what moves, which saves most of the shadow's cost each frame. The
+look's fog and baked shadow reach every built-in material; one with its own
+`onBeforeCompile` calls `lookShader(shader)` from `look.js` first.
+
+Through an orthographic camera with no preset and no `toneMapping` named,
+nothing is tone mapped, fogged or graded, so a 2D or pixel-art game's sprites
+draw their files' exact colours; such a game also sets
+`export const LOOK = { environment: false, shadows: false }`.
 
 ## Levels
 
@@ -189,7 +232,9 @@ walls. The comment block at the top of the file shows each call.
   r0.180.0, pinned and vendored (MIT, see `web/vendor/LICENSE`), imported
   with a relative path. The module entry re-exports the core file, so both
   stay together. No install step, no bundler, no CDN. Keep the pin; say why
-  in `web/vendor/PROVENANCE.md` before changing it.
+  in `web/vendor/PROVENANCE.md` before changing it. `web/vendor/postprocessing/`
+  (Zlib) and `web/vendor/n8ao/` (CC0) are the look's post chain, loaded only
+  when the look uses it.
 - `web/assets/` — every visual and sound the game adds. Reference local
   files; nothing loads from the network at runtime.
 
@@ -199,7 +244,8 @@ walls. The comment block at the top of the file shows each call.
 `ready` after the first frame, `getState()` returning `{gameState, player,
 hudText}` (the shell's `state` and `result` first, then the game's values;
 `hudText` is the text on screen, menus included), `errors[]` carrying page
-errors, and `setState(target, values)` reaching named late content when
+errors, `perf()` (the look's play stats, which the facts read), and
+`setState(target, values)` reaching named late content when
 `main.js` exports its own `setState(target, values, ctx)` (the starter
 refuses; `ctx` is `null` when no run is going, so return `false` then).
 Keep the shape; extend `GameState`, not the bridge. While the stage tab is hidden the bridge
@@ -220,7 +266,11 @@ console and page errors with file and line, so a failure in `start` cannot
 hide behind the title. Keep both clean. A clean check says the page boots; it
 cannot establish that the game is good to play.
 
-Kurambit plays and measures the build when a chat turn ends, so play with the
+Kurambit plays and measures the build when a chat turn ends; its facts include
+the game's performance during the random-input play, as the shell measured
+it (`window.__studio.perf()`): "60 fps · 1% low 48 · GPU 9 ms at 0.8× of
+1280×720" is the frame rate, the slowest 1% of frames, the GPU's time per
+frame and the render scale the look settled on. Play with the
 `game_explore_*` tools (target web) only when you need to see play, and study
 every frame. The game opens on the title: press `Enter` (Play is selected) or
 click Play.

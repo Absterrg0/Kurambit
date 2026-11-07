@@ -7,9 +7,18 @@
     <link rel="icon" href="assets/ui/icon.png" />
     <link rel="stylesheet" href="./style.css" />
     <!-- Vendored addons import the bare "three"; this maps it to the same file
-         the game imports, so every module shares one three.js instance. -->
+         the game imports, so every module shares one three.js instance. The
+         look's post chain (shell/look.js) imports postprocessing and n8ao. -->
     <script type="importmap">
-      { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+      {
+        "imports": {
+          "three": "./vendor/three.module.js",
+          "three/addons/": "./vendor/addons/",
+          "three/examples/jsm/": "./vendor/addons/",
+          "postprocessing": "./vendor/postprocessing/index.js",
+          "n8ao": "./vendor/n8ao/N8AO.js"
+        }
+      }
     </script>
   </head>
   <body>

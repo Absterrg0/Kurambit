@@ -35,6 +35,7 @@ import {
   GameBuildId,
   GameFactNotMeasured,
   GameFactPending,
+  GamePerformance,
   type GameBotRunResult,
   GameEngineId,
   GameManifest,
@@ -70,6 +71,7 @@ import { HOST_OS } from "./processHost.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { measureAssets } from "./assetFacts.ts";
 import { assetUseOf, generationsShipped, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
+import { performanceOf, readPlayPerf } from "./playPerf.ts";
 import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 
 /**
@@ -163,6 +165,13 @@ const Stored = Schema.Struct({
       GameFactPending,
     ]),
   ),
+  performance: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ status: Schema.Literal("measured"), value: GamePerformance }),
+      GameFactNotMeasured,
+      GameFactPending,
+    ]),
+  ),
   /** Each play's own use record, so a tier measured again replaces only its own. */
   plays: Schema.optionalKey(
     Schema.Struct({
@@ -206,30 +215,36 @@ type FactName =
   | "skilled"
   | "liveness"
   | "firstResponse"
-  | "use";
+  | "use"
+  | "performance";
 const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
   assets: ["assets"],
   boots: ["boots"],
   idle: ["idle", "use"],
-  masher: ["masher", "liveness", "firstResponse", "use"],
+  masher: ["masher", "liveness", "firstResponse", "performance", "use"],
   skilled: ["skilled", "use"],
 };
 const TIERS: ReadonlyArray<Tier> = ["assets", "boots", "idle", "masher", "skilled"];
 const FACT_NAMES: ReadonlyArray<FactName> = [...new Set(TIERS.flatMap((tier) => TIER_FACTS[tier]))];
 /**
- * Asset use is read from a browser page's requests; an engine whose game plays in its own
- * process says why it has none, and never owes it.
+ * Asset use is read from a browser page's requests, performance from its shell's
+ * frame stats; an engine whose game plays in its own process says why it has
+ * neither, and never owes them.
  */
-const useNotMeasured = (engine: GameEngineId) =>
+const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance"]);
+const browserOnly = (engine: GameEngineId, fact: "use" | "performance") =>
   engineProfile(engine).play === "browser"
     ? null
     : notMeasured(
-        `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for three.js games`,
+        fact === "use"
+          ? `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for three.js games`
+          : `${engineProfile(engine).displayName} games play in the engine's own process, which does not report its frame times to Kurambit yet; performance is measured for three.js games`,
         false,
       );
+const useNotMeasured = (engine: GameEngineId) => browserOnly(engine, "use");
 const factsOf = (engine: GameEngineId | undefined): ReadonlyArray<FactName> =>
   engine !== undefined && useNotMeasured(engine) !== null
-    ? FACT_NAMES.filter((name) => name !== "use")
+    ? FACT_NAMES.filter((name) => !BROWSER_ONLY.has(name))
     : FACT_NAMES;
 /** About how long each tier takes, for the message. */
 const TIER_SECONDS: Readonly<Record<Tier, number>> = {
@@ -378,12 +393,15 @@ const make = Effect.gen(function* () {
       firstResponse: get("firstResponse"),
       assets: get("assets"),
       use: useNotMeasured(build.engine) ?? get("use"),
+      performance: browserOnly(build.engine, "performance") ?? get("performance"),
     };
-    // An engine with no asset use is not an incomplete measurement.
+    // An engine with no asset use or performance is not an incomplete measurement.
     const counted =
       useNotMeasured(build.engine) === null
         ? Object.values(facts)
-        : Object.entries(facts).flatMap(([name, fact]) => (name === "use" ? [] : [fact]));
+        : Object.entries(facts).flatMap(([name, fact]) =>
+            BROWSER_ONLY.has(name as FactName) ? [] : [fact],
+          );
     const anyMeasured = FACT_NAMES.some((fact) => stored?.[fact] !== undefined);
     const state =
       job !== undefined
@@ -775,6 +793,9 @@ const make = Effect.gen(function* () {
               masher: blocked,
               liveness: blocked,
               firstResponse: blocked,
+              ...(browserOnly(build.engine, "performance") === null
+                ? { performance: blocked }
+                : {}),
               ...(yield* useAfter("masher", null, blocked)),
             });
           else {
@@ -801,10 +822,29 @@ const make = Effect.gen(function* () {
               read.status === "measured" && read.value.longestFreeze >= FREEZE_BAD
                 ? (busyReading("the picture stood still", run.machine) ?? read)
                 : read;
+            // Performance is the page's own stats from the same play, on a browser engine.
+            const performance =
+              browserOnly(build.engine, "performance") !== null
+                ? {}
+                : {
+                    performance:
+                      Option.isSome(backend) && backend.value.software
+                        ? performanceOf(null, backend.value, run.machine)
+                        : !measuredRun || run.evidence === null
+                          ? notFromRun("the random-input run was not measured")
+                          : performanceOf(
+                              yield* Effect.promise(() => readPlayPerf(root, run.evidence!)),
+                              Option.isSome(backend)
+                                ? backend.value
+                                : { software: false, renderer: null, probe: "" },
+                              run.machine,
+                            ),
+                  };
             yield* write({
               masher: run.fact,
               liveness,
               firstResponse,
+              ...performance,
               ...(yield* useAfter("masher", run.evidence, noRecord(run.fact))),
             });
           }

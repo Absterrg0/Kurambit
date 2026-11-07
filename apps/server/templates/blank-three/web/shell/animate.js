@@ -21,6 +21,16 @@
 // for meanwhile takes over; die plays once and holds until hero.revive().
 // hero.clips lists the clip names; the console shows which clip each role got.
 //
+// For combat, each call can also say how it plays:
+//   hero.play("Sword_Attack", { once: true, fade: 0.08 }); // a clip by its exact name; its own crossfade
+//   hero.play("attack", { restart: true });   // the next cut of a combo: from the start again
+//   hero.play("roll", { once: true, reverse: true }); // backwards, from the clip's end
+//   hero.play("attack", { from: 0.2 });       // start 0.2 s into the clip
+//   if (hero.time > 0.32 && hero.time < 0.45) hit(); // the clip's own seconds now: hit windows
+//   hero.progress;                            // 0..1 through it; hero.duration, hero.clip (its name)
+// The shell ticks every animator on game time, so a Juice.hitPause holds the
+// clip, and its time, with the world.
+//
 // A model exported through Kurambit's pipeline (ASSETS names its .asset.json
 // sidecar) knows more, and animate reads it from the copy:
 //   hero.play("run", { moveSpeed: 5.5 }); // m/s it moves: the clip plays at
@@ -77,8 +87,14 @@ const words = (name) =>
     .split(/[^a-z]+/)
     .filter((w) => w.length > 0);
 
-/** The clip for a role: one whose words hold a role keyword, fewest extra words, earliest keyword. */
+/**
+ * The clip for a role: a clip named exactly so first, then one whose words hold a
+ * role keyword, fewest extra words, earliest keyword.
+ */
 export function findClip(clips, state) {
+  const exact = state.toLowerCase();
+  const named = clips.find((clip) => clip.name.split("|").at(-1).toLowerCase() === exact);
+  if (named !== undefined) return named;
   const keys = ROLES[state] ?? [state.toLowerCase()];
   let best = null;
   let bestScore = Infinity;
@@ -330,7 +346,8 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     }
   };
   const unmeasured = new Set();
-  const rate = (action, options) => {
+  const rate = (action, options) => (options.reverse === true ? -1 : 1) * pace(action, options);
+  const pace = (action, options) => {
     if (options.moveSpeed === undefined) return options.speed ?? 1;
     const clip = action.getClip().name;
     const ground = groundSpeeds.get(clip);
@@ -379,9 +396,17 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     action.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
     action.clampWhenFinished = once;
     action.timeScale = rate(action, options);
+    const duration = action.getClip().duration;
+    if (options.from !== undefined) action.time = Math.min(Math.max(options.from, 0), duration);
+    else if (options.reverse === true) action.time = duration;
     // Loop to loop keeps the step phase (walk to run lands on the same foot).
-    if (!once && previous !== null && previous.loop === THREE.LoopRepeat && previous !== action)
-      action.time = (previous.time / previous.getClip().duration) * action.getClip().duration;
+    else if (
+      !once &&
+      previous !== null &&
+      previous.loop === THREE.LoopRepeat &&
+      previous !== action
+    )
+      action.time = (previous.time / previous.getClip().duration) * duration;
     action.play();
     if (previous !== null && previous !== action) action.crossFadeFrom(previous, f, false);
     current = { state, action, once, done: false };
@@ -395,6 +420,23 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     get state() {
       return current?.state ?? null;
     },
+    /** The playing clip's name, or null. */
+    get clip() {
+      return current?.action.getClip().name ?? null;
+    },
+    /** The playing clip's own seconds now (hit windows), on game time. */
+    get time() {
+      return current?.action.time ?? 0;
+    },
+    /** The playing clip's length in seconds. */
+    get duration() {
+      return current?.action.getClip().duration ?? 0;
+    },
+    /** How far through the playing clip, 0..1. */
+    get progress() {
+      const length = current?.action.getClip().duration ?? 0;
+      return length > 0 ? Math.min(Math.max(current.action.time / length, 0), 1) : 0;
+    },
     play(state, options = {}) {
       const entered = state !== asked;
       asked = state;
@@ -403,8 +445,9 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       const action = actionFor(state);
       if (action === null) return;
       if (once) {
-        // Plays once each time the state is entered; asked again, it plays on or holds its end.
-        if (!entered && current?.action === action) return;
+        // Plays once each time the state is entered; asked again, it plays on or holds its
+        // end, unless asked to restart.
+        if (!entered && current?.action === action && options.restart !== true) return;
         if (state === "die") held = true;
         start(state, action, { ...options, once });
         return;
@@ -413,7 +456,7 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       loopOptions = options;
       // A one-shot plays through; the loop asked for meanwhile follows it.
       if (current?.once && !current.done) return;
-      if (current?.action === action && !current.once) {
+      if (current?.action === action && !current.once && options.restart !== true) {
         current.state = state;
         action.timeScale = rate(action, options);
         return;

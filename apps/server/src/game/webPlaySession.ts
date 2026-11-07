@@ -3,6 +3,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
 import type { GameConsoleMessage, GameExploreStep } from "@kurambit/contracts";
 import {
+  READ_STUDIO_PERF,
   READ_STUDIO_READY,
   READ_STUDIO_STATE,
   STUDIO_SET_STATE,
@@ -318,6 +319,12 @@ export interface WebPlaySession extends PlaySession {
   readonly ended: Promise<PlayEnd>;
   /** After `close`: the kept session's storage to write back, or null. */
   readonly keptStorage: () => KeptStorage | null;
+  /**
+   * After `close`: how play ran, as the page's shell measured it (`__studio.perf()`:
+   * frame times, GPU time, the render scale), read just before the page closed; null
+   * when the shell has none or the page could not answer.
+   */
+  readonly perf: () => unknown;
 }
 
 /**
@@ -758,6 +765,7 @@ export const openWebPlaySession = async (input: {
     let lastSentFrame = -1;
     const gameT = () => Math.max(0, pageSeconds - realtimeSeconds);
     let kept: KeptStorage | null = null;
+    let perf: unknown = null;
     const session: WebPlaySession = {
       protocol: 2,
       capabilities: new Set(["realtime", "setState", "frames"]),
@@ -765,6 +773,7 @@ export const openWebPlaySession = async (input: {
       bootPerf: null,
       ended,
       keptStorage: () => kept,
+      perf: () => perf,
       act,
       realtime: async (frames) => {
         realtimeSeconds = pageSeconds;
@@ -911,6 +920,18 @@ export const openWebPlaySession = async (input: {
             PLAY_BOUNDS.webCallMs,
           );
         try {
+          if (endedWith === null) {
+            const text = await bounded(
+              page.evaluate(READ_STUDIO_PERF).catch(() => null),
+              PLAY_BOUNDS.webCallMs,
+            );
+            if (typeof text === "string")
+              try {
+                perf = JSON.parse(text);
+              } catch {
+                perf = null;
+              }
+          }
           if (keptStorage !== null && endedWith === null) {
             // Leaving the page fires pagehide as closing the tab would, so a game
             // that saves then (the starter shell's progress does) has written it.

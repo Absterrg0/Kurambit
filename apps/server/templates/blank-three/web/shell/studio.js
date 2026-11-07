@@ -98,9 +98,10 @@ function position(player) {
 /**
  * Publishes window.__studio. `player()` returns the run's player (an Object3D
  * or {x,y,z}) or null, `setState` is the game's own, `hold(on)` freezes play
- * and sound while the stage tab is hidden and returns whether sound is muted.
+ * and sound while the stage tab is hidden and returns whether sound is muted,
+ * `perf()` reads the look's play stats.
  */
-export function installStudio({ ui, player, setState, hold }) {
+export function installStudio({ ui, player, setState, hold, perf }) {
   let ready = false;
   const studio = {
     engine: "three",
@@ -114,6 +115,11 @@ export function installStudio({ ui, player, setState, hold }) {
       ready = value === true;
     },
     errors,
+    // How play ran: frame times, GPU time and the render scale (shell/look.js). The
+    // harness reads it once at the end of each facts play.
+    perf() {
+      return typeof perf === "function" ? perf() : null;
+    },
     getState() {
       // innerText skips hidden screens, so this is the text on screen now.
       const text = typeof ui?.innerText === "string" ? ui.innerText : "";
