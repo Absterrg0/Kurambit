@@ -97,6 +97,7 @@ const GameStatusTool = Tool.make("game_status", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderCodeTool = Tool.make("game_blender_code", {
@@ -108,6 +109,7 @@ const BlenderCodeTool = Tool.make("game_blender_code", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameBlenderLookTool = Tool.make("game_blender_look", {
@@ -119,6 +121,7 @@ export const GameBlenderLookTool = Tool.make("game_blender_look", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderSceneTool = Tool.make("game_blender_scene", {
@@ -130,6 +133,7 @@ const BlenderSceneTool = Tool.make("game_blender_scene", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
@@ -141,6 +145,7 @@ const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
@@ -152,6 +157,7 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const GenerateTool = Tool.make("game_generate", {
@@ -163,6 +169,7 @@ const GenerateTool = Tool.make("game_generate", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const GenerateWaitTool = Tool.make("game_generate_wait", {
@@ -174,6 +181,7 @@ const GenerateWaitTool = Tool.make("game_generate_wait", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderCharacterTool = Tool.make("game_blender_character", {
@@ -185,6 +193,7 @@ const BlenderCharacterTool = Tool.make("game_blender_character", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderExportTool = Tool.make("game_blender_export", {
@@ -196,6 +205,7 @@ const BlenderExportTool = Tool.make("game_blender_export", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameBlenderLookToolkit = Toolkit.make(GameBlenderLookTool);
@@ -208,6 +218,7 @@ export const GameBlenderRenderSpritesTool = Tool.make("game_blender_render_sprit
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameBlenderRenderSpritesToolkit = Toolkit.make(GameBlenderRenderSpritesTool);
@@ -220,6 +231,7 @@ export const GameAssetsSearchTool = Tool.make("game_assets_search", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameAssetsSearchToolkit = Toolkit.make(GameAssetsSearchTool);
@@ -232,6 +244,7 @@ const AssetsAddTool = Tool.make("game_assets_add", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const UnityToolsTool = Tool.make("game_unity_tools", {
@@ -242,6 +255,7 @@ const UnityToolsTool = Tool.make("game_unity_tools", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const UnityEditTool = Tool.make("game_unity_edit", {
@@ -253,6 +267,7 @@ const UnityEditTool = Tool.make("game_unity_edit", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const UnityEvalTool = Tool.make("game_unity_eval", {
@@ -264,6 +279,7 @@ const UnityEvalTool = Tool.make("game_unity_eval", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const UnityRecompileTool = Tool.make("game_unity_recompile", {
@@ -274,6 +290,7 @@ const UnityRecompileTool = Tool.make("game_unity_recompile", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const UnityPlayTool = Tool.make("game_unity_play", {
@@ -285,6 +302,7 @@ const UnityPlayTool = Tool.make("game_unity_play", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const UnityConsoleTool = Tool.make("game_unity_console", {
@@ -296,6 +314,7 @@ const UnityConsoleTool = Tool.make("game_unity_console", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameUnityScreenshotTool = Tool.make("game_unity_screenshot", {
@@ -307,6 +326,7 @@ export const GameUnityScreenshotTool = Tool.make("game_unity_screenshot", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameUnityScreenshotToolkit = Toolkit.make(GameUnityScreenshotTool);
@@ -317,6 +337,7 @@ const ImportTool = Tool.make("game_import", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const CheckTool = Tool.make("game_check", {
@@ -326,6 +347,7 @@ const CheckTool = Tool.make("game_check", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const ExportTool = Tool.make("game_export", {
@@ -336,6 +358,7 @@ const ExportTool = Tool.make("game_export", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const PackageWindowsTool = Tool.make("game_package_windows", {
@@ -348,6 +371,7 @@ const PackageWindowsTool = Tool.make("game_package_windows", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const PackageWebTool = Tool.make("game_package_web", {
@@ -359,6 +383,7 @@ const PackageWebTool = Tool.make("game_package_web", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const MediaSaveTool = Tool.make("game_media_save", {
@@ -370,6 +395,7 @@ const MediaSaveTool = Tool.make("game_media_save", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const SavedListTool = Tool.make("game_saved_list", {
@@ -380,6 +406,7 @@ const SavedListTool = Tool.make("game_saved_list", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const SavedDeleteTool = Tool.make("game_saved_delete", {
@@ -391,6 +418,7 @@ const SavedDeleteTool = Tool.make("game_saved_delete", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
@@ -402,6 +430,7 @@ const PreviewTool = Tool.make("game_preview", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const StopTool = Tool.make("game_stop", {
@@ -412,6 +441,7 @@ const StopTool = Tool.make("game_stop", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 /**
@@ -427,6 +457,7 @@ const ExploreStartTool = Tool.make("game_explore_start", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const ExploreActTool = Tool.make("game_explore_act", {
@@ -437,6 +468,7 @@ const ExploreActTool = Tool.make("game_explore_act", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const ExploreCloseTool = Tool.make("game_explore_close", {
@@ -448,6 +480,7 @@ const ExploreCloseTool = Tool.make("game_explore_close", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BotRunTool = Tool.make("game_bot_run", {
@@ -459,6 +492,7 @@ const BotRunTool = Tool.make("game_bot_run", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BotReportTool = Tool.make("game_bot_report", {
@@ -469,6 +503,7 @@ const BotReportTool = Tool.make("game_bot_report", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BotViewTool = Tool.make("game_bot_view", {
@@ -480,6 +515,7 @@ const BotViewTool = Tool.make("game_bot_view", {
   failureMode: "return",
   dependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const commandId = Schema.optionalKey(
@@ -507,6 +543,7 @@ const BuildsTool = Tool.make("game_builds", {
   failureMode: "return",
   dependencies: buildDependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const FactsTool = Tool.make("game_facts", {
@@ -518,6 +555,7 @@ const FactsTool = Tool.make("game_facts", {
   failureMode: "return",
   dependencies: buildDependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const BuildRestoreTool = Tool.make("game_build_restore", {
@@ -529,6 +567,7 @@ const BuildRestoreTool = Tool.make("game_build_restore", {
   failureMode: "return",
   dependencies: buildDependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 
@@ -551,6 +590,7 @@ const KeepGoingTool = Tool.make("game_keep_going", {
   failureMode: "return",
   dependencies: keepGoingDependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const KeepGoingStatusTool = Tool.make("game_keep_going_status", {
@@ -561,6 +601,7 @@ const KeepGoingStatusTool = Tool.make("game_keep_going_status", {
   failureMode: "return",
   dependencies: keepGoingDependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const KeepGoingSteerTool = Tool.make("game_keep_going_steer", {
@@ -572,6 +613,7 @@ const KeepGoingSteerTool = Tool.make("game_keep_going_steer", {
   failureMode: "return",
   dependencies: keepGoingDependencies,
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 
