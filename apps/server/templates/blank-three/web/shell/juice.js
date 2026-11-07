@@ -648,6 +648,6 @@ export const juiceShell = {
     tweens = [];
     bursts = [];
     pool?.clear();
-    for (const trail of [...trails]) trail.dispose();
+    for (const trail of trails) trail.dispose();
   },
 };

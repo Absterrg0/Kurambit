@@ -129,7 +129,7 @@ export function resolveLook(options = {}) {
     if (own === false) return false;
     if (own === true) return preset[key] === false ? (DEFAULT_PARTS[key] ?? {}) : preset[key];
     if (own === undefined) return preset[key];
-    return { ...(preset[key] || DEFAULT_PARTS[key] || {}), ...own };
+    return { ...(preset[key] || DEFAULT_PARTS[key]), ...own };
   };
   const look = {
     name,
@@ -529,6 +529,7 @@ export async function createLook(canvas, options = {}) {
   };
 
   const bake = (root, { bounds = null, size = 4096 } = {}) => {
+    if (!look.shadows) return;
     root.updateWorldMatrix(true, true);
     const box = bounds ?? new THREE.Box3().setFromObject(root);
     if (box.isEmpty()) return;
@@ -617,8 +618,11 @@ export async function createLook(canvas, options = {}) {
     /** Times the frame's GPU work and keeps the render scale on budget. The shell wraps every draw. */
     frame(work, { playing = false, realMs = 0 } = {}) {
       timer.begin();
-      work();
-      timer.end();
+      try {
+        work();
+      } finally {
+        timer.end();
+      }
       const gpuMs = timer.poll();
       scale.update(gpuMs, realMs);
       if (playing) stats.add(realMs, gpuMs, scale.value);
