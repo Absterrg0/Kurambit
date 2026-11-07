@@ -34,6 +34,8 @@
 //                                // stays free for a dodge; null: no button, only
 //                                // pointer lock and the right stick
 //     distance: 4.3, pitch: 0.22,
+//     ground: (x, z) => terrainHeight(x, z), // a heightfield to stay above, cheaper than
+//                                // raycasting a big terrain mesh as a blocker
 //   });
 //   cam.focus = foe.root;        // turns to keep this foe in frame; null lets go
 import * as THREE from "../vendor/three.module.js";
@@ -136,6 +138,7 @@ export function followCamera3D(ctx, target, options = {}) {
     minPitch = -0.35,
     maxPitch = 1.1,
     radius = 0.3,
+    ground = null,
   } = options;
   const camera = ctx.camera;
   const ray = new THREE.Raycaster();
@@ -265,6 +268,10 @@ export function followCamera3D(ctx, target, options = {}) {
       }
       length = room < length ? room : length + (room - length) * ease(3, dt);
       camera.position.copy(look).addScaledVector(back, length);
+      if (ground !== null) {
+        const floor = ground(camera.position.x, camera.position.z) + radius;
+        if (camera.position.y < floor) camera.position.y = floor;
+      }
       camera.lookAt(look);
     },
   };
