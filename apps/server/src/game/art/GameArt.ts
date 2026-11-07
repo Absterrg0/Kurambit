@@ -21,6 +21,7 @@ import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Result from "effect/Result";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -38,6 +39,7 @@ import {
   type GameArtProviderId,
   type GameArtProviderStatus,
   type GameArtProvidersResult,
+  type GameCharacterRoute,
   type GameGenerateInput,
   type GameGenerateResult,
   type GameGenerateWaitInput,
@@ -57,6 +59,7 @@ import * as ServerSettingsService from "../../serverSettings.ts";
 import { GameCaller } from "../GameCaller.ts";
 import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
+import { lockCharacterRouteRefusal } from "../gameStyle.ts";
 import { isPathInside } from "../gameNativeUserDir.ts";
 import {
   type ArtAdapter,
@@ -75,11 +78,16 @@ import { ART_ADAPTERS } from "./providers/index.ts";
 export class GameArt extends Context.Service<
   GameArt,
   {
-    /** Starts a generation and answers at once with its record (state making). */
+    /**
+     * Starts a generation and answers at once with its record (state making). `route` is the
+     * game's character route: off the generated route, characters and creatures are refused
+     * before anything is asked or spent.
+     */
     readonly generate: (
       root: string,
       threadId: ThreadId,
       input: GameGenerateInput,
+      route: GameCharacterRoute,
     ) => Effect.Effect<GameGenerateResult, GameOperationError>;
     /** Until done, choosing (the person's pick), failed or cancelled, or `seconds` pass. */
     readonly wait: (
@@ -97,11 +105,28 @@ export class GameArt extends Context.Service<
       root: string,
       id: string,
     ) => Effect.Effect<GameGenerationChangeResult, GameOperationError>;
+    /**
+     * The finished generation of this game that delivered `path` (game-relative), with its
+     * licence and a creature's body plan; null when none did. The pipeline trusts a generated
+     * file by this row, never by a record file or a custom property in the scene.
+     */
+    readonly delivered: (
+      root: string,
+      id: string,
+      path: string,
+    ) => Effect.Effect<GameArtDelivered | null, GameOperationError>;
     readonly providers: Effect.Effect<GameArtProvidersResult, GameOperationError>;
     /** The lane map alone, from saved keys and Codex's sign-in: no network, for game_status. */
     readonly lanes: Effect.Effect<GameArtLanes, GameOperationError>;
   }
 >()("kurambit/game/art/GameArt") {}
+
+export interface GameArtDelivered {
+  readonly generation: GameGeneration;
+  readonly licence: string;
+  /** A creature's body plan, as it was asked for. */
+  readonly body: string | null;
+}
 
 /**
  * What GameArt reads from the rest of the server: the person's Codex (for images on their
@@ -179,6 +204,8 @@ const opError = (
 
 const usd = (value: number) => `$${value.toFixed(value < 0.1 && value > 0 ? 3 : 2)}`;
 const TERMINAL = new Set(["done", "failed", "cancelled"]);
+const UNDONE =
+  "a build from before them was restored (undo). Make it again if it is still wanted; restoring a later build brings them back.";
 
 /** Local midnight today, as the ISO instant rows are compared with. */
 const localMidnightIso = (nowMs: number): string => {
@@ -275,6 +302,65 @@ const fileNames = (
       return { path: unique(stem, file.ext), file };
     }),
   );
+};
+
+interface DirectionsSettled {
+  readonly step: Extract<ArtStep, { kind: "done" }>;
+  /** The labels of the looks that came back, in candidate order. */
+  readonly labels: ReadonlyArray<string>;
+  readonly refused: ReadonlyArray<{ readonly label: string; readonly reason: string }>;
+  /** Some look's cost is its estimate: the provider did not report it. */
+  readonly estimated: boolean;
+}
+
+/** One result per direction, in order, into candidates, refusals and what is counted. */
+export const settleDirections = (
+  results: ReadonlyArray<Result.Result<ArtStep, ArtProviderError>>,
+  estimates: ReadonlyArray<number | null>,
+  labels: ReadonlyArray<string>,
+): Effect.Effect<DirectionsSettled, ArtProviderError> => {
+  const arrived: Array<{ readonly files: ReadonlyArray<ArtFile>; readonly label: string }> = [];
+  const refused: Array<{ readonly label: string; readonly reason: string }> = [];
+  const costs: Array<number | null> = [];
+  let estimated = false;
+  results.forEach((result, index) => {
+    const label = labels[index] ?? `Direction ${index + 1}`;
+    if (Result.isFailure(result)) {
+      refused.push({ label, reason: result.failure.reason.slice(0, 1000) });
+      costs.push(result.failure.costUsd ?? null);
+      return;
+    }
+    const step = result.success;
+    // The loop runs every direction to done; a making step here is a bug, counted as sent.
+    const files = step.kind === "done" ? step.candidates[0] : undefined;
+    const reported = step.kind === "done" ? step.costUsd : null;
+    const cost = reported ?? estimates[index] ?? null;
+    if (reported === null && cost !== null) estimated = true;
+    costs.push(cost);
+    if (files === undefined || files.length === 0)
+      refused.push({ label, reason: "The provider answered with no image." });
+    else arrived.push({ files, label });
+  });
+  const costUsd = costs.every((cost) => cost === null)
+    ? null
+    : roundUsd(costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0));
+  if (arrived.length === 0)
+    return Effect.fail(
+      new ArtProviderError({
+        reason:
+          `No direction came back. ${refused.map((refusal) => `${refusal.label}: ${refusal.reason}`).join(" ")}`.slice(
+            0,
+            2000,
+          ),
+        costUsd: costUsd ?? 0,
+      }),
+    );
+  return Effect.succeed({
+    step: { kind: "done", candidates: arrived.map((look) => look.files), costUsd },
+    labels: arrived.map((look) => look.label),
+    refused,
+    estimated,
+  });
 };
 
 const make = Effect.gen(function* () {
@@ -510,7 +596,13 @@ const make = Effect.gen(function* () {
         }),
     });
 
-  const recordFile = (row: Row, adapter: ArtAdapter | undefined) => {
+  const licenceOf = (row: Row) => {
+    const adapter = ART_ADAPTERS[row.generation.provider];
+    return (
+      adapter?.laneLicence?.[row.generation.lane] ?? adapter?.licence ?? "Unknown provider terms."
+    );
+  };
+  const recordFile = (row: Row) => {
     const generation = row.generation;
     return encodeJson({
       id: generation.id,
@@ -528,8 +620,7 @@ const make = Effect.gen(function* () {
       ai: true,
       costUsd: generation.costUsd,
       costEstimated: row.meta.costEstimated,
-      licence:
-        adapter?.laneLicence?.[generation.lane] ?? adapter?.licence ?? "Unknown provider terms.",
+      licence: licenceOf(row),
       createdAt: generation.createdAt,
     });
   };
@@ -538,7 +629,7 @@ const make = Effect.gen(function* () {
       writeGameFile(
         row.root,
         `${row.meta.folder}/${row.generation.name}.generation.json`,
-        new TextEncoder().encode(`${recordFile(row, ART_ADAPTERS[row.generation.provider])}\n`),
+        new TextEncoder().encode(`${recordFile(row)}\n`),
       ),
     );
 
@@ -591,7 +682,9 @@ const make = Effect.gen(function* () {
   const finish = (row: Row, step: Extract<ArtStep, { kind: "done" }>) =>
     Effect.gen(function* () {
       const written = yield* writeFiles(row, step.candidates);
-      const estimated = step.costUsd === null && row.generation.estimateUsd !== null;
+      // Directions mark it themselves when one of them reported no cost.
+      const estimated =
+        (step.costUsd === null && row.generation.estimateUsd !== null) || row.meta.costEstimated;
       const costUsd = step.costUsd ?? row.generation.estimateUsd;
       const candidateFiles = written.map((files) => files.map((file) => file.path));
       const previews = written.map((files, index) => {
@@ -609,7 +702,9 @@ const make = Effect.gen(function* () {
         { costUsd, candidates: previews },
         { candidateFiles, costEstimated: estimated, job: row.meta.job },
       );
-      if (written.length === 1) return yield* chooseUnlocked(next, 0, "only");
+      // A direction set with refusals goes to the person even with one look left: they asked to choose.
+      if (written.length === 1 && (next.generation.refused ?? []).length === 0)
+        return yield* chooseUnlocked(next, 0, "only");
       if (next.meta.autopilot) return yield* chooseUnlocked(next, 0, "autopilot");
       const choosing = yield* touch(next, { state: "choosing" });
       yield* writeRecordFile(choosing);
@@ -754,10 +849,14 @@ const make = Effect.gen(function* () {
             : `, estimated ${usd(g.estimateUsd)}`
         }${spent !== null && limit !== null ? ` (${usd(spent)} of the ${usd(limit)} daily limit spent today)` : ""}. Files land in ${where}/. Wait with game_generate_wait id ${g.id}.`;
       case "choosing":
-        return `${g.candidates.length} candidates of "${g.name}" are ready (${g.candidates
+        if (g.filesUndone === true)
+          return `The candidates of "${g.name}" are no longer in the game: ${UNDONE}`;
+        return `${g.candidates.length} ${g.candidates.length === 1 ? "candidate" : "candidates"} of "${g.name}" ${g.candidates.length === 1 ? "is" : "are"} ready (${g.candidates
           .map((candidate) => candidate.preview)
-          .join(", ")}); the person picks one in the chat. Cost ${costText(row)}.`;
+          .join(", ")})${refusedText(g)}; the person picks one in the chat. Cost ${costText(row)}.`;
       case "done":
+        if (g.filesUndone === true)
+          return `"${g.name}" was made (${g.files.join(", ")}), but its files are no longer in the game: ${UNDONE}`;
         return `"${g.name}" is in the game: ${g.files.join(", ")}${
           g.chosenBy === "autopilot"
             ? " (Keep going took the first candidate)"
@@ -771,6 +870,10 @@ const make = Effect.gen(function* () {
         return `"${g.name}" was cancelled.${g.costUsd ? ` ${usd(g.costUsd)} counted against today for work already started.` : ""}`;
     }
   };
+  const refusedText = (g: GameGeneration) =>
+    (g.refused ?? []).length === 0
+      ? ""
+      : `; ${g.refused!.map((refusal) => `"${refusal.label}" was refused by the provider (${refusal.reason})`).join("; ")}`;
   const costText = (row: Row) =>
     row.generation.costUsd === null
       ? row.generation.provider === "codex"
@@ -779,14 +882,19 @@ const make = Effect.gen(function* () {
       : `${usd(row.generation.costUsd)}${row.meta.costEstimated ? " (estimated: the provider did not report it)" : ""}`;
 
   /**
-   * Directions: one request per look, each to completion, as one step with a candidate each.
-   * Codex runs them one at a time (one plan, one session at a time); the others together.
+   * Directions: one request per look, each to completion. Codex runs them one at a time (one
+   * plan, one session at a time); the others together. Each settles on its own: every look that
+   * came back is a candidate, a refused one is named with the provider's reason, and only when
+   * none came back does the generation fail. What is counted: each look's reported cost (its
+   * estimate when the provider said none), and what a refusal reported it cost.
    */
   const directionsTogether = (
     adapter: ArtAdapter,
     context: ArtContext,
     requests: ReadonlyArray<ArtRequest>,
-  ): Effect.Effect<ArtStep, ArtProviderError> =>
+    estimates: ReadonlyArray<number | null>,
+    labels: ReadonlyArray<string>,
+  ): Effect.Effect<DirectionsSettled, ArtProviderError> =>
     Effect.forEach(
       requests,
       (request) =>
@@ -801,23 +909,37 @@ const make = Effect.gen(function* () {
             step = yield* adapter.poll(context, step.remote);
           }
           return step;
-        }),
+        }).pipe(Effect.result),
       { concurrency: adapter.id === "codex" ? 1 : "unbounded" },
-    ).pipe(
-      Effect.map((steps): ArtStep => {
-        const costs = steps.map((step) => step.costUsd);
-        return {
-          kind: "done",
-          candidates: steps.flatMap((step) => step.candidates.slice(0, 1)),
-          costUsd: costs.every((cost) => cost === null)
-            ? null
-            : roundUsd(costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0)),
-        };
+    ).pipe(Effect.flatMap((results) => settleDirections(results, estimates, labels)));
+
+  /** Before the files land: which looks came back (their labels), which were refused, and why. */
+  const recordDirections = (root: string, id: string, settled: DirectionsSettled) =>
+    locks.withLock(
+      id,
+      Effect.gen(function* () {
+        const row = yield* loadOrFail(root, id, "art-drive");
+        if (row.generation.state !== "making") return;
+        const next = yield* touch(
+          row,
+          settled.refused.length === 0 ? {} : { refused: settled.refused },
+          { labels: settled.labels, costEstimated: settled.estimated },
+        );
+        yield* save(next, countedOf(next.generation));
       }),
     );
 
-  const generate: GameArt["Service"]["generate"] = (root, threadId, input) =>
+  const generate: GameArt["Service"]["generate"] = (root, threadId, input, characterRoute) =>
     Effect.gen(function* () {
+      // Before any provider is asked: the person's route decides who makes characters.
+      if (input.lane === "character" || input.lane === "creature") {
+        const refused = lockCharacterRouteRefusal("generated-body", characterRoute);
+        if (refused !== null)
+          return yield* opError(
+            "art-generate",
+            `Nothing was asked of a provider or spent. ${refused}`,
+          );
+      }
       const all = yield* settings;
       const directions = input.directions ?? [];
       const options = input.options ?? {};
@@ -928,12 +1050,26 @@ const make = Effect.gen(function* () {
         }),
       );
       yield* operations.changed(root, GAME_ART_EVENT, `Making ${admitted.row.generation.name}.`);
+      const labels = directions.map((direction) => direction.label);
       yield* startDriver(root, id, (adapter, context) =>
         Effect.promise(() => NodeFSP.mkdir(context.scratch, { recursive: true })).pipe(
           Effect.andThen(
             requests.length === 1
               ? adapter.start(context, requests[0]!)
-              : directionsTogether(adapter, context, requests),
+              : directionsTogether(adapter, context, requests, estimates, labels).pipe(
+                  Effect.flatMap((settled) =>
+                    recordDirections(root, id, settled).pipe(
+                      Effect.mapError(
+                        (error) =>
+                          new ArtProviderError({
+                            reason: error.message,
+                            costUsd: settled.step.costUsd,
+                          }),
+                      ),
+                      Effect.as(settled.step),
+                    ),
+                  ),
+                ),
           ),
         ),
       );
@@ -942,6 +1078,49 @@ const make = Effect.gen(function* () {
         generation: admitted.row.generation,
       };
     });
+
+  /**
+   * A checkpoint restore (undo) puts art/ back as a build had it, so files a generation wrote
+   * after that build are removed while its row still lists them. Checked when read, so a later
+   * restore that brings them back reads as it is.
+   */
+  const withUndone = (row: Row): Effect.Effect<Row> => {
+    const files =
+      row.generation.state === "done"
+        ? row.generation.files
+        : row.generation.state === "choosing"
+          ? row.meta.candidateFiles.flat()
+          : [];
+    if (files.length === 0) return Effect.succeed(row);
+    return Effect.promise(async () => {
+      for (const file of files)
+        if (
+          await NodeFSP.lstat(NodePath.join(row.root, file)).then(
+            () => true,
+            () => false,
+          )
+        )
+          return false;
+      return true;
+    }).pipe(
+      Effect.map((undone) =>
+        undone ? { ...row, generation: { ...row.generation, filesUndone: true } } : row,
+      ),
+    );
+  };
+
+  const delivered: GameArt["Service"]["delivered"] = (root, id, path) =>
+    load(root, id).pipe(
+      Effect.map((row) =>
+        row === null || row.generation.state !== "done" || !row.generation.files.includes(path)
+          ? null
+          : {
+              generation: row.generation,
+              licence: licenceOf(row),
+              body: typeof row.meta.options.body === "string" ? row.meta.options.body : null,
+            },
+      ),
+    );
 
   // ── wait, list, choose, cancel ─────────────────────────────────────────
   const wait: GameArt["Service"]["wait"] = (root, input) =>
@@ -953,8 +1132,10 @@ const make = Effect.gen(function* () {
         while (true) {
           const row = yield* loadOrFail(root, input.id, "art-wait");
           const left = deadline - (yield* Clock.currentTimeMillis);
-          if (row.generation.state !== "making" || left <= 0)
-            return { text: describe(row, null, null), generation: row.generation };
+          if (row.generation.state !== "making" || left <= 0) {
+            const read = yield* withUndone(row);
+            return { text: describe(read, null, null), generation: read.generation };
+          }
           // Every change wakes the wait; one for another generation is read and ignored.
           yield* PubSub.take(subscription).pipe(Effect.timeoutOption(Duration.millis(left)));
         }
@@ -969,7 +1150,13 @@ const make = Effect.gen(function* () {
         readonly remote_json: string;
       }>`
         SELECT root, payload_json, remote_json FROM game_art_generations
-        WHERE root = ${root} ORDER BY created_at DESC LIMIT ${LIST_LIMIT}
+        WHERE root = ${root} AND (
+          state IN ('making', 'choosing') OR id IN (
+            SELECT id FROM game_art_generations WHERE root = ${root}
+            ORDER BY created_at DESC LIMIT ${LIST_LIMIT}
+          )
+        )
+        ORDER BY created_at DESC
       `.pipe(
         Effect.mapError(
           (cause) =>
@@ -977,11 +1164,14 @@ const make = Effect.gen(function* () {
         ),
       );
       const all = yield* settings;
+      const decoded = rows.flatMap((row) => {
+        const read = toRow(row);
+        return read === null ? [] : [read];
+      });
       return {
-        generations: rows.flatMap((row) => {
-          const decoded = toRow(row);
-          return decoded === null ? [] : [decoded.generation];
-        }),
+        generations: yield* Effect.forEach(decoded, (row) =>
+          withUndone(row).pipe(Effect.map((read) => read.generation)),
+        ),
         spentTodayUsd: yield* spentToday,
         dailyLimitUsd: all.gameArtDailyLimitUsd,
       };
@@ -1007,6 +1197,11 @@ const make = Effect.gen(function* () {
             candidate >= row.meta.candidateFiles.length
           )
             return yield* opError("art-choose", `There is no candidate ${candidate + 1}.`);
+          if ((yield* withUndone(row)).generation.filesUndone === true)
+            return yield* opError(
+              "art-choose",
+              `The candidates of "${row.generation.name}" are no longer in the game: ${UNDONE}`,
+            );
           return { generation: (yield* chooseUnlocked(row, candidate, "person")).generation };
         }),
       );
@@ -1152,7 +1347,7 @@ const make = Effect.gen(function* () {
   // one the last server left behind. Each resumed driver is its own fiber.
   yield* recover;
 
-  return GameArt.of({ generate, wait, list, choose, cancel, providers, lanes });
+  return GameArt.of({ generate, wait, list, choose, cancel, delivered, providers, lanes });
 });
 
 /** The server's host: the provider registry's Codex and the run's in-flight step. */

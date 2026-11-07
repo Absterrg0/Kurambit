@@ -83,12 +83,17 @@ describe("GameArt", () => {
       const root = NodePath.join(base, "game");
       const art = yield* GameArt.GameArt;
       const refused = yield* art
-        .generate(root, THREAD, {
-          lane: "music",
-          prompt: "a calm loop",
-          name: "theme",
-          options: { seconds: 120 },
-        })
+        .generate(
+          root,
+          THREAD,
+          {
+            lane: "music",
+            prompt: "a calm loop",
+            name: "theme",
+            options: { seconds: 120 },
+          },
+          "library",
+        )
         .pipe(Effect.flip);
       assert.match(refused.message, /\$0\.00 spent today.*\$0\.30.*\$0\.10 limit/);
       assert.deepStrictEqual((yield* art.list(root)).generations, []);
@@ -113,15 +118,20 @@ describe("GameArt", () => {
       yield* Effect.provide(
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
-          const started = yield* art.generate(root, THREAD, {
-            lane: "image",
-            prompt: "a hero",
-            name: "hero",
-            directions: [
-              { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
-              { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
-            ],
-          });
+          const started = yield* art.generate(
+            root,
+            THREAD,
+            {
+              lane: "image",
+              prompt: "a hero",
+              name: "hero",
+              directions: [
+                { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
+                { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
+              ],
+            },
+            "library",
+          );
           assert.strictEqual(started.generation.name, "hero_2");
           const ready = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
           assert.strictEqual(ready.generation.state, "choosing");
@@ -161,6 +171,108 @@ describe("GameArt", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("refuses a character off the generated route before any provider is asked", () =>
+    Effect.gen(function* () {
+      const base = yield* tempGame();
+      const root = NodePath.join(base, "game");
+      const asked: string[] = [];
+      yield* Effect.provide(
+        Effect.gen(function* () {
+          const art = yield* GameArt.GameArt;
+          for (const lane of ["character", "creature"] as const) {
+            const refused = yield* art
+              .generate(root, THREAD, { lane, prompt: "a knight", name: "knight" }, "library")
+              .pipe(Effect.flip);
+            assert.match(refused.message, /Nothing was asked of a provider or spent/);
+            assert.match(refused.message, /only the person changes how characters are made/);
+          }
+          const listed = yield* art.list(root);
+          assert.deepStrictEqual(listed.generations, []);
+          assert.strictEqual(listed.spentTodayUsd, 0);
+          assert.deepStrictEqual(asked, []);
+        }),
+        layer({
+          base,
+          settings: { gameTripoApiKey: "tk", gameMeshyApiKey: "mk" },
+          answer: (url) => {
+            asked.push(url);
+            return new Response("{}", { status: 500 });
+          },
+        }),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps the looks that came back when one direction is refused, and counts them", () =>
+    Effect.gen(function* () {
+      const base = yield* tempGame();
+      const root = NodePath.join(base, "game");
+      let calls = 0;
+      yield* Effect.provide(
+        Effect.gen(function* () {
+          const art = yield* GameArt.GameArt;
+          const started = yield* art.generate(
+            root,
+            THREAD,
+            {
+              lane: "image",
+              prompt: "a hero",
+              name: "hero",
+              directions: [
+                { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
+                { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
+              ],
+            },
+            "library",
+          );
+          const ready = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
+          // One look is still the person's to take or leave: it waits on their pick.
+          assert.strictEqual(ready.generation.state, "choosing");
+          assert.strictEqual(ready.generation.candidates.length, 1);
+          const kept = ready.generation.candidates[0]!.label!;
+          const refused = ready.generation.refused ?? [];
+          assert.strictEqual(refused.length, 1);
+          assert.deepStrictEqual([kept, refused[0]!.label].toSorted(), [
+            "Cold low-poly",
+            "Warm toon",
+          ]);
+          assert.match(refused[0]!.reason, /safety system/);
+          assert.match(ready.text, /was refused by the provider/);
+          // The image that came back was paid for: it is counted, and it is on disk.
+          const cost = ready.generation.costUsd ?? 0;
+          assert.isAbove(cost, 0);
+          assert.strictEqual((yield* art.list(root)).spentTodayUsd, cost);
+          const preview = ready.generation.candidates[0]!.preview;
+          yield* Effect.promise(() => NodeFSP.access(NodePath.join(root, preview)));
+          const picked = yield* art.choose(root, started.generation.id, 0);
+          assert.strictEqual(picked.generation.state, "done");
+          // An undo that takes its files away reads as undone, not as a broken record.
+          yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, preview)));
+          const listed = (yield* art.list(root)).generations[0]!;
+          assert.strictEqual(listed.filesUndone, true);
+        }),
+        layer({
+          base,
+          settings: { gameOpenAiApiKey: "sk" },
+          answer: () => {
+            calls += 1;
+            return calls === 1
+              ? openAiImages(1)()
+              : Response.json(
+                  {
+                    error: {
+                      message: "Your request was rejected by the safety system.",
+                      code: "moderation_blocked",
+                    },
+                  },
+                  { status: 400 },
+                );
+          },
+        }),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("never writes through a link out of the game, and refuses references outside it", () =>
     Effect.gen(function* () {
       const base = yield* tempGame();
@@ -176,19 +288,29 @@ describe("GameArt", () => {
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
           const escaped = yield* art
-            .generate(root, THREAD, {
+            .generate(
+              root,
+              THREAD,
+              {
+                lane: "image",
+                prompt: "x",
+                name: "x",
+                references: ["../secret.png"],
+              },
+              "library",
+            )
+            .pipe(Effect.flip);
+          assert.match(escaped.message, /inside the game/);
+          const started = yield* art.generate(
+            root,
+            THREAD,
+            {
               lane: "image",
               prompt: "x",
               name: "x",
-              references: ["../secret.png"],
-            })
-            .pipe(Effect.flip);
-          assert.match(escaped.message, /inside the game/);
-          const started = yield* art.generate(root, THREAD, {
-            lane: "image",
-            prompt: "x",
-            name: "x",
-          });
+            },
+            "library",
+          );
           const ended = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
           assert.strictEqual(ended.generation.state, "failed");
           assert.match(ended.generation.error ?? "", /outside the game folder/);

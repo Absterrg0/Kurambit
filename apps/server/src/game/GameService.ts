@@ -1220,7 +1220,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         yield* projects.admitWrite(threadId, root, "Generate art", String(threadId));
-        return yield* art.generate(root, threadId, input);
+        return yield* art.generate(
+          root,
+          threadId,
+          input,
+          characterRoute(yield* projects.read(root)),
+        );
       }),
     generateWait: (threadId, input) =>
       projects.resolve(threadId).pipe(Effect.flatMap((root) => art.wait(root, input))),

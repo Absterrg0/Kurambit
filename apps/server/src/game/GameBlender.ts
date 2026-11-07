@@ -42,6 +42,7 @@ import {
   GAME_STYLE_FILE,
   manifestProject,
 } from "@kurambit/contracts";
+import * as GameArt from "./art/GameArt.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import type { PackClips } from "./GameAssetLibrary.ts";
 import * as GameTemplates from "./GameTemplates.ts";
@@ -275,7 +276,9 @@ const routeRefusalOf = (candidate: Candidate, route: GameCharacterRoute) =>
     ? null
     : candidate.parts.some((part) => part.from === "mpfb2")
       ? lockCharacterRouteRefusal("mpfb-body", route)
-      : candidate.parts.some((part) => part.ai && part.what !== "parts" && part.what !== "texture")
+      : // The body or a creature's own rig: a generated prop it holds (a sword, a hat) is no character.
+        candidate.parts.some((part) => part.ai && part.what === "body") ||
+          Object.keys(candidate.creatures ?? {}).length > 0
         ? lockCharacterRouteRefusal("generated-body", route)
         : candidate.parts.some((part) => part.from === "made" && part.what !== "clips")
           ? lockCharacterRouteRefusal("unstamped-mesh", route)
@@ -542,6 +545,7 @@ const make = Effect.gen(function* () {
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const art = yield* GameArt.GameArt;
   const library = yield* GameAssetLibrary.GameAssetLibrary;
   const templates = yield* GameTemplates.GameTemplates;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -1431,6 +1435,24 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * The lock's rig check skips an armature marked as a generated creature (kurambit_rig), and
+   * any scene code can set that mark. So each one must name the finished creature generation of
+   * this game that delivered it, as the import wrote it; anything else is refused here, at the
+   * review and again at the export. The route itself is routeRefusalOf's.
+   */
+  const creatureRefusal = (root: string, candidate: Candidate) =>
+    Effect.gen(function* () {
+      for (const name of Object.keys(candidate.creatures ?? {})) {
+        const source = candidate.creatureSources?.[name];
+        const row =
+          source === undefined ? null : yield* art.delivered(root, source.id, source.path);
+        if (row === null || row.generation.lane !== "creature")
+          return `${name} is marked as a creature on its own rig (kurambit_rig), but no finished creature generation of this game delivered it, so the lock's rig check cannot skip it. Bring the creature game_generate made in with game_blender_assets_import (source generated), or build the character on STYLE.json's rig with game_blender_character.`;
+      }
+      return null;
+    });
+
+  /**
    * A model game_generate delivered, into the live scene: stamped with its generation record (the
    * provider, its licence, ai and the cost), so the review and the export credit it like any import.
    * A prop comes in as it is; a creature keeps its own rig and clips. A humanoid is conformed by
@@ -1445,7 +1467,12 @@ const make = Effect.gen(function* () {
           `source generated takes path: the game-relative model game_generate delivered under ${GENERATED_DIR}/ (game_generate_wait lists its files).`,
         );
       const realRoot = yield* realRootOf(root);
-      const { file, source } = yield* generatedSource(realRoot, path, "blender-assets-import");
+      const { file, source } = yield* generatedSource(
+        realRoot,
+        path,
+        "blender-assets-import",
+        (id, delivered) => art.delivered(root, id, delivered),
+      );
       if (source.lane === "character")
         return yield* refuse(
           `${path} is a generated humanoid: game_blender_character with body {game: "${path}"} conforms it to the standard skeleton, so the clip library plays on it.`,
@@ -1466,7 +1493,7 @@ const make = Effect.gen(function* () {
         root,
         "blender-assets-import",
         decodeGeneratedMade,
-        `kurambit.generated(${pyJson({ path: file, name, lane: source.lane, stamp: source.stamp, rig: source.rig })})`,
+        `kurambit.generated(${pyJson({ path: file, name, lane: source.lane, stamp: source.stamp, rig: source.rig, generation: source.generation })})`,
       );
       const blend = yield* saveBlend(root);
       const cost =
@@ -1609,7 +1636,8 @@ const make = Effect.gen(function* () {
       );
       const imageRel = `${PIPELINE_DIR}/${key}/${NodePath.basename(rendered.image)}`;
       const route = characterRoute(yield* projects.read(root));
-      const routeRefusal = routeRefusalOf(candidate, route);
+      const routeRefusal =
+        routeRefusalOf(candidate, route) ?? (yield* creatureRefusal(root, candidate));
       const refusing = [
         ...candidate.refusals.map((refusal) => `- [${refusal.code}] ${refusal.text}`),
         ...(routeRefusal === null ? [] : [`- [route] ${routeRefusal}`]),
@@ -1789,6 +1817,7 @@ const make = Effect.gen(function* () {
               realRoot,
               input.body.game,
               "blender-character",
+              (id, delivered) => art.delivered(root, id, delivered),
             );
             if (generated.source.lane !== "character")
               return yield* fail(
@@ -2023,7 +2052,9 @@ const make = Effect.gen(function* () {
               `The review measured what the lock refuses; fix it and review again:\n${candidate.refusals.map((refusal) => `- [${refusal.code}] ${refusal.text}`).join("\n")}`,
             );
           // The person's route is read now, not at the review: they may have changed it since.
-          const routeRefusal = routeRefusalOf(candidate, characterRoute(manifest));
+          const routeRefusal =
+            routeRefusalOf(candidate, characterRoute(manifest)) ??
+            (yield* creatureRefusal(root, candidate));
           if (routeRefusal !== null)
             return yield* opError("blender-export", root, "invalid-input", routeRefusal);
           const file = input.file ?? `${assetDirOf(manifest)}/${candidate.subject}.glb`;

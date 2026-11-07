@@ -4,6 +4,7 @@
 // attached. No key and no dollar cost: it counts against the plan's Codex limits.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { type ArtAdapter, type ArtContext, type ArtRequest, ArtProviderError } from "./adapter.ts";
 
@@ -67,11 +68,17 @@ const start = (context: ArtContext, request: ArtRequest) =>
       referencePaths: request.references.map((reference) => reference.absolute),
       timeoutMs: TIMEOUT_MS,
     });
-    // Only Codex's own saved images are read: a path it reports elsewhere is not one.
-    const saved = files.filter(
-      (file) =>
-        NodePath.isAbsolute(file) &&
-        file.split(NodePath.sep).includes("generated_images") &&
+    // Only Codex's own saved images are read: a path it reports elsewhere is not one. The
+    // paths come from the model's output stream, so each is resolved first: a `..` or a link
+    // past generated_images/ is judged by where it really leads.
+    const saved = (yield* Effect.forEach(files, (file) =>
+      NodePath.isAbsolute(file)
+        ? Effect.promise(() => NodeFSP.realpath(file).catch(() => null))
+        : Effect.succeed(null),
+    )).filter(
+      (file): file is string =>
+        file !== null &&
+        NodePath.dirname(file).split(NodePath.sep).includes("generated_images") &&
         /\.(png|jpe?g|webp)$/i.test(file),
     );
     const candidates = yield* Effect.forEach(saved.slice(0, request.candidates), (file) =>

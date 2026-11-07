@@ -30,7 +30,7 @@ MAX_REST_DEVIATION = 2.0
 def _stamp(idb, key="kurambit_source"):
     try:
         return json.loads(idb.get(key, ""))
-    except ValueError:
+    except (TypeError, ValueError):
         return None
 
 
@@ -154,6 +154,11 @@ def run_pass(params):
         standard_rest = json.loads(stored) if stored else None
     rig = params.get("rig") or ("standard-humanoid" if standard_rest else None)
     creatures = {a.name: a["kurambit_rig"] for a in arms if a.get("kurambit_rig")}
+    creature_sources = {}
+    for a in arms:
+        s = _stamp(a, "kurambit_generation") if a.get("kurambit_rig") else None
+        if isinstance(s, dict) and isinstance(s.get("id"), str) and isinstance(s.get("path"), str):
+            creature_sources[a.name] = {"id": s["id"][:64], "path": s["path"][:500]}
 
     _keep_only(objects)
     notes = []
@@ -192,6 +197,7 @@ def run_pass(params):
         "usedPalette": styled["usedPalette"],
         "armatures": {n: b for n, b in info["armatures"].items() if n not in creatures},
         "creatures": creatures,
+        "creatureSources": creature_sources,
         "notes": [n[:400] for n in notes + styled["notes"] + still],
     }
 

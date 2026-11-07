@@ -246,6 +246,20 @@ export const GameGeneration = Schema.Struct({
   estimateUsd: Schema.NullOr(Schema.Number),
   costUsd: Schema.NullOr(Schema.Number),
   error: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000))),
+  /** Directions the provider refused while the others came back, each with the provider's reason. */
+  refused: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        label: Schema.String,
+        reason: Schema.String.check(Schema.isMaxLength(1000)),
+      }),
+    ),
+  ),
+  /**
+   * Read time only: its files are gone from the game, because a build from before them was
+   * restored (undo). A later restore can bring them back.
+   */
+  filesUndone: Schema.optionalKey(Schema.Boolean),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
