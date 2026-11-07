@@ -214,7 +214,7 @@ export const keepGoingBannerView = (
       id: `keep-going-proposal:${proposal.stepId}`,
       stepId: proposal.stepId,
       lead: `${n === null ? "Next step" : `Step ${n}`} · ${stepWhyLabel(proposal.why)}:`,
-      line: proposal.text.split("\n").find((entry) => entry.trim() !== "") ?? proposal.text,
+      line: proposal.summary,
       text: proposal.text,
       detail:
         proposal.deadline === null ? "Waits for you" : `Starts at ${clock(proposal.deadline)}`,

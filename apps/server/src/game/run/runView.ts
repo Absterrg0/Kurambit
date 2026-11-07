@@ -13,7 +13,7 @@ import {
 } from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 
-import { headline } from "./loop.ts";
+import { proposalSummary } from "./loop.ts";
 import { RESUMABLE, type StepRecord, stageEra } from "./state.ts";
 
 /** Why a run made by an earlier Kurambit is never continued (design §6.4). */
@@ -151,6 +151,7 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
       ? {
           stepId: inFlight.id,
           why: inFlight.step.proposal.why,
+          summary: proposalSummary(inFlight.step.proposal),
           text: inFlight.step.proposal.text,
           deadline: inFlight.step.deadline === null ? null : iso(inFlight.step.deadline),
         }
@@ -164,7 +165,7 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
           {
             n,
             why: turn.proposal.why,
-            text: headline(turn.proposal),
+            text: proposalSummary(turn.proposal),
             build:
               inFlight?.step.kind === "judge"
                 ? inFlight.step.build
@@ -193,7 +194,7 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
       : phase === "looking"
         ? "Keep going is reading the current build's facts."
         : proposal !== null
-          ? `Step ${n} · ${headline(proposal)}`
+          ? `Step ${n} · ${proposal.summary}`
           : phase === "undoing"
             ? `Keep going · undoing step ${n}${input.undoing === null || input.undoing === "" ? "" : `: ${input.undoing}`}`
             : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`

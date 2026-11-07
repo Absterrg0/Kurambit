@@ -202,14 +202,27 @@ export function getProviderInstanceEntry(
   return deriveProviderInstanceEntries(providers).find((entry) => entry.instanceId === instanceId);
 }
 
+/**
+ * OpenCode names no default and lists every provider it routes to, paid
+ * OpenRouter models first in the alphabet: start from OpenCode's own Go
+ * subscription, then its Zen catalog, never a paid route nobody chose.
+ */
+const PREFERRED_MODEL_PREFIXES: Readonly<Record<string, ReadonlyArray<string>>> = {
+  opencode: ["opencode-go/", "opencode/"],
+};
+
 export function getDefaultProviderInstanceModel(
   providers: ReadonlyArray<ServerProvider>,
   instanceId: ProviderInstanceId,
 ): string | undefined {
   const entry = getProviderInstanceEntry(providers, instanceId);
   if (!entry) return undefined;
+  const preferred = (PREFERRED_MODEL_PREFIXES[entry.driverKind] ?? []).flatMap((prefix) =>
+    entry.models.filter((model) => !model.isCustom && model.slug.startsWith(prefix)),
+  );
   return (
     entry.models.find((model) => model.isDefault && !model.isCustom)?.slug ??
+    preferred[0]?.slug ??
     entry.models.find((model) => !model.isCustom)?.slug ??
     entry.models[0]?.slug ??
     DEFAULT_MODEL_BY_PROVIDER[entry.driverKind]

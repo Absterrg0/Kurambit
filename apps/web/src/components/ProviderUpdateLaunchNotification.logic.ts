@@ -157,10 +157,20 @@ export function isProviderUpdateActive(provider: Pick<ServerProvider, "updateSta
   return provider.updateState?.status === "queued" || provider.updateState?.status === "running";
 }
 
+/**
+ * Only agents in use count: a CLI the person never signed in to (a default
+ * Codex or Claude on a new machine) is not theirs to keep updated, and nagging
+ * about it on the first minute is noise. Settings → Providers still offers it.
+ */
 export function collectProviderUpdateCandidates(
   providers: ReadonlyArray<ServerProvider>,
 ): ProviderUpdateCandidate[] {
-  return dedupeProvidersByDriver(providers.filter(isProviderUpdateCandidate));
+  return dedupeProvidersByDriver(
+    providers.filter(
+      (provider): provider is ProviderUpdateCandidate =>
+        provider.status === "ready" && isProviderUpdateCandidate(provider),
+    ),
+  );
 }
 
 export function isProviderSettingsUpdateCandidate(

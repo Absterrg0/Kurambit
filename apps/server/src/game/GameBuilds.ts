@@ -36,6 +36,7 @@ import {
   type GameEngineId,
   GameOperationError,
   manifestProject,
+  RESTORE_BEFORE_LABEL,
   type RunId,
   type ThreadId,
 } from "@kurambit/contracts";
@@ -387,7 +388,7 @@ const make = Effect.gen(function* () {
         e.source._tag === "saved" &&
         (("build" in e.handle && /^restores\/.+-before$/.test(e.handle.build)) ||
           noRun?.before === e.id ||
-          e.source.label === "The game before a restore");
+          e.source.label === RESTORE_BEFORE_LABEL);
       const captures = rows.flatMap((row) => {
         const oid = refs.get(row.checkpoint.ref);
         return row.cwd !== g.root || oid === undefined || !isGameBuildId(oid)
@@ -621,7 +622,7 @@ const make = Effect.gen(function* () {
           ? [
               {
                 name: ref.checkpointRef.slice(noRunFolder.length),
-                label: "The game before a restore",
+                label: RESTORE_BEFORE_LABEL,
                 oid: ref.oid,
                 at: isoOfSeconds(ref.committedAt),
               },

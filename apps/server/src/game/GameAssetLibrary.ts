@@ -2,7 +2,6 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -50,30 +49,26 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { toolsDirectory } from "./GameToolchain.ts";
 import { engineProfile, gamePaths } from "./engineProfile.ts";
-import { templateDirectoryCandidates } from "./templates.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 
 /** Beside the pinned tools, shared by every game on this machine. */
 const libraryDirectory = () => NodePath.join(NodePath.dirname(toolsDirectory()), "asset-library");
 
 /** Vendored beside the starter templates (see its THIRD-PARTY-NOTICES.md), so sheets never wait on a pack. */
 export const LABEL_FONT = "label-font.ttf";
-export const labelFontDirectory = () => {
-  const candidates = templateDirectoryCandidates(
-    NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
-    NodePath.join,
-  ).map((templates) => NodePath.join(templates, "asset-library"));
-  return Effect.promise(async () => {
-    for (const candidate of candidates)
-      if (
-        await NodeFSP.access(NodePath.join(candidate, LABEL_FONT)).then(
-          () => true,
-          () => false,
-        )
-      )
-        return candidate;
-    return undefined;
-  });
-};
+export const labelFontDirectory = (templates: GameTemplates.GameTemplates["Service"]) =>
+  templates.directory.pipe(
+    Effect.map((directory) => NodePath.join(directory, "asset-library")),
+    Effect.flatMap((candidate) =>
+      Effect.promise(() =>
+        NodeFSP.access(NodePath.join(candidate, LABEL_FONT)).then(
+          () => candidate,
+          () => undefined,
+        ),
+      ),
+    ),
+    Effect.orElseSucceed(() => undefined),
+  );
 const MAX_ADD_FILES = 3000;
 const MAX_ADD_BYTES = 300 * 1024 * 1024;
 /** Far more than a game loads well; a bigger model add is almost always a folder of every format. */
@@ -233,7 +228,7 @@ const make = Effect.gen(function* () {
   const scratch = NodePath.join(directory, "tmp");
   const locks = yield* KeyedLock.make<string>();
   const indexes = new Map<string, LibraryIndex>();
-  const fontDirectory = yield* labelFontDirectory();
+  const fontDirectory = yield* labelFontDirectory(yield* GameTemplates.GameTemplates);
   if (fontDirectory === undefined)
     yield* Effect.logWarning(
       "asset library: the label font is missing; contact sheets go unnumbered",

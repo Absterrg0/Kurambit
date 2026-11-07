@@ -477,13 +477,14 @@ function EngineOption({
         <span>
           <span className="font-medium">{title}</span>
           <span className="block text-xs text-muted-foreground">{description}</span>
-          {tool !== null && tool.status !== "ready" ? (
+          {tool !== null && tool.status !== "ready" && tool.installed ? (
             <span className="mt-1 block text-xs text-muted-foreground">{tool.message}</span>
           ) : null}
         </span>
       </label>
       {tool !== null && tool.status !== "ready" ? (
-        <div className="pl-5">
+        <div className="flex items-center gap-2 pl-5 text-xs text-muted-foreground">
+          {tool.installed ? null : <span>Not installed ·</span>}
           <GameToolLink tool={tool} />
         </div>
       ) : null}

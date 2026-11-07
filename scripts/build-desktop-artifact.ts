@@ -981,9 +981,6 @@ export const WINDOWS_SERVER_ASAR_RESOURCE = "server.asar";
 // asar redirect convention). Everything else stays packed.
 export const WINDOWS_NATIVE_ASAR_UNPACK_GLOB =
   "{**/*.node,**/*.dll,**/*.exe,**/*.so,**/*.so.*,**/*.dylib}";
-// The server copies game templates with fs.cp and hands their paths to engines
-// and tools, none of which can read inside an asar (apps/server/src/game/templates.ts).
-export const SERVER_TEMPLATES_ASAR_UNPACK_GLOB = "apps/server/dist/templates/**";
 export const WINDOWS_SERVER_ASAR_UNPACK_GLOBS = [
   "**/*.dll",
   "**/*.exe",
@@ -2535,7 +2532,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // not inflate the loose-file count and slow NSIS installation.
     ...(platform === "win"
       ? { asar: { smartUnpack: false }, asarUnpack: [WINDOWS_NATIVE_ASAR_UNPACK_GLOB] }
-      : { asarUnpack: [SERVER_TEMPLATES_ASAR_UNPACK_GLOB] }),
+      : {}),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),
@@ -3419,7 +3416,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     private: true,
     packageManager: rootPackageJson.packageManager,
     description:
-      "Kurambit is a local desktop application for creating games with coding agents, Blender, and Godot.",
+      "Kurambit is a local desktop app for making games with coding agents: three.js browser games first, plus Godot and Unity games with Blender art.",
     license: "MIT",
     homepage: "https://kurambit.com",
     author: "Kurambit Tools",

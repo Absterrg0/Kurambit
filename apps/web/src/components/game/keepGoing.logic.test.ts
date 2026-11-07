@@ -113,7 +113,7 @@ describe("the keep-going banner", () => {
     expect(keepGoingBannerView(GUIDED_PROPOSED, MAIN_CHAT, clock)).toMatchObject({
       kind: "proposal",
       lead: "Step 3 · after an undo:",
-      line: "Your last step (Masher wins at 9 s with no skill.) was undone: Random input now crashes at 12 s.",
+      line: "Try the undone step another way, or a smaller one",
       detail: "Starts at 14:32",
       held: false,
     });

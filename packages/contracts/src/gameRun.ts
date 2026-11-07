@@ -120,6 +120,9 @@ export const GameKeepGoingStatus = Schema.Struct({
     Schema.Struct({
       stepId: Schema.String,
       why: GameRunStepWhy,
+      /** One line for the person, from the step's why and target. */
+      summary: Schema.String,
+      /** The agent's full prompt, shown on Edit. */
       text: Schema.String,
       /** Null while held. */
       deadline: Schema.NullOr(IsoDateTime),

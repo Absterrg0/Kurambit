@@ -8,6 +8,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import JSZip from "jszip";
 
 import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
@@ -63,6 +64,31 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
   yield* Effect.log("[cli] Applied development icon overrides to dist/client");
 });
 
+// One archive, not a folder: the server extracts it into the Kurambit home
+// (apps/server/src/game/GameTemplates.ts), so no platform has to read loose
+// files from inside an asar and Windows installs one file instead of hundreds.
+// A fixed date keeps the archive, and so its extracted folder's name, stable.
+// @effect-diagnostics-next-line globalDate:off -- jszip takes a Date for each member's timestamp.
+const TEMPLATES_ZIP_DATE = new Date("2026-01-01T00:00:00Z");
+const zipTemplates = Effect.fn("zipTemplates")(function* (source: string, target: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const zip = new JSZip();
+  const entries = (yield* fs.readDirectory(source, { recursive: true })).toSorted();
+  for (const entry of entries) {
+    const file = path.join(source, entry);
+    if ((yield* fs.stat(file)).type !== "File") continue;
+    zip.file(entry.split(path.sep).join("/"), yield* fs.readFile(file), {
+      date: TEMPLATES_ZIP_DATE,
+      createFolders: false,
+    });
+  }
+  const bytes = yield* Effect.promise(() =>
+    zip.generateAsync({ type: "uint8array", compression: "DEFLATE" }),
+  );
+  yield* fs.writeFile(target, bytes);
+});
+
 const buildCmd = Command.make(
   "build",
   {
@@ -98,8 +124,8 @@ const buildCmd = Command.make(
 
       const templatesSource = path.join(serverDir, "templates");
       if (yield* fs.exists(templatesSource)) {
-        yield* fs.copy(templatesSource, path.join(serverDir, "dist/templates"));
-        yield* Effect.log("[cli] Bundled game starter templates into dist/templates");
+        yield* zipTemplates(templatesSource, path.join(serverDir, "dist/templates.zip"));
+        yield* Effect.log("[cli] Bundled game starter templates into dist/templates.zip");
       } else {
         yield* Effect.logWarning("[cli] Starter templates not found — skipping template bundle.");
       }

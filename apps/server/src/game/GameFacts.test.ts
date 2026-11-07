@@ -14,6 +14,7 @@ import * as GameBuildCopies from "./GameBuildCopies.ts";
 import * as GameFacts from "./GameFacts.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 import * as GameService from "./GameService.ts";
 
 const ROOT = "/games/arena";
@@ -46,6 +47,7 @@ describe("GameFacts supersede", () => {
             Layer.mock(GameService.GameService)({}),
             Layer.mock(PreviewBrowser.PreviewBrowser)({}),
             Layer.mock(GameProcesses.GameProcesses)({ list: () => [] }),
+            GameTemplates.layerAt(`${import.meta.dirname}/../../templates`),
             SqlitePersistence.layerMemory,
             NodeServices.layer,
           ),

@@ -29,7 +29,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildDetail, refOf } from "./GameBuildDetail";
 import { GameBuildFactChips } from "./GameBuildFacts";
 import { buildName, formatBuildTime } from "./gameBuilds.logic";
-import { isUndone, markLabel, markTone, stepMark } from "./gameBuildTimeline.logic";
+import { isUndone, markLabel, markTone, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
 import { turnStripRestore } from "./gameTurnBuild.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { restoreQuestion, useBuildRestore } from "./useBuildActions";
@@ -128,7 +128,7 @@ export function GameBuildTimeline({
       seen.add(build.id);
       loaded.push(build);
     }
-  const marks = loaded.toReversed();
+  const marks = timelineMarks(loaded, list?.current ?? null);
   const order = marks.map((build) => build.id);
   const lastPage = olderPages.at(-1);
   const olderNext =

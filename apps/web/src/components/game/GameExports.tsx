@@ -50,6 +50,13 @@ const BUILD_META: Record<
 };
 
 /** The game folder's exports: the release files Play serves and the person ships. */
+/** A release path as a person reads it: content-hash folder names become "…" (the full path is in Details). */
+const humanBuildPath = (path: string) =>
+  path
+    .split("/")
+    .map((part) => (/^[0-9a-f]{16,}$/.test(part) ? "…" : part))
+    .join("/");
+
 export function GameExports({
   threadRef,
   builds,
@@ -240,15 +247,20 @@ export function GameExports({
               <p className="text-xs text-muted-foreground">{meta.body}</p>
               {build?.ships === "folder" ? (
                 <p className="text-2xs text-muted-foreground">
-                  This release is the whole {build.path.replace(/\/[^/]+$/, "")} folder; ship the
-                  folder as it is.
+                  This release is a whole folder; ship it as it is.
                 </p>
               ) : null}
-              <p className="truncate font-mono text-2xs text-muted-foreground">
-                {build
-                  ? `${build.path} · updated ${new Date(build.updatedAt).toLocaleString()}`
-                  : "Not built yet"}
-              </p>
+              {build ? (
+                <details className="text-2xs text-muted-foreground">
+                  <summary className="cursor-pointer truncate font-mono">
+                    {humanBuildPath(build.path)} · updated{" "}
+                    {new Date(build.updatedAt).toLocaleString()}
+                  </summary>
+                  <p className="mt-1 font-mono break-all">{build.path}</p>
+                </details>
+              ) : (
+                <p className="text-2xs text-muted-foreground">Not built yet</p>
+              )}
               {target === "Web" && !live ? (
                 <p className="text-2xs text-muted-foreground">
                   Packages the export Play serves; later source edits are not included.
