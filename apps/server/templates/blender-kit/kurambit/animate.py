@@ -818,12 +818,10 @@ def _bar(arm, body, bar, fps, out):
     skeleton.import_gltf(bar["path"])
     new = [o for o in bpy.data.objects if o not in before_objects]
     src = next((o for o in new if o.type == "ARMATURE"), None)
-    found = None
-    for a in set(bpy.data.actions) - before_actions:
-        if a.name == bar["clip"] or a.name.split("|")[-1] == bar["clip"]:
-            found = a
+    imported = set(bpy.data.actions) - before_actions
+    found = next((a for a in imported if a.name == bar["clip"] or a.name.split("|")[-1] == bar["clip"]), None)
     keep = found.copy() if found is not None else None
-    for a in set(bpy.data.actions) - before_actions:
+    for a in imported:
         bpy.data.actions.remove(a)
     ratio = (arm.data.bones["pelvis"].head_local.length / max(1e-6, src.data.bones["pelvis"].head_local.length)) if src is not None and "pelvis" in src.data.bones else 1.0
     skeleton.remove_objects(new)

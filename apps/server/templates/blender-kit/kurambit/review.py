@@ -779,7 +779,10 @@ def _views(sc, cam, frames, folder, prefix, points, size, views, transparent, fl
     aspect = size[0] / size[1]
     out = {}
     for name, az in views:
-        ext = _extent(points, az, el)
+        # the 1st to 99th percentile: a prop's tip flung out on one frame must not shrink the body on every other
+        r, u, b = (np.array(v) for v in _basis(az, el))
+        x, y, d = points @ r, points @ u, points @ b
+        ext = (*np.percentile(x, (1, 99)), *np.percentile(y, (1, 99)), d.min(), d.max())
         w, h = (ext[1] - ext[0]) + 2 * margin, (ext[3] - ext[2]) + 2 * margin
         _camera(cam, az, el, ext, max(w, h * aspect) if aspect >= 1 else max(h, w / aspect))
         tiles = []
@@ -988,7 +991,7 @@ def motion_pictures(arm, body, act, res, curves, beats, notes, out, title, motio
         sc.world = world
         tr = curves["track"]
         points = np.concatenate([np.array(v) for v in tr.values()])
-        floor_ob = _floor(sc, 4 * float(np.ptp(points[:, :2], axis=0).max() + 4), made)
+        floor_ob = _floor(sc, 400.0, made)
         labels = Labels(folder)
         if window is not None:
             window.scene = sc

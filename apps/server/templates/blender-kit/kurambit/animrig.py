@@ -206,6 +206,26 @@ def _descendants(arm, name):
     return set(out)
 
 
+def _islands(me, mask):
+    """A label per vertex: the connected piece it belongs to, over edges between masked vertices."""
+    parent = np.arange(len(me.vertices))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    ev = np.empty(len(me.edges) * 2, np.int64)
+    me.edges.foreach_get("vertices", ev)
+    for a, b in ev.reshape(-1, 2):
+        if mask[a] and mask[b]:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+    return np.array([find(i) for i in range(len(parent))])
+
+
 def character_meshes(arm):
     """The meshes that move with an armature: skinned by it, or parented to it or to its bones."""
     out = []
@@ -294,11 +314,16 @@ class Body:
                     w = sum(g.weight for g in v.groups if g.group in gi)
                     rigid[v.index] = w >= 0.98
                 if rigid.any():
-                    local = co[rigid] @ inv[:3, :3].T + inv[:3, 3]
-                    far = np.linalg.norm(local, axis=1) > reach
-                    if far.sum() >= 8:
-                        pts.append(co[rigid][far])
-                        objects.append(o.name)
+                    local = co @ inv[:3, :3].T + inv[:3, 3]
+                    far = rigid & (np.linalg.norm(local, axis=1) > reach)
+                    if far.any():
+                        # every rigid island reaching past the fingertips: a box blade has vertices
+                        # only at its ends, so the far ones alone would be its tip
+                        island = _islands(o.data, rigid)
+                        keep = rigid & np.isin(island, np.unique(island[far]))
+                        if keep.sum() >= 8:
+                            pts.append(co[keep])
+                            objects.append(o.name)
             if not pts:
                 continue
             world = np.concatenate(pts)

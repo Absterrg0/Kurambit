@@ -181,7 +181,7 @@ def _clips(arm, meshes, height, skin=None):
         if still:
             clip["seam"] = clip["kneePops"] = clip["armThroughBody"] = None
         elif body is not None and len(frames) >= 3:
-            clip.update(_contacts(body, frames, fps, act.name))
+            clip.update(_contacts(body, frames, fps, act.name, clip["groundSpeed"]))
         out.append(clip)
     skeleton.assign_action(arm, None)
     for pb in arm.pose.bones:
@@ -201,14 +201,14 @@ def _body_of(arm, meshes):
         return None
 
 
-def _contacts(body, frames, fps, name):
+def _contacts(body, frames, fps, name, ground_speed=None):
     """The clip's stances (each foot's planted spans) and strikes (a held prop's tip, a free hand
     or a foot at speed, held out from the body; none in a locomotion clip), in the clip's seconds,
     so a game reads its hit windows and foot plants instead of guessing."""
     m = Motion(body, fps)
     pts = [m.points(P) for P in frames]
     floor = m.floor_of(pts)
-    planted = m.contacts(pts, floor)
+    planted = m.contacts(pts, floor, ground_speed or 0.0)
     t = lambda f: round(f / fps, 3)  # noqa: E731
     stances = sorted(({"foot": "foot_" + s, "from": t(a), "to": t(b)} for s in "lr" for a, b in planted[s]), key=lambda x: x["from"])
     strikes = [] if any(w in name.lower() for w in LOCOMOTION) else [
@@ -449,14 +449,17 @@ class Motion:
         out["neck_turn"], out["neck_flex"] = y, p
         return out
 
-    def contacts(self, pts, floor):
-        """Per foot: the frames it is planted (low and slow), as runs of three frames or more."""
+    def contacts(self, pts, floor, ground_speed=0.0):
+        """Per foot: the frames it is planted (low and slow), as runs of three frames or more. In an
+        in-place locomotion clip a planted foot slides back at the clip's ground speed (+Y, the
+        character facing -Y): slow means slow against that."""
         n, fps = len(pts), self.fps
         out = {}
         for s in "lr":
             low = [min(p["heel_" + s][2] - self.rest_z["heel"], p["ball_" + s][2] - self.rest_z["ball"], p["toe_" + s][2] - self.rest_z["toe"]) < floor + CONTACT_Z for p in pts]
             fp = np.array([p["ball_" + s] for p in pts])
-            fv = np.linalg.norm(np.gradient(fp[:, :2], axis=0), axis=1) * fps if n > 1 else np.zeros(n)
+            v = np.gradient(fp[:, :2], axis=0) * fps if n > 1 else np.zeros((n, 2))
+            fv = np.linalg.norm(v - np.array([0.0, ground_speed]), axis=1)
             out[s] = [(k, j) for k, j in _runs([bool(lw and v < CONTACT_V) for lw, v in zip(low, fv)]) if j - k + 1 >= 3]
         return out
 
