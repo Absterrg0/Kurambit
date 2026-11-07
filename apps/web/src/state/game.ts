@@ -419,6 +419,11 @@ export const gameEnvironment = {
     label: "game:toolchainRemove",
     tag: WS_METHODS.gameToolchainRemove,
   }),
+  // The person's choice of how the game's characters are made; the agent never sets it.
+  setCharacterRoute: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:setCharacterRoute",
+    tag: WS_METHODS.gameSetCharacterRoute,
+  }),
   status: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:status",
     tag: WS_METHODS.gameStatus,

@@ -3,6 +3,7 @@
 import { useGameDialogStore } from "./game/gameDialogStore";
 import { useTurnUndo } from "./game/useBuildActions";
 import { useKeepGoing } from "./game/useKeepGoing";
+import { CHARACTER_ROUTES, useCharacterRoute } from "./game/GameCharacterRoute";
 import { keepGoingControlView } from "./game/keepGoing.logic";
 import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
 import {
@@ -63,6 +64,7 @@ import {
   FolderPlusIcon,
   Gamepad2Icon,
   ColumnsIcon,
+  PersonStandingIcon,
   FastForwardIcon,
   HistoryIcon,
   MessageSquareDashedIcon,
@@ -753,6 +755,7 @@ function OpenCommandPaletteDialog(props: {
   // The game's latest turn build: the palette offers the Undo or Redo its strip does.
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
+  const characterRoute = useCharacterRoute(isGameThread ? activeThreadRef : null);
 
   const activeThreadReferenceCopyTarget =
     activeThread === null
@@ -1636,6 +1639,35 @@ function OpenCommandPaletteDialog(props: {
       icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
       run: requestStage({ kind: "compare" }),
     });
+    if (characterRoute.canSet)
+      actionItems.push({
+        kind: "submenu",
+        value: "action:game-character-route",
+        title: "Make characters with…",
+        searchTerms: ["characters", "make", "library", "blender", "tripo", "route", "game"],
+        icon: <PersonStandingIcon className={ITEM_ICON_CLASS} />,
+        addonIcon: <PersonStandingIcon className={ADDON_ICON_CLASS} />,
+        groups: [
+          {
+            value: "character-routes",
+            label: "Make characters with",
+            items: CHARACTER_ROUTES.map((option) => ({
+              kind: "action",
+              value: `game-character-route:${option.route}`,
+              title: option.label,
+              description: option.unavailable ?? option.description,
+              disabled: option.unavailable !== null,
+              searchTerms: [option.label, "characters", "route"],
+              icon: <PersonStandingIcon className={ITEM_ICON_CLASS} />,
+              titleTrailingContent:
+                characterRoute.shown === option.route ? (
+                  <span className="text-xs text-muted-foreground/70">Current</span>
+                ) : undefined,
+              run: () => characterRoute.choose(option.route),
+            })),
+          },
+        ],
+      });
     // Keep going (design §7.6): on, off and resume, and the Guided proposal's
     // answers. A pause's reason rides on the items that resume it.
     const keepGoingStatus = keepGoing.status;

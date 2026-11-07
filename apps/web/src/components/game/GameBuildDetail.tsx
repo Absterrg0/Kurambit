@@ -18,6 +18,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { GameBuildFactsList } from "./GameBuildFacts";
+import { useCharacterRoute } from "./GameCharacterRoute";
 import { SaveMediaButton } from "./GameSavedMedia";
 import { buildName, buildSourceLabel, formatBuildTime } from "./gameBuilds.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
@@ -61,6 +62,7 @@ export function GameBuildDetail({
       : null,
   );
   const restores = useBuildRestore(threadRef, list?.restore ?? null);
+  const characters = useCharacterRoute(threadRef).route;
   const measure = useMeasureOnOpen(threadRef);
   // Opened, by a row or a link: a build that never was measured is, once.
   const neverMeasured = build.available && build.facts.state === "never";
@@ -214,7 +216,7 @@ export function GameBuildDetail({
           </p>
         ) : (
           <>
-            <GameBuildFactsList threadRef={threadRef} facts={factsData} />
+            <GameBuildFactsList threadRef={threadRef} facts={factsData} characters={characters} />
             <SaveEvidence threadRef={threadRef} build={build} facts={factsData} />
           </>
         )}

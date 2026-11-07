@@ -62,6 +62,7 @@ import {
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
+import { GameCharacterRouteMenu } from "./GameCharacterRoute";
 import { GameBuildTimeline, type GameTimelineRequest } from "./GameBuildTimeline";
 import { GameExports } from "./GameExports";
 import { buildName } from "./gameBuilds.logic";
@@ -849,6 +850,7 @@ function ThreadGameStage({
                   Stop the game
                 </MenuItem>
                 <MenuSeparator />
+                <GameCharacterRouteMenu threadRef={threadRef} />
                 <MenuItem
                   onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
                 >
