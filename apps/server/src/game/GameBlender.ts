@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -36,6 +37,7 @@ import {
   type GameBlenderSceneResult,
   type GameCharacterRoute,
   type GameManifest,
+  type GameStyle,
   type GameStyleView,
   GAME_STYLE_FILE,
   manifestProject,
@@ -57,14 +59,19 @@ import {
   KitDigest,
   PIPELINE_DIR,
   PassResult,
+  type PassRecord,
   candidateJsonPath,
   conceptOf,
   encodeCandidate,
+  encodePassRecord,
   kitOutput,
   kitVersion,
   ledgerLine,
+  ledgerParts,
   measurementText,
+  passJsonPath,
   readCandidate,
+  readPassRecord,
   reviewKey,
   sidecarOf,
   sidecarPathOf,
@@ -525,6 +532,16 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const sessions = new Map<string, Session>();
+  /**
+   * One per game (its real root) around a review's pass and its records, and an export's
+   * promotion: an export never copies a GLB a pass is still writing, and two reviews of one key
+   * never share a candidate folder at once.
+   */
+  const pipelineLocks = yield* KeyedLock.make<string>();
+  const pipelineLocked =
+    (root: string) =>
+    <A>(effect: Effect.Effect<A, GameOperationError>) =>
+      Effect.flatMap(realRootOf(root), (realRoot) => pipelineLocks.withLock(realRoot, effect));
   /** Public operations running per game right now; a sweep never closes a held game's Blender. */
   const held = new Map<string, number>();
   const holding = <A>(
@@ -1253,18 +1270,21 @@ const make = Effect.gen(function* () {
   /**
    * The one-shot pass on a copy of the saved scene (§2.8): the style pass and the measurement
    * in a factory-startup Blender under the session's isolated folders, behind the memory gate.
-   * It writes the candidate GLB; its result is returned as it measured it.
+   * It writes the GLB to `glb`, a name of this run's that the caller renames into place; its
+   * result is returned as it measured it.
    */
   const runPass = (
     root: string,
     out: string,
+    glb: string,
     params: Record<string, unknown>,
   ): Effect.Effect<typeof PassResult.Type, GameOperationError> =>
     Effect.gen(function* () {
       const blender = yield* tools.executable("blender");
       const kit = yield* kitDirectory;
-      const copy = NodePath.join(out, "scene.blend");
-      const paramsFile = NodePath.join(out, "params.json");
+      const run = NodeCrypto.randomUUID();
+      const copy = NodePath.join(out, `scene.${run}.blend`);
+      const paramsFile = NodePath.join(out, `params.${run}.json`);
       // The live scene saves the copy itself: Blender remaps its relative paths (library
       // textures) for the copy's folder, so the pass resolves the same files the scene does.
       const saved = yield* callText(root, "execute_blender_code", {
@@ -1273,7 +1293,7 @@ const make = Effect.gen(function* () {
       if (!saved.includes("STUDIO_SAVED"))
         return yield* opError("blender-review", copy, "command-failed", saved.slice(0, 1000));
       yield* Effect.tryPromise({
-        try: () => NodeFSP.writeFile(paramsFile, JSON.stringify({ ...params, out })),
+        try: () => NodeFSP.writeFile(paramsFile, JSON.stringify({ ...params, out, glb })),
         catch: (cause) => opError("blender-review", out, "io", undefined, cause),
       });
       const result = yield* gate
@@ -1303,7 +1323,13 @@ const make = Effect.gen(function* () {
           }),
         )
         // The copy is the size of the scene; the candidate GLB is what the review keeps.
-        .pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(copy, { force: true }))));
+        .pipe(
+          Effect.ensuring(
+            Effect.promise(() =>
+              Promise.all([copy, paramsFile].map((file) => NodeFSP.rm(file, { force: true }))),
+            ),
+          ),
+        );
       const output = kitOutput(result.stdout);
       if (output.kind === "refused")
         return yield* opError(
@@ -1390,71 +1416,80 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Look's review mode (§2.2): digest the objects, reuse the candidate of that key or run the
-   * pass for it, then render its composite in a throwaway scene of the live session.
+   * The locked part of a review: the pass of this key (run now, or the one a review already ran,
+   * kept as pass.json), its composite rendered in a throwaway scene of the live session, and only
+   * then candidate.json, so an export never follows a review nobody saw (§0.5).
    */
-  const review = (root: string, input: GameBlenderLookInput) =>
+  const reviewed = (
+    root: string,
+    realRoot: string,
+    style: GameStyle | null,
+    input: GameBlenderLookInput,
+  ) =>
     Effect.gen(function* () {
-      const short = yield* memoryShortfall(
-        memory,
-        "Blender review",
-        RENDER_NEEDED_MB,
-        "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
-      );
-      if (short !== null) return yield* opError("blender-review", root, "low-memory", short);
-      const realRoot = yield* realRootOf(root);
-      const style = yield* readGameStyle(realRoot);
       const kit = yield* kitVersionOf;
       const digest = yield* liveDigest(root, input.target ?? null);
       const key = reviewKey(digest.perObject, styleHash(style), kit);
       const out = yield* candidateDir(realRoot, key);
-      const found = yield* Effect.promise(() => readCandidate(out));
-      const measured: Candidate =
+      const found = yield* Effect.promise(() => readPassRecord(out));
+      const passed: PassRecord =
         found ??
         (yield* Effect.gen(function* () {
-          const rig = style?.rig === undefined ? null : resolveRig(style.rig);
-          const pass = yield* runPass(root, out, {
-            objects: digest.objects,
-            expectedDigest: digest.perObject,
-            style,
-            budgets: styleBudgets(style),
-            standardJoints: rig === null ? null : (LIBRARY_RIG_JOINTS[rig] ?? null),
-            rig,
-            standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
-          });
-          // The scene's own armatures too: one deforming no skinned mesh leaves none in the GLB.
-          const live = armaturesIn(
-            yield* callText(root, "execute_blender_code", {
-              code: [
-                "import bpy, json",
-                ARMATURES_OF,
-                `studio_armatures([bpy.data.objects[n] for n in ${pyJson(digest.objects)}])`,
-              ].join("\n"),
-            }),
-          );
-          const carried = { ...live, ...pass.armatures };
-          const offRig = lockArmatureRefusal(carried, style);
-          const armatures = Object.keys(carried);
-          return {
-            ...pass,
-            refusals:
-              offRig === null || pass.refusals.some((refusal) => refusal.code === "off-rig")
-                ? pass.refusals
-                : [...pass.refusals, { code: "off-rig" as const, text: offRig.slice(0, 400) }],
-            key,
-            kit,
-            digest: digest.perObject,
-            at: DateTime.formatIso(yield* DateTime.now),
-            subject: subjectName(
-              armatures.length === 1 ? armatures[0]! : (input.target?.[0] ?? digest.objects[0]!),
-            ),
-            concept: null,
-          };
+          // A new pass replaces the GLB: nothing may promote what an earlier review rendered.
+          yield* Effect.promise(() => NodeFSP.rm(candidateJsonPath(out), { force: true }));
+          const glb = NodePath.join(out, `candidate.${NodeCrypto.randomUUID()}.glb`);
+          return yield* Effect.gen(function* () {
+            const rig = style?.rig === undefined ? null : resolveRig(style.rig);
+            const pass = yield* runPass(root, out, glb, {
+              objects: digest.objects,
+              expectedDigest: digest.perObject,
+              style,
+              budgets: styleBudgets(style),
+              standardJoints: rig === null ? null : (LIBRARY_RIG_JOINTS[rig] ?? null),
+              rig,
+              standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
+            });
+            // The scene's own armatures too: one deforming no skinned mesh leaves none in the GLB.
+            const live = armaturesIn(
+              yield* callText(root, "execute_blender_code", {
+                code: [
+                  "import bpy, json",
+                  ARMATURES_OF,
+                  `studio_armatures([bpy.data.objects[n] for n in ${pyJson(digest.objects)}])`,
+                ].join("\n"),
+              }),
+            );
+            const carried = { ...live, ...pass.armatures };
+            const offRig = lockArmatureRefusal(carried, style);
+            const armatures = Object.keys(carried);
+            const record: PassRecord = {
+              ...pass,
+              refusals:
+                offRig === null || pass.refusals.some((refusal) => refusal.code === "off-rig")
+                  ? pass.refusals
+                  : [...pass.refusals, { code: "off-rig" as const, text: offRig.slice(0, 400) }],
+              key,
+              kit,
+              digest: digest.perObject,
+              at: DateTime.formatIso(yield* DateTime.now),
+              subject: subjectName(
+                armatures.length === 1 ? armatures[0]! : (input.target?.[0] ?? digest.objects[0]!),
+              ),
+            };
+            yield* Effect.tryPromise({
+              try: () => NodeFSP.rename(glb, NodePath.join(out, CANDIDATE_GLB)),
+              catch: (cause) => opError("blender-review", out, "io", undefined, cause),
+            });
+            yield* writeText(passJsonPath(out), encodePassRecord(record), "blender-review");
+            return record;
+          }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(glb, { force: true }))));
         }));
+      const ledger = ledgerParts(passed.parts);
+      if ("refusal" in ledger)
+        return yield* opError("blender-review", root, "invalid-input", ledger.refusal);
       // The concept is read at every review, so one added since is beside the next render.
-      const concept = yield* Effect.promise(() => conceptOf(realRoot, measured.subject));
-      const candidate: Candidate = { ...measured, concept: concept.ref };
-      yield* writeText(candidateJsonPath(out), encodeCandidate(candidate), "blender-review");
+      const concept = yield* Effect.promise(() => conceptOf(realRoot, passed.subject));
+      const candidate: Candidate = { ...passed, parts: ledger.parts, concept: concept.ref };
       const image = NodePath.join(out, "review.png");
       const view = style?.view ?? "perspective";
       const rendered = yield* kitCall(
@@ -1477,6 +1512,29 @@ const make = Effect.gen(function* () {
       });
       const bytes = yield* Effect.promise(() =>
         NodeFSP.stat(NodePath.join(out, CANDIDATE_GLB)).then((stat) => stat.size),
+      );
+      yield* writeText(candidateJsonPath(out), encodeCandidate(candidate), "blender-review");
+      return { key, candidate, concept, rendered, png, bytes };
+    });
+
+  /**
+   * Look's review mode (§2.2): digest the objects, reuse the pass of that key or run it, then
+   * render its composite in a throwaway scene of the live session.
+   */
+  const review = (root: string, input: GameBlenderLookInput) =>
+    Effect.gen(function* () {
+      const short = yield* memoryShortfall(
+        memory,
+        "Blender review",
+        RENDER_NEEDED_MB,
+        "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
+      );
+      if (short !== null) return yield* opError("blender-review", root, "low-memory", short);
+      const realRoot = yield* realRootOf(root);
+      const style = yield* readGameStyle(realRoot);
+      const { key, candidate, concept, rendered, png, bytes } = yield* pipelineLocks.withLock(
+        realRoot,
+        reviewed(root, realRoot, style, input),
       );
       const imageRel = `${PIPELINE_DIR}/${key}/${NodePath.basename(rendered.image)}`;
       const route = characterRoute(yield* projects.read(root));
@@ -1741,10 +1799,11 @@ const make = Effect.gen(function* () {
           // The import adds to the live scene; only what it added is exported,
           // never the rest of the scene under the asset's name.
           const before = yield* callText(root, "execute_blender_code", {
-            code: "import bpy, json\nprint('STUDIO_NAMES ' + json.dumps([o.name for o in bpy.data.objects]))\n",
+            code: "import bpy, json\nprint('STUDIO_NAMES ' + json.dumps([o.name for o in bpy.data.objects]))\nprint('STUDIO_ACTIONS ' + json.dumps([a.name for a in bpy.data.actions]))\n",
           });
           const known = /STUDIO_NAMES (\[.*\])/.exec(before)?.[1];
-          if (known === undefined)
+          const knownActions = /STUDIO_ACTIONS (\[.*\])/.exec(before)?.[1];
+          if (known === undefined || knownActions === undefined)
             return yield* opError(
               "blender-assets-import",
               root,
@@ -1782,7 +1841,10 @@ const make = Effect.gen(function* () {
               code: [
                 "import bpy",
                 `before = set(${known})`,
+                `before_actions = set(${knownActions})`,
                 "for o in [o for o in bpy.data.objects if o.name not in before]: bpy.data.objects.remove(o, do_unlink=True)",
+                // Its clips go too, or they ride along with any armature whose bones they key.
+                "for a in [a for a in bpy.data.actions if a.name not in before_actions]: bpy.data.actions.remove(a)",
               ].join("\n"),
             });
             return yield* opError(
@@ -1794,14 +1856,28 @@ const make = Effect.gen(function* () {
           }
           // The import stays in the live scene, stamped with its source and licence (§2.8): the
           // export composes the ledger from the stamps, after a review like anything built here.
+          // Its clips are stamped too, so a rigged import's animations are credited to it, not
+          // called made here; a clip keyed later on its armature carries no stamp and is.
           const licence = importLicence(input.source, input.id, text);
+          const stampOf = (what: "mesh" | "clips") =>
+            JSON.stringify(
+              JSON.stringify({
+                what,
+                from: input.source,
+                licence: licence.slice(0, 200),
+                ai: false,
+                credits: null,
+              }),
+            );
           const stamped = yield* callText(root, "execute_blender_code", {
             code: [
               "import bpy, json",
               `before = set(${known})`,
-              `stamp = ${JSON.stringify(JSON.stringify({ what: "mesh", from: input.source, licence: licence.slice(0, 200), ai: false, credits: null }))}`,
+              `before_actions = set(${knownActions})`,
+              `stamp = ${stampOf("mesh")}`,
               "added = [o for o in bpy.context.scene.objects if o.name not in before and o.type in ('MESH', 'ARMATURE')]",
               "for o in added: o['kurambit_source'] = stamp",
+              `for a in [a for a in bpy.data.actions if a.name not in before_actions]: a['kurambit_source'] = ${stampOf("clips")}`,
               "print(f'STUDIO_STAMPED {len(added)}')",
             ].join("\n"),
           });
@@ -1901,7 +1977,7 @@ const make = Effect.gen(function* () {
             export: file,
             sidecar,
           };
-        }),
+        }).pipe(pipelineLocked(root)),
       ),
     renderSprites: (root, input) =>
       holding(

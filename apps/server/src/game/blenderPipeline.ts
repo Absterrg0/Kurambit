@@ -2,7 +2,9 @@
 // The asset pipeline's server side, beside GameBlender: a review is a candidate GLB the
 // one-shot pass wrote under builds/logs/blender-pipeline/<key>/, keyed by exactly what was
 // reviewed (each object's digest, the style lock and the kit), and an export promotes that
-// candidate as it is, or refuses. Nothing here runs Blender; GameBlender does.
+// candidate as it is, or refuses. The pass's result (pass.json) is kept so a retried review
+// skips the pass; only a review whose image was rendered leaves candidate.json, the one record
+// an export promotes. Nothing here runs Blender; GameBlender does.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -24,7 +26,10 @@ export const PIPELINE_DIR = "builds/logs/blender-pipeline";
 /** The Blender kit's folder in the templates. */
 export const KIT_DIR = "blender-kit";
 const CANDIDATE_JSON = "candidate.json";
+const PASS_JSON = "pass.json";
 export const CANDIDATE_GLB = "candidate.glb";
+/** GameAssetSource's limit on a sidecar's parts. */
+const LEDGER_PARTS = 16;
 const MAX_CANDIDATE_BYTES = 4 * 1024 * 1024;
 
 /**
@@ -103,7 +108,8 @@ export const PassResult = Schema.Struct({
   objects: Schema.Array(Schema.String),
   measured: GameModelMeasure,
   refusals: Schema.Array(GameModelRefusal),
-  parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+  /** Every distinct stamp; ledgerParts fits them to a sidecar. */
+  parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(512)),
   usedPalette: Schema.Array(Schema.String),
   /** Every armature the candidate carries, with its bone names: the lock's rig is checked on them. */
   armatures: Schema.Record(Schema.String, Schema.Array(Schema.String)),
@@ -111,8 +117,8 @@ export const PassResult = Schema.Struct({
   notes: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(400)))),
 });
 
-/** `candidate.json`: the pass's result as measured, plus what makes it this review's. */
-const Candidate = Schema.Struct({
+/** `pass.json`: the pass's result as measured, plus what makes it this key's. */
+const PassRecord = Schema.Struct({
   ...PassResult.fields,
   key: Schema.String,
   kit: Schema.String,
@@ -120,28 +126,103 @@ const Candidate = Schema.Struct({
   at: Schema.String,
   /** The export's default stem, and the name the concept is looked up by. */
   subject: Schema.String.check(Schema.isPattern(/^[a-z0-9_]{1,64}$/)),
+});
+export type PassRecord = typeof PassRecord.Type;
+const PassRecordJson = Schema.fromJsonString(PassRecord);
+export const encodePassRecord = Schema.encodeSync(PassRecordJson);
+
+/** `candidate.json`: a pass record whose review was rendered, its ledger fit to a sidecar. */
+const Candidate = Schema.Struct({
+  ...PassRecord.fields,
+  parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(LEDGER_PARTS)),
   concept: Schema.NullOr(Schema.String),
 });
 export type Candidate = typeof Candidate.Type;
 const CandidateJson = Schema.fromJsonString(Candidate);
-const decodeCandidate = Schema.decodeUnknownOption(CandidateJson);
 export const encodeCandidate = Schema.encodeSync(CandidateJson);
 
 /**
- * The candidate a review left at `dir`, or null: no review, an unreadable record, or a GLB that
- * is not there as a plain file. A link is never followed, so the export never promotes one.
+ * A record beside the candidate GLB, or null: none, an unreadable record, or a GLB that is not
+ * there as a plain file. A link is never followed, so the export never promotes one.
  */
-export const readCandidate = async (dir: string): Promise<Candidate | null> => {
+const readRecord = async <A>(
+  dir: string,
+  name: string,
+  decode: (text: string) => Option.Option<A>,
+): Promise<A | null> => {
   const plainFile = async (path: string, max: number) => {
     const stat = await NodeFSP.lstat(path).catch(() => null);
     return stat !== null && stat.isFile() && stat.size <= max;
   };
   if (!(await plainFile(NodePath.join(dir, CANDIDATE_GLB), Number.MAX_SAFE_INTEGER))) return null;
-  if (!(await plainFile(NodePath.join(dir, CANDIDATE_JSON), MAX_CANDIDATE_BYTES))) return null;
-  const text = await NodeFSP.readFile(NodePath.join(dir, CANDIDATE_JSON), "utf8").catch(() => null);
-  return text === null ? null : Option.getOrNull(decodeCandidate(text));
+  if (!(await plainFile(NodePath.join(dir, name), MAX_CANDIDATE_BYTES))) return null;
+  const text = await NodeFSP.readFile(NodePath.join(dir, name), "utf8").catch(() => null);
+  return text === null ? null : Option.getOrNull(decode(text));
 };
+const decodeCandidate = Schema.decodeUnknownOption(CandidateJson);
+const decodePassRecord = Schema.decodeUnknownOption(PassRecordJson);
+/** The candidate a rendered review left at `dir`: the only thing an export promotes. */
+export const readCandidate = (dir: string) => readRecord(dir, CANDIDATE_JSON, decodeCandidate);
+/** The pass a review of this key already ran, rendered or not. */
+export const readPassRecord = (dir: string) => readRecord(dir, PASS_JSON, decodePassRecord);
 export const candidateJsonPath = (dir: string) => NodePath.join(dir, CANDIDATE_JSON);
+export const passJsonPath = (dir: string) => NodePath.join(dir, PASS_JSON);
+
+const sameStamp = (a: GameAssetPart, b: GameAssetPart) =>
+  a.what === b.what &&
+  a.from === b.from &&
+  a.licence === b.licence &&
+  a.ai === b.ai &&
+  a.credits === b.credits;
+
+/**
+ * The ledger as a sidecar holds it: every distinct stamp, in order. Past the sidecar's limit,
+ * parts with the same licence, ai and credits become one (their sources named together), since
+ * they read as the same credit line; the body stays whole, as the route is read off it. A
+ * ledger that is still too long is refused, never cut: a dropped part is a dropped credit.
+ */
+export const ledgerParts = (
+  parts: ReadonlyArray<GameAssetPart>,
+): { readonly parts: ReadonlyArray<GameAssetPart> } | { readonly refusal: string } => {
+  const unique = parts.filter(
+    (part, index) => parts.findIndex((other) => sameStamp(part, other)) === index,
+  );
+  if (unique.length <= LEDGER_PARTS) return { parts: unique };
+  const groups: Array<{ part: GameAssetPart; froms: string[] }> = [];
+  for (const part of unique) {
+    const group =
+      part.what === "body"
+        ? undefined
+        : groups.find(
+            ({ part: other }) =>
+              other.what !== "body" &&
+              other.licence === part.licence &&
+              other.ai === part.ai &&
+              other.credits === part.credits,
+          );
+    if (group === undefined) groups.push({ part, froms: [part.from] });
+    else {
+      if (!group.froms.includes(part.from)) group.froms.push(part.from);
+      if (group.part.what !== part.what) group.part = { ...group.part, what: "parts" };
+    }
+  }
+  const merged = groups.map(({ part, froms }) => {
+    const joined = froms.join(", ");
+    const more = ` and ${froms.length - 1} more`;
+    return {
+      ...part,
+      from: joined.length <= 64 ? joined : `${froms[0]!.slice(0, 64 - more.length)}${more}`,
+    };
+  });
+  if (merged.length <= LEDGER_PARTS) return { parts: merged };
+  return {
+    refusal:
+      `The model draws on ${merged.length} sources with different licences, more than the ${LEDGER_PARTS} a sidecar records, and no credit is ever dropped: export it in pieces (fewer imports per model), or make some of those parts here. Its sources: ${merged.map((part) => `${part.from} (${part.licence || "no licence"})`).join("; ")}`.slice(
+        0,
+        2000,
+      ),
+  };
+};
 
 /** A name fit for a file stem and the concept lookup. */
 export const subjectName = (name: string) =>

@@ -21,7 +21,7 @@ import numpy as np
 from mathutils import Matrix, Vector
 
 from . import skeleton
-from .protocol import entry
+from .protocol import Refused, entry
 
 BG = (0.29, 0.30, 0.33)
 INK = (0.93, 0.93, 0.95)
@@ -113,6 +113,8 @@ def _load(path):
     img = bpy.data.images.load(path, check_existing=False)
     try:
         w, h = img.size
+        if w == 0 or h == 0:  # Blender loads a file that is not an image as an empty one
+            raise Refused("invalid-input", f"the concept art/concepts/{os.path.basename(path)} could not be read as an image: replace it with a PNG, or remove it")
         px = np.empty(w * h * 4, np.float32)
         img.pixels.foreach_get(px)
     finally:
@@ -237,6 +239,8 @@ def _concept(path, height):
     img = bpy.data.images.load(path, check_existing=False)
     try:
         w, h = img.size
+        if w == 0 or h == 0:  # Blender loads a file that is not an image as an empty one
+            raise Refused("invalid-input", f"the concept art/concepts/{os.path.basename(path)} could not be read as an image: replace it with a PNG, or remove it")
         img.scale(max(1, round(w * height / h)), height)
         w, h = img.size
         px = np.empty(w * h * 4, np.float32)
