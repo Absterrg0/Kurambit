@@ -174,6 +174,11 @@ export async function downloadPinned(
       redirect: "follow",
       headers: { "user-agent": "Kurambit asset library" },
     });
+    if (response.status >= 400 && response.status < 500)
+      // The source answered and does not have it: no network change or retry brings it back.
+      throw new Error(
+        `its source no longer serves this file (HTTP ${response.status}), so retrying will not help; this Kurambit version's library pin needs an update`,
+      );
     if (!response.ok || !response.body) throw new Error(`Download request: ${response.status}`);
     if (!response.url.startsWith("https://")) throw new Error("Download left HTTPS.");
     let received = 0;

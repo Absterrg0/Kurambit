@@ -313,7 +313,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "This machine has too little free memory to start this without risking it being killed mid-work. Close other apps, or wait a few minutes for other work to finish, then retry once. Retrying sooner gets the same answer.",
       checksum: "A helper Kurambit fetches failed its published checksum. Retry.",
       download:
-        "A helper Kurambit fetches could not be downloaded. Check network access and retry.",
+        "A helper Kurambit fetches could not be downloaded. Check network access and retry, unless the detail says retrying will not help.",
       io: "Check that the path exists and is writable. Read the server log for the underlying error.",
       "unsupported-platform":
         "This is not available on this operating system yet. Read the detail for what to install yourself.",
