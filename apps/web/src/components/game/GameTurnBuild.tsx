@@ -3,7 +3,6 @@ import type { GameBuild, RunId, ScopedThreadRef } from "@kurambit/contracts";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { Button } from "../ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildFactChips } from "./GameBuildFacts";
 import { turnBuildIsFolder } from "./gameTurnBuild.logic";
 import { stepLine } from "./keepGoing.logic";
@@ -92,27 +91,12 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
 
 type Step = NonNullable<Extract<GameBuild["source"], { _tag: "turn" }>["step"]>;
 
-/**
- * A keep-going step's verdict (design §7.4). Left alone after a regression,
- * its reason (what got worse) is in the tooltip.
- */
+/** A keep-going step's verdict and why (design §7.4). */
 function StepLine({ step }: { step: Step }) {
-  const verdict = step.verdict ?? "measuring";
-  if (step.verdict !== "kept-moved-on" || step.reason === "")
-    return (
-      <p data-game-step={verdict} className="text-2xs text-muted-foreground">
-        {stepLine(step)}
-      </p>
-    );
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={<p data-game-step={verdict} className="text-2xs text-muted-foreground" />}
-      >
-        {stepLine(step)}
-      </TooltipTrigger>
-      <TooltipPopup side="top">{step.reason}</TooltipPopup>
-    </Tooltip>
+    <p data-game-step={step.verdict ?? "measuring"} className="text-2xs text-muted-foreground">
+      {stepLine(step)}
+    </p>
   );
 }
 

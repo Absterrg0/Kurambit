@@ -139,7 +139,7 @@ describe("the keep-going banner", () => {
       "Keep going · step 3 · measuring the build before keeping it",
     );
     expect(title({ ...AUTOPILOT_TURN, phase: "undoing", step: 2 })).toBe(
-      "Keep going · step 2 · undoing it: Random input now crashes at 12 s",
+      "Undoing step 2: Random input now crashes at 12 s",
     );
   });
 
@@ -181,8 +181,12 @@ describe("a step's strip line", () => {
     expect(line("undone", "Random input now crashes at 12 s")).toBe(
       "Step 3 · undone: Random input now crashes at 12 s",
     );
-    expect(line("kept-moved-on", "Random input now crashes at 12 s")).toBe(
-      "Step 3 · not undone: the game changed after it",
+    // Only the server's moved-on refusal blames a later change; a failed undo says what failed.
+    expect(line("kept-moved-on", "the game changed after it (Masher: crashed at 12 s)")).toBe(
+      "Step 3 · not undone: the game changed after it (Masher: crashed at 12 s)",
+    );
+    expect(line("kept-moved-on", "the restore failed: git is busy (Masher: crashed at 12 s)")).toBe(
+      "Step 3 · not undone: the restore failed: git is busy (Masher: crashed at 12 s)",
     );
     expect(line("not-measured", "the facts took over 10 min")).toBe(
       "Step 3 · kept: not measured (the facts took over 10 min)",

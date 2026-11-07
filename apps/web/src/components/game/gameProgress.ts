@@ -13,7 +13,9 @@ export interface GameProgress {
 /**
  * The library's status line. Live keep going wins: it is what the game is
  * doing for an hour or more, between turns too. Its line ("Keep going · step
- * 3") is the server's. A running operation comes next; otherwise the game is idle.
+ * 3") is the server's, and the server sends a run only while it is live: a
+ * paused or finished one reads idle here and says why in its chat's banner.
+ * A running operation comes next; otherwise the game is idle.
  */
 export const gameProgress = (summary: Pick<GameSummary, "operation" | "run">): GameProgress => {
   if (summary.run !== null)

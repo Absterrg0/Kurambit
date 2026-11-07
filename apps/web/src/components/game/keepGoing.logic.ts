@@ -231,7 +231,7 @@ export const keepGoingBannerView = (
         : status.phase === "measuring"
           ? `${step} · measuring the build before keeping it`
           : status.phase === "undoing"
-            ? `${step} · undoing it${reason === "" ? "" : `: ${reason}`}`
+            ? `${n === null ? "Undoing the last step" : `Undoing step ${n}`}${reason === "" ? "" : `: ${reason}`}`
             : "Keep going · reading the current build's facts";
   return { kind: "live", id: `keep-going:${runId}`, title };
 };
@@ -256,9 +256,10 @@ export const stepVerdictText = (step: StepSource): string => {
       return `kept: ${step.reason || "no fact got worse"}`;
     case "undone":
       return step.reason === "" ? "undone" : `undone: ${step.reason}`;
-    // The reason names what got worse; the line says why that was left alone.
+    // The server's reason says why the undo left it: the game moved on, or
+    // the restore itself failed. Only the first is the person's later change.
     case "kept-moved-on":
-      return "not undone: the game changed after it";
+      return step.reason === "" ? "not undone" : `not undone: ${step.reason}`;
     case "no-change":
       return "changed no game files";
     case "not-measured":

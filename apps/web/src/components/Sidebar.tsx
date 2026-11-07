@@ -7,7 +7,11 @@ import {
   sortGameThreadsByActivity,
 } from "./game/gameLibrary.logic";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
-import { type EnvironmentId, type ScopedProjectRef } from "@kurambit/contracts";
+import {
+  type EnvironmentId,
+  GAME_RUN_STAGE_ERA_SENTENCE,
+  type ScopedProjectRef,
+} from "@kurambit/contracts";
 import type { EnvironmentServerConfig } from "@kurambit/client-runtime/connection";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
@@ -1644,24 +1648,41 @@ function GameDisclosureSection({ title, children }: { title: string; children: R
   );
 }
 
-function GameDisclosureLine(props: { label: string; at: string; onOpen: () => void }) {
+function GameDisclosureLine(props: {
+  label: string;
+  at: string;
+  onOpen: () => void;
+  /** Why the line reads as it does, on hover. */
+  tooltip?: string;
+}) {
+  const button = (
+    <button
+      type="button"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        props.onOpen();
+      }}
+      className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+    />
+  );
+  const content = (
+    <>
+      <span className="min-w-0 flex-1 truncate">{props.label}</span>
+      <span className="shrink-0 text-2xs tabular-nums">
+        <RelativeTimeLabel timestamp={props.at} />
+      </span>
+    </>
+  );
   return (
     <li className="list-none">
-      <button
-        type="button"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          props.onOpen();
-        }}
-        className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-      >
-        <span className="min-w-0 flex-1 truncate">{props.label}</span>
-        <span className="shrink-0 text-2xs tabular-nums">
-          <RelativeTimeLabel timestamp={props.at} />
-        </span>
-      </button>
+      <Tooltip disabled={props.tooltip === undefined}>
+        <TooltipTrigger render={button}>{content}</TooltipTrigger>
+        {props.tooltip === undefined ? null : (
+          <TooltipPopup side="right">{props.tooltip}</TooltipPopup>
+        )}
+      </Tooltip>
     </li>
   );
 }
@@ -1702,7 +1723,12 @@ function GamePastRunLine(props: {
           ...(rounds.runs.some((entry) => entry.active) ? ["live"] : []),
         ].join(" · ");
   return (
-    <GameDisclosureLine label={label} at={run.updatedAt} onOpen={() => props.onOpen(first.id)} />
+    <GameDisclosureLine
+      label={label}
+      at={run.updatedAt}
+      tooltip={GAME_RUN_STAGE_ERA_SENTENCE}
+      onOpen={() => props.onOpen(first.id)}
+    />
   );
 }
 
@@ -2206,8 +2232,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       building: "text-info",
       idle: "text-muted-foreground",
     };
-    // A live run is what the game is doing; a failed creator turn before it does not stop the run.
-    const needsAttention = status === "failed" && progress.kind !== "running";
+    // A failed turn always shows, keep going or not: a step turn is a turn of
+    // this chat, so a live run never hides one behind its own line.
+    const needsAttention = status === "failed";
     const gameStatusLabel = needsAttention
       ? "Needs attention"
       : working
