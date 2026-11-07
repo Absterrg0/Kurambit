@@ -27,7 +27,7 @@ import * as Schema from "effect/Schema";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { gameRunRefsFolder } from "../checkpointing/Utils.ts";
-import { stageEra } from "../orchestration-v2/gameRun/decide.ts";
+import { stageEra } from "./run/state.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";

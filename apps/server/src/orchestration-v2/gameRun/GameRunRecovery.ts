@@ -16,7 +16,7 @@ import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import { retrying } from "../../game/run/retrying.ts";
 import { STAGE_ERA_SENTENCE } from "../../game/run/runView.ts";
-import { stageEra } from "./decide.ts";
+import { stageEra } from "../../game/run/state.ts";
 
 export class GameRunRecovery extends Context.Service<
   GameRunRecovery,
