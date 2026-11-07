@@ -47,6 +47,10 @@ CALM_CHAIN = TORSO + ("neck_01", "neck_02")
 # hard, a foot a little too far pulls the knee straight on one frame and bends it on the next.
 REACH = 0.9995
 SOFT_REACH = 0.93
+# Calm splits a turn into yaw, pitch and roll about the upright body; once the hips or head pitch
+# further than this (a fall, a roll) the split is meaningless: on the cat's Death01 calming it
+# rolled the head 30.8 degrees instead of 11.9. Such a clip is left as it is.
+UPRIGHT_DEG = 45.0
 
 
 # ---- rotations (pure numpy, as kiln) ----------------------------------------------------------
@@ -308,6 +312,17 @@ def clear_arms(rig, frames, proxy, cyclic):
 
 # ---- calm and the legs -------------------------------------------------------------------------
 
+def upright(rig, frames):
+    """Whether the hips and head stay within UPRIGHT_DEG of their rest pitch throughout."""
+    axes = rig.axes
+    for b in ("pelvis", "Head"):
+        if b in rig.rest:
+            for wr, _ in frames:
+                if abs(math.degrees(_ypr(axes.T @ wr[b] @ rig.rest[b][:3, :3].T @ axes)[1])) > UPRIGHT_DEG:
+                    return False
+    return True
+
+
 def calm(rig, frames, c):
     """Scales the pelvis' roll, yaw and side sway, the spine's and neck's own turns and the head's
     turns in the world by strength c; every other bone keeps its world rotation. In place."""
@@ -434,7 +449,7 @@ def fit(arm, meshes, actions, params):
     rig = Rig(arm, meshes)
     proxy = _proxy(rig) if arms else None
     keep = bpy.context.scene.frame_current
-    notes, swings, calmed = [], [], None
+    notes, swings, calmed, tumbling = [], [], None, []
     for act in actions:
         f0, f1 = (int(round(x)) for x in act.frame_range)
         at = list(range(f0, f1 + 1))
@@ -442,13 +457,15 @@ def fit(arm, meshes, actions, params):
         # A loop's last frame repeats its first: fit the cycle without it and repeat it again.
         cyclic = "loop" in act.name.lower() and len(at) > 2
         work = frames[:-1] if cyclic else frames
-        if c > 0:
+        if c > 0 and not upright(rig, work):
+            tumbling.append(act.get("kurambit_clip", act.name))
+        elif c > 0:
             ankles = [{s: pose_at[f"foot_{s}"].copy() for s in "lr" if f"foot_{s}" in pose_at} for _, pose_at in work]
             before = _sway_roll(rig, work)
             calm(rig, work, c)
             drop = place_feet(rig, work, ankles)
             if calmed is None or "walk" in act.name.lower():
-                calmed = (act.name, before, _sway_roll(rig, work), drop)
+                calmed = (act.get("kurambit_clip", act.name), before, _sway_roll(rig, work), drop)
         if proxy is not None:
             swings.append(clear_arms(rig, work, proxy, cyclic))
         if cyclic:
@@ -463,6 +480,8 @@ def fit(arm, meshes, actions, params):
     if calmed is not None:
         name, b, a, drop = calmed
         notes.append(f"fit calm {c:g} on {name}: hips roll {b[0]:.1f}→{a[0]:.1f}°, yaw {b[1]:.1f}→{a[1]:.1f}°, sway {b[2]:.0f}→{a[2]:.0f} mm, head roll {b[3]:.1f}→{a[3]:.1f}°; feet kept, hips lowered up to {drop * 1000:.0f} mm")
+    if tumbling:
+        notes.append(f"fit calm left {', '.join(tumbling)} as they are: the body pitches over more than {UPRIGHT_DEG:.0f}°")
     return notes
 
 
