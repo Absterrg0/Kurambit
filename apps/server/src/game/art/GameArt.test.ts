@@ -269,7 +269,7 @@ describe("GameArt", () => {
             assert.deepStrictEqual(ended.generation.files, ["art/generated/model/crate/crate.glb"]);
             assert.strictEqual(ended.generation.costUsd, 0.3);
             assert.match(ended.text, /estimated/);
-            assert.include(asked, "https://openapi.tripo3d.com/v3/tasks/t_crate");
+            assert.include(asked, "https://openapi.tripo3d.ai/v3/tasks/t_crate");
           }),
           layer({
             base,
@@ -282,7 +282,7 @@ describe("GameArt", () => {
                     code: 0,
                     data: {
                       status: "success",
-                      output: { pbr_model: "https://cdn.tripo.example/crate.glb" },
+                      output: { model_url: "https://cdn.tripo.example/crate.glb" },
                     },
                   })
                 : new Response(new Uint8Array([1, 2, 3]));

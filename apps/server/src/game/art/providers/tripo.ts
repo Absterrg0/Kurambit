@@ -1,8 +1,9 @@
-// Tripo (API v3): every step is a task polled by id. A model is one task (H3.1 image or text to
-// 3D, smart low poly, textured); a character adds a rig on the Unreal bone names and a few
-// preset clips; a creature is rigged on its own body plan's skeleton with the clips Tripo has
-// for it. Credits are frozen at a task's start and released if it fails, so a failed stage
-// costs what the stages before it did. Files are downloaded the moment a task succeeds.
+// Tripo (API v3, https://developers.tripo3d.ai/en/docs/introduction): every step is a task polled
+// by id. A model is one task (H3.1 image or text to 3D, smart low poly, textured); a character
+// adds a rig on the Unreal bone names and a few preset clips; a creature is rigged on its own body
+// plan's skeleton with the one clip Tripo has for it. Credits are frozen at a task's start and
+// released if it fails, so a failed stage costs what the stages before it did. Each task reports
+// the credits it consumed. Result URLs expire after 5 minutes: files are downloaded at once.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { GameArtBodyPlan } from "@kurambit/contracts";
@@ -14,20 +15,46 @@ import {
   type ArtRequest,
   ArtProviderError,
   field,
+  numberField,
   requireKey,
   roundUsd,
   stringField,
 } from "./adapter.ts";
 
-const BASE = "https://openapi.tripo3d.com/v3";
+const BASE = "https://openapi.tripo3d.ai/v3";
 export const TRIPO_MODEL = "v3.1-20260211";
 const RIG_BIPED = "v3.0-20260909";
 const RIG_CREATURE = "v2.5-20260210";
-/** A character's clips when none are asked: the presets the v3 biped rig has. */
+/** A character's clips when none are asked. */
 const CHARACTER_CLIPS = ["idle", "walk", "run"];
 const MAX_CLIPS = 5;
+/** The retarget presets of a v3.0 biped rig (docs/animations-retarget). */
+const BIPED_PRESETS = [
+  "idle",
+  "walk",
+  "run",
+  "dive",
+  "climb",
+  "jump",
+  "slash",
+  "shoot",
+  "hurt",
+  "fall",
+  "turn",
+] as const;
+/** A v2.5 creature rig's one preset by body plan; avian and other bodies have none. */
+const CREATURE_PRESET: Partial<Record<GameArtBodyPlan, string>> = {
+  quadruped: "preset:quadruped:walk",
+  hexapod: "preset:hexapod:walk",
+  octopod: "preset:octopod:walk",
+  serpentine: "preset:serpentine:march",
+  aquatic: "preset:aquatic:march",
+};
+/** A creature's one preset moves it along; any of these names asks for it. */
+const CREATURE_CLIP_NAMES = new Set(["walk", "march", "move", "locomotion"]);
+const USD_PER_CREDIT = 0.01;
 
-/** USD (1 credit = $0.01), 2026-11. */
+/** USD (1 credit = $0.01), developers.tripo3d.ai/en/pricing, 2026-11. */
 const PRICE = {
   imageTextured: 0.3,
   textTextured: 0.2,
@@ -52,11 +79,13 @@ interface TripoRemote {
   readonly task: string;
   readonly lane: "character" | "creature" | "model";
   readonly body: string | null;
+  /** Retarget presets, already resolved ("preset:walk"). */
   readonly clips: ReadonlyArray<string>;
   readonly rig: string | null;
   /** Files already downloaded from earlier stages are not kept here: only ids. */
   readonly mesh: string;
-  readonly height?: number;
+  /** Credits the finished stages consumed; null once one did not say (rows from before too). */
+  readonly credits?: number | null;
 }
 
 const clipsOf = (request: Pick<ArtRequest, "lane" | "options">): ReadonlyArray<string> =>
@@ -67,6 +96,29 @@ const clipsOf = (request: Pick<ArtRequest, "lane" | "options">): ReadonlyArray<s
         MAX_CLIPS,
       );
 
+const clipKey = (clip: string) => clip.trim().toLowerCase();
+
+/** The retarget presets for the asked clips, or the clip Tripo has no preset for. */
+export const tripoPresets = (
+  request: Pick<ArtRequest, "lane" | "options">,
+): { readonly presets: ReadonlyArray<string> } | { readonly missing: string } => {
+  const presets: string[] = [];
+  for (const clip of clipsOf(request)) {
+    const key = clipKey(clip);
+    const preset =
+      request.lane === "character"
+        ? (BIPED_PRESETS as ReadonlyArray<string>).includes(key)
+          ? `preset:${key}`
+          : undefined
+        : CREATURE_CLIP_NAMES.has(key)
+          ? CREATURE_PRESET[request.options.body ?? "other"]
+          : undefined;
+    if (preset === undefined) return { missing: clip };
+    if (!presets.includes(preset)) presets.push(preset);
+  }
+  return { presets };
+};
+
 const auth = (key: string) => ({ authorization: `Bearer ${key}` });
 
 /** The generation task's body: the shape the fixtures check. */
@@ -75,7 +127,8 @@ export const tripoMeshBody = (
   fileToken: string | null,
 ) => ({
   model: TRIPO_MODEL,
-  ...(fileToken === null ? { prompt: request.prompt } : { file_token: fileToken }),
+  // image-to-model takes the uploaded file's token as its `input`.
+  ...(fileToken === null ? { prompt: request.prompt.slice(0, 1024) } : { input: fileToken }),
   texture: true,
   pbr: true,
   smart_low_poly: true,
@@ -85,10 +138,7 @@ export const tripoMeshBody = (
   auto_size: true,
 });
 
-export const tripoRigBody = (
-  remote: Pick<TripoRemote, "lane" | "body" | "mesh">,
-  height?: number,
-) =>
+export const tripoRigBody = (remote: Pick<TripoRemote, "lane" | "body" | "mesh">) =>
   remote.lane === "character"
     ? {
         input: remote.mesh,
@@ -96,7 +146,6 @@ export const tripoRigBody = (
         rig_type: "biped",
         spec: "unreal",
         out_format: "glb",
-        ...(height === undefined ? {} : { height }),
       }
     : {
         input: remote.mesh,
@@ -105,9 +154,9 @@ export const tripoRigBody = (
         out_format: "glb",
       };
 
-export const tripoRetargetBody = (rig: string, clips: ReadonlyArray<string>) => ({
+export const tripoRetargetBody = (rig: string, presets: ReadonlyArray<string>) => ({
   input: rig,
-  animations: clips.map((clip) => `preset:${clip.toLowerCase().replace(/[^a-z0-9_]+/g, "_")}`),
+  animations: presets,
   animate_in_place: true,
   export_with_geometry: true,
   out_format: "glb",
@@ -125,7 +174,10 @@ const post = (context: ArtContext, key: string, path: string, body: unknown) =>
     .json("tripo", { method: "POST", url: `${BASE}${path}`, headers: auth(key), json: body })
     .pipe(Effect.flatMap(taskIdOf));
 
-/** Every https model URL a task's output names, whatever key this version puts it under. */
+/**
+ * Every https model URL a task's output names. The docs give `model_url` (a string) for every task;
+ * how a retarget of several clips keys its files is undocumented, so lists and other keys are read too.
+ */
 export const tripoModelUrls = (output: unknown): ReadonlyArray<string> => {
   const urls: string[] = [];
   const add = (value: unknown) => {
@@ -137,7 +189,7 @@ export const tripoModelUrls = (output: unknown): ReadonlyArray<string> => {
       else Object.values(value).forEach(add);
     }
   };
-  for (const key of ["pbr_model", "model_url", "model", "model_urls"]) {
+  for (const key of ["model_url", "model_urls", "pbr_model", "model"]) {
     add(field(output, key));
     if (urls.length > 0) break;
   }
@@ -179,6 +231,7 @@ const start = (context: ArtContext, request: ArtRequest) =>
       fileToken === null ? "/generation/text-to-model" : "/generation/image-to-model",
       tripoMeshBody(request, fileToken),
     );
+    const resolved = tripoPresets(request);
     const remote: TripoRemote = {
       stage: "mesh",
       task,
@@ -186,8 +239,8 @@ const start = (context: ArtContext, request: ArtRequest) =>
       rig: null,
       lane: request.lane as TripoRemote["lane"],
       body: request.options.body ?? null,
-      clips: clipsOf(request),
-      ...(request.options.height === undefined ? {} : { height: request.options.height }),
+      clips: "presets" in resolved ? resolved.presets : [],
+      credits: 0,
     };
     return {
       kind: "making" as const,
@@ -206,22 +259,26 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
       headers: auth(key),
     });
     const status = stringField(answer, "data", "status");
-    if (status === "queued" || status === "running" || status === null)
-      return { kind: "making" as const, remote: stored };
-    if (status !== "success")
+    const spent = remote.credits === undefined ? null : remote.credits;
+    // Documented: queued, running, success, failed, cancelled. Anything else (unknown) is neither
+    // an end nor a failure; the person can cancel a job that never ends.
+    if (status === "failed" || status === "cancelled") {
+      const message = stringField(answer, "data", "error_message");
       return yield* new ArtProviderError({
-        reason: `Tripo's ${remote.stage} task ended ${status}${
-          stringField(answer, "data", "error_msg") === null
-            ? ""
-            : `: ${stringField(answer, "data", "error_msg")}`
-        }.`,
+        reason: `Tripo's ${remote.stage} task ended ${status}${message === null ? "" : `: ${message}`}.`,
+        // A failed task's credits are released; the stages before it were spent.
+        ...(spent === null ? {} : { costUsd: roundUsd(spent * USD_PER_CREDIT) }),
       });
+    }
+    if (status !== "success") return { kind: "making" as const, remote: stored };
+    const consumed = numberField(answer, "data", "credits_consumed");
+    const credits = spent === null || consumed === null ? null : spent + consumed;
     const output = field(answer, "data", "output");
     if (remote.stage === "mesh" && remote.lane !== "model") {
-      const rig = yield* post(context, key, "/animations/rig", tripoRigBody(remote, remote.height));
+      const rig = yield* post(context, key, "/animations/rig", tripoRigBody(remote));
       return {
         kind: "making" as const,
-        remote: { ...stored, stage: "rig", task: rig, rig } as ArtRemote,
+        remote: { ...stored, stage: "rig", task: rig, rig, credits } as ArtRemote,
         note: "Rigging.",
       };
     }
@@ -234,7 +291,7 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
       );
       return {
         kind: "making" as const,
-        remote: { ...stored, stage: "retarget", task: retarget } as ArtRemote,
+        remote: { ...stored, stage: "retarget", task: retarget, credits } as ArtRemote,
         note: "Adding clips.",
       };
     }
@@ -245,7 +302,7 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
     for (const [index, url] of urls.entries()) {
       const label =
         remote.stage === "retarget" && urls.length > 1
-          ? (remote.clips[index] ?? `clip${index + 1}`)
+          ? (remote.clips[index]?.split(":").pop() ?? `clip${index + 1}`)
           : undefined;
       files.push({
         role: "asset",
@@ -254,12 +311,11 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
         ...(label === undefined ? {} : { label }),
       });
     }
-    const preview =
-      stringField(output, "rendered_image") ?? stringField(output, "rendered_image", "url");
+    const preview = stringField(output, "rendered_image_url");
     if (preview !== null)
       files.push({
         role: "preview",
-        ext: "webp",
+        ext: /\.(png|jpe?g)$/i.exec(new URL(preview).pathname)?.[1]?.toLowerCase() ?? "webp",
         bytes: yield* context.http
           .download(preview)
           .pipe(Effect.orElseSucceed(() => new Uint8Array())),
@@ -267,7 +323,7 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
     return {
       kind: "done" as const,
       candidates: [files.filter((file) => file.bytes.byteLength > 0)],
-      costUsd: null,
+      costUsd: credits === null ? null : roundUsd(credits * USD_PER_CREDIT),
     };
   });
 
@@ -277,15 +333,37 @@ export const tripo: ArtAdapter = {
     const mesh =
       (request.references > 0 ? PRICE.imageTextured : PRICE.textTextured) + PRICE.smartLowPoly;
     if (request.lane === "model") return roundUsd(mesh);
-    return roundUsd(mesh + PRICE.rig + clipsOf(request).length * PRICE.clip);
+    const resolved = tripoPresets(request);
+    return roundUsd(
+      mesh + PRICE.rig + ("presets" in resolved ? resolved.presets.length : 0) * PRICE.clip,
+    );
   },
-  refuse: (request) =>
-    request.lane === "character" || request.lane === "creature" || request.lane === "model"
-      ? null
-      : `Tripo makes characters, creatures and models, not ${request.lane}.`,
+  refuse: (request) => {
+    if (request.lane !== "character" && request.lane !== "creature" && request.lane !== "model")
+      return `Tripo makes characters, creatures and models, not ${request.lane}.`;
+    const resolved = tripoPresets(request);
+    if (!("missing" in resolved)) return null;
+    if (request.lane === "character")
+      return `Tripo has no "${resolved.missing}" clip for a character; its clips are ${BIPED_PRESETS.join(", ")}.`;
+    const preset = CREATURE_PRESET[request.options.body ?? "other"];
+    return preset === undefined
+      ? `Tripo has no clips for a ${request.options.body ?? "other"} body; ask for none.`
+      : `Tripo has one clip for a ${request.options.body} body, "${preset.split(":").pop()}"; ask for "walk" or none.`;
+  },
   start,
   poll,
   pollEvery: Duration.seconds(4),
+  checkKey: (context) =>
+    requireKey("tripo", context).pipe(
+      Effect.flatMap((key) =>
+        context.http.json("tripo", {
+          method: "GET",
+          url: `${BASE}/account/balance`,
+          headers: auth(key),
+        }),
+      ),
+      Effect.asVoid,
+    ),
   licence:
     "Tripo API output (paid credits): the user has all rights, including commercial use. Free-tier output belongs to Tripo.",
 };
