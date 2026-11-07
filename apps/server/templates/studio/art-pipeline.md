@@ -349,6 +349,19 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
    `image` or `texture` with the key art as reference. Effects and music:
    lanes `sfx` and `music` from the brief's mood (`options.seconds`,
    `options.loop` for music). Add each file with `game_import`.
+
+   **Change, don't remake.** When the person wants a picked image changed
+   ("make the cat orange"), or asks to "Change…" one from its card, use
+   lane `image` (or `texture`) with `options.edit` set to that file and the
+   change in words as `prompt`, the key art in `references`: it keeps what
+   they liked and costs one image, where a new generation loses it. To cut
+   a sprite out of its background, add `options.transparent` (OpenAI or
+   Codex; Google refuses). An edit takes no directions; the person picks
+   "Changed" or "As it was" in the chat, and the original file is never
+   touched. After "Changed", point the game at the new file where it used
+   the old one; if that was the anchor (`art/key-art.png`), copy it there
+   and read the palette again into STYLE.json.
+
 6. **Cost.** Say in the turn's reply what its generations cost. A refusal
    (no key, over the person's daily limit) goes in the reply as it is;
    never switch route or lane to get past it.

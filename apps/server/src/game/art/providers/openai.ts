@@ -1,6 +1,9 @@
 // OpenAI's GPT Image: synchronous, base64 in the answer. Generations without references, edits
 // with up to 16 (the key art, a concept). Candidates through `n`; if fewer come back, the rest
-// are asked one at a time. The cost is read from the answer's token usage at list price.
+// are asked one at a time. The cost is read from the answer's token usage at list price. A
+// change to a game image (options.edit) is the same edits call with that image first: the API
+// edits the first image and reads the rest as references, and `background: "transparent"` cuts
+// it out on the 2.5 models.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { GameArtOptions } from "@kurambit/contracts";
@@ -13,6 +16,7 @@ import {
   field,
   fromBase64,
   numberField,
+  readPng,
   requireKey,
   roundUsd,
 } from "./adapter.ts";
@@ -42,6 +46,27 @@ export const openAiSize = (options: GameArtOptions): string => {
     default:
       return "1024x1024";
   }
+};
+/**
+ * An edit keeps the size of the image it changes, when that size is one the API takes (edges in
+ * multiples of 16, at most 3840, between 1:3 and 3:1, 655,360 to 8,294,400 pixels); otherwise
+ * the API sizes it ("auto"). An aspect asked outright wins.
+ */
+export const openAiEditSize = (request: ArtRequest): string => {
+  if (request.options.aspect !== undefined) return openAiSize(request.options);
+  const first = request.references[0];
+  const png = first?.mime === "image/png" ? readPng(first.bytes) : null;
+  if (png === null) return "auto";
+  const { width, height } = png;
+  const area = width * height;
+  return width % 16 === 0 &&
+    height % 16 === 0 &&
+    Math.max(width, height) <= 3840 &&
+    Math.max(width, height) <= 3 * Math.min(width, height) &&
+    area >= 655_360 &&
+    area <= 8_294_400
+    ? `${width}x${height}`
+    : "auto";
 };
 const pixels = (size: string) => {
   const [w, h] = size.split("x").map(Number);
@@ -74,7 +99,8 @@ const imagesOf = (answer: unknown): ReadonlyArray<ArtFile> => {
 
 /** One call for `n` images: the body every test fixture checks. */
 export const openAiRequest = (request: ArtRequest, n: number, key: string) => {
-  const size = openAiSize(request.options);
+  const size =
+    request.options.edit === undefined ? openAiSize(request.options) : openAiEditSize(request);
   const transparent = request.options.transparent === true;
   const headers = { authorization: `Bearer ${key}` };
   if (request.references.length === 0)

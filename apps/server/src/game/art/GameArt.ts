@@ -74,6 +74,7 @@ import {
   ArtProviderError,
   makeArtHttp,
   pendingStage,
+  readPng,
   roundUsd,
 } from "./providers/adapter.ts";
 import { ART_ADAPTERS } from "./providers/index.ts";
@@ -186,6 +187,32 @@ const REFERENCE_MIME: Readonly<Record<string, ArtReference["mime"]>> = {
   ".webp": "image/webp",
 };
 const MULTI_CANDIDATE_LANES: ReadonlyArray<GameArtLane> = ["image", "texture"];
+const CHANGED_LABEL = "Changed";
+const AS_IT_WAS_LABEL = "As it was";
+
+/** The game image an edit changes; null for anything else. */
+const editOf = (meta: Meta): string | null =>
+  typeof meta.options.edit === "string" ? meta.options.edit : null;
+
+/**
+ * An edit as every image provider is asked it: the image to change goes first, the change is
+ * one instruction, and everything it does not name stays as it was.
+ */
+export const editPrompt = (change: string, transparent: boolean, styled: boolean): string =>
+  [
+    "Change image 1 as asked below, and keep everything else in it exactly as it is: its subject, composition, framing, art style, palette, lighting and level of detail.",
+    ...(styled
+      ? ["The other images are references for the look only; do not copy what they show."]
+      : []),
+    "",
+    `The change: ${change}`,
+    ...(transparent
+      ? [
+          "",
+          "Cut the subject out: keep only the subject, whole and unchanged, on a fully transparent background, with nothing behind it (no backdrop, floor, shadow or frame).",
+        ]
+      : []),
+  ].join("\n");
 
 /** What the service keeps beside the provider's own job ids. */
 const Meta = Schema.Struct({
@@ -577,7 +604,7 @@ const make = Effect.gen(function* () {
     });
 
   // ── Images sent with a request ─────────────────────────────────────────
-  const readReference = (root: string, path: string) =>
+  const readReference = (root: string, path: string, what = "Reference") =>
     Effect.tryPromise({
       try: async (): Promise<ArtReference> => {
         if (NodePath.isAbsolute(path) || path.split(/[\\/]/).includes(".."))
@@ -598,7 +625,7 @@ const make = Effect.gen(function* () {
       catch: (cause) =>
         opError(
           "art-generate",
-          `Reference ${cause instanceof Error ? cause.message : String(cause)}`,
+          `${what} ${cause instanceof Error ? cause.message : String(cause)}`,
           "invalid-path",
           path,
         ),
@@ -764,8 +791,31 @@ const make = Effect.gen(function* () {
       return next;
     });
 
+  const toChoosing = (row: Row) =>
+    Effect.gen(function* () {
+      const choosing = yield* touch(row, { state: "choosing" });
+      yield* writeRecordFile(choosing);
+      yield* save(choosing, countedOf(choosing.generation));
+      return choosing;
+    });
+
   const finish = (row: Row, step: Extract<ArtStep, { kind: "done" }>) =>
     Effect.gen(function* () {
+      const edit = editOf(row.meta);
+      // A cut-out that came back opaque is no cut-out: it fails, its cost counted, rather than
+      // being passed off as one (and nothing fakes the alpha afterwards).
+      if (edit !== null && row.meta.options.transparent === true) {
+        const image = step.candidates[0]?.find((file) => file.role === "asset");
+        const png = image === undefined ? null : readPng(image.bytes);
+        if (png === null || png.clear === 0)
+          return yield* fail(
+            row,
+            `${GAME_ART_PROVIDERS[row.generation.provider].label} answered ${
+              png === null ? "an image that is not a PNG" : "an image with no transparent pixel"
+            }, so the background was not cut out. Nothing was written to the game; ${edit} is unchanged.`,
+            step.costUsd ?? row.generation.estimateUsd,
+          );
+      }
       const written = yield* writeFiles(row, step.candidates);
       // Directions mark it themselves when one of them reported no cost.
       const estimated =
@@ -782,19 +832,35 @@ const make = Effect.gen(function* () {
           ...(label === undefined ? {} : { label }),
         };
       });
+      // An edit: the change, and the game's image as it was, which belongs to no generation and
+      // so has no files here: picking it deletes only the change, and nothing ever touches it.
       const next = yield* touch(
         row,
-        { costUsd, candidates: previews },
-        { candidateFiles, costEstimated: estimated, job: row.meta.job },
+        {
+          costUsd,
+          candidates:
+            edit === null
+              ? previews
+              : [
+                  { preview: previews[0]!.preview, label: CHANGED_LABEL },
+                  { preview: edit, label: AS_IT_WAS_LABEL, original: true },
+                ],
+        },
+        {
+          candidateFiles: edit === null ? candidateFiles : [candidateFiles[0] ?? [], []],
+          costEstimated: estimated,
+          job: row.meta.job,
+        },
       );
+      if (edit !== null)
+        return next.meta.autopilot
+          ? yield* chooseUnlocked(next, 0, "autopilot")
+          : yield* toChoosing(next);
       // A direction set with refusals goes to the person even with one look left: they asked to choose.
       if (written.length === 1 && (next.generation.refused ?? []).length === 0)
         return yield* chooseUnlocked(next, 0, "only");
       if (next.meta.autopilot) return yield* chooseUnlocked(next, 0, "autopilot");
-      const choosing = yield* touch(next, { state: "choosing" });
-      yield* writeRecordFile(choosing);
-      yield* save(choosing, countedOf(choosing.generation));
-      return choosing;
+      return yield* toChoosing(next);
     });
 
   const fail = (row: Row, reason: string, cost: number | null | undefined) =>
@@ -967,11 +1033,12 @@ const make = Effect.gen(function* () {
   // ── generate ───────────────────────────────────────────────────────────
   const describe = (row: Row, spent: number | null, limit: number | null): string => {
     const g = row.generation;
+    const edit = editOf(row.meta);
     const label = GAME_ART_PROVIDERS[g.provider].label;
     const where = row.meta.folder;
     switch (g.state) {
       case "making":
-        return `Making ${g.lane} "${g.name}" with ${label}${
+        return `Making ${edit === null ? `${g.lane} "${g.name}"` : `a change to ${edit}${row.meta.options.transparent === true ? " (cut out)" : ""}`} with ${label}${
           g.estimateUsd === null
             ? g.provider === "codex"
               ? " on the ChatGPT plan's Codex limits (no dollar cost)"
@@ -981,12 +1048,15 @@ const make = Effect.gen(function* () {
       case "choosing":
         if (g.filesUndone === true)
           return `The candidates of "${g.name}" are no longer in the game: ${UNDONE}`;
+        if (edit !== null)
+          return `The change to ${edit} is ready (${g.candidates[0]?.preview ?? ""}); the person picks "${CHANGED_LABEL}" or "${AS_IT_WAS_LABEL}" in the chat. Until then the game keeps ${edit}. Cost ${costText(row)}.`;
         return `${g.candidates.length} ${g.candidates.length === 1 ? "candidate" : "candidates"} of "${g.name}" ${g.candidates.length === 1 ? "is" : "are"} ready (${g.candidates
           .map((candidate) => candidate.preview)
           .join(", ")})${refusedText(g)}; the person picks one in the chat. Cost ${costText(row)}.`;
       case "done":
         if (g.filesUndone === true)
           return `"${g.name}" was made (${g.files.join(", ")}), but its files are no longer in the game: ${UNDONE}`;
+        if (edit !== null) return editDone(row, edit);
         return `"${g.name}" is in the game: ${g.files.join(", ")}${
           g.chosenBy === "autopilot"
             ? " (Keep going took the first candidate)"
@@ -999,6 +1069,22 @@ const make = Effect.gen(function* () {
       case "cancelled":
         return `"${g.name}" was cancelled.${g.costUsd ? ` ${usd(g.costUsd)} counted against today for work already started.` : ""}`;
     }
+  };
+  /**
+   * A settled edit: the person kept the change (the agent wires it in where the original was
+   * used) or the image as it was (nothing to do). The style anchor's palette is read from it.
+   */
+  const editDone = (row: Row, edit: string) => {
+    const g = row.generation;
+    const cost = `Cost ${costText(row)}.`;
+    const changed = g.files.find((file) => /\.(png|jpe?g|webp)$/i.test(file));
+    if (g.chosen !== 0 || changed === undefined)
+      return `The person kept ${edit} as it was; the change was deleted, and the game needs nothing more. ${cost}`;
+    return `The change to ${edit} is in the game: ${changed}${
+      g.chosenBy === "autopilot"
+        ? ` (Keep going took "${CHANGED_LABEL}")`
+        : ` (the person picked "${CHANGED_LABEL}")`
+    }. ${edit} is unchanged. ${cost} Recorded in ${row.meta.folder}/${g.name}.generation.json. Next: point the game at ${changed} wherever it uses ${edit} (or copy it over ${edit} when the game reads that path), and if ${edit} is STYLE.json's anchor, read the palette again from the new file with kurambit.palette_of and update STYLE.json.`;
   };
   /** Where a delivered file goes next, so the agent reads the call instead of guessing it. */
   const nextStep = (g: GameGeneration) => {
@@ -1088,8 +1174,25 @@ const make = Effect.gen(function* () {
             ? `Directions are for images and textures; ask ${input.lane} one at a time.`
             : `Directions are for images: make 2-4 concept images in distinct directions in the image lane, let the person pick one, then make the ${input.lane} from it with the picked image as a reference.`,
         );
+      if (options.edit !== undefined) {
+        if (!MULTI_CANDIDATE_LANES.includes(input.lane))
+          return yield* opError(
+            "art-generate",
+            `edit changes an image or a texture, not ${input.lane}; make the ${input.lane} again from a picture instead.`,
+          );
+        if (directions.length > 0)
+          return yield* opError(
+            "art-generate",
+            "An edit is one change: drop directions, and the person picks between the change and the image as it was.",
+          );
+      }
       const base = { lane: input.lane, prompt: input.prompt, candidates: 1, options };
       const adapter = yield* route(all, base);
+      // Read before anything is asked: an image that is not there is refused with nothing spent.
+      const edited =
+        options.edit === undefined
+          ? null
+          : yield* readReference(root, options.edit, "The image to change:");
       const references = yield* readReferences(root, input.references ?? []);
       const styles = yield* Effect.forEach(directions, (direction) =>
         direction.style === undefined ? Effect.succeed(null) : readStyle(root, direction.style),
@@ -1098,7 +1201,19 @@ const make = Effect.gen(function* () {
       // never between samples of one prompt (which come back as near-copies).
       const requests: ReadonlyArray<ArtRequest> =
         directions.length === 0
-          ? [{ ...base, references }]
+          ? [
+              edited === null
+                ? { ...base, references }
+                : {
+                    ...base,
+                    prompt: editPrompt(
+                      input.prompt,
+                      options.transparent === true,
+                      references.length > 0,
+                    ),
+                    references: [edited, ...references],
+                  },
+            ]
           : directions.map((direction, index) => {
               const style = styles[index] ?? null;
               // The look leads: image models weight a prompt's start, and a style tacked on after a
@@ -1120,7 +1235,10 @@ const make = Effect.gen(function* () {
       const estimate = estimates.some((value) => value === null)
         ? null
         : roundUsd(estimates.reduce<number>((sum, value) => sum + (value ?? 0), 0));
-      const autopilot = directions.length > 1 && (yield* host.keepGoingStep(threadId));
+      // Keep going's autopilot picks where the person would: between looks, or a change and the
+      // image as it was (it takes the change).
+      const autopilot =
+        (directions.length > 1 || edited !== null) && (yield* host.keepGoingStep(threadId));
       const id = NodeCrypto.randomUUID();
       const limit = all.gameArtDailyLimitUsd;
       const admitted = yield* spendGate.withPermits(1)(

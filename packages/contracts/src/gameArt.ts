@@ -178,8 +178,9 @@ export const GameArtOptions = Schema.Struct({
   /** image: a transparent background (sprites, UI); with edit, cuts the edited image's background out. */
   transparent: Schema.optionalKey(Schema.Boolean),
   /**
-   * image, texture: change this game image as the prompt says, keeping the rest of it. The person
-   * then picks between the change and the image as it was.
+   * image, texture: change this game image as the prompt says, keeping the rest of it. It is sent
+   * as the first image (references follow it), takes no directions, and the person then picks
+   * between the change and the image as it was.
    */
   edit: Schema.optionalKey(GamePath),
   /** image: "1:1", "16:9", "9:16", "4:3", "3:4". */
@@ -270,6 +271,11 @@ export const GameGenerationCandidate = Schema.Struct({
   preview: GamePath,
   /** The direction it was made from, as the pick card shows it. */
   label: Schema.optionalKey(Schema.String),
+  /**
+   * An edit's "As it was": its preview is the game's own image, outside the generation's folder.
+   * Picking it costs nothing more and keeps that file; no generation ever moves or deletes it.
+   */
+  original: Schema.optionalKey(Schema.Boolean),
 });
 export type GameGenerationCandidate = typeof GameGenerationCandidate.Type;
 
