@@ -10,7 +10,8 @@ outlast a live call), on the meshes the server resolved:
     pose           optional {arms, legs}: degrees for a standard-skeleton character, set for the
                    projection only (arms below horizontal, legs apart); otherwise as posed
     size           the atlas side in px (the head's own atlas is half)
-    name           the stem of the textures
+    name           optional: the stem of the textures (default the character's armature, or
+                   the first mesh)
     out            abs scratch dir: textures, the alignment image and the library .blend
 It writes nothing in the game. adopt (live) checks the objects are unchanged since the copy, puts
 the painted meshes in place of theirs, copies the textures into the game and stamps the objects."""
@@ -18,6 +19,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 
 import bpy
@@ -181,13 +183,16 @@ def paint(params):
     project.uv_unwrap(targets, groups)
     project.log("unwrapped", sizes)
     tol = 0.009 * float(hi[2] - lo[2])
-    files, seen = project.paint_atlases(targets, groups, sizes, views, depths, read, project.detail_height(read), infos, out, params["name"], tol, mid_attribute=GID)
+    owner = next((a for o in targets for a in _deformers(o)), targets[0])
+    name = params.get("name") or (re.sub(r"[^a-z0-9_]+", "_", owner.name.lower()).strip("_")[:32] or "model")
+    files, seen = project.paint_atlases(targets, groups, sizes, views, depths, read, project.detail_height(read), infos, out, name, tol, mid_attribute=GID)
     for o in targets:
         o.data.attributes.remove(o.data.attributes[GID])
     library = os.path.join(out, "painted.blend")
     bpy.data.libraries.write(library, {o.data for o in targets}, path_remap="ABSOLUTE", fake_user=True)
     return {
         "library": library,
+        "name": name,
         "meshes": {o.name: o.data.name for o in targets},
         "files": [os.path.basename(f) for f in files],
         "alignment": alignment,

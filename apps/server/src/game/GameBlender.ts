@@ -251,6 +251,7 @@ const TEXTURES_DIR = "art/blender/textures";
 const decodePainted = Schema.decodeUnknownEffect(
   Schema.Struct({
     library: Schema.String,
+    name: Schema.String,
     meshes: Schema.Record(Schema.String, Schema.String),
     files: Schema.Array(Schema.String),
     alignment: Schema.String,
@@ -1879,12 +1880,8 @@ const make = Effect.gen(function* () {
         art.delivered(root, id, path),
       );
       const digest = yield* liveDigest(root, input.objects);
-      const name =
-        (input.objects[0] ?? "model")
-          .toLowerCase()
-          .replace(/[^a-z0-9_]+/g, "_")
-          .slice(0, 32) || "model";
-      const out = yield* sheetRunDir(realRoot, "paint", name);
+      const out = yield* sheetRunDir(realRoot, "paint", "model");
+      const alignmentFile = NodePath.join(out, "alignment.png");
       const painted = yield* oneShot(root, out, {
         entry: "paint",
         operation: "blender-paint",
@@ -1899,9 +1896,34 @@ const make = Effect.gen(function* () {
           noMirror: input.noMirror ?? null,
           pose: input.pose ?? null,
           size,
-          name,
         },
-      }).pipe(Effect.flatMap(decodePainted), Effect.mapError(protocolError("blender-paint", root)));
+      }).pipe(
+        // A model refused for its fit is shown against the sheet, so the agent sees what to fix.
+        Effect.catch((error) =>
+          Effect.flatMap(
+            Effect.promise(() =>
+              NodeFSP.access(alignmentFile).then(
+                () => true,
+                () => false,
+              ),
+            ),
+            (drawn) =>
+              Effect.fail(
+                drawn
+                  ? opError(
+                      error.operation,
+                      error.path,
+                      error.reason,
+                      `${error.detail ?? ""} Each view's outline of the model over the sheet: ${relativeTo(realRoot, alignmentFile)}.`,
+                    )
+                  : error,
+              ),
+          ),
+        ),
+        Effect.flatMap(decodePainted),
+        Effect.mapError(protocolError("blender-paint", root)),
+      );
+      const name = painted.name;
       // The live scene has a file before the textures' paths are made relative to it.
       yield* saveBlend(root);
       const adopted = yield* kitCall(
@@ -1917,7 +1939,7 @@ const make = Effect.gen(function* () {
         })})`,
       ).pipe(Effect.ensuring(removeScratch(out, ["alignment.png"])));
       const blend = yield* saveBlend(root);
-      const alignment = relativeTo(realRoot, NodePath.join(out, "alignment.png"));
+      const alignment = relativeTo(realRoot, alignmentFile);
       const views = painted.views
         .map(
           (view) =>
