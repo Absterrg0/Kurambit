@@ -6,6 +6,7 @@ import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
+import { PNG } from "pngjs";
 import {
   GAME_ART_PROVIDERS,
   type GameArtLane,
@@ -103,7 +104,11 @@ export interface ArtAdapter {
   readonly id: GameArtProviderId;
   /** USD this request should cost, from the provider's price table; null when it is free (plan usage). */
   readonly estimate: (
-    request: Omit<ArtRequest, "references"> & { readonly references: number },
+    request: Omit<ArtRequest, "references"> & {
+      readonly references: number;
+      /** An edit's image size, when it reads as a PNG: an edit keeps it, and pays for it. */
+      readonly edited?: { readonly width: number; readonly height: number };
+    },
   ) => number | null;
   /** Why this provider cannot make this request (a lane or option it lacks); null when it can. */
   readonly refuse?: (request: Omit<ArtRequest, "references">) => string | null;
@@ -334,3 +339,21 @@ export const numberField = (value: unknown, ...path: ReadonlyArray<string | numb
 };
 
 export const roundUsd = (usd: number): number => Math.round(usd * 10_000) / 10_000;
+
+/**
+ * A PNG's size and the share of its pixels that are fully clear (0..1); null when the bytes are
+ * not a PNG that decodes. An edit keeps its original's size, and a cut-out is only one when some
+ * of it is truly transparent: a provider that answers opaque is never passed off as a cut-out.
+ */
+export const readPng = (
+  bytes: Uint8Array,
+): { readonly width: number; readonly height: number; readonly clear: number } | null => {
+  try {
+    const png = PNG.sync.read(Buffer.from(bytes));
+    let clear = 0;
+    for (let index = 3; index < png.data.length; index += 4) if (png.data[index] === 0) clear += 1;
+    return { width: png.width, height: png.height, clear: clear / (png.width * png.height) };
+  } catch {
+    return null;
+  }
+};

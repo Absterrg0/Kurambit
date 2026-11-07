@@ -3,7 +3,9 @@
 // shows the Interactions API, but generateContent stays fully supported and its reference
 // (ai.google.dev/api/generate-content) documents responseModalities, imageConfig and inlineData;
 // Interactions would also store every request unless told not to. It documents no transparent
-// background, so a transparent request is refused rather than quietly opaque.
+// background, so a transparent request (a cut-out too) is refused rather than quietly opaque. A
+// change to a game image (options.edit) is the same call with that image as the first image
+// part; with no aspect ratio set the model keeps the input image's.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import {
@@ -48,7 +50,12 @@ export const googleRequest = (request: ArtRequest, key: string) => ({
     ],
     generationConfig: {
       responseModalities: ["IMAGE"],
-      imageConfig: { aspectRatio: request.options.aspect ?? "1:1", imageSize: "1K" },
+      imageConfig: {
+        ...(request.options.edit !== undefined && request.options.aspect === undefined
+          ? {}
+          : { aspectRatio: request.options.aspect ?? "1:1" }),
+        imageSize: "1K",
+      },
     },
   },
 });
@@ -98,7 +105,9 @@ export const google: ArtAdapter = {
     request.lane !== "image" && request.lane !== "texture"
       ? `Google makes images and textures, not ${request.lane}.`
       : request.options.transparent === true
-        ? "Google's image model makes no transparent background. Choose OpenAI or Codex for images in Settings → Art providers, or ask without a transparent background."
+        ? request.options.edit !== undefined
+          ? "Google's image model returns no transparency, so it cannot cut a background out. Choose OpenAI or Codex for images in Settings → Art providers."
+          : "Google's image model makes no transparent background. Choose OpenAI or Codex for images in Settings → Art providers, or ask without a transparent background."
         : null,
   start,
   pollEvery: Duration.seconds(5),

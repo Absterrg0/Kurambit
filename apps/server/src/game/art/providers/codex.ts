@@ -1,7 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Codex reports its saved images as native paths.
 // Codex's image generation on the person's ChatGPT plan: their own Codex, run hidden and
 // one-shot in a private folder of the server's (never the game), read-only, with the references
-// attached. No key and no dollar cost: it counts against the plan's Codex limits.
+// attached. No key and no dollar cost: it counts against the plan's Codex limits. A change to a
+// game image (options.edit) attaches that image first and names its path for the image tool.
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as NodeFSP from "node:fs/promises";
@@ -12,20 +13,42 @@ const TIMEOUT_MS = 8 * 60_000;
 
 export const codexPrompt = (request: ArtRequest): string => {
   const count = request.candidates;
-  const lines = [
-    `Use $imagegen to generate ${count === 1 ? "one image" : `${count} separate images, one call each, as alternative takes`} of:`,
-    "",
-    request.prompt,
-    "",
-  ];
+  const edited = request.options.edit === undefined ? undefined : request.references[0];
+  // An edit: the image tool edits the images it is given by path, the first one being changed.
+  const lines =
+    edited === undefined
+      ? [
+          `Use $imagegen to generate ${count === 1 ? "one image" : `${count} separate images, one call each, as alternative takes`} of:`,
+          "",
+          request.prompt,
+          "",
+        ]
+      : [
+          `Use $imagegen to edit the image at ${edited.absolute}: pass that path as the first of referenced_image_paths${
+            request.references.length > 1
+              ? `, then ${request.references
+                  .slice(1)
+                  .map((reference) => reference.absolute)
+                  .join(", ")} as references`
+              : ""
+          }. Make one image.`,
+          "",
+          request.prompt,
+          "",
+        ];
   if (request.lane === "texture" && request.options.seamless !== false)
     lines.push(
       "It is a seamless, tileable texture: flat, evenly lit, edges that wrap without a seam.",
     );
-  if (request.options.transparent === true) lines.push("Use a transparent background.");
+  if (request.options.transparent === true)
+    lines.push(
+      edited === undefined
+        ? "Use a transparent background."
+        : "Set transparent_background to true: the background is cut out.",
+    );
   if (request.options.aspect !== undefined && request.options.aspect !== "1:1")
     lines.push(`Aspect ratio ${request.options.aspect}.`);
-  if (request.references.length > 0)
+  if (request.references.length > 0 && edited === undefined)
     lines.push(
       "The attached images are references: match their look (palette, shapes, rendering style); pass them to the image tool as referenced images.",
     );

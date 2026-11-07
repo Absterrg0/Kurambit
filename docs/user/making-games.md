@@ -174,6 +174,13 @@ creatures (animals, monsters) keep their own skeleton and animations. **Cancel**
 **Generated art…** in the game's **More** menu (**⋯**) or the command palette lists everything the game
 has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
 
+To change an image you kept instead of making it again, choose **Change…** under it (in the chat card
+or in **Generated art…**), say what should change, and press Enter. Your words go to the agent as
+your message, and it has the change made, at the price of one image. You then pick **Changed** or
+**As it was**: As it was keeps your image untouched and deletes only the change. Ask for the
+background to be cut out to get a sprite with a transparent background; that needs OpenAI or Codex,
+since Google's images have no transparency.
+
 Generated assets are yours on a paid plan; free plans of these providers do not allow commercial use.
 ElevenLabs music also has a studio-size limit, so check its terms before you ship a game that uses it.
 

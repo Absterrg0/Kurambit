@@ -245,6 +245,16 @@ export const FAKE_FACTS: GameBuildFacts = {
       libraryFiles: 14,
     },
   },
+  use: {
+    status: "measured",
+    value: {
+      used: ["web/assets/blender/space_cat.glb", "web/assets/audio/pounce.mp3"],
+      unused: ["web/assets/generated/robot.glb"],
+      played: ["web/assets/audio/pounce.mp3"],
+      silent: [],
+      more: 0,
+    },
+  },
   message: "",
 };
 

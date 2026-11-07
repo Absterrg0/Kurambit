@@ -207,6 +207,25 @@ export const GameAssetFacts = Schema.Struct({
 });
 export type GameAssetFacts = typeof GameAssetFacts.Type;
 
+/**
+ * What the plays used of the files the game ships: measured from the running game, never claimed.
+ * Library files ASSETS.md credits are left out; everything else under the engine's assets
+ * folder counts (exported, imported and generated art, sounds).
+ */
+export const GameAssetUse = Schema.Struct({
+  /** Game-relative files some play loaded, path order. */
+  used: Schema.Array(Schema.String).check(Schema.isMaxLength(64)),
+  /** Files the game ships that no play loaded. */
+  unused: Schema.Array(Schema.String).check(Schema.isMaxLength(64)),
+  /** Sound files that started playing above silence during the plays. */
+  played: Schema.Array(Schema.String).check(Schema.isMaxLength(64)),
+  /** Sound files loaded that never started playing. */
+  silent: Schema.Array(Schema.String).check(Schema.isMaxLength(64)),
+  /** Files past the caps, counted only. */
+  more: NonNegativeInt,
+});
+export type GameAssetUse = typeof GameAssetUse.Type;
+
 export const GameBotEnding = Schema.Literals([
   "won",
   "lost",
@@ -276,6 +295,16 @@ export const GameBuildFacts = Schema.Struct({
       Effect.succeed({
         status: "not-measured" as const,
         why: "measured before asset facts existed",
+        retry: false,
+      }),
+    ),
+  ),
+  /** Measured during the plays: which shipped files the game loaded and which sounds played. */
+  use: gameFact(GameAssetUse).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        status: "not-measured" as const,
+        why: "measured before asset use was measured",
         retry: false,
       }),
     ),

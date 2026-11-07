@@ -334,6 +334,8 @@ const make = Effect.gen(function* () {
       liveness: get("liveness"),
       firstResponse: get("firstResponse"),
       assets: get("assets"),
+      // Builder U measures it during the plays.
+      use: { status: "not-measured" as const, why: "asset use is not measured yet", retry: false },
     };
     const anyMeasured = FACT_NAMES.some((fact) => stored?.[fact] !== undefined);
     const state =

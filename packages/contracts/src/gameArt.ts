@@ -19,6 +19,11 @@ export const GameArtLane = Schema.Literals([
   "sfx",
   "music",
   "voice",
+  /**
+   * A clip on the standard humanoid skeleton, from plain words or a video of the move. Every
+   * character conformed to that skeleton plays it, so one clip serves the whole game.
+   */
+  "motion",
 ]);
 export type GameArtLane = typeof GameArtLane.Type;
 
@@ -30,6 +35,7 @@ export const GameArtProviderId = Schema.Literals([
   "tripo",
   "meshy",
   "elevenlabs",
+  "uthana",
   /** Kurambit's own plan: one account for every lane (a later adapter; never required). */
   "kurambit",
 ]);
@@ -57,6 +63,7 @@ export interface GameArtProviderInfo {
     | "gameTripoApiKey"
     | "gameMeshyApiKey"
     | "gameElevenLabsApiKey"
+    | "gameUthanaApiKey"
     | null;
   /** The hosts its adapter talks to, shown in Settings. */
   readonly hosts: ReadonlyArray<string>;
@@ -108,9 +115,26 @@ export const GAME_ART_PROVIDERS: Readonly<Record<GameArtProviderId, GameArtProvi
     hosts: ["api.elevenlabs.io"],
     site: "https://elevenlabs.io/app/settings/api-keys",
   },
+  uthana: {
+    label: "Uthana",
+    lanes: ["motion"],
+    keySetting: "gameUthanaApiKey",
+    hosts: ["uthana.com"],
+    site: "https://uthana.com",
+  },
   kurambit: {
     label: "Kurambit plan",
-    lanes: ["image", "character", "creature", "model", "texture", "sfx", "music", "voice"],
+    lanes: [
+      "image",
+      "character",
+      "creature",
+      "model",
+      "texture",
+      "sfx",
+      "music",
+      "voice",
+      "motion",
+    ],
     keySetting: null,
     hosts: [],
     site: "https://kurambit.com",
@@ -128,6 +152,7 @@ export const GAME_ART_LANE_ORDER: Readonly<Record<GameArtLane, ReadonlyArray<Gam
     sfx: ["elevenlabs", "kurambit"],
     music: ["elevenlabs", "kurambit"],
     voice: ["elevenlabs", "kurambit"],
+    motion: ["uthana", "kurambit"],
   };
 
 /** The person's choice per lane: auto (the order above) or one provider. */
@@ -143,14 +168,21 @@ export const GameArtLaneChoices = Schema.Struct({
   sfx: Schema.optionalKey(GameArtLaneChoice),
   music: Schema.optionalKey(GameArtLaneChoice),
   voice: Schema.optionalKey(GameArtLaneChoice),
+  motion: Schema.optionalKey(GameArtLaneChoice),
 });
 export type GameArtLaneChoices = typeof GameArtLaneChoices.Type;
 
 const GamePath = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500));
 
 export const GameArtOptions = Schema.Struct({
-  /** image: a transparent background (sprites, UI). */
+  /** image: a transparent background (sprites, UI); with edit, cuts the edited image's background out. */
   transparent: Schema.optionalKey(Schema.Boolean),
+  /**
+   * image, texture: change this game image as the prompt says, keeping the rest of it. It is sent
+   * as the first image (references follow it), takes no directions, and the person then picks
+   * between the change and the image as it was.
+   */
+  edit: Schema.optionalKey(GamePath),
   /** image: "1:1", "16:9", "9:16", "4:3", "3:4". */
   aspect: Schema.optionalKey(Schema.Literals(["1:1", "16:9", "9:16", "4:3", "3:4"])),
   /** character, creature, model: the triangle budget asked of the generator. */
@@ -167,12 +199,21 @@ export const GameArtOptions = Schema.Struct({
   ),
   /** texture: tiles seamlessly. */
   seamless: Schema.optionalKey(Schema.Boolean),
-  /** sfx, music, voice: seconds. */
+  /** sfx, music, voice, motion: seconds. */
   seconds: Schema.optionalKey(
     Schema.Number.check(Schema.isBetween({ minimum: 0.5, maximum: 300 })),
   ),
-  /** sfx, music: loops without a seam. */
+  /** sfx, music, motion: loops without a seam. */
   loop: Schema.optionalKey(Schema.Boolean),
+  /**
+   * motion: the game's character (an exported GLB on the standard humanoid skeleton) it is made
+   * on, so its feet and reach fit that body; omitted, the standard body.
+   */
+  character: Schema.optionalKey(GamePath),
+  /** motion: a game-relative video of a person doing the move, copied instead of words. */
+  video: Schema.optionalKey(GamePath),
+  /** motion: the walk and run set in every direction, instead of one clip. */
+  locomotion: Schema.optionalKey(Schema.Boolean),
 });
 export type GameArtOptions = typeof GameArtOptions.Type;
 
@@ -230,6 +271,11 @@ export const GameGenerationCandidate = Schema.Struct({
   preview: GamePath,
   /** The direction it was made from, as the pick card shows it. */
   label: Schema.optionalKey(Schema.String),
+  /**
+   * An edit's "As it was": its preview is the game's own image, outside the generation's folder.
+   * Picking it costs nothing more and keeps that file; no generation ever moves or deletes it.
+   */
+  original: Schema.optionalKey(Schema.Boolean),
 });
 export type GameGenerationCandidate = typeof GameGenerationCandidate.Type;
 
