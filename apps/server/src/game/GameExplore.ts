@@ -35,6 +35,7 @@ import {
   type GameViewport,
 } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 import { engineProfile } from "./engineProfile.ts";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as ExploreSheet from "./exploreSheet.ts";
@@ -206,6 +207,7 @@ const make = Effect.gen(function* () {
   const gate = yield* GameMemoryGate.GameMemoryGate;
   const players = yield* GamePlayer.GamePlayer;
   const stateDir = (yield* ServerConfig.ServerConfig).stateDir;
+  const templates = yield* GameTemplates.GameTemplates;
   const evidenceDir = NodePath.join(stateDir, "explore-evidence");
   // Each session's runner files, user:// tree and pictures. Kept off the temp
   // dir (it may be RAM-backed) and gone with the session; none outlives a
@@ -1527,7 +1529,7 @@ const make = Effect.gen(function* () {
           reason: "tool-missing",
           detail: "ffmpeg draws the frame sheet.",
         });
-      const fontDirectory = yield* GameAssetLibrary.labelFontDirectory();
+      const fontDirectory = yield* GameAssetLibrary.labelFontDirectory(templates);
       // ffmpeg writes a fresh name, then the rename replaces whatever sits at
       // `output` without following a link planted there.
       const temporary = NodePath.join(

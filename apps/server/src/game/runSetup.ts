@@ -10,7 +10,6 @@ import { GameOperationError, type GameEngineId } from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
 import { RUN_STATE_IGNORES, withEveryTurn, withKeepGoing } from "./scaffold.ts";
-import * as Templates from "./templates.ts";
 import { failureText } from "./run/handBack.ts";
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
@@ -47,6 +46,7 @@ const ioError = (operation: string, path: string, cause: unknown) =>
  * fails the capture: a build with a stale runner would be played wrong.
  */
 export const refreshHarnessFiles = (
+  templates: string,
   root: string,
   engine: GameEngineId,
   project: string,
@@ -55,7 +55,6 @@ export const refreshHarnessFiles = (
   Effect.gen(function* () {
     const owned = engineProfile(engine).run.harnessFiles;
     if (owned === null) return;
-    const templates = yield* Templates.resolveTemplatesDirectory();
     const paths = owned.files.map((file) => NodePath.join(project, file));
     yield* Effect.tryPromise({
       try: async () => {
@@ -80,12 +79,12 @@ export const refreshHarnessFiles = (
  * start: roles told to read them would work without them.
  */
 export const ensureScaffold = (
+  templates: string,
   root: string,
   engine: GameEngineId,
   fresh: boolean,
 ): Effect.Effect<void, GameOperationError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
-    const templates = yield* Templates.resolveTemplatesDirectory();
     const io = <A>(what: string, path: string, work: () => Promise<A>) =>
       Effect.tryPromise({ try: work, catch: (cause) => ioError(what, path, cause) });
     yield* io("Run scaffold", ".studio/bot", () =>

@@ -51,6 +51,7 @@ import * as Loop from "./run/loop.ts";
 import { NO_TURN_LOOP_SENTENCE, keepGoingStatus } from "./run/runView.ts";
 import { RESUMABLE, isStepRecord, stageEra, stepNumber } from "./run/state.ts";
 import { ensureScaffold } from "./runSetup.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
   operation: Schema.String,
@@ -208,6 +209,7 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* GameProjectService.GameProjectService;
+  const templates = yield* GameTemplates.GameTemplates;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const engine = yield* Orchestrator.OrchestratorV2;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -546,7 +548,8 @@ const make = Effect.gen(function* () {
   ) =>
     engineId === undefined
       ? Effect.void
-      : ensureScaffold(root, engineId, fresh).pipe(
+      : templates.directory.pipe(
+          Effect.flatMap((directory) => ensureScaffold(directory, root, engineId, fresh)),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, pathService),
           Effect.mapError((cause) =>

@@ -104,9 +104,9 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   for (const required of [
     executable,
     path.join(contentDir, "client/index.html"),
-    // Starter templates resolve from beside the executable, so a game created
-    // by this archive would otherwise fail to copy its godot/ tree.
-    path.join(contentDir, "templates/blank/template.json"),
+    // The starter templates archive resolves from beside the executable, so a
+    // game created by this archive would otherwise fail to copy its engine tree.
+    path.join(contentDir, "templates.zip"),
   ]) {
     if (!(yield* fs.exists(required))) {
       return yield* new CliArchiveSmokeError({

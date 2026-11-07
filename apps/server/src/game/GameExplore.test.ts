@@ -18,6 +18,7 @@ import * as GameExplore from "./GameExplore.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 import { gameProjectWorld, layerGameProjectFake } from "./testing/gameProjectFake.ts";
 import { ProcessHost } from "./processHost.ts";
 
@@ -36,6 +37,7 @@ const layer = GameExplore.layer.pipe(
       Layer.mock(GameEngine.GameEngine)({}),
       Layer.mock(GameMemoryGate.GameMemoryGate)({}),
       Layer.mock(GamePlayer.GamePlayer)({}),
+      GameTemplates.layerAt(NodePath.join(import.meta.dirname, "../../templates")),
       layerConfig,
       NodeServices.layer,
     ),

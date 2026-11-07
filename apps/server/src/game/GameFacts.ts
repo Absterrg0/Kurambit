@@ -61,7 +61,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import { findExecutable } from "./GameProcesses.ts";
 import * as GameService from "./GameService.ts";
 import { HOST_OS } from "./processHost.ts";
-import { resolveTemplatesDirectory } from "./templates.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 
 /** Changes when the server's reading of a measurement changes; the bot files are hashed besides. */
@@ -239,7 +239,13 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const gameBrowser = yield* makeGameBrowser;
   const scope = yield* Effect.scope;
-  const templates = yield* resolveTemplatesDirectory().pipe(Effect.orDie);
+  // Missing templates fail a measure (its bots cannot be copied), never the server's start.
+  const templates = yield* (yield* GameTemplates.GameTemplates).directory.pipe(
+    Effect.tapError((error) =>
+      Effect.logWarning("game facts: the starter templates are unavailable", error),
+    ),
+    Effect.orElseSucceed(() => NodePath.join(import.meta.dirname, "missing-templates")),
+  );
   const kit = NodePath.join(templates, "bot-kit");
   const boundsFile = `// Written by the harness for this measurement (GAME_FACTS_BOUNDS).\nexport const PLAY_SECONDS = { idle: ${GAME_FACTS_BOUNDS.idleSeconds}, masher: ${GAME_FACTS_BOUNDS.masherSeconds} };\nexport const START_SECONDS = ${GAME_FACTS_BOUNDS.startSeconds};\n`;
   // Facts are comparable only when the same bots and bounds measured them.

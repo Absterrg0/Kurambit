@@ -44,7 +44,8 @@ import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
 import { ensureScaffold, ensureTurnSections } from "./runSetup.ts";
 import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
-import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
+import { copyTemplateIntoGame } from "./templates.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 
 export const insideGame = (root: string, relative: string) => {
   const target = NodePath.resolve(root, relative);
@@ -184,6 +185,7 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const fileSystem = yield* FileSystem.FileSystem;
   const vcs = yield* VcsDriverRegistry.VcsDriverRegistry;
+  const templates = yield* GameTemplates.GameTemplates;
   const createLocks = yield* KeyedLock.make<string>();
   // A card says what a live run is doing. A paused or ended run reads nothing
   // here, so the row never masks "Needs attention"; the chat's banner says paused.
@@ -435,10 +437,7 @@ const make = Effect.gen(function* () {
                   cause,
                 }),
         });
-        const templatesDirectory = yield* resolveTemplatesDirectory().pipe(
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-        );
+        const templatesDirectory = yield* templates.directory;
         yield* copyTemplateIntoGame({
           templatesDirectory,
           templateId: gameTemplateForEngine(createEngine(input)),
@@ -451,7 +450,7 @@ const make = Effect.gen(function* () {
         root = yield* resolveCanonicalRoot(root, "create-game");
         // The skills and the bot kit ride in the first commit, so no turn's
         // build counts them as its change.
-        yield* ensureScaffold(root, createEngine(input), true).pipe(
+        yield* ensureScaffold(templatesDirectory, root, createEngine(input), true).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         );
