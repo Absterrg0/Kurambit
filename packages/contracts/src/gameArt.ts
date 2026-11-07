@@ -91,7 +91,7 @@ export const GAME_ART_PROVIDERS: Readonly<Record<GameArtProviderId, GameArtProvi
     label: "Tripo",
     lanes: ["character", "creature", "model"],
     keySetting: "gameTripoApiKey",
-    hosts: ["api.tripo3d.ai"],
+    hosts: ["openapi.tripo3d.com"],
     site: "https://platform.tripo3d.ai",
   },
   meshy: {
@@ -278,10 +278,13 @@ export const GameArtProviderStatus = Schema.Struct({
   message: Schema.String,
 });
 export type GameArtProviderStatus = typeof GameArtProviderStatus.Type;
+/** Per lane, the provider a generation would use now (the person's choice or auto); null when none is ready. */
+export const GameArtLanes = Schema.Record(GameArtLane, Schema.NullOr(GameArtProviderId));
+export type GameArtLanes = typeof GameArtLanes.Type;
 export const GameArtProvidersResult = Schema.Struct({
   providers: Schema.Array(GameArtProviderStatus),
   /** Per lane, the provider "auto" would use now; null when none is ready. */
-  lanes: Schema.Record(GameArtLane, Schema.NullOr(GameArtProviderId)),
+  lanes: GameArtLanes,
   /** Spent today across every game (USD), for Settings, which has no game thread to ask. */
   spentTodayUsd: Schema.optionalKey(Schema.Number),
 });

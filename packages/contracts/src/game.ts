@@ -6,6 +6,7 @@ import { GameAssetFamily } from "./gameAssets.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason } from "./gameRunReasons.ts";
 import { GameCharacterRoute } from "./gameStyle.ts";
+import { GameArtLanes } from "./gameArt.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -277,6 +278,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "thread-dispatch",
       "invalid-input",
       "license-missing",
+      /** Something only the person sets up (an art provider's key, a sign-in, a raised limit). */
+      "setup-missing",
       "source-changed",
       "unsafe-archive",
       "symlink",
@@ -325,6 +328,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The request is outside the limits this operation accepts. Read the detail, shrink the request, and retry.",
       "license-missing":
         "Unity needs an active licence on this machine. Open Unity Hub, sign in, and add a Unity Personal licence under Preferences > Licenses, then retry. Kurambit never stores Unity credentials.",
+      "setup-missing":
+        "This needs something only the person sets up in Settings. Tell them what the detail names; do not make it another way instead.",
       "source-changed":
         "The source changed: this library pack no longer matches the SHA-256 it was pinned with, so its bytes were not used. Pick another pack.",
       "unsafe-archive":
@@ -381,6 +386,7 @@ const FAULTS: Readonly<Record<GameOperationReason, GameOperationFault>> = {
   "project-not-found": "tool",
   "thread-dispatch": "tool",
   "license-missing": "tool",
+  "setup-missing": "tool",
   "source-changed": "tool",
   "unsafe-archive": "tool",
   "tool-failed": "tool",
@@ -394,6 +400,7 @@ const STANDING: ReadonlySet<GameOperationReason> = new Set([
   "starter-templates-missing",
   "unsupported-platform",
   "license-missing",
+  "setup-missing",
   "unsafe-archive",
   "source-changed",
 ]);
@@ -604,6 +611,11 @@ export const GameStatus = Schema.Struct({
    * library). Only the person changes it.
    */
   characters: GameCharacterRoute,
+  /**
+   * Generated art: per lane, the provider game_generate would use now (a key saved, Codex
+   * signed in); null when nothing can make that lane. Absent when it could not be read.
+   */
+  artLanes: Schema.optionalKey(GameArtLanes),
   /** The builds being played from copies of their own (Play of a build), with their URLs. */
   buildPlays: Schema.Array(
     Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),

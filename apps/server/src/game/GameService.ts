@@ -1022,6 +1022,10 @@ const make = Effect.gen(function* () {
         // Phase 2 fix round (L): the serve's state, held by GamePreview.
         live: live ? preview.liveState(root) : ("off" as const),
         characters: characterRoute(manifest),
+        ...(yield* art.lanes.pipe(
+          Effect.map((artLanes) => ({ artLanes })),
+          Effect.orElseSucceed(() => ({})),
+        )),
         buildPlays: copies.plays(root),
         operation: operations.current(root),
       };
