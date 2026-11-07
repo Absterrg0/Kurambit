@@ -109,13 +109,15 @@ def generated(params):
     notes = []
     if arms:
         arm = arms[0]
+        # The bodies first: a mesh may already hold the creature's name (a person's own model
+        # usually does), and the armature must get it, not a numbered copy of it.
+        for i, o in enumerate(meshes):
+            o.name = f"{name}_body" if len(meshes) == 1 else f"{name}_body_{i + 1}"
         arm.name = name
         arm.data.name = name
         arm["kurambit_source"] = json.dumps({"what": "clips", **stamp})
         arm["kurambit_rig"] = params["rig"]
         arm["kurambit_generation"] = json.dumps(params["generation"])
-        for i, o in enumerate(meshes):
-            o.name = f"{name}_body" if len(meshes) == 1 else f"{name}_body_{i + 1}"
         for a in actions:
             label = _clip_name(a)
             a.use_fake_user = True  # an action nothing uses is not saved
