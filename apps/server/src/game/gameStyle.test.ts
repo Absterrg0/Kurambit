@@ -194,8 +194,9 @@ it("hashes a lock by its content, not its key order, and fills budgets from defa
   });
 });
 
-it("refuses Blender-made characters only on the library route, naming the setting", () => {
-  expect(lockCharacterRouteRefusal("mpfb-body", characterRoute({}))).toMatch(/from the library/);
+it("refuses Blender-made characters off the Blender route, naming the setting", () => {
+  expect(lockCharacterRouteRefusal("mpfb-body", characterRoute({}))).toMatch(/with library/);
+  expect(lockCharacterRouteRefusal("unstamped-mesh", "tripo")).toMatch(/with tripo/);
   expect(lockCharacterRouteRefusal("unstamped-mesh", "library")).toMatch(/Make characters with/);
   expect(
     lockCharacterRouteRefusal("mpfb-body", characterRoute({ characters: "blender" })),
