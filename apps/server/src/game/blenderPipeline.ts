@@ -299,7 +299,9 @@ export const measurementText = (
         .map((clip) =>
           [
             `${clip.name} ${clip.seconds.toFixed(2)} s`,
-            ...(isLoopClip(clip) ? [clip.loops ? "loops" : "loop seam broken"] : []),
+            ...(isLoopClip(clip) && clip.seam === undefined
+              ? [clip.loops ? "loops" : "loop seam broken"]
+              : []),
             ...(Math.abs(clip.rootDrift) > DRIFT_METRES
               ? [`root drifts ${metres(clip.rootDrift)}`]
               : []),
@@ -311,6 +313,40 @@ export const measurementText = (
           ].join(", "),
         )
         .join("; ")}.`,
+    );
+  const perClip = (
+    label: string,
+    value: (clip: GameModelClip) => number | null | undefined,
+    show: (value: number) => string,
+  ) => {
+    const found = m.clips.flatMap((clip) => {
+      const v = value(clip);
+      return v === null || v === undefined ? [] : [`${clip.name} ${show(v)}`];
+    });
+    if (found.length > 0) lines.push(`- ${label}: ${found.join("; ")}.`);
+  };
+  perClip(
+    "Arm skin through the body, mm² per sampled frame (what crosses at rest left out)",
+    (clip) => clip.armThroughBody,
+    (v) => Math.round(v).toLocaleString("en-US"),
+  );
+  perClip(
+    "Loop seams, the last-to-first pose step over the mean step (about 1 is seamless)",
+    (clip) => clip.seam,
+    (v) => v.toFixed(2),
+  );
+  perClip(
+    "One-frame knee snaps of 8° or more",
+    (clip) => clip.kneePops,
+    (v) => String(v),
+  );
+  if (m.skinThrough !== undefined)
+    lines.push(
+      `- Skin through skin: ${m.skinThrough.rest.toFixed(1)}% of the skin's area at rest; ${m.skinThrough.bent === null ? "the bent pose not measured (off the standard skeleton)" : `${m.skinThrough.bent.toFixed(1)}% more on a fixed bent pose (thighs 60°, knees 75°, arms 45°, elbows 75°, spine 20°, neck 30°)`}.`,
+    );
+  if (m.floating !== undefined)
+    lines.push(
+      `- Parts over 0.5 mm from every other part: ${m.floating.length === 0 ? "none" : m.floating.map((part) => `${part.part} ${(part.gap * 1000).toFixed(1)} mm`).join(", ")}.`,
     );
   if (m.springs.length > 0)
     lines.push(

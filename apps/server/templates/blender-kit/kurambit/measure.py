@@ -1,5 +1,6 @@
 """The measurement shared by the review and the sidecar: size, triangles, textures, clips,
-ground speeds, springs and restDeviation.
+ground speeds, springs and restDeviation; on a character also skin through skin, and per clip
+arms through the body, the loop seam and knee pops (contact.py).
 
 It measures the candidate GLB itself, imported into an empty scene: exactly what ships.
 
@@ -9,16 +10,26 @@ is near the floor it is planted, so its backward speed is the clip's ground spee
 clip with a flight phase (a sprint) touches down for too few samples in that band, so the
 fallback ("stride") widens the band to two, then three times, catching each stride's touchdown.
 (The distance a foot sweeps while low, over the time it is low, underestimates: touchdown and
-lift-off are slow.)"""
+lift-off are slow.)
+
+Per clip, from the bones at every frame: the seam (a *_Loop clip's last-to-first pose step over
+its mean frame step, the pelvis's horizontal travel removed: about 1 is seamless) and knee pops
+(one-frame knee bends of KNEE_POP degrees or more against both neighbours, either way). From the
+skin at every ARM_EVERY-th frame: arm skin through the body, mm² per sampled frame. Bones are
+sampled with the meshes hidden; only that skin pass evaluates them."""
 import math
 
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
-from . import face, skeleton
+from . import contact, face, skeleton
 
 LOCOMOTION = ("walk", "run", "jog", "sprint")
 SUB = 4  # samples per frame: a sprint's foot contact lasts only a few frames
+KNEE_POP = 8.0
+ARM_EVERY = 2
+KNEES = (("thigh_l", "calf_l"), ("thigh_r", "calf_r"))
 
 
 def _bounds(meshes):
@@ -51,11 +62,45 @@ def _ground_speed(ta, tb, fps, height):
     return None, None
 
 
-def _clips(arm, meshes, height):
+def _seam(poses, hips):
+    """The loop point's pose step over the mean frame step, or None under three frames."""
+    if len(poses) < 3:
+        return None
+    off = np.zeros((len(hips), 1, 3))
+    off[:, 0, :2] = hips[:, :2] - hips[0, :2]
+    p = poses - off
+    steps = np.linalg.norm(p[1:] - p[:-1], axis=2).mean(1)
+    if steps.mean() < 1e-9:
+        return None
+    last = len(p) - 1
+    if np.linalg.norm(p[last] - p[0], axis=1).mean() < 0.05 * steps.mean():  # a closing key repeating the first
+        last -= 1
+    return round(float(np.linalg.norm(p[0] - p[last], axis=1).mean() / steps[:last].mean()), 2)
+
+
+def _knee_pops(bends):
+    pops = 0
+    for a in bends:
+        a = np.array(a)
+        if len(a) < 3:
+            continue
+        d0, d1 = a[1:-1] - a[:-2], a[2:] - a[1:-1]
+        pops += int(np.sum((np.abs(d0) >= KNEE_POP) & (np.abs(d1) >= KNEE_POP) & (d0 * d1 < 0)))
+    return pops
+
+
+def _bend(arm, upper, lower):
+    u = arm.pose.bones[upper]
+    lo = arm.pose.bones[lower]
+    return math.degrees((u.tail - u.head).angle(lo.tail - lo.head, 0.0))
+
+
+def _clips(arm, meshes, height, skin=None):
     sc = bpy.context.scene
     fps = sc.render.fps / sc.render.fps_base
     feet = [n for n in ("ball_l", "ball_r") if n in arm.pose.bones] or [n for n in ("foot_l", "foot_r") if n in arm.pose.bones]
     hips = next((n for n in ("pelvis", "root") if n in arm.pose.bones), arm.pose.bones[0].name)
+    knees = [k for k in KNEES if all(n in arm.pose.bones for n in k)]
     out = []
     for o in meshes:  # only bones are sampled: skinning every mesh at every subframe is wasted
         o.hide_viewport = True
@@ -64,10 +109,15 @@ def _clips(arm, meshes, height):
         f0, f1 = act.frame_range
         f0, f1 = int(round(f0)), int(round(f1))
         track = {n: [] for n in feet + [hips]}
+        poses, bends = [], [[] for _ in knees]
         for k in range((f1 - f0) * SUB + 1):
             sc.frame_set(f0 + k // SUB, subframe=(k % SUB) / SUB)
             for n in track:
                 track[n].append((arm.matrix_world @ arm.pose.bones[n].head).copy())
+            if k % SUB == 0:
+                poses.append([arm.matrix_world @ v for b in arm.pose.bones for v in (b.head, b.tail)])
+                for i, (up, lo) in enumerate(knees):
+                    bends[i].append(_bend(arm, up, lo))
         tol = 0.02 * max(1.0, height / 1.8)
         h = track[hips]
         clip = {
@@ -82,6 +132,20 @@ def _clips(arm, meshes, height):
             speed, source = _ground_speed(track[feet[0]], track[feet[1]], fps, height)
             if speed is not None and speed > 0.01:
                 clip["groundSpeed"], clip["groundSpeedFrom"] = round(speed, 3), source
+        loop = act.name.lower().endswith("_loop")
+        clip["seam"] = _seam(np.array(poses), np.array([h[i].to_tuple() for i in range(0, len(h), SUB)])) if loop else None
+        clip["kneePops"] = _knee_pops(bends) if knees else None
+        clip["armThroughBody"] = None
+        if skin is not None:
+            for o in meshes:
+                o.hide_viewport = False
+            through = []
+            for f in range(f0, f1 + 1, ARM_EVERY):
+                sc.frame_set(f)
+                through.append(skin.arm_body_mm2())
+            for o in meshes:
+                o.hide_viewport = True
+            clip["armThroughBody"] = round(sum(through) / len(through), 1) if through else None
         out.append(clip)
     skeleton.assign_action(arm, None)
     for pb in arm.pose.bones:
@@ -89,6 +153,16 @@ def _clips(arm, meshes, height):
     for o in meshes:
         o.hide_viewport = False
     return out
+
+
+def _unweighted(meshes):
+    """Vertices the glTF exporter bound to its neutral_bone: weighted to no bone of the skin."""
+    n = 0
+    for o in meshes:
+        g = o.vertex_groups.get("neutral_bone")
+        if g is not None:
+            n += sum(1 for v in o.data.vertices if any(e.group == g.index and e.weight > 0 for e in v.groups))
+    return n
 
 
 def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, rig=None):
@@ -114,6 +188,11 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
         if found is not None:
             deviation, worst = round(found[0], 2), found[1]
     holds = bool(standard_joints) and all(j in joints for j in standard_joints)
+    skin, through = None, None
+    skinned = [o for o in meshes if arm is not None and any(m.type == "ARMATURE" and m.object == arm for m in o.modifiers)]
+    if kind == "character" and skinned:
+        skin = contact.Skin(arm, skinned)
+        through = {"rest": skin.pct(skin.rest_hits), "bent": skin.bent() if holds else None}
     springs = []
     for name, bones in (chains or {}).items():
         if bones and all(b in joints for b in bones):
@@ -127,10 +206,13 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
         "triangles": sum(len(p.vertices) - 2 for o in meshes for p in o.data.polygons),
         "materials": len({s.material.name for o in meshes for s in o.material_slots if s.material}),
         "textures": textures[:32],
-        "clips": _clips(arm, meshes, height)[:128] if arm is not None else [],
+        "clips": _clips(arm, meshes, height, skin if skin is not None and skin.has_arms else None)[:128] if arm is not None else [],
         "springs": springs[:8],
     }
+    if through is not None:
+        measured["skinThrough"] = through
     blink = face.face_of(arm) if arm is not None else None
     if blink is not None:
         measured["face"] = blink
-    return measured, {"armatures": {a.name: [b.name for b in a.data.bones] for a in arms}, "joints": joints, "worstJoint": worst}
+    return measured, {"armatures": {a.name: [b.name for b in a.data.bones] for a in arms}, "joints": joints, "worstJoint": worst,
+                      "unweighted": _unweighted(meshes)}

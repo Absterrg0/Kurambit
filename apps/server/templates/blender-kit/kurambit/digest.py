@@ -200,7 +200,7 @@ def _material(m, cache):
     if key not in cache:
         h = hashlib.sha1(m.name.encode())
         h.update(repr((m.use_backface_culling, m.blend_method if hasattr(m, "blend_method") else None)).encode())
-        if m.use_nodes and m.node_tree is not None:
+        if m.node_tree is not None:
             h.update(_tree(m.node_tree, cache).encode())
         else:
             h.update(_r(m.diffuse_color))

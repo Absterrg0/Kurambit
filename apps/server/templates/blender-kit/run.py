@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
 from mathutils import Matrix  # noqa: E402
 
-from kurambit import measure, skeleton, stylepass  # noqa: E402
+from kurambit import contact, measure, skeleton, stylepass  # noqa: E402
 from kurambit.digest import digests, exported_actions  # noqa: E402
 from kurambit.protocol import Refused, entry  # noqa: E402
 
@@ -92,6 +92,8 @@ def refusals_of(measured, info, params):
         out.append({"code": "texture", "text": f"a {big[0]['width']}x{big[0]['height']} texture is over STYLE.json's budget.texture of {side} px a side and the pass could not scale it: replace it, or use the palette."})
     if kind == "character" and not any("idle" in c["name"].lower() for c in measured["clips"]):
         out.append({"code": "no-idle", "text": "a character needs an idle clip to stand: add Idle_Loop through game_blender_character's clips, or key one."})
+    if kind == "character" and info["unweighted"]:
+        out.append({"code": "unweighted", "text": f"{info['unweighted']} vertices are weighted to no bone (no vertex group, or groups naming no bone): they stay where they are while the character moves. Weight them to its bones with helpers.skin_rigid, or parent the part to a bone."})
     return out
 
 
@@ -146,6 +148,8 @@ def run_pass(params):
     _keep_only(objects)
     out = params["out"]
     os.makedirs(out, exist_ok=True)
+    # Before the style pass, which joins a character's meshes into one.
+    gaps = contact.floating(objects)
     styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
     # The server names the file (a temporary one it renames into place), so nothing reads half of it.
     candidate = params.get("glb") or os.path.join(out, "candidate.glb")
@@ -158,6 +162,9 @@ def run_pass(params):
         export_cameras=False, export_lights=False,
     )
     measured, info = measure.measure(candidate, styled["kind"], standard_rest, params.get("standardJoints"), chains, rig)
+    if gaps is not None:
+        k = styled["scaled"] or 1.0  # in the shipped size
+        measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]
     return {
         "kind": styled["kind"],
         "objects": names,

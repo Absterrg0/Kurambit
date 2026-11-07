@@ -244,6 +244,8 @@ const ReviewRender = Schema.Struct({
   image: Schema.String,
   width: Schema.Number,
   height: Schema.Number,
+  /** Tiles the model hardly shows in (under 1% covered): out of frame, or too small to judge. */
+  problems: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 const decodeCharacterMade = Schema.decodeUnknownEffect(CharacterMade);
 const decodeReviewRender = Schema.decodeUnknownEffect(ReviewRender);
@@ -1549,6 +1551,11 @@ const make = Effect.gen(function* () {
           ? `No concept: art/CONCEPT.md has no section headed "${candidate.subject}"${concept.png === null ? ` and there is no art/concepts/${candidate.subject}.png` : ""}.`
           : `Concept (${candidate.concept}):\n${concept.section}`,
         measurementText(candidate, styleBudgets(style), bytes),
+        ...(rendered.problems === undefined || rendered.problems.length === 0
+          ? []
+          : [
+              `The image has errors:\n${rendered.problems.map((problem) => `- ${problem}`).join("\n")}`,
+            ]),
         refusing.length === 0
           ? "Would refuse: nothing; game_blender_export would write it."
           : `Would refuse:\n${refusing.join("\n")}`,
