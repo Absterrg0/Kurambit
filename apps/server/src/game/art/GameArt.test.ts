@@ -55,6 +55,7 @@ const layer = (input: {
         Layer.succeed(GameArt.GameArtHost, {
           codex: Effect.succeed({ ready: false as const, message: "no codex in tests" }),
           keepGoingStep: () => Effect.succeed(false),
+          packPicture: () => Effect.die("no library in tests"),
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
@@ -110,6 +111,7 @@ describe("GameArt", () => {
       yield* Effect.promise(() =>
         NodeFSP.mkdir(NodePath.join(root, "art/generated/image/hero"), { recursive: true }),
       );
+      yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "look.png"), PNG));
       yield* Effect.provide(
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
@@ -118,7 +120,11 @@ describe("GameArt", () => {
             prompt: "a hero",
             name: "hero",
             directions: [
-              { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
+              {
+                label: "Warm toon",
+                prompt: "chunky toon shading, warm palette",
+                style: "look.png",
+              },
               { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
             ],
           });
@@ -155,6 +161,10 @@ describe("GameArt", () => {
           );
           assert.strictEqual(record.ai, true);
           assert.strictEqual(record.provider, "openai");
+          assert.deepStrictEqual(record.directions, [
+            { label: "Warm toon", style: "look.png" },
+            { label: "Cold low-poly", style: null },
+          ]);
         }),
         layer({ base, settings: { gameOpenAiApiKey: "sk" }, answer: openAiImages(2) }),
       );

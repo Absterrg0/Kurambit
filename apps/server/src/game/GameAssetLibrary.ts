@@ -109,6 +109,10 @@ export class GameAssetLibrary extends Context.Service<
     readonly packClips: (
       pack: string,
     ) => Effect.Effect<ReadonlyArray<PackClips>, GameOperationError>;
+    /** The picture that shows the pack's look: its own overview, else a render of one of its models. */
+    readonly packPicture: (
+      pack: string,
+    ) => Effect.Effect<{ readonly path: string; readonly file: string }, GameOperationError>;
   }
 >()("kurambit/game/GameAssetLibrary") {}
 
@@ -1390,7 +1394,26 @@ const make = Effect.gen(function* () {
       return found;
     });
 
-  return GameAssetLibrary.of({ search, add, packFile, packClips });
+  const packPicture = (id: string) =>
+    Effect.gen(function* () {
+      const pack = yield* packOf(id);
+      const index = yield* ensure(pack);
+      const path =
+        index.previews.find((candidate) => /\.(?:png|jpe?g|webp)$/i.test(candidate)) ??
+        index.files.find(
+          (file) => file.previewOf !== undefined && /\.(?:png|jpe?g|webp)$/i.test(file.path),
+        )?.path;
+      if (path === undefined)
+        return yield* fail(
+          "Library",
+          pack.id,
+          "invalid-input",
+          `${pack.id} ships no picture of its look; pass a game image instead.`,
+        );
+      return { path, file: yield* packFile(pack.id, path) };
+    });
+
+  return GameAssetLibrary.of({ search, add, packFile, packClips, packPicture });
 });
 
 export const layer = Layer.effect(GameAssetLibrary, make);

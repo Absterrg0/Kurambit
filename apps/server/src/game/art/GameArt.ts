@@ -55,6 +55,8 @@ import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettingsService from "../../serverSettings.ts";
 import { GameCaller } from "../GameCaller.ts";
+import * as GameAssetLibrary from "../GameAssetLibrary.ts";
+import { LIBRARY_CATALOG } from "../assetLibraryCatalog.ts";
 import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
 import { isPathInside } from "../gameNativeUserDir.ts";
@@ -123,6 +125,10 @@ export class GameArtHost extends Context.Service<
     >;
     /** True while the thread's turn is a Keep going step's: nobody is there to pick. */
     readonly keepGoingStep: (threadId: ThreadId) => Effect.Effect<boolean>;
+    /** A library pack's picture of its look, as `pack/path` and its absolute cached file. */
+    readonly packPicture: (
+      pack: string,
+    ) => Effect.Effect<{ readonly path: string; readonly file: string }, GameOperationError>;
   }
 >()("kurambit/game/art/GameArt/GameArtHost") {}
 
@@ -156,6 +162,8 @@ const Meta = Schema.Struct({
   options: Schema.Record(Schema.String, Schema.Unknown),
   /** The directions' labels, by candidate; absent on a single asset (and on rows from before). */
   labels: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** The style picture each direction was sent with (a game path or `library:pack/path`), by candidate. */
+  styles: Schema.optionalKey(Schema.Array(Schema.NullOr(Schema.String))),
 });
 type Meta = typeof Meta.Type;
 const decodeGeneration = Schema.decodeUnknownOption(Schema.fromJsonString(GameGeneration));
@@ -466,35 +474,83 @@ const make = Effect.gen(function* () {
       };
     });
 
-  // ── References ─────────────────────────────────────────────────────────
+  // ── Images sent with a request ─────────────────────────────────────────
+  const readReference = (root: string, path: string) =>
+    Effect.tryPromise({
+      try: async (): Promise<ArtReference> => {
+        if (NodePath.isAbsolute(path) || path.split(/[\\/]/).includes(".."))
+          throw new Error(`${path}: use a path inside the game.`);
+        const realRoot = await NodeFSP.realpath(root);
+        const absolute = await NodeFSP.realpath(NodePath.join(root, path)).catch(() => {
+          throw new Error(`${path} does not exist.`);
+        });
+        if (!isPathInside(absolute, realRoot))
+          throw new Error(`${path} resolves outside the game.`);
+        const mime = REFERENCE_MIME[NodePath.extname(absolute).toLowerCase()];
+        if (mime === undefined) throw new Error(`${path} is not a PNG, JPEG or WebP image.`);
+        const stat = await NodeFSP.stat(absolute);
+        if (!stat.isFile()) throw new Error(`${path} is not a file.`);
+        if (stat.size > MAX_REFERENCE_BYTES) throw new Error(`${path} is larger than 20 MB.`);
+        return { path, absolute, mime, bytes: new Uint8Array(await NodeFSP.readFile(absolute)) };
+      },
+      catch: (cause) =>
+        opError(
+          "art-generate",
+          `Reference ${cause instanceof Error ? cause.message : String(cause)}`,
+          "invalid-path",
+          path,
+        ),
+    });
+
   const readReferences = (root: string, paths: ReadonlyArray<string>) =>
-    Effect.forEach(paths, (path) =>
-      Effect.tryPromise({
-        try: async (): Promise<ArtReference> => {
-          if (NodePath.isAbsolute(path) || path.split(/[\\/]/).includes(".."))
-            throw new Error(`${path}: use a path inside the game.`);
-          const realRoot = await NodeFSP.realpath(root);
-          const absolute = await NodeFSP.realpath(NodePath.join(root, path)).catch(() => {
-            throw new Error(`${path} does not exist.`);
-          });
-          if (!isPathInside(absolute, realRoot))
-            throw new Error(`${path} resolves outside the game.`);
-          const mime = REFERENCE_MIME[NodePath.extname(absolute).toLowerCase()];
-          if (mime === undefined) throw new Error(`${path} is not a PNG, JPEG or WebP image.`);
-          const stat = await NodeFSP.stat(absolute);
-          if (!stat.isFile()) throw new Error(`${path} is not a file.`);
-          if (stat.size > MAX_REFERENCE_BYTES) throw new Error(`${path} is larger than 20 MB.`);
-          return { path, absolute, mime, bytes: new Uint8Array(await NodeFSP.readFile(absolute)) };
-        },
-        catch: (cause) =>
-          opError(
-            "art-generate",
-            `Reference ${cause instanceof Error ? cause.message : String(cause)}`,
-            "invalid-path",
-            path,
+    Effect.forEach(paths, (path) => readReference(root, path));
+
+  /**
+   * A direction's style picture: a library pack's own picture, or a game image. A pack's picture is
+   * read from the library cache, which is the server's, so it never needs a path inside the game.
+   */
+  const readStyle = (root: string, style: string) =>
+    LIBRARY_CATALOG.some((pack) => pack.id === style)
+      ? host.packPicture(style).pipe(
+          Effect.mapError((error) =>
+            opError("art-generate", `Style ${style}: ${error.message}`, "invalid-input", style),
           ),
-      }),
-    );
+          Effect.flatMap(({ path, file }) =>
+            Effect.tryPromise({
+              try: async (): Promise<ArtReference> => {
+                const mime = REFERENCE_MIME[NodePath.extname(file).toLowerCase()];
+                if (mime === undefined)
+                  throw new Error(`${path} is not a PNG, JPEG or WebP image.`);
+                const stat = await NodeFSP.stat(file);
+                if (stat.size > MAX_REFERENCE_BYTES)
+                  throw new Error(`${path} is larger than 20 MB.`);
+                return {
+                  path: `library:${style}/${path}`,
+                  absolute: file,
+                  mime,
+                  bytes: new Uint8Array(await NodeFSP.readFile(file)),
+                };
+              },
+              catch: (cause) =>
+                opError(
+                  "art-generate",
+                  `Style ${style}: ${cause instanceof Error ? cause.message : String(cause)}`,
+                  "io",
+                  style,
+                ),
+            }),
+          ),
+        )
+      : /^[a-z0-9][a-z0-9-]{1,63}$/.test(style)
+        ? Effect.fail(
+            opError(
+              "art-generate",
+              `Style ${style} is no library pack; pass a pack id game_assets_search lists, or a game image path.`,
+              "invalid-input",
+              style,
+            ),
+          )
+        : readReference(root, style);
 
   // ── Files ──────────────────────────────────────────────────────────────
   const gameIo = <A>(root: string, operation: string, run: () => Promise<A>) =>
@@ -523,6 +579,14 @@ const make = Effect.gen(function* () {
       options: row.meta.options,
       files: generation.files,
       candidates: row.meta.candidateFiles,
+      ...(row.meta.labels === undefined
+        ? {}
+        : {
+            directions: row.meta.labels.map((label, index) => ({
+              label,
+              style: row.meta.styles?.[index] ?? null,
+            })),
+          }),
       chosen: generation.chosen,
       chosenBy: generation.chosenBy,
       ai: true,
@@ -828,27 +892,34 @@ const make = Effect.gen(function* () {
             ? `Directions are for images and textures; ask ${input.lane} one at a time.`
             : `Directions are for images: make 2-4 concept images in distinct directions in the image lane, let the person pick one, then make the ${input.lane} from it with the picked image as a reference.`,
         );
-      // Each direction is its own request for one image: the person picks between looks,
-      // never between samples of one prompt (which come back as near-copies).
-      const prompts =
-        directions.length === 0
-          ? [input.prompt]
-          : // The look leads: image models weight a prompt's start, and a style tacked on after a
-            // long subject comes back in the model's own default rendering.
-            directions.map(
-              (direction) =>
-                `Art style (follow it strictly, above everything else): ${direction.prompt}\n\n${input.prompt}\n\nRender every part of the image in that art style, not in a polished 3D movie style.`,
-            );
       const base = { lane: input.lane, prompt: input.prompt, candidates: 1, options };
       const adapter = yield* route(all, base);
       const references = yield* readReferences(root, input.references ?? []);
-      const requests: ReadonlyArray<ArtRequest> = prompts.map((prompt) => ({
-        ...base,
-        prompt,
-        references,
-      }));
-      const estimates = prompts.map((prompt) =>
-        adapter.estimate({ ...base, prompt, references: references.length }),
+      const styles = yield* Effect.forEach(directions, (direction) =>
+        direction.style === undefined ? Effect.succeed(null) : readStyle(root, direction.style),
+      );
+      // Each direction is its own request for one image: the person picks between looks,
+      // never between samples of one prompt (which come back as near-copies).
+      const requests: ReadonlyArray<ArtRequest> =
+        directions.length === 0
+          ? [{ ...base, references }]
+          : directions.map((direction, index) => {
+              const style = styles[index] ?? null;
+              // The look leads: image models weight a prompt's start, and a style tacked on after a
+              // long subject comes back in the model's own default rendering. Words alone still
+              // drift back to that polish; a picture of the look, sent first, holds it.
+              const prompt =
+                style === null
+                  ? `Art style (follow it strictly, above everything else): ${direction.prompt}\n\n${input.prompt}\n\nRender every part of the image in that art style, not in a polished 3D movie style.`
+                  : `Image 1 is the art style to copy exactly: ${direction.prompt}. Copy its rendering, shapes, materials, palette, lighting and level of detail; do not copy what it shows.${references.length === 0 ? "" : " The other images show what to draw, not how."}\n\n${input.prompt}\n\nRender every part of the image in the art style of image 1, not in a polished 3D movie style.`;
+              return {
+                ...base,
+                prompt,
+                references: style === null ? references : [style, ...references],
+              };
+            });
+      const estimates = requests.map((request) =>
+        adapter.estimate({ ...request, references: request.references.length }),
       );
       const estimate = estimates.some((value) => value === null)
         ? null
@@ -903,7 +974,12 @@ const make = Effect.gen(function* () {
             options,
             ...(directions.length === 0
               ? {}
-              : { labels: directions.map((direction) => direction.label) }),
+              : {
+                  labels: directions.map((direction) => direction.label),
+                  ...(styles.every((style) => style === null)
+                    ? {}
+                    : { styles: styles.map((style) => style?.path ?? null) }),
+                }),
           };
           yield* sql`
             INSERT INTO game_art_generations
@@ -1161,7 +1237,9 @@ export const layerHost = Layer.effect(
   Effect.gen(function* () {
     const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const library = yield* GameAssetLibrary.GameAssetLibrary;
     return GameArtHost.of({
+      packPicture: library.packPicture,
       codex: Effect.gen(function* () {
         const instances = yield* registry.listInstances;
         const codex = instances.filter(

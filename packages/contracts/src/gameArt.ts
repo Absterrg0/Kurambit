@@ -185,6 +185,11 @@ export const GameArtDirection = Schema.Struct({
   label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(40)),
   /** How this direction looks, added to the shared prompt. */
   prompt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+  /**
+   * A real look the game can reach, sent as the first image: a library pack id (its preview picture)
+   * or a game path to an image. Image models drift back to their own polish; a picture holds them.
+   */
+  style: Schema.optionalKey(GamePath),
 });
 export type GameArtDirection = typeof GameArtDirection.Type;
 
