@@ -207,7 +207,20 @@ export const makeArtHttp = (client: HttpClient.HttpClient): ArtHttp => {
         );
       if (response.status >= 400) {
         const body = yield* response.json.pipe(Effect.orElseSucceed(() => null));
-        const said = messageOf(body);
+        // A provider's own advice ("use the secret key, not the client id") is the fix the person needs.
+        const message = messageOf(body);
+        const suggestion =
+          typeof body === "object" &&
+          body !== null &&
+          typeof (body as Record<string, unknown>).suggestion === "string"
+            ? ((body as Record<string, unknown>).suggestion as string)
+            : null;
+        const said =
+          message === null
+            ? suggestion
+            : suggestion === null
+              ? message
+              : `${message}. ${suggestion}`;
         return yield* new ArtProviderError({
           reason: `${label} refused (HTTP ${response.status})${said === null ? "." : `: ${said.slice(0, 400)}`}`,
           transient: response.status === 429 || response.status >= 500,
