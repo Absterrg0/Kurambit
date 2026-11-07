@@ -1388,11 +1388,16 @@ export function deriveMessagesTimelineRows(input: {
     liveSubagentEntryIds,
     completeSupersededReplyEntryIds: completeSupersededReplyIds,
   });
+  // A generation card never folds away with its turn: it may wait on the person's pick, and
+  // when done it is what the turn made and what it cost.
+  const unfoldedCardIds = new Set(
+    timelineEntries.filter((entry) => entry.kind === "game-generation").map((entry) => entry.id),
+  );
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
     if (!input.expandedRunIds?.has(fold.runId)) {
       for (const entryId of fold.hiddenEntryIds) {
-        collapsedEntryIds.add(entryId);
+        if (!unfoldedCardIds.has(entryId)) collapsedEntryIds.add(entryId);
       }
     }
   }
