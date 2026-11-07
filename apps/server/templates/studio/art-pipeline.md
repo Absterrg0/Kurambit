@@ -151,7 +151,12 @@ through the review and the export is not finished.
    `pelvis`, `ear` from `Head` with `mirror`. Keep chains short (springs do
    not collide). It leaves a collection `<name>` with the armature `<name>`
    and the skinned `<name>_body`. `replace: true` rebuilds only the body and
-   the armature and re-binds your parts.
+   the armature and re-binds your parts. Pick the body by the concept's
+   proportions, not by the subject's age: the scale pass sets how tall it
+   stands, but the body sets its head share and limb length. A small,
+   round or chibi character (a cat, a gnome, a mascot) takes a child body
+   (`age` 0.1 to 0.25); a lean adult body under a big head reads as a
+   person in a costume.
 3. **Parts** with `game_blender_code`, in world space at the rest pose.
    `kurambit` is already imported:
    - `kurambit.material("#RRGGBB", glow=0)`: a colour by palette role;
