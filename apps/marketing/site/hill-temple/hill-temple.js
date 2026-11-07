@@ -3,9 +3,10 @@
 // only same-origin scripts, so the engine's config travels in a JSON block.
 (() => {
   const config = JSON.parse(document.getElementById("godot-config").textContent);
-  // The page lives at /hill-temple (no trailing slash), so every engine file is fetched by an
-  // absolute path; the progress bar looks sizes up by those same paths.
-  const base = "/hill-temple/";
+  // The engine's files (wasm, pack, audio worklets) come from games.kurambit.com (Cloudflare R2:
+  // no transfer charges), one folder per build so the edge cache never serves a stale one. The
+  // progress bar looks sizes up by those same URLs.
+  const base = "https://games.kurambit.com/hill-temple/r3/";
   config.executable = base + config.executable;
   if (config.fileSizes) {
     for (const k of Object.keys(config.fileSizes)) config.fileSizes[base + k] = config.fileSizes[k];
