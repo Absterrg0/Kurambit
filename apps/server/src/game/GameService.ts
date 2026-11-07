@@ -35,6 +35,8 @@ import {
   type GameBlenderCharacterInput,
   type GameArtProvidersResult,
   type GameGenerateInput,
+  type GameImageEditInput,
+  imageEditName,
   type GameGenerateResult,
   type GameGenerateWaitInput,
   type GameGenerationChangeResult,
@@ -262,6 +264,11 @@ export class GameService extends Context.Service<
     readonly generate: (
       threadId: ThreadId,
       input: GameGenerateInput,
+    ) => Effect.Effect<GameGenerateResult, GameOperationError>;
+    /** A change to a game image, from words: generate's image lane with options.edit. */
+    readonly imageEdit: (
+      threadId: ThreadId,
+      input: GameImageEditInput,
     ) => Effect.Effect<GameGenerateResult, GameOperationError>;
     readonly generateWait: (
       threadId: ThreadId,
@@ -1226,6 +1233,26 @@ const make = Effect.gen(function* () {
           root,
           threadId,
           input,
+          characterRoute(yield* projects.read(root)),
+        );
+      }),
+    imageEdit: (threadId, input) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        yield* projects.admitWrite(threadId, root, "Edit art", String(threadId));
+        return yield* art.generate(
+          root,
+          threadId,
+          {
+            lane: "image",
+            name: imageEditName(input.path),
+            prompt: input.change,
+            ...(input.references === undefined ? {} : { references: input.references }),
+            options: {
+              edit: input.path,
+              ...(input.transparent === true ? { transparent: true } : {}),
+            },
+          },
           characterRoute(yield* projects.read(root)),
         );
       }),

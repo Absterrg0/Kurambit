@@ -7,6 +7,7 @@ import {
   GameBlenderCharacterResult,
   GameGenerateInput,
   GameGenerateResult,
+  GameImageEditInput,
   GameGenerateWaitInput,
   GameBlenderCodeInput,
   GameBlenderCodeResult,
@@ -164,6 +165,18 @@ const GenerateTool = Tool.make("game_generate", {
   description:
     "Make art with the best provider for its lane (to change an image the game already has, pass it as options.edit, never as a reference: the person then picks the change or the image as it was), the person's own keys or their ChatGPT plan's Codex image generation, chosen in Settings: image (key art, concepts, character sheets, sprites, UI art), character (a humanoid: rigged and conformed to the standard skeleton, so it plays the clip library), creature (any other body plan: options.body quadruped, avian, serpentine, aquatic, hexapod, octopod or other; it keeps its own rig and the clips asked in options.clips), model (a prop, vehicle or building), texture (options.seamless), sfx, music, voice (options.seconds, options.loop). motion is a clip on the standard humanoid skeleton that every humanoid in the game plays: first look for the move in the clip library (game_assets_search with pack quaternius-universal-animation-library lists its clips) and generate only a move the game needs that it lacks (a boss's slam, a victory dance); prompt says the move in plain words, options.character is the game's exported character it is made on (omitted, the standard body), options.seconds 4-10, options.loop for a move that repeats, options.video a game path to footage of a person doing it instead of words, options.locomotion the walk and run set in eight directions; it takes no references and is allowed on every character route, since it adds clips, not a character. prompt says what the thing itself is; the game's look comes from references: for an image or texture pass the key art; a character, creature or model takes only the picked picture of that one subject (its concept or character sheet, one front view on a plain background), never the key art, because a 3D generator models everything its picture shows. directions (image and texture, 2-4 of {label, prompt, style}) makes one image per look for the person to pick from in the chat: each a different rendering, palette or shape language the game can reach in its engine, drawn as an in-game screenshot, never a movie poster; samples of one idea are not a choice. style grounds a direction in a real look, sent as the first image to copy: a library pack id (its own picture; game_assets_search lists the families) or a game path to the person's reference image. Use it for key art and the sheet of every hero character or creature (Keep going takes the first); omitted makes one. options.edit (image, texture: a game path) changes that image from words instead of making it again, keeping what the person liked: prompt is the one change, the image goes first and references (the key art) follow it; with options.transparent it cuts the background out onto real transparency (OpenAI or Codex; Google refuses). An edit takes no directions: the person picks \"Changed\" or \"As it was\" (the game's file, never touched; picking it deletes only the change), and Keep going takes \"Changed\". After \"Changed\", point the game at the new file, and if the edited image is STYLE.json's anchor read its palette again. It answers at once with the generation's id: pick it up with game_generate_wait. Files land under art/generated/<lane>/<name>/, recorded with their source, AI flag and cost. character and creature are refused unless the person's character route (characters in game_status) is generated, before anything is spent. A paid lane counts against the person's daily limit; a refusal says which key, limit or route is missing, and then say so in your reply rather than switching to another way of making it. Then the usual pipeline: a motion's GLB goes into game_blender_character's clips by its game path, a character-lane humanoid goes through game_blender_character with body {game: path}, a creature or model through game_blender_assets_import with source generated, each then game_blender_look mode review and game_blender_export; an image or sound is added with game_import. Say in your reply what the generations cost.",
   parameters: GameGenerateInput,
+  success: GameGenerateResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Strict, true)
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const ImageEditTool = Tool.make("game_image_edit", {
+  description:
+    'Change an image the game already has (key art, a sprite, a concept, a character sheet) from words, keeping everything else in it; with transparent, cut its subject out onto a transparent background. Use it whenever the person asks to change an image ("Change <file>: …", "make the cat orange"), never game_generate with the image as a reference, which makes a new image. The person then picks "Changed" or "As it was" in the chat: the original file is never touched, and Keep going takes "Changed". It answers at once with the generation\'s id: pick it up with game_generate_wait. After "Changed", point the game at the new file where it used the original, and if the original is STYLE.json\'s anchor, read the palette again from the new file. It costs one image, against the person\'s daily limit.',
+  parameters: GameImageEditInput,
   success: GameGenerateResult,
   failure,
   failureMode: "return",
@@ -626,6 +639,7 @@ export const GameToolkit = Toolkit.make(
   BlenderExportTool,
   BlenderCharacterTool,
   GenerateTool,
+  ImageEditTool,
   GenerateWaitTool,
   AssetsAddTool,
   UnityToolsTool,

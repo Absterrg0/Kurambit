@@ -368,10 +368,10 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
 
    **Change, don't remake.** When the person wants a picked image changed
    ("make the cat orange"), or asks to "Change…" one from its card, use
-   lane `image` (or `texture`) with `options.edit` set to that file and the
-   change in words as `prompt`, the key art in `references`: it keeps what
+   `game_image_edit` with that file as `path` and the change in words (a
+   texture: `game_generate` lane `texture` with `options.edit`): it keeps what
    they liked and costs one image, where a new generation loses it. To cut
-   a sprite out of its background, add `options.transparent` (OpenAI or
+   a sprite out of its background, add `transparent` (OpenAI or
    Codex; Google refuses). An edit takes no directions; the person picks
    "Changed" or "As it was" in the chat, and the original file is never
    touched. After "Changed", point the game at the new file where it used

@@ -322,6 +322,34 @@ export const GameGeneration = Schema.Struct({
 });
 export type GameGeneration = typeof GameGeneration.Type;
 
+/**
+ * game_image_edit: a change, in words, to an image the game already has. The same generation as
+ * game_generate's image lane with options.edit, under a name an agent finds when asked to change
+ * an image.
+ */
+export const GameImageEditInput = Schema.Struct({
+  /** The game image to change. */
+  path: GamePath,
+  /** The one change, in words: "make the robot's eye green". */
+  change: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
+  /** Cut its subject out onto a transparent background (OpenAI or Codex; Google refuses). */
+  transparent: Schema.optionalKey(Schema.Boolean),
+  /** Game images whose look to match, sent after the image being changed. */
+  references: Schema.optionalKey(Schema.Array(GamePath).check(Schema.isMaxLength(3))),
+});
+export type GameImageEditInput = typeof GameImageEditInput.Type;
+
+/** The generation name an edit of `path` lands under: its stem, then "_edit". */
+export const imageEditName = (path: string): string => {
+  const stem = (path.split("/").pop() ?? "image")
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .slice(0, 42);
+  return `${stem === "" ? "image" : stem}_edit`;
+};
+
 export const GameGenerateResult = Schema.Struct({
   text: Schema.String,
   generation: GameGeneration,

@@ -204,4 +204,4 @@ export const changeableImage = (generation: GameGeneration): string | null =>
 
 /** The person's "Change…", as their message to the agent, which makes the edit generation. */
 export const changeMessage = (path: string, words: string): string =>
-  `Change ${path}: ${words.trim()}\n\nEdit that image rather than making a new one, so I can pick between the change and the image as it was.`;
+  `Change ${path}: ${words.trim()}\n\nEdit that image (game_image_edit) rather than making a new one, so I can pick between the change and the image as it was.`;

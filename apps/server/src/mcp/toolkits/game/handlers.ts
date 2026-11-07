@@ -86,6 +86,9 @@ const handlers = {
   game_generate: McpToolAccess.actsAsCaller((input) =>
     withGame((game, threadId) => game.generate(threadId, input)),
   ),
+  game_image_edit: McpToolAccess.actsAsCaller((input) =>
+    withGame((game, threadId) => game.imageEdit(threadId, input)),
+  ),
   game_generate_wait: McpToolAccess.readsAsCaller((input) =>
     withGame((game, threadId) => game.generateWait(threadId, input)),
   ),
