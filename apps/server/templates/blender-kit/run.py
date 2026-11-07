@@ -54,7 +54,10 @@ def parts_of(objects):
             add({"what": "clips", **MADE})
     for o in meshes:
         s = _stamp(o)
-        add(s if s is not None and s.get("what") != "body" else {"what": "parts", **MADE})
+        if s is None:
+            add({"what": "parts", **MADE})
+        elif s.get("what") != "body":
+            add(s)
     return parts[:16]
 
 
@@ -111,8 +114,11 @@ def _keep_only(objects):
 @entry
 def run_pass(params):
     names = list(params["objects"])
-    if any(n not in bpy.data.objects for n in names) or digests(names) != params["expectedDigest"]:
-        raise Refused("invalid-input", "the saved scene differs from the live one")
+    missing = [n for n in names if n not in bpy.data.objects]
+    found = digests([n for n in names if n not in missing])
+    differ = missing + [n for n, sha in found.items() if params["expectedDigest"].get(n) != sha]
+    if differ:
+        raise Refused("invalid-input", f"the saved scene differs from the live one ({', '.join(differ[:5])})")
     objects = [bpy.data.objects[n] for n in names]
     parts = parts_of(objects)
     arms = [o for o in objects if o.type == "ARMATURE"]
