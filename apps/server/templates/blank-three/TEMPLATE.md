@@ -71,7 +71,10 @@ The rest of this file is reference: read a section when you use its kit.
 "assets/library/kaykit-adventurers/Characters/gltf/Knight.glb" }`: the shell loads them behind a loading bar
   before the title, and `ctx.assets.model("knight")` returns a fresh copy
   (with `.animations`) and `ctx.assets.texture(name)` a texture, ready in
-  `start`. A path that fails to load is reported as a page error. The
+  `start`. A model `game_blender_export` made is named by its sidecar,
+  `cat: "assets/blender/space_cat.asset.json"`: the GLB beside it loads, and
+  every copy carries the sidecar as `userData.asset` for `animate`. A path
+  that fails to load is reported as a page error. The
   loading screen also compiles the models' shaders, lit as a run is, so the
   first frame of play does not stall on them.
 - `GameState.state` reads `"title"`, `"playing"`, `"paused"` or `"ended"`
@@ -133,7 +136,16 @@ The comment block at the top of the file shows each call.
 `animate(ctx.assets.model("hero"))` (`web/shell/animate.js`) plays a model's clips by state: call
 `hero.play("idle" | "walk" | "run" | "jump" | "fall" | "attack" | "hit" |
 "die", { speed })` every frame and it crossfades, returns from one-shots and
-falls back (run to walk to idle) when a clip is missing. `followCamera2D`
+falls back (run to walk to idle) when a clip is missing. A model loaded
+from its sidecar knows more: `hero.play("run", { moveSpeed })` plays at the
+speed the body moves over the clip's measured ground speed, so the feet stay
+planted; its spring chains (a tail, ears) swing on their own, and
+`hero.spring("tail", { stiffness, damping, gravity })` retunes one;
+`hero.lookAt(point)` turns the head. `locomotion(hero, { walk, run })`
+(`web/shell/locomotion.js`) drives it: call `loco.update({ speed, grounded,
+vy, dt })` every frame with the speed the body really moved, and
+`loco.act("attack")` for a one-shot move. The console's `animate:` line names
+each state's clip and its ground speed. `followCamera2D`
 and `followCamera3D` (`web/shell/camera.js`) follow the player with a dead
 zone, look-ahead, damping and level bounds, and in 3D pull in at walls.
 The shell ticks both after `update` and drops them between runs. The comment

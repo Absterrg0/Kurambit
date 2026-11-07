@@ -410,6 +410,20 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
   }),
+  // Only the person installs these tools (MPFB2), from Settings.
+  toolchainInstall: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:toolchainInstall",
+    tag: WS_METHODS.gameToolchainInstall,
+  }),
+  toolchainRemove: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:toolchainRemove",
+    tag: WS_METHODS.gameToolchainRemove,
+  }),
+  // The person's choice of how the game's characters are made; the agent never sets it.
+  setCharacterRoute: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:setCharacterRoute",
+    tag: WS_METHODS.gameSetCharacterRoute,
+  }),
   status: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:status",
     tag: WS_METHODS.gameStatus,

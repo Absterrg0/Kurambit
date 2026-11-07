@@ -3,6 +3,7 @@ import {
   gameFactsView,
   type GameBuildFacts,
   type GameBuildFactsSummary,
+  type GameCharacterRoute,
   type GameFactDelta,
   type GameFactTone,
   type ScopedThreadRef,
@@ -12,7 +13,8 @@ import { cn } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { deltaLine, factLine, factsSummaryLine } from "./gameBuilds.logic";
+import { characterRouteLabel } from "./GameCharacterRoute";
+import { assetLines, deltaLine, factLine, factsSummaryLine } from "./gameBuilds.logic";
 
 const TONE_TEXT: Record<GameFactTone, string> = {
   good: "text-success-foreground",
@@ -46,9 +48,12 @@ const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextI
 export function GameBuildFactsList({
   threadRef,
   facts,
+  characters,
 }: {
   threadRef: ScopedThreadRef;
   facts: GameBuildFacts;
+  /** The game's setting now, not this build's: shown with the Assets row. */
+  characters: GameCharacterRoute | null;
 }) {
   const views = gameFactsView(facts);
   return (
@@ -72,6 +77,21 @@ export function GameBuildFactsList({
                 >
                   {line.text}
                 </dd>
+                {view.id === "assets" ? (
+                  <dd className="w-full text-2xs text-muted-foreground">
+                    <ul className="space-y-0.5 break-words">
+                      {facts.assets.status === "measured"
+                        ? assetLines(facts.assets.value).map((text) => <li key={text}>{text}</li>)
+                        : null}
+                      {characters === null ? null : (
+                        <li>
+                          This game makes characters with {characterRouteLabel(characters)}; change
+                          it under More, Make characters with….
+                        </li>
+                      )}
+                    </ul>
+                  </dd>
+                ) : null}
                 {view.evidence.length > 0 ? (
                   <dd className="flex shrink-0 flex-wrap gap-1">
                     {view.evidence.map((item) => {

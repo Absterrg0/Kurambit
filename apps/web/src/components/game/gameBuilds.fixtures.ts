@@ -186,7 +186,65 @@ export const FAKE_FACTS: GameBuildFacts = {
   winnableWithoutSkill: { status: "measured", value: true },
   liveness: { status: "not-measured", why: "the browser host went away", retry: true },
   firstResponse: { status: "pending" },
-  assets: { status: "measured", value: { models: [], more: 0, libraryFiles: 0 } },
+  assets: {
+    status: "measured",
+    value: {
+      models: [
+        {
+          path: "web/assets/blender/space_cat.glb",
+          triangles: 16_661,
+          bytes: 1_306_664,
+          maxTextureSide: 96,
+          skeleton: "standard-humanoid",
+          clips: 11,
+          pipeline: {
+            status: "measured",
+            sidecar: "web/assets/blender/space_cat.asset.json",
+            kind: "character",
+            height: 2.1,
+            reviewedAt: "2026-11-06T14:12:00.000Z",
+            groundSpeeds: [
+              { clip: "Walk_Loop", speed: 0.85 },
+              { clip: "Jog_Fwd_Loop", speed: 5.1 },
+              { clip: "Sprint_Loop", speed: null },
+            ],
+            seamsBroken: [],
+            drifting: [],
+            source: {
+              route: "blender",
+              parts: [
+                { what: "body", from: "mpfb2", licence: "CC0-1.0", ai: false, credits: null },
+                {
+                  what: "parts",
+                  from: "made",
+                  licence: "made in this game",
+                  ai: false,
+                  credits: null,
+                },
+              ],
+              standIn: null,
+              concept: "art/CONCEPT.md#space-cat",
+            },
+          },
+        },
+        {
+          path: "web/assets/blender/crate.glb",
+          triangles: 3_908,
+          bytes: 268_132,
+          maxTextureSide: 96,
+          skeleton: null,
+          clips: 0,
+          pipeline: {
+            status: "not-measured",
+            why: "the GLB changed after its export: export it again",
+            retry: false,
+          },
+        },
+      ],
+      more: 0,
+      libraryFiles: 14,
+    },
+  },
   message: "",
 };
 
