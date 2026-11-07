@@ -121,14 +121,22 @@ export const readPlayUse = (root: string, evidence: string) =>
     () => null,
   );
 
-/** The files a build ships: its engine's assets folder, without the library files ASSETS.md credits. */
+/**
+ * The files a build ships: its engine's assets folder, without the library's. A pack folder with
+ * a file ASSETS.md credits is the library's whole: its add also copies the pack's licence and the
+ * buffers its models load, which it leaves uncredited, and those are not the game's to wire in.
+ */
 export const shippedFiles = async (
   copyRoot: string,
   engine: GameEngineId,
   project: string,
 ): Promise<ReadonlyArray<string>> => {
   const paths = gamePaths(engine, project);
+  const library = `${NodePath.relative(copyRoot, NodePath.join(copyRoot, paths.library)).split(NodePath.sep).join("/")}/`;
+  const packOf = (path: string) =>
+    path.startsWith(library) ? path.slice(0, path.indexOf("/", library.length) + 1) : "";
   const credited = await creditedLibraryFiles(copyRoot, NodePath.join(copyRoot, paths.library));
+  const packs = new Set([...credited].map(packOf).filter((pack) => pack !== ""));
   const found = await walkFiles(NodePath.join(copyRoot, paths.assets), {
     enter: (_full, name) => !name.startsWith("."),
     match: (name) => !name.startsWith("."),
@@ -136,7 +144,7 @@ export const shippedFiles = async (
   });
   return found
     .map((full) => NodePath.relative(copyRoot, full).split(NodePath.sep).join("/"))
-    .filter((path) => !credited.has(path))
+    .filter((path) => !credited.has(path) && !packs.has(packOf(path)))
     .toSorted();
 };
 
