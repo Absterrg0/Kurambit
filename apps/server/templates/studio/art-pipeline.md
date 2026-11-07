@@ -227,6 +227,8 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
    pose, by world directions (the character faces -Y, +X is its left),
    never by a bone's local axes. Give it an anticipation key, an overshoot
    and a settle; keep it in place (the game moves the character).
+   `kurambit.mirror_pose(pose)` keys the other one of a left and right
+   pair (a dodge left from a dodge right) from the same pose.
    A clip you key with your own code needs `action.use_fake_user = True`:
    an action nothing uses is not saved, and the review then refuses.
 5. **Review:** `game_blender_look` with `mode: "review"`. It runs the
@@ -274,6 +276,51 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
    (`cat: "assets/blender/space_cat.asset.json"`) and drive it with
    `locomotion()` and `play(state, { moveSpeed })` so the feet stay planted
    (TEMPLATE.md).
+
+### Painted from a sheet
+
+On the Blender route a model looks like its picture when the picture is its
+texture. Model the silhouette and the big forms; paint the detail from the
+subject's turnaround sheet with `game_blender_paint`. Plates, cords, weave,
+eyes, brows and the nose as geometry fight the painted ones and read as
+noise: make them smooth shells and let the paint carry them.
+
+1. **The sheet.** Lane `image` (the person picks it), the key art as
+   reference, and a prompt that asks for the layout the paint reads: "a
+   turnaround sheet: front, side (facing left, true profile) and back views
+   side by side at exactly the same scale and height, feet on one
+   baseline; strict symmetric A-pose, arms straight about 45 degrees down
+   and away from the body, legs slightly apart; orthographic, flat even
+   lighting, plain light grey background, no shadows, no text, nothing
+   overlapping, space between the views". The person's own sheet works the
+   same.
+2. **Paint.** `game_blender_paint` with the character's meshes (leave out
+   what keeps its own material: alpha-clipped hair cards, bright metal), the
+   sheet, and `pose: {arms, legs}` matching the sheet's A-pose. Read each
+   view's overlap and look at the alignment image: below about 75% the
+   model's proportions or pose differ from the sheet's (arm angle, head
+   size, shoulder width); fix the model, not the paint. A detail on one
+   side only (a scabbard on the left hip) goes in `noMirror` as the sheet
+   pixel box around it, so the mirrored side does not copy it.
+3. **Review the ¾ view.** The front, side and back match the sheet by
+   construction; the ¾ view and the game camera are the real test. Texels
+   no view sees (shoulder tops, inside the sleeves) take their material's
+   colour, so give each material its fitting colour before painting.
+4. **A new character on the same body:** edit the hero's sheet (lane
+   `image`, `options.edit` the hero's sheet, prompt "same layout, same
+   body, same pose and scale; new outfit: ..."): it comes back aligned to
+   the first, so the base body, its clips and the paint all carry over.
+   Build the new outfit's shells on the shared base body and paint it with
+   the new sheet: a new enemy for one image.
+5. **Carve organic props.** A statue, a carved lion, a rock or a trunk:
+   draw its three-view sheet the same way (the prop instead of the
+   character) and `game_blender_carve` it with its `height` (and `box` for
+   a square plinth). It is sculpted from the views and painted from them.
+   Model buildings, vehicles and anything with straight edges, holes or
+   thin parts instead.
+
+A STYLE.json palette snaps painted faces to its colours: a painted look
+needs a lock with no hex palette.
 
 ## Generated art
 
@@ -443,7 +490,8 @@ anchor offset it gives.
 
 ## Props, set pieces and 3D models
 
-Library pieces from the lock's packs come first. What no pack has, build in
+Library pieces from the lock's packs come first. An organic hard prop with a
+three-view sheet is carved (Painted from a sheet). What no pack has, build in
 the live Blender: `game_blender_code` to model, `game_blender_scene` to
 measure, `game_blender_look` with `mode: "review"` to see exactly what will
 ship, `game_blender_export` for the GLB and its sidecar, then `game_import`

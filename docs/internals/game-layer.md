@@ -108,6 +108,9 @@ matters.
   and says so). The asset is its sidecar `<name>.asset.json` (skeleton, clips with ground speed,
   springs, height, source and licence), which the three.js shell reads from `ASSETS` and which
   Godot and Unity can read later; GLB extras are not used because those engines drop them.
+  Painting from a sheet (`game_blender_paint`) and carving (`game_blender_carve`) run in a
+  one-shot Blender too, since their bakes outlast the live server's 180 s per command; the live
+  scene only adopts the result, after checking its objects did not change meanwhile.
   MPFB2 is GPL code with CC0 output, so it is downloaded into Kurambit's own Blender folder on the
   person's request and never bundled.
 - An engine is two modules, and nothing above them names an engine. Its profile

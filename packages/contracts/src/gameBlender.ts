@@ -203,6 +203,81 @@ export const GameBlenderCharacterResult = Schema.Struct({
 });
 export type GameBlenderCharacterResult = typeof GameBlenderCharacterResult.Type;
 
+/** A turnaround sheet's views, left to right: which side of the subject each shows. */
+const SheetViews = Schema.Array(Schema.Literals(["front", "back", "left", "right"])).check(
+  Schema.isMinLength(2),
+  Schema.isMaxLength(4),
+);
+const SheetPath = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500));
+const AtlasSize = Schema.Int.check(Schema.isBetween({ minimum: 256, maximum: 4096 }));
+
+export const GameBlenderPaintInput = Schema.Struct({
+  /** Meshes to paint, or a character's armature (its meshes), in the live scene. */
+  objects: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(64),
+  ),
+  /** Game path of the turnaround sheet: a generated image under art/generated/, or the person's own. */
+  sheet: SheetPath,
+  /** The sheet's views left to right, when the measured reading is wrong. */
+  views: Schema.optionalKey(SheetViews),
+  /** Sheet pixel boxes [x0, y0, x1, y1] the mirrored side view must not copy (a scabbard on one hip). */
+  noMirror: Schema.optionalKey(
+    Schema.Array(Schema.Tuple([Schema.Number, Schema.Number, Schema.Number, Schema.Number])).check(
+      Schema.isMaxLength(16),
+    ),
+  ),
+  /**
+   * A standard-skeleton character posed as the sheet for the projection only: arms degrees below
+   * horizontal, legs degrees apart. Omitted: painted as the live scene poses it.
+   */
+  pose: Schema.optionalKey(
+    Schema.Struct({
+      arms: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 90 })),
+      legs: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 30 }))),
+    }),
+  ),
+  /** The atlas side in px (the head's own atlas is half); at most STYLE.json's budget.texture, its default. */
+  size: Schema.optionalKey(AtlasSize),
+});
+export type GameBlenderPaintInput = typeof GameBlenderPaintInput.Type;
+export const GameBlenderPaintResult = Schema.Struct({
+  text: Schema.String,
+  /** Game-relative image of each view with the model's outline over it. */
+  alignment: Schema.String,
+  blend: Schema.String,
+});
+export type GameBlenderPaintResult = typeof GameBlenderPaintResult.Type;
+
+export const GameBlenderCarveInput = Schema.Struct({
+  /** The object and its collection in the live scene. */
+  name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
+  sheet: SheetPath,
+  /** Its standing height in metres. */
+  height: Schema.Number.check(Schema.isBetween({ minimum: 0.05, maximum: 50 })),
+  views: Schema.optionalKey(SheetViews),
+  /** Below this height (m) sections stay boxes: a plinth or a base. */
+  box: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 50 }))),
+  /** Triangle budget of the game mesh; default STYLE.json's budget.prop. */
+  triangles: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 200, maximum: 200_000 })),
+  ),
+  size: Schema.optionalKey(AtlasSize),
+  /** How deep the painting's light and dark are carved (1 is the default). */
+  relief: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 3 }))),
+  roughness: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+  metallic: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+  /** Replace an object of this name, keeping where it stands. */
+  replace: Schema.optionalKey(Schema.Boolean),
+});
+export type GameBlenderCarveInput = typeof GameBlenderCarveInput.Type;
+export const GameBlenderCarveResult = Schema.Struct({
+  text: Schema.String,
+  object: Schema.String,
+  blend: Schema.String,
+});
+export type GameBlenderCarveResult = typeof GameBlenderCarveResult.Type;
+
 /** Named views; the four sides take `elevation`, top looks straight down, isometric is 45° round and 30° down. */
 export const GameBlenderSpriteViewName = Schema.Literals([
   "front",

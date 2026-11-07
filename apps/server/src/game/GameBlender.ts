@@ -25,12 +25,16 @@ import {
   type GameBlenderAssetsSearchResult,
   type GameBlenderCharacterInput,
   type GameBlenderCharacterResult,
+  type GameBlenderCarveInput,
+  type GameBlenderCarveResult,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
   type GameBlenderExportInput,
   type GameBlenderExportResult,
   type GameBlenderLookInput,
   type GameBlenderLookResult,
+  type GameBlenderPaintInput,
+  type GameBlenderPaintResult,
   type GameBlenderRenderSpritesInput,
   type GameBlenderRenderSpritesResult,
   type GameBlenderSceneInput,
@@ -101,7 +105,13 @@ import {
   styleHash,
 } from "./gameStyle.ts";
 import { gamePaths } from "./engineProfile.ts";
-import { GENERATED_DIR, generatedSource, motionClipName } from "./generatedSource.ts";
+import {
+  GENERATED_DIR,
+  type SheetSource,
+  generatedSource,
+  motionClipName,
+  sheetSource,
+} from "./generatedSource.ts";
 import { breakSession, HeldSources, type LiveHealth, makeLiveRecords } from "./liveEditor.ts";
 import {
   commandFlag,
@@ -225,6 +235,74 @@ const PASS_ROOM: MemoryRoom = {
   env: "KURAMBIT_BLENDER_PASS_MEMORY_MB",
 };
 /** A character's height on screen at game distance, px, by the lock's view. */
+/**
+ * A paint or carve run: the sheet, the depth renders, a handful of float atlases of up to
+ * 4096² and Cycles bakes; a carve also holds its dense sculpt. Measured peaks are in the K report.
+ */
+const SHEET_ROOM: MemoryRoom = {
+  what: "Blender sheet projection",
+  neededMb: 3072,
+  env: "KURAMBIT_BLENDER_SHEET_MEMORY_MB",
+};
+const PAINT_TIMEOUT_MS = 15 * 60_000;
+const CARVE_TIMEOUT_MS = 20 * 60_000;
+/** Where painted and carved textures live in the game, one folder per name. */
+const TEXTURES_DIR = "art/blender/textures";
+const decodePainted = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    library: Schema.String,
+    name: Schema.String,
+    meshes: Schema.Record(Schema.String, Schema.String),
+    files: Schema.Array(Schema.String),
+    alignment: Schema.String,
+    views: Schema.Array(
+      Schema.Struct({
+        label: Schema.String,
+        columns: Schema.Array(Schema.Number),
+        overlap: Schema.Number,
+      }),
+    ),
+    mirrored: Schema.NullOr(Schema.String),
+    head: Schema.Boolean,
+    seen: Schema.Number,
+    notes: Schema.Array(Schema.String),
+  }),
+);
+const decodeCarved = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    library: Schema.String,
+    object: Schema.String,
+    triangles: Schema.Number,
+    size: Schema.Array(Schema.Number),
+    files: Schema.Array(Schema.String),
+    views: Schema.Array(
+      Schema.Struct({ label: Schema.String, columns: Schema.Array(Schema.Number) }),
+    ),
+    mirrored: Schema.NullOr(Schema.String),
+    seen: Schema.Number,
+    notes: Schema.Array(Schema.String),
+  }),
+);
+const decodeAdopted = Schema.decodeUnknownEffect(
+  Schema.Struct({ objects: Schema.Array(Schema.String), files: Schema.Array(Schema.String) }),
+);
+/** A one-shot run's refusal as it is; a result that does not decode is the kit's fault. */
+const protocolError =
+  (operation: string, root: string) => (cause: GameOperationError | Schema.SchemaError) =>
+    Schema.is(GameOperationError)(cause)
+      ? cause
+      : opError(
+          operation,
+          root,
+          "tool-failed",
+          `The Blender kit's result did not match its protocol: ${cause.message.slice(0, 600)}`,
+          cause,
+        );
+const sheetCredit = (sheet: SheetSource) =>
+  sheet.stamp.generation === undefined
+    ? `credited to the person's own image ${sheet.path}`
+    : `credited to ${sheet.stamp.from}'s generation ${sheet.stamp.generation} (AI-made, ${sheet.stamp.credits === null ? "cost unknown" : `$${sheet.stamp.credits.toFixed(2)}`})`;
+
 const GAME_PX: Readonly<Record<GameStyleView, number>> = {
   perspective: 96,
   side: 96,
@@ -281,7 +359,10 @@ const routeRefusalOf = (candidate: Candidate, route: GameCharacterRoute) =>
         candidate.parts.some((part) => part.ai && part.what === "body") ||
           Object.keys(candidate.creatures ?? {}).length > 0
         ? lockCharacterRouteRefusal("generated-body", route)
-        : candidate.parts.some((part) => part.from === "made" && part.what !== "clips")
+        : // A texture painted from the person's own sheet makes no mesh.
+          candidate.parts.some(
+              (part) => part.from === "made" && part.what !== "clips" && part.what !== "texture",
+            )
           ? lockCharacterRouteRefusal("unstamped-mesh", route)
           : null;
 
@@ -517,6 +598,16 @@ export class GameBlender extends Context.Service<
       root: string,
       input: GameBlenderCharacterInput,
     ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
+    /** Live Blender scene: meshes painted from their turnaround sheet (UV atlases, normal, ORM). */
+    readonly paint: (
+      root: string,
+      input: GameBlenderPaintInput,
+    ) => Effect.Effect<GameBlenderPaintResult, GameOperationError>;
+    /** Live Blender scene: an organic hard prop carved from its three-view sheet, then painted. */
+    readonly carve: (
+      root: string,
+      input: GameBlenderCarveInput,
+    ) => Effect.Effect<GameBlenderCarveResult, GameOperationError>;
     readonly scene: (
       root: string,
       input: GameBlenderSceneInput,
@@ -1295,61 +1386,68 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The one-shot pass on a copy of the saved scene (§2.8): the style pass and the measurement
-   * in a factory-startup Blender under the session's isolated folders, behind the memory gate.
-   * It writes the GLB to `glb`, a name of this run's that the caller renames into place; its
-   * result is returned as it measured it.
+   * One kit entry in a one-shot, factory-startup Blender under the session's isolated folders,
+   * behind the memory gate: run.py's `pass`, `paint` or `carve`. With `copy`, it opens a copy of
+   * the saved live scene, which the live scene saves itself: Blender remaps its relative paths
+   * (library textures) for the copy's folder, so the run resolves the same files the scene does.
+   * Its one result line comes back undecoded; a refusal fails with the reason it names.
    */
-  const runPass = (
+  const oneShot = (
     root: string,
     out: string,
-    glb: string,
-    params: Record<string, unknown>,
-  ): Effect.Effect<typeof PassResult.Type, GameOperationError> =>
+    job: {
+      readonly entry: "pass" | "paint" | "carve";
+      readonly operation: string;
+      readonly copy: boolean;
+      readonly room: MemoryRoom;
+      readonly timeoutMs: number;
+      readonly params: Record<string, unknown>;
+    },
+  ): Effect.Effect<unknown, GameOperationError> =>
     Effect.gen(function* () {
       const blender = yield* tools.executable("blender");
       const kit = yield* kitDirectory;
       const run = NodeCrypto.randomUUID();
       const copy = NodePath.join(out, `scene.${run}.blend`);
       const paramsFile = NodePath.join(out, `params.${run}.json`);
-      // The live scene saves the copy itself: Blender remaps its relative paths (library
-      // textures) for the copy's folder, so the pass resolves the same files the scene does.
-      const saved = yield* callText(root, "execute_blender_code", {
-        code: `import bpy\nbpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(copy)}, copy=True, compress=True)\nprint("STUDIO_SAVED")\n`,
-      });
-      if (!saved.includes("STUDIO_SAVED"))
-        return yield* opError("blender-review", copy, "command-failed", saved.slice(0, 1000));
+      if (job.copy) {
+        const saved = yield* callText(root, "execute_blender_code", {
+          code: `import bpy\nbpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(copy)}, copy=True, compress=True)\nprint("STUDIO_SAVED")\n`,
+        });
+        if (!saved.includes("STUDIO_SAVED"))
+          return yield* opError(job.operation, copy, "command-failed", saved.slice(0, 1000));
+      }
       yield* Effect.tryPromise({
-        try: () => NodeFSP.writeFile(paramsFile, JSON.stringify({ ...params, out, glb })),
-        catch: (cause) => opError("blender-review", out, "io", undefined, cause),
+        try: () => NodeFSP.writeFile(paramsFile, JSON.stringify({ ...job.params, out })),
+        catch: (cause) => opError(job.operation, out, "io", undefined, cause),
       });
       const result = yield* gate
         .admit(
-          "blender-pipeline-pass",
+          `blender-pipeline-${job.entry}`,
           root,
-          PASS_ROOM,
+          job.room,
           processes.run({
             root,
             executable: blender.path,
             args: [
               "-b",
               "--factory-startup",
-              copy,
+              ...(job.copy ? [copy] : []),
               "--python-exit-code",
               "1",
               "--python",
               NodePath.join(kit, "run.py"),
               "--",
-              "pass",
+              job.entry,
               paramsFile,
             ],
-            operation: "blender-pipeline-pass",
-            timeoutMs: 180_000,
+            operation: `blender-pipeline-${job.entry}`,
+            timeoutMs: job.timeoutMs,
             env: sessionEnv(homeDirOf(root)),
             envMode: "replace",
           }),
         )
-        // The copy is the size of the scene; the candidate GLB is what the review keeps.
+        // The copy is the size of the scene; what the run wrote is what the caller keeps.
         .pipe(
           Effect.ensuring(
             Effect.promise(() =>
@@ -1360,31 +1458,55 @@ const make = Effect.gen(function* () {
       const output = kitOutput(result.stdout);
       if (output.kind === "refused")
         return yield* opError(
-          "blender-review",
+          job.operation,
           root,
           isReason(output.reason) ? output.reason : "invalid-input",
           output.text.slice(0, 2000),
         );
       if (output.kind === "none" || result.exitCode !== 0)
         return yield* opError(
-          "blender-review",
+          job.operation,
           result.logPath,
           "tool-failed",
-          `${result.timedOut ? "The pipeline pass did not finish in 180 s" : "The pipeline pass failed"}: ${commandDetail(result).slice(-2000)}`,
+          `${result.timedOut ? `Blender did not finish in ${Math.round(job.timeoutMs / 1000)} s` : "Blender failed"}: ${commandDetail(result).slice(-2000)}`,
           result,
         );
-      return yield* decodePass(output.value).pipe(
-        Effect.mapError((cause) =>
-          opError(
-            "blender-review",
-            root,
-            "tool-failed",
-            `The pipeline pass's result did not match its protocol: ${cause.message.slice(0, 600)}`,
-            cause,
+      return output.value;
+    });
+
+  /**
+   * The one-shot pass on a copy of the saved scene (§2.8): the style pass and the measurement.
+   * It writes the GLB to `glb`, a name of this run's that the caller renames into place; its
+   * result is returned as it measured it.
+   */
+  const runPass = (
+    root: string,
+    out: string,
+    glb: string,
+    params: Record<string, unknown>,
+  ): Effect.Effect<typeof PassResult.Type, GameOperationError> =>
+    oneShot(root, out, {
+      entry: "pass",
+      operation: "blender-review",
+      copy: true,
+      room: PASS_ROOM,
+      timeoutMs: 180_000,
+      params: { ...params, glb },
+    }).pipe(
+      Effect.flatMap((value) =>
+        decodePass(value).pipe(
+          Effect.mapError((cause) =>
+            opError(
+              "blender-review",
+              root,
+              "tool-failed",
+              `The pipeline pass's result did not match its protocol: ${cause.message.slice(0, 600)}`,
+              cause,
+            ),
           ),
         ),
-      );
-    });
+      ),
+    );
 
   /**
    * Each named clip found in the lock's animation packs on the standard skeleton, in the
@@ -1708,6 +1830,208 @@ const make = Effect.gen(function* () {
   yield* Effect.addFinalizer(() =>
     Effect.forEach([...sessions.keys()], drop, { discard: true, concurrency: "unbounded" }),
   );
+
+  /** A scratch folder of one paint or carve run under the pipeline's logs. */
+  const sheetRunDir = (realRoot: string, kind: string, name: string) =>
+    Effect.tryPromise({
+      try: () =>
+        ensureGameDir(
+          realRoot,
+          `${PIPELINE_DIR}/${kind}-${name}-${NodeCrypto.randomUUID().slice(0, 8)}`,
+        ),
+      catch: (cause) => opError(`blender-${kind}`, PIPELINE_DIR, "invalid-path", undefined, cause),
+    });
+
+  /** The atlas side: the asked size within STYLE.json's budget.texture, which is its default. */
+  const atlasSize = (style: GameStyle | null, asked: number | undefined) => {
+    const budget = styleBudgets(style).texture;
+    return { size: Math.max(256, Math.min(asked ?? budget, budget)), budget };
+  };
+
+  const paletteNote = (style: GameStyle | null) =>
+    Array.isArray(style?.palette) && style.palette.length > 0
+      ? [
+          `${GAME_STYLE_FILE} has a palette, so the export's style pass snaps each face to it by the paint under it: the painted detail ships only in a game without a palette.`,
+        ]
+      : [];
+
+  const relativeTo = (realRoot: string, file: string) =>
+    NodePath.relative(realRoot, file).split(NodePath.sep).join("/");
+
+  const removeScratch = (out: string, keep: ReadonlyArray<string>) =>
+    Effect.promise(() =>
+      NodeFSP.readdir(out)
+        .then((names) =>
+          Promise.all(
+            names
+              .filter((name) => !keep.includes(name))
+              .map((name) =>
+                NodeFSP.rm(NodePath.join(out, name), { force: true, recursive: true }),
+              ),
+          ),
+        )
+        .catch(() => undefined),
+    );
+
+  const paintModel = (root: string, input: GameBlenderPaintInput) =>
+    Effect.gen(function* () {
+      const realRoot = yield* realRootOf(root);
+      const style = yield* readGameStyle(realRoot);
+      const { size, budget } = atlasSize(style, input.size);
+      const sheet = yield* sheetSource(realRoot, input.sheet, "blender-paint", (id, path) =>
+        art.delivered(root, id, path),
+      );
+      const digest = yield* liveDigest(root, input.objects);
+      const out = yield* sheetRunDir(realRoot, "paint", "model");
+      const alignmentFile = NodePath.join(out, "alignment.png");
+      const painted = yield* oneShot(root, out, {
+        entry: "paint",
+        operation: "blender-paint",
+        copy: true,
+        room: SHEET_ROOM,
+        timeoutMs: PAINT_TIMEOUT_MS,
+        params: {
+          objects: digest.objects,
+          expectedDigest: digest.perObject,
+          sheet: sheet.file,
+          views: input.views ?? null,
+          noMirror: input.noMirror ?? null,
+          pose: input.pose ?? null,
+          size,
+        },
+      }).pipe(
+        // A model refused for its fit is shown against the sheet, so the agent sees what to fix.
+        Effect.catch((error) =>
+          Effect.flatMap(
+            Effect.promise(() =>
+              NodeFSP.access(alignmentFile).then(
+                () => true,
+                () => false,
+              ),
+            ),
+            (drawn) =>
+              Effect.fail(
+                drawn
+                  ? opError(
+                      error.operation,
+                      error.path,
+                      error.reason,
+                      `${error.detail ?? ""} Each view's outline of the model over the sheet: ${relativeTo(realRoot, alignmentFile)}.`,
+                    )
+                  : error,
+              ),
+          ),
+        ),
+        Effect.flatMap(decodePainted),
+        Effect.mapError(protocolError("blender-paint", root)),
+      );
+      const name = painted.name;
+      // The live scene has a file before the textures' paths are made relative to it.
+      yield* saveBlend(root);
+      const adopted = yield* kitCall(
+        root,
+        "blender-paint",
+        decodeAdopted,
+        `import kurambit.paint\nkurambit.paint.adopt(${pyJson({
+          library: painted.library,
+          meshes: painted.meshes,
+          expectedDigest: digest.perObject,
+          dest: NodePath.join(realRoot, TEXTURES_DIR, name),
+          stamp: sheet.stamp,
+        })})`,
+      ).pipe(Effect.ensuring(removeScratch(out, ["alignment.png"])));
+      const blend = yield* saveBlend(root);
+      const alignment = relativeTo(realRoot, alignmentFile);
+      const views = painted.views
+        .map(
+          (view) =>
+            `${view.label} (columns ${view.columns.join("-")}, ${Math.round(view.overlap * 100)}% overlap)`,
+        )
+        .join(", ");
+      return {
+        text: [
+          `Painted ${adopted.objects.join(", ")} from ${sheet.path}, ${sheetCredit(sheet)}.`,
+          `Views read: ${views}${painted.mirrored === null ? "" : `; the ${painted.mirrored} side is the other side mirrored`}. Each view's outline of the model over the sheet: ${alignment}.`,
+          `${Math.round(painted.seen * 100)}% of the surface was painted from a view; the rest (inside sleeves, tops of shoulders) took its material's colour.`,
+          `${painted.head ? `Textures: ${size} px for the body and ${Math.max(Math.floor(size / 2), 256)} px for the head (its own atlas)` : `Textures: ${size} px`}${input.size !== undefined && input.size > budget ? ` (${GAME_STYLE_FILE}'s budget.texture is ${budget})` : ""}: albedo, a detail normal map and ORM, under ${TEXTURES_DIR}/${name}/.`,
+          ...painted.notes,
+          ...paletteNote(style),
+          `Saved .blend source: ${blend}. Look at it (game_blender_look mode review, which also shows the ¾ view the sheet never drew), then game_blender_export.`,
+        ].join("\n"),
+        alignment,
+        blend,
+      };
+    });
+
+  const carveProp = (root: string, input: GameBlenderCarveInput) =>
+    Effect.gen(function* () {
+      const realRoot = yield* realRootOf(root);
+      const style = yield* readGameStyle(realRoot);
+      const { size } = atlasSize(style, input.size);
+      const triangles = input.triangles ?? styleBudgets(style).prop;
+      const sheet = yield* sheetSource(realRoot, input.sheet, "blender-carve", (id, path) =>
+        art.delivered(root, id, path),
+      );
+      // Before the run: a name already taken is refused without carving anything.
+      yield* kitCall(
+        root,
+        "blender-carve",
+        decodeAdopted,
+        [
+          "import bpy",
+          `name = ${JSON.stringify(input.name)}`,
+          `if (bpy.data.objects.get(name) or bpy.data.collections.get(name)) and not ${input.replace === true ? "True" : "False"}: print('KURAMBIT_REFUSED ' + json.dumps({'reason': 'invalid-input', 'text': name + ' already exists in the live scene: carve again with replace: true to replace it, or under another name'}))`,
+          "else: print('KURAMBIT_RESULT ' + json.dumps({'objects': [], 'files': []}))",
+        ].join("\n"),
+      );
+      const out = yield* sheetRunDir(realRoot, "carve", input.name);
+      const carved = yield* oneShot(root, out, {
+        entry: "carve",
+        operation: "blender-carve",
+        copy: false,
+        room: SHEET_ROOM,
+        timeoutMs: CARVE_TIMEOUT_MS,
+        params: {
+          sheet: sheet.file,
+          views: input.views ?? null,
+          name: input.name,
+          height: input.height,
+          box: input.box ?? 0,
+          triangles,
+          size,
+          relief: input.relief ?? 1,
+          roughness: input.roughness ?? 0.8,
+          metallic: input.metallic ?? 0,
+        },
+      }).pipe(Effect.flatMap(decodeCarved), Effect.mapError(protocolError("blender-carve", root)));
+      yield* saveBlend(root);
+      const adopted = yield* kitCall(
+        root,
+        "blender-carve",
+        decodeAdopted,
+        `import kurambit.carve\nkurambit.carve.adopt(${pyJson({
+          library: carved.library,
+          object: carved.object,
+          name: input.name,
+          dest: NodePath.join(realRoot, TEXTURES_DIR, input.name),
+          stamp: sheet.stamp,
+          replace: input.replace === true,
+        })})`,
+      ).pipe(Effect.ensuring(removeScratch(out, [])));
+      const blend = yield* saveBlend(root);
+      return {
+        text: [
+          `Carved ${adopted.objects.join(", ")} from ${sheet.path}, ${sheetCredit(sheet)}: ${carved.size.map((x) => x.toFixed(2)).join(" x ")} m, ${carved.triangles} triangles, standing at the origin facing -Y${input.replace === true ? " (or where the one it replaced stood)" : ""}.`,
+          `Views read: ${carved.views.map((view) => `${view.label} (columns ${view.columns.join("-")})`).join(", ")}${carved.mirrored === null ? "" : `; the ${carved.mirrored} side is the other side mirrored`}. ${Math.round(carved.seen * 100)}% of the surface was painted from a view.`,
+          `Textures: ${size} px albedo, a normal map baked from the sculpt and ORM, under ${TEXTURES_DIR}/${input.name}/.`,
+          ...carved.notes,
+          ...paletteNote(style),
+          `Saved .blend source: ${blend}. Look at it from a ¾ view (game_blender_look mode review) before game_blender_export: three views leave its corners to guesswork.`,
+        ].join("\n"),
+        object: adopted.objects[0] ?? input.name,
+        blend,
+      };
+    });
 
   return GameBlender.of({
     code: (root, input) =>
@@ -2103,6 +2427,8 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
+    paint: (root, input) => holding(root, pipelineLocked(root)(paintModel(root, input))),
+    carve: (root, input) => holding(root, pipelineLocked(root)(carveProp(root, input))),
     exportGlb: (root, input) =>
       holding(
         root,
