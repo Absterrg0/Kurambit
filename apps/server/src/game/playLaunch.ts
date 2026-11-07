@@ -45,6 +45,8 @@ export interface PlayLaunch {
     readonly keptStorage: KeptStorage | null;
     /** What a recorded page loaded and played (`recordUse`); null for every other launch. */
     readonly use: PlayUse | null;
+    /** How a page's play ran, as its shell measured it (`__studio.perf()`); null elsewhere. */
+    readonly perf: unknown;
   }>;
   readonly bootMs: number;
   /** Folders the runner writes that go with the session. */
@@ -220,7 +222,7 @@ export const openRunnerPlay = (
               // writing its saves before it is stopped.
               if (input.saves !== null) await bounded(started.exited, PLAY_BOUNDS.keptSavesMs);
               await end();
-              return { keptStorage: null, use: null };
+              return { keptStorage: null, use: null, perf: null };
             }),
             bootMs,
             scratch: spec.scratch,
@@ -295,6 +297,7 @@ export const openPagePlay = (input: {
             await unserve();
             return {
               keptStorage: play.keptStorage(),
+              perf: play.perf(),
               use:
                 input.recordUse === true
                   ? await resolvePlayUse({
