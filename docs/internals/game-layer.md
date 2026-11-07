@@ -71,17 +71,17 @@ matters.
   licence. Kenney packs come from Kenney's own OpenGameArt uploads, because kenney.nl hands out
   short-lived signed links behind a session cookie, which cannot be pinned. KayKit packs are
   GitHub commit archives of Kay Lousberg's own repositories, pinned by commit; itch.io links are
-  signed and cannot be pinned either, which is also why Quaternius' Universal Base Characters are
-  not in the library. A pack's `root` names the archive folder that holds it. Every server on the
+  signed and cannot be pinned either, so Quaternius' itch-only packs (the 65-joint Universal
+  Animation Library and the Universal Base Characters) are pinned from a Kurambit release mirror of
+  the same zips, by SHA-256. A pack's `root` names the archive folder that holds it. Every server on the
   machine (the installed app and any dev server) shares that cache, so fetches lock per pack only
   within one process, scratch names carry the fetching server's pid (a start-up sweep spares live
   ones), and placing a pack accepts a complete copy another server placed first.
 - Every pack belongs to a style family (`LIBRARY_FAMILIES`), and a pack with rigged characters
   names its rig, read from its GLBs' skin joints when it is pinned (`LIBRARY_RIG_JOINTS`; the
   FBX-only rigs are named from their authors' descriptions): a game whose characters share
-  one rig can play any clip on any character, so the art guide takes characters from one rig
-  family and builds only props in Blender. Weak models given a box-built example character
-  copy it.
+  one rig can play any clip on any character. Made characters share the `standard-humanoid`
+  skeleton, so every standard clip plays on every made or library body on it.
 - `STYLE.json` at the game root is the style lock (`packages/contracts/src/gameStyle.ts`), read
   by `gameStyle.ts` on every call of every tool that brings art in, and never cached, so an edit
   takes effect at once. The tools refuse what drifts rather than warn: a library add outside its
@@ -93,7 +93,23 @@ matters.
   refusal names the one edit that changes direction on purpose. A lock that is a link, not JSON
   or names unknown library ids fails every art tool with the field, so a broken lock is never
   silently lifted. It is a game file, so checkpoints carry it and a run's restore brings it back
-  with the art (`restoredPaths`).
+  with the art (`restoredPaths`). `rig` names the skeleton made characters are conformed to; a
+  pack the lock lists may still bring characters on its own rig with its own clips. How a game's
+  characters are made (library, Blender or Tripo) is the person's choice, kept in `game.json`
+  `characters` rather than the lock, so it can be set before the first turn writes one; the
+  export enforces it and the agent never changes it on its own.
+- Made characters are conformed, not retargeted: `game_blender_character` fits the standard
+  armature to the body once, keeping the standard rest frames, so library clips play unchanged
+  and a body off those frames is refused at export rather than playing broken. An asset ships
+  only as reviewed: `game_blender_look` mode review runs the style pass and measurement in a
+  separate one-shot Blender on a saved copy of the live scene, and `game_blender_export` writes
+  exactly that candidate or refuses when the scene changed since; a refusal is only for what the
+  agent or person must change, while the pass fixes what it can (it scales over-budget textures
+  and says so). The asset is its sidecar `<name>.asset.json` (skeleton, clips with ground speed,
+  springs, height, source and licence), which the three.js shell reads from `ASSETS` and which
+  Godot and Unity can read later; GLB extras are not used because those engines drop them.
+  MPFB2 is GPL code with CC0 output, so it is downloaded into Kurambit's own Blender folder on the
+  person's request and never bundled.
 - An engine is two modules, and nothing above them names an engine. Its profile
   (`godotProfile.ts`, `threeProfile.ts`, `unityProfile.ts`, read through `engineProfile.ts`) is pure
   data the services, the client tables and the run's pure policy share: directories, its releases
