@@ -163,6 +163,8 @@ export const GAME_ENGINES: Readonly<
       readonly turnLoop: boolean;
       /** How the Stage shows this engine's game. */
       readonly stage: GameStageKind;
+      /** Its template's shell speaks the Stage bridge (gameStageBridge.ts): Freeze, select and live values. */
+      readonly stageBridge: boolean;
       readonly picker: { readonly title: string; readonly description: string };
     }
   >
@@ -173,6 +175,7 @@ export const GAME_ENGINES: Readonly<
     tool: "godot",
     turnLoop: false,
     stage: "export",
+    stageBridge: false,
     picker: {
       title: "Godot native",
       description:
@@ -185,6 +188,7 @@ export const GAME_ENGINES: Readonly<
     tool: null,
     turnLoop: true,
     stage: "live",
+    stageBridge: true,
     picker: {
       title: "three.js browser",
       description: "A quick static browser game, nothing to install. Web export only.",
@@ -196,6 +200,7 @@ export const GAME_ENGINES: Readonly<
     tool: "unity",
     turnLoop: false,
     stage: "window",
+    stageBridge: false,
     picker: {
       title: "Unity native",
       description:

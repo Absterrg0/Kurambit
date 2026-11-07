@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import {
+  ChevronDownIcon,
+  ChevronUpIcon,
   FastForwardIcon,
   GitCompareIcon,
   HistoryIcon,
@@ -29,6 +31,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildDetail, refOf } from "./GameBuildDetail";
 import { GameBuildFactChips } from "./GameBuildFacts";
+import { GameReel } from "./GameReel";
 import { buildName, formatBuildTime } from "./gameBuilds.logic";
 import { isUndone, markLabel, markTone, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
 import { turnStripRestore } from "./gameTurnBuild.logic";
@@ -114,6 +117,8 @@ export function GameBuildTimeline({
   // A build asked for by ref that no loaded page holds: pages back until it does.
   const [sought, setSought] = useState<GameBuildRef | null>(null);
   const [notFound, setNotFound] = useState(false);
+  // The strip opened as Keep going's reel.
+  const [reelOpen, setReelOpen] = useState(false);
   // A request made before the timeline mounted was answered, or was for another one.
   const [mountRequest] = useState(request?.n ?? 0);
   const restores = useBuildRestore(threadRef, first.data?.restore ?? null);
@@ -252,6 +257,14 @@ export function GameBuildTimeline({
       data-game-build-timeline=""
       className="flex shrink-0 flex-col gap-1 border-t border-border bg-background px-3 py-2"
     >
+      {reelOpen ? (
+        <GameReel
+          threadRef={threadRef}
+          marks={marks}
+          onPlay={play}
+          onCompare={([a, b]) => onCompare([refOf(a), refOf(b)])}
+        />
+      ) : null}
       <div className="flex min-w-0 items-center gap-2">
         {olderNext !== null ? (
           <Button size="xs" variant="ghost" onClick={() => setOlderCount(olderCount + 1)}>
@@ -369,6 +382,21 @@ export function GameBuildTimeline({
             <span aria-hidden="true" className="h-0.75 w-4 rounded-full bg-muted-foreground/50" />
           </button>
         </div>
+        {marks.some((build) => build.source._tag === "turn" && build.source.step !== null) ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            aria-expanded={reelOpen}
+            onClick={() => setReelOpen(!reelOpen)}
+          >
+            {reelOpen ? (
+              <ChevronDownIcon aria-hidden="true" />
+            ) : (
+              <ChevronUpIcon aria-hidden="true" />
+            )}
+            {reelOpen ? "Close reel" : "Reel"}
+          </Button>
+        ) : null}
         {picking !== null ? (
           <span className="flex shrink-0 items-center gap-1 text-2xs text-muted-foreground">
             {picking === "any" ? "Pick the first build" : "Pick the build to compare with"}

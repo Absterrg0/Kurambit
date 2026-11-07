@@ -232,6 +232,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --color-stage-foreground: #ecebe7;
   --color-stage-muted: #a19e97;
   --color-stage-subtle: #6e655a;
+  /* What the person points at on the Stage: the selection's tag and path. The
+     three.js shell outlines the selection in the same colour (stage-bridge.js). */
+  --color-stage-mark: #e2582a;
   --animate-skeleton: skeleton 2.4s infinite;
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */

@@ -1,4 +1,5 @@
 import { GameStage } from "./game/GameStage";
+import { GameDockPanel, GameDockTabs } from "./game/GameDock";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -1653,12 +1654,17 @@ export default function ChatView(props: ChatViewProps) {
   const isGameThread = useIsGameThread(activeThreadRef);
   const gameChatWidth = useGameWorkspaceStore((state) => state.chatWidth);
   const gameChatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
+  const gameDockTab = useGameWorkspaceStore((state) => state.dockTab);
   // A remembered dock width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
   // the stored width while compact so a narrow preview cannot rewrite it.
   const gameWorkspaceCompact = useGameWorkspaceCompact(workspaceLayoutElement, isGameThread);
   const [compactGamePane, setCompactGamePane] = useCompactGamePane(gameWorkspaceCompact);
   const showCompactGame = () => setCompactGamePane("game");
+  // A dock tab opened from the Stage (a selection, Things, Art) is the chat pane on a compact workbench.
+  useEffect(() => {
+    if (gameWorkspaceCompact && gameDockTab !== "chat") setCompactGamePane("chat");
+  }, [gameWorkspaceCompact, gameDockTab, setCompactGamePane]);
   // A Stage request (a strip's Play, a round card, the palette, a key) is a
   // request to see the game, so a compact workbench showing the chat
   // switches. Undo and Redo change the folder and need no pane.
@@ -5446,6 +5452,7 @@ export default function ChatView(props: ChatViewProps) {
       "game.undoTurn": () => requestGameStage({ kind: "undo" }),
       "game.redoTurn": () => requestGameStage({ kind: "redo" }),
       "game.focus": () => requestGameStage({ kind: "focus" }),
+      "game.freeze": () => requestGameStage({ kind: "freeze" }),
       "game.playPrevious": () => requestGameStage({ kind: "step", by: -1 }),
       "game.playNext": () => requestGameStage({ kind: "step", by: 1 }),
       "rightPanel.toggleMaximized": ({ event }) => {
@@ -7737,7 +7744,7 @@ export default function ChatView(props: ChatViewProps) {
       ) : null}
       <div
         className={cn(
-          "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
+          "relative flex min-h-0 min-w-0 flex-col overflow-x-hidden",
           rightPanelMaximized || gameChatHidden
             ? "invisible w-0 flex-none"
             : gameChatDocked
@@ -7782,24 +7789,35 @@ export default function ChatView(props: ChatViewProps) {
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
-          <ChatHeader
-            activeThreadEnvironmentId={activeThread.environmentId}
-            activeThreadId={activeThread.id}
-            isServerThread={isServerThread}
-            activeThreadTitle={activeThread.title}
-            activeProject={activeProject ?? null}
-            parentThreadLink={parentThreadLink}
-            gameThread={isGameThread}
-            onOpenThread={onOpenRelatedThreadStable}
-            rightPanelOpen={inlineRightPanelOwnsTitleBar}
-            onNewThreadInProject={handleNewThreadInActiveProjectStable}
-            {...(activeDraftLogicalProjectKey
-              ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
-              : {})}
-          />
+          {isGameThread && activeThreadRef ? (
+            <div className="flex h-full min-w-0 flex-1 items-stretch pr-24">
+              <GameDockTabs threadRef={activeThreadRef} />
+            </div>
+          ) : (
+            <ChatHeader
+              activeThreadEnvironmentId={activeThread.environmentId}
+              activeThreadId={activeThread.id}
+              isServerThread={isServerThread}
+              activeThreadTitle={activeThread.title}
+              activeProject={activeProject ?? null}
+              parentThreadLink={parentThreadLink}
+              gameThread={isGameThread}
+              onOpenThread={onOpenRelatedThreadStable}
+              rightPanelOpen={inlineRightPanelOwnsTitleBar}
+              onNewThreadInProject={handleNewThreadInActiveProjectStable}
+              {...(activeDraftLogicalProjectKey
+                ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
+                : {})}
+            />
+          )}
         </header>
+        {isGameThread && activeThreadRef ? <GameDockPanel threadRef={activeThreadRef} /> : null}
 
-        <div className="relative flex min-h-0 min-w-0 flex-1">
+        <div
+          className="relative flex min-h-0 min-w-0 flex-1"
+          // Under another dock tab the chat stays mounted, so its draft and scroll survive.
+          inert={isGameThread && gameDockTab !== "chat"}
+        >
           <ThreadFindCanvas
             findOptions={{
               skills: timelineSkills,

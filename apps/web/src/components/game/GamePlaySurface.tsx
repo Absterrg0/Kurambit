@@ -13,6 +13,7 @@ import type { GameViewport } from "@kurambit/contracts";
 import { Button } from "../ui/button";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
+import { useStageBridgeFrame, useThreadStageBridge } from "./gameStageBridge";
 import type { GameStagePhase } from "./gameStageLogic";
 
 /**
@@ -80,6 +81,8 @@ export function GamePlaySurface({
   onTakeHeld,
   onStudioMessage,
   focusRequest,
+  bridge,
+  overlay,
 }: {
   phase: GameStagePhase;
   /** The operation running on the game: its name, and whether it is this thread's own (Stop ends only those). */
@@ -103,8 +106,16 @@ export function GamePlaySurface({
   onStudioMessage: (message: StudioMessage) => void;
   /** Changes when something asks for the game to have the keyboard. */
   focusRequest: number;
+  /** The Stage bridge this frame owns while it plays: its thread's key, and whether its engine speaks it. */
+  bridge: { readonly threadKey: string; readonly enabled: boolean };
+  /** Drawn over the playing game: the frozen game's pointer layer, names and path. */
+  overlay?: ReactNode;
 }) {
   const playing = phase.kind === "playing" && previewUrl !== null;
+  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
+  // Frozen, the game is pointed at, not played: its "Click to play" cover would sit on the selection.
+  const frozen = useThreadStageBridge(bridge.threadKey, (state) => state.frozen, false);
+  useStageBridgeFrame(`${bridge.threadKey}\0${frameKey}`, playing ? frame : null, bridge.enabled);
   return (
     <div
       data-game-play-surface="true"
@@ -119,6 +130,8 @@ export function GamePlaySurface({
             hidden={hidden}
             onStudioMessage={onStudioMessage}
             focusRequest={focusRequest}
+            onFrame={setFrame}
+            frozen={frozen}
           />
         ) : (
           <StageStateCard
@@ -133,6 +146,7 @@ export function GamePlaySurface({
             onOpenTools={onOpenTools}
           />
         )}
+        {playing ? overlay : null}
         {playing && held !== null ? (
           <div className="absolute inset-x-0 top-2 z-20 flex justify-center px-2">
             <div className="flex items-center gap-2 rounded-full bg-black/75 py-1 ps-3 pe-1 text-xs text-stage-foreground ring-1 ring-white/15">
@@ -193,6 +207,8 @@ export function GameFrame({
   hidden,
   onStudioMessage,
   focusRequest = 0,
+  onFrame,
+  frozen = false,
 }: {
   url: string;
   title: string;
@@ -201,8 +217,16 @@ export function GameFrame({
   /** Hears the bridge's error and ready messages from this frame only. */
   onStudioMessage?: ((message: StudioMessage) => void) | undefined;
   focusRequest?: number;
+  /** Hands the iframe to the Stage bridge. */
+  onFrame?: ((frame: HTMLIFrameElement | null) => void) | undefined;
+  /** The Stage froze the game to point at it: no "Click to play" cover. */
+  frozen?: boolean;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const setFrameRef = (node: HTMLIFrameElement | null) => {
+    frameRef.current = node;
+    onFrame?.(node);
+  };
   const [frameFocused, setFrameFocused] = useState(false);
   // Track the hide request the game never answered: without StudioProbe or when
   // a hidden page is too throttled to pump the engine, the pause/mute request is
@@ -268,7 +292,7 @@ export function GameFrame({
   return (
     <>
       <iframe
-        ref={frameRef}
+        ref={setFrameRef}
         src={url}
         // Not title: Chromium shows an iframe's title as a tooltip over the
         // game wherever the pointer rests, and keyboard games leave it resting.
@@ -296,7 +320,7 @@ export function GameFrame({
           Game may still be running
         </div>
       ) : null}
-      {frameFocused ? null : (
+      {frameFocused || frozen ? null : (
         <button
           type="button"
           className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-black/35"

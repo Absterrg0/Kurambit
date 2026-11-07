@@ -139,6 +139,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     when: "gameThread && !editableFocus && !terminalFocus",
   },
   { key: "mod+alt+g", command: "game.focus", when: "gameThread && !terminalFocus" },
+  { key: "mod+alt+f", command: "game.freeze", when: "gameThread && !terminalFocus" },
   {
     key: "mod+alt+[",
     command: "game.playPrevious",

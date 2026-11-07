@@ -80,6 +80,8 @@ import {
   SparklesIcon,
   PlayIcon,
   Redo2Icon,
+  PanelRightIcon,
+  ScanIcon,
   SquareIcon,
   Undo2Icon,
   WrenchIcon,
@@ -743,6 +745,10 @@ function OpenCommandPaletteDialog(props: {
     gameStatus === null || gameStatus === undefined
       ? null
       : GAME_ENGINES[gameStatus.manifest.engine.name].stage;
+  const gameStageBridge =
+    gameStatus !== null &&
+    gameStatus !== undefined &&
+    GAME_ENGINES[gameStatus.manifest.engine.name].stageBridge;
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const canRestore = useAtomValue(
     activeThreadRef === null
@@ -1560,8 +1566,8 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:game-toggle-chat",
-      title: "Toggle chat",
-      searchTerms: ["chat", "hide", "show", "stage", "game"],
+      title: "Show or hide the dock",
+      searchTerms: ["chat", "dock", "inspector", "panel", "hide", "show", "stage", "game"],
       icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.chat.toggle",
       run: async () => {
@@ -1580,6 +1586,31 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "game.focus",
       run: requestStage({ kind: "focus" }),
     });
+    if (gameStageBridge)
+      actionItems.push({
+        kind: "action",
+        value: "action:game-freeze",
+        title: "Freeze the game or play on",
+        searchTerms: ["freeze", "pause", "point", "select", "inspect", "stage", "game"],
+        icon: <ScanIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.freeze",
+        run: requestStage({ kind: "freeze" }),
+      });
+    for (const [tab, title, terms] of [
+      ["inspector", "Show the Inspector", ["inspector", "selection", "values", "look", "ask"]],
+      ["things", "Show the game's things", ["things", "list", "objects", "hierarchy", "scene"]],
+      ["facts", "Show the build's facts", ["facts", "measured", "boots", "evidence"]],
+    ] as const)
+      actionItems.push({
+        kind: "action",
+        value: `action:game-dock-${tab}`,
+        title,
+        searchTerms: [...terms, "dock", "game"],
+        icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          useGameWorkspaceStore.getState().showDockTab(tab);
+        },
+      });
     // The game's latest turn build, the one the timeline selects by default.
     const latestBuild = turnUndo.view?.build ?? null;
     if (latestBuild !== null) {
