@@ -338,6 +338,22 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
      creature clips are a walk only), which you may key into a breath;
    - then stand it on the ground facing -Y, review and export it as in
      Made characters 5 and 6.
+   - **Moves the library lacks.** Every humanoid shares the standard
+     skeleton, so one generated move plays on all of them, on any
+     character route (a move adds clips, not a character). Look in the
+     clip library first (`game_assets_search` with pack
+     `quaternius-universal-animation-library` lists its clips); generate
+     only the moves the game's design needs that it lacks (a boss's slam,
+     a pounce, a victory dance): lane `motion`, the move in plain words,
+     `options.character` the game's exported character (its GLB under
+     the engine's assets) so the feet and reach fit that body,
+     `options.loop` for a move that repeats, `options.video` to copy a
+     move from footage, `options.locomotion` for a walk and run set in
+     eight directions. Its card shows a strip of the move. Then
+     `game_blender_character` with `replace: true`, the character's clips
+     and the motion's GLB path among them: the clip is named after the
+     generation (`Slam`) and gets a ground speed and the review's strip
+     like any library clip. Add it to every humanoid that should play it.
 4. **Props.** A concept first when the look matters (lane `image`, the
    key art as reference, the prop alone on a plain background), then lane
    `model` with the picked concept as its only reference, or with none
