@@ -2206,8 +2206,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       building: "text-info",
       idle: "text-muted-foreground",
     };
-    // A live run is what the game is doing; a failed creator turn before it does not stop the run.
-    const needsAttention = status === "failed" && progress.kind !== "running";
+    // A failed turn always shows, keep going or not: a step turn is a turn of
+    // this chat, so a live run never hides one behind its own line.
+    const needsAttention = status === "failed";
     const gameStatusLabel = needsAttention
       ? "Needs attention"
       : working
