@@ -1,5 +1,5 @@
 """Helpers for modelling parts and keying clips on a conformed character: skin_rigid, ring_around,
-tube_along_bones, place_on_surface, aim and key_pose, plus material and place_chain, and the
+tube_along_bones, place_on_surface, aim, key_pose and mirror_pose, plus material and place_chain, and the
 eyes that blink by bones: eye_lid and eye_squash.
 
 Every helper works in world space on the character's rest pose (what the export binds to), even
@@ -7,6 +7,7 @@ while a clip poses it in the viewport. The Blender traps live here, not in the a
 bone references are fetched again after every edit-mode switch, and geometry is measured at rest."""
 import json
 import math
+import re
 
 import bmesh
 import bpy
@@ -378,6 +379,29 @@ def key_pose(action, frame, pose, armature):
             ad.action_slot = previous_slot
         scene.frame_set(keep)
     return act
+
+
+_SIDE = re.compile(r"_(l|r)(?=$|_)")
+
+
+def mirror_name(bone):
+    """upperarm_l and upperarm_r, ear_l_01 and ear_r_01; a centre bone keeps its name."""
+    return _SIDE.sub(lambda m: "_r" if m.group(1) == "l" else "_l", bone)
+
+
+def mirror_pose(pose):
+    """A key_pose pose mirrored across the character's centre (x), for the other one of a left and
+    right pair (a step left from a step right): bones swap sides, x flips in moves and aims, and
+    a turn keeps its degrees about the reflected axis (x, -y, -z)."""
+    out = dict(pose)
+    if "move" in pose:
+        x, y, z = pose["move"]
+        out["move"] = (-x, y, z)
+    if "turn" in pose:
+        out["turn"] = {mirror_name(b): ((ax[0], -ax[1], -ax[2]), deg) for b, (ax, deg) in pose["turn"].items()}
+    if "aim" in pose:
+        out["aim"] = {mirror_name(b): (-d[0], d[1], d[2]) for b, d in pose["aim"].items()}
+    return out
 
 
 def chains_of(arm):
