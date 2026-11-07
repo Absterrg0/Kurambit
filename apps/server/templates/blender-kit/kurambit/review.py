@@ -1,7 +1,7 @@
 """review(): the composite image of a candidate, rendered in a throwaway scene.
 
 params: {candidate: abs glb, out: abs png, gamePx, view, palette: [hex] | None, used: [hex],
-         concept_png: abs | None}
+         concept_png: abs | None, characterHeight?: STYLE.json scale.character (a prop's scale)}
 
 One PNG shows exactly what the export would write: a turnaround (front, three-quarter, side,
 back), the same views as silhouettes, the model at game distance (gamePx tall, at 1x and 3x with
@@ -307,9 +307,18 @@ def review(params):
         gaz, gel = GAME_VIEWS.get(params.get("view") or "perspective", GAME_VIEWS["perspective"])
         game_px = int(params.get("gamePx") or 96)
         ge = _extent(points, gaz, gel)
-        size = int(round(game_px * 1.4))
+        span_g = max(ge[3] - ge[2], ge[1] - ge[0])
+        if arm is not None:
+            per_m = game_px / max(ge[3] - ge[2], 1e-6)
+            game_label = f"at game distance: {game_px} px tall"
+        else:
+            # a prop is drawn at the scale the game's characters are drawn at, not at their height
+            height = float(params.get("characterHeight") or 2.0)
+            per_m = game_px / height
+            game_label = f"at game distance ({height:g} m character = {game_px} px)"
+        size = max(16, int(round(span_g * per_m * 1.25)))
         _setup(sc, "BLENDER_EEVEE_NEXT", (size, size))
-        _camera(cam, gaz, gel, ge, max(ge[3] - ge[2], ge[1] - ge[0]) * size / game_px)
+        _camera(cam, gaz, gel, ge, size / per_m)
         _aim_lights(lights, gaz, gel)
         game = _render(sc, os.path.join(folder, "game.png"))
 
@@ -344,7 +353,8 @@ def review(params):
 
         # ---- the layout ---------------------------------------------------------------------
         left = PAD + (concept.shape[1] + PAD if concept is not None else 0)
-        game3 = _nearest(game, 3)
+        zoom = max(1, min(3, TURN[1] // game.shape[0]))  # a wide prop at 3x would outgrow the page
+        game3 = _nearest(game, zoom)
         turn_w = 4 * TURN[0]
         strip_w = 6 * STRIP[0] + 2 * PAD
         strip_h = LABEL_PX + 4 + STRIP[1] + PAD
@@ -365,9 +375,10 @@ def review(params):
         for i, t in enumerate(turns):
             _over(canvas, t, left + i * TURN[0], row_a)
         gx = left + turn_w + PAD
-        _over(canvas, labels(f"at game distance: {game_px} px tall, 3x and 1x"), gx, PAD)
+        _over(canvas, labels(f"{game_label}, {zoom}x and 1x" if zoom > 1 else game_label), gx, PAD)
         _over(canvas, game3, gx, row_a)
-        _over(canvas, game, gx + game3.shape[1] + PAD, row_a)
+        if zoom > 1:
+            _over(canvas, game, gx + game3.shape[1] + PAD, row_a)
         _over(canvas, labels("silhouettes"), left, row_b)
         for i, t in enumerate(turns):
             _over(canvas, _silhouette(t), left + i * TURN[0] + TURN[0] // 4, row_b + LABEL_PX + 4)
