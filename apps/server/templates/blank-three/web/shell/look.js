@@ -2,7 +2,7 @@
 // and the post chain; main.js chooses one in one line and may override any part:
 //
 //   export const LOOK = { preset: "day" };   // "day" (the default), "golden" (golden hour),
-//                                            // "night", "interior", "flat" (stylised, no post)
+//                                            // "night", "interior", "flat" (stylised)
 //   export const LOOK = {
 //     preset: "golden",
 //     exposure: 1.1,
@@ -23,9 +23,12 @@
 //                             // sharpen; or a fixed scale such as 1 or 0.75
 //   };
 //
-// The post chain (AO, bloom, tone mapping, the grade, SMAA) is one merged chain
-// over a half-float frame, with no MSAA under it. "flat" draws straight to the
-// canvas with its MSAA, as does any look in a browser drawing in software. The
+// "day" and "flat" draw straight to the canvas with its MSAA, the tone mapping and
+// the grade inside the materials: they cost what a plain three.js frame costs.
+// "golden", "night" and "interior", or any look that asks for ao or bloom, draw
+// through one merged post chain (AO, bloom, tone mapping, the grade, SMAA) over a
+// half-float frame, with no MSAA under it; a browser drawing in software always
+// gets the straight path. The
 // sky is drawn behind the scene and lights it (an environment probe), unless
 // the game sets scene.background (a texture there becomes the probe) or
 // scene.environment itself. The look's fog is set when the game sets none;
@@ -63,8 +66,8 @@ const PRESETS = {
     sky: { top: 0x5b8fd8, horizon: 0xd0e0ee, ground: 0x3a3936 },
     sun: { direction: { x: -0.45, y: 0.8, z: 0.4 }, color: 0xfff2de, intensity: 2.6 },
     fog: { density: 0.004, height: 0.06 },
-    ao: { radius: 1.2, intensity: 1.8 },
-    bloom: { strength: 0.25, threshold: 1.1 },
+    ao: false,
+    bloom: false,
     grade: { saturation: 1.06, contrast: 1.04, warmth: 0.01, vignette: 0.25 },
   },
   golden: {
@@ -156,11 +159,18 @@ export function resolveLook(options = {}) {
     throw new Error('LOOK.environment must be "sky", "room" or false.');
   if (look.resolution !== "adaptive" && !(look.resolution > 0))
     throw new Error('LOOK.resolution must be "adaptive" or a scale such as 0.75.');
-  // "flat" is the cheap look: no chain at all, the canvas's own MSAA.
-  look.post = name !== "flat" || look.ao !== false || look.bloom !== false || look.grade !== false;
+  // The chain runs only for what needs whole-frame passes; tone mapping and the grade
+  // also work inside the materials.
+  look.post = look.ao !== false || look.bloom !== false;
   return look;
 }
-const DEFAULT_PARTS = PRESETS.day;
+// What `ao: true` or `bloom: true` turns on where the preset has none.
+const DEFAULT_PARTS = {
+  fog: PRESETS.day.fog,
+  ao: { radius: 1.2, intensity: 1.8 },
+  bloom: { strength: 0.3, threshold: 1 },
+  grade: PRESETS.day.grade,
+};
 
 // ── Shared shader state: the height fog's sun glow and base, and the baked sun shadow.
 // Every built-in material gets these through one compile hook, so a game's own
@@ -174,7 +184,21 @@ const shared = {
   lookBakedTexel: { value: 1 / 4096 },
   lookBakedPush: { value: 0.1 },
   lookBakedOn: { value: 0 },
+  lookGrade: { value: new THREE.Vector4(1, 1, 0, 0) },
+  lookResolution: { value: new THREE.Vector2(1, 1) },
 };
+// The grade inside the materials, for looks without the chain: after tone mapping.
+const GRADE_PARS = /* glsl */ `
+uniform vec4 lookGrade;
+uniform vec2 lookResolution;
+vec3 lookGraded( vec3 c ) {
+  c *= vec3( 1.0 + lookGrade.z, 1.0, 1.0 - lookGrade.z );
+  c = ( c - 0.5 ) * lookGrade.y + 0.5;
+  c = mix( vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ), c, lookGrade.x );
+  vec2 v = gl_FragCoord.xy / lookResolution - 0.5;
+  return max( c * mix( 1.0, 1.0 - dot( v, v ) * 1.6, lookGrade.w ), 0.0 );
+}`;
+let gradeInMaterials = false;
 
 // Height fog inside every material that has fog: dense near the ground, thinning
 // with height, integrated along the view ray and lit toward the sun. It needs no
@@ -296,6 +320,15 @@ const LIGHTS_BAKED = THREE.ShaderChunk.lights_fragment_begin.replace(
  */
 export function lookShader(shader) {
   const fog = shader.fragmentShader.includes("#include <fog_pars_fragment>");
+  if (gradeInMaterials && shader.fragmentShader.includes("#include <tonemapping_fragment>")) {
+    Object.assign(shader.uniforms, shared);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("void main() {", `${GRADE_PARS}\nvoid main() {`)
+      .replace(
+        "#include <tonemapping_fragment>",
+        "#include <tonemapping_fragment>\n#if defined( TONE_MAPPING )\n\tgl_FragColor.rgb = lookGraded( gl_FragColor.rgb );\n#endif",
+      );
+  }
   const lit =
     shader.fragmentShader.includes("#include <lights_fragment_begin>") &&
     shader.vertexShader.includes("#include <worldpos_vertex>") &&
@@ -413,6 +446,11 @@ export async function createLook(canvas, options = {}) {
   renderer.toneMappingExposure = look.exposure;
   const gpu = isSoftware(renderer);
   const post = look.post && !gpu.software;
+  if (!post && look.grade !== false) {
+    gradeInMaterials = true;
+    const g = look.grade;
+    shared.lookGrade.value.set(g.saturation ?? 1, g.contrast ?? 1, g.warmth ?? 0, g.vignette ?? 0);
+  }
 
   const sunDir = new THREE.Vector3(
     look.sun.direction.x,
@@ -441,6 +479,7 @@ export async function createLook(canvas, options = {}) {
   const timer = createTimer(renderer);
   const scale = createScale(renderer, look, devicePixels, (s) => {
     chain?.resize(s);
+    renderer.getDrawingBufferSize(shared.lookResolution.value);
   });
   const stats = createStats();
   const probes = new WeakMap();
@@ -879,14 +918,18 @@ function createTimer(renderer) {
 
 /** The GPU time a frame may take: a 60 fps frame with room for the browser's own work. */
 const GPU_BUDGET_MS = 12.5;
+/** A 60 fps frame comes every 16.7 ms; frames later than this on average are missed ones. */
+const LATE_MS = 18.5;
 const SCALE_MIN = 0.5;
 
 /**
- * The render scale: a share of the device's pixels per side. Adaptive, it
- * follows the GPU's median time over the last half second toward the budget
- * (pixels cost as the square of the scale), in 0.05 steps so the frame
- * buffers are not remade every frame; without GPU timers it only steps down
- * when frames run long.
+ * The render scale: a share of the device's pixels per side. Adaptive, it steps
+ * down only when frames are actually late (a GPU idling at a low clock reports
+ * long frame times while it keeps up, so its time alone is no reason), by as
+ * much as the GPU's time says it must (pixels cost as the square of the scale),
+ * and back up when the GPU's time leaves room. Steps are 0.05, every half second
+ * at most, so the frame buffers are not remade every frame; a scale that just
+ * stepped down is not raised again for three seconds.
  */
 function createScale(renderer, look, devicePixels, onChange) {
   const fixed = look.resolution === "adaptive" ? null : Math.min(look.resolution, 1);
@@ -895,11 +938,13 @@ function createScale(renderer, look, devicePixels, onChange) {
   const real = [];
   let since = 0;
   let settle = 0.5;
+  let hold = 0;
   const apply = () => {
     renderer.setPixelRatio(devicePixels * value);
     onChange(value);
   };
   const median = (list) => list.toSorted((a, b) => a - b)[list.length >> 1];
+  const mean = (list) => list.reduce((sum, x) => sum + x, 0) / list.length;
   apply();
   return {
     get value() {
@@ -912,21 +957,24 @@ function createScale(renderer, look, devicePixels, onChange) {
       if (realMs > 0 && realMs < 250) real.push(realMs);
       since += realMs / 1000;
       if (since < 0.5) return;
+      hold = Math.max(0, hold - since);
       since = 0;
       // The first half second after a change settles (new buffers, first draws).
-      if (settle > 0) {
-        settle -= 0.5;
+      if (settle > 0 || real.length < 8) {
+        settle = Math.max(0, settle - 0.5);
         gpu.length = 0;
         real.length = 0;
         return;
       }
+      const frame = mean(real);
+      const ms = gpu.length >= 8 ? median(gpu) : null;
       let next = value;
-      if (gpu.length >= 8) {
-        const ms = median(gpu);
-        if (ms > GPU_BUDGET_MS) next = value * Math.max(0.8, Math.sqrt(GPU_BUDGET_MS / ms));
-        else if (ms < GPU_BUDGET_MS * 0.65)
-          next = value * Math.min(1.1, Math.sqrt((GPU_BUDGET_MS * 0.8) / ms));
-      } else if (real.length >= 8 && median(real) > 20) next = value * 0.9;
+      if (frame > LATE_MS) {
+        const need = ms !== null && ms > GPU_BUDGET_MS ? Math.sqrt(GPU_BUDGET_MS / ms) : 0.9;
+        next = value * Math.max(0.8, need);
+        hold = 3;
+      } else if (hold === 0 && ms !== null && ms < GPU_BUDGET_MS * 0.6)
+        next = value * Math.min(1.1, Math.sqrt((GPU_BUDGET_MS * 0.8) / ms));
       gpu.length = 0;
       real.length = 0;
       next = Math.min(1, Math.max(SCALE_MIN, Math.round(next * 20) / 20));
