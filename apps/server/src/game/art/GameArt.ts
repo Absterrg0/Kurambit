@@ -296,6 +296,8 @@ const Meta = Schema.Struct({
   ),
   /** What was measured of a rigged game mesh against the file sent, for the done text. */
   meshNote: Schema.optionalKey(Schema.String),
+  /** What the model stage cost, kept with the pending rig so a look resumed after a restart shows it. */
+  spent: Schema.optionalKey(Schema.Struct({ usd: Schema.Number, estimated: Schema.Boolean })),
 });
 type Meta = typeof Meta.Type;
 const decodeGeneration = Schema.decodeUnknownOption(Schema.fromJsonString(GameGeneration));
@@ -1170,7 +1172,11 @@ const make = Effect.gen(function* () {
             const next = yield* touch(
               row,
               {},
-              { job: making.remote, kept: [...row.meta.kept, ...kept] },
+              {
+                job: making.remote,
+                kept: [...row.meta.kept, ...kept],
+                ...(making.spent === undefined ? {} : { spent: making.spent }),
+              },
             );
             yield* save(next, countedOf(next.generation));
             return next;
@@ -2016,6 +2022,19 @@ const make = Effect.gen(function* () {
       const adapter = ART_ADAPTERS[row.generation.provider];
       const job = row.meta.job;
       const stage = job === null ? null : pendingStage(job);
+      // A model saved for the person's look was never sent its rig (the look is what sends it):
+      // the stop before the look is taken again, so a restart neither buys nor fails anything.
+      if (job !== null && stage === "rig" && row.meta.review === true) {
+        const spent = row.meta.spent;
+        yield* startDriver(row.root, row.generation.id, () =>
+          Effect.succeed({
+            kind: "making",
+            remote: job,
+            ...(spent === undefined ? {} : { spent }),
+          } satisfies ArtStep),
+        );
+        continue;
+      }
       if (stage !== null) {
         yield* locks.withLock(
           row.generation.id,

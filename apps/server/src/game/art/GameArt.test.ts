@@ -421,6 +421,7 @@ describe("GameArt", () => {
     readonly id: string;
     readonly job: Record<string, unknown>;
     readonly createdAt?: string;
+    readonly meta?: Record<string, unknown>;
     readonly answer: (url: string, method: string) => Response;
   }) =>
     Effect.gen(function* () {
@@ -454,6 +455,7 @@ describe("GameArt", () => {
         costEstimated: false,
         candidateFiles: [],
         options: {},
+        ...input.meta,
       };
       const asked: string[] = [];
       const client = yield* SqlClient.SqlClient;
@@ -521,6 +523,27 @@ describe("GameArt", () => {
       assert.deepStrictEqual(asked, []);
       assert.strictEqual(ended.generation.costUsd, 0.85);
     }),
+  );
+
+  it.live(
+    "a model the person had not yet been shown before a restart waits for them, unrigged",
+    () =>
+      Effect.gen(function* () {
+        const { ended, asked } = yield* resumed({
+          id: "gen-look-restart",
+          job: { ...meshJob, pending: "rig", credits: 30, review: true },
+          meta: {
+            review: true,
+            kept: ["art/generated/character/hero/hero.model.glb"],
+            spent: { usd: 0.3, estimated: false },
+          },
+          answer: () => Response.json({ code: 0, data: { task_id: "t_rig_unasked" } }),
+        });
+        assert.strictEqual(ended.generation.state, "choosing");
+        assert.deepStrictEqual(asked, []);
+        assert.strictEqual(ended.generation.candidates[0]?.label, "Rig this");
+        assert.strictEqual(ended.generation.costUsd, 0.3);
+      }),
   );
 
   it.live("gives up a job past its lane's deadline, counting the estimate", () =>
