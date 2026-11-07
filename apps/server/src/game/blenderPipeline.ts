@@ -115,6 +115,19 @@ export const PassResult = Schema.Struct({
   armatures: Schema.Record(Schema.String, Schema.Array(Schema.String)),
   /** Generated creatures' armatures, each to its own rig id: kept off the lock's rig check. */
   creatures: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  /**
+   * The generation and file each creature armature was imported from, as the import wrote them;
+   * the server checks them against its own generations before the rig check is skipped.
+   */
+  creatureSources: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        id: Schema.String.check(Schema.isMaxLength(64)),
+        path: Schema.String.check(Schema.isMaxLength(500)),
+      }),
+    ),
+  ),
   /** What the pass changed on its way, such as a texture it scaled down to the budget; never a refusal. */
   notes: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(400)))),
 });

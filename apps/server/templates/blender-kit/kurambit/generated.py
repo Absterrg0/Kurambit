@@ -7,6 +7,8 @@ params (the server resolves the path and reads the generation's record):
     lane   "model" (a prop: no armature) or "creature" (one armature, kept as it is)
     stamp  {from, licence, ai, credits}: the provider, its licence line, true, the cost in USD
     rig    a creature's own rig id ("tripo-quadruped"): the lock's rig governs humanoids only
+    generation  {id, path}: the generation that delivered it; the server checks a creature's
+                armature against it before the lock's rig check skips it
 
 A creature keeps its skeleton and its clips: it is never conformed, and its armature carries
 kurambit_rig so the pass and the lock know it is on its own rig. A humanoid is not imported here:
@@ -77,6 +79,7 @@ def generated(params):
         arm.data.name = name
         arm["kurambit_source"] = json.dumps({"what": "clips", **stamp})
         arm["kurambit_rig"] = params["rig"]
+        arm["kurambit_generation"] = json.dumps(params["generation"])
         for i, o in enumerate(meshes):
             o.name = f"{name}_body" if len(meshes) == 1 else f"{name}_body_{i + 1}"
         for a in actions:

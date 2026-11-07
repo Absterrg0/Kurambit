@@ -1,34 +1,28 @@
 // @effect-diagnostics nodeBuiltinImport:off -- the record is a file in the game folder, read beside the model it describes.
 // Where a generated file came from: the `<name>.generation.json` game_generate writes beside its
 // files under art/generated/<lane>/<name>/. The Blender pipeline stamps an import with it, so the
-// review, the export's sidecar and ASSETS.md credit the provider, the AI flag and the cost.
+// review, the export's sidecar and ASSETS.md credit the provider, the AI flag and the cost. The
+// record only names the generation: what is stamped comes from the server's own row of it, so a
+// hand-written record beside any model imports nothing.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import {
-  GameArtBodyPlan,
-  GameArtLane,
-  GameArtProviderId,
-  GameOperationError,
-} from "@kurambit/contracts";
+import { type GameArtLane, GameOperationError } from "@kurambit/contracts";
+import type { GameArtDelivered } from "./art/GameArt.ts";
 
 export const GENERATED_DIR = "art/generated";
 
-/** The fields of the record the pipeline reads; the rest (prompt, references) it leaves alone. */
-const GenerationRecord = Schema.Struct({
-  provider: GameArtProviderId,
-  lane: GameArtLane,
-  licence: Schema.String,
-  costUsd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  options: Schema.optionalKey(Schema.Struct({ body: Schema.optionalKey(GameArtBodyPlan) })),
-});
+/** The one field of the record the pipeline reads: which generation wrote it. */
+const GenerationRecord = Schema.Struct({ id: Schema.String });
 const decodeRecord = Schema.decodeUnknownResult(Schema.fromJsonString(GenerationRecord));
 
 /** A generated file's stamp, as the kit writes it on what it imports. */
 export interface GeneratedSource {
   readonly lane: GameArtLane;
+  /** The generation that delivered it and the file, as the import binds a creature's rig to them. */
+  readonly generation: { readonly id: string; readonly path: string };
   /** A creature's own rig id, `<provider>-<body plan>`: its sidecar's skeleton. */
   readonly rig: string;
   readonly stamp: {
@@ -50,6 +44,11 @@ export const generatedSource = (
   realRoot: string,
   relative: string,
   operation: string,
+  /** The server's finished generation that delivered this game-relative path, or null. */
+  delivered: (
+    id: string,
+    path: string,
+  ) => Effect.Effect<GameArtDelivered | null, GameOperationError>,
 ): Effect.Effect<{ readonly file: string; readonly source: GeneratedSource }, GameOperationError> =>
   Effect.gen(function* () {
     const refuse = (detail: string) =>
@@ -87,17 +86,23 @@ export const generatedSource = (
       return yield* refuse(
         `${NodePath.posix.dirname(normal)}/${name} does not read as a generation record: ${decoded.failure.message.slice(0, 600)}`,
       );
-    const record = decoded.success;
+    const row = yield* delivered(decoded.success.id, normal);
+    if (row === null)
+      return yield* refuse(
+        `${normal} is not a file a finished generation of this game delivered (its record names generation ${decoded.success.id.slice(0, 64)}). Only what game_generate delivered is imported as generated: game_generate_wait lists a generation's files.`,
+      );
+    const generation = row.generation;
     return {
       file: real,
       source: {
-        lane: record.lane,
-        rig: `${record.provider}-${record.options?.body ?? "creature"}`,
+        lane: generation.lane,
+        generation: { id: generation.id, path: normal },
+        rig: `${generation.provider}-${row.body ?? "creature"}`,
         stamp: {
-          from: record.provider,
-          licence: record.licence.slice(0, 200),
+          from: generation.provider,
+          licence: row.licence.slice(0, 200),
           ai: true,
-          credits: record.costUsd ?? null,
+          credits: generation.costUsd,
         },
       },
     };
