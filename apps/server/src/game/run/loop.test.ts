@@ -479,7 +479,8 @@ describe("a step acts only on the build it was planned on (TW1)", () => {
       { kind: "undo", restored: false, why: "refused", message: "the copy could not be made" },
       NOW,
     );
-    expect(failed.record?.step).toMatchObject({ verdict: "kept", gain: false });
+    // Not undone either way; the reason, not the verdict, says the restore failed.
+    expect(failed.record?.step).toMatchObject({ verdict: "kept-moved-on", gain: false });
     expect(failed.record?.step.reason).toMatch(
       /^the copy could not be made \(Winnable without skill/,
     );
@@ -490,5 +491,6 @@ describe("a step acts only on the build it was planned on (TW1)", () => {
       NOW,
     );
     expect(moved.record?.step.verdict).toBe("kept-moved-on");
+    expect(moved.record?.step.reason).toMatch(/^the game changed after it/);
   });
 });

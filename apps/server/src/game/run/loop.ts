@@ -731,12 +731,14 @@ export const applyUndo = (
         `step ${n} not undone: the game changed after it`,
       );
     // The folder did not move on: the restore itself failed, so the step
-    // stays with its regression, and the record says why.
+    // stays with its regression. Like moved-on, it is "not undone"; the
+    // reason (the restore's own message) says which, so the strip never
+    // reads it as a step kept on purpose.
     case "refused":
       return settle(
         state,
         recordOf(state, cycle, now, {
-          verdict: "kept",
+          verdict: "kept-moved-on",
           reason: `${undo.message} (${why})`,
           gain: false,
           delta,

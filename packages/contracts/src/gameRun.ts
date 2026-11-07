@@ -43,10 +43,6 @@ export const GameRunEnding = Schema.Literals([
 ]);
 export type GameRunEnding = typeof GameRunEnding.Type;
 
-/** Why a run made by an earlier Kurambit is never continued (design §6.4): the status and the Past runs tooltip. */
-export const GAME_RUN_STAGE_ERA_SENTENCE =
-  "This run was made by an earlier Kurambit whose stages (vision, prototypes, plan) no longer exist. Its builds stay on the timeline. Keep going starts from the game as it is now.";
-
 export const GameKeepGoingMode = Schema.Literals(["off", "guided", "autopilot"]);
 export type GameKeepGoingMode = typeof GameKeepGoingMode.Type;
 
