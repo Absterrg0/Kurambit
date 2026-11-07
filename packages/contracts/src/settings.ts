@@ -1,3 +1,4 @@
+import { GameArtLaneChoices } from "./gameArt.ts";
 import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
@@ -1068,6 +1069,32 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("")),
     namedSecretSetting("game-blender-polypizza-key"),
   ),
+  // Generated art: the person's own keys per provider (Codex needs none), a daily spend limit
+  // across every game, and which provider each lane uses (auto: GAME_ART_LANE_ORDER).
+  gameOpenAiApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    secretSetting,
+  ),
+  gameGoogleApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    secretSetting,
+  ),
+  gameTripoApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    secretSetting,
+  ),
+  gameMeshyApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    secretSetting,
+  ),
+  gameElevenLabsApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    secretSetting,
+  ),
+  gameArtDailyLimitUsd: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1000 })).pipe(
+    Schema.withDecodingDefault(Effect.succeed(5)),
+  ),
+  gameArtLanes: GameArtLaneChoices.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1363,6 +1390,15 @@ export const ServerSettingsPatch = Schema.Struct({
   gameJevApiKey: Schema.optionalKey(TrimmedString),
   gameSketchfabApiKey: Schema.optionalKey(TrimmedString),
   gamePolyPizzaApiKey: Schema.optionalKey(TrimmedString),
+  gameOpenAiApiKey: Schema.optionalKey(TrimmedString),
+  gameGoogleApiKey: Schema.optionalKey(TrimmedString),
+  gameTripoApiKey: Schema.optionalKey(TrimmedString),
+  gameMeshyApiKey: Schema.optionalKey(TrimmedString),
+  gameElevenLabsApiKey: Schema.optionalKey(TrimmedString),
+  gameArtDailyLimitUsd: Schema.optionalKey(
+    Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1000 })),
+  ),
+  gameArtLanes: Schema.optionalKey(GameArtLaneChoices),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),

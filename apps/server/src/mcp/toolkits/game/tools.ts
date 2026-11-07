@@ -5,6 +5,9 @@ import {
   GameActionResult,
   GameBlenderCharacterInput,
   GameBlenderCharacterResult,
+  GameGenerateInput,
+  GameGenerateResult,
+  GameGenerateWaitInput,
   GameBlenderCodeInput,
   GameBlenderCodeResult,
   GameBlenderExportInput,
@@ -150,6 +153,28 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const GenerateTool = Tool.make("game_generate", {
+  description:
+    "Make art with the best provider for its lane, the person's own keys or their ChatGPT plan's Codex image generation, chosen in Settings: image (key art, concepts, character sheets, sprites, UI art), character (a humanoid: rigged and conformed to the standard skeleton, so it plays the clip library), creature (any other body plan: options.body quadruped, avian, serpentine, aquatic, hexapod, octopod or other; it keeps its own rig and the clips asked in options.clips), model (a prop, vehicle or building), texture (options.seamless), sfx, music, voice (options.seconds, options.loop). prompt says what the thing itself is; the game's look comes from references: pass the key art, and for a 3D asset the picked concept or character sheet. candidates 2-4 asks for options the person picks from in the chat (use it for key art and every hero character or creature; Keep going takes the first); 1 makes one. It answers at once with the generation's id: pick it up with game_generate_wait. Files land under art/generated/<lane>/<name>/, recorded with their source, AI flag and cost. A paid lane counts against the person's daily limit; a refusal says which key or limit is missing, and then say so in your reply rather than switching to another way of making it. Then the usual pipeline: a 3D asset goes through game_blender_look mode review and game_blender_export, an image or sound is added with game_import.",
+  parameters: GameGenerateInput,
+  success: GameGenerateResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const GenerateWaitTool = Tool.make("game_generate_wait", {
+  description:
+    "Wait for a generation from game_generate: it returns when the files are in the game (done), when its candidates wait for the person's pick (choosing: tell the person to pick one in the chat, and end your turn unless other work remains), when it failed or was cancelled, or after seconds (default 120, up to 540) with it still making. Never start the same generation again while one is making: each start is paid.",
+  parameters: GameGenerateWaitInput,
+  success: GameGenerateResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderCharacterTool = Tool.make("game_blender_character", {
   description:
@@ -558,6 +583,8 @@ export const GameToolkit = Toolkit.make(
   BlenderAssetsImportTool,
   BlenderExportTool,
   BlenderCharacterTool,
+  GenerateTool,
+  GenerateWaitTool,
   AssetsAddTool,
   UnityToolsTool,
   UnityEditTool,

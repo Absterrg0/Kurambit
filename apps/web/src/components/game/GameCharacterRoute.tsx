@@ -34,10 +34,10 @@ export const CHARACTER_ROUTES: ReadonlyArray<{
     unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.blender ?? null,
   },
   {
-    route: "tripo",
-    label: "Tripo",
-    description: "Generated with your Tripo key",
-    unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.tripo ?? null,
+    route: "generated",
+    label: "Generated",
+    description: "Made by an art provider: Codex, or your own keys",
+    unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.generated ?? null,
   },
 ];
 

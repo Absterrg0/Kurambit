@@ -33,6 +33,12 @@ import {
   GameExploreActResult,
   GameExploreCloseResult,
   type GameBlenderCharacterInput,
+  type GameArtProvidersResult,
+  type GameGenerateInput,
+  type GameGenerateResult,
+  type GameGenerateWaitInput,
+  type GameGenerationChangeResult,
+  type GameGenerationsResult,
   type GameBlenderCharacterResult,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
@@ -75,6 +81,7 @@ import {
 import { engineProfile, type GameEngineProfile } from "./engineProfile.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameBlender from "./GameBlender.ts";
+import * as GameArt from "./art/GameArt.ts";
 import * as GameBot from "./GameBot.ts";
 import type * as BotEvidence from "./botEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
@@ -251,6 +258,28 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderCharacterInput,
     ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
+    /** Generated art (GameArt): never under the game's operation lock, a generation takes minutes. */
+    readonly generate: (
+      threadId: ThreadId,
+      input: GameGenerateInput,
+    ) => Effect.Effect<GameGenerateResult, GameOperationError>;
+    readonly generateWait: (
+      threadId: ThreadId,
+      input: GameGenerateWaitInput,
+    ) => Effect.Effect<GameGenerateResult, GameOperationError>;
+    readonly generations: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameGenerationsResult, GameOperationError>;
+    readonly chooseGeneration: (
+      threadId: ThreadId,
+      id: string,
+      candidate: number,
+    ) => Effect.Effect<GameGenerationChangeResult, GameOperationError>;
+    readonly cancelGeneration: (
+      threadId: ThreadId,
+      id: string,
+    ) => Effect.Effect<GameGenerationChangeResult, GameOperationError>;
+    readonly artProviders: Effect.Effect<GameArtProvidersResult, GameOperationError>;
     /**
      * The person's choice of how this game's characters are made, written into game.json.
      * Only the person makes it: the client's control, or the agent when they asked in chat.
@@ -480,6 +509,7 @@ const make = Effect.gen(function* () {
   const liveUnity = yield* GameUnity.GameUnity;
   const preview = yield* GamePreview.GamePreview;
   const liveBlender = yield* GameBlender.GameBlender;
+  const art = yield* GameArt.GameArt;
   const library = yield* GameAssetLibrary.GameAssetLibrary;
   const gameBot = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
@@ -1182,6 +1212,28 @@ const make = Effect.gen(function* () {
       readRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
     blenderCharacter: (threadId, input) =>
       withRoot(threadId, "Blender character", (root) => liveBlender.character(root, input)),
+    generate: (threadId, input) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        yield* projects.admitWrite(threadId, root, "Generate art", String(threadId));
+        return yield* art.generate(root, threadId, input);
+      }),
+    generateWait: (threadId, input) =>
+      projects.resolve(threadId).pipe(Effect.flatMap((root) => art.wait(root, input))),
+    generations: (threadId) => projects.resolve(threadId).pipe(Effect.flatMap(art.list)),
+    chooseGeneration: (threadId, id, candidate) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        yield* projects.admitWrite(threadId, root, "Pick art", String(threadId));
+        return yield* art.choose(root, id, candidate);
+      }),
+    cancelGeneration: (threadId, id) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        yield* projects.admitWrite(threadId, root, "Cancel art", String(threadId));
+        return yield* art.cancel(root, id);
+      }),
+    artProviders: art.providers,
     blenderScene: (threadId, input) =>
       readRoot(threadId, "Blender scene", (root) => liveBlender.scene(root, input)),
     blenderAssetsSearch: (threadId, input) =>
@@ -1231,6 +1283,7 @@ export const layer = Layer.effect(GameService, make).pipe(
   // After GameEngine, so the engine backend and the service share one live editor.
   Layer.provide(GameUnity.layer),
   Layer.provide(GameBlender.layer),
+  Layer.provide(GameArt.layer),
   // After the editors, so every heavy start, editor opens included, shares one gate.
   Layer.provide(GameMemoryGate.layer),
   Layer.provide(GameAssetLibrary.layer),

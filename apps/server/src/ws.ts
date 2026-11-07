@@ -1847,6 +1847,12 @@ const layerWsRpc = (
         [WS_METHODS.gameToolchainRemove]: ({ tool }) => gameToolchain.remove(tool),
         [WS_METHODS.gameSetCharacterRoute]: ({ threadId, route }) =>
           game.setCharacterRoute(threadId, route),
+        [WS_METHODS.gameGenerations]: ({ threadId }) => game.generations(threadId),
+        [WS_METHODS.gameChooseGeneration]: ({ threadId, id, candidate }) =>
+          game.chooseGeneration(threadId, id, candidate),
+        [WS_METHODS.gameCancelGeneration]: ({ threadId, id }) =>
+          game.cancelGeneration(threadId, id),
+        [WS_METHODS.gameArtProviders]: () => game.artProviders,
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

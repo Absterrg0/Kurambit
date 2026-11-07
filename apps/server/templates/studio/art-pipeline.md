@@ -102,7 +102,7 @@ to read and edit too.
 
 How this game's characters are made is the person's choice, kept in
 game.json and shown by game_status as `characters`: `library` (the
-default), `blender` or `tripo`. Read it before any character; it is not in
+default), `blender` or `generated`. Read it before any character; it is not in
 STYLE.json, and you cannot change it. When the route cannot do what is
 asked (the library has no cat), say so in your reply and name the other
 routes: the person changes it under the game's More menu, "Make characters

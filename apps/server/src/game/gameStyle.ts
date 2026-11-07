@@ -316,7 +316,7 @@ export const characterRoute = (manifest: Pick<GameManifest, "characters">): Game
 const MAKES_CHARACTERS: Record<GameCharacterRoute, boolean> = {
   library: false,
   blender: true,
-  tripo: false,
+  generated: false,
 };
 
 /**

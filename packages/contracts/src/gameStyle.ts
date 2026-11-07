@@ -5,12 +5,12 @@ import { GameLibraryPackId } from "./gameLibrary.ts";
 export const GAME_STYLE_FILE = "STYLE.json";
 
 /** How a game's characters are made; the person picks it in game.json, never the harness. */
-export const GameCharacterRoute = Schema.Literals(["library", "blender", "tripo"]);
+export const GameCharacterRoute = Schema.Literals(["library", "blender", "generated"]);
 export type GameCharacterRoute = typeof GameCharacterRoute.Type;
 
 /** Why a route cannot be chosen yet; a route missing here can be. The server refuses the rest. */
 export const GAME_CHARACTER_ROUTE_UNAVAILABLE: Partial<Record<GameCharacterRoute, string>> = {
-  tripo: "Not available yet",
+  generated: "Not available yet",
 };
 
 const Hex = Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/));

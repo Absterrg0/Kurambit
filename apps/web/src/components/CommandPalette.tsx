@@ -1644,7 +1644,7 @@ function OpenCommandPaletteDialog(props: {
         kind: "submenu",
         value: "action:game-character-route",
         title: "Make characters with…",
-        searchTerms: ["characters", "make", "library", "blender", "tripo", "route", "game"],
+        searchTerms: ["characters", "make", "library", "blender", "generated", "route", "game"],
         icon: <PersonStandingIcon className={ITEM_ICON_CLASS} />,
         addonIcon: <PersonStandingIcon className={ADDON_ICON_CLASS} />,
         groups: [

@@ -11,7 +11,7 @@ const Metres = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1000 
 /** One part of an asset and where it came from: the ledger's unit. */
 export const GameAssetPart = Schema.Struct({
   what: Schema.Literals(["body", "clips", "mesh", "parts", "texture"]),
-  /** A library pack id, "mpfb2", "polyhaven", "sketchfab", "polypizza", "tripo", or "made" (modelled or keyed in this game). */
+  /** A library pack id, "mpfb2", "polyhaven", "sketchfab", "polypizza", an art provider id (GameArtProviderId), or "made" (modelled or keyed in this game). */
   from: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   licence: Schema.String.check(Schema.isMaxLength(200)),
   /** Made by a generative model. */
@@ -23,7 +23,7 @@ export type GameAssetPart = typeof GameAssetPart.Type;
 
 export const GameAssetSource = Schema.Struct({
   /** The game's character route when it was exported; where each part came from is in parts. */
-  route: Schema.Literals(["blender", "library", "tripo"]),
+  route: Schema.Literals(["blender", "library", "generated"]),
   parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   /** The named subject a placeholder stands in for; null when it is the real thing. (Phase 2 writes it.) */
   standIn: Schema.NullOr(Schema.String.check(Schema.isMaxLength(140))),
