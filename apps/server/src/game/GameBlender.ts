@@ -248,14 +248,14 @@ const STANDARD_BODY_PACKS = LIBRARY_CATALOG.filter(
 const MPFB_MISSING = `An mpfb body needs MPFB2, which is not installed. Only the person installs it, in Settings → Game tools (the MPFB2 row); say so in your reply if the request needs it. Meanwhile use a library body: {library: {pack: "quaternius-universal-base-characters", file: "Base Characters/Godot - UE/Superhero_Female_FullBody.gltf"}} (or Superhero_Male_FullBody.gltf), or the Universal Animation Library's mannequin.`;
 /**
  * The person's route refuses a made character on library: an MPFB2 body, or a mesh no library
- * or import stamped (§8). Props are modelled on every route.
+ * or import stamped (§8). Props are modelled on every route, and a clip keyed here is no mesh.
  */
 const routeRefusalOf = (candidate: Candidate, route: GameCharacterRoute) =>
   candidate.kind !== "character"
     ? null
     : candidate.parts.some((part) => part.from === "mpfb2")
       ? lockCharacterRouteRefusal("mpfb-body", route)
-      : candidate.parts.some((part) => part.from === "made")
+      : candidate.parts.some((part) => part.from === "made" && part.what !== "clips")
         ? lockCharacterRouteRefusal("unstamped-mesh", route)
         : null;
 
@@ -311,6 +311,15 @@ const portFree = (port: number): Promise<boolean> =>
       resolve(true);
     });
   });
+
+const waitPortFree = async (port: number, timeoutMs: number): Promise<boolean> => {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    if (await portFree(port)) return true;
+    if (Date.now() >= end) return false;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+};
 
 const waitPort = async (port: number, timeoutMs: number): Promise<boolean> => {
   const end = Date.now() + timeoutMs;
@@ -741,7 +750,8 @@ const make = Effect.gen(function* () {
       const addonKeys = yield* readAddonKeyEnv;
       const homeDir = homeDirOf(root);
       const port = portFor(root);
-      if (yield* Effect.promise(() => portFree(port)).pipe(Effect.map((free) => !free)))
+      // A session just closed (a reopen) lets its port go within its stop's grace.
+      if (!(yield* Effect.promise(() => waitPortFree(port, 10_000))))
         return yield* opError(
           "blender-live",
           `${root}:${port}`,
@@ -1293,7 +1303,7 @@ const make = Effect.gen(function* () {
           "blender-review",
           result.logPath,
           "tool-failed",
-          `${result.timedOut ? "The pipeline pass did not finish in 180 s" : "The pipeline pass failed"}: ${commandDetail(result).slice(0, 2000)}`,
+          `${result.timedOut ? "The pipeline pass did not finish in 180 s" : "The pipeline pass failed"}: ${commandDetail(result).slice(-2000)}`,
           result,
         );
       return yield* decodePass(output.value).pipe(
@@ -1400,8 +1410,19 @@ const make = Effect.gen(function* () {
             rig,
             standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
           });
-          const offRig = lockArmatureRefusal(pass.armatures, style);
-          const armatures = Object.keys(pass.armatures);
+          // The scene's own armatures too: one deforming no skinned mesh leaves none in the GLB.
+          const live = armaturesIn(
+            yield* callText(root, "execute_blender_code", {
+              code: [
+                "import bpy, json",
+                ARMATURES_OF,
+                `studio_armatures([bpy.data.objects[n] for n in ${pyJson(digest.objects)}])`,
+              ].join("\n"),
+            }),
+          );
+          const carried = { ...live, ...pass.armatures };
+          const offRig = lockArmatureRefusal(carried, style);
+          const armatures = Object.keys(carried);
           return {
             ...pass,
             refusals:
