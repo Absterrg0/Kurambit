@@ -73,6 +73,11 @@ export const GameStyle = Schema.Struct({
       ),
     }),
   ),
+  /**
+   * The game-relative image the whole look answers to (the person's picked key art, usually
+   * art/key-art.png): every generation passes it as a reference, and the palette is read from it.
+   */
+  anchor: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300))),
   /** A 1 px outline on rendered sprites: true for the palette's darkest colour, or #rrggbb. */
   outline: Schema.optionalKey(Schema.Union([Schema.Boolean, Schema.String])),
   view: GameStyleView,

@@ -2,13 +2,15 @@
 
 It runs only in the one-shot pass, on its own copy of the scene, so the live scene keeps the
 agent's materials and modifiers. From STYLE.json:
-  palette  a hex list: every material snaps to its nearest colour (in Lab), and the palette becomes
+  palette  a hex list: every material snaps to its nearest colour (in Lab; a textured one face by
+           face, by the texture under each face), and the palette becomes
            one small atlas of vertical-gradient swatches (shading.gradient); each face samples its
            swatch by height in the model, so every part gets the same soft top light. Two
            materials result, Palette and Glow (shading.glow), on the one atlas. Without a hex list
            the materials are kept (D3), their textures scaled down to budget.texture.
   scale    scale.character: a character is scaled to that standing height on its armature's
-           object, so clip units are unchanged (D4). Props keep their modelled metres.
+           object, so clip units are unchanged (D4). Props and generated creatures keep their
+           modelled metres.
 A character's meshes are joined into one skinned mesh: one mesh, two draw calls."""
 import math
 import os
@@ -139,6 +141,65 @@ def material_colour(m):
     return [_srgb(x) for x in base.default_value[:3]], glow
 
 
+def _lab_np(rgb):
+    """_lab over an (n, 3) array of sRGB 0..1."""
+    c = np.where(rgb > 0.04045, ((rgb + 0.055) / 1.055) ** 2.4, rgb / 12.92)
+    xyz = c @ np.array([[0.4124, 0.2126, 0.0193], [0.3576, 0.7152, 0.1192], [0.1805, 0.0722, 0.9505]])
+    xyz /= np.array([0.95047, 1.0, 1.08883])
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+    return np.stack([116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], 1)
+
+
+def _srgb_pixels(image):
+    """(h, w, 3) sRGB 0..1 of an image, or None when it cannot be read."""
+    if len(image.pixels) == 0:
+        return None
+    w, h = image.size
+    px = np.empty(w * h * 4, np.float32)
+    image.pixels.foreach_get(px)
+    rgb = px.reshape(h, w, 4)[:, :, :3]
+    if image.is_float:
+        rgb = np.where(rgb > 0.0031308, 1.055 * np.power(np.clip(rgb, 0, 1), 1 / 2.4) - 0.055, 12.92 * rgb)
+    return rgb
+
+
+def _face_swatches(me, images, mat_index, loop_poly, plab):
+    """Per face, the palette entry its material's base-colour image shows under it, for faces whose
+    material is textured (a generator's one baked texture, a pack's colormap): (swatch (n,), mask (n,)).
+    Each corner and the centre (counted twice) snap on their own and the face takes the most votes,
+    so a face across a colour edge takes one side, never a third colour its mean would land on."""
+    n = len(me.polygons)
+    swatch, mask = np.zeros(n, np.int64), np.zeros(n, bool)
+    uv_layer = me.uv_layers.active
+    if uv_layer is None or not any(img is not None for img in images):
+        return swatch, mask
+    uv = np.empty(len(me.loops) * 2, np.float32)
+    uv_layer.data.foreach_get("uv", uv)
+    uv = uv.reshape(-1, 2)
+    count = np.bincount(loop_poly, minlength=n)
+    centre = np.stack([np.bincount(loop_poly, weights=uv[:, i], minlength=n) for i in (0, 1)], 1) / np.maximum(count, 1)[:, None]
+    plab = np.array(plab)
+    votes = np.zeros((n, len(plab)))
+    for k, img in enumerate(images):
+        if img is None:
+            continue
+        loops = (mat_index == k)[loop_poly]
+        faces = np.where((mat_index == k) & (count > 0))[0]
+        if len(faces) == 0:
+            continue
+        at = np.concatenate([uv[loops], centre[faces], centre[faces]])
+        owner = np.concatenate([loop_poly[loops], faces, faces])
+        h, w = img.shape[:2]
+        x = np.clip((np.mod(at[:, 0], 1.0) * w).astype(np.int64), 0, w - 1)
+        y = np.clip((np.mod(at[:, 1], 1.0) * h).astype(np.int64), 0, h - 1)
+        lab = _lab_np(img[y, x].astype(np.float64))
+        label = np.argmin(((lab[:, None, :] - plab[None]) ** 2).sum(2), 1)
+        np.add.at(votes, (owner, label), 1)
+        mask[faces] = True
+    swatch[mask] = np.argmax(votes[mask], 1)
+    return swatch, mask
+
+
 def _atlas(palette, gradient, out_dir):
     rows = math.ceil(len(palette) / COLS)
     img = bpy.data.images.new("palette", COLS * SWATCH_W, rows * SWATCH_H, alpha=False)
@@ -181,7 +242,7 @@ def snap_palette(meshes, hexes, shading, out_dir):
     nearest = lambda rgb: min(range(len(pal)), key=lambda i: sum((a - b) ** 2 for a, b in zip(_lab(rgb), plab[i])))
     img, rows = _atlas(pal, shading["gradient"], out_dir)
     flat, glow_mat = _palette_material("Palette", img, shading, False), _palette_material("Glow", img, shading, True)
-    used, seen = set(), set()
+    used, seen, pixel_cache = set(), set(), {}
     for o in meshes:
         me = o.data
         if me.as_pointer() in seen:  # a mesh several objects share is styled once
@@ -195,6 +256,19 @@ def snap_palette(meshes, hexes, shading, out_dir):
         mat_index = np.minimum(mat_index, len(idx) - 1)
         swatch = np.array(idx)[mat_index]
         glows = np.array([g for _, g in infos])[mat_index]
+        loop_poly = np.repeat(np.arange(np_), [p.loop_total for p in me.polygons])
+        # A textured material (a generator's one baked texture, a pack's colormap) is many colours:
+        # each face snaps to the palette by what its texture shows under it, not by the mean.
+        images = []
+        for slot in o.material_slots:
+            m = slot.material
+            bsdf = next((nd for nd in m.node_tree.nodes if nd.type == "BSDF_PRINCIPLED"), None) if m is not None and m.node_tree is not None else None
+            img = _feeding_image(bsdf.inputs["Base Color"]) if bsdf is not None else None
+            if img is not None and img.name not in pixel_cache:
+                pixel_cache[img.name] = _srgb_pixels(img)
+            images.append(pixel_cache.get(img.name) if img is not None else None)
+        snapped, textured = _face_swatches(me, images, mat_index, loop_poly, plab)
+        swatch[textured] = snapped[textured]
         used.update(int(k) for k in np.unique(swatch))
         co = np.empty(len(me.vertices) * 3)
         me.vertices.foreach_get("co", co)
@@ -202,7 +276,6 @@ def snap_palette(meshes, hexes, shading, out_dir):
         z = (co.reshape(-1, 3) @ m[:3, :3].T + m[:3, 3])[:, 2]
         loop_v = np.empty(len(me.loops), np.int32)
         me.loops.foreach_get("vertex_index", loop_v)
-        loop_poly = np.repeat(np.arange(np_), [p.loop_total for p in me.polygons])
         loop_swatch = swatch[loop_poly]
         lz = z[loop_v]
         t = np.full(len(lz), 0.5)
@@ -295,7 +368,8 @@ def style_pass(objects, style, out_dir, texture_side):
         notes = fit_textures(meshes, texture_side)
     scaled = None
     want = (style.get("scale") or {}).get("character")
-    if arms and want:
+    # A generated creature (kurambit_rig) keeps the size it was made at: a wolf is no hero's height.
+    if arms and want and not any(a.get("kurambit_rig") for a in arms):
         h = rest_height(meshes)
         if h > 1e-6:
             scaled = want / h

@@ -136,7 +136,10 @@ The comment block at the top of the file shows each call.
 `animate(ctx.assets.model("hero"))` (`web/shell/animate.js`) plays a model's clips by state: call
 `hero.play("idle" | "walk" | "run" | "jump" | "fall" | "attack" | "hit" |
 "die", { speed })` every frame and it crossfades, returns from one-shots and
-falls back (run to walk to idle) when a clip is missing. A model loaded
+falls back (run to walk to idle) when a clip is missing. A generated
+creature on its own rig plays its own clips the same way ("Trot" is its walk,
+"Bite" its attack); its sidecar measures a walk's ground speed from its lowest
+bones. A model loaded
 from its sidecar knows more: `hero.play("run", { moveSpeed })` plays at the
 speed the body moves over the clip's measured ground speed, so the feet stay
 planted; its spring chains (a tail, ears) swing on their own, and

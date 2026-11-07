@@ -100,6 +100,7 @@ import {
   styleHash,
 } from "./gameStyle.ts";
 import { gamePaths } from "./engineProfile.ts";
+import { GENERATED_DIR, generatedSource } from "./generatedSource.ts";
 import { breakSession, HeldSources, type LiveHealth, makeLiveRecords } from "./liveEditor.ts";
 import {
   commandFlag,
@@ -168,7 +169,8 @@ const EXPORT_TOOL = "game_blender_export";
 /**
  * Python that prints `STUDIO_ARMATURES {name: [bones]}` for the armatures that
  * would travel with `objs` into a GLB: the objects themselves, their parents
- * and the armatures their modifiers deform with.
+ * and the armatures their modifiers deform with. A generated creature's
+ * armature (kurambit_rig) is on its own rig, which the lock does not govern.
  */
 const ARMATURES_OF = `
 def studio_armatures(objs):
@@ -176,7 +178,7 @@ def studio_armatures(objs):
     for o in objs:
         cands = [o, o.parent] + [m.object for m in getattr(o, "modifiers", []) if m.type == "ARMATURE"]
         for a in cands:
-            if a is not None and a.type == "ARMATURE":
+            if a is not None and a.type == "ARMATURE" and not a.get("kurambit_rig"):
                 found[a.name] = [b.name for b in a.data.bones]
     print("STUDIO_ARMATURES " + json.dumps(found))
 `;
@@ -247,6 +249,15 @@ const ReviewRender = Schema.Struct({
   /** Tiles the model hardly shows in (under 1% covered): out of frame, or too small to judge. */
   problems: Schema.optionalKey(Schema.Array(Schema.String)),
 });
+/** What kurambit.generated prints. */
+const GeneratedMade = Schema.Struct({
+  objects: Schema.Array(Schema.String),
+  armature: Schema.NullOr(Schema.String),
+  clips: Schema.Array(Schema.String),
+  size: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+  notes: Schema.Array(Schema.String),
+});
+const decodeGeneratedMade = Schema.decodeUnknownEffect(GeneratedMade);
 const decodeCharacterMade = Schema.decodeUnknownEffect(CharacterMade);
 const decodeReviewRender = Schema.decodeUnknownEffect(ReviewRender);
 const decodeDigest = Schema.decodeUnknownEffect(KitDigest);
@@ -264,9 +275,11 @@ const routeRefusalOf = (candidate: Candidate, route: GameCharacterRoute) =>
     ? null
     : candidate.parts.some((part) => part.from === "mpfb2")
       ? lockCharacterRouteRefusal("mpfb-body", route)
-      : candidate.parts.some((part) => part.from === "made" && part.what !== "clips")
-        ? lockCharacterRouteRefusal("unstamped-mesh", route)
-        : null;
+      : candidate.parts.some((part) => part.ai && part.what !== "parts" && part.what !== "texture")
+        ? lockCharacterRouteRefusal("generated-body", route)
+        : candidate.parts.some((part) => part.from === "made" && part.what !== "clips")
+          ? lockCharacterRouteRefusal("unstamped-mesh", route)
+          : null;
 
 const STILL_WORKING =
   "Blender may still be finishing this call. Inspect the scene with game_blender_scene or game_blender_look before retrying, so the work is not done twice.";
@@ -1418,6 +1431,62 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * A model game_generate delivered, into the live scene: stamped with its generation record (the
+   * provider, its licence, ai and the cost), so the review and the export credit it like any import.
+   * A prop comes in as it is; a creature keeps its own rig and clips. A humanoid is conformed by
+   * game_blender_character instead, and images and sound never need Blender.
+   */
+  const importGenerated = (root: string, path: string | undefined) =>
+    Effect.gen(function* () {
+      const refuse = (detail: string) =>
+        Effect.fail(opError("blender-assets-import", path ?? root, "invalid-input", detail));
+      if (path === undefined)
+        return yield* refuse(
+          `source generated takes path: the game-relative model game_generate delivered under ${GENERATED_DIR}/ (game_generate_wait lists its files).`,
+        );
+      const realRoot = yield* realRootOf(root);
+      const { file, source } = yield* generatedSource(realRoot, path, "blender-assets-import");
+      if (source.lane === "character")
+        return yield* refuse(
+          `${path} is a generated humanoid: game_blender_character with body {game: "${path}"} conforms it to the standard skeleton, so the clip library plays on it.`,
+        );
+      if (source.lane !== "model" && source.lane !== "creature")
+        return yield* refuse(
+          `${path} came from the ${source.lane} lane, which Blender does not take: add it to the game with game_import.`,
+        );
+      if (source.lane === "creature") {
+        const refused = lockCharacterRouteRefusal(
+          "generated-body",
+          characterRoute(yield* projects.read(root)),
+        );
+        if (refused !== null) return yield* refuse(refused);
+      }
+      const name = NodePath.basename(NodePath.dirname(file));
+      const made = yield* kitCall(
+        root,
+        "blender-assets-import",
+        decodeGeneratedMade,
+        `kurambit.generated(${pyJson({ path: file, name, lane: source.lane, stamp: source.stamp, rig: source.rig })})`,
+      );
+      const blend = yield* saveBlend(root);
+      const cost =
+        source.stamp.credits === null ? "cost unknown" : `$${source.stamp.credits.toFixed(2)}`;
+      return {
+        text: [
+          `${made.objects.join(", ")} from ${source.stamp.from} (${source.lane}), ${made.size.map((x) => x.toFixed(2)).join(" x ")} m, marked AI-made with its licence (${source.stamp.licence}) and ${cost}.`,
+          ...(made.armature === null
+            ? []
+            : [
+                `${made.armature} keeps its own rig, ${source.rig}${made.clips.length === 0 ? ", with no clips" : `, and its clips: ${made.clips.join(", ")}`}. The lock's rig governs humanoids only.`,
+              ]),
+          ...made.notes,
+          `Saved .blend source: ${blend}. Generators model at their own scale and facing: check the size, stand it on the ground facing -Y, then game_blender_look mode review and game_blender_export.`,
+        ].join("\n"),
+        blend,
+      };
+    });
+
+  /**
    * The locked part of a review: the pass of this key (run now, or the one a review already ran,
    * kept as pass.json), its composite rendered in a throwaway scene of the live session, and only
    * then candidate.json, so an export never follows a review nobody saw (§0.5).
@@ -1714,6 +1783,24 @@ const make = Effect.gen(function* () {
                 );
             }
             body = { mpfb: input.body.mpfb };
+          } else if (input.body.game.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`)) {
+            // A generated humanoid: conformed like any body, credited to its provider.
+            const generated = yield* generatedSource(
+              realRoot,
+              input.body.game,
+              "blender-character",
+            );
+            if (generated.source.lane !== "character")
+              return yield* fail(
+                "invalid-input",
+                `${input.body.game} came from the ${generated.source.lane} lane. ${generated.source.lane === "creature" ? "A creature keeps its own rig and clips: bring it in with game_blender_assets_import (source generated), then review and export it." : "Only a character-lane humanoid is put on the standard skeleton."}`,
+              );
+            const refused = lockCharacterRouteRefusal(
+              "generated-body",
+              characterRoute(yield* projects.read(root)),
+            );
+            if (refused !== null) return yield* fail("invalid-input", refused);
+            body = { game: generated.file, source: generated.source.stamp };
           } else {
             const relative = input.body.game;
             const absolute = NodePath.resolve(realRoot, relative);
@@ -1799,9 +1886,19 @@ const make = Effect.gen(function* () {
       holding(
         root,
         Effect.gen(function* () {
+          if (input.source === "generated") return yield* importGenerated(root, input.path);
+          const id = input.id;
+          if (id === undefined)
+            return yield* opError(
+              "blender-assets-import",
+              root,
+              "invalid-input",
+              `source ${input.source} takes id: the asset id game_blender_assets_search listed.`,
+            );
+          const source = input.source;
           // Refused before the live scene changes.
           const style = yield* styleOf(root);
-          const outside = lockImportRefusal(input.source, style);
+          const outside = lockImportRefusal(source, style);
           if (outside !== null)
             return yield* opError("blender-assets-import", root, "invalid-input", outside);
           // The import adds to the live scene; only what it added is exported,
@@ -1819,8 +1916,8 @@ const make = Effect.gen(function* () {
               `Blender did not list the scene's objects before the import: ${before.slice(0, 500)}`,
             );
           const text = yield* callText(root, "import_asset", {
-            source: input.source,
-            id: input.id,
+            source,
+            id,
             ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
             ...(input.targetSize === undefined ? {} : { target_size: input.targetSize }),
             ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
@@ -1866,12 +1963,12 @@ const make = Effect.gen(function* () {
           // export composes the ledger from the stamps, after a review like anything built here.
           // Its clips are stamped too, so a rigged import's animations are credited to it, not
           // called made here; a clip keyed later on its armature carries no stamp and is.
-          const licence = importLicence(input.source, input.id, text);
+          const licence = importLicence(source, id, text);
           const stampOf = (what: "mesh" | "clips") =>
             JSON.stringify(
               JSON.stringify({
                 what,
-                from: input.source,
+                from: source,
                 licence: licence.slice(0, 200),
                 ai: false,
                 credits: null,

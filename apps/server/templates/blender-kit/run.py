@@ -5,7 +5,8 @@ params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.js
          standard?: abs path of the standard armature's GLB, rig?: the lock's rig id,
          glb?: abs path to write the GLB to (default <out>/candidate.glb)}
 Writes the GLB and prints KURAMBIT_RESULT {kind, objects, measured, refusals, parts,
-usedPalette, armatures, notes}. It works on its own copy of the scene: the live scene and the game folder
+usedPalette, armatures, creatures, notes}: armatures are those the lock's rig governs, creatures
+(name to its own rig id) those a generated creature brought, which keep their own skeleton. It works on its own copy of the scene: the live scene and the game folder
 are never touched (D7), and what it measures is the GLB it wrote, so the review, the export and
 the sidecar all describe the same bytes."""
 import json
@@ -71,12 +72,16 @@ def parts_of(objects):
     return parts
 
 
-def refusals_of(measured, info, params):
+def refusals_of(measured, info, params, creatures=()):
+    """creatures: armatures on their own rig (a generated creature), which the lock's rig, made
+    for humanoids, does not govern."""
     out = []
     kind = measured["kind"]
     joints = params.get("standardJoints")
     if kind == "character" and joints:
         for name, bones in info["armatures"].items():
+            if name in creatures:
+                continue
             missing = [j for j in joints if j not in bones]
             if missing:
                 out.append({"code": "off-rig", "text": f"{name} lacks {len(missing)} joints of STYLE.json's rig ({', '.join(missing[:6])}): its clips would not fit the game's other characters. Build it with game_blender_character, which puts it on the rig."})
@@ -90,7 +95,8 @@ def refusals_of(measured, info, params):
     big = [t for t in measured["textures"] if max(t["width"], t["height"]) > side]
     if big:
         out.append({"code": "texture", "text": f"a {big[0]['width']}x{big[0]['height']} texture is over STYLE.json's budget.texture of {side} px a side and the pass could not scale it: replace it, or use the palette."})
-    if kind == "character" and not any("idle" in c["name"].lower() for c in measured["clips"]):
+    # A creature with no clips ships posed as it came; one with clips needs one to stand in.
+    if kind == "character" and not any("idle" in c["name"].lower() for c in measured["clips"]) and (measured["clips"] or not creatures):
         out.append({"code": "no-idle", "text": "a character needs an idle clip to stand: add Idle_Loop through game_blender_character's clips, or key one."})
     clips = measured["clips"]
     if kind == "character" and clips and len(info["frozen"]) == len(clips):
@@ -147,6 +153,7 @@ def run_pass(params):
         stored = next((a["kurambit_standard_rest"] for a in arms if "kurambit_standard_rest" in a), None)
         standard_rest = json.loads(stored) if stored else None
     rig = params.get("rig") or ("standard-humanoid" if standard_rest else None)
+    creatures = {a.name: a["kurambit_rig"] for a in arms if a.get("kurambit_rig")}
 
     _keep_only(objects)
     notes = []
@@ -170,7 +177,8 @@ def run_pass(params):
         export_image_format="AUTO", export_materials="EXPORT", export_texcoords=True, export_normals=True,
         export_cameras=False, export_lights=False,
     )
-    measured, info = measure.measure(candidate, styled["kind"], standard_rest, params.get("standardJoints"), chains, rig)
+    own = next(iter(creatures.values())) if len(creatures) == 1 and len(arms) == 1 else None
+    measured, info = measure.measure(candidate, styled["kind"], standard_rest, params.get("standardJoints"), chains, rig, own)
     if gaps is not None:
         k = styled["scaled"] or 1.0  # in the shipped size
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]
@@ -179,10 +187,11 @@ def run_pass(params):
         "kind": styled["kind"],
         "objects": names,
         "measured": measured,
-        "refusals": refusals_of(measured, info, params),
+        "refusals": refusals_of(measured, info, params, set(creatures)),
         "parts": parts,
         "usedPalette": styled["usedPalette"],
-        "armatures": info["armatures"],
+        "armatures": {n: b for n, b in info["armatures"].items() if n not in creatures},
+        "creatures": creatures,
         "notes": [n[:400] for n in notes + styled["notes"] + still],
     }
 

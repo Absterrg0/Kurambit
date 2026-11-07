@@ -552,3 +552,40 @@ def eye_squash(eye, side, *, shine=(), armature=None, look=(0, -1, 0)):
             skin_rigid(o, lit, armature=arm)
         out.append(face.blink_of(arm, lit))
     return out
+
+
+def palette_of(path, colours=8):
+    """The dominant colours of an image (the picked key art), most covered first, as "#rrggbb":
+    k-means over its opaque pixels, seeded the same way every time, so one image gives one palette.
+    The image is loaded for the call and removed again; it never enters the scene's data."""
+    colours = max(2, min(64, int(colours)))
+    image = bpy.data.images.load(path, check_existing=False)
+    try:
+        n = len(image.pixels) // 4
+        px = np.empty(n * 4, np.float32)
+        image.pixels.foreach_get(px)
+        linear = image.is_float
+    finally:
+        bpy.data.images.remove(image)
+    px = px.reshape(-1, 4)
+    px = px[px[:, 3] > 0.5, :3]
+    if len(px) == 0:
+        raise ValueError(f"{path} has no opaque pixels")
+    if linear:
+        px = np.where(px > 0.0031308, 1.055 * np.power(np.clip(px, 0, 1), 1 / 2.4) - 0.055, 12.92 * px)
+    rng = np.random.default_rng(0)
+    px = px[rng.choice(len(px), min(len(px), 40000), replace=False)]
+    centres = [px[rng.integers(len(px))]]
+    for _ in range(colours - 1):  # k-means++: each next centre far from the ones chosen
+        d = np.min([((px - c) ** 2).sum(1) for c in centres], axis=0)
+        centres.append(px[rng.choice(len(px), p=d / d.sum())] if d.sum() > 0 else px[rng.integers(len(px))])
+    centres = np.array(centres)
+    for _ in range(30):
+        label = np.argmin(((px[:, None, :] - centres[None]) ** 2).sum(2), 1)
+        moved = np.array([px[label == k].mean(0) if np.any(label == k) else centres[k] for k in range(len(centres))])
+        if np.allclose(moved, centres, atol=1e-4):
+            break
+        centres = moved
+    share = np.bincount(label, minlength=len(centres))
+    order = [k for k in np.argsort(-share) if share[k] > 0]
+    return ["#%02x%02x%02x" % tuple(int(round(float(c) * 255)) for c in np.clip(centres[k], 0, 1)) for k in order]

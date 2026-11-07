@@ -10,8 +10,10 @@ modeller for props; you have no local Blender, Godot or image tools.
 
 A game whose AGENTS.md has "The first turn" follows it there: that turn
 locks the look in `STYLE.json` and adds the characters and props with
-`game_assets_add`, and takes nothing else from this skill. Key art, sprite
-renders and Blender props come in later turns, for what no pack has.
+`game_assets_add`, and takes nothing else from this skill (on the
+`generated` route it also starts the key art: Generated art, below). Key
+art, sprite renders and Blender props come in later turns, for what no pack
+has.
 
 1. Key art first: one image the finished game must live up to.
 2. Every in-game visual is a file: characters, objects, tiles, backgrounds, UI
@@ -20,8 +22,10 @@ renders and Blender props come in later turns, for what no pack has.
 3. One look, locked in `STYLE.json` before the first asset (below). The art
    tools hold the game to it.
 4. Characters and creatures come the way the person chose (`characters`
-   in game_status; Characters, below): from the lock's packs, or made through the character
-   pipeline and exported after a review. Blender also builds props, set
+   in game_status; Characters, below): from the lock's packs, made through
+   the character pipeline, or generated; every made or generated one is
+   exported after a review. On the `generated` route the rest of the art is
+   generated too (Generated art, below); elsewhere Blender builds props, set
    pieces, backgrounds and key art.
 5. One palette, one silhouette language, one ground line. Movement, hurt, win
    and lose read at a glance. Put the set in one contact-sheet PNG, look at
@@ -75,6 +79,9 @@ look fits the brief (and the key art, once there is one) and write `STYLE.json` 
 - `imports`: outside sources the live Blender may import from (`polyhaven`,
   `sketchfab`, `polypizza`); none when left out. Realistic Poly Haven models
   sit only in a realistic look.
+- `anchor`: the image the look answers to (`art/key-art.png`, the person's
+  pick on the `generated` route): its palette is the lock's, and every
+  generation passes it as a reference.
 - 3D made models: `palette` may also be a hex list (`["#E4E4E3", ...]`, 2 to
   64 colours; take them from the family's own textures so made models sit
   with the packs), `shading` (`gradient` 0.16, `roughness` 0.62, `glow` 2.5),
@@ -91,7 +98,7 @@ the lock and refuses a palette or mode it does not hold;
 `game_blender_assets_import` refuses a source `imports` does not list;
 `game_blender_export` exports only what you last reviewed, as it was, and
 refuses an armature not on the lock's rig (or any armature when it names
-none), rest frames off the standard skeleton, triangles or a texture over the
+none; a generated creature keeps its own rig), rest frames off the standard skeleton, triangles or a texture over the
 budget, and a character with no idle clip; `game_assets_search` shows the
 lock's packs first. A refusal says what to change. Changing
 direction is an edit to STYLE.json made on purpose, never a drift: when the
@@ -124,6 +131,9 @@ every route.
   that PNG and point the copy's material at it). Creatures off the humanoid
   rig come from a pack that carries their own clips.
 - `blender`: made characters, below.
+- `generated`: characters and creatures from generators (Generated art,
+  below): a humanoid is conformed to `standard-humanoid` and plays the clip
+  library, a creature keeps its own rig and clips.
 - 2D sprite packs (a lock with no rig): take the characters the packs draw,
   with their own frames. To render a 3D family's character into strips,
   import its GLB into the live Blender, list its clips
@@ -265,6 +275,56 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
    `locomotion()` and `play(state, { moveSpeed })` so the feet stay planted
    (TEMPLATE.md).
 
+## Generated art
+
+On the `generated` route the person has the art made by providers through
+`game_generate` (their own keys, or Codex on their ChatGPT plan), and this
+pipeline makes it one look. The person picks every candidate; you never
+pick taste for them. Never block the playable on art: library stand-ins
+play until each piece arrives. Start a generation, keep building, and pick
+it up with `game_generate_wait`.
+
+1. **Key art, in the first turn.** Lane `image`, name `key_art`,
+   `candidates: 3`, `options.aspect` `"16:9"`, and a prompt holding the
+   game's world, mood and palette in one image (from BRIEF.md and its art
+   direction; no text or UI in it). End the turn asking the person to pick
+   one in the chat.
+2. **After the pick, lock the look to it.** Copy the picked file to
+   `art/key-art.png`, read its colours with
+   `print(kurambit.palette_of("art/key-art.png", 8))` in
+   `game_blender_code`, and write STYLE.json's `palette` (that hex list:
+   every exported model is snapped to it; for a painted or realistic key
+   art leave `palette` out, so models keep their textures) and `anchor`
+   (`"art/key-art.png"`). Pass the key art in `references` of every later
+   generation. It is also the title backdrop (TEMPLATE.md or the engine
+   skill).
+3. **Characters.** A character sheet first: lane `image`, `candidates` 2 or
+   3, the key art as reference, the character alone on a plain background
+   in a front and side view, arms down and apart. The person picks. Then
+   lane `character` (a humanoid) or `creature` (`options.body`, and the
+   clips it needs in `options.clips`), with the picked sheet and the key
+   art as references. Then:
+   - a humanoid: `game_blender_character` with `body: {game: "<the .glb it
+delivered>"}` and the clips. It is conformed to the standard skeleton
+     whatever its bones are named, so the clip library, `fit`, ground
+     speeds, springs and blinks all work on it;
+   - a creature: `game_blender_assets_import` with `source: "generated"`
+     and its `path`. It keeps its own rig, clips and size; it needs an idle
+     clip once it has clips;
+   - then stand it on the ground facing -Y, review and export it as in
+     Made characters 5 and 6.
+4. **Props.** Lane `model` with the key art (or a picked prop image) as
+   reference, then `game_blender_assets_import` with `source: "generated"`,
+   review and export. Its baked texture is snapped to the palette face by
+   face; a lock with no hex palette keeps it, scaled to the budget.
+5. **Images and sound.** Sprites, UI art, backgrounds and textures: lane
+   `image` or `texture` with the key art as reference. Effects and music:
+   lanes `sfx` and `music` from the brief's mood (`options.seconds`,
+   `options.loop` for music). Add each file with `game_import`.
+6. **Cost.** Say in the turn's reply what its generations cost. A refusal
+   (no key, over the person's daily limit) goes in the reply as it is;
+   never switch route or lane to get past it.
+
 ## 2D sprites from 3D
 
 Render every sprite, animation strip and icon with `game_blender_render_sprites`,
@@ -315,7 +375,8 @@ lock.
 
 ## Key art
 
-A perspective camera at 1280x720 over the game's real assets, rendered in a
+On the `generated` route the key art is generated (Generated art, above).
+Otherwise, a perspective camera at 1280x720 over the game's real assets, rendered in a
 throwaway scene that is removed in `finally`, so a failed run leaves nothing in
 the live .blend:
 

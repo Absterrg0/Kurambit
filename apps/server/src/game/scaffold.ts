@@ -141,6 +141,13 @@ const everyTurnSection = (engine: GameEngineId): string | undefined => {
   return profile.turnLoop ? EVERY_TURN_SECTIONS[profile.stage] : undefined;
 };
 
+/**
+ * On the generated route the first turn also starts the key art, builds on library stand-ins while
+ * it renders, and ends on the person's pick: the look is theirs, and art never blocks the playable.
+ */
+const GENERATED_FIRST_STEP = `1. Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`candidates: 3\`, \`options.aspect\` \`"16:9"\` and a prompt holding the game's world, mood and palette in one image (\`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it. If it is refused (no key, or over the person's daily limit), say so in your reply and go on with library art. Then read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.`;
+const GENERATED_LAST_STEP = `4. Run \`game_check\` and fix until it is clean, then \`game_generate_wait\` for the key art and end the turn: say what the person can do now, ask them to pick one of the key art's candidates in the chat, or say it is still rendering (the library models are stand-ins until art made from it arrives), say what it cost, and add your \`Next:\` line.`;
+
 /** A new game's first turn, per engine; an engine without one gets the brief alone. */
 const FIRST_TURN_SECTIONS: Partial<Record<GameEngineId, string>> = {
   three: `## The first turn
@@ -154,6 +161,22 @@ Goal: the person plays the brief's core loop on the Stage within ten minutes, wi
 
 More waves and levels, menu art, music and polish are later turns.
 `,
+};
+
+/** The first turn for this game: its engine's, with the generated route's key-art steps. */
+const firstTurnSection = (manifest: GameManifest): string | undefined => {
+  const section = FIRST_TURN_SECTIONS[manifest.engine.name];
+  if (section === undefined || manifest.characters !== "generated") return section;
+  const lines = section.split("\n");
+  const first = lines.findIndex((line) => line.startsWith("1. "));
+  const last = lines.findIndex((line) => line.startsWith("4. "));
+  return [
+    ...lines.slice(0, first),
+    GENERATED_FIRST_STEP,
+    ...lines.slice(first + 1, last),
+    GENERATED_LAST_STEP,
+    ...lines.slice(last + 1),
+  ].join("\n");
 };
 
 /**
@@ -243,7 +266,7 @@ Use the game_* tools to check, play, export and package the game; never run Godo
     "AGENTS.md": [
       projectLine,
       everyTurnSection(engine),
-      FIRST_TURN_SECTIONS[engine],
+      firstTurnSection(manifest),
       engineProfile(engine).turnLoop ? KEEP_GOING_SECTION : undefined,
     ]
       .filter((section) => section !== undefined)

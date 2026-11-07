@@ -270,7 +270,8 @@ export const lockImportRefusal = (
 /**
  * Why the lock refuses armatures about to enter the game (name to bone names),
  * or null: a lock with a rig takes only armatures holding every bone of that
- * rig (when its bones are known); a lock without one takes no armature.
+ * rig (when its bones are known); a lock without one takes no armature. The
+ * rig governs humanoids: a generated creature on its own rig is never passed here.
  */
 export const lockArmatureRefusal = (
   armatures: Readonly<Record<string, ReadonlyArray<string>>>,
@@ -321,16 +322,19 @@ const MAKES_CHARACTERS: Record<GameCharacterRoute, boolean> = {
 
 /**
  * Why the person's character route refuses a character, or null: off the Blender route,
- * an MPFB2 body or a character mesh that came from no stamped source is not theirs to ship.
+ * an MPFB2 body or a character mesh that came from no stamped source is not theirs to ship;
+ * off the generated route, neither is a generated character or creature.
  */
 export const lockCharacterRouteRefusal = (
-  what: "mpfb-body" | "unstamped-mesh",
+  what: "mpfb-body" | "unstamped-mesh" | "generated-body",
   route: GameCharacterRoute,
 ): string | null => {
-  if (MAKES_CHARACTERS[route]) return null;
+  if (what === "generated-body" ? route === "generated" : MAKES_CHARACTERS[route]) return null;
   const thing =
     what === "mpfb-body"
       ? "An MPFB2 body is a Blender-made character"
-      : "A character mesh with no library or import source is a Blender-made character";
-  return `${thing}, and the person chose to make this game's characters with ${route}. Use a library body or the lock's packs, and if the request needs a made character, say so in your reply: only the person changes how characters are made, in the game's "Make characters with" setting.`;
+      : what === "generated-body"
+        ? "A generated character or creature (an AI provider made its body)"
+        : "A character mesh with no library or import source is a Blender-made character";
+  return `${thing}, and the person chose to make this game's characters with ${route}. Use ${route === "generated" ? "a generated character (game_generate) or a library body" : "a library body or the lock's packs"}, and if the request needs another kind of character, say so in your reply: only the person changes how characters are made, in the game's "Make characters with" setting.`;
 };
