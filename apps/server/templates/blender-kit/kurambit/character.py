@@ -192,6 +192,18 @@ def character(params):
     notes = []
     carried = []
 
+    # The clips keep their own frame rate: imported at another, a 30 fps clip lands between frames
+    # and the export resamples it (a 28-frame jog became 22 frames, its last cut off the loop).
+    rates = {skeleton.clip_rate(skeleton.gltf_json(p)) for p in {c["path"] for c in params.get("clips", [])} if os.path.isfile(p)} - {None}
+    render = bpy.context.scene.render
+    if rates:
+        rate = min(rates)
+        if render.fps != rate or render.fps_base != 1.0:
+            notes.append(f"the scene now runs at {rate} fps, the library clips' own rate (it was {render.fps / render.fps_base:g}): key your own clips at {rate} fps")
+            render.fps, render.fps_base = rate, 1.0
+        if len(rates) > 1:
+            notes.append(f"the clips were made at {', '.join(str(r) for r in sorted(rates))} fps: those not at {rate} are resampled")
+
     # The standard armature first: every check below reads its joints.
     standard = params["standard"]
     std_new, std_actions = skeleton.import_gltf(standard)

@@ -59,6 +59,20 @@ def skin_joints(doc):
     return out
 
 
+def clip_rate(doc):
+    """The frame rate a glTF's clips were sampled at (the commonest over its animations), or None.
+    An animation input's accessor carries its count and max (the glTF spec requires both)."""
+    votes = {}
+    accessors = doc.get("accessors", [])
+    for anim in doc.get("animations", []):
+        a = max((accessors[s["input"]] for s in anim.get("samplers", [])), key=lambda x: x.get("count", 0), default=None)
+        if a is None or a.get("count", 0) < 3 or not a.get("max") or a["max"][0] <= 0:
+            continue
+        rate = round((a["count"] - 1) / a["max"][0])
+        votes[rate] = votes.get(rate, 0) + 1
+    return max(votes, key=votes.get) if votes else None
+
+
 def standard_joints(standard_glb):
     """The standard skeleton's joints, read from the standard armature's own file."""
     return skin_joints(gltf_json(standard_glb))
