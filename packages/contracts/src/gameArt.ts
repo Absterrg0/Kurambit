@@ -200,7 +200,10 @@ export const GameGenerateInput = Schema.Struct({
   prompt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
   /** The file stem the result lands under: art/generated/<lane>/<name>/. */
   name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,47}$/)),
-  /** Game-relative images it must match: the key art, a picked concept, a character sheet. */
+  /**
+   * Game-relative images it must match: an image takes the key art; a 3D lane only the picked
+   * picture of its one subject (a concept, a character sheet), which the generator models.
+   */
   references: Schema.optionalKey(Schema.Array(GamePath).check(Schema.isMaxLength(4))),
   /** image and texture: 2-4 distinct looks, one image each, that the person picks from; omitted makes one. */
   directions: Schema.optionalKey(

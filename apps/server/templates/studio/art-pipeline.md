@@ -316,16 +316,18 @@ it up with `game_generate_wait`.
    every exported model is snapped to it; for a painted or realistic key
    art leave `palette` out, so models keep their textures) and `anchor`
    (`"art/key-art.png"`). Pass the key art in `references` of every later
-   generation. It is also the title backdrop (TEMPLATE.md or the engine
-   skill).
+   image and texture. It is also the title backdrop (TEMPLATE.md or the
+   engine skill).
 3. **Characters.** A character sheet first: lane `image`, two or three
    `directions` when the character's design is open (silhouette, outfit,
    proportions; the key art fixes the rendering), else none, the key art
-   as reference, the character alone on a plain background
-   in a front and side view, arms down and apart. The person picks. Then
-   lane `character` (a humanoid) or `creature` (`options.body`, and the
-   clips it needs in `options.clips`), with the picked sheet and the key
-   art as references. Then:
+   as reference, the character alone on a plain background, full body,
+   one front view, arms down and apart. The person picks. Then lane
+   `character` (a humanoid) or `creature` (`options.body`, and the clips
+   it needs in `options.clips`), with the picked sheet as its only
+   reference: a 3D generator models everything its picture shows (Tripo
+   reads the first image; Meshy reads several as views of one object), so
+   the key art or a second view would be built into the model. Then:
    - a humanoid: `game_blender_character` with `body: {game: "<the .glb it
 delivered>"}` and the clips. It is conformed to the standard skeleton
      whatever its bones are named, so the clip library, `fit`, ground
@@ -336,9 +338,12 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
      creature clips are a walk only), which you may key into a breath;
    - then stand it on the ground facing -Y, review and export it as in
      Made characters 5 and 6.
-4. **Props.** Lane `model` with the key art (or a picked prop image) as
-   reference, then `game_blender_assets_import` with `source: "generated"`,
-   review and export. Its baked texture is snapped to the palette face by
+4. **Props.** A concept first when the look matters (lane `image`, the
+   key art as reference, the prop alone on a plain background), then lane
+   `model` with the picked concept as its only reference, or with none
+   (the prompt alone), never the key art; then
+   `game_blender_assets_import` with `source: "generated"`, review and
+   export. Its baked texture is snapped to the palette face by
    face; a lock with no hex palette keeps it, scaled to the budget.
 5. **Images and sound.** Sprites, UI art, backgrounds and textures: lane
    `image` or `texture` with the key art as reference. Effects and music:
