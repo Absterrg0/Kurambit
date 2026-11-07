@@ -192,11 +192,17 @@ export const withKeepGoing = (agents: string, engine: GameEngineId): string => {
  * see exactly what the agent was told. It names AGENTS.md because some
  * providers (Grok, Antigravity) do not load it by themselves.
  */
+const FIRST_TURN_LEADS = [
+  "Make this game. Read AGENTS.md first.",
+  'Make this game. Follow "The first turn" in AGENTS.md.',
+] as const;
+
+/** The instruction line before the brief, which names no game, so a build's summary skips it. */
+export const isFirstTurnLead = (line: string): boolean =>
+  (FIRST_TURN_LEADS as ReadonlyArray<string>).includes(line);
+
 export const firstTurnMessage = (manifest: GameManifest): string => {
-  const lead =
-    FIRST_TURN_SECTIONS[manifest.engine.name] === undefined
-      ? "Make this game. Read AGENTS.md first."
-      : 'Make this game. Follow "The first turn" in AGENTS.md.';
+  const lead = FIRST_TURN_LEADS[FIRST_TURN_SECTIONS[manifest.engine.name] === undefined ? 0 : 1];
   const art = manifest.artDirection.trim();
   return `${lead}\n\n${manifest.brief.trim()}${art === "" ? "" : `\n\nArt direction: ${art}`}`;
 };

@@ -912,6 +912,8 @@ interface StagePackageJson {
   readonly packageManager: string;
   readonly description: string;
   readonly license: string;
+  // The .deb target (fpm) refuses to build without it.
+  readonly homepage: string;
   readonly author: string;
   readonly main: string;
   readonly build: Record<string, unknown>;
@@ -979,6 +981,9 @@ export const WINDOWS_SERVER_ASAR_RESOURCE = "server.asar";
 // asar redirect convention). Everything else stays packed.
 export const WINDOWS_NATIVE_ASAR_UNPACK_GLOB =
   "{**/*.node,**/*.dll,**/*.exe,**/*.so,**/*.so.*,**/*.dylib}";
+// The server copies game templates with fs.cp and hands their paths to engines
+// and tools, none of which can read inside an asar (apps/server/src/game/templates.ts).
+export const SERVER_TEMPLATES_ASAR_UNPACK_GLOB = "apps/server/dist/templates/**";
 export const WINDOWS_SERVER_ASAR_UNPACK_GLOBS = [
   "**/*.dll",
   "**/*.exe",
@@ -2512,7 +2517,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "Game-Studio-${version}-${arch}.${ext}",
+    artifactName: "Kurambit-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [
       ...DESKTOP_FILE_EXCLUSIONS,
@@ -2530,7 +2535,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // not inflate the loose-file count and slow NSIS installation.
     ...(platform === "win"
       ? { asar: { smartUnpack: false }, asarUnpack: [WINDOWS_NATIVE_ASAR_UNPACK_GLOB] }
-      : {}),
+      : { asarUnpack: [SERVER_TEMPLATES_ASAR_UNPACK_GLOB] }),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),
@@ -3416,6 +3421,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     description:
       "Kurambit is a local desktop application for creating games with coding agents, Blender, and Godot.",
     license: "MIT",
+    homepage: "https://kurambit.com",
     author: "Kurambit Tools",
     main: "apps/desktop/dist-electron/boot.cjs",
     build: yield* createBuildConfig(

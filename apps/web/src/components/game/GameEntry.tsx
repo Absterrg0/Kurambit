@@ -32,6 +32,8 @@ import { useEnvironmentSettings } from "../../hooks/useSettings";
 import {
   deriveProviderInstanceEntries,
   applyProviderInstanceSettings,
+  getDefaultProviderInstanceModel,
+  isProviderInstancePickerReady,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import {
@@ -108,15 +110,25 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
     null,
     lastGameModelSchema,
   );
-  const remembered =
-    lastGameModel !== null &&
+  // A game's first turn starts the moment it is created, so only an agent that
+  // can work now (installed and signed in) may make it.
+  const isReady = (instanceId: string) =>
     entries.some(
-      (entry) =>
-        entry.instanceId === lastGameModel.instanceId && entry.enabled && entry.isAvailable,
-    )
-      ? lastGameModel
-      : null;
-  const model = selection ?? remembered ?? defaultSelection;
+      (entry) => entry.instanceId === instanceId && isProviderInstancePickerReady(entry),
+    );
+  const remembered =
+    lastGameModel !== null && isReady(lastGameModel.instanceId) ? lastGameModel : null;
+  const firstReady = entries.find(isProviderInstancePickerReady);
+  const readyFallback =
+    firstReady === undefined || isReady(defaultSelection.instanceId)
+      ? null
+      : {
+          instanceId: firstReady.instanceId,
+          model:
+            getDefaultProviderInstanceModel(providers, firstReady.instanceId) ??
+            defaultSelection.model,
+        };
+  const model = selection ?? remembered ?? readyFallback ?? defaultSelection;
   const options = getCustomModelOptionsByInstance(
     settings,
     providers,
@@ -146,9 +158,8 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const isCreate = dialog === "create";
   const slug = gameSlug(name) || "your-game";
   const folder = `${directory.replace(/\/+$/, "")}/${slug}`;
-  const providerReady = entries.some(
-    (entry) => entry.instanceId === model.instanceId && entry.enabled && entry.isAvailable,
-  );
+  const providerReady = isReady(model.instanceId);
+  const modelEntry = entries.find((entry) => entry.instanceId === model.instanceId);
   const canSubmit = isCreate
     ? canCreate && providerReady && name.trim().length > 0 && brief.trim().length > 0
     : canOpen && providerReady && directory.trim().length > 0;
@@ -386,6 +397,14 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                 {error}
               </p>
             ) : null}
+            {providerReady ? null : (
+              <p className="text-sm text-muted-foreground">
+                {modelEntry === undefined
+                  ? "No agent is ready."
+                  : `${modelEntry.displayName} is not ready: ${modelEntry.snapshot.message ?? "it is not signed in."}`}{" "}
+                Sign in, or add an agent in Settings → Providers, then choose its model here.
+              </p>
+            )}
           </DialogPanel>
           <DialogFooter className="sm:justify-between">
             <div className="flex items-center gap-2">

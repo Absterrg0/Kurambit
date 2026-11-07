@@ -680,7 +680,7 @@ export function StorageSettingsPanel() {
           <SettingsRow
             title="Delete old game logs"
             status={ruleStatus("gameLogsAfterDays")}
-            description="Delete each game's tool logs and bot, explore and check runs after this many days, and the copies a production run made by an earlier Kurambit left behind. A game's oldest go first once they pass 2 GB."
+            description="Delete each game's tool logs and bot, explore and check runs after this many days, and any game copies an earlier Kurambit version left behind. A game's oldest go first once they pass 2 GB."
             serverScoped
             control={
               <RetentionControl

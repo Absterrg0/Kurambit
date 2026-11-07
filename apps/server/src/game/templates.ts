@@ -36,24 +36,36 @@ export const substituteGameName = (text: string, gameName: string): string =>
     .replaceAll(gameNameEscapedPlaceholder, JSON.stringify(gameName).slice(1, -1))
     .replaceAll(gameNamePlaceholder, gameName);
 
+/**
+ * The packed server ships templates beside its bundle (dist/templates); in the
+ * dev tree this module lives in src/game, with templates at apps/server/templates.
+ * Inside the desktop app the bundle runs from app.asar, whose directories
+ * Electron cannot access() or cp() and other processes cannot open at all, so
+ * the desktop build unpacks the templates into the app.asar.unpacked sibling.
+ */
 export const templateDirectoryCandidates = (
   dirname: string,
   join: (left: string, right: string) => string,
-): readonly [string, string] => [join(dirname, "templates"), join(dirname, "../../templates")];
+): ReadonlyArray<string> => {
+  const unpacked = dirname.replace(/\.asar(?=[\\/]|$)/, ".asar.unpacked");
+  return [
+    ...(unpacked === dirname ? [] : [join(unpacked, "templates")]),
+    join(dirname, "templates"),
+    join(dirname, "../../templates"),
+  ];
+};
 
 export const resolveTemplatesDirectory = Effect.fn("GameTemplates.resolveDirectory")(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  // The packed server ships templates beside its bundle (dist/templates); in the
-  // dev tree this module lives in src/game, with templates at apps/server/templates.
-  const [bundled, monorepo] = templateDirectoryCandidates(import.meta.dirname, (left, right) =>
+  const candidates = templateDirectoryCandidates(import.meta.dirname, (left, right) =>
     path.join(left, right),
   );
-  for (const candidate of [bundled, monorepo])
+  for (const candidate of candidates)
     if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) return candidate;
   return yield* new GameOperationError({
     operation: "resolve-templates",
-    path: bundled,
+    path: candidates[0] ?? import.meta.dirname,
     reason: "starter-templates-missing",
   });
 });

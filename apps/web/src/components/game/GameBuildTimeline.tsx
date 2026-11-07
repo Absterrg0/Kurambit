@@ -407,7 +407,9 @@ export function GameBuildTimeline({
         ) : (
           <>
             <span className="min-w-0 max-w-full truncate font-medium">
-              {buildName(shown)} · {shown.summary}
+              {buildName(shown) === shown.summary
+                ? shown.summary
+                : `${buildName(shown)} · ${shown.summary}`}
             </span>
             {shown.source._tag === "turn" && shown.source.step !== null ? (
               <span className="shrink-0 text-muted-foreground">

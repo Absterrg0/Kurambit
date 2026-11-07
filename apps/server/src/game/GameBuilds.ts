@@ -56,6 +56,7 @@ import { BuildName } from "./run/buildNames.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
+import { isFirstTurnLead } from "./scaffold.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */
 const NO_RUN = "game-builds";
@@ -123,7 +124,7 @@ const firstLine = (text: string | null, fallback: string) => {
   const line =
     (text ?? "")
       .split("\n")
-      .find((each) => each.trim() !== "")
+      .find((each) => each.trim() !== "" && !isFirstTurnLead(each.trim()))
       ?.trim() ?? "";
   return line === "" ? fallback : line.length > 140 ? `${line.slice(0, 139)}…` : line;
 };
