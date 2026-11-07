@@ -224,7 +224,9 @@ export function update(dt, ctx) {
    `main.js`: the shell loads them before the title, and `ctx.assets.model("knight")`
    returns a fresh copy (skinned characters included; `.animations` holds its
    clips) and `ctx.assets.texture(name)` a texture, both synchronously in
-   `start`. Never load files inside `start` or `update`. Keep the import map.
+   `start`. A model from `game_blender_export` is named by its sidecar
+   (`cat: "assets/blender/space_cat.asset.json"`), never its GLB, so `animate`
+   gets its measurements. Never load files inside `start` or `update`. Keep the import map.
 3. Never launch your own browser. Check, play, export, bot-test and package
    ONLY with the `game_*` tools (`game_check` to check, `game_export`
    to export).
@@ -266,7 +268,24 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    for third person, moving the player relative to `cam.yaw`. Juice.shake
    applies on top. Each `ctx.assets.model` call is its own copy, so every
    character or enemy gets its own `animate`; call its `dispose()` when the
-   enemy is gone for good.
+   enemy is gone for good. A character loaded from its sidecar moves with
+   `locomotion` (`web/shell/locomotion.js`) instead of a hand-picked state:
+
+   ```js
+   import { locomotion } from "./shell/locomotion.js";
+   // in start(ctx):
+   hero = animate(ctx.assets.model("cat")); // its tail and ears spring on their own
+   loco = locomotion(hero, { walk: 0.3, run: 3.2 });
+   // in update(dt, ctx), after moving it: the speed it really moved (walls stop it)
+   loco.update({ speed: moved / dt, grounded: !airborne, vy, dt });
+   if (ctx.input.pressed("action")) loco.act("attack");
+   hero.lookAt(nearestFoe?.position ?? null);
+   ```
+
+   Walk and run then play at the clip's measured ground speed, so the feet
+   stay planted; never pass `speed` for them. Retune a chain with
+   `hero.spring("tail", { stiffness: 0.09, damping: 0.14, gravity: 4 })`.
+
 6. Never write a renderer, post-processing or lighting rig; the shell's look
    (`web/shell/look.js`; TEMPLATE.md) does it. Light the run with
    `ctx.look.sun({ follow: ctx.player, size })` and tune numbers through
