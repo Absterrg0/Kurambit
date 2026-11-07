@@ -40,7 +40,7 @@ import { playSfx } from "./audio.js";
 
 const MAX_HIT_PAUSE_S = 0.3;
 const MAX_PARTICLES = 1500;
-const TRAIL_SAMPLES = 14;
+const TRAIL_SAMPLES = 10;
 const MAX_FLASH_MESHES = 32;
 const MAX_BURSTS = 48;
 
@@ -477,6 +477,10 @@ function makeTrail(root, boneName, tipOption, color, strength) {
     "alpha",
     new THREE.BufferAttribute(alpha, 1).setUsage(THREE.DynamicDrawUsage),
   );
+  // 0 on the inner edge, 1 on the blade's edge; fixed, so it never needs an upload.
+  const edge = new Float32Array(TRAIL_SAMPLES * 2);
+  for (let i = 0; i < TRAIL_SAMPLES; i += 1) edge[i * 2 + 1] = 1;
+  geometry.setAttribute("edge", new THREE.BufferAttribute(edge, 1));
   const index = [];
   for (let i = 0; i < TRAIL_SAMPLES - 1; i += 1)
     index.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
@@ -492,16 +496,21 @@ function makeTrail(root, boneName, tipOption, color, strength) {
       uniforms: { tint: { value: tint }, strength: { value: strength } },
       vertexShader: /* glsl */ `
         attribute float alpha;
+        attribute float edge;
         varying float vAlpha;
+        varying float vEdge;
         void main() {
           vAlpha = alpha;
+          vEdge = edge;
           gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 tint;
         uniform float strength;
         varying float vAlpha;
-        void main() { gl_FragColor = vec4( tint * vAlpha * strength, 1.0 ); }`,
+        varying float vEdge;
+        // Bright along the blade's edge, gone toward the hilt: a streak, not a filled fan.
+        void main() { gl_FragColor = vec4( tint * vAlpha * strength * vEdge * vEdge * vEdge, 1.0 ); }`,
     }),
   );
   mesh.frustumCulled = false;
@@ -524,10 +533,13 @@ function makeTrail(root, boneName, tipOption, color, strength) {
       shown = trail.on ? 1 : Math.max(0, shown - dt * 8);
       for (let i = 0; i < TRAIL_SAMPLES; i += 1) {
         const sample = samples[Math.min(i, samples.length - 1)];
-        sample[0].toArray(position, i * 6);
+        const age = i / (TRAIL_SAMPLES - 1);
+        // The inner edge slides out to the tip with age, so the ribbon is a crescent that thins
+        // behind the blade. A full-width ribbon reads as a solid fan over a fast swing.
+        _a.lerpVectors(sample[0], sample[1], age).toArray(position, i * 6);
         sample[1].toArray(position, i * 6 + 3);
-        const a = shown * (1 - i / (TRAIL_SAMPLES - 1)) ** 1.5;
-        alpha[i * 2] = a * 0.15;
+        const a = shown * (1 - age) ** 2;
+        alpha[i * 2] = a;
         alpha[i * 2 + 1] = a;
       }
       geometry.attributes.position.needsUpdate = true;
