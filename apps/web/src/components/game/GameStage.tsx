@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import {
   DownloadIcon,
+  FastForwardIcon,
   HistoryIcon,
   MaximizeIcon,
   MessageSquareIcon,
@@ -11,10 +12,13 @@ import {
   MoreHorizontalIcon,
   PanelRightIcon,
   PlayIcon,
+  Redo2Icon,
   RefreshCwIcon,
+  ScanIcon,
   SparklesIcon,
   SquareIcon,
   TriangleAlertIcon,
+  Undo2Icon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -28,6 +32,7 @@ import type {
 } from "@kurambit/contracts";
 import { GAME_ENGINES, GAME_TEMPLATES } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
 import {
   buildPlaysOf,
@@ -60,14 +65,24 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { Kbd } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
 import { GameCharacterRouteMenu } from "./GameCharacterRoute";
 import { GameBuildTimeline, type GameTimelineRequest } from "./GameBuildTimeline";
 import { GameExports } from "./GameExports";
-import { GameGeneratedArt } from "./GameGeneratedArt";
 import { useChoosingCount } from "./GameGenerationCard";
+import { GameKeepGoingMenuContent } from "./GameKeepGoingControl";
+import { GameStageOverlay } from "./GameStageOverlay";
+import {
+  clearStageSelection,
+  toggleStageFreeze,
+  useStageBridge,
+  useThreadStageBridge,
+} from "./gameStageBridge";
+import { keepGoingControlView } from "./keepGoing.logic";
+import { useKeepGoing } from "./useKeepGoing";
 import { buildName } from "./gameBuilds.logic";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { GameElapsed } from "./GameElapsed";
@@ -201,6 +216,12 @@ function ThreadGameStage({
   const stopBuild = useBuildStop(threadRef);
   const plays = useBuildPlay(threadRef);
   const turnUndo = useTurnUndo(threadRef, null);
+  const turnUndoAllowed = (kind: "undo" | "redo") =>
+    turnUndo.action?.kind === kind &&
+    turnUndo.action.blocked === null &&
+    turnUndo.canRestore &&
+    turnUndo.writer &&
+    !turnUndo.pending;
   const live = useAtomValue(liveSignal(threadRef));
   // Which live change the frame shows (A6): while this chat's turn runs, at
   // most one per window, latest wins; at once otherwise and at the turn's end.
@@ -230,7 +251,34 @@ function ThreadGameStage({
   const [timelineRequest, setTimelineRequest] = useState<GameTimelineRequest | null>(null);
   const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const [artOpen, setArtOpen] = useState(false);
+  const showDockTab = useGameWorkspaceStore((state) => state.showDockTab);
+  const threadKey = scopedThreadKey(threadRef);
+  const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
+  const bridgeStatus = useThreadStageBridge(threadKey, (state) => state.status, null);
+  const selectedId = useThreadStageBridge(
+    threadKey,
+    (state) => state.selected?.thing.id ?? null,
+    null,
+  );
+  // Selecting a thing opens its Inspector; clearing the selection takes the dock back to the chat.
+  const shownSelection = useRef(selectedId);
+  useEffect(() => {
+    const before = shownSelection.current;
+    shownSelection.current = selectedId;
+    if (selectedId === before) return;
+    if (selectedId !== null) showDockTab("inspector");
+    else if (useGameWorkspaceStore.getState().dockTab === "inspector")
+      useGameWorkspaceStore.setState({ dockTab: "chat" });
+  }, [selectedId, showDockTab]);
+  const keepGoing = useKeepGoing(threadRef);
+  const keepGoingView = keepGoingControlView({
+    status: keepGoing.status,
+    error: keepGoing.error,
+    threadId: threadRef.threadId,
+    canOperate: keepGoing.canOperate,
+    sending: keepGoing.sending,
+    chosenBudget: keepGoing.chosenBudget,
+  });
   const choosing = useChoosingCount(threadRef);
   // A focus request, for the frame on screen when it came: each frame acts on a new one only.
   const [focusRequest, setFocusRequest] = useState<{
@@ -400,24 +448,18 @@ function ThreadGameStage({
       case "focus":
         setFocusRequest({ n, frame: asked !== null ? "copy" : "folder" });
         return;
-      case "undo":
-      case "redo": {
-        const turn = turnUndo.action;
-        if (
-          turn?.kind === request.kind &&
-          turn.blocked === null &&
-          turnUndo.canRestore &&
-          turnUndo.writer &&
-          !turnUndo.pending
-        )
-          void turnUndo.send();
+      case "freeze":
+        toggleStageFreeze();
         return;
-      }
+      case "undo":
+      case "redo":
+        if (turnUndoAllowed(request.kind)) void turnUndo.send();
+        return;
       case "export":
         setExportOpen(true);
         return;
       case "generated-art":
-        setArtOpen(true);
+        showDockTab("art");
         return;
     }
   });
@@ -732,6 +774,24 @@ function ThreadGameStage({
       onBlur={(event) => {
         if (isFolderGameFrame(event.target)) setGameFocused(false);
       }}
+      onKeyDown={(event) => {
+        // Tab freezes and plays on while the Stage itself has focus (a focused game
+        // keeps its own keys); Esc clears the selection. Controls keep their keys.
+        if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey)
+          return;
+        if (
+          event.key === "Tab" &&
+          !event.shiftKey &&
+          engine.stageBridge &&
+          phase.kind === "playing"
+        ) {
+          event.preventDefault();
+          toggleStageFreeze();
+        } else if (event.key === "Escape" && useStageBridge.getState().selected !== null) {
+          event.preventDefault();
+          clearStageSelection();
+        }
+      }}
       className={cn(
         "relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background outline-none",
         hidden ? "hidden" : "flex",
@@ -758,10 +818,21 @@ function ThreadGameStage({
             </span>
           </span>
           <div className="flex min-w-0 flex-1 flex-col justify-center">
-            <h2 className="min-w-0 truncate text-base font-semibold leading-5 tracking-tight">
+            <h2 className="min-w-0 truncate font-display text-xl leading-6">
               <TruncatedText text={data.manifest.name} />
             </h2>
-            {building && stageKind !== "live" ? (
+            {frozen ? (
+              <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
+                <span className="size-1.5 shrink-0 rounded-full bg-stage-mark" aria-hidden="true" />
+                <span className="truncate">
+                  {bridgeStatus === "ready"
+                    ? selectedId === null
+                      ? "Frozen · click a thing to inspect it · Tab plays on"
+                      : "Frozen · Esc clears the selection · Tab plays on"
+                    : "Frozen · selecting needs the newer game shell; your agent can update it"}
+                </span>
+              </span>
+            ) : building && stageKind !== "live" ? (
               <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
                 {/* Static: the elapsed timer already shows it is live. */}
                 <RefreshCwIcon className="size-3 shrink-0" aria-hidden="true" />
@@ -780,6 +851,80 @@ function ThreadGameStage({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <IconAction
+              label="Undo the last turn's change"
+              disabled={!turnUndoAllowed("undo")}
+              onClick={() => handleRequest({ kind: "undo" }, 0)}
+            >
+              <Undo2Icon className="size-3.5" aria-hidden="true" />
+            </IconAction>
+            <IconAction
+              label="Redo the last turn's change"
+              disabled={!turnUndoAllowed("redo")}
+              onClick={() => handleRequest({ kind: "redo" }, 0)}
+            >
+              <Redo2Icon className="size-3.5" aria-hidden="true" />
+            </IconAction>
+            <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
+            {engine.stageBridge && stageKind === "live" ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="sm"
+                      variant={frozen ? "secondary" : "ghost"}
+                      aria-pressed={frozen}
+                      disabled={phase.kind !== "playing" || bridgeStatus === null}
+                      onClick={() => {
+                        toggleStageFreeze();
+                        // Tab plays on from here, and Esc clears, while the Stage has focus.
+                        stageRef.current?.focus({ preventScroll: true });
+                      }}
+                    />
+                  }
+                >
+                  <ScanIcon className="size-3.5" aria-hidden="true" />
+                  <span className="hidden @[44rem]/stage-header:inline">
+                    {frozen ? "Frozen" : "Freeze"}
+                  </span>
+                  <Kbd className="hidden @[44rem]/stage-header:inline-flex">Tab</Kbd>
+                </TooltipTrigger>
+                <TooltipPopup side="bottom">
+                  {frozen
+                    ? "Play on (Tab)"
+                    : "Freeze the game to point at things (Tab, while the Stage has focus)"}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+            <Menu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <MenuTrigger
+                      render={
+                        <Button
+                          size="sm"
+                          variant={keepGoingView.pressed ? "secondary" : "ghost"}
+                          aria-label="Keep going"
+                          aria-pressed={keepGoingView.pressed}
+                        />
+                      }
+                    />
+                  }
+                >
+                  <FastForwardIcon
+                    className={cn("size-3.5", keepGoingView.pressed && "text-stage-mark")}
+                    aria-hidden="true"
+                  />
+                  <span className="hidden @[52rem]/stage-header:inline">{keepGoingView.label}</span>
+                </TooltipTrigger>
+                <TooltipPopup side="bottom">{keepGoingView.tooltip}</TooltipPopup>
+              </Tooltip>
+              <MenuPopup align="end">
+                <GameKeepGoingMenuContent threadRef={threadRef} />
+              </MenuPopup>
+            </Menu>
+            <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
             {stageKind === "export" ? (
               <>
                 <Button
@@ -850,7 +995,7 @@ function ThreadGameStage({
                   <DownloadIcon />
                   Export…
                 </MenuItem>
-                <MenuItem onClick={() => setArtOpen(true)}>
+                <MenuItem onClick={() => showDockTab("art")}>
                   <SparklesIcon />
                   {choosing > 0 ? `Generated art… (${choosing} to pick)` : "Generated art…"}
                 </MenuItem>
@@ -999,6 +1144,8 @@ function ThreadGameStage({
           onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
           onStudioMessage={onStudioMessage}
           focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
+          bridge={{ threadKey, enabled: engine.stageBridge }}
+          overlay={<GameStageOverlay threadKey={threadKey} />}
         />
       </div>
       <GameBuildTimeline
@@ -1040,19 +1187,6 @@ function ThreadGameStage({
                 void perform(target === "Windows" ? "export-windows" : "export-linux")
               }
             />
-          </DialogPanel>
-        </DialogPopup>
-      </Dialog>
-      <Dialog open={artOpen} onOpenChange={setArtOpen}>
-        <DialogPopup className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Generated art</DialogTitle>
-            <DialogDescription>
-              What the agent asked the art providers to make for this game.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel>
-            <GameGeneratedArt threadRef={threadRef} />
           </DialogPanel>
         </DialogPopup>
       </Dialog>
