@@ -65,6 +65,39 @@ const REQUIRED = {
   godot: "Godot 4.7.x",
   uv: "uv 0.7 or later",
 } as const;
+/**
+ * MPFB2, the human-body add-on for Blender: GPL-3.0 code, so never bundled. Only the person
+ * installs it (Settings, then the toolchain RPC); it is fetched from extensions.blender.org,
+ * whose URL is addressed by the same SHA-256, into Kurambit's own folder, and each live
+ * Blender installs it into its isolated user folder, never the user's own Blender config.
+ */
+const MPFB = {
+  version: "2.0.18",
+  download:
+    "https://extensions.blender.org/download/sha256:c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad/add-on-mpfb-v2.0.18.zip",
+  sha256: "c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad",
+  bytes: 45_956_992,
+  page: "https://extensions.blender.org/add-ons/mpfb/",
+} as const;
+const MPFB_ABOUT = `MPFB2 ${MPFB.version}: human bodies for made characters. GPL-3.0 code, downloaded from extensions.blender.org into Kurambit's own Blender folder (46 MB); the bodies are CC0.`;
+/**
+ * Whether `path` is a regular file with exactly the pinned bytes. Kept per file identity, so a
+ * status poll never rehashes 46 MB; a file changed or replaced on disk is hashed again.
+ */
+const verified = new Map<string, { readonly identity: string; readonly ok: boolean }>();
+export const verifiedFile = async (
+  path: string,
+  pin: { readonly sha256: string; readonly bytes: number },
+): Promise<boolean> => {
+  const stat = await NodeFSP.lstat(path).catch(() => null);
+  if (stat === null || !stat.isFile() || stat.size !== pin.bytes) return false;
+  const identity = `${stat.ino}:${stat.mtimeMs}:${stat.size}:${pin.sha256}`;
+  const known = verified.get(path);
+  if (known?.identity === identity) return known.ok;
+  const ok = (await fileSha256(path).catch(() => null))?.sha256 === pin.sha256;
+  verified.set(path, { identity, ok });
+  return ok;
+};
 /** Kurambit's own data folder for helpers it fetches, and where earlier versions installed engines. */
 export const toolsDirectory = () =>
   NodePath.join(
@@ -846,13 +879,99 @@ const make = Effect.gen(function* () {
         } satisfies GameToolStatus),
       ),
     );
+  const mpfbFile = NodePath.join(directory, "blender-extensions", `mpfb-${MPFB.version}.zip`);
+  const mpfbReady = Effect.promise(() => verifiedFile(mpfbFile, MPFB));
+  const mpfbStatus = Effect.gen(function* () {
+    const base = {
+      tool: "mpfb" as const,
+      path: null,
+      version: null,
+      source: null,
+      downloadUrl: MPFB.page,
+    };
+    // MPFB2 is a Blender extension: it needs a usable Blender with the extension platform (4.2+).
+    const blender = yield* probe("blender").pipe(Effect.orElseSucceed(() => null));
+    if (blender?.kind !== "ok")
+      return {
+        ...base,
+        installed: false,
+        status: "error",
+        message: `${MPFB_ABOUT} It needs Blender 4.2 or later, which Kurambit cannot use yet: see the Blender row.`,
+      } satisfies GameToolStatus;
+    if (!(yield* mpfbReady))
+      return {
+        ...base,
+        installed: false,
+        status: "warning",
+        message: `Not installed. ${MPFB_ABOUT} Characters can still use library bodies.`,
+      } satisfies GameToolStatus;
+    return {
+      ...base,
+      installed: true,
+      path: mpfbFile,
+      version: MPFB.version,
+      source: "kurambit",
+      status: "ready",
+      message: `${MPFB_ABOUT} A live Blender already open picks a change up when it reopens.`,
+      downloadUrl: null,
+    } satisfies GameToolStatus;
+  });
   const status: GameToolchain["Service"]["status"] = (options) =>
     Effect.all([
       binaryStatus("blender"),
       binaryStatus("godot"),
       binaryStatus("uv"),
       unityStatus(options?.unityProject),
+      mpfbStatus,
     ]).pipe(Effect.map((tools) => ({ tools })));
+  /** Fetched into a private stage and verified against its pin before it is moved into place. */
+  const installMpfb = fetchLock.withPermits(1)(
+    Effect.gen(function* () {
+      if (yield* mpfbReady) return;
+      const stage = yield* makeStage("install-mpfb");
+      yield* Effect.gen(function* () {
+        const staged = NodePath.join(stage, NodePath.basename(mpfbFile));
+        yield* Effect.tryPromise({
+          try: (signal) => downloadPinned(MPFB, staged, signal),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "install-mpfb",
+              path: MPFB.download,
+              reason: "download",
+              detail: `Could not download MPFB2 ${MPFB.version} from extensions.blender.org.`,
+              cause,
+            }),
+        });
+        if (!(yield* Effect.promise(() => verifiedFile(staged, MPFB))))
+          return yield* new GameOperationError({
+            operation: "install-mpfb",
+            path: MPFB.download,
+            reason: "checksum",
+            detail: `The MPFB2 ${MPFB.version} download does not match its pinned SHA-256, so it was not installed.`,
+          });
+        yield* Effect.tryPromise({
+          try: async () => {
+            await NodeFSP.mkdir(NodePath.dirname(mpfbFile), { recursive: true });
+            await NodeFSP.rename(staged, mpfbFile);
+          },
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "install-mpfb",
+              path: mpfbFile,
+              reason: "io",
+              cause,
+            }),
+        });
+      }).pipe(Effect.ensuring(dropStage(stage)));
+    }),
+  );
+  const removeMpfb = fetchLock.withPermits(1)(
+    Effect.tryPromise({
+      try: () => NodeFSP.rm(mpfbFile, { force: true }),
+      catch: (cause) =>
+        new GameOperationError({ operation: "remove-mpfb", path: mpfbFile, reason: "io", cause }),
+    }),
+  );
   const makeStage = (operation: string) =>
     Effect.tryPromise({
       try: async () => {
@@ -870,26 +989,18 @@ const make = Effect.gen(function* () {
     unityExecutables,
     status,
     revision: () => revision,
-    install: (tool) =>
-      Effect.fail(
-        new GameOperationError({
-          operation: "Install",
-          path: tool,
-          reason: "invalid-input",
-          detail: "not built",
-        }),
+    // A change moves the revision, so the cached status the Settings row reads is fresh at once.
+    install: (_tool) =>
+      installMpfb.pipe(
+        Effect.ensuring(Effect.sync(() => (revision += 1))),
+        Effect.andThen(status()),
       ),
-    remove: (tool) =>
-      Effect.fail(
-        new GameOperationError({
-          operation: "Remove",
-          path: tool,
-          reason: "invalid-input",
-          detail: "not built",
-        }),
+    remove: (_tool) =>
+      removeMpfb.pipe(
+        Effect.ensuring(Effect.sync(() => (revision += 1))),
+        Effect.andThen(status()),
       ),
-    // Not built: nothing installs MPFB2 yet, so it is never installed.
-    blenderExtension: () => Effect.succeed(null),
+    blenderExtension: (_id) => Effect.map(mpfbReady, (ready) => (ready ? mpfbFile : null)),
   });
 });
 const isExecutable = async (file: string) => {
