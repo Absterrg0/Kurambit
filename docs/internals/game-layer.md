@@ -421,14 +421,15 @@ batches renders because the pinned server gives each Blender command 180 s. The 
 ## Why this shape
 
 A model left alone grades its own work, stops when it feels done, and says it tested things. The
-harness makes these true regardless of what the model says: a separate tester plays every build,
-fresh sessions review it, blind compare reverts the loser, and the clock enforces bold moves in
-every round. Craft advice lives in the skill pack under `apps/server/templates/studio/` (plus `three.md`
+harness makes the facts true regardless of what the model says: every turn's build is played and
+measured by the harness's own bots (boots, the idle, masher and skilled tiers, liveness, response),
+and keep going undoes a step that made a watched fact worse and stops when steps stop landing
+changes. Taste stays with the person; the harness never judges it for them. Craft advice lives in the skill pack under `apps/server/templates/studio/` (plus `three.md`
 for the browser lane, `unity.md` for Unity) and the bot
 kit under `apps/server/templates/bot-kit/`; both are copied into each game when a run starts, not the product. A
 resume keeps the run's copy, so every build of one run is made and judged under the same guidance and no
 build carries harness text as its own work. `GameCreateInput.engine`
-(`godot` default, `three` for the browser lane, `unity`) picks the starter template (`blank` /
+(`godot` when omitted on the wire; the app defaults new games to the first ready engine with `turnLoop`, three.js today; `three` for the browser lane, `unity`) picks the starter template (`blank` /
 `blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
 project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.
 The Godot starter's main scene is a genre-free demo shell (title, pause, settings, controls, end, credits)
