@@ -289,11 +289,18 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   is measured but not played. Freshness is decided inside the game's lock, and a fresh build is
   left as it is, so a turn that changed nothing playable never restarts a game the person
   stopped. Each thread's turns run forked, in order, off the event
-  stream, so one game's wait for its lock never holds another's. Role and subagent turns are the
-  run's, and while a run holds the game it owns the folder, so neither is played. A newer turn's
-  measure drops an earlier turn's that is still queued (`supersede`), never one running, a
-  person's or a run's. A restart can cut a turn's work off, so the reconcile measures the newest
-  turn build of each turn-loop game that has no facts.
+  stream, so one game's wait for its lock never holds another's. Subagent turns (and a stage-era
+  run's role turns) are no builds of their own. A newer turn's measure drops an earlier turn's
+  that is still queued (`supersede`), never one running, a person's or keep going's. A restart can
+  cut a turn's work off, so the reconcile measures the newest turn build of each turn-loop game
+  that has no facts. A keep-going step is such a turn: its row carries `source.step` (number,
+  verdict, reason) from `GameRunControl.steps`, which is how the strip and the timeline mark it.
+- **An automatic undo never takes a person's work.** Keep going's undo is the same restore with
+  `expect`: the folder must still hold the step's build, unedited, or nothing moves and the answer
+  is `moved-on`. It is checked under the game's lock before the restore record is written, so a
+  refusal keeps the game's last restore and its Redo, and again against the park inside the
+  move, which a repeat after a restart reads too. A folder that already holds the base answers
+  `current`: the person undid the step first.
 - **A build's base is fixed when it lands.** `base` is what restoring undoes a build to. A
   turn's is the folder as the turn began: T3's diff base (turn 1's is the start checkpoint,
   ordinal 0), or a newer build that landed in between, such as a restore's target. It is

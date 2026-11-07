@@ -9,12 +9,7 @@ import type * as Path from "effect/Path";
 import { GameOperationError, type GameEngineId } from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
-import {
-  CREATOR_HEADING,
-  CREATOR_SESSION_SECTION,
-  RUN_STATE_IGNORES,
-  withEveryTurn,
-} from "./scaffold.ts";
+import { RUN_STATE_IGNORES, withEveryTurn, withKeepGoing } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
 import { failureText } from "./run/handBack.ts";
 
@@ -35,15 +30,6 @@ const readText = (path: string): Promise<string | null> =>
 /** A run's line for people, in the server log: the run's step records are its history. */
 export const logLine = (root: string, line: string): Effect.Effect<void> =>
   Effect.logInfo(line).pipe(Effect.annotateLogs({ game: root }));
-
-// A game made before the decision protocol has the older creator section; it is replaced whole.
-const withCreatorSection = (agents: string): string => {
-  if (agents.includes("game_run_decide")) return agents;
-  const at = agents.indexOf(CREATOR_HEADING);
-  if (at < 0) return `${agents.trimEnd()}\n\n${CREATOR_SESSION_SECTION}`;
-  const after = agents.indexOf("\n## ", at + CREATOR_HEADING.length);
-  return `${agents.slice(0, at)}${CREATOR_SESSION_SECTION}${after < 0 ? "" : agents.slice(after)}`;
-};
 
 const ioError = (operation: string, path: string, cause: unknown) =>
   new GameOperationError({
@@ -155,7 +141,7 @@ export const ensureScaffold = (
         )) ?? "";
       let agents = before.replace(STALE_SKILLS, "").replace(ROLE_SKILLS_HEADING, SKILLS_HEADING);
       if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;
-      agents = withEveryTurn(withCreatorSection(agents), engine);
+      agents = withEveryTurn(withKeepGoing(agents, engine), engine);
       if (agents !== before)
         yield* writeFileStringAtomically({
           filePath: NodePath.join(root, "AGENTS.md"),

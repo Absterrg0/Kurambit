@@ -44,6 +44,10 @@ import {
   GameExploreStartResult,
   GameExploreActResult,
   GameExploreCloseResult,
+  GameKeepGoingInput,
+  GameKeepGoingStatus,
+  GameKeepGoingSteerInput,
+  GameKeepGoingSteerResult,
   GameBotRunInput,
   GameBotRunResult,
   GameBotReportResult,
@@ -59,6 +63,7 @@ import {
 } from "@kurambit/contracts";
 import { PROFILES, type GameEngineProfile } from "../../../game/engineProfile.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
+import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -489,6 +494,49 @@ const BuildRestoreTool = Tool.make("game_build_restore", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 
+/** Keep going: the same service the composer control and the banner reach. */
+const keepGoingDependencies = [
+  GameRunControl.GameRunControl,
+  McpInvocationContext.McpInvocationContext,
+  ThreadManagementService.ThreadManagementService,
+];
+const KeepGoingTool = Tool.make("game_keep_going", {
+  description:
+    "Turn Keep going on or off for this chat, only when the person asks. off stops it; a step's turn in flight ends and still becomes a build. guided proposes each next step in the composer and starts it after a minute unless the person changes it. autopilot takes each next step itself, and undoes one that makes a measured fact worse (the person can redo it). Choosing a mode while it is paused resumes it, keeping the steps it set aside and the notes waiting for it. budgetMinutes (null for no limit; a new run's is 60) applies when it starts or resumes. Keep going runs only on games Kurambit plays after every turn (three.js); elsewhere, or while it is on in another chat of the game, it is refused with why. Returns what game_keep_going_status returns.",
+  parameters: Schema.Struct({
+    mode: GameKeepGoingInput.fields.mode,
+    budgetMinutes: GameKeepGoingInput.fields.budgetMinutes,
+    commandId,
+  }),
+  success: GameKeepGoingStatus,
+  failure,
+  failureMode: "return",
+  dependencies: keepGoingDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const KeepGoingStatusTool = Tool.make("game_keep_going_status", {
+  description:
+    "Keep going on this game: off, guided or autopilot; what it is doing now (waiting for a turn to end, reading the build's facts, a proposal and when it starts, a step's turn, measuring, undoing); its last 10 steps with each verdict, reason and fact changes; the person's notes waiting for the next step; the steps it set aside and why; when its budget ends; and why it last stopped and whether choosing a mode resumes it. A message in this chat that starts \"Keep going · step N\" is a step: do that one change as it asks, like any turn. The person's own messages always come first. Read-only.",
+  success: GameKeepGoingStatus,
+  failure,
+  failureMode: "return",
+  dependencies: keepGoingDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const KeepGoingSteerTool = Tool.make("game_keep_going_steer", {
+  description:
+    "Give Keep going the person's words for its next step, when they ask for that from another chat of the game, or want it taken up after the step in flight: the next step carries them as they said them, before anything keep going would choose. One request per call, in their words. Returns how many notes are waiting. In the chat keep going runs in, the person's own message goes first anyway.",
+  parameters: Schema.Struct({ text: GameKeepGoingSteerInput.fields.text, commandId }),
+  success: GameKeepGoingSteerResult,
+  failure,
+  failureMode: "return",
+  dependencies: keepGoingDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
   BlenderCodeTool,
@@ -522,4 +570,7 @@ export const GameToolkit = Toolkit.make(
   BuildsTool,
   FactsTool,
   BuildRestoreTool,
+  KeepGoingTool,
+  KeepGoingStatusTool,
+  KeepGoingSteerTool,
 );

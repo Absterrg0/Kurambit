@@ -37,6 +37,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { isGameRunOperationOwner } from "../orchestration-v2/gameRun/ids.ts";
 import { gameRunHold } from "../orchestration-v2/CommandPolicy.ts";
 import { stepLine } from "./run/runView.ts";
+import { stepNumber } from "./run/state.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
@@ -185,12 +186,25 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const vcs = yield* VcsDriverRegistry.VcsDriverRegistry;
   const createLocks = yield* KeyedLock.make<string>();
-  // The game's run as its records hold it: a card says what a live run is doing.
+  // The game's run as its records hold it: a card says what keep going is
+  // doing, and that it is paused until it is turned on again. A run that
+  // finished, or that an earlier Kurambit made and that ended, reads nothing.
   const liveRun = (projectId: ProjectId) =>
     Effect.gen(function* () {
       const run = yield* projections.getProjectGameRun(projectId);
-      if (run === null || run.status === "ended") return null;
-      return { step: stepLine(run), startedAt: run.startedAt } satisfies GameSummary["run"];
+      if (run === null) return null;
+      if (run.status === "ended")
+        return run.loop !== "turns" || run.ending === "done"
+          ? null
+          : ({ step: stepLine(run), startedAt: run.startedAt } satisfies GameSummary["run"]);
+      const n =
+        run.loop === "turns"
+          ? stepNumber(
+              (yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" }))
+                .gameRunRounds,
+            )
+          : undefined;
+      return { step: stepLine(run, n), startedAt: run.startedAt } satisfies GameSummary["run"];
     }).pipe(Effect.orElseSucceed(() => null));
   const path = yield* Path.Path;
   /**

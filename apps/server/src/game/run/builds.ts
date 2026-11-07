@@ -210,7 +210,7 @@ export type InFolder<A> = { readonly parked: string; readonly back: string | nul
   | { readonly kind: "current" | "done"; readonly value: A }
   | {
       readonly kind: "refused";
-      readonly why: "gone" | "incomplete" | "broke";
+      readonly why: "gone" | "incomplete" | "broke" | "moved-on";
       readonly detail: string;
     }
 );
@@ -233,8 +233,10 @@ const caught =
  * the park, so a repeat answers as the first try did. A refusal or failure on
  * the way, or a work that asks, puts the work back; `keep` names follow the
  * build in, `back` names follow the work back, and `check` names the capture
- * each move is verified by. An interrupt leaves the rest to the repeat: every
- * move is whole (buildStep).
+ * each move is verified by. With `expect`, a folder whose work is not that
+ * build (a turn or an edit since) is refused "moved-on" and nothing moves;
+ * the park is what is compared, so a repeat answers as the first try did. An
+ * interrupt leaves the rest to the repeat: every move is whole (buildStep).
  */
 export const withBuildInFolder = <A, E>(
   deps: Parameters<typeof buildStep>[0],
@@ -245,6 +247,7 @@ export const withBuildInFolder = <A, E>(
     readonly keep?: ReadonlyArray<string>;
     readonly back?: { readonly names: ReadonlyArray<string>; readonly sha: string };
     readonly check?: string;
+    readonly expect?: string;
   },
   work: (current: boolean) => Effect.Effect<{ readonly value: A; readonly putBack: boolean }, E>,
 ) =>
@@ -262,6 +265,17 @@ export const withBuildInFolder = <A, E>(
         back: null,
         kind: "current",
         value: (yield* work(true)).value,
+      } satisfies InFolder<A>;
+    if (
+      move.expect !== undefined &&
+      (yield* measureChange(checkpoints, root, restored, parkRef, move.expect)).changed
+    )
+      return {
+        parked,
+        back: null,
+        kind: "refused",
+        why: "moved-on",
+        detail: "the game changed after the build it was to undo",
       } satisfies InFolder<A>;
     // The folder holds `expected`, or says why it does not.
     const verify = (expected: string) =>

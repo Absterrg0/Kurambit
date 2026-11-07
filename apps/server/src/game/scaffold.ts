@@ -90,28 +90,19 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
 }
 
 /**
- * The creator's own session and a live production run share this folder; the
- * run's builder edits it and the run restores builds into it, which would
- * overwrite the session's edits.
+ * Keep going, for the agent of a game whose turns Kurambit plays (engineProfile
+ * turnLoop): what a step message is and what the run does with its build.
  */
-export const CREATOR_HEADING = "## The creator's session and the production run";
-export const CREATOR_SESSION_SECTION = `${CREATOR_HEADING}
+export const KEEP_GOING_HEADING = "## Keep going";
+export const KEEP_GOING_SECTION = `${KEEP_GOING_HEADING}
 
-This section is for the creator's own session on this game. A session the production run launched for one of its roles follows its prompt instead.
-
-A production run may be working on this game; game_run_status says whether one is live and what it is doing. While one is live, do not edit the game's files: the run is changing them and restores its builds into the folder, which would overwrite your edits. Pass the creator's requests to the run with game_run_steer and tell them the run's next round takes it up. When no run is live, work on the game directly as usual. A run ends once its ladder is done and the ship check has played the game; it does not polish on its own. When the creator wants the run to polish something, pass their request with game_run_steer: the run comes back for one round on it, then stops.
-
-A run is Guided or on Autopilot. A Guided run asks the creator at its decision points (the vision's look, which prototype to keep, the ladder of what to build) by sending a message to this chat. When one arrives, read the decision with game_run_status and present it:
-
-- Show the evidence as a visual reply: an HTML render with the images by their local paths (key art, each prototype's frame sheet), and the pitches or the ladder as short text.
-- Say in a few plain lines what differs or what to look at; no jargon about the run.
-- Ask, and invite an answer in the creator's own words. They may combine ("the first one's movement with the second one's camera"), change things, or let the run decide.
-- Say what the run does by itself if nobody answers, and when (game_run_status gives the time).
-
-Record the answer with game_run_decide: choose the answer that fits what they said and put their words in notes. A refused answer comes back with the reason; fix it and call again. Do not answer for the creator; if nobody answers, the run takes its default by itself.
-
-The creator can ask at any time to start or resume the run (game_run_start), stop it (game_run_stop), switch it between Guided and Autopilot (game_run_profile), steer it (game_run_steer) or put the game back to a kept round (game_run_restore).
+- The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Do that one step, like any turn: one change, \`game_check\` clean, end with your \`Next:\` line.
+- Kurambit measures the step's build, and undoes the step itself when it makes a fact worse; the person can redo it. Do not put an undone change back unless they ask.
+- A step that asks you to fix a measured fact may be wrong for this game: then change nothing and say why in one line. Kurambit sets that step aside.
+- The person's own messages always come first. Turn keep going on or off (\`game_keep_going\`) only when they ask.
 `;
+/** The section an earlier Kurambit wrote for its production run, whose tools are gone. */
+export const STAGE_ERA_HEADING = "## The creator's session and the production run";
 
 const EVERY_TURN_HEADING = "## Every turn";
 
@@ -166,15 +157,34 @@ More waves and levels, menu art, music and polish are later turns.
 
 /**
  * An existing game's AGENTS.md with its engine's "Every turn" section, added
- * once before the creator section, so a game made before the turn loop learns
- * that its turns are played and can be undone. Pure; unchanged when present.
+ * once before the keep-going section, so a game made before the turn loop
+ * learns that its turns are played and can be undone. Pure; unchanged when present.
  */
 export const withEveryTurn = (agents: string, engine: GameEngineId): string => {
   const section = everyTurnSection(engine);
   if (section === undefined || agents.includes(EVERY_TURN_HEADING)) return agents;
-  const at = agents.indexOf(CREATOR_HEADING);
+  const keepGoing = agents.indexOf(KEEP_GOING_HEADING);
+  const at = keepGoing >= 0 ? keepGoing : agents.indexOf(STAGE_ERA_HEADING);
   if (at < 0) return `${agents.trimEnd()}\n\n${section}`;
   return `${agents.slice(0, at)}${section}\n${agents.slice(at)}`;
+};
+
+/**
+ * The game's keep-going section, in place of the production run's section an
+ * earlier Kurambit wrote (its tools no longer exist), or added once. An engine
+ * keep going cannot run on only loses the stale section. Pure.
+ */
+export const withKeepGoing = (agents: string, engine: GameEngineId): string => {
+  const section = engineProfile(engine).turnLoop ? KEEP_GOING_SECTION : "";
+  const at = agents.indexOf(STAGE_ERA_HEADING);
+  if (at >= 0) {
+    const after = agents.indexOf("\n## ", at + STAGE_ERA_HEADING.length);
+    const rest = after < 0 ? "" : agents.slice(after + 1);
+    const kept = agents.includes(KEEP_GOING_HEADING) ? "" : section;
+    return `${agents.slice(0, at)}${kept}${kept !== "" && rest !== "" ? "\n" : ""}${rest}`;
+  }
+  if (section === "" || agents.includes(KEEP_GOING_HEADING)) return agents;
+  return `${agents.trimEnd()}\n\n${section}`;
 };
 
 /**
@@ -226,7 +236,7 @@ Use the game_* tools to check, play, export and package the game; never run Godo
       projectLine,
       everyTurnSection(engine),
       FIRST_TURN_SECTIONS[engine],
-      CREATOR_SESSION_SECTION,
+      engineProfile(engine).turnLoop ? KEEP_GOING_SECTION : undefined,
     ]
       .filter((section) => section !== undefined)
       .join("\n"),

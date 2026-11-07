@@ -141,3 +141,15 @@ play. They read only the shell's run state (`GameState.state` and
 `result`), so a game that keeps those and starts on Enter gets its facts.
 If the masher wins in seconds, the game has no challenge; if idle wins, it
 plays itself.
+
+## A keep-going bot step
+
+The harness's third tier, `skilled`, plays the game's latest play-mode bot
+(the newest `game_bot_run` with `mode: "play"`). A game with none gets one
+from a keep-going step, once: write `.studio/bot/play.mjs`, a win bot with a
+`policy` whose goal is to win one run of the core loop with the game's own
+verbs, run it with `game_bot_run` (decider `policy`) and fix it until it
+plays a full run. Change no game files in that step: its build is the game
+as it was, so only `skilled` is measured again. From then on every build is
+played with it, so keep it general to the game's verbs and goal rather than
+one level's layout, and update it when the game's rules change.

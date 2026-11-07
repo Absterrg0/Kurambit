@@ -7,6 +7,7 @@ import * as GameBuildsReactor from "./game/GameBuildsReactor.ts";
 import * as GameFacts from "./game/GameFacts.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameRunStepRunner from "./game/run/GameRunStepRunner.ts";
+import * as GameRunTurnReactor from "./game/run/GameRunTurnReactor.ts";
 import * as GameRunRecovery from "./orchestration-v2/gameRun/GameRunRecovery.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
@@ -503,12 +504,16 @@ const layerCommandReadiness = HttpRouter.middleware(
   { global: true },
 );
 
-// Keep going's game-side work: the step runner gives GameRunJobs its work.
-const layerGameRunWork = GameRunStepRunner.layer.pipe(Layer.provide(ProjectionStoreV2.layer));
-const layerGameServices = GameBuilds.layer.pipe(
+// Keep going's game-side work: the step runner gives GameRunJobs its work, and
+// the turn reactor follows each step's turn; both stand on the game's builds.
+const layerGameRunWork = GameRunStepRunner.layer.pipe(
+  Layer.provideMerge(GameRunTurnReactor.layer),
+  Layer.provide(ProjectionStoreV2.layer),
+);
+const layerGameServices = layerGameRunWork.pipe(
+  Layer.provideMerge(GameBuilds.layer),
   Layer.provideMerge(GameFacts.layer),
   Layer.provideMerge(GameRunControl.layer),
-  Layer.provideMerge(layerGameRunWork),
   Layer.provide(ProjectionStoreV2.layer),
   Layer.provideMerge(GameService.layer),
   Layer.provideMerge(GameProjectService.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
@@ -542,8 +547,10 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.effectDiscard(
     Effect.gen(function* () {
       const runner = yield* GameRunStepRunner.GameRunStepRunner;
+      const turns = yield* GameRunTurnReactor.GameRunTurnReactor;
       const recovery = yield* GameRunRecovery.GameRunRecovery;
       yield* runner.start();
+      yield* turns.start();
       yield* forkParked(recovery.recover());
     }),
   ),

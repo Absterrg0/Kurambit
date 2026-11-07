@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import { GameOperationError, type ThreadId } from "@kurambit/contracts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
 import { GameCaller } from "../../../game/GameCaller.ts";
+import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -37,6 +38,21 @@ const withBuilds = <A, E>(
     const scope = yield* caller;
     return yield* work(yield* GameBuilds.GameBuilds, scope.thread.threadId).pipe(
       Effect.provideService(GameCaller, { kind: "agent", runRole: scope.gameRunRole === "run" }),
+    );
+  });
+/** One tool call on the calling chat's keep going, its refusals as operation errors. */
+const withKeepGoing = <A>(
+  work: (
+    runs: GameRunControl.GameRunControl["Service"],
+    threadId: ThreadId,
+  ) => Effect.Effect<A, GameRunControl.GameRunError>,
+) =>
+  Effect.gen(function* () {
+    const scope = yield* caller;
+    return yield* work(yield* GameRunControl.GameRunControl, scope.thread.threadId).pipe(
+      Effect.mapError((cause) =>
+        GameRunControl.GameRunError.toOperationError(`keep-going-${cause.operation}`, cause),
+      ),
     );
   });
 // Within the shortest tool-call timeout a provider gives an MCP server (Codex's is 60s).
@@ -162,6 +178,28 @@ const handlers = {
     withBuilds((builds, threadId) =>
       builds.restore(threadId, { _tag: "build", build: input.build }, input.commandId, {
         waitFor: TOOL_RESTORE_WAIT,
+      }),
+    ),
+  ),
+  game_keep_going: McpToolAccess.actsAsCaller((input) =>
+    withKeepGoing((runs, threadId) =>
+      runs.set(threadId, {
+        threadId,
+        mode: input.mode,
+        ...(input.budgetMinutes === undefined ? {} : { budgetMinutes: input.budgetMinutes }),
+        ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+      }),
+    ),
+  ),
+  game_keep_going_status: McpToolAccess.readsAsCaller(() =>
+    withKeepGoing((runs, threadId) => runs.status(threadId)),
+  ),
+  game_keep_going_steer: McpToolAccess.actsAsCaller((input) =>
+    withKeepGoing((runs, threadId) =>
+      runs.steer(threadId, {
+        threadId,
+        text: input.text,
+        ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
       }),
     ),
   ),

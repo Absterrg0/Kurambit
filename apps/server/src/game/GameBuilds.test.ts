@@ -115,7 +115,10 @@ const world = Effect.gen(function* () {
           harness: "test",
           readMany: () => Effect.succeed(new Map()),
         }),
-        Layer.mock(GameRunControl.GameRunControl)({ runBuilds: () => Effect.succeed(null) }),
+        Layer.mock(GameRunControl.GameRunControl)({
+          runBuilds: () => Effect.succeed(null),
+          steps: () => Effect.succeed(new Map()),
+        }),
         Layer.mock(GameService.GameService)({}),
         Layer.mock(GameOperations.GameOperations)({ current: () => null, events: Stream.empty }),
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
