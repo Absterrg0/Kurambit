@@ -124,6 +124,31 @@ const clockTime = (at: string) => {
  * (`GAME_ENGINES[engine].stage`): its folder served live, a Web export, or its
  * own window.
  */
+let webGlProbe: boolean | undefined;
+/** Whether this renderer can make a WebGL context at all; asked once. */
+const rendererHasWebGl = () => {
+  if (webGlProbe === undefined) {
+    const canvas = document.createElement("canvas");
+    webGlProbe = (canvas.getContext("webgl2") ?? canvas.getContext("webgl")) !== null;
+  }
+  return webGlProbe;
+};
+
+function NoWebGlCard() {
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-stage p-6">
+      <div className="flex max-w-md flex-col gap-2 rounded-xl border border-border bg-background p-5 text-sm">
+        <p className="font-medium">This computer's browser can't run 3D here</p>
+        <p className="text-muted-foreground">
+          WebGL is turned off in Kurambit on this computer, usually because the graphics driver is
+          blocked or there is no GPU (a virtual machine, a remote desktop). The game itself is fine:
+          Kurambit still measures its facts, and its web export plays in another browser.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function GameStage(props: GameStageProps) {
   // One stage per thread: a compare, a pick, a held reload or an error of one
   // game never carries into another (ChatView keeps its children mounted).
@@ -521,6 +546,9 @@ function ThreadGameStage({
   const frameKey = frame.key;
   // A reload clears what the old page threw; a later error sets it again.
   const liveError = studioError !== null && studioError.key === frameKey ? studioError.text : null;
+  // A game that cannot make a WebGL context here is the machine's browser, not
+  // the agent's work: confirmed by the app's own renderer, which shares the GPU.
+  const noWebGl = liveError !== null && /webgl/i.test(liveError) && !rendererHasWebGl();
   const failureVisible =
     error ??
     (operation !== null && operationVisible && operation.state === "failed"
@@ -637,7 +665,7 @@ function ThreadGameStage({
           Ask agent to fix
         </Button>
       </div>
-    ) : liveError !== null ? (
+    ) : liveError !== null && !noWebGl ? (
       // Mid-turn, a save may be half-written: the error is named, not alarmed.
       <div className="flex items-center gap-2 border-t border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
         <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
@@ -919,9 +947,12 @@ function ThreadGameStage({
       <div
         aria-hidden={playTarget !== null || compare !== null}
         className={
-          playTarget === null && compare === null ? "flex min-h-0 flex-1 flex-col" : "hidden"
+          playTarget === null && compare === null
+            ? "relative flex min-h-0 flex-1 flex-col"
+            : "hidden"
         }
       >
+        {noWebGl ? <NoWebGlCard /> : null}
         <GamePlaySurface
           phase={phase}
           viewport={data.viewport}
