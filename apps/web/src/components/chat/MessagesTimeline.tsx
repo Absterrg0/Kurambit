@@ -1020,9 +1020,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
     setFullscreenAppRowId((current) => (fullscreen ? rowId : current === rowId ? null : current));
   };
   const alwaysRenderIndices = restoringAlwaysRender?.indices ?? [];
+  // Generation cards stay mounted: a card may wait on the person's pick, and the list sizes a row
+  // it has not drawn by a guess far from a card's height, so a card far up the chat was otherwise
+  // never drawn. A chat holds few of them.
+  const generationCardKeys = rows.flatMap((row) =>
+    row.kind === "game-generation" ? [keyExtractor(row)] : [],
+  );
   const alwaysRenderKeys = [
     ...(citationAlwaysRender?.keys ?? []),
     ...(fullscreenAppRowId === null ? [] : [fullscreenAppRowId]),
+    ...generationCardKeys,
   ];
   const alwaysRender =
     alwaysRenderIndices.length === 0 && alwaysRenderKeys.length === 0
