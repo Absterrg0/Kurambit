@@ -37,10 +37,9 @@ def _clip_name(action):
 
 def _rest_idle(arm, owner, stamp, frames=30):
     """A looping clip that holds every bone at rest: a creature's way of standing still."""
-    act = bpy.data.actions.new("Idle_Loop")
+    act = bpy.data.actions.new(helpers.action_name(owner, "Idle_Loop"))
     act.use_fake_user = True
     act["kurambit_owner"] = owner
-    # Another character's Idle_Loop may hold the name in the scene; the export names clips by this.
     act["kurambit_clip"] = "Idle_Loop"
     act["kurambit_source"] = json.dumps({"what": "clips", **stamp})
     skeleton.assign_action(arm, act)
@@ -124,8 +123,8 @@ def generated(params):
             a["kurambit_owner"] = name
             a["kurambit_clip"] = label
             a["kurambit_source"] = json.dumps({"what": "clips", **stamp})
-            a.name = label
-            clips.append(a.name)
+            a.name = helpers.action_name(name, label)
+            clips.append(label)
         idle = next((a for a in actions if "idle" in a.name.lower()), None)
         if actions and idle is None:
             # Tripo's creature presets are one walk or march and no idle, so a creature standing

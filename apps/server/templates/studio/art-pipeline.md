@@ -178,6 +178,11 @@ through the review and the export is not finished.
    round or chibi character (a cat, a gnome, a mascot) takes a child body
    (`age` 0.1 to 0.25); a lean adult body under a big head reads as a
    person in a costume.
+   A `game` body (an earlier export, a generated humanoid) keeps its own
+   clips beside the library ones, and any body keeps its own skinned bones
+   that hang from a joint (a robe's skirt, a sash, hair) as spring chains
+   with their weights. In Blender a clip is the action `<name>|<clip>`;
+   `key_pose` and the export use the clip's own name.
 3. **Parts** with `game_blender_code`, in world space at the rest pose.
    `kurambit` is already imported:
    - `kurambit.material("#RRGGBB", glow=0)`: a colour by palette role;

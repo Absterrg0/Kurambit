@@ -4,7 +4,9 @@ params (the server resolves every path):
     name      the collection, the armature's name and the export's default stem
     body      {"library": abs, "pack"?: id, "licence"?: str} | {"mpfb": {age, gender, weight, ...}}
               | {"game": abs, "source"?: {from, licence, ai, credits}} (source: a generated file's
-              record, read by the server; without it the sidecar beside the file is the ledger)
+              record, read by the server; without it the sidecar beside the file is the ledger).
+              A game body keeps its own clips, and every body its own skinned bone chains (cloth,
+              hair) as spring chains.
     standard  abs path of the standard armature's GLB (STANDARD_ARMATURE)
     clips     [{pack, name, path, licence?}] | {pack, name, path, licence, source, motion: true}: a GLB
               the motion lane delivered (one clip retargeted onto the body it holds), its source
@@ -78,14 +80,17 @@ def _mpfb_body(spec):
     return rig, [body], skeleton.NAME_MAPS["mpfb_game_engine"]
 
 
-def _file_body(path):
+def _file_body(path, keep_clips=False):
+    """(armature, meshes, name map, the body's own clips when keep_clips, else none)."""
     if not os.path.isfile(path):
         raise Refused("invalid-input", f"no body file at {path}")
     new, actions = skeleton.import_model(path)
-    for a in actions:
-        bpy.data.actions.remove(a)
+    if not keep_clips:
+        bpy.data.batch_remove(set(actions))
+        actions = []
     rigs = [o for o in new if o.type == "ARMATURE"]
     if len(rigs) != 1:
+        bpy.data.batch_remove(set(actions))
         skeleton.remove_objects(new)
         raise Refused("invalid-input", f"{os.path.basename(path)} holds {len(rigs)} armatures: a body is one rigged humanoid on the standard skeleton")
     rig = rigs[0]
@@ -96,7 +101,37 @@ def _file_body(path):
             o.parent = None
             o.matrix_world = mw
     skeleton.remove_objects([o for o in new if o is not rig and o not in meshes])
-    return rig, meshes, skeleton.humanoid_map({b.name: b.parent.name if b.parent else None for b in rig.data.bones})
+    return rig, meshes, skeleton.humanoid_map({b.name: b.parent.name if b.parent else None for b in rig.data.bones}), actions
+
+
+def _body_clips(actions, rig, name_map, reference, bones, notes):
+    """The clips a body came with (a hand-keyed cut, a dodge), on the standard names: [(action,
+    label)]. glTF keys absolute joint rotations, so they play as made only when the body's rest
+    frames are the standard's; off them they are dropped with a note. Keys on bones that do not
+    stay (merged into a joint) go."""
+    if not actions:
+        return []
+    frames = {name_map.get(n, n): q for n, q in skeleton.local_frames(rig).items()}
+    worst = max(((math.degrees(frames[n].rotation_difference(q).angle), n) for n, q in reference.items() if n in frames), default=(0.0, None))
+    if worst[0] > MAX_REST_DEVIATION:
+        notes.append(f"the body's own clips ({', '.join(sorted(a.name for a in actions))[:200]}) were left out: its {worst[1]} rest frame is {worst[0]:.1f}° off the standard skeleton (at most {MAX_REST_DEVIATION:.0f}°), so they would play twisted on it")
+        bpy.data.batch_remove(set(actions))
+        return []
+    out = []
+    for act in actions:
+        fcs = skeleton.action_fcurves(act)
+        for fc in list(fcs):
+            m = re.match(r'^pose\.bones\["(.+?)"\](.*)$', fc.data_path)
+            joint = name_map.get(m.group(1), m.group(1)) if m else None
+            if joint not in bones:
+                fcs.remove(fc)
+            elif joint != m.group(1):
+                fc.data_path = f'pose.bones["{joint}"]{m.group(2)}'
+        if len(fcs) == 0:
+            bpy.data.actions.remove(act)
+            continue
+        out.append((act, re.sub(r"\.\d{3}$", "", act.name)))
+    return out
 
 
 def _part(p):
@@ -139,6 +174,8 @@ def _game_source(path):
 
 # The most a clip's skeleton may differ from the standard's rest frames, as the export allows.
 MAX_REST_DEVIATION = 2.0
+# The most spring chains a model's sidecar holds (GameModelSpring).
+MAX_SPRINGS = 8
 
 
 def _height(arm, name_map):
@@ -294,19 +331,32 @@ def character(params):
     std_arm = next(o for o in std_new if o.type == "ARMATURE")
     skeleton.remove_objects([o for o in std_new if o is not std_arm])
     reference = skeleton.local_frames(std_arm)
-    taken, body_arm, meshes = [], None, []
+    taken, body_arm, meshes, own_actions, own, extra, unit = [], None, [], [], [], [], 1.0
+    joints = set(std_arm.data.bones.keys())
     try:
+        asked_bones = set()
         for chain in params.get("chains", []):
             if chain["parent"] not in std_arm.data.bones:
                 raise Refused("invalid-input", f"chain {chain['name']}: the standard skeleton has no joint {chain['parent']} (a tail hangs from pelvis, ears from Head)")
+            labels = [f"{chain['name']}_l", f"{chain['name']}_r"] if chain.get("mirror") else [chain["name"]]
+            asked_bones |= {f"{label}_{i + 1:02d}" for label in labels for i in range(int(chain["bones"]))}
         taken = _take_clips(params.get("clips", []), standard, std_actions, reference, _height(std_arm, {}))
         if "mpfb" in body_spec:
             body_arm, meshes, name_map = _mpfb_body(body_spec["mpfb"])
             body_part = {**MADE_BODY, "from": "mpfb2", "licence": MPFB_LICENCE}
         else:
             path = body_spec.get("library") or body_spec.get("game")
-            body_arm, meshes, name_map = _file_body(path)
-            skeleton.merge_unmapped(meshes, body_arm, name_map, set(std_arm.data.bones.keys()))
+            body_arm, meshes, name_map, own_actions = _file_body(path, keep_clips="game" in body_spec)
+            # The body's own cloth, hair and tails stay as spring chains, as many as a model springs.
+            extra = skeleton.body_chains(meshes, body_arm, name_map, joints)
+            room = MAX_SPRINGS - sum(2 if c.get("mirror") else 1 for c in params.get("chains", []))
+            if len(extra) > room:
+                notes.append(f"the body's own {len(extra)} bone chains ({', '.join(n for n, _, _ in extra)[:200]}) were merged into their joints: a model springs at most {MAX_SPRINGS} chains, and {MAX_SPRINGS - room} are asked for in chains")
+                extra = []
+            clash = sorted(asked_bones & {b for _, bones, _ in extra for b in bones})
+            if clash:
+                raise Refused("invalid-input", f"the body already has bones {', '.join(clash[:6])}, which it keeps as its own spring chains: leave that chain out of chains, or name it another way")
+            skeleton.merge_unmapped(meshes, body_arm, name_map, joints | {b for _, bones, _ in extra for b in bones})
             if body_spec.get("source"):
                 body_part = {"what": "body", **body_spec["source"]}
             elif "game" in body_spec:
@@ -317,10 +367,13 @@ def character(params):
         missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in has]
         if missing:
             raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)} under any name the kit knows (UE, Mixamo, KayKit and similar): it is not a humanoid, or its bones are named another way. A creature keeps its own rig: import it with game_blender_assets_import instead. Its bones: {', '.join(b.name for b in body_arm.data.bones)[:600]}")
-        ratio = skeleton.conform(std_arm, body_arm, meshes, name_map)
+        own = _body_clips(own_actions, body_arm, name_map, reference, joints | {b for _, bones, _ in extra for b in bones}, notes)
+        # Its clips move the pelvis in the body's own units.
+        unit = body_arm.matrix_world.to_scale().z / std_arm.matrix_world.to_scale().z
+        ratio = skeleton.conform(std_arm, body_arm, meshes, name_map, extra)
     except BaseException:
         # a refused or failed build leaves the live scene as it was
-        bpy.data.batch_remove({a for a in [*std_actions, *(t[0] for t in taken)] if _alive(a)})
+        bpy.data.batch_remove({a for a in [*std_actions, *(t[0] for t in taken), *own_actions] if _alive(a)})
         skeleton.remove_objects([o for o in [std_arm, body_arm, *meshes] if o is not None and _alive(o)])
         raise
 
@@ -354,6 +407,16 @@ def character(params):
         if carried:
             o["kurambit_parts"] = json.dumps(carried)  # the ledger's other parts this body brings
 
+    names = {label for _, label, _, _ in taken}
+    for act, label in own:
+        if label in names:
+            notes.append(f"the body's own clip {label} was left out: a clip asked for in clips has its name")
+            bpy.data.actions.remove(act)
+            continue
+        names.add(label)
+        taken.append((act, label, {"pack": "body", "own": True}, ratio / unit))
+    if own:
+        notes.append(f"kept the body's own clips: {', '.join(label for _, label, c, _ in taken if c.get('own'))}")
     for act, label, c, made in taken:
         # A clip made on this body already moves its pelvis this body's distances.
         skeleton.fit_clip(act, ratio / made)
@@ -363,10 +426,14 @@ def character(params):
         act["kurambit_clip"] = label
         if c.get("motion"):
             act["kurambit_source"] = json.dumps({"what": "clips", **c["source"]})  # credited per clip: ai, cost
-        act.name = label
+        elif c.get("own"):
+            act["kurambit_source"] = json.dumps({**body_part, "what": "clips"})  # credited as the body is
+        # Clip names are per character; in Blender every action needs its own name, so a second
+        # character's Idle_Loop would read Idle_Loop.001. The export names it by kurambit_clip.
+        act.name = helpers.action_name(name, label)
     packs = []
     for _, _, c, _ in taken:
-        if c.get("motion"):
+        if c.get("motion") or c.get("own"):
             continue
         if all(p["from"] != c["pack"] for p in packs):
             packs.append({"from": c["pack"], "licence": c.get("licence", "")})
@@ -374,10 +441,12 @@ def character(params):
         stamp(arm, "clips", packs[0]["from"], packs[0]["licence"])
     arm["kurambit_clips"] = json.dumps(packs)
     if params.get("fit"):
-        notes += fit.fit(arm, meshes, [a for a, _, _, _ in taken], params["fit"])
+        notes += fit.fit(arm, meshes, [a for a, _, c, _ in taken if not c.get("own")], params["fit"])
     arm["kurambit_standard_rest"] = json.dumps(skeleton.local_rest(skeleton.gltf_json(standard)))
 
-    chains = {}
+    chains = {n: bones for n, bones, _ in extra}
+    if extra:
+        arm["kurambit_chains"] = json.dumps(chains)
     for chain in params.get("chains", []):
         sides = [("", Vector(chain["direction"]))]
         if chain.get("mirror"):

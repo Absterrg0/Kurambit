@@ -327,6 +327,21 @@ def turn(bone, axis, degrees, armature=None):
     _rotate(arm, pb, Quaternion(Vector(axis).normalized(), math.radians(degrees)))
 
 
+def action_name(owner, clip):
+    """A character's clip as the live scene names it: every Blender action needs its own name, and
+    two characters each have an Idle_Loop. The export names it clip (kurambit_clip)."""
+    return f"{owner}|{clip}"[:63]
+
+
+def clip_of(arm, clip):
+    """arm's own clip by its name in the game, or an action of that name no other character owns."""
+    for a in bpy.data.actions:
+        if a.get("kurambit_owner") == arm.name and a.get("kurambit_clip", a.name) == clip:
+            return a
+    a = bpy.data.actions.get(clip)
+    return a if a is not None and a.get("kurambit_owner") in (None, arm.name) else None
+
+
 def key_pose(action, frame, pose, armature):
     """Keys one pose of a custom clip on top of a library pose, by world directions, so the keys do
     not depend on any bone's local axes. pose:
@@ -336,14 +351,16 @@ def key_pose(action, frame, pose, armature):
         turn       {bone: ((x, y, z), degrees)}: rotations about world axes, in order
         aim        {bone: (x, y, z)}: world directions, applied after turn, parents first
     Every bone's rotation and the pelvis location are keyed at frame. A custom clip reads well with
-    an anticipation key, an overshoot and a settle. The clip stays in place: the game moves it."""
+    an anticipation key, an overshoot and a settle. The clip stays in place: the game moves it.
+    action and base name the armature's own clips (Idle_Loop, as the game names them)."""
     arm = _armature(armature)
-    act = bpy.data.actions.get(action) if isinstance(action, str) else action
+    act = clip_of(arm, action) if isinstance(action, str) else action
     if act is None:
-        act = bpy.data.actions.new(action)
+        act = bpy.data.actions.new(action_name(arm.name, action))
+        act["kurambit_clip"] = action
     act.use_fake_user = True
     act["kurambit_owner"] = arm.name
-    act["kurambit_clip"] = act.name
+    act["kurambit_clip"] = act.get("kurambit_clip", act.name)
     ad = arm.animation_data or arm.animation_data_create()
     previous, previous_slot = ad.action, getattr(ad, "action_slot", None)
     scene = bpy.context.scene
@@ -352,8 +369,11 @@ def key_pose(action, frame, pose, armature):
         base = pose.get("base")
         rest = {pb.name: Matrix() for pb in arm.pose.bones}
         if base is not None:
-            skeleton.assign_action(arm, bpy.data.actions[base])
-            scene.frame_set(int(pose.get("base_frame", bpy.data.actions[base].frame_range[0])))
+            found = clip_of(arm, base)
+            if found is None:
+                raise ValueError(f"{arm.name} has no clip {base!r}; its clips: {', '.join(sorted(a.get('kurambit_clip', a.name) for a in bpy.data.actions if a.get('kurambit_owner') == arm.name))[:300]}")
+            skeleton.assign_action(arm, found)
+            scene.frame_set(int(pose.get("base_frame", found.frame_range[0])))
             rest = {pb.name: pb.matrix_basis.copy() for pb in arm.pose.bones}
         ad.action = None
         for pb in arm.pose.bones:

@@ -146,6 +146,63 @@ def merge_unmapped(meshes, arm, name_map, joints):
             o.vertex_groups.remove(g)
 
 
+# A body's own bones that must not swing on a spring: twist and corrective helpers, IK targets,
+# the face's, and a weapon's or a prop's socket. They lend their weights to a joint (merge_unmapped).
+_HELD = {"twist", "corrective", "roll", "ik", "fk", "pole", "target", "ctrl", "mch", "eye", "eyes", "jaw",
+         "teeth", "tongue", "lid", "brow", "lip", "weapon", "slot", "socket", "attach", "prop", "grip"}
+
+
+def _words(name):
+    n = name.split("|")[-1].split(":")[-1]
+    n = re.sub(r"([a-z])([A-Z])", r"\1_\2", n)
+    return {w for w in re.split(r"[^a-z0-9]+", n.lower()) if w}
+
+
+def body_chains(meshes, arm, name_map, joints):
+    """A body's own bones the standard lacks that carry its skin and lead to no standard joint (a
+    robe's, a sash's, hair), as runs root to tip: [(chain name, [bones], parent bone)]. They stay on
+    the standard armature as spring chains instead of lending their weights to a joint. Ordered
+    parents first, so a run's parent is a joint or a bone of an earlier run."""
+    std = lambda n: name_map.get(n, n)
+    weighted = set()
+    for o in meshes:
+        names = {g.index: g.name for g in o.vertex_groups}
+        for v in o.data.vertices:
+            for e in v.groups:
+                if e.weight > 1e-3 and e.group in names:
+                    weighted.add(names[e.group])
+    bones = arm.data.bones
+    free = {b.name for b in bones
+            if std(b.name) not in joints and b.use_deform and not (_words(b.name) & _HELD)
+            and not any(std(c.name) in joints for c in b.children_recursive)}
+    starts = [b for b in bones if b.name in free and b.parent is not None
+              and (b.parent.name not in free or sum(c.name in free for c in b.parent.children) != 1)]
+    runs, kept, taken = [], set(), set()
+    depth = lambda b: len(b.parent_recursive)
+    for b in sorted(starts, key=depth):
+        run = [b]
+        while len(run) < 8:
+            kids = [c for c in run[-1].children if c.name in free]
+            if len(kids) != 1:
+                break
+            run.append(kids[0])
+        while run and run[-1].name not in weighted:
+            run.pop()  # an end bone that holds no skin is no link
+        parent = b.parent.name
+        if not run or not (std(parent) in joints or parent in kept):
+            continue
+        stem = re.sub(r"[^a-z0-9]+", "_", b.name.split("|")[-1].split(":")[-1].lower()).strip("_")
+        stem = re.sub(r"_?0*1$", "", stem) or "chain"
+        stem = (stem if stem[0].isalpha() else f"c_{stem}")[:21]
+        name, n = stem, 2
+        while name in taken:
+            name, n = f"{stem}_{n}", n + 1
+        taken.add(name)
+        kept.update(x.name for x in run)
+        runs.append((name, [x.name for x in run], std(parent) if std(parent) in joints else parent))
+    return runs
+
+
 # Limb bones posed onto the standard rest directions before a body is baked (MPFB stands in an
 # A-pose; library bodies are close to the standard T-pose but not exactly on it). Parents first.
 ALIGN = []
@@ -387,7 +444,7 @@ def align_pose(body_arm, std_world, std_bones, std_name):
     bpy.context.view_layer.update()
 
 
-def conform(std_arm, body_arm, body_meshes, name_map):
+def conform(std_arm, body_arm, body_meshes, name_map, chains=()):
     """Fits std_arm (the standard armature, freshly imported) to a body, keeping every bone's
     orientation and roll (D5), and skins the body to it. body_arm is removed afterwards.
 
@@ -395,6 +452,8 @@ def conform(std_arm, body_arm, body_meshes, name_map):
     2. Move each standard joint onto the body's joint; joints the body lacks (leaf bones) keep
        their offset from the parent, scaled by the height ratio.
     3. Skin the meshes to the standard armature by name (the body's weights, renamed by the map).
+    chains (body_chains) are the body's own bones that stay: added under their joint where the
+    posed body has them, keeping their weights.
     Returns the height ratio (body / standard), which scales the pelvis translation of the clips."""
     std_name = lambda n: name_map.get(n, n)
     std_world = {b.name: std_arm.matrix_world @ b.head_local for b in std_arm.data.bones}
@@ -403,6 +462,7 @@ def conform(std_arm, body_arm, body_meshes, name_map):
         align_pose(body_arm, std_world, std_bones, std_name)
         mw = body_arm.matrix_world
         joints = {std_name(pb.name): mw @ pb.head for pb in body_arm.pose.bones}
+        kept = {b: (mw @ body_arm.pose.bones[b].head, mw @ body_arm.pose.bones[b].tail) for _, bones, _ in chains for b in bones}
         for o in body_meshes:
             baked_mesh(o, keep=lambda m: m.type != "ARMATURE")
             if o.parent is not None and o.parent_type == "BONE":
@@ -418,7 +478,7 @@ def conform(std_arm, body_arm, body_meshes, name_map):
             else:
                 to_world(o)
     else:
-        joints = {}
+        joints, kept = {}, {}
     missing = [n for n in ("Head", "foot_l", "pelvis") if n not in joints]
     if missing:
         raise ValueError(f"the body's rig has no {', '.join(missing)} joint: it is not a humanoid on a known name map")
@@ -450,6 +510,16 @@ def conform(std_arm, body_arm, body_meshes, name_map):
             b.head = heads[b.name]
             b.tail = heads[b.name] + (t0 - h0) * ratio
             b.roll = r0
+        for _, bones, parent in chains:
+            prev = eb[parent]
+            for i, name in enumerate(bones):
+                b = eb.new(name)
+                b.head, b.tail = inv @ kept[name][0], inv @ kept[name][1]
+                b.roll = 0.0
+                b.parent = prev
+                b.use_connect = False
+                b.use_deform = True
+                prev = b
 
     for o in body_meshes:
         for vg in o.vertex_groups:
