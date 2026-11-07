@@ -222,7 +222,10 @@ export const modelLookLine = (generation: GameGeneration): string => {
     more === null || more <= 0
       ? "Rigging and its clips cost more."
       : `Rigging and its clips add about ${formatUsd(more)}.`,
-    "Cancel keeps only the model's cost.",
+    // Cancel counts the cost the generation shows; with none reported, the server counts the estimate.
+    cost === null
+      ? "The model's cost was not reported, so Cancel counts the whole estimate."
+      : "Cancel keeps only the model's cost.",
   ]
     .filter((part) => part !== null)
     .join(" ");
