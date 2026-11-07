@@ -7,7 +7,7 @@
 //   const loco = locomotion(hero, { walk: 0.2, run: 3.2 }); // thresholds in m/s
 //   // every frame in update(dt, ctx), with the speed the body really moved:
 //   loco.update({ speed, grounded, vy, dt });              // vy: vertical speed, + up
-//   if (ctx.input.pressed("action")) loco.act("attack");   // any clip word
+//   if (ctx.input.pressed("action")) loco.act("attack");   // a clip word the model carries
 //   loco.state;  // "idle" | "walk" | "run" | "air" | "land" | the move
 //   loco.acting; // true while a move from act() plays
 //
@@ -22,6 +22,12 @@ export function locomotion(
   let move = null; // { name, until }
   let clock = 0;
   let landUntil = 0;
+  // Reused every frame: update() runs per character per frame.
+  const still = {};
+  const moving = { moveSpeed: 0 };
+  const rising = { once: true, speed: 1 };
+  const falling = { once: true, speed: 0.6 };
+  const landing = { once: true, speed: 2.2, fade: 0.06 };
   return {
     get state() {
       return move !== null ? move.name : state;
@@ -40,18 +46,19 @@ export function locomotion(
       if (move !== null && (animator.state !== move.name || clock >= move.until)) move = null;
       const up = state === "run" ? run - band : run;
       const ground = speed > up ? "run" : speed > walk ? "walk" : "idle";
-      const groundOptions = ground === "idle" ? {} : { moveSpeed: speed };
+      moving.moveSpeed = speed;
+      const groundOptions = ground === "idle" ? still : moving;
       if (move !== null) {
         // Keep asking for the loop: animate plays it once the move is through.
         animator.play(ground, groundOptions);
       } else if (!grounded) {
         state = "air";
-        animator.play(air, { once: true, speed: vy > 0 ? 1 : 0.6 });
+        animator.play(air, vy > 0 ? rising : falling);
       } else if (!wasGrounded) {
         // The landing also cuts the air clip short, which a loop would wait out.
         state = "land";
         landUntil = clock + 0.18;
-        animator.play(land, { once: true, speed: 2.2, fade: 0.06 });
+        animator.play(land, landing);
       } else if (state === "land" && clock < landUntil && speed < walk) {
         animator.play("idle"); // the landing plays through, then idle
       } else {

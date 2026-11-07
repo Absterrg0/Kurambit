@@ -86,6 +86,7 @@ const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
+const _q3 = new THREE.Quaternion();
 
 // Bones only: a mesh may share a bone's name ("Head").
 const findBone = (root, name) => {
@@ -100,7 +101,7 @@ const findBone = (root, name) => {
 function rotateWorld(bone, axis, angle) {
   bone.parent.getWorldQuaternion(_q1);
   _q2.setFromAxisAngle(axis, angle);
-  bone.quaternion.premultiply(_q1.clone().invert().multiply(_q2).multiply(_q1));
+  bone.quaternion.premultiply(_q3.copy(_q1).invert().multiply(_q2).multiply(_q1));
   bone.updateMatrixWorld(true);
 }
 
@@ -136,7 +137,8 @@ function makeSpring(root, names, options) {
       tip: null,
       prev: new THREE.Vector3(),
       base: bone.quaternion.clone(),
-      wrote: null,
+      wrote: new THREE.Quaternion(),
+      written: false,
     };
   });
   const head = new THREE.Vector3();
@@ -146,6 +148,7 @@ function makeSpring(root, names, options) {
   const to = new THREE.Vector3();
   const q = new THREE.Quaternion();
   const pq = new THREE.Quaternion();
+  const turn = new THREE.Quaternion();
   return {
     key: bones.map((bone) => bone.name).join(","),
     options,
@@ -157,8 +160,7 @@ function makeSpring(root, names, options) {
       for (const link of links) {
         const { bone } = link;
         // A clip that does not key this bone leaves our last rotation: start from its pose again.
-        if (link.wrote !== null && bone.quaternion.equals(link.wrote))
-          bone.quaternion.copy(link.base);
+        if (link.written && bone.quaternion.equals(link.wrote)) bone.quaternion.copy(link.base);
         bone.updateWorldMatrix(true, false);
         bone.getWorldPosition(head);
         goal
@@ -179,8 +181,9 @@ function makeSpring(root, names, options) {
         to.subVectors(link.tip, head).normalize();
         q.setFromUnitVectors(from, to);
         bone.parent.getWorldQuaternion(pq);
-        bone.quaternion.premultiply(pq.clone().invert().multiply(q).multiply(pq));
-        link.wrote = bone.quaternion.clone();
+        bone.quaternion.premultiply(turn.copy(pq).invert().multiply(q).multiply(pq));
+        link.wrote.copy(bone.quaternion);
+        link.written = true;
         bone.updateMatrixWorld(true);
       }
     },
@@ -213,14 +216,15 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     yaw: 0,
     maxYaw: 1,
     rate: 6,
-    base: null,
-    wrote: null,
+    base: new THREE.Quaternion(),
+    wrote: new THREE.Quaternion(),
+    written: false,
   };
   const settleGaze = (dt) => {
     const { bone } = gaze;
     if (bone === null) return;
     // As with springs: a clip that leaves the head unkeyed would otherwise compound the turn.
-    if (gaze.wrote !== null && bone.quaternion.equals(gaze.wrote)) bone.quaternion.copy(gaze.base);
+    if (gaze.written && bone.quaternion.equals(gaze.wrote)) bone.quaternion.copy(gaze.base);
     let want = 0;
     if (gaze.target !== null) {
       const facing = _v2.set(0, 0, 1).applyQuaternion(root.getWorldQuaternion(_q1));
@@ -233,9 +237,10 @@ export function animate(gltf, { fade = 0.2 } = {}) {
         );
     }
     gaze.yaw += (want - gaze.yaw) * (1 - Math.exp(-gaze.rate * dt));
-    gaze.base = bone.quaternion.clone();
+    gaze.base.copy(bone.quaternion);
     rotateWorld(bone, _v1.set(0, 1, 0), gaze.yaw);
-    gaze.wrote = bone.quaternion.clone();
+    gaze.wrote.copy(bone.quaternion);
+    gaze.written = true;
   };
   const unmeasured = new Set();
   const rate = (action, options) => {
@@ -357,7 +362,7 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       if (gaze.name !== bone) {
         gaze.name = bone;
         gaze.bone = findBone(root, bone);
-        gaze.wrote = null;
+        gaze.written = false;
         if (gaze.bone === null) console.warn(`animate: no bone "${bone}" to look with`);
       }
       gaze.target = point;

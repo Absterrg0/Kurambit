@@ -282,6 +282,10 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    hero.lookAt(nearestFoe?.position ?? null);
    ```
 
+   The standard clips have no attack: name one in `game_blender_character`'s
+   `clips` (`Punch_Jab`, `Sword_Attack`, `Spell_Simple_Shoot`) when the
+   character fights.
+
    Walk and run then play at the clip's measured ground speed, so the feet
    stay planted; never pass `speed` for them. Retune a chain with
    `hero.spring("tail", { stiffness: 0.09, damping: 0.14, gravity: 4 })`.
