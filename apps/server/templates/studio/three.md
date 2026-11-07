@@ -26,11 +26,12 @@ the person the error until a save boots again.
   `GLB format` becomes `GLB-format`). Packs differ in scale (a Kenney blocky
   character stands several times a mini one): when you mix packs, size each
   model with `root.scale.setScalar(n)`.
-- Keep the default look on the first build: `LOOK` as it is, no lights
-  besides `ctx.look.sun`. Builds are played and measured in a software
-  renderer, where bloom and extra lights stall the start; the shell already
-  loads every `ASSETS` model and compiles its shaders behind the loading
-  screen, so play starts without a freeze. Glows are a later turn.
+- Keep the default look on the first build (`day`), or name the one preset
+  the brief calls for (`export const LOOK = { preset: "night" }`), with no
+  lights besides `ctx.look.sun`. The look draws the sky, its light and the fog;
+  do not set `scene.background` or `scene.fog` over them. The shell loads every
+  `ASSETS` model and compiles its shaders behind the loading screen, so play
+  starts without a freeze. Glows and extra lights are a later turn.
 - No Blender, no key art, no plan, no `game_explore_*` to check your work:
   `game_check` clean is the check, and Kurambit plays and measures the build
   when the turn ends. On the `generated` route the one exception is the key
@@ -61,7 +62,6 @@ export const ACTIONS = { jump: null, alt: null };
 let hero, foe, cam, level;
 
 export function start(ctx) {
-  ctx.scene.background = new THREE.Color(0x141a24);
   // KayKit pieces are 4 m across, so the cells are too.
   level = buildLevel(
     ctx,
@@ -119,7 +119,6 @@ export const ACTIONS = { jump: null, alt: null };
 let hero, orc, level;
 
 export function start(ctx) {
-  ctx.scene.background = new THREE.Color(0x1a1c22);
   level = buildLevel(
     ctx,
     ["##############", "#..b......b..#", "#.....P......#", "#..b......E..#", "##############"],
@@ -291,15 +290,34 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    stay planted; never pass `speed` for them. Retune a chain with
    `hero.spring("tail", { stiffness: 0.09, damping: 0.14, gravity: 4 })`.
 
+   A fight plays clips by their exact names with its own timing
+   (`hero.play("Sword_Attack", { once: true, fade: 0.08, from: 0.25 })`,
+   `reverse: true`, `restart: true` for a combo's next cut) and reads
+   `hero.time` for hit windows; frame it with `followCamera3D(ctx, hero.root,
+{ shoulder: 0.55, orbitButton: null, blockers: [level, props] })` and
+   `cam.focus = foe.root`, and answer hits with `Juice.sparks(at, away)`,
+   `Juice.blood(at, away)`, `Juice.dust(at)` and a
+   `Juice.trail(hero.root, { bone: "hand_r" })` switched on through each cut
+   (TEMPLATE.md).
+
 6. Never write a renderer, post-processing or lighting rig; the shell's look
-   (`web/shell/look.js`; TEMPLATE.md) does it. Light the run with
-   `ctx.look.sun({ follow: ctx.player, size })` and tune numbers through
-   `export const LOOK = { ... }` in `main.js`. Turn on `bloom: true` only when
-   glows matter to the game, with their emissive colours above 1: it costs
-   several times the plain look every frame, and a machine without a GPU
-   (some players', and the harness's fallback) draws it in software. Through an orthographic camera nothing is tone mapped
-   unless LOOK names a toneMapping, so a 2D or pixel-art game's sprites keep
-   their files' colours; it also sets `LOOK = { environment: false, shadows: false }`.
+   (`web/shell/look.js`; TEMPLATE.md) does it. Pick a preset in one line,
+   `export const LOOK = { preset: "golden" }` (`day`, `golden`, `night`,
+   `interior`, `flat`), and override parts of it there (`sun`, `sky`, `fog`,
+   `ao`, `bloom`, `grade`, `exposure`). `day` and `flat` cost what a plain frame
+   costs; `golden`, `night`, `interior`, `ao: true` and `bloom: true` add the
+   post chain, which the look's adaptive resolution keeps near 60 fps. Light the
+   run with `ctx.look.sun({ follow: ctx.player, size })`, and bake a big static
+   level's shadow once with `ctx.look.bake(level)`. A game that builds a large
+   world once, draws its own frame or wants a live title exports `prepare`,
+   `render` or `title` (TEMPLATE.md) instead of forking the shell. The facts'
+   Performance row is how the random-input play ran ("60 fps · 1% low 48 · GPU
+   9 ms at 0.8× of 1280×720"): a low 1% or a small scale is a reason to bake,
+   trim triangles or drop a pass; "not measured" because the harness drew in
+   software is Kurambit's machine, not your game. Through an orthographic camera
+   with no preset named nothing is tone mapped, so a 2D or pixel-art game's
+   sprites keep their files' colours; it also sets
+   `LOOK = { environment: false, shadows: false }`.
 7. Write every top-down level (rows run along x/z on the ground) as a text map with `buildLevel(ctx, rows, legend, { floor })`
    (`web/shell/level.js`), never pieces placed by coordinates: `#` walls,
    `.` floor, a letter per spawn, the legend naming ASSETS models. Make more
