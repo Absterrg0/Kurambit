@@ -151,3 +151,18 @@ export const mergeAnchoredCards = <T>(
 /** The person's pick, as the message the agent goes on from. */
 export const pickMessage = (generation: GameGeneration, candidate: number): string =>
   `Use "${generation.candidates[candidate]?.label ?? `candidate ${candidate + 1}`}" for ${generation.name}.`;
+
+/**
+ * The picture "Change…" names in a settled image or texture generation: the one the game kept
+ * (an edit's "As it was" is the game's own file). Null where there is none to change.
+ */
+export const changeableImage = (generation: GameGeneration): string | null =>
+  generation.state === "done" &&
+  generation.filesUndone !== true &&
+  (generation.lane === "image" || generation.lane === "texture")
+    ? generationResultImage(generation)
+    : null;
+
+/** The person's "Change…", as their message to the agent, which makes the edit generation. */
+export const changeMessage = (path: string, words: string): string =>
+  `Change ${path}: ${words.trim()}`;

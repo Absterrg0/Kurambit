@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { BoxIcon, CheckIcon, SparklesIcon, XIcon } from "lucide-react";
+import { BoxIcon, CheckIcon, PencilIcon, SparklesIcon, XIcon } from "lucide-react";
 import {
   EnvironmentId,
   ThreadId,
@@ -27,10 +27,13 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { GameElapsed } from "./GameElapsed";
 import { GameFileActions } from "./GameSavedMedia";
 import {
   GAME_ART_LANE_LABELS,
+  changeMessage,
+  changeableImage,
   chatGenerationCardKey,
   fileName,
   generationCostLine,
@@ -108,7 +111,10 @@ export function useGameGenerationCards(
 const failureText = (result: AtomCommandResult<unknown, unknown>) =>
   result._tag === "Failure" ? String(squashAtomCommandFailure(result)) : null;
 
-/** Pick and Cancel for a game's generations, as the chat card and the Generated art view share them. */
+/**
+ * Pick, Cancel and Change for a game's generations, as the chat card and the Generated art view
+ * share them.
+ */
 export function useGenerationActions(threadRef: ScopedThreadRef) {
   const choose = useAtomCommand(gameEnvironment.chooseGeneration, { reportFailure: false });
   const cancel = useAtomCommand(gameEnvironment.cancelGeneration, { reportFailure: false });
@@ -125,22 +131,27 @@ export function useGenerationActions(threadRef: ScopedThreadRef) {
   const generations = useGameGenerations(threadRef);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<{ readonly id: string; readonly text: string } | null>(null);
-  /** `send` answers what to tell the person when it did not all go through, else null. */
+  /**
+   * `send` answers what to tell the person when it did not all go through, else null; `run`
+   * answers whether it all went through.
+   */
   const run = async (id: string, send: () => Promise<string | null>) => {
-    if (pending !== null) return;
+    if (pending !== null) return false;
     setPending(id);
     setError(null);
     const failure = await send();
     setPending(null);
     if (failure !== null) setError({ id, text: failure });
     generations.refresh();
+    return failure === null;
   };
   // The agent ended its turn waiting on this pick: the pick is the person's message in that
-  // generation's chat, so the agent carries on with it.
-  const tellAgent = async (generation: GameGeneration, text: string) => {
+  // generation's chat, so the agent carries on with it. A change goes the same way: the agent
+  // makes the edit, so the client never starts a paid generation itself.
+  const tellAgent = async (generation: GameGeneration, text: string, done = "Picked. ") => {
     const target = { environmentId: threadRef.environmentId, threadId: generation.threadId };
     const shell = readThreadShell(target);
-    if (shell === null) return `Picked. Its chat is not loaded here, so tell the agent: ${text}`;
+    if (shell === null) return `${done}Its chat is not loaded here, so tell the agent: ${text}`;
     const sent = await startTurn({
       environmentId: target.environmentId,
       input: {
@@ -154,11 +165,12 @@ export function useGenerationActions(threadRef: ScopedThreadRef) {
     const failure = failureText(sent);
     return failure === null
       ? null
-      : `Picked, but the message to the agent was not sent (${failure}). Tell it: ${text}`;
+      : `${done}The message to the agent was not sent (${failure}). Tell it: ${text}`;
   };
   return {
     canChoose: canChoose && writer,
     canCancel: canCancel && writer,
+    canChange: writer,
     pending,
     errorFor: (id: string) => (error?.id === id ? error.text : null),
     choose: (generation: GameGeneration, candidate: number) =>
@@ -171,6 +183,8 @@ export function useGenerationActions(threadRef: ScopedThreadRef) {
         });
         return failureText(picked) ?? (await tellAgent(generation, text));
       }),
+    change: (generation: GameGeneration, path: string, words: string) =>
+      run(generation.id, () => tellAgent(generation, changeMessage(path, words), "")),
     cancel: (id: string) =>
       run(id, async () =>
         failureText(
@@ -339,12 +353,71 @@ export function CandidatePicker({
           {sending ? "Using…" : "Use this"}
         </Button>
         <span className="text-xs text-muted-foreground">
-          {actions.canChoose
-            ? "Pick one; it goes to the agent as your message."
-            : "The person directing this game picks one."}
+          {!actions.canChoose
+            ? "The person directing this game picks one."
+            : generation.candidates.some((candidate) => candidate.original === true)
+              ? "Pick one; it goes to the agent as your message. As it was keeps the game's image and deletes the change."
+              : "Pick one; it goes to the agent as your message."}
         </span>
       </div>
     </div>
+  );
+}
+
+/** "Change…" on a kept image: the person's words go to the agent, which makes the edit. */
+function ChangeImage({
+  generation,
+  path,
+  actions,
+}: {
+  generation: GameGeneration;
+  path: string;
+  actions: GenerationActions;
+}) {
+  const [open, setOpen] = useState(false);
+  const [words, setWords] = useState("");
+  const sending = actions.pending === generation.id;
+  if (!open)
+    return (
+      <Button size="xs" variant="ghost" className="self-start" onClick={() => setOpen(true)}>
+        <PencilIcon aria-hidden="true" />
+        Change…
+      </Button>
+    );
+  const send = async () => {
+    if (words.trim() === "" || actions.pending !== null) return;
+    if (await actions.change(generation, path, words)) {
+      setWords("");
+      setOpen(false);
+    }
+  };
+  return (
+    <form
+      className="flex items-center gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void send();
+      }}
+    >
+      <Input
+        size="sm"
+        value={words}
+        onChange={(event) => setWords(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          setOpen(false);
+        }}
+        autoFocus
+        maxLength={1500}
+        placeholder="What should change?"
+        aria-label={`What should change in ${fileName(path)}?`}
+        disabled={sending}
+      />
+      <Button size="xs" type="submit" disabled={words.trim() === "" || actions.pending !== null}>
+        {sending ? "Sending…" : "Send"}
+      </Button>
+    </form>
   );
 }
 
@@ -399,7 +472,11 @@ const STATE_BADGES = {
 
 /** The chosen-by note: only Keep going's pick says so, since nobody else saw the choice made. */
 const chosenByNote = (generation: GameGeneration): string | null =>
-  generation.chosenBy === "autopilot" ? "Keep going took the first candidate" : null;
+  generation.chosenBy !== "autopilot"
+    ? null
+    : generation.candidates[0]?.label === undefined
+      ? "Keep going took the first candidate"
+      : `Keep going took "${generation.candidates[0].label}"`;
 
 /** One generation, in full: the chat card's body and the Generated art view's open row. */
 export function GameGenerationBody({
@@ -421,6 +498,7 @@ export function GameGenerationBody({
     generation.state === "choosing" || generation.state === "done"
       ? (generation.refused ?? [])
       : [];
+  const changeable = actions.canChange ? changeableImage(generation) : null;
   const meta = [
     settled ? `Made with ${providerLabel(generation.provider)}` : null,
     cost,
@@ -469,6 +547,9 @@ export function GameGenerationBody({
         <>
           <GenerationResult threadRef={threadRef} root={root} generation={generation} />
           <p className="text-xs text-muted-foreground">{meta.join(" · ")}</p>
+          {changeable === null ? null : (
+            <ChangeImage generation={generation} path={changeable} actions={actions} />
+          )}
           {generation.files.length === 0 || root === null ? null : (
             <ul className="flex flex-col gap-0.5 text-xs">
               {generation.files.map((file) => (
