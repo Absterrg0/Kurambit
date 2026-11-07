@@ -802,17 +802,19 @@ const make = Effect.gen(function* () {
   const finish = (row: Row, step: Extract<ArtStep, { kind: "done" }>) =>
     Effect.gen(function* () {
       const edit = editOf(row.meta);
-      // A cut-out that came back opaque is no cut-out: it fails, its cost counted, rather than
-      // being passed off as one (and nothing fakes the alpha afterwards).
-      if (edit !== null && row.meta.options.transparent === true) {
-        const image = step.candidates[0]?.find((file) => file.role === "asset");
-        const png = image === undefined ? null : readPng(image.bytes);
-        if (png === null || png.clear === 0)
+      // A transparent image or cut-out that came back opaque is neither: it fails, its cost
+      // counted, rather than being passed off as one (and nothing fakes the alpha afterwards).
+      if (row.meta.options.transparent === true) {
+        const opaque = step.candidates
+          .map((files) => files.find((file) => file.role === "asset"))
+          .map((image) => (image === undefined ? null : readPng(image.bytes)))
+          .find((png) => png === null || png.clear === 0);
+        if (opaque !== undefined)
           return yield* fail(
             row,
             `${GAME_ART_PROVIDERS[row.generation.provider].label} answered ${
-              png === null ? "an image that is not a PNG" : "an image with no transparent pixel"
-            }, so the background was not cut out. Nothing was written to the game; ${edit} is unchanged.`,
+              opaque === null ? "an image that is not a PNG" : "an image with no transparent pixel"
+            }, so ${edit === null ? "it has no transparent background" : "the background was not cut out"}. Nothing was written to the game${edit === null ? "" : `; ${edit} is unchanged`}.`,
             step.costUsd ?? row.generation.estimateUsd,
           );
       }
