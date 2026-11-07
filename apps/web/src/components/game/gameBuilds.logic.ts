@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import {
   GameBuildId,
   type GameAssetFacts,
+  type GameAssetUse,
   type GameBuild,
   type GameBuildFactsSummary,
   type GameBuildSource,
@@ -100,6 +101,12 @@ export const factLine = (view: GameFactView): FactLine => {
       return { label: view.label, text: "Not measured yet", tone: null };
   }
 };
+
+/** The Asset use row's detail: the files the plays never loaded, and sounds never started. */
+export const assetUseLines = (use: GameAssetUse): ReadonlyArray<string> => [
+  ...(use.unused.length > 0 ? [`Never loaded: ${use.unused.join(", ")}`] : []),
+  ...(use.silent.length > 0 ? [`Loaded, never started playing: ${use.silent.join(", ")}`] : []),
+];
 
 /**
  * The Assets row's detail: one line per made model, then what was only

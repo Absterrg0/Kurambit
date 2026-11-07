@@ -352,6 +352,11 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
 6. **Cost.** Say in the turn's reply what its generations cost. A refusal
    (no key, over the person's daily limit) goes in the reply as it is;
    never switch route or lane to get past it.
+7. **In the game.** A three.js build's facts record which shipped files its
+   plays loaded (`game_facts`, `use`). A file in `use.unused` is not in the
+   game yet: wire it in or delete it. Add generated images and sounds
+   unchanged where you can; their cards know them in the game by their
+   bytes.
 
 ## 2D sprites from 3D
 
