@@ -6,8 +6,8 @@
 // someone else's turn, and reports the turn's typed result once its run is
 // over and its checkpoint (the build) has landed. It also does the two things
 // keep going owes the game's other turns: a turn that starts while a proposal
-// waits supersedes it, and a turn that ends wakes a look waiting for the game
-// to be idle.
+// waits supersedes it, and a turn that ends wakes a look or an undo waiting
+// for the game to be idle.
 import {
   CommandId,
   type GameOperationError,
@@ -235,15 +235,25 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  // A queued turn is cancelled; one at work is interrupted, as T3's Stop does.
   const interrupt = (threadId: ThreadId, run: OrchestrationV2Run, key: string, reason: string) =>
     refusedOnly(
-      engine.dispatch({
-        type: "run.interrupt",
-        commandId: CommandId.make(`server:game-run-step-${key}:${run.id}`),
-        threadId,
-        runId: run.id,
-        reason,
-      }),
+      engine.dispatch(
+        run.status === "queued"
+          ? {
+              type: "queued-run.cancel",
+              commandId: CommandId.make(`server:game-run-step-${key}:${run.id}`),
+              threadId,
+              runId: run.id,
+            }
+          : {
+              type: "run.interrupt",
+              commandId: CommandId.make(`server:game-run-step-${key}:${run.id}`),
+              threadId,
+              runId: run.id,
+              reason,
+            },
+      ),
     );
 
   /**
@@ -265,12 +275,14 @@ const make = Effect.gen(function* () {
         Effect.asVoid,
         Effect.catchTags({
           OrchestratorGameRunRefusedError: () =>
-            interrupt(
-              located.run.threadId,
-              run,
-              "orphan",
-              "Keep going moved on before this step's turn started.",
-            ),
+            isActive(run)
+              ? interrupt(
+                  located.run.threadId,
+                  run,
+                  "orphan",
+                  "Keep going moved on before this step's turn started.",
+                )
+              : Effect.void,
           OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
         }),
       );
@@ -459,8 +471,8 @@ const make = Effect.gen(function* () {
 
   /**
    * Another turn on the game moved: one that starts supersedes a waiting
-   * proposal (the person goes first), and one that ends wakes a look that
-   * waits for the game to be idle.
+   * proposal (the person goes first), and one that ends wakes a look or an
+   * undo that waits for the game to be idle.
    */
   const onOtherRun = (threadId: ThreadId, run: OrchestrationV2Run) =>
     Effect.gen(function* () {
@@ -485,7 +497,7 @@ const make = Effect.gen(function* () {
       const located = { run: gameRun, record };
       if (record.step.kind === "propose" && isActive(run) && run.status !== "waiting")
         return yield* complete(located, { kind: "decided", answer: "superseded", by: "server" });
-      if (record.step.kind === "look" && !isActive(run))
+      if ((record.step.kind === "look" || record.step.kind === "undo") && !isActive(run))
         yield* jobs.execute({
           threadId: gameRun.threadId,
           runId: gameRun.id,

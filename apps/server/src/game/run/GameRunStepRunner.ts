@@ -11,7 +11,8 @@
 //   GameRunTurnReactor follows that turn to its build.
 // - judge: measures the step's build and its base, never superseded, and
 //   waits for both.
-// - undo: restores the base only while the folder still holds the step's build.
+// - undo: once the game is idle, restores the base only while the folder
+//   still holds the step's build.
 import {
   CommandId,
   type GameBuildFacts,
@@ -234,6 +235,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const step = located.record.step;
       if (step.kind !== "undo") return;
+      // K2: a turn at work may not have written yet, so `expect` alone cannot
+      // tell; the undo waits for it to end like a look does.
+      if (!(yield* gameIdle(located))) return;
       yield* startStep(located);
       const restored = yield* builds
         .restore(
