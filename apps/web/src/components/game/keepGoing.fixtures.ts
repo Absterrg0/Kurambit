@@ -14,6 +14,7 @@ export const NEVER_RAN: GameKeepGoingStatus = {
   runId: null,
   chat: null,
   mode: "off",
+  profile: null,
   phase: null,
   step: null,
   proposal: null,
