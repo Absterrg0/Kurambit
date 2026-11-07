@@ -8,6 +8,7 @@ params (the server resolves every path):
     clips     [{pack, name, path, licence?}]
     chains    [{name, parent, bones, direction, length, mirror?}]
     replace   rebuild the body and armature of an existing <name>, re-binding its other objects
+    fit       {arms?, calm?} | None: fit.fit() on every library clip, after the conform
 """
 import importlib
 import json
@@ -17,7 +18,7 @@ import re
 import bpy
 from mathutils import Vector
 
-from . import helpers, skeleton
+from . import fit, helpers, skeleton
 from .protocol import Refused, entry
 
 MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the game)"
@@ -281,6 +282,8 @@ def character(params):
     if packs:
         stamp(arm, "clips", packs[0]["from"], packs[0]["licence"])
     arm["kurambit_clips"] = json.dumps(packs)
+    if params.get("fit"):
+        notes += fit.fit(arm, meshes, [a for a, _, _ in taken], params["fit"])
     arm["kurambit_standard_rest"] = json.dumps(skeleton.local_rest(skeleton.gltf_json(standard)))
 
     chains = {}
