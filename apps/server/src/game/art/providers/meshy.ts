@@ -1,4 +1,4 @@
-// Meshy (API v1): tasks polled by id. A model is one task (image, multi-image or text to 3D with
+// Meshy (https://docs.meshy.ai/en/api): tasks polled by id. A model is one task (image, multi-image or text to 3D with
 // Smart Topology at the asked face count); a character adds rigging (humanoids only), which
 // brings walking and running clips, and the asked clips from Meshy's animation library. Meshy
 // deletes API files after 3 days, so each is downloaded the moment its task succeeds.
@@ -19,6 +19,9 @@ import {
 } from "./adapter.ts";
 
 const BASE = "https://api.meshy.ai/openapi/v1";
+/** Text to 3D is the one task on v2 (its preview and refine, and its GET). */
+const urlOf = (kind: Kind | "rigging" | "animations") =>
+  kind === "text-to-3d" ? "https://api.meshy.ai/openapi/v2/text-to-3d" : `${BASE}/${kind}`;
 export const MESHY_MODEL = "meshy-7.1";
 /** USD per credit at the Pro plan's rate (1,000 credits for $20), 2026-11. */
 const CREDIT = 0.02;
@@ -58,7 +61,7 @@ export const meshyMeshRequest = (request: ArtRequest) => {
   };
   const body =
     kind === "text-to-3d"
-      ? { mode: "preview", prompt: request.prompt.slice(0, 600), ...shape }
+      ? { mode: "preview", prompt: request.prompt.slice(0, 800), ...shape }
       : {
           ...(kind === "image-to-3d"
             ? { image_url: dataUri(request.references[0]!) }
@@ -68,7 +71,7 @@ export const meshyMeshRequest = (request: ArtRequest) => {
           target_formats: ["glb"],
           ...shape,
         };
-  return { kind, url: `${BASE}/${kind}`, body };
+  return { kind, url: urlOf(kind), body };
 };
 
 const created = (answer: unknown) => {
@@ -126,7 +129,7 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
     const remote = stored as unknown as MeshyRemote;
     const task = yield* context.http.json("meshy", {
       method: "GET",
-      url: `${BASE}/${remote.kind}/${encodeURIComponent(remote.task)}`,
+      url: `${urlOf(remote.kind)}/${encodeURIComponent(remote.task)}`,
       headers: auth(key),
     });
     const status = stringField(task, "status");
@@ -140,9 +143,9 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
             : `: ${stringField(task, "task_error", "message")}`
         }.`,
       });
-    const post = (path: string, body: unknown) =>
+    const post = (kind: Kind | "rigging" | "animations", body: unknown) =>
       context.http
-        .json("meshy", { method: "POST", url: `${BASE}/${path}`, headers: auth(key), json: body })
+        .json("meshy", { method: "POST", url: urlOf(kind), headers: auth(key), json: body })
         .pipe(Effect.flatMap(created));
     // A text request's preview is untextured: refine it before anything else.
     if (remote.stage === "mesh" && remote.kind === "text-to-3d") {
@@ -246,6 +249,13 @@ export const meshy: ArtAdapter = {
   start,
   poll,
   pollEvery: Duration.seconds(5),
+  checkKey: (context) =>
+    requireKey("meshy", context).pipe(
+      Effect.flatMap((key) =>
+        context.http.json("meshy", { method: "GET", url: `${BASE}/balance`, headers: auth(key) }),
+      ),
+      Effect.asVoid,
+    ),
   licence:
     "Meshy API output on a paid plan: owned by the user. Free-plan output is Meshy's, licensed CC BY 4.0.",
 };

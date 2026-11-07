@@ -289,6 +289,35 @@ describe("art adapters: request shapes", () => {
       }),
   );
 
+  it.effect("Meshy refines a text preview on v2 and polls it there", () =>
+    Effect.gen(function* () {
+      const { calls, context } = recording([
+        { id: "t_prev", status: "SUCCEEDED" },
+        { result: "t_ref" },
+      ]);
+      const step = yield* meshy.poll!(context, {
+        stage: "mesh",
+        kind: "text-to-3d",
+        task: "t_prev",
+        lane: "model",
+        height: null,
+        clips: [],
+        rig: null,
+      });
+      assert.strictEqual(
+        calls[0]?.request.url,
+        "https://api.meshy.ai/openapi/v2/text-to-3d/t_prev",
+      );
+      assert.strictEqual(calls[1]?.request.url, "https://api.meshy.ai/openapi/v2/text-to-3d");
+      assert.deepStrictEqual(calls[1]?.request.json, {
+        mode: "refine",
+        preview_task_id: "t_prev",
+        enable_pbr: true,
+      });
+      assert.strictEqual(step.kind, "making");
+    }),
+  );
+
   it("Meshy picks its endpoint by reference count and refuses creatures and tiles", () => {
     assert.strictEqual(
       meshyMeshRequest(request({ lane: "model", references: [reference] })).url,
@@ -316,6 +345,10 @@ describe("art adapters: request shapes", () => {
       target_polycount: 12000,
       pose_mode: "a-pose",
     });
+    assert.strictEqual(
+      meshyMeshRequest(request({ lane: "model" })).url,
+      "https://api.meshy.ai/openapi/v2/text-to-3d",
+    );
     assert.match(meshy.refuse?.(request({ lane: "creature" })) ?? "", /Tripo/);
     assert.match(meshy.refuse?.(request({ lane: "texture" })) ?? "", /tileable/);
   });
