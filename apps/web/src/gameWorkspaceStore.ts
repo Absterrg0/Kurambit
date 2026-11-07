@@ -44,7 +44,8 @@ export type GameStageRequest =
   | { readonly kind: "focus" }
   | { readonly kind: "undo" }
   | { readonly kind: "redo" }
-  | { readonly kind: "export" };
+  | { readonly kind: "export" }
+  | { readonly kind: "generated-art" };
 
 interface GameWorkspaceStoreState {
   /** Width of the docked chat column on game threads, in CSS pixels. */

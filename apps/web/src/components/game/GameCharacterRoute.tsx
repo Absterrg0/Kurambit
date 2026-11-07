@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import {
   GAME_CHARACTER_ROUTE_UNAVAILABLE,
+  type EnvironmentId,
   type GameCharacterRoute,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
@@ -10,7 +11,9 @@ import { Atom } from "effect/reactivity";
 import { useGameStageAccess } from "../../hooks/useGameStageAccess";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { generatedRouteBlocker } from "./gameGeneration.logic";
 import { MenuRadioGroup, MenuRadioItem, MenuSub, MenuSubPopup, MenuSubTrigger } from "../ui/menu";
 
 /** The ways a game's characters are made, in the order the person picks from. */
@@ -18,28 +21,39 @@ export const CHARACTER_ROUTES: ReadonlyArray<{
   readonly route: GameCharacterRoute;
   readonly label: string;
   readonly description: string;
-  /** Why it cannot be picked yet; null when it can. */
-  readonly unavailable: string | null;
 }> = [
   {
     route: "library",
     label: "Library",
     description: "Characters from the asset library's packs",
-    unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.library ?? null,
   },
   {
     route: "blender",
     label: "Blender",
     description: "The agent builds each character in Blender",
-    unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.blender ?? null,
   },
   {
     route: "generated",
     label: "Generated",
     description: "Made by an art provider: Codex, or your own keys",
-    unavailable: GAME_CHARACTER_ROUTE_UNAVAILABLE.generated ?? null,
   },
 ];
+
+/**
+ * Why each route cannot be picked right now, or null when it can: the
+ * contract's own mark first, then Generated needs a ready art provider (a 3D
+ * lane, or Codex for images).
+ */
+export function useCharacterRouteBlockers(
+  environmentId: EnvironmentId | null,
+): (route: GameCharacterRoute) => string | null {
+  const providers = useEnvironmentQuery(
+    environmentId === null ? null : gameEnvironment.artProviders({ environmentId, input: {} }),
+  );
+  const generated = generatedRouteBlocker(providers.data);
+  return (route) =>
+    GAME_CHARACTER_ROUTE_UNAVAILABLE[route] ?? (route === "generated" ? generated : null);
+}
 
 export const characterRouteLabel = (route: GameCharacterRoute) =>
   CHARACTER_ROUTES.find((option) => option.route === route)?.label ?? route;
@@ -85,6 +99,7 @@ export function useCharacterRoute(threadRef: ScopedThreadRef | null) {
 /** The game's More menu entry: "Make characters with…" and its three choices. */
 export function GameCharacterRouteMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
   const { shown, canSet, choose } = useCharacterRoute(threadRef);
+  const blocker = useCharacterRouteBlockers(threadRef.environmentId);
   return (
     <MenuSub>
       <MenuSubTrigger disabled={!canSet}>Make characters with…</MenuSubTrigger>
@@ -93,17 +108,19 @@ export function GameCharacterRouteMenu({ threadRef }: { threadRef: ScopedThreadR
           value={shown}
           onValueChange={(value: GameCharacterRoute) => void choose(value)}
         >
-          {CHARACTER_ROUTES.map((option) => (
-            <MenuRadioItem
-              key={option.route}
-              value={option.route}
-              disabled={option.unavailable !== null}
-            >
-              {option.unavailable === null
-                ? option.label
-                : `${option.label} · ${option.unavailable.toLowerCase()}`}
-            </MenuRadioItem>
-          ))}
+          {CHARACTER_ROUTES.map((option) => {
+            const blocked = blocker(option.route);
+            return (
+              <MenuRadioItem
+                key={option.route}
+                value={option.route}
+                // The current route stays checkable even when its providers went away.
+                disabled={blocked !== null && shown !== option.route}
+              >
+                {blocked === null ? option.label : `${option.label} · ${blocked.toLowerCase()}`}
+              </MenuRadioItem>
+            );
+          })}
         </MenuRadioGroup>
       </MenuSubPopup>
     </MenuSub>

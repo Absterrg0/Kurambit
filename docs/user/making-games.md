@@ -113,12 +113,15 @@ then have the art redone. Delete it to lift the lock.
 ## Characters
 
 Each game has one setting for how its characters are made, **Make characters with**: **Library**
-(the default), **Blender** or **Tripo**. Pick it in the **New game** dialog, so the first turn builds the cast your way, and change it later from the game's **More** menu (**⋯** above the
+(the default), **Blender** or **Generated**. Pick it in the **New game** dialog, so the first turn builds the cast your way, and change it later from the game's **More** menu (**⋯** above the
 stage) or the command palette's **Make characters with…**; the stage's build detail shows the
 current choice. On **Library** the agent takes characters from the asset library and will not model
 one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the
-head, clothes, tail or ears it models itself, with the library's animations already fitted. Tripo,
-which generates characters with your own Tripo key, is not available yet. The agent never changes the setting itself: when the chosen way cannot make
+head, clothes, tail or ears it models itself, with the library's animations already fitted. On
+**Generated** an art provider makes them (see [Generated art](#generated-art)): Tripo or Meshy on your
+own key makes rigged 3D characters, and with Codex alone they are images, such as character sheets
+and sprites. Generated can be picked once a 3D provider
+or Codex is ready; until then the choice says what to set up. The agent never changes the setting itself: when the chosen way cannot make
 something, it says so and names the others, and you switch the setting when you want to.
 
 Human bodies on **Blender** come from MPFB2, which you install once: **Settings → General → Game
@@ -136,6 +139,34 @@ model and a `.asset.json` file beside it that records its measurements and where
 from; three.js games play its animations at the speed the character moves, so its feet stay
 planted, and swing its tail and ears. The turn's build lists the model under **Assets**, and undo
 brings back the model the game had before.
+
+## Generated art
+
+Agents can have art made by specialist providers: images (key art, concepts, character sheets,
+sprites, UI art) and textures by Codex, OpenAI or Google Gemini; characters, creatures and props by
+Tripo or Meshy; sound effects, music and voice by ElevenLabs. Whatever comes back goes through the
+same pipeline as everything else, matched to the game's key art and style, reviewed, recorded in
+`ASSETS.md` with its source, an AI flag and its cost, and undone like any other change. Files land
+under `art/generated/`.
+
+Set it up in **Settings → General → Art providers**. Codex needs no key: it uses your ChatGPT plan
+through the Codex you already run in Kurambit. Every other provider takes your own API key; each row
+links to where you get one and shows whether it is ready. **Provider per kind of asset** picks one
+provider for a kind or leaves it on **Auto**, the first ready one. The agent never switches provider
+or route to get past a refusal; it tells you what is missing.
+
+Paid generations cost money on your provider account. Each one shows its estimate while it is being
+made and its cost when it is done, and every paid call counts against the **Daily limit** (5 USD a day
+across all games by default). A generation that would go over it is refused, with the numbers.
+
+For key art and hero characters the agent asks for a few candidates. They appear as a card in the
+chat: click one, then **Use this** (or use the arrow keys and Enter), and the agent carries on with
+it. Keep going takes the first candidate and says so. **Cancel** stops a generation still being made.
+**Generated art…** in the game's **More** menu (**⋯**) or the command palette lists everything the game
+has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
+
+Generated assets are yours on a paid plan; free plans of these providers do not allow commercial use.
+ElevenLabs music also has a studio-size limit, so check its terms before you ship a game that uses it.
 
 ## Keep going
 
