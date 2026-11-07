@@ -1,4 +1,3 @@
-import * as Schema from "effect/Schema";
 import {
   EnvironmentId,
   GameBuildId,
@@ -8,7 +7,6 @@ import {
   type GameBuildPlayResult,
   type GameBuildRef,
   type GameBuildsResult,
-  type GameRunRoundRef,
   type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadId,
@@ -230,6 +228,22 @@ export const buildRestoreSending = (ref: ScopedThreadRef) =>
   buildRestoreSendingAtom(`${ref.environmentId}\0${ref.threadId}`);
 export const setBuildRestoreSending = (ref: ScopedThreadRef, value: BuildRestoreSending | null) =>
   appAtomRegistry.set(buildRestoreSending(ref), value);
+
+/**
+ * The keep-going budget a person picked in one chat for its next start or
+ * resume; undefined keeps the run's own. The control and its overflow copy
+ * share it, and it outlives a remount of either.
+ */
+const keepGoingBudgetAtom = Atom.family((key: string) =>
+  Atom.make<number | null | undefined>(undefined).pipe(
+    Atom.keepAlive,
+    Atom.withLabel(`game:keep-going-budget:${key}`),
+  ),
+);
+export const keepGoingBudget = (ref: ScopedThreadRef) =>
+  keepGoingBudgetAtom(`${ref.environmentId}\0${ref.threadId}`);
+export const setKeepGoingBudget = (ref: ScopedThreadRef, minutes: number | null) =>
+  appAtomRegistry.set(keepGoingBudget(ref), minutes);
 
 /**
  * An earlier build the Stage is playing instead of the game folder's own
@@ -463,6 +477,23 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
     refreshTrigger: threadSignal("run"),
+  }),
+  // Keep going's status for one chat: reread on run pushes only, so a step's
+  // progress re-renders the control and the banner once per change, never on a timer.
+  keepGoingStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:keepGoingStatus",
+    tag: WS_METHODS.gameKeepGoingStatus,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: threadSignal("run"),
+  }),
+  keepGoing: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:keepGoing",
+    tag: WS_METHODS.gameKeepGoing,
+  }),
+  keepGoingDecide: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:keepGoingDecide",
+    tag: WS_METHODS.gameKeepGoingDecide,
   }),
   saveMedia: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:saveMedia",
