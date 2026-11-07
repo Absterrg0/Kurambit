@@ -45,6 +45,7 @@ const cardsOf = (key: string): ReadonlyArray<TimelineAnchoredCard> => {
   const cards = key.split("\u0002").map((part) => {
     const [runId = "", round = "0", endedAt = ""] = part.split("\u0001");
     return {
+      kind: "game-round" as const,
       id: `game-round:${runId}:${round}`,
       createdAt: endedAt,
       runId,

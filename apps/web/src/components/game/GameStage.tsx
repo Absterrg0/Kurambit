@@ -12,6 +12,7 @@ import {
   PanelRightIcon,
   PlayIcon,
   RefreshCwIcon,
+  SparklesIcon,
   SquareIcon,
   TriangleAlertIcon,
   WrenchIcon,
@@ -65,6 +66,8 @@ import { GameBuildCompare } from "./GameBuildCompare";
 import { GameCharacterRouteMenu } from "./GameCharacterRoute";
 import { GameBuildTimeline, type GameTimelineRequest } from "./GameBuildTimeline";
 import { GameExports } from "./GameExports";
+import { GameGeneratedArt } from "./GameGeneratedArt";
+import { useChoosingCount } from "./GameGenerationCard";
 import { buildName } from "./gameBuilds.logic";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { GameElapsed } from "./GameElapsed";
@@ -227,6 +230,8 @@ function ThreadGameStage({
   const [timelineRequest, setTimelineRequest] = useState<GameTimelineRequest | null>(null);
   const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [artOpen, setArtOpen] = useState(false);
+  const choosing = useChoosingCount(threadRef);
   // A focus request, for the frame on screen when it came: each frame acts on a new one only.
   const [focusRequest, setFocusRequest] = useState<{
     readonly n: number;
@@ -410,6 +415,9 @@ function ThreadGameStage({
       }
       case "export":
         setExportOpen(true);
+        return;
+      case "generated-art":
+        setArtOpen(true);
         return;
     }
   });
@@ -842,6 +850,10 @@ function ThreadGameStage({
                   <DownloadIcon />
                   Export…
                 </MenuItem>
+                <MenuItem onClick={() => setArtOpen(true)}>
+                  <SparklesIcon />
+                  {choosing > 0 ? `Generated art… (${choosing} to pick)` : "Generated art…"}
+                </MenuItem>
                 <MenuItem
                   disabled={!canOperate || !runningSomething}
                   onClick={() => void perform("stop")}
@@ -1028,6 +1040,19 @@ function ThreadGameStage({
                 void perform(target === "Windows" ? "export-windows" : "export-linux")
               }
             />
+          </DialogPanel>
+        </DialogPopup>
+      </Dialog>
+      <Dialog open={artOpen} onOpenChange={setArtOpen}>
+        <DialogPopup className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Generated art</DialogTitle>
+            <DialogDescription>
+              What the agent asked the art providers to make for this game.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <GameGeneratedArt threadRef={threadRef} />
           </DialogPanel>
         </DialogPopup>
       </Dialog>

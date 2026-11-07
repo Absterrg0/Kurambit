@@ -3,7 +3,11 @@
 import { useGameDialogStore } from "./game/gameDialogStore";
 import { useTurnUndo } from "./game/useBuildActions";
 import { useKeepGoing } from "./game/useKeepGoing";
-import { CHARACTER_ROUTES, useCharacterRoute } from "./game/GameCharacterRoute";
+import {
+  CHARACTER_ROUTES,
+  useCharacterRoute,
+  useCharacterRouteBlockers,
+} from "./game/GameCharacterRoute";
 import { keepGoingControlView } from "./game/keepGoing.logic";
 import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
 import {
@@ -73,6 +77,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PackageIcon,
+  SparklesIcon,
   PlayIcon,
   Redo2Icon,
   SquareIcon,
@@ -756,6 +761,9 @@ function OpenCommandPaletteDialog(props: {
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
   const characterRoute = useCharacterRoute(isGameThread ? activeThreadRef : null);
+  const characterRouteBlocker = useCharacterRouteBlockers(
+    isGameThread && characterRoute.canSet ? (activeThreadRef?.environmentId ?? null) : null,
+  );
 
   const activeThreadReferenceCopyTarget =
     activeThread === null
@@ -1655,8 +1663,10 @@ function OpenCommandPaletteDialog(props: {
               kind: "action",
               value: `game-character-route:${option.route}`,
               title: option.label,
-              description: option.unavailable ?? option.description,
-              disabled: option.unavailable !== null,
+              description: characterRouteBlocker(option.route) ?? option.description,
+              disabled:
+                characterRouteBlocker(option.route) !== null &&
+                characterRoute.shown !== option.route,
               searchTerms: [option.label, "characters", "route"],
               icon: <PersonStandingIcon className={ITEM_ICON_CLASS} />,
               titleTrailingContent:
@@ -1747,6 +1757,15 @@ function OpenCommandPaletteDialog(props: {
         icon: <PackageIcon className={ITEM_ICON_CLASS} />,
         run: requestStage({ kind: "export" }),
       });
+    // Read-only for a run's role thread too: picking is guarded inside.
+    actionItems.push({
+      kind: "action",
+      value: "action:game-generated-art",
+      title: "Generated art…",
+      searchTerms: ["generated", "art", "assets", "images", "candidates", "pick", "cost", "game"],
+      icon: <SparklesIcon className={ITEM_ICON_CLASS} />,
+      run: requestStage({ kind: "generated-art" }),
+    });
   }
   for (const [mode, title] of [
     ["create", "New game"],
@@ -1771,6 +1790,18 @@ function OpenCommandPaletteDialog(props: {
     icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings/general", hash: "game-tools" });
+    },
+  });
+  actionItems.push({
+    kind: "action",
+    value: "action:game-art-providers",
+    title: "Art providers",
+    searchTerms: [
+      "art providers generated keys codex openai gemini tripo meshy elevenlabs daily limit",
+    ],
+    icon: <SparklesIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/general", hash: "art-providers" });
     },
   });
 

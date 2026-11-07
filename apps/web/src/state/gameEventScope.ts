@@ -1,4 +1,5 @@
 import {
+  GAME_ART_EVENT,
   GAME_BUILDS_EVENT,
   GAME_FACTS_EVENT,
   GAME_LIVE_EVENT,
@@ -14,7 +15,7 @@ import {
  * only on its own scopes, so a run step does not reread the stage's status
  * and an export does not reread the run.
  */
-export type GameEventScope = "run" | "saved" | "builds" | "facts" | "live" | "operation";
+export type GameEventScope = "run" | "saved" | "builds" | "facts" | "live" | "art" | "operation";
 
 export const gameEventScope = (event: GameOperationEvent): GameEventScope =>
   event.name === "run"
@@ -27,4 +28,6 @@ export const gameEventScope = (event: GameOperationEvent): GameEventScope =>
           ? "facts"
           : event.name === GAME_LIVE_EVENT
             ? "live"
-            : "operation";
+            : event.name === GAME_ART_EVENT
+              ? "art"
+              : "operation";

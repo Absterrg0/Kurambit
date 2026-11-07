@@ -25,7 +25,12 @@ import {
 import type { HtmlRenderReference } from "@kurambit/shared/htmlRender";
 import { turnItemDetailRevision } from "@kurambit/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@kurambit/shared/mcpApp";
-import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@kurambit/shared/toolOutput";
+import {
+  compactDynamicToolOutput,
+  htmlRenderFromToolItem,
+  mcpAppFromToolItem,
+} from "@kurambit/shared/toolOutput";
+import { isGameGenerationTool } from "./components/game/gameGeneration.logic";
 import {
   contextCompactionLabel,
   workEntryIndicatesToolFailure,
@@ -171,6 +176,12 @@ export type TimelineEntry = (
       readonly createdAt: string;
       readonly runId: string;
       readonly round: number;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "game-generation";
+      readonly createdAt: string;
+      readonly generationId: string;
     }
 ) & {
   readonly attempt?: TimelineAttempt;
@@ -571,14 +582,23 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
  */
 /**
  * A card the client derives from records it already holds, placed by time: a
- * production run's round card in the run's chat. It adds no message and starts no turn.
+ * production run's round card in the run's chat, or a generation the chat's
+ * agent started. It adds no message and starts no turn.
  */
-export interface TimelineAnchoredCard {
-  readonly id: string;
-  readonly createdAt: string;
-  readonly runId: string;
-  readonly round: number;
-}
+export type TimelineAnchoredCard =
+  | {
+      readonly kind: "game-round";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly runId: string;
+      readonly round: number;
+    }
+  | {
+      readonly kind: "game-generation";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly generationId: string;
+    };
 
 export interface TimelineEntriesInput {
   readonly visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
@@ -606,6 +626,12 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   );
   const nodeById = new Map((input.nodes ?? []).map((node) => [node.id, node] as const));
   const planById = new Map((input.plans ?? []).map((plan) => [plan.id, plan] as const));
+  // Once the chat's generation cards are read, they stand for the agent's
+  // game_generate and game_generate_wait calls; a refused or failed call keeps
+  // its own row, since no card exists for it.
+  const generationCardsShown = (input.anchoredCards ?? []).some(
+    (card) => card.kind === "game-generation",
+  );
 
   const resolveAttempt = (item: OrchestrationV2TurnItem): TimelineAttempt | undefined => {
     if (item.nodeId === null || item.runId === null) return undefined;
@@ -720,6 +746,17 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       continue;
     }
 
+    if (
+      generationCardsShown &&
+      item.type === "dynamic_tool" &&
+      isGameGenerationTool(item.toolName) &&
+      item.status !== "failed" &&
+      item.status !== "cancelled" &&
+      item.status !== "interrupted" &&
+      compactDynamicToolOutput(item.output)?.isError !== true
+    )
+      continue;
+
     const htmlRender =
       item.type === "dynamic_tool" && item.status === "completed"
         ? htmlRenderFromToolItem(item)
@@ -796,13 +833,21 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   }
 
   for (const card of input.anchoredCards ?? []) {
-    const entry: TimelineEntry = {
-      id: card.id,
-      kind: "game-round",
-      createdAt: card.createdAt,
-      runId: card.runId,
-      round: card.round,
-    };
+    const entry: TimelineEntry =
+      card.kind === "game-round"
+        ? {
+            id: card.id,
+            kind: "game-round",
+            createdAt: card.createdAt,
+            runId: card.runId,
+            round: card.round,
+          }
+        : {
+            id: card.id,
+            kind: "game-generation",
+            createdAt: card.createdAt,
+            generationId: card.generationId,
+          };
     const insertionIndex = entries.findIndex((candidate) => candidate.createdAt > card.createdAt);
     if (insertionIndex === -1) entries.push(entry);
     else entries.splice(insertionIndex, 0, entry);
