@@ -68,6 +68,7 @@ export default defineConfig({
       "*.icon/**",
       // Sample games on the site are shipped builds (vendored three.js among them), not source.
       "apps/marketing/site/hill-temple-three/**",
+      "apps/marketing/site/hill-temple/**",
     ],
     sortPackageJson: {},
     overrides: [
@@ -91,6 +92,7 @@ export default defineConfig({
       "**/routeTree.gen.ts",
       "**/*.graphql.ts",
       "apps/marketing/site/hill-temple-three/**",
+      "apps/marketing/site/hill-temple/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-kurambit/index.ts", "@shadcn/lint"],
