@@ -529,22 +529,7 @@ const make = Effect.gen(function* () {
           found !== null && found.harness === harness
             ? found.stored
             : { build: build.build, measuredAt: null, renderer: null };
-        // A browser game's bots draw with the backend the server probed; its
-        // renderer is recorded, so facts from the GPU and from SwiftShader are
-        // never compared as alike.
-        const backend =
-          engineProfile(build.engine).play === "browser"
-            ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
-            : Option.none();
-        const software = Option.isSome(backend) && backend.value.software;
-        stored = {
-          ...stored,
-          root,
-          engine: build.engine,
-          renderer: Option.isSome(backend)
-            ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
-            : yield* rendererOf(copy, build.engine),
-        };
+        stored = { ...stored, root, engine: build.engine };
         const write = (patch: Partial<Record<FactName, unknown>>) =>
           Effect.gen(function* () {
             const names = Object.keys(patch) as FactName[];
@@ -562,6 +547,7 @@ const make = Effect.gen(function* () {
             yield* announce(`Build ${build.build.slice(0, 8)}: ${names.join(", ")} measured.`);
           });
 
+        // The static tier reads the copy's files only: it needs no browser and no engine.
         if (tiers.has("assets"))
           yield* write({
             assets: {
@@ -573,6 +559,20 @@ const make = Effect.gen(function* () {
               ),
             },
           });
+        // A browser game's bots draw with the backend the server probed; its
+        // renderer is recorded, so facts from the GPU and from SwiftShader are
+        // never compared as alike.
+        const backend =
+          engineProfile(build.engine).play === "browser"
+            ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
+            : Option.none();
+        const software = Option.isSome(backend) && backend.value.software;
+        stored = {
+          ...stored,
+          renderer: Option.isSome(backend)
+            ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
+            : yield* rendererOf(copy, build.engine),
+        };
         if (tiers.has("boots")) {
           const boots = yield* step(game.checkIn(copy, OWNER)).pipe(
             Effect.map(bootsFact),
