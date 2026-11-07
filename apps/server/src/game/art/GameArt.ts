@@ -496,7 +496,7 @@ const make = Effect.gen(function* () {
   const renderers = yield* Ref.make<ArtRenderers | null>(null);
   const keyChecks = new Map<
     GameArtProviderId,
-    { key: string; at: number; status: GameArtProviderStatus }
+    { key: string; at: number; status: GameArtProviderStatus; refused: boolean }
   >();
 
   const settings = settingsService.getSettings.pipe(
@@ -587,7 +587,7 @@ const make = Effect.gen(function* () {
   // ── Routing ────────────────────────────────────────────────────────────
   const codexReady = host.codex;
   /** Whether the provider can be asked now, without a network call: a key saved, Codex signed in. */
-  const quickReady = (all: ServerSettings, provider: GameArtProviderId) =>
+  const savedReady = (all: ServerSettings, provider: GameArtProviderId) =>
     Effect.gen(function* () {
       if (ART_ADAPTERS[provider] === undefined)
         return { ready: false, message: "Not available yet." };
@@ -601,6 +601,23 @@ const make = Effect.gen(function* () {
         ? // Settings shows it beside the key field and its "Get a key" link; the agent's refusal says where (setupHint).
           { ready: false, message: "No key saved." }
         : { ready: true, message: "Key saved." };
+    });
+
+  /**
+   * Ready to route to, without a network call: a saved key, unless the provider refused this very
+   * key (Settings' check) or said it cannot work now within the check's lifetime. Without this,
+   * a refused key reads as ready to the agent (`artLanes`), which then pays for the steps before it.
+   */
+  const quickReady = (all: ServerSettings, provider: GameArtProviderId) =>
+    Effect.gen(function* () {
+      const saved = yield* savedReady(all, provider);
+      const cached = keyChecks.get(provider);
+      if (!saved.ready || cached === undefined || cached.key !== keyOf(all, provider)) return saved;
+      if (cached.status.ready) return saved;
+      const now = yield* Clock.currentTimeMillis;
+      return cached.refused || now - cached.at < KEY_CHECK_TTL_MS
+        ? { ready: false, message: cached.status.message }
+        : saved;
     });
 
   const setupHint = (lane: GameArtLane) => {
@@ -1356,7 +1373,12 @@ const make = Effect.gen(function* () {
               ? " on the ChatGPT plan's Codex limits (no dollar cost)"
               : ""
             : `, estimated ${usd(g.estimateUsd)}`
-        }${spent !== null && limit !== null ? ` (${usd(spent)} of the ${usd(limit)} daily limit spent today)` : ""}. Files land in ${where}/.${lookText(row)} Wait with game_generate_wait id ${g.id}.`;
+        }${
+          // `spent` holds this generation's estimate too: the limit reserves it before it is spent.
+          spent !== null && limit !== null
+            ? ` (${usd(spent)} of the ${usd(limit)} daily limit used today${g.estimateUsd === null ? "" : ", counting this estimate"})`
+            : ""
+        }. Files land in ${where}/.${lookText(row)} Wait with game_generate_wait id ${g.id}.`;
       case "choosing":
         if (g.filesUndone === true)
           return `The candidates of "${g.name}" are no longer in the game: ${UNDONE}`;
@@ -1941,7 +1963,7 @@ const make = Effect.gen(function* () {
   // ── providers ──────────────────────────────────────────────────────────
   const checkedStatus = (all: ServerSettings, provider: GameArtProviderId) =>
     Effect.gen(function* () {
-      const quick = yield* quickReady(all, provider);
+      const quick = yield* savedReady(all, provider);
       const adapter = ART_ADAPTERS[provider];
       const key = keyOf(all, provider);
       if (!quick.ready || key === null || adapter === undefined)
@@ -1957,24 +1979,40 @@ const make = Effect.gen(function* () {
       if (cached !== undefined && cached.key === key && now - cached.at < KEY_CHECK_TTL_MS)
         return cached.status;
       const context = yield* contextFor(all, provider, "key-check");
-      const status: GameArtProviderStatus = yield* adapter.checkKey(context).pipe(
+      const { status, refused } = yield* adapter.checkKey(context).pipe(
         Effect.timeout(Duration.seconds(8)),
         Effect.match({
-          onSuccess: (answer) =>
-            answer === undefined
+          onSuccess: (answer) => ({
+            refused: false,
+            status: (answer === undefined
               ? { provider, ready: true, message: "Key works." }
-              : { provider, ready: answer.ready, message: answer.note },
-          onFailure: (error) =>
-            error instanceof ArtProviderError && error.transient !== true
-              ? { provider, ready: false, message: `The key was refused: ${error.reason}` }
               : {
                   provider,
-                  ready: true,
-                  message: "Key saved; the provider could not be reached to check it.",
+                  ready: answer.ready,
+                  message: answer.note,
+                }) satisfies GameArtProviderStatus,
+          }),
+          onFailure: (error) =>
+            error instanceof ArtProviderError && error.transient !== true
+              ? {
+                  refused: true,
+                  status: {
+                    provider,
+                    ready: false,
+                    message: `The key was refused: ${error.reason}`,
+                  } satisfies GameArtProviderStatus,
+                }
+              : {
+                  refused: false,
+                  status: {
+                    provider,
+                    ready: true,
+                    message: "Key saved; the provider could not be reached to check it.",
+                  } satisfies GameArtProviderStatus,
                 },
         }),
       );
-      keyChecks.set(provider, { key, at: now, status });
+      keyChecks.set(provider, { key, at: now, status, refused });
       return status;
     });
 

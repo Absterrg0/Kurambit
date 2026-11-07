@@ -155,9 +155,10 @@ export const generatedRouteBlocker = (providers: GameArtProvidersResult | null):
 export const generatedRouteNote = (providers: GameArtProvidersResult | null): string | null => {
   if (providers === null || generatedRouteBlocker(providers) !== null) return null;
   const threeD = [...THREE_D_LANES].some((lane) => providers.lanes[lane] !== null);
-  return threeD
-    ? null
-    : "Codex makes the key art and images; characters and props also need a Tripo or Meshy key.";
+  if (threeD) return null;
+  // The image lane may be the person's paid key, not Codex: name the one that will be used.
+  const images = providers.lanes.image === null ? "Codex" : providerLabel(providers.lanes.image);
+  return `${images} makes the key art and images; characters and props also need a Tripo or Meshy key.`;
 };
 
 /** Generations started by one chat's agent, oldest first, as timeline card keys. */
