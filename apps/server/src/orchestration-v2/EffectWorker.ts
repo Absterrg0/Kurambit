@@ -570,76 +570,33 @@ export const layerExecutor: Layer.Layer<
               ),
             );
           }
-          // Before the run's next step, which its commit queued behind it.
+          // Retired with the stage era: a row from before the upgrade settles with no work.
+          case "game-run.decision.wake":
+          case "game-run.finish":
+          case "game-run.restore.execute":
           case "game-run.outputs":
-            return gameRunJobs
-              .outputs({
-                threadId: effect.threadId,
-                runId: effect.request.runId,
-                files: effect.request.files,
-                release: effect.request.release,
+          case "game-run.copies.release":
+            return Effect.void;
+          case "game-run.decision.deadline": {
+            const request = effect.request;
+            return gameRunDecisions
+              .expire({
                 effectId: effect.id,
-                final: !willRetry,
+                threadId: effect.threadId,
+                runId: request.runId,
+                stepId: request.stepId,
+                decisionId: request.decisionId,
               })
               .pipe(
                 Effect.mapError(
-                  (error) =>
+                  (cause) =>
                     new OrchestrationEffectExecutionError({
                       effectId: effect.id,
-                      effectType: effect.request.type,
-                      cause: error.cause,
+                      effectType: request.type,
+                      cause,
                     }),
                 ),
               );
-          case "game-run.copies.release":
-            return gameRunJobs
-              .releaseCopies({ threadId: effect.threadId, runId: effect.request.runId })
-              .pipe(
-                Effect.mapError(
-                  (error) =>
-                    new OrchestrationEffectExecutionError({
-                      effectId: effect.id,
-                      effectType: effect.request.type,
-                      cause: error.cause,
-                    }),
-                ),
-              );
-          case "game-run.restore.execute":
-            return gameRunJobs.restore({
-              threadId: effect.threadId,
-              runId: effect.request.runId,
-              requestId: effect.request.requestId,
-            });
-          case "game-run.finish":
-            return gameRunJobs.finish({
-              threadId: effect.threadId,
-              runId: effect.request.runId,
-              endedAt: effect.request.endedAt,
-            });
-          case "game-run.decision.wake":
-          case "game-run.decision.deadline": {
-            const request = effect.request;
-            const decision = {
-              effectId: effect.id,
-              threadId: effect.threadId,
-              runId: request.runId,
-              stepId: request.stepId,
-              decisionId: request.decisionId,
-            };
-            return (
-              request.type === "game-run.decision.wake"
-                ? gameRunDecisions.wake(decision)
-                : gameRunDecisions.expire(decision)
-            ).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationEffectExecutionError({
-                    effectId: effect.id,
-                    effectType: request.type,
-                    cause,
-                  }),
-              ),
-            );
           }
         }
       },
