@@ -25,28 +25,9 @@
     <link rel="icon" href="/favicon.ico?v=2" sizes="any" />
     <link rel="icon" href="/favicon-32x32.png?v=2" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
-    <link
-      rel="preload"
-      href="/fonts/redaction-italic.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
+    <link rel="preload" href="/fonts/redaction-italic.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/hill-temple/hill-temple.css" />
-    <script type="application/json" id="godot-config">
-      {
-        "args": [],
-        "canvasResizePolicy": 2,
-        "emscriptenPoolSize": 8,
-        "ensureCrossOriginIsolationHeaders": true,
-        "executable": "index",
-        "experimentalVK": false,
-        "fileSizes": { "index.pck": 26481200, "index.wasm": 39514754 },
-        "focusCanvas": true,
-        "gdextensionLibs": [],
-        "godotPoolSize": 4
-      }
-    </script>
+    <script type="application/json" id="godot-config">{"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":51765452,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4}</script>
     <script src="/hill-temple/index.js" defer></script>
     <script src="/hill-temple/hill-temple.js" defer></script>
   </head>
@@ -63,77 +44,43 @@
       <div class="gate-copy">
         <p class="kicker">A Warring States slice</p>
         <h1>The Hill Temple</h1>
-        <p class="lede">
-          Bandits hold the old path up the hill, and something waits at the temple. Five to ten
-          minutes, with a sword.
-        </p>
+        <p class="lede">Bandits hold the old path up the hill, and something waits at the temple. Five to ten minutes, with a sword.</p>
         <button class="play" type="button" data-play>Play</button>
-        <p class="fine" data-status role="status" aria-live="polite">
-          About a 30 MB download. Best with a mouse and keyboard, or a gamepad, on a desktop
-          browser.
-        </p>
+        <p class="fine" data-status role="status" aria-live="polite">About a 60 MB download. Best with a mouse and keyboard, or a gamepad, on a desktop browser.</p>
         <div class="bar" data-bar hidden><i data-bar-fill></i></div>
       </div>
     </main>
 
     <footer class="foot">
       <p class="keys">
-        <span>Mouse look</span><span>WASD move</span><span>Shift sprint</span
-        ><span>Click strike</span><span>Right click block, tap to parry</span
-        ><span>Space dodge</span><span>C roll</span><span>Tab lock on</span><span>Esc pause</span>
+        <span>Mouse look</span><span>WASD move</span><span>Shift sprint</span><span>Click strike</span><span>Right click block, tap to parry</span><span>Space dodge</span><span>C roll</span><span>Tab lock on</span><span>Esc pause, sound and quality</span>
       </p>
       <button class="credits-open" type="button" data-credits-open>Credits</button>
     </footer>
 
     <dialog class="credits" data-credits aria-labelledby="credits-title">
       <h2 id="credits-title">Credits</h2>
-      <p>
-        Made in <a href="/">Kurambit</a> by a coding agent (Claude) from its maintainers' briefs:
-        the code, the level, and the characters and props, modelled, rigged and painted in Blender
-        from concept art.
-      </p>
+      <p>Made in <a href="/">Kurambit</a> by a coding agent (Claude) from its maintainers' briefs: the code, the level, and the characters and props, modelled, rigged and painted in Blender from concept art.</p>
       <h3>Art</h3>
       <ul>
-        <li>
-          Concept art, the reference sheets the characters and the lion were painted from, and the
-          painted mountains: generated with OpenAI's image model for this game.
-        </li>
-        <li>
-          Rock scans and ground, stone, wood, roof and grass textures:
-          <a href="https://polyhaven.com">Poly Haven</a>, CC0.
-        </li>
-        <li>
-          Character animation: Universal Animation Library 1 and 2 by
-          <a href="https://quaternius.com">Quaternius</a>, CC0.
-        </li>
+        <li>Concept art, the reference sheets the characters and the lion were painted from, and the painted mountains: generated with OpenAI's image model for this game.</li>
+        <li>Rock scans and ground, stone, wood, roof and grass textures: <a href="https://polyhaven.com">Poly Haven</a>, CC0.</li>
+        <li>Character animation: Universal Animation Library 1 and 2 by <a href="https://quaternius.com">Quaternius</a>, CC0.</li>
       </ul>
       <h3>Sound and music</h3>
       <ul>
-        <li>
-          Music: “Asianoriental1” and “Asianoriental2” by Tozan,
-          <a href="https://opengameart.org/users/tozan">OpenGameArt</a>, CC0.
-        </li>
-        <li>
-          Sword attacks and clashes by StarNinjas, swishes pack, and the 100 CC0 SFX by rubberduck:
-          <a href="https://opengameart.org">OpenGameArt</a>, CC0.
-        </li>
-        <li>
-          Footsteps and cloth: RPG Audio by <a href="https://kenney.nl">Kenney</a>, CC0. Wind:
-          synthesized for this game.
-        </li>
+        <li>Music: “Asianoriental1” and “Asianoriental2” by Tozan, <a href="https://opengameart.org/users/tozan">OpenGameArt</a>, CC0.</li>
+        <li>Sword attacks and clashes by StarNinjas, swishes pack, and the 100 CC0 SFX by rubberduck: <a href="https://opengameart.org">OpenGameArt</a>, CC0.</li>
+        <li>Footsteps and cloth: RPG Audio by <a href="https://kenney.nl">Kenney</a>, CC0. Wind: synthesized for this game.</li>
       </ul>
       <h3>Type</h3>
       <ul>
         <li>Redaction and Geist, under the SIL Open Font License.</li>
       </ul>
       <h3>Engine</h3>
-      <p>
-        Made with the <a href="https://godotengine.org">Godot Engine</a> 4.7, © 2014-present Godot
-        Engine contributors, © 2007-2014 Juan Linietsky, Ariel Manzur, under the MIT license. Godot
-        includes third-party code under its own licenses:
-        <a href="/hill-temple/LICENSES.txt">the full notices</a>.
-      </p>
+      <p>Made with the <a href="https://godotengine.org">Godot Engine</a> 4.7, © 2014-present Godot Engine contributors, © 2007-2014 Juan Linietsky, Ariel Manzur, under the MIT license. Godot includes third-party code under its own licenses: <a href="/hill-temple/LICENSES.txt">the full notices</a>.</p>
       <form method="dialog"><button type="submit" class="credits-close">Close</button></form>
     </dialog>
   </body>
 </html>
+

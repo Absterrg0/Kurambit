@@ -85,9 +85,7 @@ a {
   font-style: italic;
   font-size: 19px;
   text-decoration: none;
-  transition:
-    color 200ms var(--ease),
-    opacity 400ms var(--ease);
+  transition: color 200ms var(--ease), opacity 400ms var(--ease);
 }
 
 .home:hover {
@@ -99,20 +97,15 @@ a {
   height: 28px;
 }
 
-/* Once the game runs, the page steps back: the brand moves clear of the game's health bar and fades
-   until the pointer finds it, and the controls line gives way to the game's own. */
-body.running .home {
-  left: auto;
-  right: max(22px, env(safe-area-inset-right));
+/* Once the game runs, the page steps back: the brand fades until the pointer finds it. */
+body.running .home,
+body.running .foot {
   opacity: 0.28;
 }
 
-body.running .home:hover {
+body.running .home:hover,
+body.running .foot:hover {
   opacity: 1;
-}
-
-body.running .foot {
-  display: none;
 }
 
 .gate {
@@ -187,9 +180,7 @@ h1 {
   cursor: pointer;
   -webkit-mask: url("/brush-swash.svg") 0 0 / 100% 100% no-repeat;
   mask: url("/brush-swash.svg") 0 0 / 100% 100% no-repeat;
-  transition:
-    background 200ms var(--ease),
-    transform 200ms var(--ease);
+  transition: background 200ms var(--ease), transform 200ms var(--ease);
 }
 
 .play:hover {
