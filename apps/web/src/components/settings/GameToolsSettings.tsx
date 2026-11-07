@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import type { EnvironmentId, GameToolStatus } from "@kurambit/contracts";
+import type { EnvironmentId, GameToolchainChangeInput, GameToolStatus } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { gameEnvironment } from "../../state/game";
@@ -20,7 +20,7 @@ const TOOL_PURPOSE = {
     "The engine for Unity games: a Unity 6 editor from Unity Hub (6000.6.7f1 or later) with Windows Build Support (Mono), and a Unity licence.",
   blender: "Models, rigs and renders game art. Blender 4.2 or later.",
   uv: "Runs the live Blender view's helper. Kurambit fetches it itself when it is not installed.",
-  mpfb: "Makes human bodies for characters in Blender. Installed only into Kurambit's own Blender sessions.",
+  mpfb: "MPFB2 2.0.18 makes human bodies for characters built in Blender. Its code is GPL-3.0 and is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender settings; the bodies it makes are CC0. Without it, characters use library bodies.",
 } as const satisfies Record<GameToolStatus["tool"], string>;
 
 const SOURCE_LABELS = {
@@ -36,6 +36,11 @@ const STATUS_BADGES = {
   warning: { variant: "warning", label: "Needs attention" },
   error: { variant: "error", label: "Not ready" },
 } as const;
+
+// The tools only the person installs and removes, here: the agent cannot.
+const INSTALLABLE: ReadonlySet<GameToolStatus["tool"]> = new Set<GameToolchainChangeInput["tool"]>([
+  "mpfb",
+]);
 
 const PATH_ROWS = [
   { key: "gameGodotPath", title: "Godot executable" },
@@ -99,6 +104,13 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
                   <p className="mt-1 whitespace-pre-wrap">{tool.message}</p>
                 </details>
               )}
+              {INSTALLABLE.has(tool.tool) ? (
+                <GameToolChange
+                  environmentId={environmentId}
+                  tool={tool}
+                  onChanged={() => query.refresh()}
+                />
+              ) : null}
               {tool.status === "ready" ? null : (
                 <div>
                   <GameToolLink tool={tool} />
@@ -154,6 +166,64 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
       </div>
       <GameToolsKeysSection environmentId={environmentId} />
     </SettingsSection>
+  );
+}
+
+/** Install or Remove for a tool Kurambit fetches itself; a failure stays on the row. */
+function GameToolChange({
+  environmentId,
+  tool,
+  onChanged,
+}: {
+  environmentId: EnvironmentId;
+  tool: GameToolStatus;
+  onChanged: () => void;
+}) {
+  const install = useAtomCommand(gameEnvironment.toolchainInstall, { reportFailure: false });
+  const remove = useAtomCommand(gameEnvironment.toolchainRemove, { reportFailure: false });
+  const canInstall = useAtomValue(gameEnvironment.toolchainInstall.permissionAtom(environmentId));
+  const canRemove = useAtomValue(gameEnvironment.toolchainRemove.permissionAtom(environmentId));
+  const [pending, setPending] = useState<"install" | "remove" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const change = async (kind: "install" | "remove") => {
+    if (pending !== null || tool.tool !== "mpfb") return;
+    setPending(kind);
+    setError(null);
+    const run = kind === "install" ? install : remove;
+    const result = await run({ environmentId, input: { tool: tool.tool } });
+    if (result._tag === "Failure") setError(String(squashAtomCommandFailure(result)));
+    setPending(null);
+    onChanged();
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap gap-2">
+        {tool.installed ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!canRemove || pending !== null}
+            onClick={() => void change("remove")}
+          >
+            {pending === "remove" ? "Removing…" : "Remove"}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            // Blender missing or too old: the message says what to fix first.
+            disabled={!canInstall || pending !== null || tool.status === "error"}
+            onClick={() => void change("install")}
+          >
+            {pending === "install" ? "Installing…" : "Install"}
+          </Button>
+        )}
+      </div>
+      {error === null ? null : (
+        <p role="alert" className="whitespace-pre-wrap text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

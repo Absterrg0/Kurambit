@@ -410,6 +410,15 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
   }),
+  // Only the person installs these tools (MPFB2), from Settings.
+  toolchainInstall: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:toolchainInstall",
+    tag: WS_METHODS.gameToolchainInstall,
+  }),
+  toolchainRemove: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:toolchainRemove",
+    tag: WS_METHODS.gameToolchainRemove,
+  }),
   status: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:status",
     tag: WS_METHODS.gameStatus,
