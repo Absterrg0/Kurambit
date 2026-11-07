@@ -18,6 +18,7 @@ import re
 
 import bpy
 import numpy as np
+from mathutils import Matrix
 
 from . import helpers, skeleton
 from .protocol import Refused, entry
@@ -28,6 +29,24 @@ def _clip_name(action):
     parts = [p for p in action.name.split("|") if p and p.lower() not in ("baselayer", "base layer")]
     name = parts[-1] if parts else action.name
     return re.sub(r"\.\d{3}$", "", name)[:64]
+
+
+def _rest_idle(arm, owner, stamp, frames=30):
+    """A looping clip that holds every bone at rest: a creature's way of standing still."""
+    act = bpy.data.actions.new("Idle_Loop")
+    act.use_fake_user = True
+    act["kurambit_owner"] = owner
+    # Another character's Idle_Loop may hold the name in the scene; the export names clips by this.
+    act["kurambit_clip"] = "Idle_Loop"
+    act["kurambit_source"] = json.dumps({"what": "clips", **stamp})
+    skeleton.assign_action(arm, act)
+    rotation = {"QUATERNION": "rotation_quaternion", "AXIS_ANGLE": "rotation_axis_angle"}
+    for pb in arm.pose.bones:
+        pb.matrix_basis = Matrix.Identity(4)
+        for frame in (1, 1 + frames):
+            for path in ("location", rotation.get(pb.rotation_mode, "rotation_euler"), "scale"):
+                pb.keyframe_insert(path, frame=frame)
+    return act
 
 
 @entry
@@ -91,9 +110,13 @@ def generated(params):
             a.name = label
             clips.append(a.name)
         idle = next((a for a in actions if "idle" in a.name.lower()), None)
-        skeleton.assign_action(arm, idle)
         if actions and idle is None:
-            notes.append(f"no clip is named idle ({', '.join(clips)[:200]}): the review refuses a creature with clips but no idle. Rename the clip it stands in (bpy.data.actions[...].name and its kurambit_clip) or key one")
+            # Tripo's creature presets are one walk or march and no idle, so a creature standing
+            # still would play its walk in place. Its rest pose is how it stands.
+            idle = _rest_idle(arm, name, stamp)
+            clips.append(idle["kurambit_clip"])
+            notes.append(f"it came with no idle ({', '.join(clips[:-1])[:200]}): Idle_Loop was added, holding its rest pose. Key a breath or a look on its own bones if it should move while it stands")
+        skeleton.assign_action(arm, idle)
         if not actions:
             notes.append("it came with no clips: it ships in its rest pose, or key clips on its own bones")
     else:
