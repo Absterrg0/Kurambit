@@ -186,6 +186,13 @@ const make = Effect.gen(function* () {
             located,
             GameRunTurnReactor.supersededTurn(null, "your message went first"),
           );
+        // The step was proposed from the build the look read; a folder that
+        // moved since (a turn, an Undo or Redo) gets a fresh look.
+        if (step.base !== null && !(yield* builds.holds(threadId, step.base)))
+          return yield* complete(
+            located,
+            GameRunTurnReactor.supersededTurn(null, "the game changed since keep going looked"),
+          );
         // The step starts a turn in the chat, so it takes the admission any message turn does.
         yield* turnAdmission.admit(yield* projections.getThread(threadId));
         const message = stepMessage(stepNumber(rounds), step.proposal);
