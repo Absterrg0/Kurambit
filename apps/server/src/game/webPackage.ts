@@ -271,7 +271,7 @@ export const packageWebRelease = async (input: {
       throw new WebPackageError(
         stagedPath,
         "io",
-        "The Web package was not written completely. The previous package was kept; build & play again and retry.",
+        "The Web package was not written completely. The previous package was kept; export again to retry.",
       );
     throwIfAborted(input.signal);
     let publication: { readonly notes: readonly string[] };
