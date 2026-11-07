@@ -392,10 +392,8 @@ const make = Effect.gen(function* () {
           : { ready: false, message: codex.message };
       }
       return keyOf(all, provider) === null
-        ? {
-            ready: false,
-            message: `No key: add one in Settings → Art providers (${GAME_ART_PROVIDERS[provider].site}).`,
-          }
+        ? // Settings shows it beside the key field and its "Get a key" link; the agent's refusal says where (setupHint).
+          { ready: false, message: "No key saved." }
         : { ready: true, message: "Key saved." };
     });
 
