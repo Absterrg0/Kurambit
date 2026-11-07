@@ -513,7 +513,12 @@ const make = Effect.gen(function* () {
     LIBRARY_CATALOG.some((pack) => pack.id === style)
       ? host.packPicture(style).pipe(
           Effect.mapError((error) =>
-            opError("art-generate", `Style ${style}: ${error.message}`, "invalid-input", style),
+            opError(
+              "art-generate",
+              `Style ${style}: ${error.detail ?? error.message}`,
+              error.reason,
+              style,
+            ),
           ),
           Effect.flatMap(({ path, file }) =>
             Effect.tryPromise({
@@ -911,7 +916,7 @@ const make = Effect.gen(function* () {
               const prompt =
                 style === null
                   ? `Art style (follow it strictly, above everything else): ${direction.prompt}\n\n${input.prompt}\n\nRender every part of the image in that art style, not in a polished 3D movie style.`
-                  : `Image 1 is the art style to copy exactly: ${direction.prompt}. Copy its rendering, shapes, materials, palette, lighting and level of detail; do not copy what it shows.${references.length === 0 ? "" : " The other images show what to draw, not how."}\n\n${input.prompt}\n\nRender every part of the image in the art style of image 1, not in a polished 3D movie style.`;
+                  : `Image 1 is the art style to copy exactly: ${direction.prompt}. Copy its rendering, shapes, materials, palette, lighting and level of detail; do not copy what it shows, nor any text or logo on it.${references.length === 0 ? "" : " The other images show what to draw, not how."}\n\n${input.prompt}\n\nRender every part of the image in the art style of image 1, not in a polished 3D movie style.`;
               return {
                 ...base,
                 prompt,

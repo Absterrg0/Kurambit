@@ -301,12 +301,13 @@ it up with `game_generate_wait`.
    Ground each direction in a real look with `style`: words alone drift back
    to the image model's own glossy polish, and key art that promises a look
    the game cannot reach is a promise broken on the first screenshot. For a
-   stylised 3D game pass a library pack id from a different family per
-   direction (`game_assets_search` with no words lists them: KayKit,
-   Quaternius, Kenney low-poly; for 2D, Kenney pixel or vector); its own
-   picture goes first, and the models of that family can follow it. When
-   the person gave reference images, pass those game paths as `style`
-   instead.
+   stylised 3D game pass a library pack id per direction, from different
+   families (`game_assets_search` with no words lists them); its own
+   overview picture goes first, and the models of that family can follow
+   it. Kenney low-poly kits and characters and Quaternius Monsters ship
+   one; KayKit packs ship none, so ground a KayKit look in a game image of
+   it instead. For 2D, a Kenney pixel or vector pack. When the person gave
+   reference images, pass those game paths as `style` instead.
 
 2. **After the pick, lock the look to it.** Copy the picked file to
    `art/key-art.png`, read its colours with
