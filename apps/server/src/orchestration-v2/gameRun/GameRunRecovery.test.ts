@@ -24,7 +24,10 @@ import { stepTurnMessageId } from "./ids.ts";
 const live = ThreadId.make("thread:live");
 const ended = ThreadId.make("thread:ended");
 const legacy = ThreadId.make("thread:legacy");
+const fresh = ThreadId.make("thread:fresh");
 const liveRun = GameRunId.make("run_live");
+const olderRun = GameRunId.make("run_older");
+const freshRun = GameRunId.make("run_fresh");
 const endedRun = GameRunId.make("run_ended");
 
 const run = (id: GameRunId, threadId: ThreadId, patch: Partial<GameRun>) =>
@@ -61,11 +64,15 @@ it.effect("recovery stops what a restart left behind, and runs the cut-off step 
       [live]: run(liveRun, live, {}),
       [ended]: run(endedRun, ended, { status: "ended", ending: "stopped", inFlight: null }),
       [legacy]: run(GameRunId.make("run_legacy"), legacy, { loop: undefined } as never),
+      [fresh]: run(freshRun, fresh, {}),
     };
     const steps: Record<string, GameRunStep[]> = {
       [live]: [step(liveRun, live, 4, "judge")],
       [ended]: [],
       [legacy]: [],
+      // An older paused run of the chat holds its judge at the same seq as
+      // the new run's live turn: the lookup must go by run, not seq alone.
+      [fresh]: [step(olderRun, fresh, 4, "judge"), step(freshRun, fresh, 4, "turn")],
     };
     const t3Runs: Record<string, unknown[]> = {
       [live]: [
@@ -74,6 +81,7 @@ it.effect("recovery stops what a restart left behind, and runs the cut-off step 
         // The person's own turn: never touched.
         t3Run("t3-person", "message:person-1", "running"),
       ],
+      [fresh]: [t3Run("t3-fresh", stepTurnMessageId(gameRunStepId(freshRun, 4), 1), "running")],
       [ended]: [
         t3Run("t3-ended", stepTurnMessageId(gameRunStepId(endedRun, 3), 1), "running"),
         t3Run("t3-queued", stepTurnMessageId(gameRunStepId(endedRun, 3), 2), "queued"),
@@ -98,6 +106,7 @@ it.effect("recovery stops what a restart left behind, and runs the cut-off step 
                 threads: [
                   { id: live, activeRunId: RunId.make("t3-old") },
                   { id: ended, activeRunId: RunId.make("t3-ended") },
+                  { id: fresh, activeRunId: RunId.make("t3-fresh") },
                 ],
               } as never),
             getThreadRecords: (threadId) =>

@@ -47,6 +47,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { savedBuildOf } from "./run/buildNames.ts";
+import * as Loop from "./run/loop.ts";
 import { NO_TURN_LOOP_SENTENCE, keepGoingStatus } from "./run/runView.ts";
 import { RESUMABLE, isStepRecord, stageEra, stepNumber } from "./run/state.ts";
 import { ensureScaffold } from "./runSetup.ts";
@@ -151,12 +152,16 @@ const runError = (operation: string, path: string, reason: GameRunErrorReason, d
   new GameRunError({ operation, path, reason, detail });
 
 /** The T3 run a step turn's result names, once it landed. */
-const turnRunOf = (record: GameRunStep): RunId | null => {
-  const result = record.result;
-  return result !== null && result.kind === "turn" && "outcome" in result
-    ? (result as Extract<GameRunStepResult, { readonly kind: "turn" }>).runId
+const turnRunOf = (record: GameRunStep): RunId | null => resultOf(record, "turn")?.runId ?? null;
+
+/** A step's result of the kind its step reports, or null. */
+const resultOf = <K extends "turn" | "judge">(
+  record: GameRunStep | null,
+  kind: K,
+): Extract<GameRunStepResult, { readonly kind: K }> | null =>
+  record?.result != null && record.result.kind === kind
+    ? (record.result as Extract<GameRunStepResult, { readonly kind: K }>)
     : null;
-};
 
 /** How a stage-era round ended, as its card says. */
 const roundOutcome = (r: GameRunRoundRecord) =>
@@ -457,7 +462,7 @@ const make = Effect.gen(function* () {
   const readRun = (operation: string, threadId: ThreadId, run: GameRun | null) =>
     Effect.gen(function* () {
       if (run === null || stageEra(run))
-        return { records: [], inFlight: null, turn: null, turnRun: null, n: 1 };
+        return { records: [], inFlight: null, turn: null, turnRun: null, undoing: null, n: 1 };
       const fail = unreadable(operation, threadId);
       const records = yield* projections
         .getGameRunRecords(run.threadId, { steps: "in-flight" })
@@ -477,6 +482,15 @@ const make = Effect.gen(function* () {
             .pipe(Effect.mapError(fail))).gameRunSteps
         : [];
       const turnRecord = cycle.find((step) => step.step.kind === "turn") ?? null;
+      const turnResult = resultOf(turnRecord, "turn");
+      const judge = resultOf(cycle.find((step) => step.step.kind === "judge") ?? null, "judge");
+      const undoing =
+        inFlight?.step.kind === "undo" &&
+        turnRecord?.step.kind === "turn" &&
+        turnResult !== null &&
+        judge !== null
+          ? Loop.undoReason({ turn: turnRecord.step, result: turnResult, since: 0, judge })
+          : null;
       return {
         records: records.gameRunRounds.flatMap((r) =>
           r.runId === run.id && isStepRecord(r.round)
@@ -486,6 +500,7 @@ const make = Effect.gen(function* () {
         inFlight,
         turn: turnRecord?.step.kind === "turn" ? turnRecord.step : null,
         turnRun: turnRecord === null ? null : turnRunOf(turnRecord),
+        undoing,
         n: stepNumber(records.gameRunRounds),
       };
     });
@@ -518,6 +533,7 @@ const make = Effect.gen(function* () {
       inFlight: read.inFlight,
       turn: read.turn,
       n: read.n,
+      undoing: read.undoing,
       blocked: yield* blockedFor(threadId, root, projectRun),
     });
   });
@@ -750,7 +766,7 @@ const make = Effect.gen(function* () {
             verdict: null,
             reason:
               read.inFlight?.step.kind === "undo"
-                ? "undoing it: it made a fact worse"
+                ? `undoing it: ${read.undoing ?? "it made a fact worse"}`
                 : "measuring before keeping it",
           });
       }

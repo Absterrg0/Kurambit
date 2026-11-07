@@ -362,9 +362,12 @@ cannot both find none.
   watched facts are proposed or guarded: motion, detail and colour are heuristics, and a space
   game's black sky must never cost a step.
 - **Never two writers.** A look waits until no turn runs or is queued on any chat of the game; a
-  step turn that comes up queued is cancelled and the run looks again; any other turn supersedes a
-  pending proposal. So a step always starts from the folder its proposal read, and a person's turn
-  is never judged or undone.
+  step turn that comes up queued is cancelled and the run looks again; any other turn or folder
+  move supersedes a pending proposal. A step acts only on the build its look read: its turn
+  reports the folder's build at its start (`startBuild`), the judge and the undo use that build,
+  and a turn that started on any other build (a Redo, a restore, a person's turn landing during the
+  look) is never judged or undone, so the run looks again. A step the person redid is never
+  retried. A person's turn is never judged or undone.
 - **Worse is a crossing, not a change.** A step regresses a watched fact only on a comparable delta
   whose reading crosses into `bad` (or skilled stops winning). GPU liveness varies between builds
   of one tree, so "any change" would undo good work; a fact already bad that gets worse is the

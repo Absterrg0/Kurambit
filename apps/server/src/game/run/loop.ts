@@ -242,6 +242,8 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     () => {
       const last = state.records.at(-1);
       if (last === undefined || last.step.verdict !== "undone") return null;
+      // The person redid the undone step: it stands, and nothing retries it.
+      if (last.build !== undefined && look.current === last.build) return null;
       return {
         why: "regression",
         text: clip(
@@ -301,7 +303,11 @@ export const capturedSteer = (inFlight: GameRunStep | null): number =>
   inFlight?.step.kind === "turn" && inFlight.status === "planned" ? inFlight.step.steer.length : 0;
 
 /** A turn that never landed gives back the notes its start took. */
-const giveBack = (state: RunState, turn: GameRunTurnStep, started: boolean): RunState =>
+export const giveBackSteer = (
+  state: RunState,
+  turn: GameRunTurnStep,
+  started: boolean,
+): RunState =>
   started && turn.steer.length > 0 ? { ...state, steer: [...turn.steer, ...state.steer] } : state;
 
 // ── What a result leads to. ─────────────────────────────────────────────────
@@ -450,7 +456,7 @@ const recordOf = (
     why: cycle.turn.proposal.why,
     key: cycle.turn.proposal.key,
     turn: cycle.result.runId,
-    base: cycle.turn.base,
+    base: startBuildOf(cycle.result) ?? cycle.turn.base,
     verdict: fields.verdict,
     reason: fields.reason,
     gain: fields.gain,
@@ -534,7 +540,7 @@ export const applyTurn = (
 ): Next => {
   const n = state.n;
   const cycle: Cycle = { turn, result, since: input.since };
-  const back = giveBack(state, turn, input.started);
+  const back = giveBackSteer(state, turn, input.started);
   switch (result.outcome) {
     case "superseded":
       return go(back, LOOK, `step ${n}'s turn came up behind another turn: looking again`);
@@ -553,17 +559,31 @@ export const applyTurn = (
       );
     }
     case "failed":
-      if (result.build === null || result.files === 0)
-        return end(
-          back,
-          "failed",
-          `step ${n}'s turn failed: ${result.reason}`,
-          `step ${n}'s turn failed`,
-        );
-      break;
+      return end(
+        back,
+        "failed",
+        `step ${n}'s turn failed: ${result.reason}`,
+        `step ${n}'s turn failed`,
+      );
     case "completed":
     case "capped":
       break;
+  }
+  // A step acts only on the build it was planned on. When the folder moved
+  // between the look and the turn's start (a restore, a Redo, a person's
+  // turn), or the start is unknown, the turn is history, not a step: it is
+  // never judged or undone, and the run looks again. The notes it carried
+  // reached the agent, so they are not sent twice. A move is the person's
+  // doing; an unknown start is ours, so it counts against the stall and can
+  // never loop.
+  const startBuild = startBuildOf(result);
+  if (startBuild === null || startBuild !== turn.base) {
+    const log = `step ${n} started on a build its look did not read: looking again`;
+    if (startBuild !== null) return go(state, LOOK, log);
+    const unknown = { ...state, stallStreak: state.stallStreak + 1 };
+    return unknown.stallStreak >= STALL_LIMIT
+      ? end(unknown, "stalled", "keep going could not tell which build its steps started from", log)
+      : go(unknown, LOOK, log);
   }
   // The bot step changes no game files by design: it is judged by its build.
   if (result.build === null || (result.files === 0 && turn.proposal.why !== "bot")) {
@@ -586,8 +606,34 @@ export const applyTurn = (
         : state;
     return settle(aside, record, `step ${n} changed nothing`);
   }
-  return go(state, { kind: "judge", build: result.build, base: turn.base }, `step ${n}: measuring`);
+  return go(
+    state,
+    { kind: "judge", build: result.build, base: startBuild },
+    `step ${n}: measuring`,
+  );
 };
+
+/**
+ * The folder's build when the step's turn started (the turn build's recorded
+ * base, contract §2.3); absent or null is unknown, never a match.
+ */
+const startBuildOf = (result: TurnResult): GameBuildId | null =>
+  (result as TurnResult & { readonly startBuild?: GameBuildId | null }).startBuild ?? null;
+
+const worseOf = (cycle: Cycle & { readonly judge: JudgeResult }) =>
+  cycle.judge.base === null || cycle.judge.build === null
+    ? []
+    : regressions(
+        cycle.judge.base,
+        cycle.judge.build,
+        cycle.turn.proposal.why === "steer" || cycle.result.personSteered,
+      );
+
+/** What an undo is for: the facts the step made worse, as one line. */
+export const undoReason = (cycle: Cycle & { readonly judge: JudgeResult }): string =>
+  worseOf(cycle)
+    .map((r) => deltaText(r.delta))
+    .join("; ");
 
 /** K4: keep, or undo the step whose build made a watched fact worse. */
 export const applyJudge = (
@@ -616,7 +662,8 @@ export const applyJudge = (
       `step ${n} kept, not measured: ${why}`,
     );
   if (judge.build === null) return notMeasured("the step's build could not be measured");
-  if (judge.base === null || turn.base === null)
+  const base = startBuildOf(result);
+  if (judge.base === null || base === null)
     return notMeasured("the build before it could not be measured");
   const deltas = watchedDeltas(judge.base, judge.build);
   if (comparable(deltas).length === 0)
@@ -626,7 +673,7 @@ export const applyJudge = (
   if (worse.length > 0 && result.build !== null)
     return go(
       state,
-      { kind: "undo", target: turn.base, expect: result.build },
+      { kind: "undo", target: base, expect: result.build },
       `step ${n} made a fact worse (${worse.map((r) => deltaText(r.delta)).join("; ")}): undoing it`,
     );
   const missed = targetStillBad(turn, judge.build);
@@ -651,14 +698,11 @@ export const applyUndo = (
   now: number,
 ): Next => {
   const n = state.n;
-  const { turn, result, judge } = cycle;
-  const worse =
-    judge.base === null || judge.build === null
-      ? []
-      : regressions(judge.base, judge.build, turn.proposal.why === "steer" || result.personSteered);
+  const { judge } = cycle;
+  const worse = worseOf(cycle);
   const deltas =
     judge.base === null || judge.build === null ? [] : watchedDeltas(judge.base, judge.build);
-  const why = worse.map((r) => deltaText(r.delta)).join("; ");
+  const why = undoReason(cycle);
   const delta = chips(deltas, worse);
   switch (undo.why) {
     case "restored":
@@ -675,20 +719,30 @@ export const applyUndo = (
         `step ${n} undone (${undo.why === "restored" ? why : "by the person"})`,
       );
     case "moved-on":
-    case "refused":
       return settle(
         state,
         recordOf(state, cycle, now, {
           verdict: "kept-moved-on",
-          reason:
-            undo.why === "moved-on"
-              ? `the game changed after it (${why})`
-              : `${undo.message} (${why})`,
+          reason: `the game changed after it (${why})`,
           gain: false,
           delta,
           failure: "game",
         }),
-        `step ${n} not undone: ${undo.why === "moved-on" ? "the game changed after it" : undo.message}`,
+        `step ${n} not undone: the game changed after it`,
+      );
+    // The folder did not move on: the restore itself failed, so the step
+    // stays with its regression, and the record says why.
+    case "refused":
+      return settle(
+        state,
+        recordOf(state, cycle, now, {
+          verdict: "kept",
+          reason: `${undo.message} (${why})`,
+          gain: false,
+          delta,
+          failure: "game",
+        }),
+        `step ${n} not undone: ${undo.message}`,
       );
   }
 };

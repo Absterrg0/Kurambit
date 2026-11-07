@@ -137,7 +137,9 @@ const make = Effect.gen(function* () {
       const step =
         run === null
           ? null
-          : (records.gameRunSteps.find((each) => each.seq === run.inFlight) ?? null);
+          : (records.gameRunSteps.find(
+              (each) => each.runId === run.id && each.seq === run.inFlight,
+            ) ?? null);
       yield* stopStepTurns(
         { projections, engine },
         thread.id,

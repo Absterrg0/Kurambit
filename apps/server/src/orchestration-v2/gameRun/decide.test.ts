@@ -271,9 +271,14 @@ const look = (patch: Partial<Extract<GameRunStepResult, { kind: "look" }>> = {})
     bot: true,
     ...patch,
   }) as const;
-const turn = (patch: Partial<Extract<GameRunStepResult, { kind: "turn" }>> = {}) =>
+const turn = (
+  patch: Partial<Extract<GameRunStepResult, { kind: "turn" }>> & {
+    readonly startBuild?: GameBuildId | null;
+  } = {},
+) =>
   ({
     kind: "turn",
+    startBuild: BASE,
     runId: RunId.make("t3-run-1"),
     outcome: "completed",
     build: BUILD,
@@ -546,6 +551,80 @@ describe("a keep-going run", () => {
     store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
     expect(store.rounds.map((r) => r.round.step?.verdict)).toEqual(["kept"]);
     expect(store.step().step.kind).toBe("look");
+  });
+
+  it("gives a started note back when its turn ends on a usage limit (WB2)", () => {
+    const store = new Store();
+    store.start("autopilot");
+    store.ok({ type: "game-run.steer", runId: store.run.id, note: "Add a boss at wave 5." });
+    store.complete(look());
+    store.ok({
+      type: "game-run.step.start",
+      runId: store.run.id,
+      stepId: store.step().id,
+      attempt: 1,
+    });
+    expect(store.run.steer).toEqual([]);
+    store.complete({
+      kind: "ended",
+      ending: "usage-limit",
+      reason: "Claude's usage limit is reached",
+    });
+    expect(store.run).toMatchObject({
+      status: "ended",
+      ending: "usage-limit",
+      steer: ["Add a boss at wave 5."],
+    });
+  });
+
+  it("Redo after an auto-undo supersedes the pending retry, and nothing undoes the Redo (TW1)", () => {
+    const store = new Store();
+    store.start("guided");
+    store.complete(look());
+    store.ok({
+      type: "game-run.decide",
+      runId: store.run.id,
+      decisionId: store.step().id,
+      answer: "start",
+    });
+    store.complete(turn());
+    store.complete({ kind: "judge", base: facts(), build: { ...crashes, build: BUILD } });
+    store.complete({ kind: "undo", restored: true, why: "restored", message: "" });
+    store.complete(look());
+    expect(store.step().step).toMatchObject({ kind: "propose", proposal: { why: "regression" } });
+    // The person presses Redo: the folder move supersedes the retry, and the
+    // next look reads the redone build, so no retry is proposed and nothing undoes it.
+    store.complete({ kind: "decided", answer: "superseded", by: "server" });
+    store.complete(look({ current: BUILD }));
+    expect(store.step().step).toMatchObject({ kind: "propose", proposal: { why: "next" } });
+  });
+
+  it("an Autopilot retry that starts after a Redo is superseded, never judged (TW1)", () => {
+    const store = new Store();
+    store.start("autopilot");
+    store.complete(look());
+    store.complete(turn());
+    store.complete({ kind: "judge", base: facts(), build: { ...crashes, build: BUILD } });
+    store.complete({ kind: "undo", restored: true, why: "restored", message: "" });
+    store.complete(look());
+    expect(store.step().step).toMatchObject({
+      kind: "turn",
+      base: BASE,
+      proposal: { why: "regression" },
+    });
+    store.complete(turn({ startBuild: BUILD, runId: RunId.make("t3-run-2") }));
+    expect(store.step().step.kind).toBe("look");
+    expect(store.rounds).toHaveLength(1);
+  });
+
+  it("a person's turn landing during the look's facts wait is never judged as the step (TW1)", () => {
+    const store = new Store();
+    store.start("autopilot");
+    store.complete(look());
+    const PERSON = GameBuildId.make("c".repeat(40));
+    store.complete(turn({ startBuild: PERSON }));
+    expect(store.step().step.kind).toBe("look");
+    expect(store.rounds).toEqual([]);
   });
 
   it("stops on two steps in a row that changed nothing, and resumes afresh", () => {
