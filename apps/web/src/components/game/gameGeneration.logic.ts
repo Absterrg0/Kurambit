@@ -95,6 +95,18 @@ export const generatedRouteBlocker = (providers: GameArtProvidersResult | null):
   return threeD || codex ? null : "Set up an art provider in Settings";
 };
 
+/**
+ * What the generated route can make now, when that is less than it promises: Codex alone makes
+ * images (key art, concepts), not the 3D characters and props the route is chosen for.
+ */
+export const generatedRouteNote = (providers: GameArtProvidersResult | null): string | null => {
+  if (providers === null || generatedRouteBlocker(providers) !== null) return null;
+  const threeD = [...THREE_D_LANES].some((lane) => providers.lanes[lane] !== null);
+  return threeD
+    ? null
+    : "Codex makes the key art and images; characters and props also need a Tripo or Meshy key.";
+};
+
 /** Generations started by one chat's agent, oldest first, as timeline card keys. */
 export const chatGenerationCardKey = (
   generations: ReadonlyArray<GameGeneration>,

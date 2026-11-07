@@ -46,7 +46,11 @@ import { gameEnvironment } from "../../state/game";
 import { engineToolFor } from "./gameStageLogic";
 import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import { GameToolLink } from "./GameToolLink";
-import { CHARACTER_ROUTES, useCharacterRouteBlockers } from "./GameCharacterRoute";
+import {
+  CHARACTER_ROUTES,
+  useCharacterRouteBlockers,
+  useGeneratedRouteNote,
+} from "./GameCharacterRoute";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { gameSlug } from "./gameLibrary.logic";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -157,6 +161,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [characters, setCharacters] = useState<GameCharacterRoute>("library");
   // Read only while the New game dialog is open: it asks the server about every provider.
   const routeBlocker = useCharacterRouteBlockers(dialog === "create" ? environmentId : null);
+  const generatedNote = useGeneratedRouteNote(dialog === "create" ? environmentId : null);
   const [editingFolder, setEditingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
@@ -346,6 +351,9 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                         Set up in Settings
                       </Button>
                     </p>
+                  ) : null}
+                  {characters === "generated" && generatedNote !== null ? (
+                    <p className="text-xs text-muted-foreground">{generatedNote}</p>
                   ) : null}
                 </fieldset>
                 <label className="flex flex-col gap-1 text-sm">

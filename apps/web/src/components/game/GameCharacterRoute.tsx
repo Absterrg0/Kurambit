@@ -13,7 +13,7 @@ import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { generatedRouteBlocker } from "./gameGeneration.logic";
+import { generatedRouteBlocker, generatedRouteNote } from "./gameGeneration.logic";
 import { MenuRadioGroup, MenuRadioItem, MenuSub, MenuSubPopup, MenuSubTrigger } from "../ui/menu";
 
 /** The ways a game's characters are made, in the order the person picks from. */
@@ -53,6 +53,14 @@ export function useCharacterRouteBlockers(
   const generated = generatedRouteBlocker(providers.data);
   return (route) =>
     GAME_CHARACTER_ROUTE_UNAVAILABLE[route] ?? (route === "generated" ? generated : null);
+}
+
+/** The generated route's caveat for the person picking it, or null; see generatedRouteNote. */
+export function useGeneratedRouteNote(environmentId: EnvironmentId | null): string | null {
+  const providers = useEnvironmentQuery(
+    environmentId === null ? null : gameEnvironment.artProviders({ environmentId, input: {} }),
+  );
+  return generatedRouteNote(providers.data);
 }
 
 export const characterRouteLabel = (route: GameCharacterRoute) =>
