@@ -11,16 +11,16 @@ export interface GameProgress {
 }
 
 /**
- * The library's status line. A live production run wins: it is what the game
- * is doing for hours, while its creator chat sits idle. A running operation
- * comes next; otherwise the game is idle.
+ * The library's status line. Live keep going wins: it is what the game is
+ * doing for an hour or more, between turns too. Its line ("Keep going · step
+ * 3") is the server's. A running operation comes next; otherwise the game is idle.
  */
 export const gameProgress = (summary: Pick<GameSummary, "operation" | "run">): GameProgress => {
   if (summary.run !== null)
     return {
       kind: "running",
-      label: `Running · ${summary.run.step}`,
-      detail: `The production run is working on this game: ${summary.run.step}.`,
+      label: summary.run.step,
+      detail: `Keep going is working on this game: ${summary.run.step}.`,
     };
   const operation = summary.operation;
   if (operation?.state === "running")
