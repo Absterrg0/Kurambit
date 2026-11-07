@@ -166,7 +166,10 @@ export const GameBlenderCharacterInput = Schema.Struct({
   /** The collection, the armature's name and the export's default stem. */
   name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
   body: GameBlenderBody,
-  /** "Walk_Loop" or "<pack-id>:Walk_Loop", from the lock's packs on standard-humanoid. Omitted: STANDARD_CLIPS. */
+  /**
+   * "Walk_Loop" or "<pack-id>:Walk_Loop", from the lock's packs on standard-humanoid, or the
+   * game path of a motion-lane GLB (every clip it holds). Omitted: STANDARD_CLIPS.
+   */
   clips: Schema.optionalKey(
     Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160))).check(
       Schema.isMaxLength(48),

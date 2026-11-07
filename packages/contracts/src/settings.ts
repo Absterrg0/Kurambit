@@ -1091,6 +1091,10 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("")),
     secretSetting,
   ),
+  gameUthanaApiKey: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    secretSetting,
+  ),
   gameArtDailyLimitUsd: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1000 })).pipe(
     Schema.withDecodingDefault(Effect.succeed(5)),
   ),
@@ -1395,6 +1399,7 @@ export const ServerSettingsPatch = Schema.Struct({
   gameTripoApiKey: Schema.optionalKey(TrimmedString),
   gameMeshyApiKey: Schema.optionalKey(TrimmedString),
   gameElevenLabsApiKey: Schema.optionalKey(TrimmedString),
+  gameUthanaApiKey: Schema.optionalKey(TrimmedString),
   gameArtDailyLimitUsd: Schema.optionalKey(
     Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1000 })),
   ),

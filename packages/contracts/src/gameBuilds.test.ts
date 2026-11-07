@@ -31,6 +31,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   liveness: { status: "not-measured", why: "ffmpeg failed", retry: true },
   firstResponse: { status: "pending" },
   assets: { status: "not-measured", why: "not built", retry: false },
+  use: { status: "not-measured", why: "not built", retry: false },
   message: "",
   ...patch,
 });

@@ -15,11 +15,17 @@ export const GAME_ART_LANE_LABELS = {
   sfx: "Sound effect",
   music: "Music",
   voice: "Voice",
+  motion: "Motion",
 } as const satisfies Record<GameArtLane, string>;
 
 export const GAME_ART_LANES = Object.keys(GAME_ART_LANE_LABELS) as ReadonlyArray<GameArtLane>;
 
-const THREE_D_LANES: ReadonlySet<GameArtLane> = new Set(["character", "creature", "model"]);
+const THREE_D_LANES: ReadonlySet<GameArtLane> = new Set([
+  "character",
+  "creature",
+  "model",
+  "motion",
+]);
 const AUDIO_LANES: ReadonlySet<GameArtLane> = new Set(["sfx", "music", "voice"]);
 
 /** What the card shows of a delivered file: a picture, a model chip, or a sound. */

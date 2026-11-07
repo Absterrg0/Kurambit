@@ -175,6 +175,7 @@ const LANE_DEADLINE: Readonly<Record<GameArtLane, Duration.Duration>> = {
   model: Duration.minutes(90),
   character: Duration.minutes(150),
   creature: Duration.minutes(150),
+  motion: Duration.minutes(30),
 };
 const LIST_LIMIT = 50;
 const KEY_CHECK_TTL_MS = 10 * 60_000;
