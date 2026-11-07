@@ -1,5 +1,6 @@
-// Meshy (https://docs.meshy.ai/en/api): tasks polled by id. A model is one task (image, multi-image or text to 3D with
-// Smart Topology at the asked face count); a character adds rigging (humanoids only), which
+// Meshy (https://docs.meshy.ai/en/api): tasks polled by id. A model is one task (image, multi-image or text to 3D,
+// remeshed to the asked face count, or made by a Smart Topology model at it when low-poly is
+// asked); a character adds rigging (humanoids only), which
 // brings walking and running clips, and the asked clips from Meshy's animation library. Meshy
 // deletes API files after 3 days, so each is downloaded the moment its task succeeds.
 import * as Duration from "effect/Duration";
@@ -26,9 +27,14 @@ const BASE = "https://api.meshy.ai/openapi/v1";
 const urlOf = (kind: Kind | "rigging" | "animations") =>
   kind === "text-to-3d" ? "https://api.meshy.ai/openapi/v2/text-to-3d" : `${BASE}/${kind}`;
 export const MESHY_MODEL = "meshy-7.1";
+/** The Smart Topology model the docs name for game characters and low-poly assets. */
+export const MESHY_LOW_POLY_MODEL = "meshy-t2.5";
+/** meshy-t2.5's target_polycount range (docs/api/image-to-3d). */
+const LOW_POLY_FACES = { min: 100, max: 30_000 } as const;
 /** USD per credit at the Pro plan's rate (1,000 credits for $20), 2026-11. */
 const CREDIT = 0.02;
-const CREDITS = { mesh: 30, rig: 5, action: 3 } as const;
+/** A textured mesh: 30 on meshy-7.1, 15 on Smart Topology (text: a 5 preview plus a 10 refine). */
+const CREDITS = { mesh: 30, lowPolyMesh: 15, rig: 5, action: 3 } as const;
 const MAX_ACTIONS = 10;
 
 type Kind = "image-to-3d" | "multi-image-to-3d" | "text-to-3d";
@@ -47,7 +53,14 @@ interface MeshyRemote {
   readonly actions?: ReadonlyArray<number>;
   /** Answers in a row whose status was none of the documented ones. */
   readonly unknown?: number;
+  /** The person looks at the model before the rig: its files come with the pending rig. */
+  readonly review?: boolean;
+  /** What the model stage costs, in credits (Meshy reports none). */
+  readonly meshCredits?: number;
 }
+
+const meshCreditsOf = (request: Pick<ArtRequest, "options">) =>
+  request.options.lowPoly === true ? CREDITS.lowPolyMesh : CREDITS.mesh;
 
 const auth = (key: string) => ({ authorization: `Bearer ${key}` });
 
@@ -59,13 +72,31 @@ export const meshyMeshRequest = (request: ArtRequest) => {
       : request.references.length === 1
         ? "image-to-3d"
         : "multi-image-to-3d";
+  const polycount = request.options.polycount;
+  // Low-poly is made at the face count by a Smart Topology model (no remesh, triangles only);
+  // the docs say not to remesh meshy-7.1 down to a game budget instead.
+  const topology =
+    request.options.lowPoly === true
+      ? {
+          model_type: "smart-topology",
+          ai_model: MESHY_LOW_POLY_MODEL,
+          ...(polycount === undefined
+            ? {}
+            : {
+                target_polycount: Math.min(
+                  LOW_POLY_FACES.max,
+                  Math.max(LOW_POLY_FACES.min, Math.round(polycount)),
+                ),
+              }),
+        }
+      : {
+          ai_model: MESHY_MODEL,
+          topology: "triangle",
+          should_remesh: true,
+          ...(polycount === undefined ? {} : { target_polycount: Math.round(polycount) }),
+        };
   const shape = {
-    ai_model: MESHY_MODEL,
-    topology: "triangle",
-    should_remesh: true,
-    ...(request.options.polycount === undefined
-      ? {}
-      : { target_polycount: Math.round(request.options.polycount) }),
+    ...topology,
     ...(request.lane === "character" ? { pose_mode: "a-pose" } : {}),
   };
   const body =
@@ -105,6 +136,8 @@ const start = (context: ArtContext, request: ArtRequest) =>
       height: request.options.height ?? null,
       clips: (request.options.clips ?? []).slice(0, MAX_ACTIONS),
       rig: null,
+      meshCredits: meshCreditsOf(request),
+      ...(request.review === true ? { review: true } : {}),
     };
     return {
       kind: "making" as const,
@@ -170,11 +203,29 @@ const poll = (context: ArtContext, stored: ArtRemote) =>
         kind: "making" as const,
         remote: { ...stored, pending: "refine", unknown: 0 } as ArtRemote,
       };
-    if ((remote.stage === "mesh" || remote.stage === "refine") && remote.lane === "character")
+    if ((remote.stage === "mesh" || remote.stage === "refine") && remote.lane === "character") {
+      const next = { ...stored, pending: "rig", unknown: 0 } as ArtRemote;
+      if (remote.review !== true) return { kind: "making" as const, remote: next };
+      // The person looks at the model before the rig is bought; Meshy deletes it in 3 days.
+      const url = stringField(task, "model_urls", "glb");
+      if (url === null)
+        return yield* new ArtProviderError({
+          reason: "Meshy finished the model without a model file.",
+        });
       return {
         kind: "making" as const,
-        remote: { ...stored, pending: "rig", unknown: 0 } as ArtRemote,
+        remote: next,
+        files: [
+          {
+            role: "asset",
+            ext: "glb",
+            bytes: yield* context.http.download(url),
+            label: "model",
+          } satisfies ArtFile,
+        ],
+        spent: { usd: roundUsd(CREDIT * (remote.meshCredits ?? CREDITS.mesh)), estimated: true },
       };
+    }
     const files: ArtFile[] = [];
     const download = (url: string | null, role: ArtFile["role"], ext: string, label?: string) =>
       url === null
@@ -290,20 +341,26 @@ export const meshy: ArtAdapter = {
   estimate: (request) =>
     roundUsd(
       CREDIT *
-        (CREDITS.mesh +
+        (meshCreditsOf(request) +
           (request.lane === "character"
             ? CREDITS.rig +
               Math.min(MAX_ACTIONS, request.options.clips?.length ?? 0) * CREDITS.action
             : 0)),
     ),
   refuse: (request) =>
-    request.lane === "creature"
-      ? "Meshy rigs humanoids only. Choose Tripo for creatures in Settings → Art providers."
-      : request.lane === "texture"
-        ? "Meshy textures a model, not a tileable surface. Choose Google, OpenAI or Codex for textures in Settings → Art providers."
-        : request.lane === "character" || request.lane === "model"
-          ? null
-          : `Meshy makes characters and models, not ${request.lane}.`,
+    request.options.parts === true
+      ? "Meshy makes no separate parts. Choose Tripo for models in Settings → Art providers."
+      : request.options.mesh !== undefined
+        ? "Kurambit rigs the game's own mesh through Tripo. Choose Tripo for this lane in Settings → Art providers."
+        : request.options.lowPoly === true && request.references > 1
+          ? "Meshy makes low-poly (Smart Topology) from one picture, not several: pass the one picture of the subject, or choose Tripo."
+          : request.lane === "creature"
+            ? "Meshy rigs humanoids only. Choose Tripo for creatures in Settings → Art providers."
+            : request.lane === "texture"
+              ? "Meshy textures a model, not a tileable surface. Choose Google, OpenAI or Codex for textures in Settings → Art providers."
+              : request.lane === "character" || request.lane === "model"
+                ? null
+                : `Meshy makes characters and models, not ${request.lane}.`,
   start,
   poll,
   advance,
