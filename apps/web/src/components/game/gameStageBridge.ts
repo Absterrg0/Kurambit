@@ -130,6 +130,12 @@ export function useStageBridgeFrame(
         case "studio-frame":
           settleCapture(message.png);
           return;
+        case "studio-key":
+          // The same keys as on the Stage itself, from a game that has focus.
+          if (message.key === "Tab") toggleStageFreeze();
+          else if (useStageBridge.getState().selected !== null) clearStageSelection();
+          else toggleStageFreeze();
+          return;
       }
     };
     window.addEventListener("message", onMessage);
@@ -170,6 +176,10 @@ export const clearStageSelection = () => {
 
 export const selectStageThing = (id: string) =>
   useStageBridge.getState().post?.({ type: "studio-select", id });
+
+/** Outlines a thing from the Things list while frozen; null clears. */
+export const hoverStageThing = (id: string | null) =>
+  useStageBridge.getState().post?.({ type: "studio-hover-thing", id });
 
 export const pointStage = (x: number, y: number, action: "hover" | "select") =>
   useStageBridge.getState().post?.({ type: "studio-pointer", x, y, action });

@@ -108,6 +108,11 @@ export const StudioTune = Schema.Struct({
   key: Schema.String,
   value: Schema.Union([Schema.Finite, Schema.Boolean]),
 });
+/** Outline a thing from the Things list as the pointer passes its row; null clears. Shown while frozen. */
+export const StudioHoverThing = Schema.Struct({
+  type: Schema.Literal("studio-hover-thing"),
+  id: Schema.NullOr(Schema.String),
+});
 export const StudioThingsRequest = Schema.Struct({
   type: Schema.Literal("studio-things-request"),
 });
@@ -124,6 +129,7 @@ export const GameStageToGameMessage = Schema.Union([
   StudioPointer,
   StudioSelect,
   StudioTune,
+  StudioHoverThing,
   StudioThingsRequest,
   StudioCapture,
 ]);
@@ -158,6 +164,16 @@ export const StudioFrozen = Schema.Struct({
   on: Schema.Boolean,
 });
 
+/**
+ * A Stage key pressed while the game's frame has focus, which keeps every key
+ * from the Stage: Tab (freeze, play on) always, Escape only while frozen (the
+ * game's own pause otherwise). Sent only once the Stage has spoken to the game.
+ */
+export const StudioKey = Schema.Struct({
+  type: Schema.Literal("studio-key"),
+  key: Schema.Literals(["Tab", "Escape"]),
+});
+
 /** The answer to studio-capture. */
 export const StudioFrame = Schema.Struct({
   type: Schema.Literal("studio-frame"),
@@ -170,6 +186,7 @@ export const GameToStageMessage = Schema.Union([
   StudioHover,
   StudioSelected,
   StudioFrozen,
+  StudioKey,
   StudioFrame,
 ]);
 export type GameToStageMessage = typeof GameToStageMessage.Type;

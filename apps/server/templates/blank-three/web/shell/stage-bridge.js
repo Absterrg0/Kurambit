@@ -562,6 +562,7 @@ export function createStageBridge({ canvas, renderer, view, freeze, redraw, draw
           finite(data.x) && finite(data.y) && (data.action === "hover" || data.action === "select")
         );
       case "studio-select":
+      case "studio-hover-thing":
         return data.id === null || text(data.id, 400);
       case "studio-tune":
         return (
@@ -614,12 +615,41 @@ export function createStageBridge({ canvas, renderer, view, freeze, redraw, draw
         if (selected?.id === data.id) postSelected();
         return redraw();
       }
+      case "studio-hover-thing": {
+        const record = data.id === null ? null : (things.get(data.id) ?? null);
+        if (record === hovered) return;
+        hovered = record;
+        const rect = rectOf(record, view());
+        toStage({
+          type: "studio-hover",
+          id: record?.id ?? null,
+          ...(rect === undefined ? {} : { rect }),
+        });
+        return redraw();
+      }
       case "studio-things-request":
         return postThings();
       case "studio-capture":
         return capture();
     }
   });
+
+  // A focused game keeps every key from the Stage, so its two keys travel up: Tab
+  // always, Escape only while frozen (the game's own pause otherwise). Capture
+  // phase, so the shell's keys never see them. Only once the Stage has spoken.
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (!framed || !active || event.repeat) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const key = event.key === "Tab" ? "Tab" : event.key === "Escape" && frozen ? "Escape" : null;
+      if (key === null) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      toStage({ type: "studio-key", key });
+    },
+    { capture: true },
+  );
 
   return {
     /** What studio-ready carries: the Stage learns the bridge from it. */

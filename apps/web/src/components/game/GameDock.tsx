@@ -40,6 +40,7 @@ import {
   clearStageSelection,
   forgetStageTuning,
   resetStageValues,
+  hoverStageThing,
   selectStageThing,
   tuneStageValue,
   useThreadStageBridge,
@@ -575,6 +576,8 @@ function ThingsPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
                   type="button"
                   aria-current={selectedId === thing.id ? "true" : undefined}
                   onClick={() => selectStageThing(thing.id)}
+                  onPointerEnter={() => hoverStageThing(thing.id)}
+                  onPointerLeave={() => hoverStageThing(null)}
                   className={cn(
                     "flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent",
                     selectedId === thing.id && "bg-accent",
