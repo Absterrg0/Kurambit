@@ -18,6 +18,10 @@ export const GameRunCommandKey = Schema.optionalKey(
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
 );
 
+/** Why a run made by an earlier Kurambit is never continued (design §6.4): the server's refusal and the Past runs line say it alike. */
+export const GAME_RUN_STAGE_ERA_SENTENCE =
+  "This run was made by an earlier Kurambit whose stages (vision, prototypes, plan) no longer exist. Its builds stay on the timeline. Keep going starts from the game as it is now.";
+
 export const GameRunEnding = Schema.Literals([
   "ready",
   "done",
