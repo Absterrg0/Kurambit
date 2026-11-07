@@ -6,13 +6,16 @@ params (the server resolves every path):
               | {"game": abs, "source"?: {from, licence, ai, credits}} (source: a generated file's
               record, read by the server; without it the sidecar beside the file is the ledger)
     standard  abs path of the standard armature's GLB (STANDARD_ARMATURE)
-    clips     [{pack, name, path, licence?}]
+    clips     [{pack, name, path, licence?}] | {pack, name, path, licence, source, motion: true}: a GLB
+              the motion lane delivered (one clip retargeted onto the body it holds), its source
+              the generation's stamp {from, licence, ai, credits}
     chains    [{name, parent, bones, direction, length, mirror?}]
     replace   rebuild the body and armature of an existing <name>, re-binding its other objects
     fit       {arms?, calm?} | None: fit.fit() on every library clip, after the conform
 """
 import importlib
 import json
+import math
 import os
 import re
 
@@ -131,9 +134,71 @@ def _game_source(path):
     return (body if body is not None else dict(MADE_BODY)), rest
 
 
-def _take_clips(clips, standard, standard_actions):
-    """The requested library clips as actions owned by name; every other imported action goes."""
+# The most a clip's skeleton may differ from the standard's rest frames, as the export allows.
+MAX_REST_DEVIATION = 2.0
+
+
+def _height(arm, name_map):
+    """Head over foot_l at rest, in metres: what a clip's pelvis travel is scaled by."""
+    by_std = {name_map.get(b.name, b.name): b for b in arm.data.bones}
+    head, foot = by_std.get("Head"), by_std.get("foot_l")
+    if head is None or foot is None:
+        return None
+    return ((arm.matrix_world @ head.head_local).z - (arm.matrix_world @ foot.head_local).z) or None
+
+
+def _take_motion(c, reference, standard_height):
+    """A motion-lane GLB's clip: (action, the scale of the body it was made on). Its bones are
+    renamed to the standard joints when Uthana named them otherwise, the way a body is conformed,
+    and it is refused when its skeleton's rest frames are not the standard's: glTF keys absolute
+    joint rotations, so on other rest frames it would play twisted."""
+    path, label = c["path"], c["name"]
+    if not os.path.isfile(path):
+        raise Refused("invalid-input", f"no clip file at {path}")
+    new, actions = skeleton.import_gltf(path)
+    try:
+        rigs = [o for o in new if o.type == "ARMATURE"]
+        if len(rigs) != 1 or not actions:
+            raise Refused("invalid-input", f"{os.path.basename(path)} holds {len(rigs)} armatures and {len(actions)} clips: a motion is one clip on one skeleton")
+        rig = rigs[0]
+        name_map = skeleton.humanoid_map({b.name: b.parent.name if b.parent else None for b in rig.data.bones})
+        frames = {name_map.get(n, n): q for n, q in skeleton.local_frames(rig).items()}
+        missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in frames]
+        if missing:
+            raise Refused("invalid-input", f"{label}'s skeleton has no {', '.join(missing)} under any name the kit knows: its bones are {', '.join(b.name for b in rig.data.bones)[:400]}")
+        worst = max(((math.degrees(frames[n].rotation_difference(q).angle), n) for n, q in reference.items() if n in frames), default=(0.0, None))
+        if worst[0] > MAX_REST_DEVIATION:
+            raise Refused("invalid-input", f"{label} was made on a skeleton whose {worst[1]} rest frame is {worst[0]:.1f}° off the standard (at most {MAX_REST_DEVIATION:.0f}°): it would play twisted on the game's humanoids. Make it on a character on the standard skeleton")
+        made = _height(rig, name_map)
+        act = max(actions, key=lambda a: a.frame_range[1] - a.frame_range[0])
+        for a in actions:
+            if a is not act:
+                bpy.data.actions.remove(a)
+        fcs = skeleton.action_fcurves(act)
+        for fc in list(fcs):
+            m = re.match(r'^pose\.bones\["(.+?)"\](.*)$', fc.data_path)
+            if m is None:
+                fcs.remove(fc)
+                continue
+            joint = name_map.get(m.group(1), m.group(1))
+            if joint not in reference:
+                fcs.remove(fc)  # a bone the standard lacks keys nothing in the game
+            elif joint != m.group(1):
+                fc.data_path = f'pose.bones["{joint}"]{m.group(2)}'
+        return act, (made / standard_height) if made and standard_height else 1.0
+    except BaseException:
+        bpy.data.batch_remove({a for a in actions if _alive(a)})
+        raise
+    finally:
+        skeleton.remove_objects(new)
+
+
+def _take_clips(clips, standard, standard_actions, reference=None, standard_height=None):
+    """The requested library clips as actions owned by name; every other imported action goes.
+    A motion-lane clip comes with the scale of the body it was made on (1 for a library clip)."""
     by_path, taken = {}, []
+    motions = [c for c in clips if c.get("motion")]
+    clips = [c for c in clips if not c.get("motion")]
     for c in clips:
         by_path.setdefault(c["path"], []).append(c)
     counts = {}
@@ -153,9 +218,19 @@ def _take_clips(clips, standard, standard_actions):
             if act is None:
                 raise Refused("invalid-input", f"{c['pack']} has no clip {c['name']}; it has {', '.join(sorted(base))[:300]}")
             label = c["name"] if counts[c["name"]] == 1 else f"{c['pack']}:{c['name']}"
-            taken.append((act, label, c))
+            taken.append((act, label, c, 1.0))
         for a in base.values():
             bpy.data.actions.remove(a)
+    names = {label for _, label, _, _ in taken}
+    for c in motions:
+        act, made = _take_motion(c, reference, standard_height)
+        label = c["name"]
+        for n in range(2, 100):
+            if label not in names:
+                break
+            label = f"{c['name']}_{n}"
+        names.add(label)
+        taken.append((act, label, c, made))
     return taken
 
 
@@ -221,7 +296,7 @@ def character(params):
         for chain in params.get("chains", []):
             if chain["parent"] not in std_arm.data.bones:
                 raise Refused("invalid-input", f"chain {chain['name']}: the standard skeleton has no joint {chain['parent']} (a tail hangs from pelvis, ears from Head)")
-        taken = _take_clips(params.get("clips", []), standard, std_actions)
+        taken = _take_clips(params.get("clips", []), standard, std_actions, reference, _height(std_arm, {}))
         if "mpfb" in body_spec:
             body_arm, meshes, name_map = _mpfb_body(body_spec["mpfb"])
             body_part = {**MADE_BODY, "from": "mpfb2", "licence": MPFB_LICENCE}
@@ -276,22 +351,27 @@ def character(params):
         if carried:
             o["kurambit_parts"] = json.dumps(carried)  # the ledger's other parts this body brings
 
-    for act, label, c in taken:
-        skeleton.fit_clip(act, ratio)
+    for act, label, c, made in taken:
+        # A clip made on this body already moves its pelvis this body's distances.
+        skeleton.fit_clip(act, ratio / made)
         act.use_fake_user = True
         act["kurambit_from"] = c["pack"]
         act["kurambit_owner"] = name
         act["kurambit_clip"] = label
+        if c.get("motion"):
+            act["kurambit_source"] = json.dumps({"what": "clips", **c["source"]})  # credited per clip: ai, cost
         act.name = label
     packs = []
-    for _, _, c in taken:
+    for _, _, c, _ in taken:
+        if c.get("motion"):
+            continue
         if all(p["from"] != c["pack"] for p in packs):
             packs.append({"from": c["pack"], "licence": c.get("licence", "")})
     if packs:
         stamp(arm, "clips", packs[0]["from"], packs[0]["licence"])
     arm["kurambit_clips"] = json.dumps(packs)
     if params.get("fit"):
-        notes += fit.fit(arm, meshes, [a for a, _, _ in taken], params["fit"])
+        notes += fit.fit(arm, meshes, [a for a, _, _, _ in taken], params["fit"])
     arm["kurambit_standard_rest"] = json.dumps(skeleton.local_rest(skeleton.gltf_json(standard)))
 
     chains = {}
@@ -331,7 +411,7 @@ def character(params):
         if gone:
             notes.append(f"bones the parts use are gone: {', '.join(sorted(gone))} (add them again, or make them chains)")
 
-    idle = next((a for a, _, _ in taken if "idle" in a.name.lower()), None)
+    idle = next((a for a, _, _, _ in taken if "idle" in a.name.lower()), None)
     skeleton.assign_action(arm, idle)
     deviation = skeleton.frame_deviation(arm, reference)
     zs = [z for o in meshes for z in helpers.rest_coords(o)[0][:, 2]]
@@ -340,7 +420,7 @@ def character(params):
     return {
         "armature": arm.name,
         "meshes": [o.name for o in meshes],
-        "clips": [a.name for a, _, _ in taken],
+        "clips": [a.name for a, _, _, _ in taken],
         "chains": chains,
         "restDeviation": round(deviation or 0.0, 2),
         "height": round(height, 3),
