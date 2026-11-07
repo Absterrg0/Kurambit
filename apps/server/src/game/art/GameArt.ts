@@ -833,7 +833,12 @@ const make = Effect.gen(function* () {
       const prompts =
         directions.length === 0
           ? [input.prompt]
-          : directions.map((direction) => `${input.prompt}\n\nThe look: ${direction.prompt}`);
+          : // The look leads: image models weight a prompt's start, and a style tacked on after a
+            // long subject comes back in the model's own default rendering.
+            directions.map(
+              (direction) =>
+                `Art style (follow it strictly, above everything else): ${direction.prompt}\n\n${input.prompt}\n\nRender every part of the image in that art style, not in a polished 3D movie style.`,
+            );
       const base = { lane: input.lane, prompt: input.prompt, candidates: 1, options };
       const adapter = yield* route(all, base);
       const references = yield* readReferences(root, input.references ?? []);
