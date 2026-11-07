@@ -28,6 +28,8 @@ export const KIT_DIR = "blender-kit";
 const CANDIDATE_JSON = "candidate.json";
 const PASS_JSON = "pass.json";
 export const CANDIDATE_GLB = "candidate.glb";
+/** GameAssetSource's limit on a sidecar's parts. */
+const LEDGER_PARTS = 16;
 const MAX_CANDIDATE_BYTES = 4 * 1024 * 1024;
 
 /**
@@ -106,7 +108,8 @@ export const PassResult = Schema.Struct({
   objects: Schema.Array(Schema.String),
   measured: GameModelMeasure,
   refusals: Schema.Array(GameModelRefusal),
-  parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+  /** Every distinct stamp; ledgerParts fits them to a sidecar. */
+  parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(512)),
   usedPalette: Schema.Array(Schema.String),
   /** Every armature the candidate carries, with its bone names: the lock's rig is checked on them. */
   armatures: Schema.Record(Schema.String, Schema.Array(Schema.String)),
@@ -128,9 +131,10 @@ export type PassRecord = typeof PassRecord.Type;
 const PassRecordJson = Schema.fromJsonString(PassRecord);
 export const encodePassRecord = Schema.encodeSync(PassRecordJson);
 
-/** `candidate.json`: a pass record whose review was rendered. */
+/** `candidate.json`: a pass record whose review was rendered, its ledger fit to a sidecar. */
 const Candidate = Schema.Struct({
   ...PassRecord.fields,
+  parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(LEDGER_PARTS)),
   concept: Schema.NullOr(Schema.String),
 });
 export type Candidate = typeof Candidate.Type;
@@ -163,6 +167,62 @@ export const readCandidate = (dir: string) => readRecord(dir, CANDIDATE_JSON, de
 export const readPassRecord = (dir: string) => readRecord(dir, PASS_JSON, decodePassRecord);
 export const candidateJsonPath = (dir: string) => NodePath.join(dir, CANDIDATE_JSON);
 export const passJsonPath = (dir: string) => NodePath.join(dir, PASS_JSON);
+
+const sameStamp = (a: GameAssetPart, b: GameAssetPart) =>
+  a.what === b.what &&
+  a.from === b.from &&
+  a.licence === b.licence &&
+  a.ai === b.ai &&
+  a.credits === b.credits;
+
+/**
+ * The ledger as a sidecar holds it: every distinct stamp, in order. Past the sidecar's limit,
+ * parts with the same licence, ai and credits become one (their sources named together), since
+ * they read as the same credit line; the body stays whole, as the route is read off it. A
+ * ledger that is still too long is refused, never cut: a dropped part is a dropped credit.
+ */
+export const ledgerParts = (
+  parts: ReadonlyArray<GameAssetPart>,
+): { readonly parts: ReadonlyArray<GameAssetPart> } | { readonly refusal: string } => {
+  const unique = parts.filter(
+    (part, index) => parts.findIndex((other) => sameStamp(part, other)) === index,
+  );
+  if (unique.length <= LEDGER_PARTS) return { parts: unique };
+  const groups: Array<{ part: GameAssetPart; froms: string[] }> = [];
+  for (const part of unique) {
+    const group =
+      part.what === "body"
+        ? undefined
+        : groups.find(
+            ({ part: other }) =>
+              other.what !== "body" &&
+              other.licence === part.licence &&
+              other.ai === part.ai &&
+              other.credits === part.credits,
+          );
+    if (group === undefined) groups.push({ part, froms: [part.from] });
+    else {
+      if (!group.froms.includes(part.from)) group.froms.push(part.from);
+      if (group.part.what !== part.what) group.part = { ...group.part, what: "parts" };
+    }
+  }
+  const merged = groups.map(({ part, froms }) => {
+    const joined = froms.join(", ");
+    const more = ` and ${froms.length - 1} more`;
+    return {
+      ...part,
+      from: joined.length <= 64 ? joined : `${froms[0]!.slice(0, 64 - more.length)}${more}`,
+    };
+  });
+  if (merged.length <= LEDGER_PARTS) return { parts: merged };
+  return {
+    refusal:
+      `The model draws on ${merged.length} sources with different licences, more than the ${LEDGER_PARTS} a sidecar records, and no credit is ever dropped: export it in pieces (fewer imports per model), or make some of those parts here. Its sources: ${merged.map((part) => `${part.from} (${part.licence || "no licence"})`).join("; ")}`.slice(
+        0,
+        2000,
+      ),
+  };
+};
 
 /** A name fit for a file stem and the concept lookup. */
 export const subjectName = (name: string) =>

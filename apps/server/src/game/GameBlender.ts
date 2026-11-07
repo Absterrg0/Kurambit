@@ -67,6 +67,7 @@ import {
   kitOutput,
   kitVersion,
   ledgerLine,
+  ledgerParts,
   measurementText,
   passJsonPath,
   readCandidate,
@@ -1473,9 +1474,12 @@ const make = Effect.gen(function* () {
             return record;
           }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(glb, { force: true }))));
         }));
+      const ledger = ledgerParts(passed.parts);
+      if ("refusal" in ledger)
+        return yield* opError("blender-review", root, "invalid-input", ledger.refusal);
       // The concept is read at every review, so one added since is beside the next render.
       const concept = yield* Effect.promise(() => conceptOf(realRoot, passed.subject));
-      const candidate: Candidate = { ...passed, concept: concept.ref };
+      const candidate: Candidate = { ...passed, parts: ledger.parts, concept: concept.ref };
       const image = NodePath.join(out, "review.png");
       const view = style?.view ?? "perspective";
       const rendered = yield* kitCall(
@@ -1785,10 +1789,11 @@ const make = Effect.gen(function* () {
           // The import adds to the live scene; only what it added is exported,
           // never the rest of the scene under the asset's name.
           const before = yield* callText(root, "execute_blender_code", {
-            code: "import bpy, json\nprint('STUDIO_NAMES ' + json.dumps([o.name for o in bpy.data.objects]))\n",
+            code: "import bpy, json\nprint('STUDIO_NAMES ' + json.dumps([o.name for o in bpy.data.objects]))\nprint('STUDIO_ACTIONS ' + json.dumps([a.name for a in bpy.data.actions]))\n",
           });
           const known = /STUDIO_NAMES (\[.*\])/.exec(before)?.[1];
-          if (known === undefined)
+          const knownActions = /STUDIO_ACTIONS (\[.*\])/.exec(before)?.[1];
+          if (known === undefined || knownActions === undefined)
             return yield* opError(
               "blender-assets-import",
               root,
@@ -1826,7 +1831,10 @@ const make = Effect.gen(function* () {
               code: [
                 "import bpy",
                 `before = set(${known})`,
+                `before_actions = set(${knownActions})`,
                 "for o in [o for o in bpy.data.objects if o.name not in before]: bpy.data.objects.remove(o, do_unlink=True)",
+                // Its clips go too, or they ride along with any armature whose bones they key.
+                "for a in [a for a in bpy.data.actions if a.name not in before_actions]: bpy.data.actions.remove(a)",
               ].join("\n"),
             });
             return yield* opError(
@@ -1838,14 +1846,28 @@ const make = Effect.gen(function* () {
           }
           // The import stays in the live scene, stamped with its source and licence (§2.8): the
           // export composes the ledger from the stamps, after a review like anything built here.
+          // Its clips are stamped too, so a rigged import's animations are credited to it, not
+          // called made here; a clip keyed later on its armature carries no stamp and is.
           const licence = importLicence(input.source, input.id, text);
+          const stampOf = (what: "mesh" | "clips") =>
+            JSON.stringify(
+              JSON.stringify({
+                what,
+                from: input.source,
+                licence: licence.slice(0, 200),
+                ai: false,
+                credits: null,
+              }),
+            );
           const stamped = yield* callText(root, "execute_blender_code", {
             code: [
               "import bpy, json",
               `before = set(${known})`,
-              `stamp = ${JSON.stringify(JSON.stringify({ what: "mesh", from: input.source, licence: licence.slice(0, 200), ai: false, credits: null }))}`,
+              `before_actions = set(${knownActions})`,
+              `stamp = ${stampOf("mesh")}`,
               "added = [o for o in bpy.context.scene.objects if o.name not in before and o.type in ('MESH', 'ARMATURE')]",
               "for o in added: o['kurambit_source'] = stamp",
+              `for a in [a for a in bpy.data.actions if a.name not in before_actions]: a['kurambit_source'] = ${stampOf("clips")}`,
               "print(f'STUDIO_STAMPED {len(added)}')",
             ].join("\n"),
           });

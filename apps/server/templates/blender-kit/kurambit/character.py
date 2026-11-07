@@ -24,6 +24,10 @@ MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the ga
 LIBRARY_HELP = "Library bodies (quaternius-universal-base-characters, as game_assets_search lists them) need no install."
 
 
+MADE_BODY = {"what": "body", "from": "made", "licence": "made in this game", "ai": False, "credits": None}
+WHATS = {"body", "clips", "mesh", "parts", "texture"}
+
+
 def stamp(obj, what, source, licence):
     obj["kurambit_source"] = json.dumps({"what": what, "from": source, "licence": licence, "ai": False, "credits": None})
 
@@ -90,15 +94,39 @@ def _file_body(path):
     return rig, meshes, skeleton.NAME_MAPS["identity"]
 
 
+def _part(p):
+    """A sidecar part as the ledger holds it, or None when it is not one (GameAssetPart)."""
+    if not isinstance(p, dict) or p.get("what") not in WHATS:
+        return None
+    src, licence, ai, credits = p.get("from"), p.get("licence"), p.get("ai"), p.get("credits")
+    if not (isinstance(src, str) and 0 < len(src) <= 64 and isinstance(licence, str) and len(licence) <= 200
+            and isinstance(ai, bool) and (credits is None or (isinstance(credits, (int, float)) and not isinstance(credits, bool)))):
+        return None
+    return {"what": p["what"], "from": src, "licence": licence, "ai": ai, "credits": credits}
+
+
 def _game_source(path):
-    """A body that is an earlier export carries its sidecar's body part."""
+    """A body that is an earlier export carries its sidecar's whole ledger: its body part (or a made
+    body) and every other part, imports, ai and credits included, since its one mesh holds them all.
+    A GLB with no sidecar was made here; a sidecar that does not read as one is refused, never guessed."""
     sidecar = os.path.splitext(path)[0] + ".asset.json"
     try:
         with open(sidecar) as f:
-            parts = json.load(f)["source"]["parts"]
-        return next(p for p in parts if p.get("what") == "body")
-    except (OSError, ValueError, KeyError, StopIteration):
-        return {"from": "made", "licence": "made in this game"}
+            text = f.read()
+    except FileNotFoundError:
+        return dict(MADE_BODY), []
+    except OSError as error:
+        raise Refused("invalid-input", f"could not read {os.path.basename(sidecar)}: {error}")
+    try:
+        raw = json.loads(text)["source"]["parts"]
+    except (ValueError, KeyError, TypeError):
+        raw = None
+    parts = [_part(p) for p in raw] if isinstance(raw, list) and raw else [None]
+    if None in parts:
+        raise Refused("invalid-input", f"{os.path.basename(sidecar)} has no ledger that reads as one (source.parts), so the body's credits are unknown: export that model again with game_blender_export, or use a library body")
+    body = next((p for p in parts if p["what"] == "body"), None)
+    rest = [p for p in parts if p is not body]
+    return (body if body is not None else dict(MADE_BODY)), rest
 
 
 def _take_clips(clips, standard, standard_actions):
@@ -162,6 +190,7 @@ def character(params):
     skeleton.object_mode()
     body_spec = params["body"]
     notes = []
+    carried = []
 
     # The standard armature first: every check below reads its joints.
     standard = params["standard"]
@@ -177,15 +206,14 @@ def character(params):
         taken = _take_clips(params.get("clips", []), standard, std_actions)
         if "mpfb" in body_spec:
             body_arm, meshes, name_map = _mpfb_body(body_spec["mpfb"])
-            body_source = ("mpfb2", MPFB_LICENCE)
+            body_part = {**MADE_BODY, "from": "mpfb2", "licence": MPFB_LICENCE}
         else:
             path = body_spec.get("library") or body_spec.get("game")
             body_arm, meshes, name_map = _file_body(path)
             if "game" in body_spec:
-                part = _game_source(path)
-                body_source = (part["from"], part.get("licence", ""))
+                body_part, carried = _game_source(path)
             else:
-                body_source = (body_spec.get("pack", "library"), body_spec.get("licence", ""))
+                body_part = {**MADE_BODY, "from": body_spec.get("pack", "library"), "licence": body_spec.get("licence", "")}
         has = {name_map.get(b.name, b.name) for b in body_arm.data.bones}
         missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in has]
         if missing:
@@ -223,7 +251,9 @@ def character(params):
     for i, o in enumerate(meshes):
         o.name = f"{name}_body" if len(meshes) == 1 else f"{name}_body_{i + 1}"
         o.data.name = o.name
-        stamp(o, "body", *body_source)
+        o["kurambit_source"] = json.dumps(body_part)
+        if carried:
+            o["kurambit_parts"] = json.dumps(carried)  # the ledger's other parts this body brings
 
     for act, label, c in taken:
         skeleton.fit_clip(act, ratio)

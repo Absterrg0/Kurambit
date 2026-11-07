@@ -26,40 +26,49 @@ MADE = {"from": "made", "licence": "made in this game", "ai": False, "credits": 
 MAX_REST_DEVIATION = 2.0
 
 
-def _stamp(o):
+def _stamp(idb, key="kurambit_source"):
     try:
-        return json.loads(o.get("kurambit_source", ""))
+        return json.loads(idb.get(key, ""))
     except ValueError:
         return None
 
 
 def parts_of(objects):
-    """The ledger: where every part came from, read from the stamps (an unstamped mesh was made here)."""
+    """The ledger: every distinct stamp (what, from, licence, ai and credits all count), body first;
+    an unstamped mesh, or a clip with no source, was made here. Nothing is dropped: the server
+    merges parts past the sidecar's limit, or refuses."""
     parts = []
 
     def add(p):
-        if not any(q["what"] == p["what"] and q["from"] == p["from"] for q in parts):
-            parts.append({"what": p["what"], "from": p["from"], "licence": p.get("licence", ""),
-                          "ai": bool(p.get("ai", False)), "credits": p.get("credits")})
+        part = {"what": p["what"], "from": p["from"], "licence": p.get("licence", ""),
+                "ai": bool(p.get("ai", False)), "credits": p.get("credits")}
+        if part not in parts:
+            parts.append(part)
 
     meshes = [o for o in objects if o.type in stylepass.helpers.GEOMETRY]
     for o in meshes:
         s = _stamp(o)
         if s is not None and s.get("what") == "body":
             add(s)
+            for p in _stamp(o, "kurambit_parts") or []:  # an earlier export reused as a body brings its ledger
+                add(p)
     for arm in (o for o in objects if o.type == "ARMATURE"):
         clips = json.loads(arm.get("kurambit_clips", "[]"))
         for c in clips:
             add({"what": "clips", **c})
-        if any("kurambit_from" not in a for a in exported_actions(arm)):
-            add({"what": "clips", **MADE})
+        for a in exported_actions(arm):
+            s = _stamp(a)  # a clip an import brought carries the import's stamp
+            if s is not None:
+                add({**s, "what": "clips"})
+            elif "kurambit_from" not in a:
+                add({"what": "clips", **MADE})
     for o in meshes:
         s = _stamp(o)
         if s is None:
             add({"what": "parts", **MADE})
         elif s.get("what") != "body":
             add(s)
-    return parts[:16]
+    return parts
 
 
 def refusals_of(measured, info, params):
