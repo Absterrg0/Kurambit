@@ -1,7 +1,8 @@
 """resolve() and digest(): which objects a review or export covers, and their content hashes.
 
 A digest covers everything an export would carry: transforms, geometry, weights, materials,
-modifiers, the stamps, bone rest frames and every key of the clips an armature exports. The live
+modifiers, the stamps, bone rest frames and every key of the clips an armature exports, and the
+contents of the images its materials use, so a repainted texture is a new review. The live
 session and the one-shot pass compute it from the same saved data, so an equal digest means the
 pass sees exactly what the agent built, and any edit after a review makes the review stale."""
 import hashlib
@@ -85,32 +86,126 @@ def _rna(struct):
     return out
 
 
+# What places or shows a node in the editor; it changes nothing an export carries.
+_EDITOR = {"location", "location_absolute", "width", "height", "width_hidden", "dimensions", "select",
+           "show_options", "show_preview", "show_texture", "hide", "label", "use_custom_color", "color",
+           "parent", "inputs", "outputs", "internal_links", "name", "rna_type", "warning_propagation"}
+
+
+def _value(v, depth):
+    """A property as plain data: an ID by name (an image's or a node group's content is hashed on
+    its own), a nested struct (a ColorRamp, a curve mapping, an image user) by its properties."""
+    if isinstance(v, bpy.types.ID):
+        return v.name
+    if isinstance(v, bpy.types.bpy_struct):
+        return _props(v, depth - 1) if depth > 0 else None
+    if isinstance(v, float):
+        return round(v, PLACES)
+    if isinstance(v, set):  # enum flags: a set's order changes with each process's hash seed
+        return sorted(v)
+    if hasattr(v, "__len__") and not isinstance(v, (str, bytes)):
+        return [_value(x, depth) for x in v]
+    return v
+
+
+def _props(struct, depth=3):
+    """A node's own settings, the ones that are not sockets: a Mix's blend type, a Math node's
+    operation, an image node's interpolation and extension, a ColorRamp's stops."""
+    out = []
+    for p in struct.bl_rna.properties:
+        if p.identifier in _EDITOR or p.identifier.startswith("bl_"):
+            continue
+        if p.is_readonly and p.type not in ("POINTER", "COLLECTION"):
+            continue
+        try:
+            v = getattr(struct, p.identifier)
+        except (AttributeError, RuntimeError, TypeError):
+            continue
+        out.append((p.identifier, _value(v, depth)))
+    return out
+
+
+def _file_sha1(path):
+    h = hashlib.sha1()
+    try:
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+    except OSError:
+        return b"missing"
+    return h.hexdigest().encode()
+
+
+def _image(image, cache):
+    """An image by what the export would read of it: a packed image's bytes, a file's bytes, a
+    generated image's pixels. Never image.size (a reopened file loads image buffers lazily, so it
+    reads 0 x 0) and never the raw filepath ("//" paths are rewritten when the pass's copy is saved
+    elsewhere)."""
+    key = "image:" + image.name
+    if key in cache:
+        return cache[key]
+    if image.is_dirty:
+        # Pixels only in this session's memory: the saved copy the pass opens would not have them.
+        raise Refused("invalid-input", f"the image {image.name} has changes only in the live scene (painted or edited, never saved): save or pack the image first (image.save() to its file, or image.pack()), so the review and the export read the same pixels")
+    h = hashlib.sha1(repr((image.name, image.source, image.colorspace_settings.name, image.alpha_mode)).encode())
+    packed = [f.packed_file for f in image.packed_files if f.packed_file is not None]  # one per UDIM tile or view
+    if packed:
+        for pf in packed:
+            h.update(pf.data)
+    elif image.source == "GENERATED":
+        px = np.empty(len(image.pixels), dtype=np.float32)
+        image.pixels.foreach_get(px)
+        h.update(repr(tuple(image.size)).encode())
+        h.update(px.tobytes())
+    else:
+        path = os.path.normpath(bpy.path.abspath(image.filepath, library=image.library)) if image.filepath else ""
+        h.update(path.encode())
+        if path:
+            h.update(_file_sha1(path))
+    cache[key] = h.hexdigest()
+    return cache[key]
+
+
+def _tree(tree, cache, depth=0):
+    """A node tree: every node's type, settings, socket values, images and groups, and the links."""
+    group = not tree.is_embedded_data  # a material's own tree is always named "Shader Nodetree"
+    key = "tree:" + tree.name
+    if group and key in cache:
+        return cache[key]
+    h = hashlib.sha1()
+    for n in sorted(tree.nodes, key=lambda n: n.name):
+        h.update(repr((n.name, n.bl_idname, n.mute, _props(n))).encode())
+        image = getattr(n, "image", None)
+        if isinstance(image, bpy.types.Image):
+            h.update(_image(image, cache).encode())
+        sub = getattr(n, "node_tree", None)
+        if isinstance(sub, bpy.types.NodeTree) and depth < 8:
+            h.update(_tree(sub, cache, depth + 1).encode())
+        for i in n.inputs:
+            if hasattr(i, "default_value"):
+                v = i.default_value
+                v = [round(x, PLACES) for x in v] if hasattr(v, "__len__") and not isinstance(v, str) else (round(v, PLACES) if isinstance(v, float) else v)
+                h.update(repr((i.identifier, v)).encode())
+    for link in tree.links:
+        h.update(repr((link.from_node.name, link.from_socket.identifier, link.to_node.name, link.to_socket.identifier, link.is_muted)).encode())
+    if group:
+        cache[key] = h.hexdigest()
+    return h.hexdigest()
+
+
 def _material(m, cache):
     if m is None:
         return "none"
-    if m.name not in cache:
+    key = "material:" + m.name
+    if key not in cache:
         h = hashlib.sha1(m.name.encode())
         h.update(repr((m.use_backface_culling, m.blend_method if hasattr(m, "blend_method") else None)).encode())
         if m.use_nodes and m.node_tree is not None:
-            for n in sorted(m.node_tree.nodes, key=lambda n: n.name):
-                h.update(repr((n.name, n.bl_idname)).encode())
-                image = getattr(n, "image", None)
-                if image is not None:
-                    # Never image.size (a reopened file loads image buffers lazily, so it reads 0 x 0) and
-                    # never the raw filepath ("//" paths are rewritten when the pass's copy is saved elsewhere).
-                    path = os.path.normpath(bpy.path.abspath(image.filepath, library=image.library)) if image.filepath else ""
-                    h.update(repr((image.name, path, image.source)).encode())
-                for i in n.inputs:
-                    if hasattr(i, "default_value"):
-                        v = i.default_value
-                        v = [round(x, PLACES) for x in v] if hasattr(v, "__len__") and not isinstance(v, str) else (round(v, PLACES) if isinstance(v, float) else v)
-                        h.update(repr((i.identifier, v)).encode())
-            for link in m.node_tree.links:
-                h.update(repr((link.from_node.name, link.from_socket.identifier, link.to_node.name, link.to_socket.identifier)).encode())
+            h.update(_tree(m.node_tree, cache).encode())
         else:
             h.update(_r(m.diffuse_color))
-        cache[m.name] = h.hexdigest()
-    return cache[m.name]
+        cache[key] = h.hexdigest()
+    return cache[key]
 
 
 def _mesh(h, o, cache):
