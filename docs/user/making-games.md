@@ -161,7 +161,10 @@ across all games by default). A generation that would go over it is refused, wit
 
 For key art and hero characters the agent asks for a few candidates. They appear as a card in the
 chat: click one, then **Use this** (or use the arrow keys and Enter), and the agent carries on with
-it. Keep going takes the first candidate and says so. **Cancel** stops a generation still being made.
+it. Keep going takes the first candidate and says so. A new game on **Generated** starts from key
+art: the agent asks for three while it builds the first playable version, you pick one, and the
+game's colours and every later asset come from it. Human characters share the animation library;
+creatures (animals, monsters) keep their own skeleton and animations. **Cancel** stops a generation still being made.
 **Generated art…** in the game's **More** menu (**⋯**) or the command palette lists everything the game
 has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
 
