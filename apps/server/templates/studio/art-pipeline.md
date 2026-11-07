@@ -19,10 +19,10 @@ renders and Blender props come in later turns, for what no pack has.
    rectangles or default UI skin on the played path. Dynamic text stays code.
 3. One look, locked in `STYLE.json` before the first asset (below). The art
    tools hold the game to it.
-4. Characters and creatures come from the lock's packs: rigged models on its
-   rig when it names one, or the packs' own sprite characters in a 2D game
-   whose lock names none. Blender builds props, set pieces, backgrounds and
-   key art, never a character from boxes or primitives.
+4. Characters and creatures come the way STYLE.json's `characters` says
+   (Characters, below): from the lock's packs, or made through the character
+   pipeline and exported after a review. Blender also builds props, set
+   pieces, backgrounds and key art.
 5. One palette, one silhouette language, one ground line. Movement, hurt, win
    and lose read at a glance. Put the set in one contact-sheet PNG, look at
    it, and redo the weak ones.
@@ -75,6 +75,14 @@ look fits the brief (and the key art, once there is one) and write `STYLE.json` 
 - `imports`: outside sources the live Blender may import from (`polyhaven`,
   `sketchfab`, `polypizza`); none when left out. Realistic Poly Haven models
   sit only in a realistic look.
+- `characters`: how characters are made, the person's choice: `library`
+  (the default), `blender` or `tripo`. Only the person changes it.
+- 3D made models: `palette` may also be a hex list (`["#E4E4E3", ...]`, 2 to
+  64 colours; take them from the family's own textures so made models sit
+  with the packs), `shading` (`gradient` 0.16, `roughness` 0.62, `glow` 2.5),
+  `scale.character` (metres a made character stands; KayKit heroes are about
+  2.1) and `budget` (`character` 20000 and `prop` 8000 triangles, `texture`
+  1024 px a side). A made character's `rig` is `standard-humanoid`.
 
 What the tools do with it: `game_assets_add` refuses a pack outside the lists
 and characters on another rig (an FBX or other model whose clips cannot be
@@ -83,45 +91,117 @@ read counts as a character), and measures each added clip's loudness against
 `game_blender_render_sprites` fills the palette, outline, size and views from
 the lock and refuses a palette or mode it does not hold;
 `game_blender_assets_import` refuses a source `imports` does not list;
-`game_blender_assets_import` and `game_blender_export` refuse an armature not
-on the lock's rig, or any armature when it names none; `game_assets_search`
-shows the lock's packs first. A refusal says what to change. Changing
+`game_blender_export` exports only what you last reviewed, as it was, and
+refuses an armature not on the lock's rig (or any armature when it names
+none), rest frames off the standard skeleton, triangles or a texture over the
+budget, and a character with no idle clip; `game_assets_search` shows the
+lock's packs first. A refusal says what to change. Changing
 direction is an edit to STYLE.json made on purpose, never a drift: when the
 look changes, change the lock first, then the art. STYLE.json is the person's
 to read and edit too.
 
-## Characters from the lock
+## Characters
 
+STYLE.json's `characters` is how this game's characters are made. It is
+the person's choice: follow it, and follow a route the person names in a
+message for that request. Never switch routes yourself. When the route
+cannot do what is asked (the library has no cat), say so in your reply and
+suggest the other routes; the person changes the setting.
+
+- `library` (the default): characters come from the lock's packs. 3D:
+  `game_assets_add` the family's character models (for `kaykit-1`:
+  `kaykit-adventurers` heroes and `kaykit-skeletons` enemies, 76-95 clips
+  each) and play their clips by state with the engine's character animator
+  (`CharacterAnimator` in Godot and Unity, `animate` in three.js;
+  TEMPLATE.md), which finds "Idle", "Walking_A" or "1H_Melee_Attack_Chop"
+  by their words. On `standard-humanoid`, `game_blender_character` with a
+  library body (`quaternius-universal-base-characters`) puts it on the
+  skeleton with the library's clips; recolour it with the palette, review
+  and export it like a made one. No character fits: recolour one (a
+  family's characters share one small colormap texture; edit a copy of
+  that PNG and point the copy's material at it). Creatures off the humanoid
+  rig come from a pack that carries their own clips.
+- `blender`: made characters, below.
 - 2D sprite packs (a lock with no rig): take the characters the packs draw,
-  with their own frames.
-
-- 3D: `game_assets_add` the character models from the lock's rig family (for
-  `kaykit-1`: `kaykit-adventurers` heroes, `kaykit-skeletons` enemies, 76-95
-  clips each). Play their clips by state with the engine's character
-  animator (`CharacterAnimator` in Godot and Unity, `animate` in three.js;
-  TEMPLATE.md): it finds "Idle", "Walking_A", "1H_Melee_Attack_Chop" by
-  their words, and any clip plays by a word of its name.
-- 2D: render the family's character into strips. Import the added GLB into
-  the live Blender and list its clips:
-
-  ```python
-  import bpy, os
-  bpy.ops.import_scene.gltf(filepath=os.path.abspath("godot/assets/library/kaykit-adventurers/Characters/gltf/Knight.glb"))
-  rig = next(o for o in bpy.context.selected_objects if o.type == "ARMATURE")
-  print(rig.name, [c.name for c in rig.children], [a.name for a in bpy.data.actions])
-  ```
-
-  Hide what this character should not carry (`ob.hide_render = True` on
-  extra weapons), then `game_blender_render_sprites` with
+  with their own frames. To render a 3D family's character into strips,
+  import its GLB into the live Blender, list its clips
+  (`[a.name for a in bpy.data.actions]`), hide what it should not carry
+  (`ob.hide_render = True`), then `game_blender_render_sprites` with
   `"objects": ["<rig name>"], "action": "Walking_A"`, once per clip. With a
   pixel lock, leave out `pixelArt`, `size` and `views`: the lock fills them.
 
-- No character in the family fits: recolour one. A family's characters share
-  one small colormap texture; edit a copy of that PNG (hue, palette) and point
-  the copy's material at it. Never model a character from cubes or
-  primitives; a hand-made rig with sine-wave limbs reads as programmer art.
-- Creatures off the humanoid rig (monsters, animals) come from a pack in the
-  lock that carries their own clips.
+### Made characters
+
+The tools own the skeleton, its rest frames, scale, palette, budgets and
+measurement. You own the shape, the pose and the judgment, and you judge
+from the review image, never from your code. A character that did not go
+through the review and the export is not finished.
+
+1. **Concept first.** Add the subject's section to `art/CONCEPT.md`: three
+   adjectives; one primary shape (round, square or triangle); the head's
+   share of the height (about 40% for a chibi); the two features that must
+   read at game distance; the palette roles (main, accent, one glow).
+   `art/concepts/<name>.png`, when it exists, is shown beside every review.
+2. **Body.** `game_blender_character` with an `mpfb` body (age 0 is a
+   toddler, 0.5 an adult; needs MPFB2, which the person installs in
+   Settings → Game tools) or a library body, the clips (the standard set
+   when you leave them out) and the chains no clip keys: `tail` from
+   `pelvis`, `ear` from `Head` with `mirror`. Keep chains short (springs do
+   not collide). It leaves a collection `<name>` with the armature `<name>`
+   and the skinned `<name>_body`. `replace: true` rebuilds only the body and
+   the armature and re-binds your parts.
+3. **Parts** with `game_blender_code`, in world space at the rest pose.
+   `kurambit` is already imported:
+   - `kurambit.material("#RRGGBB", glow=0)`: a colour by palette role;
+   - `kurambit.skin_rigid(obj, "Head")`, or a `{bone: weight}` dict, or a
+     function of a vertex's world position (with `armature=`): binds a part;
+   - `kurambit.place_on_surface(obj, target, (0, 1, 0), offset=0.002)`: moves
+     a feature onto a surface along the direction you would look; returns
+     the point and normal. Eyes, noses, badges and buckles go on by raycast,
+     never by guessed coordinates;
+   - `kurambit.ring_around(body, "lowerarm_l", 0.86, axis=(1, 0, 0),
+material=m)`: a band hugging the measured cross-section (cuffs, belts,
+     collars). End every colour zone under a modelled band, never on a
+     jagged line of faces;
+   - `kurambit.tube_along_bones(["tail_01", ..., "tail_05"], 0.028)`: a
+     tapered tube weighted along a chain;
+   - `kurambit.place_chain(arm, "ear_l", start=..., direction=..., length=...)`
+     or `points=[...]`: moves a chain onto the parts you modelled (ears onto
+     the hood, a curled tail). Do it before skinning parts to the chain.
+
+   Model shapes, not boxes: bevels, subdivided spheres, boolean openings.
+   One glow accent per character. Eyes always get a highlight.
+
+4. **Custom clips** with `kurambit.key_pose("Pounce", frame, {"base":
+"Idle_Loop", "move": (0, 0, -0.1), "turn": {"pelvis": ((1, 0, 0), 14)},
+"aim": {"upperarm_l": (0.3, -0.75, -0.2)}}, arm)`: on top of a library
+   pose, by world directions (the character faces -Y, +X is its left),
+   never by a bone's local axes. Give it an anticipation key, an overshoot
+   and a settle; keep it in place (the game moves the character).
+5. **Review:** `game_blender_look` with `mode: "review"`. It runs the
+   export's style pass and measurement and shows one image: a turnaround,
+   silhouettes, the model at game distance, each walk, run, jump and custom
+   clip, the palette, and the concept. Walk it in this order:
+   1. Silhouette: the primary shape and the two features read in black.
+   2. Game distance: at 1x, can you tell what it is and which way it faces?
+   3. Palette roles: main, accent and the one glow are where the concept
+      put them; no part is a surprise colour.
+   4. Side by side with the concept: proportions, head share, features.
+   5. Clips: feet stay under the body, the head is not hidden in the jump
+      and run, arms clear the body, the custom clip has its anticipation.
+
+   Name each defect concretely (what, where, what it should be), fix it, and
+   review again. Stop at a pass, or after 8 reviews with what is left named
+   in your reply. The text lists what the export would refuse: fix those
+   first.
+
+6. **Export:** `game_blender_export` writes exactly the reviewed model, its
+   `<name>.asset.json` sidecar (clips with their ground speed, springs,
+   height) and an ASSETS.md line. Any change after the review needs a new
+   review. In three.js, point `ASSETS` at the sidecar
+   (`cat: "assets/blender/space_cat.asset.json"`) and drive it with
+   `locomotion()` and `play(state, { moveSpeed })` so the feet stay planted
+   (TEMPLATE.md).
 
 ## 2D sprites from 3D
 
@@ -159,10 +239,14 @@ anchor offset it gives.
 ## Props, set pieces and 3D models
 
 Library pieces from the lock's packs come first. What no pack has, build in
-the live Blender: `game_blender_code` to model, `game_blender_look` to see,
-`game_blender_scene` to measure, `game_blender_export` for a GLB, then
-`game_import` and `game_check`. Match the family's look: its proportions,
-its flat or colormap colours, its bevel. Realistic models and textures
+the live Blender: `game_blender_code` to model, `game_blender_scene` to
+measure, `game_blender_look` with `mode: "review"` to see exactly what will
+ship, `game_blender_export` for the GLB and its sidecar, then `game_import`
+and `game_check`. Match the family's look: its proportions, its bevel
+(bevelled edges, never flat boxes), and colours by palette role
+(`kurambit.material("#RRGGBB")`; the style pass snaps them to the palette).
+Design set pieces for the camera: a third-person or top-down camera needs
+low partitions (about 1.8 m in a 4 m cell), not full-height walls. Realistic models and textures
 (`game_blender_assets_search` and `_import`: Poly Haven is CC0, no key;
 Sketchfab and Poly Pizza need the user's keys) belong only in a realistic
 lock.
