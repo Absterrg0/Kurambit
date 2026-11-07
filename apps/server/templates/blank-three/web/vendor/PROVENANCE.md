@@ -21,5 +21,9 @@
   same tarball's files, added 2026-11-06 (sha512 integrity matches the
   registry). Like the files above, they pass through the repository's code
   formatter on commit, which changes whitespace and quotes, not code.
+- `addons/libs/meshopt_decoder.module.js` (the decoder for the meshopt-compressed
+  models game_blender_export ships, `shell/assets.js`): the same tarball's file,
+  unmodified, added 2026-11-08. meshoptimizer, MIT License, copyright (c)
+  2016-2024 Arseny Kapoulkine; the notice is in the file's header.
 - Keep this pin. A game that needs a newer three.js says why here and vendors
   the new files with their license the same way.

@@ -178,6 +178,11 @@ through the review and the export is not finished.
    round or chibi character (a cat, a gnome, a mascot) takes a child body
    (`age` 0.1 to 0.25); a lean adult body under a big head reads as a
    person in a costume.
+   A `game` body (an earlier export, a generated humanoid) keeps its own
+   clips beside the library ones, and any body keeps its own skinned bones
+   that hang from a joint (a robe's skirt, a sash, hair) as spring chains
+   with their weights. In Blender a clip is the action `<name>|<clip>`;
+   `key_pose` and the export use the clip's own name.
 3. **Parts** with `game_blender_code`, in world space at the rest pose.
    `kurambit` is already imported:
    - `kurambit.material("#RRGGBB", glow=0)`: a colour by palette role;
@@ -272,7 +277,10 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
 6. **Export:** `game_blender_export` writes exactly the reviewed model, its
    `<name>.asset.json` sidecar (clips with their ground speed, springs,
    height) and an ASSETS.md line. Any change after the review needs a new
-   review. In three.js, point `ASSETS` at the sidecar
+   review. In three.js the GLB ships compressed (WebP images, meshopt
+   geometry and clips) and the sidecar names the shipped bytes, so never
+   compress it afterwards; `simplify` caps its triangles (a character drawn
+   about 100 px tall rarely needs over 20000). In three.js, point `ASSETS` at the sidecar
    (`cat: "assets/blender/space_cat.asset.json"`) and drive it with
    `locomotion()` and `play(state, { moveSpeed })` so the feet stay planted
    (TEMPLATE.md).

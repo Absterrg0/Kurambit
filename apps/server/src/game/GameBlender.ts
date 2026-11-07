@@ -104,7 +104,10 @@ import {
   styleBudgets,
   styleHash,
 } from "./gameStyle.ts";
-import { gamePaths } from "./engineProfile.ts";
+import { engineProfile, gamePaths } from "./engineProfile.ts";
+import { gltfTriangles } from "./assetFacts.ts";
+import { glbJson } from "./gltfJson.ts";
+import { packGlb } from "./glbPack.ts";
 import {
   GENERATED_DIR,
   type SheetSource,
@@ -160,6 +163,10 @@ const BLENDER_ROOM: MemoryRoom = {
  */
 const RENDER_NEEDED_MB = 2048;
 const BLEND_REL = "art/blender/live.blend";
+/** The three.js template's model loader and the meshopt decoder it vendors, under its web folder. */
+const THREE_TEMPLATE_WEB = "blank-three/web";
+const MESHOPT_LOADER = "shell/assets.js";
+const MESHOPT_DECODER = "vendor/addons/libs/meshopt_decoder.module.js";
 const SESSION_FILE = "session.json";
 
 /**
@@ -1668,7 +1675,9 @@ const make = Effect.gen(function* () {
           const glb = NodePath.join(out, `candidate.${NodeCrypto.randomUUID()}.glb`);
           return yield* Effect.gen(function* () {
             const rig = style?.rig === undefined ? null : resolveRig(style.rig);
+            const engine = (yield* projects.read(root)).engine.name;
             const pass = yield* runPass(root, out, glb, {
+              images: engineProfile(engine).compressedModels ? "WEBP" : "AUTO",
               objects: digest.objects,
               expectedDigest: digest.perObject,
               style,
@@ -2031,6 +2040,27 @@ const make = Effect.gen(function* () {
         object: adopted.objects[0] ?? input.name,
         blend,
       };
+    });
+
+  /**
+   * The template's meshopt decoder, copied into a game whose loader predates compressed exports,
+   * and what to change so its next export ships compressed.
+   */
+  const offerMeshoptDecoder = (realRoot: string, engineDir: string) =>
+    Effect.gen(function* () {
+      const template = yield* templates.directory;
+      const target = NodePath.join(realRoot, engineDir, MESHOPT_DECODER);
+      const present = yield* Effect.tryPromise(async () => {
+        if ((await NodeFSP.stat(target).catch(() => null)) === null) {
+          await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
+          await NodeFSP.copyFile(
+            NodePath.join(template, THREE_TEMPLATE_WEB, MESHOPT_DECODER),
+            target,
+          );
+        }
+        return true;
+      }).pipe(Effect.orElseSucceed(() => false));
+      return `This game's ${engineDir}/${MESHOPT_LOADER} has no meshopt decoder, so the geometry shipped quantized but not meshopt-compressed. To ship it smaller, ${present ? "" : `copy the blank-three template's ${MESHOPT_DECODER} into ${engineDir}/, `}add import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js"${present ? ` (now in ${engineDir}/${MESHOPT_DECODER})` : ""}, make the loader new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder), and export again.`;
     });
 
   return GameBlender.of({
@@ -2480,12 +2510,59 @@ const make = Effect.gen(function* () {
             catch: (cause) => opError("blender-export", file, "invalid-path", undefined, cause),
           });
           const absolute = NodePath.join(directory, NodePath.posix.basename(file));
-          // Copied beside the target and renamed over it, so a game never loads half a model.
+          const compress = engineProfile(manifest.engine.name).compressedModels;
+          if (input.simplify !== undefined && !compress)
+            return yield* opError(
+              "blender-export",
+              root,
+              "invalid-input",
+              `simplify is for three.js games; ${manifest.engine.name} makes its own levels of detail when it imports the model.`,
+            );
+          const reviewedBytes = yield* Effect.tryPromise({
+            try: () => NodeFSP.readFile(NodePath.join(out, CANDIDATE_GLB)),
+            catch: (cause) => opError("blender-export", file, "io", undefined, cause),
+          });
+          // A game made before compressed exports has a loader with no meshopt decoder: its model
+          // ships quantized but not meshopt-compressed, and the decoder is put in its vendor folder.
+          const decodes =
+            compress &&
+            (yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(realRoot, engineDir, MESHOPT_LOADER), "utf8").catch(
+                () => "",
+              ),
+            )).includes("setMeshoptDecoder");
+          const decoderNote =
+            compress && !decodes ? yield* offerMeshoptDecoder(realRoot, engineDir) : null;
+          const measuredTriangles = candidate.measured.triangles;
+          const simplify =
+            input.simplify !== undefined && input.simplify < measuredTriangles
+              ? { ratio: input.simplify / measuredTriangles }
+              : undefined;
+          // The browser downloads the model: its geometry and clips ship meshopt-compressed (its
+          // images are already WebP from the pass), so nothing needs compressing after the export.
+          const shippedBytes = compress
+            ? yield* packGlb(
+                reviewedBytes,
+                { meshopt: decodes, ...(simplify === undefined ? {} : { simplify }) },
+                (detail, cause) =>
+                  opError(
+                    "blender-export",
+                    file,
+                    "tool-failed",
+                    `gltfpack could not compress the reviewed model: ${detail}`,
+                    cause,
+                  ),
+              )
+            : reviewedBytes;
+          const shippedDoc = glbJson(shippedBytes);
+          const shippedTriangles =
+            shippedDoc === null ? measuredTriangles : gltfTriangles(shippedDoc);
+          // Written beside the target and renamed over it, so a game never loads half a model.
           const glb = yield* Effect.tryPromise({
             try: async () => {
               const staged = `${absolute}.${NodeCrypto.randomUUID()}.part`;
               try {
-                await NodeFSP.copyFile(NodePath.join(out, CANDIDATE_GLB), staged);
+                await NodeFSP.writeFile(staged, shippedBytes);
                 const hashed = await fileSha256(staged);
                 await NodeFSP.rename(staged, absolute);
                 return hashed;
@@ -2498,8 +2575,8 @@ const make = Effect.gen(function* () {
           const sidecar = sidecarPathOf(file);
           yield* writeText(
             NodePath.join(directory, NodePath.posix.basename(sidecar)),
-            sidecarText(
-              sidecarOf(
+            sidecarText({
+              ...sidecarOf(
                 candidate,
                 {
                   name: NodePath.posix.basename(file),
@@ -2508,7 +2585,8 @@ const make = Effect.gen(function* () {
                 },
                 characterRoute(manifest),
               ),
-            ),
+              triangles: shippedTriangles,
+            }),
             "blender-export",
           );
           const credited = yield* recordProvenance(
@@ -2518,7 +2596,22 @@ const make = Effect.gen(function* () {
           );
           const blend = yield* saveBlend(root);
           return {
-            text: `Exported the review ${key.slice(0, 12)} of ${candidate.objects.join(", ")}: ${file} (${(glb.bytes / 1048576).toFixed(2)} MB) and its sidecar ${sidecar}. ${credited}\nSaved .blend source: ${blend}\nRun game_import after.${manifest.engine.name === "three" ? ` three.js games load the sidecar: ASSETS = { ${candidate.subject}: "${sidecar.slice(engineDir.length + 1)}" }.` : ""}`,
+            text:
+              [
+                `Exported the review ${key.slice(0, 12)} of ${candidate.objects.join(", ")}: ${file} (${(glb.bytes / 1048576).toFixed(2)} MB${compress ? `, compressed from ${(reviewedBytes.byteLength / 1048576).toFixed(2)} MB: ${decodes ? "meshopt geometry and clips" : "quantized geometry"}, WebP images` : ""}) and its sidecar ${sidecar}.`,
+                ...(input.simplify === undefined
+                  ? []
+                  : simplify === undefined
+                    ? [
+                        `simplify ${input.simplify} keeps all ${measuredTriangles} triangles: the model has no more.`,
+                      ]
+                    : [
+                        `Simplified from ${measuredTriangles} to ${shippedTriangles} triangles (asked for at most ${input.simplify}${shippedTriangles > input.simplify ? ": the simplifier stops before it moves the surface by more than 1% of the model's size" : ""}).`,
+                      ]),
+                ...(decoderNote === null ? [] : [decoderNote]),
+                credited,
+              ].join(" ") +
+              `\nSaved .blend source: ${blend}\nRun game_import after.${manifest.engine.name === "three" ? ` three.js games load the sidecar: ASSETS = { ${candidate.subject}: "${sidecar.slice(engineDir.length + 1)}" }.` : ""}`,
             blend,
             export: file,
             sidecar,

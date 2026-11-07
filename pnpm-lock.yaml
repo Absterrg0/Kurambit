@@ -283,6 +283,9 @@ importers:
       effect:
         specifier: 4.0.5
         version: 4.0.5
+      gltfpack:
+        specifier: 1.3.0
+        version: 1.3.0
       jose:
         specifier: 'catalog:'
         version: 6.2.2
@@ -6120,6 +6123,11 @@ packages:
   globalthis@1.0.4:
     resolution: {integrity: sha512-DpLKbNU4WylpxJykQujfCcwYWiV/Jhm50Goo0wrVILAv5jOr9d+H+UR3PhSCD2rCCEIg0uc+G+muBTwD54JhDQ==}
     engines: {node: '>= 0.4'}
+
+  gltfpack@1.3.0:
+    resolution: {integrity: sha512-YGt2vPUa3OZuGh4IqbKdorwPyr9PcKKVRHtxOcfrHz3c83EFA6WOJVQMzRej6gPbCWcVnrZ8RDKduxaGclW/xQ==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   gopd@1.2.0:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
@@ -13252,6 +13260,8 @@ snapshots:
       define-properties: 1.2.1
       gopd: 1.2.0
     optional: true
+
+  gltfpack@1.3.0: {}
 
   gopd@1.2.0: {}
 

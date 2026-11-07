@@ -188,7 +188,8 @@ def run_pass(params):
         export_animations=True, export_animation_mode="ACTIONS", export_force_sampling=True,
         export_anim_single_armature=True, export_reset_pose_bones=True, export_skins=True,
         export_def_bones=False, export_optimize_animation_size=True, export_morph=False,
-        export_image_format="AUTO", export_materials="EXPORT", export_texcoords=True, export_normals=True,
+        # WebP for a browser game (the server names it): a fifth of PNG's bytes, read natively by three.js.
+        export_image_format=params.get("images", "AUTO"), export_image_quality=80, export_materials="EXPORT", export_texcoords=True, export_normals=True,
         export_cameras=False, export_lights=False,
     )
     own = next(iter(creatures.values())) if len(creatures) == 1 and len(arms) == 1 else None

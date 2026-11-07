@@ -109,6 +109,13 @@ export const GameBlenderExportInput = Schema.Struct({
    * `<engine dir>/assets/blender/scene.glb` (`unity/Assets/Blender/scene.glb` for Unity).
    */
   file: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
+  /**
+   * three.js: the most triangles the shipped model keeps. The export simplifies it toward that
+   * count, keeping its outline and seams; the result says how many it kept. Omitted: all of them.
+   */
+  simplify: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 10_000_000 })),
+  ),
 });
 export type GameBlenderExportInput = typeof GameBlenderExportInput.Type;
 export const GameBlenderExportResult = Schema.Struct({

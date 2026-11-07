@@ -22,6 +22,7 @@
 // Sounds need no entry here: Juice.sfx and playMusic load them by path.
 import * as THREE from "../vendor/three.module.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { clone as cloneObject } from "three/addons/utils/SkeletonUtils.js";
 
 const models = new Map();
@@ -87,7 +88,8 @@ export async function preloadAssets(manifest, onProgress) {
     if (!listed.has(url))
       reportError(new Error(`${url} did not load: a file an ASSETS model references is missing.`));
   };
-  const gltfLoader = new GLTFLoader(manager);
+  // game_blender_export ships meshopt-compressed geometry (its WebP images three reads natively).
+  const gltfLoader = new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder);
   const textureLoader = new THREE.TextureLoader(manager);
   await Promise.all(
     entries.map(async ([name, path]) => {
