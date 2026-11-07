@@ -251,19 +251,13 @@ function GameToolsKeysSection({ environmentId }: { environmentId: EnvironmentId 
   const settings = useEnvironmentSettings(environmentId);
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const canWrite = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Every commit is sent: each patch names one key, and a key pasted while another saves must not be dropped.
   const saveKey = async (key: KeyField, value: string) => {
-    if (busy) return;
-    setBusy(true);
     setError(null);
-    try {
-      const patch: Partial<Record<KeyField, string>> = { [key]: value };
-      const saved = await update({ environmentId, input: { patch } });
-      if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
-    } finally {
-      setBusy(false);
-    }
+    const patch: Partial<Record<KeyField, string>> = { [key]: value };
+    const saved = await update({ environmentId, input: { patch } });
+    if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
   };
   return (
     <div className="space-y-3 px-4 py-3 text-sm">
@@ -286,7 +280,7 @@ function GameToolsKeysSection({ environmentId }: { environmentId: EnvironmentId 
                 aria-label={`${row.title} value`}
                 configured={configured}
                 value=""
-                disabled={!canWrite || busy}
+                disabled={!canWrite}
                 placeholder="Paste the key"
                 onCommit={(next) => {
                   if (next !== "") void saveKey(row.key, next);
@@ -295,7 +289,7 @@ function GameToolsKeysSection({ environmentId }: { environmentId: EnvironmentId 
               <Button
                 size="sm"
                 variant="outline"
-                disabled={!canWrite || busy || !configured}
+                disabled={!canWrite || !configured}
                 onClick={() => void saveKey(row.key, "")}
               >
                 Clear

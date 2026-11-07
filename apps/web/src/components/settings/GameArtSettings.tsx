@@ -52,14 +52,12 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
   const providers = useEnvironmentQuery(gameEnvironment.artProviders({ environmentId, input: {} }));
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const canWrite = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Every commit is sent: each patch names its own keys, so two saves never clobber each other,
+  // and a key pasted while another is still being checked must not be dropped.
   const save = async (patch: ServerSettingsPatch) => {
-    if (busy) return;
-    setBusy(true);
     setError(null);
     const saved = await update({ environmentId, input: { patch } });
-    setBusy(false);
     if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
     // A key saved or cleared changes which providers are ready.
     providers.refresh();
@@ -117,7 +115,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
                     aria-label={`${info.label} key`}
                     configured={configured}
                     value=""
-                    disabled={!canWrite || busy}
+                    disabled={!canWrite}
                     placeholder="Paste the key"
                     onCommit={(next) => {
                       if (next !== "") void save({ [keySetting]: next });
@@ -126,7 +124,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={!canWrite || busy || !configured}
+                    disabled={!canWrite || !configured}
                     onClick={() => void save({ [keySetting]: "" })}
                   >
                     Clear
@@ -174,7 +172,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
                 <span>{GAME_ART_LANE_LABELS[lane]}</span>
                 <Select
                   value={choice}
-                  disabled={!canWrite || busy}
+                  disabled={!canWrite}
                   onValueChange={(value) => {
                     const picked =
                       value === "auto" ? "auto" : options.find((provider) => provider === value);
@@ -222,7 +220,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
             format={USD}
             size="sm"
             className="w-28"
-            disabled={!canWrite || busy}
+            disabled={!canWrite}
             onValueCommitted={(value) => {
               if (value !== null && value !== settings.gameArtDailyLimitUsd)
                 void save({ gameArtDailyLimitUsd: value });
