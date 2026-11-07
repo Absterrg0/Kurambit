@@ -98,14 +98,20 @@ a {
 }
 
 /* Once the game runs, the page steps back: the brand fades until the pointer finds it. */
-body.running .home,
-body.running .foot {
+/* Once the game runs, the page steps back: the brand moves clear of the game's health bar and fades
+   until the pointer finds it, and the controls line gives way to the game's own. */
+body.running .home {
+  left: auto;
+  right: max(22px, env(safe-area-inset-right));
   opacity: 0.28;
 }
 
-body.running .home:hover,
-body.running .foot:hover {
+body.running .home:hover {
   opacity: 1;
+}
+
+body.running .foot {
+  display: none;
 }
 
 .gate {
