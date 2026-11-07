@@ -113,6 +113,7 @@ export const GameFactId = Schema.Literals([
   "detail",
   "colour",
   "first-response",
+  "performance",
   "assets",
   "use",
 ]);
@@ -290,6 +291,26 @@ export const GameFirstResponse = Schema.Struct({
   resolution: Schema.Number,
 });
 
+/**
+ * How the random-input play ran, as the game's shell measured it while the harness
+ * played (three.js): play's frame rate, its 1% low, the GPU's time per frame and the
+ * render scale the look settled on, at the play's canvas size.
+ */
+export const GamePerformance = Schema.Struct({
+  /** Frames per second from the median frame time. */
+  fps: Schema.Number,
+  /** Frames per second over the slowest 1% of frames. */
+  low1: Schema.Number,
+  /** The GPU's median milliseconds per frame (timer queries); null where the browser has none. */
+  gpuMs: Schema.NullOr(Schema.Number),
+  /** The median render scale: the share of the canvas's pixels per side the frame was drawn at. */
+  scale: Schema.NullOr(Schema.Number),
+  width: NonNegativeInt,
+  height: NonNegativeInt,
+  frames: NonNegativeInt,
+});
+export type GamePerformance = typeof GamePerformance.Type;
+
 export const GameBuildFacts = Schema.Struct({
   build: GameBuildId,
   /** The content key the facts are cached by (the engine project's tree) and the harness that measured them. */
@@ -312,6 +333,16 @@ export const GameBuildFacts = Schema.Struct({
       Effect.succeed({
         status: "not-measured" as const,
         why: "measured before asset facts existed",
+        retry: false,
+      }),
+    ),
+  ),
+  /** Measured during the random-input play: frame rate, 1% low, GPU time and render scale. */
+  performance: gameFact(GamePerformance).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        status: "not-measured" as const,
+        why: "measured before performance was measured",
         retry: false,
       }),
     ),
@@ -385,6 +416,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   detail: "Detail",
   colour: "Colour",
   "first-response": "First response",
+  performance: "Performance",
   assets: "Assets",
   use: "Asset use",
 };
@@ -526,6 +558,25 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
               : "neutral",
         kind: response.seconds === null ? "none" : "moved",
       }));
+    case "performance":
+      return from(facts.performance, (perf) => {
+        const ms = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
+        const scale = perf.scale === null ? "" : ` at ${Number(perf.scale.toFixed(2))}×`;
+        const text = [
+          `${Math.round(perf.fps)} fps`,
+          `1% low ${Math.round(perf.low1)}`,
+          ...(perf.gpuMs === null ? [] : [`GPU ${ms(perf.gpuMs)} ms`]),
+        ]
+          .join(" · ")
+          .concat(`${scale} of ${perf.width}×${perf.height}`);
+        // Whole frames: a tenth of a frame is the machine's noise, never better or worse.
+        return {
+          text,
+          value: Math.round(perf.fps),
+          tone: perf.fps >= 55 && perf.low1 >= 30 ? "good" : perf.fps < 30 ? "bad" : "neutral",
+          kind: "performance",
+        };
+      });
     case "assets":
       return from(facts.assets, (assets) => {
         const measured = assets.models.filter(
@@ -601,8 +652,9 @@ export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView
     };
   });
 
-/** For these numbers lower is better; the other numbers are neutral. */
+/** For these numbers lower is better, for these higher; the other numbers are neutral. */
 const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["freeze", "colour", "first-response"]);
+const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance"]);
 const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 /** How good a reading's kind is, for the facts whose kinds have an order; null for the rest. */
 const rank = (id: GameFactId, kind: string): number | null => {
@@ -695,9 +747,9 @@ export const diffBuildFacts = (
       return { ...base, change: "same", tone: "neutral" };
     const change = y.value > x.value ? "up" : y.value < x.value ? "down" : "same";
     const tone =
-      change === "same" || !LOWER_IS_BETTER.has(id)
+      change === "same" || !(LOWER_IS_BETTER.has(id) || HIGHER_IS_BETTER.has(id))
         ? "neutral"
-        : change === "down"
+        : (change === "down") === LOWER_IS_BETTER.has(id)
           ? "better"
           : "worse";
     return { ...base, change, tone };

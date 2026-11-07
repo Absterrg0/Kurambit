@@ -1,4 +1,5 @@
 import * as HostProcess from "@kurambit/shared/HostProcess";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { GameOperationError } from "@kurambit/contracts";
@@ -22,6 +23,8 @@ export interface GameBrowser {
   readonly renderer: string | null;
   /** The browser draws on the CPU (SwiftShader): play speed then says nothing about the game. */
   readonly software: boolean;
+  /** What each GPU backend the probe tried printed, in a line: why it chose this one. */
+  readonly probe: string;
 }
 
 const BASE_ARGS = [
@@ -62,6 +65,26 @@ export interface RenderBackend {
   readonly software: boolean;
 }
 
+/** The probe's output, one clause per backend tried: what it printed, or that it printed nothing. */
+export const describeProbe = (
+  probed: ReadonlyArray<{ readonly args: ReadonlyArray<string>; readonly dom: string }>,
+): string =>
+  probed.length === 0
+    ? "no backend was tried"
+    : probed
+        .map(({ args, dom }) => {
+          const name = args.find((arg) => arg.startsWith("--use-angle="))?.slice(12) ?? "default";
+          const printed = /RENDERER=([^<\n]+)/.exec(dom)?.[1]?.trim();
+          return `${name}: ${
+            printed !== undefined
+              ? `RENDERER=${printed.slice(0, 120)}`
+              : dom.trim() === ""
+                ? "printed nothing"
+                : `printed no renderer (${dom.replace(/\s+/g, " ").trim().slice(0, 80)})`
+          }`;
+        })
+        .join("; ");
+
 /**
  * The first candidate that drew on hardware; else Chrome's CPU renderer. Off
  * Linux the default is kept whatever it reports, with its renderer recorded.
@@ -95,7 +118,7 @@ const PROBE_TIMEOUT = "15 seconds" as const;
  * shell, with no display in its environment; one that fails or hangs counts
  * as no hardware. Shared by every service that makes a game browser.
  */
-const backends = new Map<string, Promise<RenderBackend>>();
+const backends = new Map<string, Promise<RenderBackend & { readonly probe: string }>>();
 const probeBackend = (executable: string, sandbox: boolean) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -104,6 +127,7 @@ const probeBackend = (executable: string, sandbox: boolean) =>
     delete env.DISPLAY;
     delete env.WAYLAND_DISPLAY;
     const probed = [];
+    const printed = [];
     for (const args of backendCandidates(platform)) {
       const dom = yield* spawner
         .string(
@@ -126,13 +150,15 @@ const probeBackend = (executable: string, sandbox: boolean) =>
         );
       const renderer = parseProbeRenderer(dom);
       probed.push({ args, renderer });
+      printed.push({ args, dom });
       if (renderer !== null && !isSoftwareRenderer(renderer)) break;
     }
     const chosen = chooseBackend(platform, probed);
+    const probe = describeProbe(printed);
     yield* chosen.software
-      ? Effect.logInfo("Game browsers render in software: no GPU backend drew.", { probed })
+      ? Effect.logInfo("Game browsers render in software: no GPU backend drew.", { probe })
       : Effect.logInfo("Game browsers render on the GPU.", { renderer: chosen.renderer });
-    return chosen;
+    return { ...chosen, probe };
   });
 
 /**
@@ -192,7 +218,12 @@ export const makeGameBrowser = Effect.gen(function* () {
               Effect.catchCause((cause) =>
                 Effect.logInfo("Game browsers render in software: the GPU probe failed.", {
                   cause,
-                }).pipe(Effect.as(chooseBackend(platform, []))),
+                }).pipe(
+                  Effect.as({
+                    ...chooseBackend(platform, []),
+                    probe: `the probe itself failed (${String(Cause.squash(cause)).slice(0, 120)})`,
+                  }),
+                ),
               ),
             ),
           );
@@ -207,6 +238,7 @@ export const makeGameBrowser = Effect.gen(function* () {
             args: [...BASE_ARGS, ...chosen.args],
             renderer: chosen.renderer,
             software: chosen.software,
+            probe: chosen.probe,
           }),
         );
       }),
@@ -230,6 +262,17 @@ export const READ_STUDIO_STATE = `(() => {
   if (typeof studio.getState !== "function") return null;
   try {
     return JSON.stringify(studio.getState());
+  } catch {
+    return null;
+  }
+})()`;
+
+/** Reads `window.__studio.perf()` (the shell's play stats) as JSON; null when the shell has none. */
+export const READ_STUDIO_PERF = `(() => {
+  const studio = window.__studio;
+  if (studio === null || typeof studio !== "object" || typeof studio.perf !== "function") return null;
+  try {
+    return JSON.stringify(studio.perf());
   } catch {
     return null;
   }

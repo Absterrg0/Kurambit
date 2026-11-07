@@ -10,11 +10,19 @@
 //                                    // with no run, then return false
 //   export const KEEP_ACROSS_RUNS = ["best"]; // GameState values a retry keeps
 //   export const ASSETS = { knight: "assets/models/knight.glb" }; // loaded before the title
-//   export const LOOK = { bloom: false }; // tone mapping, light, shadows, bloom (shell/look.js)
+//   export const LOOK = { preset: "golden" }; // the light, sky, fog and post chain (shell/look.js)
+//   export async function prepare({ renderer, assets, look, progress }) {} // optional: behind the
+//                                    // loading bar, once (build a big world, bake, compile);
+//                                    // progress(0..1) fills the bar
+//   export function render(ctx, dt) {} // optional: draw the frame yourself (your own chain);
+//                                    // ctx.look.render(scene, camera) draws through the look
+//   export function title(dt, ctx) {} // optional: a live title; ctx (scene, camera, renderer,
+//                                    // assets, look) lasts across visits; drawn every frame
+//                                    // the title is up
 //
 // ctx, fresh each run: renderer, canvas, hud (the game's DOM layer), scene,
 // camera, player, ui (the HUD kit: counter, bar, timer, objective, toast,
-// hint; shell/hud.js), look (sun(); shell/look.js), assets (model(name) / texture(name), shell/assets.js),
+// hint; shell/hud.js), look (sun(), bake(), render(); shell/look.js), assets (model(name) / texture(name), shell/assets.js),
 // input (named actions from keys, mouse and gamepad, which
 // the player can rebind: input.down("jump"), input.pressed("action"),
 // input.vector(); the table and the calls are in shell/controls.js), keys
@@ -92,12 +100,13 @@ const screens = {
   controls: byId("controls"),
 };
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio ?? 1, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-const look = await createLook(renderer, game.LOOK);
+// The look makes the renderer: MSAA only where no post chain runs over it.
+const look = await createLook(canvas, game.LOOK);
+const { renderer } = look;
 
 let run = null;
+/** A live title's lasting scene (the game's title(dt, ctx)), or null. */
+let titleCtx = null;
 let openScreen = null;
 let settingsFrom = null;
 let endBeat = 0;
@@ -158,7 +167,6 @@ function newContext() {
     },
   };
   ctx.look = look.forRun(ctx);
-  look.prepare(ctx.scene);
   return { ctx, input, down, pressed, buttons, clicked, listeners, timers, reported: false };
 }
 
@@ -236,6 +244,10 @@ function startRun() {
     reportError(error);
     run.reported = true;
   }
+  // The run's own programs compile before its first frame, so play never opens on a stall.
+  const started = run;
+  started.compiling = true;
+  look.compile(started.ctx.scene, started.ctx.camera).then(() => (started.compiling = false));
 }
 
 function pause() {
@@ -685,7 +697,6 @@ function step(dt) {
     game.update?.(dt, run.ctx);
     animateShell.update(dt);
     cameraShell.update(dt);
-    look.update();
     run.ctx.ui.update(dt);
   } catch (error) {
     // One report a run: the loop keeps going so the menus keep working.
@@ -696,34 +707,30 @@ function step(dt) {
   clearFrameInput();
 }
 
-function draw() {
+function draw(dt) {
   if (run === null) {
-    renderer.clear();
+    if (titleCtx !== null) look.render(titleCtx.scene, titleCtx.camera, dt);
+    else renderer.clear();
     return;
   }
   const camera = run.ctx.camera;
-  juiceShell.beforeRender(camera);
-  look.render(run.ctx.scene, camera);
+  juiceShell.beforeRender(camera, renderer);
+  if (game.render !== undefined) {
+    try {
+      game.render(run.ctx, dt);
+    } catch (error) {
+      if (!run.reported) reportError(error);
+      run.reported = true;
+    }
+  } else look.render(run.ctx.scene, camera, dt);
   juiceShell.afterRender(camera);
 }
 
 // Every resize, whatever the state: fullscreen is toggled from the pause menu.
 window.addEventListener("resize", () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
   look.resize(window.innerWidth, window.innerHeight);
   const aspect = window.innerWidth / window.innerHeight;
-  const camera = run?.ctx.camera;
-  if (camera?.isPerspectiveCamera) {
-    camera.aspect = aspect;
-    camera.updateProjectionMatrix();
-  } else if (camera?.isOrthographicCamera) {
-    // Keeps the vertical extent and the centre; the width follows the window.
-    const centre = (camera.left + camera.right) / 2;
-    const half = ((camera.top - camera.bottom) / 2) * aspect;
-    camera.left = centre - half;
-    camera.right = centre + half;
-    camera.updateProjectionMatrix();
-  }
+  for (const camera of [run?.ctx.camera, titleCtx?.camera]) fit(camera, aspect);
   if (run !== null)
     try {
       game.resize?.(run.ctx);
@@ -735,8 +742,23 @@ window.addEventListener("resize", () => {
   redraw = true;
 });
 
+function fit(camera, aspect) {
+  if (camera?.isPerspectiveCamera) {
+    camera.aspect = aspect;
+    camera.updateProjectionMatrix();
+  } else if (camera?.isOrthographicCamera) {
+    // Keeps the vertical extent and the centre; the width follows the window.
+    const centre = (camera.left + camera.right) / 2;
+    const half = ((camera.top - camera.bottom) / 2) * aspect;
+    camera.left = centre - half;
+    camera.right = centre + half;
+    camera.updateProjectionMatrix();
+  }
+}
+
 const studio = installStudio({
   ui,
+  perf: () => look.stats(),
   player: () => run?.ctx.player ?? null,
   setState: (target, values) => game.setState?.(target, values, run?.ctx ?? null),
   hold(on) {
@@ -748,14 +770,35 @@ const studio = installStudio({
 
 loadSettings();
 loadProgress(KEEP);
-// Before the loop starts, so studio.ready (the harness's boot signal) waits for the assets too.
-if (Object.keys(game.ASSETS ?? {}).length > 0) {
+// Before the loop starts, so studio.ready (the harness's boot signal) waits for the assets,
+// the game's own prepare and the shader warm-up too.
+const assetCount = Object.keys(game.ASSETS ?? {}).length;
+if (assetCount > 0 || game.prepare !== undefined) {
   show(screens.loading);
   const fill = byId("loading-fill");
-  await preloadAssets(game.ASSETS, (done, total) => {
-    fill.style.width = `${total === 0 ? 100 : (done / total) * 100}%`;
-  });
-  const models = Object.keys(game.ASSETS).flatMap((name) => {
+  // The assets fill the bar, or its first half when the game prepares after them.
+  const share = game.prepare === undefined ? 1 : assetCount > 0 ? 0.5 : 0;
+  const bar = (k) => (fill.style.width = `${Math.round(Math.min(Math.max(k, 0), 1) * 100)}%`);
+  if (assetCount > 0)
+    await preloadAssets(game.ASSETS, (done, total) =>
+      bar(total === 0 ? share : (done / total) * share),
+    );
+  if (game.prepare !== undefined)
+    try {
+      await game.prepare({
+        renderer,
+        assets,
+        look: { bake: look.bake, render: look.render, settings: look.settings },
+        progress: (k) => bar(share + Math.min(Math.max(Number(k) || 0, 0), 1) * (1 - share)),
+      });
+    } catch (error) {
+      reportError(error);
+    }
+}
+// Every program the frame needs (the look's chain, the models lit as a run is) compiles
+// behind the loading screen, never on the first frame of play.
+{
+  const models = Object.keys(game.ASSETS ?? {}).flatMap((name) => {
     try {
       return [assets.model(name)];
     } catch {
@@ -764,10 +807,20 @@ if (Object.keys(game.ASSETS ?? {}).length > 0) {
   });
   // A warm-up that fails costs only the first frame's compile, never the boot.
   try {
-    look.warm(models);
+    await look.warm(models);
   } catch (error) {
     console.warn("look: shader warm-up failed", error);
   }
+}
+if (game.title !== undefined) {
+  titleCtx = {
+    renderer,
+    assets,
+    scene: new THREE.Scene(),
+    camera: new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500),
+    player: null,
+  };
+  titleCtx.look = look.forRun(titleCtx);
 }
 // The Stage reloads a live game with #kurambit-play once the person has
 // played it, so a save lands them back in play, as pressing Play would.
@@ -780,19 +833,35 @@ if (
 else showTitle();
 
 let last = performance.now();
+let titleError = false;
 renderer.setAnimationLoop((now) => {
-  const real = Math.min(Math.max((now - last) / 1000, 0), 0.1);
+  const realMs = Math.max(now - last, 0);
+  const real = Math.min(realMs / 1000, 0.1);
   last = now;
   pollGamepad(now);
   // Only unpaused, unheld time moves the run, the end beat included.
-  if (run !== null && !held && (GameState.state === "playing" || endBeat > 0)) {
-    step(real * juiceShell.timeScale() * (endBeat > 0 ? END_BEAT_SCALE : 1));
+  const moving =
+    run !== null && !run.compiling && !held && (GameState.state === "playing" || endBeat > 0);
+  let dt = 0;
+  if (moving) {
+    dt = real * juiceShell.timeScale() * (endBeat > 0 ? END_BEAT_SCALE : 1);
+    step(dt);
     if (endBeat > 0 && (endBeat -= real) <= 0) showEnd();
+    redraw = true;
+  } else if (run === null && titleCtx !== null && !held && !document.hidden) {
+    dt = real;
+    try {
+      game.title(real, titleCtx);
+    } catch (error) {
+      if (!titleError) reportError(error);
+      titleError = true;
+    }
     redraw = true;
   }
   // A frozen frame stays on the canvas; nothing redraws until something moves.
-  if (redraw) {
-    draw();
+  if (redraw && run?.compiling !== true) {
+    look.update();
+    look.frame(() => draw(dt), { playing: moving && GameState.state === "playing", realMs });
     redraw = false;
   }
   studio.ready = true;

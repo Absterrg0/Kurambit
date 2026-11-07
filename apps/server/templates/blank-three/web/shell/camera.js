@@ -17,7 +17,8 @@
 //
 // 3D third person: behind and above the target, lagging, looking a little
 // ahead, pulled in when anything in `blockers` (the level meshes or a group
-// of them) is between it and the target, so it never ends inside a wall.
+// of them) is between it and the target: the view's centre and the corners of
+// its near plane are all kept clear, so it never ends inside a wall or a post.
 // Drag with the right mouse button (or under pointer lock) or the right
 // stick to orbit; without input it settles behind the target's facing.
 //   const cam = followCamera3D(ctx, player, { blockers: [level] });
@@ -25,6 +26,18 @@
 //   // (height: 0.6 of it) from 3 heights away (distance), so any size stays in frame
 //   // move relative to the view: forward is (-sin(cam.yaw), -cos(cam.yaw)) on x/z,
 //   // and face the move direction with player.rotation.y = Math.atan2(dir.x, dir.z)
+// For action:
+//   const cam = followCamera3D(ctx, hero.root, {
+//     blockers: [level, props],  // anything the camera must not pass through
+//     shoulder: 0.55,            // over the right shoulder (negative: the left)
+//     orbitButton: 1,            // the middle button drags the view, so right-click
+//                                // stays free for a dodge; null: no button, only
+//                                // pointer lock and the right stick
+//     distance: 4.3, pitch: 0.22,
+//     ground: (x, z) => terrainHeight(x, z), // a heightfield to stay above, cheaper than
+//                                // raycasting a big terrain mesh as a blocker
+//   });
+//   cam.focus = foe.root;        // turns to keep this foe in frame; null lets go
 import * as THREE from "../vendor/three.module.js";
 
 const live = new Set();
@@ -118,31 +131,56 @@ export function followCamera3D(ctx, target, options = {}) {
     lookAhead = 1.5,
     blockers = [],
     orbit = true,
+    orbitButton = 2,
+    shoulder = 0,
+    pitch: startPitch = 0.3,
     sensitivity = 0.004,
     minPitch = -0.35,
     maxPitch = 1.1,
     radius = 0.3,
+    ground = null,
   } = options;
   const camera = ctx.camera;
   const ray = new THREE.Raycaster();
   const pivot = target.position.clone();
   const ahead = new THREE.Vector3();
   const last = target.position.clone();
-  let pitch = 0.3;
+  const look = new THREE.Vector3();
+  const centre = new THREE.Vector3();
+  const back = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const goal = new THREE.Vector3();
+  const to = new THREE.Vector3();
+  const foeAt = new THREE.Vector3();
+  let pitch = startPitch;
   let length = distance;
+  let side = shoulder;
   let idle = 0;
+  /** The first blocker hit from `from` toward `point`, as a distance; Infinity when clear. */
+  const clear = (from, point) => {
+    to.subVectors(point, from);
+    const far = to.length();
+    if (far < 1e-4) return Infinity;
+    ray.set(from, to.divideScalar(far));
+    ray.far = far;
+    return ray.intersectObjects(rig.blockers, true)[0]?.distance ?? Infinity;
+  };
   const rig = {
     camera,
     target,
     /** The view's heading around y; 0 looks down -z. Move the player relative to it. */
     yaw: target.rotation.y + Math.PI,
     blockers,
+    /** An Object3D or point to keep in frame (a foe), or null. */
+    focus: null,
     update(dt) {
       if (dt <= 0) return;
-      // Orbit by mouse (right button or pointer lock) or the right stick.
+      // Orbit by mouse (the orbit button held, or pointer lock) or the right stick.
       let dx = 0;
       let dy = 0;
-      if (orbit && (ctx.mouse.down(2) || document.pointerLockElement === ctx.canvas)) {
+      const dragging = orbitButton !== null && ctx.mouse.down(orbitButton);
+      if (orbit && (dragging || document.pointerLockElement === ctx.canvas)) {
         dx = ctx.mouse.movement.x * sensitivity;
         dy = ctx.mouse.movement.y * sensitivity;
       }
@@ -157,9 +195,17 @@ export function followCamera3D(ctx, target, options = {}) {
       last.copy(target.position);
       moved.y = 0;
       idle = dx !== 0 || dy !== 0 ? 0 : idle + dt;
-      // Untouched for a moment and moving: swing behind the target's facing
-      // (+z, as glTF models face, turned by rotation.y).
-      if (idle > 1 && moved.lengthSq() > 0.5) {
+      const focus = rig.focus;
+      if (focus != null && idle > 0.6) {
+        // Keep the foe ahead: turn only when it leaves a cone around the view's centre.
+        if (focus.isObject3D === true) focus.getWorldPosition(foeAt);
+        else foeAt.set(focus.x, focus.y ?? 0, focus.z);
+        const want = Math.atan2(-(foeAt.x - target.position.x), -(foeAt.z - target.position.z));
+        const off = Math.atan2(Math.sin(want - rig.yaw), Math.cos(want - rig.yaw));
+        if (Math.abs(off) > 0.35) rig.yaw += (off - Math.sign(off) * 0.35) * ease(3, dt);
+      } else if (idle > 1 && moved.lengthSq() > 0.5) {
+        // Untouched for a moment and moving: swing behind the target's facing
+        // (+z, as glTF models face, turned by rotation.y).
         const behind = target.rotation.y + Math.PI;
         const turn = Math.atan2(Math.sin(behind - rig.yaw), Math.cos(behind - rig.yaw));
         rig.yaw += turn * ease(1.5, dt);
@@ -168,28 +214,70 @@ export function followCamera3D(ctx, target, options = {}) {
         moved.lengthSq() > 0.25 ? moved.normalize().multiplyScalar(lookAhead) : new THREE.Vector3();
       ahead.lerp(want, ease(2.5, dt));
       pivot.lerp(target.position, ease(lag, dt));
-      const look = pivot.clone().add(ahead);
-      look.y += height;
-      const back = new THREE.Vector3(
+      centre.copy(pivot).add(ahead);
+      centre.y += height;
+      back.set(
         Math.sin(rig.yaw) * Math.cos(pitch),
         Math.sin(pitch),
         Math.cos(rig.yaw) * Math.cos(pitch),
       );
-      // Pulled in at once when blocked, eased back out when clear.
+      right.set(Math.cos(rig.yaw), 0, -Math.sin(rig.yaw));
+      // The shoulder is pulled in when a wall stands beside the target.
+      let reach = shoulder;
+      if (shoulder !== 0 && rig.blockers.length > 0) {
+        const hit = clear(
+          centre,
+          goal.copy(centre).addScaledVector(right, shoulder + Math.sign(shoulder) * radius),
+        );
+        if (hit !== Infinity) reach = Math.sign(shoulder) * Math.max(0, hit - radius);
+      }
+      side +=
+        (reach - side) *
+        ease(reach * Math.sign(shoulder) < side * Math.sign(shoulder) ? 20 : 4, dt);
+      look.copy(centre).addScaledVector(right, side);
+      // Pulled in at once when blocked, eased back out when clear. The near
+      // plane's corners are tested too: a thin post beside the line of sight
+      // would otherwise fill the view.
       let room = distance;
       if (rig.blockers.length > 0) {
-        ray.set(look, back);
-        ray.far = distance + radius;
-        const hit = ray.intersectObjects(rig.blockers, true)[0];
-        if (hit !== undefined) room = Math.max(0.2, hit.distance - radius);
+        up.crossVectors(right, back).normalize();
+        const halfH = camera.isPerspectiveCamera
+          ? Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.near + radius
+          : radius;
+        const halfW = camera.isPerspectiveCamera ? halfH * camera.aspect : radius;
+        for (const [u, v] of [
+          [0, 0],
+          [1, 1],
+          [1, -1],
+          [-1, 1],
+          [-1, -1],
+        ]) {
+          goal
+            .copy(look)
+            .addScaledVector(back, distance + radius)
+            .addScaledVector(right, u * halfW)
+            .addScaledVector(up, v * halfH);
+          const from = to
+            .copy(look)
+            .addScaledVector(right, u * halfW * 0.25)
+            .addScaledVector(up, v * halfH * 0.25)
+            .clone();
+          room = Math.min(room, clear(from, goal) - radius);
+        }
+        room = Math.max(0.2, room);
       }
       length = room < length ? room : length + (room - length) * ease(3, dt);
       camera.position.copy(look).addScaledVector(back, length);
+      if (ground !== null) {
+        const floor = ground(camera.position.x, camera.position.z) + radius;
+        if (camera.position.y < floor) camera.position.y = floor;
+      }
       camera.lookAt(look);
     },
   };
-  // Right-drag orbits instead of opening the browser's menu.
-  if (orbit) ctx.listen(ctx.canvas, "contextmenu", (event) => event.preventDefault());
+  // A drag on the orbit button orbits instead of opening the browser's menu.
+  if (orbit && orbitButton === 2)
+    ctx.listen(ctx.canvas, "contextmenu", (event) => event.preventDefault());
   live.add(rig);
   rig.update(1e-3);
   return rig;

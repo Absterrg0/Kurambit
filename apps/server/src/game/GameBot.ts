@@ -47,6 +47,7 @@ import { findWindowHost } from "./windowHost.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { PlayDidNotBoot, openPagePlay, openRunnerPlay } from "./playLaunch.ts";
 import { encodePlayUse, PLAY_USE_FILE } from "./assetUse.ts";
+import { PLAY_PERF_FILE } from "./playPerf.ts";
 import {
   appendNoFollow,
   ensureGameDir,
@@ -936,13 +937,21 @@ const make = Effect.gen(function* () {
                     const stopped = yield* Effect.promise(() => opened.stop());
                     if (stopped.keptStorage !== null)
                       yield* fileServices(writeKeptStorage(stopped.keptStorage));
-                    // Evidence beside the trace: the build's facts read it (asset use).
+                    // Evidence beside the trace: the build's facts read it (asset use, performance).
                     const use = stopped.use;
                     if (use !== null)
                       yield* Effect.promise(() =>
                         NodeFSP.writeFile(
                           NodePath.join(runDir, PLAY_USE_FILE),
                           encodePlayUse(use),
+                        ).catch(() => undefined),
+                      );
+                    const perf = stopped.perf;
+                    if (perf !== null && perf !== undefined)
+                      yield* Effect.promise(() =>
+                        NodeFSP.writeFile(
+                          NodePath.join(runDir, PLAY_PERF_FILE),
+                          `${JSON.stringify(perf)}\n`,
                         ).catch(() => undefined),
                       );
                   }),

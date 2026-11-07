@@ -131,9 +131,11 @@ matters.
   game draws Forward+ in native exports and Compatibility in its Web export
   (`rendering_method.web`), and every play on a private display forces Compatibility because Xvfb
   has only software GL: the facts and frames the harness takes are Compatibility's. The template's
-  look therefore uses only what both renderers draw. The three.js shell's bloom is opt-in for the
-  same reason: the harness plays in Chromium on SwiftShader, where bloom cost several times the
-  plain look per frame, and the harness must play the build the player gets. The game is
+  look therefore uses only what both renderers draw. The three.js look's default draws straight
+  to the canvas, as a plain three.js frame does, so a first build costs what it always did; its
+  post chain (AO, bloom, SMAA) runs only for the presets and options that ask for it, and a browser
+  drawing in software always takes the straight path, where full-screen passes cost several times
+  over. The game is
   known by its manifest's engine id (and its project folder by `manifestProject`), never by the
   folder's name; a run records the engine it started with (`runEngine` derives it from the lane for
   older records).
@@ -349,6 +351,8 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   hardware, else SwiftShader. SwiftShader costs several cores on a lit 3D scene and plays it at a
   fraction of real time, so a facts row records its renderer, facts from different renderers are
   not comparable, and a too-slow run in software is "not measured", never the game's slowness.
+  The browser keeps what each backend printed to the probe, and a play drawn in software leaves
+  the performance fact "not measured" with that output: a harness fault, never the game's.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.
