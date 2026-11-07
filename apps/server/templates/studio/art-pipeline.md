@@ -331,8 +331,9 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
      whatever its bones are named, so the clip library, `fit`, ground
      speeds, springs and blinks all work on it;
    - a creature: `game_blender_assets_import` with `source: "generated"`
-     and its `path`. It keeps its own rig, clips and size; it needs an idle
-     clip once it has clips;
+     and its `path`. It keeps its own rig, clips and size; one that came
+     with clips but no idle gets `Idle_Loop` holding its rest pose (Tripo's
+     creature clips are a walk only), which you may key into a breath;
    - then stand it on the ground facing -Y, review and export it as in
      Made characters 5 and 6.
 4. **Props.** Lane `model` with the key art (or a picked prop image) as
