@@ -912,6 +912,8 @@ interface StagePackageJson {
   readonly packageManager: string;
   readonly description: string;
   readonly license: string;
+  // The .deb target (fpm) refuses to build without it.
+  readonly homepage: string;
   readonly author: string;
   readonly main: string;
   readonly build: Record<string, unknown>;
@@ -3416,6 +3418,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     description:
       "Kurambit is a local desktop application for creating games with coding agents, Blender, and Godot.",
     license: "MIT",
+    homepage: "https://kurambit.com",
     author: "Kurambit Tools",
     main: "apps/desktop/dist-electron/boot.cjs",
     build: yield* createBuildConfig(
