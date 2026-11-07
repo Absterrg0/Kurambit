@@ -19,6 +19,7 @@ it("counts the game's own files as live changes, not Blender's or editors' tempo
     "main.js~",
     "main.js.tmp",
     ".#main.js",
+    "sedwyBd9l",
     ".git/index",
     "assets/.cache/x.png",
     "",
