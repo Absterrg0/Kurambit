@@ -701,7 +701,14 @@ function ThreadGameStage({
       )}
     >
       <header className="@container/stage-header flex shrink-0 flex-col border-b border-border bg-background">
-        <div className="flex min-h-[var(--workspace-topbar-height)] items-center gap-2.5 px-2 py-1.5 pl-3">
+        <div
+          className={cn(
+            "flex min-h-[var(--workspace-topbar-height)] items-center gap-2.5 px-2 py-1.5 pl-3",
+            // With no chat docked beside it, the stage header runs under the
+            // desktop window controls, which would cover Chat and the menu.
+            (compact || chatCollapsed) && "wco:pr-(--workspace-native-controls-inset)",
+          )}
+        >
           <span
             aria-hidden="true"
             className="hidden size-8 shrink-0 items-end justify-end overflow-hidden rounded-lg @[28rem]/stage-header:flex"
