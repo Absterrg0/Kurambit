@@ -68,6 +68,9 @@ export interface MachineLoad {
   /** The harness's browser drew on the CPU (no GPU backend on this machine). */
   readonly software?: boolean;
 }
+/** Where the facts view reads these as bad (gameFactsView in contracts). */
+const FIRST_RESPONSE_BAD = 0.5;
+export const FREEZE_BAD = 3;
 const BUSY_STALLED = 0.2;
 const BUSY_LOAD_PER_CORE = 0.75;
 
@@ -77,6 +80,20 @@ export const machineBusy = (machine: MachineLoad | null): boolean =>
   (machine.stalled !== null
     ? machine.stalled >= BUSY_STALLED
     : machine.load / Math.max(1, machine.cores) >= BUSY_LOAD_PER_CORE);
+
+/**
+ * A timing reading that looks bad but was taken while other work held the
+ * machine: it says nothing about the game, so it is not stored as measured
+ * (never compared, never a regression) and the next measure takes it again. A
+ * good reading on a busy machine stands: other work cannot make a game faster.
+ */
+export const busyReading = (what: string, machine: MachineLoad | null): NotMeasured | null =>
+  machineBusy(machine)
+    ? notMeasured(
+        `${what} while the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so it says nothing about the game`,
+        true,
+      )
+    : null;
 
 /**
  * A run below real time: its span of play did not fit the wall budget. In a
@@ -170,8 +187,12 @@ export const tierFact = (
   if (result.played === false) return notMeasured(`the tier bot did not play: ${note}`, false);
   switch (status) {
     case "crashed":
-    case "unresponsive":
       return measured(status, since(result.gameSeconds));
+    case "unresponsive":
+      return (
+        busyReading("the game stopped answering", machine) ??
+        measured(status, since(result.gameSeconds))
+      );
     case "not-booted":
       return measured("did-not-boot", null);
     case "stopped":
@@ -211,15 +232,21 @@ export const tierFact = (
 };
 
 /** The masher's first-response probe as a fact. */
-export const firstResponseOf = (result: GameBotRunResult): Facts["firstResponse"] => {
+export const firstResponseOf = (
+  result: GameBotRunResult,
+  machine: MachineLoad | null = null,
+): Facts["firstResponse"] => {
   const response = tierEvidenceOf(result.status.evidence)?.response;
   if (response === undefined) return notMeasured("the random-input run reported no probe", false);
   if (!response.positions)
     return notMeasured("the game reports no player position, so a response cannot be seen", false);
-  return {
-    status: "measured",
-    value: { seconds: response.seconds, window: response.window, resolution: 0.1 },
-  };
+  const slow = response.seconds === null || response.seconds > FIRST_RESPONSE_BAD;
+  return (
+    (slow ? busyReading("movement answered slowly or not at all", machine) : null) ?? {
+      status: "measured",
+      value: { seconds: response.seconds, window: response.window, resolution: 0.1 },
+    }
+  );
 };
 
 const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
@@ -317,7 +344,9 @@ export const skilledFact = (
     },
   });
   if (result.played === false) return notMeasured(`the bot did not play: ${note}`, false);
-  if (status === "crashed" || status === "unresponsive") return value(status, null);
+  if (status === "crashed") return value(status, null);
+  if (status === "unresponsive")
+    return busyReading("the game stopped answering", machine) ?? value(status, null);
   if (status === "not-booted") return value("did-not-boot", null);
   if (status === "stopped") return notMeasured("the measurement was stopped", true);
   if (status === "bot-error") return notMeasured(`the bot itself failed: ${note}`, false);

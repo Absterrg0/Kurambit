@@ -368,7 +368,7 @@ const PreviewTool = Tool.make("game_preview", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const StopTool = Tool.make("game_stop", {
   description:
-    "Stop only this game's processes spawned by Kurambit, including running operations, live editors, bot runs and native play, and close its Web preview server. On a three.js game this also stops the live game on the person's Stage: it stays stopped, for every client, until Play opens it again. Returns after managed processes exit and says which did not stop (success false). While a production run holds the game it stops only the caller's own work, explore session and Play; the run's builds, bots and editors keep running until the run is stopped. Does not kill external editors or other games.",
+    "Stop only this game's processes spawned by Kurambit, including running operations, live editors, bot runs and native play, and close its Web preview server. On a three.js game this also stops the live game on the person's Stage: it stays stopped, for every client, until Play opens it again. Returns after managed processes exit and says which did not stop (success false). Does not kill external editors or other games.",
   success: GameActionResult,
   failure,
   failureMode: "return",
@@ -502,7 +502,7 @@ const keepGoingDependencies = [
 ];
 const KeepGoingTool = Tool.make("game_keep_going", {
   description:
-    "Turn Keep going on or off for this chat, only when the person asks. off stops it; a step's turn in flight ends and still becomes a build. guided proposes each next step in the composer and starts it after a minute unless the person changes it. autopilot takes each next step itself, and undoes one that makes a measured fact worse (the person can redo it). Choosing a mode while it is paused resumes it, keeping the steps it set aside and the notes waiting for it. budgetMinutes (null for no limit; a new run's is 60) applies when it starts or resumes. Keep going runs only on games Kurambit plays after every turn (three.js); elsewhere, or while it is on in another chat of the game, it is refused with why. Returns what game_keep_going_status returns.",
+    "Turn Keep going on or off for this chat, only when the person asks. off stops it; a step's turn in flight ends and still becomes a build. guided proposes each next step in the composer and starts it after a minute unless the person changes it; autopilot takes each next step itself. Both undo a step that makes a measured fact worse (the person can redo it). Choosing a mode while it is paused resumes it, keeping the steps it set aside and the notes waiting for it. budgetMinutes (null for no limit; a new run's is 60) applies when it starts or resumes. Keep going runs only on games Kurambit plays after every turn (three.js); elsewhere, or while it is on in another chat of the game, it is refused with why. Returns what game_keep_going_status returns.",
   parameters: Schema.Struct({
     mode: GameKeepGoingInput.fields.mode,
     budgetMinutes: GameKeepGoingInput.fields.budgetMinutes,

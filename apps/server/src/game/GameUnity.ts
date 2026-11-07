@@ -788,7 +788,7 @@ const make = Effect.gen(function* () {
             root,
             scene: stale,
           });
-        // The production run plays blind samples in git worktrees of the game.
+        // A game may be open from a git worktree of its folder, as a chat's own copy.
         const checkout = yield* checkoutOf(root);
         if (checkout.kind === "other")
           return yield* opError(
@@ -811,9 +811,8 @@ const make = Effect.gen(function* () {
         for (const [otherRoot, other] of Array.from(sessions))
           if (otherRoot !== root && other.inFlight > 0) {
             const [mine, theirs] = yield* Effect.all([checkoutOf(root), checkoutOf(otherRoot)]);
-            // A production run builds its blind samples in worktrees of the
-            // game; stopping one from the game's own thread would not free the
-            // editor and would sabotage the run.
+            // Another copy of the same game (a git worktree of it) holds the
+            // editor: stopping this game's own work would not free it.
             const sameGame =
               (theirs.kind === "linked" &&
                 NodePath.resolve(theirs.main) === NodePath.resolve(root)) ||
@@ -824,7 +823,7 @@ const make = Effect.gen(function* () {
               root,
               "busy",
               sameGame
-                ? "The live Unity editor is busy: the production run is building a copy of this game in a worktree to play it blind. Only one Unity editor runs at a time; retry in a few minutes, or steer the run with game_run_steer."
+                ? "The live Unity editor is busy with another copy of this game (a git worktree of it); only one Unity editor runs at a time. Retry when that copy's Unity work finishes, or stop it with game_stop in that copy's chat."
                 : `The live Unity editor is busy with the game "${yield* gameName(otherRoot)}" (${otherRoot}); only one Unity editor runs at a time. Retry when that game's Unity work finishes, or stop it with game_stop there.`,
             );
           }

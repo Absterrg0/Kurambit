@@ -4,15 +4,15 @@
 // the same turn, so the T3 runs say which step they are. The reactor starts
 // the step when its run starts, cancels a step run that came up queued behind
 // someone else's turn, and reports the turn's typed result once its run is
-// over and its checkpoint (the build) has landed. It also does the two things
-// keep going owes the game's other turns: a turn that starts while a proposal
-// waits supersedes it, a turn that ends wakes a look or an undo waiting for
-// the game to be idle, and archiving the chat keep going runs in stops it.
+// over and its checkpoint (the build) has landed. It also does what keep going
+// owes the game's other turns (K2: the person goes first, in any chat): a turn
+// that starts in another chat supersedes a waiting proposal and stops a step
+// turn at work, a turn that ends wakes a look or an undo waiting for the game
+// to be idle, and archiving the chat keep going runs in stops it. Every change
+// of the run's records is pushed to the game's clients (the `run` scope).
 import {
   CommandId,
   type GameOperationError,
-  type GameRun,
-  type GameRunStep,
   type GameRunStepResult,
   type GameRunTurnStep,
   type MessageId,
@@ -31,6 +31,7 @@ import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import * as EffectOutbox from "../../orchestration-v2/EffectOutbox.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   type StepTurn,
@@ -44,7 +45,11 @@ import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../../serverActivation.ts";
 import * as GameBuilds from "../GameBuilds.ts";
+import * as GameOperations from "../GameOperations.ts";
+import * as GameProjectService from "../GameProjectService.ts";
 import { providerEnding } from "./handBack.ts";
+import { type Located, locateIn, projectStep, refusedOnly, supersedeProposal } from "./inFlight.ts";
+import { stepLine } from "./runView.ts";
 import { type GameRunWorkBroke, retrying } from "./retrying.ts";
 
 const ACTIVE: ReadonlySet<OrchestrationV2Run["status"]> = new Set([
@@ -101,6 +106,8 @@ export type StepTurnMove =
   | { readonly kind: "start"; readonly run: OrchestrationV2Run }
   /** It is over, with its checkpoint when it has one: the step lands. */
   | { readonly kind: "land"; readonly run: OrchestrationV2Run }
+  /** Stopped, its checkpoint not in: it lands once no capture is owed. */
+  | { readonly kind: "uncaptured"; readonly run: OrchestrationV2Run }
   /** A restart cut it off; T3 continues it, or it lands once nothing will. */
   | { readonly kind: "cut-off"; readonly run: OrchestrationV2Run };
 
@@ -137,33 +144,20 @@ export const stepTurnMove = (
     case "rolled_back":
       return { kind: "land", run: latest };
     case "interrupted":
-      return latest.checkpointId === null ? { kind: "wait" } : { kind: "land", run: latest };
+      return latest.checkpointId === null
+        ? { kind: "uncaptured", run: latest }
+        : { kind: "land", run: latest };
     case "cancelled":
       // Cancelled in the queue is the end; once at work, a restart cut it off.
-      if (latest.startedAt === null) return { kind: "land", run: latest };
-      return latest.checkpointId === null ? { kind: "wait" } : { kind: "cut-off", run: latest };
+      return latest.startedAt === null
+        ? { kind: "land", run: latest }
+        : { kind: "cut-off", run: latest };
     default:
       return { kind: "wait" };
   }
 };
 
-/** The run's step in flight, while it is the attempt's. */
-export interface Located {
-  readonly run: GameRun;
-  readonly record: GameRunStep;
-}
-export const locateIn = (
-  records: ProjectionStore.GameRunThreadRecords,
-  stepId: string,
-  attempt: number,
-): Located | null => {
-  const run = records.gameRuns.at(-1);
-  if (run === undefined || run.status === "ended" || run.inFlight === null) return null;
-  const record = records.gameRunSteps.find((s) => s.runId === run.id && s.seq === run.inFlight);
-  if (record === undefined || record.id !== stepId || record.attempt !== attempt) return null;
-  if (record.status !== "planned" && record.status !== "running") return null;
-  return { run, record };
-};
+export { type Located, locateIn, refusedOnly };
 
 type TurnResult = Extract<GameRunStepResult, { readonly kind: "turn" }>;
 
@@ -182,25 +176,15 @@ export class GameRunTurnReactor extends Context.Service<
       options: { readonly fromJob: boolean },
     ) => Effect.Effect<
       void,
-      Orchestrator.OrchestratorV2Error | GameOperationError | GameRunWorkBroke
+      | Orchestrator.OrchestratorV2Error
+      | GameOperationError
+      | GameRunWorkBroke
+      | EffectOutbox.EffectOutboxError
     >;
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly handle: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
   }
 >()("kurambit/game/run/GameRunTurnReactor") {}
-
-// A refusal is the run's answer (it moved on or stopped); a receipt is a repeat.
-export const refusedOnly = <A, R>(
-  dispatch: Effect.Effect<A, Orchestrator.OrchestratorV2Error, R>,
-) =>
-  dispatch.pipe(
-    Effect.asVoid,
-    Effect.catchTags({
-      OrchestratorGameRunRefusedError: (error) =>
-        Effect.logInfo("keep going's report not taken", { detail: error.detail }),
-      OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
-    }),
-  );
 
 /** A step's turn that never ran, or ran behind another: the run looks again. */
 export const supersededTurn = (runId: RunId | null, reason: string): TurnResult => ({
@@ -208,6 +192,7 @@ export const supersededTurn = (runId: RunId | null, reason: string): TurnResult 
   runId,
   outcome: "superseded",
   build: null,
+  startBuild: null,
   files: 0,
   tokens: null,
   elapsedMs: 0,
@@ -221,6 +206,9 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const builds = yield* GameBuilds.GameBuilds;
   const jobs = yield* GameRunJobs.GameRunJobs;
+  const outbox = yield* EffectOutbox.EffectOutboxV2;
+  const operations = yield* GameOperations.GameOperations;
+  const projects = yield* GameProjectService.GameProjectService;
 
   const complete = (located: Located, result: GameRunStepResult) =>
     refusedOnly(
@@ -383,6 +371,7 @@ const make = Effect.gen(function* () {
         runId: latest.id,
         outcome,
         build: kept?.build ?? null,
+        startBuild: kept?.startBuild ?? null,
         files: kept?.files ?? 0,
         tokens: yield* tokensOf(threadId, chain),
         elapsedMs: Math.max(0, to - from),
@@ -393,6 +382,25 @@ const make = Effect.gen(function* () {
 
   const superseded = (located: Located, runId: RunId | null, reason: string) =>
     complete(located, supersededTurn(runId, reason));
+
+  /** The step's job runs again behind the thread's owed effects (a checkpoint capture). */
+  const wakeLater = (located: Located) =>
+    Effect.flatMap(DateTime.now, (now) =>
+      refusedOnly(
+        engine.dispatch({
+          type: "game-run.step.schedule",
+          commandId: CommandId.make(
+            `server:game-run-step-capture:${located.record.id}:attempt:${located.record.attempt}:${DateTime.toEpochMillis(now)}`,
+          ),
+          threadId: located.run.threadId,
+          runId: located.run.id,
+          stepId: located.record.id,
+          attempt: located.record.attempt,
+          at: DateTime.toEpochMillis(now),
+          timer: { kind: "recover" },
+        }),
+      ),
+    );
 
   const settle: GameRunTurnReactor["Service"]["settle"] = (located, turn, options) =>
     Effect.gen(function* () {
@@ -428,9 +436,22 @@ const make = Effect.gen(function* () {
           return yield* superseded(located, move.run.id, "your message went first");
         case "land":
           return yield* land(located, step, chain, move.run, false);
-        case "cut-off":
-          if (options.fromJob) return yield* land(located, step, chain, move.run, true);
-          return;
+        // A stopped or cut-off turn's checkpoint may still be on its way; once no
+        // capture is owed none will come (T3 records a restart's cut-off with no
+        // checkpoint), so the step lands rather than wait forever. A cut-off
+        // lands only from the step's own job: recovery's wake runs it behind
+        // the thread's owed effects, after any restart continuation, so a turn
+        // T3 carries on is never landed. A stopped turn has no continuation.
+        case "uncaptured":
+        case "cut-off": {
+          if (move.kind === "cut-off" && !options.fromJob) return;
+          const owed =
+            move.run.checkpointId === null &&
+            (yield* outbox.hasUnsettled({ threadId, effectTypes: ["checkpoint.capture"] }));
+          // The capture's own run.updated lands it; the job's wake waits behind it.
+          if (owed) return options.fromJob ? yield* wakeLater(located) : undefined;
+          return yield* land(located, step, chain, move.run, move.kind === "cut-off");
+        }
       }
     });
 
@@ -460,52 +481,85 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  // The game's project for a thread, read once: a thread never changes project.
-  const projectOf = new Map<ThreadId, ProjectId | null>();
-  const projectIdOf = (threadId: ThreadId) =>
-    projectOf.has(threadId)
-      ? Effect.succeed(projectOf.get(threadId) ?? null)
+  // A thread's project and whether it is a person's own chat (no parent), read
+  // once: neither ever changes. A subagent's or delegated task's thread works
+  // for the turn that launched it, the step's own included.
+  const threadOf = new Map<ThreadId, { readonly projectId: ProjectId; readonly own: boolean }>();
+  const threadInfo = (threadId: ThreadId) =>
+    threadOf.has(threadId)
+      ? Effect.succeed(threadOf.get(threadId) ?? null)
       : Effect.map(projections.getThreadShell(threadId), (shell) => {
-          if (projectOf.size > 2000) projectOf.clear();
-          projectOf.set(threadId, shell?.projectId ?? null);
-          return shell?.projectId ?? null;
+          if (shell === null) return null;
+          const info = { projectId: shell.projectId, own: shell.lineage.parentThreadId === null };
+          if (threadOf.size > 2000) threadOf.clear();
+          threadOf.set(threadId, info);
+          return info;
         });
 
   /**
-   * Another turn on the game moved: one that starts supersedes a waiting
-   * proposal (the person goes first), and one that ends wakes a look or an
-   * undo that waits for the game to be idle.
+   * Another turn on the game moved. One that starts in a person's chat goes
+   * first: it supersedes a waiting proposal, and stops a step turn at work in
+   * another chat, so the step never runs beside it and its build never holds
+   * the person's changes. One that ends wakes a look or an undo waiting for
+   * the game to be idle.
    */
   const onOtherRun = (threadId: ThreadId, run: OrchestrationV2Run) =>
     Effect.gen(function* () {
-      const projectId = yield* projectIdOf(threadId);
-      if (projectId === null) return;
-      const gameRun = yield* projections.getProjectGameRun(projectId);
-      if (
-        gameRun === null ||
-        gameRun.loop !== "turns" ||
-        gameRun.status === "ended" ||
-        gameRun.inFlight === null
-      )
-        return;
-      const records = yield* projections.getGameRunRecords(gameRun.threadId, {
-        steps: "in-flight",
-      });
-      const record = records.gameRunSteps.find(
-        (each) => each.runId === gameRun.id && each.seq === gameRun.inFlight,
-      );
-      if (record === undefined || (record.status !== "planned" && record.status !== "running"))
-        return;
-      const located = { run: gameRun, record };
-      if (record.step.kind === "propose" && isActive(run) && run.status !== "waiting")
-        return yield* complete(located, { kind: "decided", answer: "superseded", by: "server" });
-      if ((record.step.kind === "look" || record.step.kind === "undo") && !isActive(run))
+      const info = yield* threadInfo(threadId);
+      if (info === null) return;
+      const located = yield* projectStep(projections, info.projectId);
+      if (located === null) return;
+      const step = located.record.step;
+      const starting =
+        run.status === "preparing" || run.status === "starting" || run.status === "running";
+      if (starting && info.own && step.kind === "propose")
+        return yield* supersedeProposal(engine, located);
+      if (starting && info.own && step.kind === "turn" && threadId !== located.run.threadId)
+        return yield* personFirst(located, threadId);
+      if ((step.kind === "look" || step.kind === "undo") && !isActive(run))
         yield* jobs.execute({
-          threadId: gameRun.threadId,
-          runId: gameRun.id,
-          stepId: record.id,
-          attempt: record.attempt,
+          threadId: located.run.threadId,
+          runId: located.run.id,
+          stepId: located.record.id,
+          attempt: located.record.attempt,
         });
+    });
+
+  /** A person's turn in another chat started while the step's turn works: it goes first. */
+  const personFirst = (located: Located, threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const { runs } = yield* threads.getThreadRecords(located.run.threadId, ["runs"]);
+      const chain = stepChain(runs, stepTurnMessageId(located.record.id, located.record.attempt));
+      const live = chain.at(-1);
+      if (live !== undefined && isActive(live) && live.status !== "waiting")
+        yield* interrupt(
+          located.run.threadId,
+          live,
+          "person",
+          "Your turn in another chat goes first; keep going looks again after it.",
+        );
+      const shell = yield* projections.getThreadShell(threadId);
+      yield* superseded(
+        located,
+        live?.id ?? null,
+        `your turn in ${shell?.title.trim() || "another chat"} went first`,
+      );
+    });
+
+  /**
+   * Every change of a run's records is news to the game's clients (the
+   * control, the banner, the palette, the sidebar), which reread keep going's
+   * status on the `run` scope; nothing polls.
+   */
+  const pushRun = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId, { deleted: "allowed" });
+      const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
+      const run = records.gameRuns.at(-1);
+      if (run === undefined) return;
+      yield* operations.runChanged(root, run.status === "ended" ? null : stepLine(run));
+      // A run that ended has no work left: Off, a pause or the end stop its jobs.
+      if (run.status === "ended") yield* jobs.stopRun(run.id);
     });
 
   /**
@@ -539,38 +593,50 @@ const make = Effect.gen(function* () {
 
   // The event consumer only reads and hands over: landing a turn is the step's job.
   const handle: GameRunTurnReactor["Service"]["handle"] = (event) =>
-    event.type === "thread.archived"
-      ? onArchived(event.threadId).pipe(
-          retrying,
+    event.type === "game-run.created" ||
+    event.type === "game-run.updated" ||
+    event.type === "game-run-step.updated" ||
+    event.type === "game-run-round.recorded"
+      ? pushRun(event.threadId).pipe(
           Effect.catchCause((cause) =>
-            Effect.logWarning("keep going could not stop in an archived chat", {
+            Effect.logWarning("keep going's change could not be pushed", {
               threadId: event.threadId,
               cause,
             }),
           ),
         )
-      : event.type !== "run.updated"
-        ? Effect.void
-        : Effect.gen(function* () {
-            const run = event.payload;
-            const own = parseStepTurn(run.userMessageId);
-            if (own !== null) return yield* onStepRun(event.threadId, own, run);
-            // A continuation names its step only through the run it continues.
-            if (run.restartContinuationOfRunId !== undefined) {
-              const { runs } = yield* threads.getThreadRecords(event.threadId, ["runs"]);
-              const turn = stepTurnOf(run, runs);
-              if (turn !== null) return yield* onStepRun(event.threadId, turn, run);
-            }
-            yield* onOtherRun(event.threadId, run);
-          }).pipe(
+      : event.type === "thread.archived"
+        ? onArchived(event.threadId).pipe(
             retrying,
             Effect.catchCause((cause) =>
-              Effect.logWarning("keep going could not follow a turn", {
+              Effect.logWarning("keep going could not stop in an archived chat", {
                 threadId: event.threadId,
                 cause,
               }),
             ),
-          );
+          )
+        : event.type !== "run.updated"
+          ? Effect.void
+          : Effect.gen(function* () {
+              const run = event.payload;
+              const own = parseStepTurn(run.userMessageId);
+              if (own !== null) return yield* onStepRun(event.threadId, own, run);
+              // A continuation names its step only through the run it continues.
+              if (run.restartContinuationOfRunId !== undefined) {
+                const { runs } = yield* threads.getThreadRecords(event.threadId, ["runs"]);
+                const turn = stepTurnOf(run, runs);
+                if (turn !== null) return yield* onStepRun(event.threadId, turn, run);
+              }
+              yield* onOtherRun(event.threadId, run);
+            }).pipe(
+              retrying,
+              Effect.catchCause((cause) =>
+                Effect.logWarning("keep going could not follow a turn", {
+                  threadId: event.threadId,
+                  cause,
+                }),
+              ),
+            );
 
   const start: GameRunTurnReactor["Service"]["start"] = () =>
     forkParked(

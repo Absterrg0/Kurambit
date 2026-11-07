@@ -305,6 +305,3 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
 11. Export checklist before calling it done: web export builds, the page
     stays clean in `game_check`, the game is playable from `web/index.html`
     on a fresh checkout.
-12. In a production run's role, work in `./web` plus VISION.md, PLAN.md,
-    NOTES.md and, when your step chooses or changes the look, STYLE.json, and never commit, reset git or use subagents: the run keeps
-    the builds.

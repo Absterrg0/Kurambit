@@ -143,6 +143,7 @@ import * as RunFinalizationService from "./orchestration-v2/RunFinalizationServi
 import * as EventStoreV2 from "./orchestration-v2/EventStore.ts";
 import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance.ts";
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
+import * as EffectOutbox from "./orchestration-v2/EffectOutbox.ts";
 import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
@@ -509,6 +510,8 @@ const layerCommandReadiness = HttpRouter.middleware(
 const layerGameRunWork = GameRunStepRunner.layer.pipe(
   Layer.provideMerge(GameRunTurnReactor.layer),
   Layer.provide(ProjectionStoreV2.layer),
+  // Read only (is a step turn's checkpoint capture still owed), as recovery reads it.
+  Layer.provide(EffectOutbox.layer),
 );
 const layerGameServices = layerGameRunWork.pipe(
   Layer.provideMerge(GameBuilds.layer),

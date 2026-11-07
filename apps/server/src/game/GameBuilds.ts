@@ -43,6 +43,7 @@ import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../checkpointing/Utils.ts";
 import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { type EarlierBuild, summaryOf, turnChangeBase } from "./buildFacts.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
@@ -54,6 +55,7 @@ import * as GameService from "./GameService.ts";
 import { BuildName } from "./run/buildNames.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
+import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */
 const NO_RUN = "game-builds";
@@ -207,17 +209,28 @@ export class GameBuilds extends Context.Service<
       typeof GameBuildRestoreResult.Type & { readonly moved: RestoreMoved },
       GameOperationError
     >;
+    /** The folder still holds `build` in its engine project, art and ASSETS.md, read under the game's lock. */
+    readonly holds: (
+      threadId: ThreadId,
+      build: GameBuildId,
+    ) => Effect.Effect<boolean, GameOperationError>;
     /**
-     * A chat turn's build once its checkpoint is kept, and how many files of
-     * the engine project, art and ASSETS.md it changed since `base`; null
-     * while the turn has no kept checkpoint.
+     * A chat turn's build once its checkpoint is kept, the build the folder
+     * held when the turn started (its recorded base; null when none was
+     * recorded), and how many files of the engine project, art and ASSETS.md
+     * it changed since then (since `fallback` without one); null while the
+     * turn has no kept checkpoint.
      */
     readonly turnBuild: (
       threadId: ThreadId,
       runId: RunId,
-      base: GameBuildId | null,
+      fallback: GameBuildId | null,
     ) => Effect.Effect<
-      { readonly build: GameBuildId; readonly files: number } | null,
+      {
+        readonly build: GameBuildId;
+        readonly startBuild: GameBuildId | null;
+        readonly files: number;
+      } | null,
       GameOperationError
     >;
   }
@@ -235,6 +248,7 @@ const make = Effect.gen(function* () {
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const scope = yield* Effect.scope;
   const crypto = yield* Crypto.Crypto;
+  const engine = yield* Orchestrator.OrchestratorV2;
   // A round's change against the build before it never changes: read once.
   const roundFiles = new Map<string, { files: GameBuild["files"]; count: number | null }>();
 
@@ -950,10 +964,35 @@ const make = Effect.gen(function* () {
       const build = yield* resolve(g, ref);
       const result = yield* restoreWithoutRun(threadId, g, build, commandId, options.expect);
       if (result.moved !== "moved-on") yield* playRestored(threadId, g);
+      // Undo, Redo or Go back moved the folder a Guided proposal read (K2).
+      if (result.moved === "restored")
+        yield* Effect.flatMap(projectStep(projections, g.projectId), (located) =>
+          located === null ? Effect.void : supersedeProposal(engine, located),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("A restore could not supersede keep going's proposal.", { cause }),
+          ),
+        );
       return result;
     });
 
-  const turnBuild: GameBuilds["Service"]["turnBuild"] = (threadId, runId, base) =>
+  const holds: GameBuilds["Service"]["holds"] = (threadId, build) =>
+    Effect.gen(function* () {
+      const g = yield* gameOf(threadId);
+      return yield* operations.exclusive(
+        g.root,
+        "Keep going check",
+        folderAgainst(g, [build]).pipe(
+          Effect.map(([changed]) => changed === false),
+          Effect.mapError((cause) =>
+            failed("Builds", g.root, "io", "the folder could not be compared", cause),
+          ),
+        ),
+        String(threadId),
+      );
+    });
+
+  const turnBuild: GameBuilds["Service"]["turnBuild"] = (threadId, runId, fallback) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const lane = manifestProject(yield* projects.read(root));
@@ -973,13 +1012,29 @@ const make = Effect.gen(function* () {
         ),
       );
       if (id === undefined || !isGameBuildId(id)) return null;
+      // Recorded as the turn lands (the reactor may not have yet): idempotent.
+      yield* recordTurn(threadId, checkpoint.ref);
+      const recorded = yield* checkpoints
+        .listCheckpointRefs({ cwd: root, prefix: `${BASES}${id}` })
+        .pipe(
+          Effect.map(
+            (refs) => refs.find((each) => each.checkpointRef === `${BASES}${id}`)?.oid ?? null,
+          ),
+          Effect.orElseSucceed(() => null),
+        );
+      const known = recorded !== null && isGameBuildId(recorded) ? recorded : null;
+      const base = known ?? fallback;
       const counted = base === null ? null : (yield* changeOf(root, lane, base, id)).count;
-      if (counted !== null) return { build: id, files: counted };
+      // A turn that changed no game files records no base; the fallback then
+      // holds exactly what the turn started from, in the paths that count.
+      const startBuild = known ?? (counted === 0 ? fallback : null);
+      if (counted !== null) return { build: id, startBuild, files: counted };
       // No base to diff against: T3's own change list for the turn.
       const inGame = yield* gamePaths(root);
       const restored = isRestored(lane);
       return {
         build: id,
+        startBuild,
         files: checkpoint.files.filter((file) => {
           const path = inGame(file.path);
           return path !== null && restored(path);
@@ -1267,6 +1322,7 @@ const make = Effect.gen(function* () {
     recordTurn,
     play,
     restore,
+    holds,
     turnBuild,
   });
 });

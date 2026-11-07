@@ -1,7 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 import { GameOperationError, type GameBotRunResult } from "@kurambit/contracts";
 
-import { faultOf, skilledFact, tierFact, turnChangeBase, winnableOf } from "./buildFacts.ts";
+import {
+  faultOf,
+  firstResponseOf,
+  skilledFact,
+  tierFact,
+  turnChangeBase,
+  winnableOf,
+} from "./buildFacts.ts";
 
 const run = (
   state: string,
@@ -105,6 +112,29 @@ describe("budget", () => {
     });
     const bot = { file: ".studio/bot/win.mjs", hash: "h", decider: "policy" } as const;
     expect(skilledFact(slow, bot, null, busy)).toMatchObject({ retry: true });
+  });
+});
+
+// Keep going undoes a step whose health reading crosses into bad, so a bad
+// reading that other work on the machine can explain is never stored as measured.
+describe("a busy machine", () => {
+  const busy = { cores: 12, stalled: 0.45, load: 13.4 };
+  const quiet = { cores: 12, stalled: 0.02, load: 1 };
+  it("makes a game that stopped answering not measured, retried; a quiet one stays measured", () => {
+    const stuck = run("unresponsive", { state: "playing" });
+    expect(tierFact(stuck, 60, null, busy)).toMatchObject({ status: "not-measured", retry: true });
+    expect(tierFact(stuck, 60, null, quiet)).toMatchObject({
+      status: "measured",
+      value: { ending: "unresponsive" },
+    });
+  });
+  it("makes a slow first response not measured, and keeps a fast one", () => {
+    const probe = (seconds: number | null) =>
+      run("done", { state: "playing" }, { response: { positions: true, seconds, window: 1 } });
+    expect(firstResponseOf(probe(0.9), busy)).toMatchObject({ status: "not-measured" });
+    expect(firstResponseOf(probe(null), busy)).toMatchObject({ status: "not-measured" });
+    expect(firstResponseOf(probe(0.1), busy)).toMatchObject({ status: "measured" });
+    expect(firstResponseOf(probe(0.9), quiet)).toMatchObject({ status: "measured" });
   });
 });
 
