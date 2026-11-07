@@ -992,12 +992,20 @@ const make = Effect.gen(function* () {
             : g.chosenBy === "person"
               ? ` (the person picked candidate ${(g.chosen ?? 0) + 1})`
               : ""
-        }. Cost ${costText(row)}. Recorded in ${where}/${g.name}.generation.json with its source, AI flag and licence.`;
+        }. Cost ${costText(row)}. Recorded in ${where}/${g.name}.generation.json with its source, AI flag and licence.${nextStep(g)}`;
       case "failed":
         return `"${g.name}" failed: ${g.error ?? "no reason given"}${g.costUsd ? ` Counted ${usd(g.costUsd)} against today (the provider may have charged for work it started).` : ""}`;
       case "cancelled":
         return `"${g.name}" was cancelled.${g.costUsd ? ` ${usd(g.costUsd)} counted against today for work already started.` : ""}`;
     }
+  };
+  /** Where a delivered file goes next, so the agent reads the call instead of guessing it. */
+  const nextStep = (g: GameGeneration) => {
+    const model = g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file));
+    if (model === undefined) return " Next: add it to the game with game_import.";
+    return g.lane === "character"
+      ? ` Next: game_blender_character with body {game: "${model}"}.`
+      : ` Next: game_blender_assets_import with source "generated" and path "${model}".`;
   };
   const refusedText = (g: GameGeneration) =>
     (g.refused ?? []).length === 0
