@@ -5194,9 +5194,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ON run.run_id = checkpoint.run_id AND run.thread_id = checkpoint.thread_id
         LEFT JOIN orchestration_v2_projection_checkpoint_scopes AS scope
           ON scope.scope_id = checkpoint.scope_id
+        -- A restart continuation's own message is "Continue where you left off.":
+        -- its turn is the one the person asked for in the run it continues.
+        LEFT JOIN orchestration_v2_projection_runs AS source
+          ON source.thread_id = run.thread_id
+          AND source.run_id = json_extract(run.payload_json, '$.restartContinuationOfRunId')
         LEFT JOIN orchestration_v2_projection_messages AS message
           ON message.thread_id = run.thread_id
-          AND message.message_id = json_extract(run.payload_json, '$.userMessageId')
+          AND message.message_id = coalesce(
+            json_extract(source.payload_json, '$.userMessageId'),
+            json_extract(run.payload_json, '$.userMessageId'))
         WHERE thread.project_id = ${projectId}
           AND thread.deleted_at IS NULL
           AND checkpoint.status = 'ready'
