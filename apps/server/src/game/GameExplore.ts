@@ -12,9 +12,7 @@ import * as Path from "effect/Path";
 import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
-  gameOperationFault,
   manifestProject,
-  isStandingFault,
   type ThreadId,
   GAME_EXPLORE_BOUNDS,
   EXPLORE_CAPTURE_BOUNDS,
@@ -39,8 +37,6 @@ import * as GameTemplates from "./GameTemplates.ts";
 import { runtimesFor } from "./gameRuntime.ts";
 import { engineProfile } from "./engineProfile.ts";
 import * as ExploreEvidence from "./exploreEvidence.ts";
-import * as ExploreSheet from "./exploreSheet.ts";
-import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
@@ -139,60 +135,6 @@ export class GameExplore extends Context.Service<
       threadId: ThreadId,
       input: typeof GameExploreCloseInput.Type,
     ) => Effect.Effect<typeof GameExploreCloseResult.Type, GameOperationError>;
-    /**
-     * Closes the thread's open session and returns what its sessions played in
-     * all. `keepMarks` leaves the memory marks for the turn that reads them.
-     */
-    readonly finish: (
-      threadId: ThreadId,
-      options?: { readonly keepMarks?: boolean },
-    ) => Effect.Effect<
-      {
-        sessions: number;
-        actions: number;
-        executedInputSteps: number;
-        nominalMs: number;
-        images: number;
-      },
-      GameOperationError
-    >;
-    /**
-     * Caps the explore input this thread may use across all its sessions. It
-     * fails when the cap cannot be kept on disk, since a restart would then
-     * let a blind sample play past its fair budget. `root` is the folder the
-     * thread plays, given rather than resolved: the cap is set before the
-     * thread exists, so its first turn is never sent without it.
-     */
-    readonly limitInput: (
-      threadId: ThreadId,
-      totalMs: number,
-      root: string,
-    ) => Effect.Effect<void, GameOperationError>;
-    /**
-     * Marks a play start refused for a cause not about the game (machine or
-     * tool), as an explore start's refusal is marked: the agent's bot run uses it.
-     */
-    readonly markRefused: (
-      threadId: ThreadId,
-      root: string,
-      reason: GameOperationError["reason"],
-      waitedMs: number,
-    ) => Effect.Effect<void, GameOperationError>;
-    readonly memoryWait: (threadId: ThreadId) => Effect.Effect<
-      {
-        readonly waitedMs: number;
-        readonly refused: "low-memory" | "busy" | "tool-failed" | null;
-        /** The refusal is one waiting cannot clear (isStandingFault). */
-        readonly standing: boolean;
-        readonly executedInputSteps: number;
-      },
-      GameOperationError
-    >;
-    /** Tiles an even selection of the thread's kept frames into one JPEG at `output`. */
-    readonly sheet: (
-      threadId: ThreadId,
-      output: string,
-    ) => Effect.Effect<number, GameOperationError>;
     /** Closes the game's session when this thread owns it, as its turn is cancelled. */
     readonly release: (threadId: ThreadId, root: string) => Effect.Effect<void>;
   }
@@ -365,41 +307,20 @@ const make = Effect.gen(function* () {
   const exploreLive = new Map<string, ExploreSession | "starting">();
   const liveSessions = () =>
     [...exploreLive.values()].filter((live): live is ExploreSession => live !== "starting");
-  // A start's memory waits land in the thread's evidence record, on disk, so
-  // the run's cap gives the time back even across a restart.
   const withExploreRoom = <A, E, R>(
-    threadId: ThreadId,
     root: string,
     room: MemoryRoom,
     start: Effect.Effect<A, E, R>,
     lock: { readonly name: string; readonly owner: string } | undefined,
   ) =>
-    Effect.suspend(() => {
-      const waited = { ms: 0, refused: undefined as "low-memory" | "busy" | null | undefined };
-      return gate
-        .admit(
-          "Explore session",
-          root,
-          room,
-          start,
-          (waitedMs, refused) => {
-            waited.ms += waitedMs;
-            waited.refused = refused;
-          },
-          lock === undefined ? undefined : { lock },
-        )
-        .pipe(
-          Effect.ensuring(
-            Effect.suspend(() =>
-              waited.refused === undefined
-                ? Effect.void
-                : markRefusal(threadId, root, waited.ms, waited.refused ?? false, false).pipe(
-                    Effect.ignore({ log: true }),
-                  ),
-            ),
-          ),
-        );
-    });
+    gate.admit(
+      "Explore session",
+      root,
+      room,
+      start,
+      undefined,
+      lock === undefined ? undefined : { lock },
+    );
   // A write-through cache of the records under `evidenceDir`; a restart
   // reloads them, so a sample's earlier play still counts. A record enters it
   // only once it is on disk, so the cache never claims more than a restart reads.
@@ -427,50 +348,6 @@ const make = Effect.gen(function* () {
       Effect.mapError(evidenceError("The thread's explore evidence could not be written.")),
       Effect.tap(() => Effect.sync(() => rememberEvidence(record))),
     );
-  /**
-   * Adds a start's wait, and why it was refused if it was, to the thread's
-   * record: memory short or queued behind another start or operation, or a
-   * tool of ours that failed (`standing` when waiting cannot clear it).
-   */
-  const markRefusal = (
-    threadId: ThreadId,
-    root: string,
-    waitedMs: number,
-    refused: "low-memory" | "busy" | "tool-failed" | false,
-    standing: boolean,
-  ) =>
-    evidenceLock.withPermits(1)(
-      Effect.gen(function* () {
-        const record = yield* loadEvidence(String(threadId), root);
-        const prior = record.memory ?? { waitedMs: 0, refused: false };
-        yield* writeEvidence({
-          ...record,
-          memory: {
-            waitedMs: prior.waitedMs + waitedMs,
-            refused,
-            ...(standing ? { standing: true } : {}),
-          },
-        });
-      }),
-    );
-  /** A start refused by the machine or a tool of ours, by its reason; anything else is not a refusal. */
-  const markFault = (
-    threadId: ThreadId,
-    root: string,
-    reason: GameOperationError["reason"],
-    waitedMs: number,
-  ) => {
-    const fault = gameOperationFault(reason);
-    return fault !== "machine" && fault !== "tool"
-      ? Effect.void
-      : markRefusal(
-          threadId,
-          root,
-          waitedMs,
-          fault === "tool" ? "tool-failed" : reason === "low-memory" ? "low-memory" : "busy",
-          isStandingFault(reason),
-        );
-  };
   /** The caller holds `evidenceLock`. */
   const loadEvidence = (threadId: string, root: string) =>
     Effect.gen(function* () {
@@ -505,33 +382,12 @@ const make = Effect.gen(function* () {
       else rememberEvidence(record);
       return record;
     });
-  const threadEvidence = (threadId: ThreadId, root: string) =>
-    evidenceLock.withPermits(1)(loadEvidence(String(threadId), root));
   /** Records the session's play so far; called after its start, every act and its close. */
   const persistSession = (session: ExploreSession) =>
     evidenceLock.withPermits(1)(
       Effect.gen(function* () {
         const owner = String(session.threadId);
         const record = yield* loadEvidence(owner, session.root);
-        const frames = [...(record.sessions.find((s) => s.id === session.id)?.frames ?? [])];
-        for (const action of session.actions)
-          if (action.screenshot !== "" && !frames.some((frame) => frame.step === action.index))
-            frames.push({
-              step: action.index,
-              // Only a capped thread (a blind sample) draws a sheet, so only its
-              // frames are kept past a reboot; others record the scratch path.
-              path:
-                record.inputCapMs !== undefined
-                  ? yield* Effect.promise(() =>
-                      ExploreEvidence.keepFrame(
-                        evidenceDir,
-                        owner,
-                        session.id,
-                        NodePath.join(session.traceDir, action.screenshot),
-                      ),
-                    )
-                  : NodePath.join(session.traceDir, action.screenshot),
-            });
         const next = ExploreEvidence.upsert(record, {
           id: session.id,
           actions: actsOf(session),
@@ -541,7 +397,6 @@ const make = Effect.gen(function* () {
           ),
           nominalMs: session.totalNominalMs,
           images: session.images,
-          frames,
           closed: session.closed,
           closeReason: session.closeReason,
         });
@@ -564,19 +419,11 @@ const make = Effect.gen(function* () {
     const actsLeft = GAME_EXPLORE_BOUNDS.maxCalls - session.calls;
     const stepsLeft = GAME_EXPLORE_BOUNDS.maxTotalSteps - session.totalSteps;
     const earlierMs = inputUsedBefore(session.threadId, session.id);
-    const cap = exploreEvidence.get(String(session.threadId))?.inputCapMs;
-    const leftMs = Math.min(
-      GAME_EXPLORE_BOUNDS.maxTotalNominalMs - session.totalNominalMs,
-      cap === undefined ? Number.POSITIVE_INFINITY : cap - earlierMs - session.totalNominalMs,
-    );
+    const leftMs = GAME_EXPLORE_BOUNDS.maxTotalNominalMs - session.totalNominalMs;
     const used =
       `input used: ${s(session.totalNominalMs)} s of this session's ` +
       `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s` +
-      (cap !== undefined
-        ? ` (${s(earlierMs + session.totalNominalMs)} s of your ${s(cap)} s across sessions)`
-        : earlierMs > 0
-          ? ` (${s(earlierMs + session.totalNominalMs)} s across your sessions)`
-          : "");
+      (earlierMs > 0 ? ` (${s(earlierMs + session.totalNominalMs)} s across your sessions)` : "");
     if (actsLeft <= 0 || leftMs <= 0 || stepsLeft <= 0) return `${used}; this session is spent.`;
     const perAct = Math.min(leftMs / actsLeft, GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall);
     return `${used}, ${s(leftMs)} s left over ${actsLeft} act(s) and ${stepsLeft} step(s): about ${s(perAct)} s of input per act spends it.`;
@@ -1043,7 +890,7 @@ const make = Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       // The cache, else disk: right after a restart the cache is cold. A record
       // found damaged before this start begins a fresh count now.
-      const startRecord = yield* evidenceLock.withPermits(1)(
+      yield* evidenceLock.withPermits(1)(
         Effect.gen(function* () {
           const wasDamaged = exploreEvidence.get(String(threadId))?.damaged === true;
           const record = yield* loadEvidence(String(threadId), root);
@@ -1053,14 +900,6 @@ const make = Effect.gen(function* () {
           return fresh;
         }),
       );
-      const threadCap = startRecord.inputCapMs;
-      const usedBefore =
-        threadCap === undefined ? 0 : ExploreEvidence.totals(startRecord).nominalMs;
-      if (threadCap !== undefined && usedBefore >= threadCap - 500)
-        return yield* exploreInvalid(
-          root,
-          `Your ${threadCap / 1000} s input budget across sessions is spent; do not start another session. Write your notes now.`,
-        );
       const engine = engineProfile((yield* projects.read(root)).engine.name);
       const target = input.target ?? (engine.play === "browser" ? "web" : "native");
       const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
@@ -1111,7 +950,6 @@ const make = Effect.gen(function* () {
         // A native start's import writes the folder: the game's operation lock,
         // then the memory gate, through the boot (the order GameMemoryGate keeps).
         const started = yield* withExploreRoom(
-          threadId,
           root,
           room,
           start,
@@ -1127,18 +965,7 @@ const make = Effect.gen(function* () {
             ),
           );
         return started;
-      }).pipe(
-        Effect.onExit(() => unclaim),
-        // The machine or a tool of ours that kept the session from starting
-        // (the player's build included) is marked, so a run's play turn that
-        // played nothing is replayed, not judged. A run's own refusal of the
-        // write is no such start.
-        Effect.tapError((error) =>
-          error.reason === "cancelled" || error.runReason !== undefined
-            ? Effect.void
-            : markFault(threadId, root, error.reason, 0).pipe(Effect.ignore({ log: true })),
-        ),
-      );
+      }).pipe(Effect.onExit(() => unclaim));
     });
   /**
    * Runs one act through the session and keeps the picture the runner wrote,
@@ -1344,19 +1171,6 @@ const make = Effect.gen(function* () {
               session.id,
               `This act would exceed the session's ${GAME_EXPLORE_BOUNDS.maxTotalNominalMs}ms total nominal time; close it and start a new exploration.`,
             );
-          const record = yield* evidenceLock.withPermits(1)(
-            loadEvidence(String(session.threadId), session.root),
-          );
-          const threadCap = record.inputCapMs;
-          if (threadCap !== undefined) {
-            const usedMs =
-              ExploreEvidence.totals(record, session.id).nominalMs + session.totalNominalMs;
-            if (usedMs + nominalMs > threadCap)
-              return yield* exploreInvalid(
-                session.id,
-                `This act would pass your ${threadCap / 1000} s input budget across sessions (${(usedMs / 1000).toFixed(1)} s used, ${((threadCap - usedMs) / 1000).toFixed(1)} s left); use a shorter act, or close the session and write your notes.`,
-              );
-          }
           // Headless native acts persist no picture, so the image bound only
           // covers acts that actually keep one. Web acts always keep one.
           const keepsImage = session.pictures;
@@ -1435,157 +1249,6 @@ const make = Effect.gen(function* () {
     start: exploreStart,
     act: exploreAct,
     close: exploreClose,
-    // The thread's evidence is keyed by the thread, not its folder: a role in a
-    // folder that is no game (a comparator's blank one) still finishes.
-    finish: Effect.fn("GameExplore.finish")(function* (threadId, options) {
-      const live = liveSessions().find((session) => String(session.threadId) === String(threadId));
-      if (live !== undefined)
-        yield* live.lock.withPermits(1)(exploreFinalize(live, "role-finished"));
-      // A finish starts the thread's memory marks over: the next turn counts its own.
-      const record = yield* evidenceLock.withPermits(1)(
-        Effect.gen(function* () {
-          const loaded = yield* loadEvidence(String(threadId), live?.root ?? "");
-          if (loaded.memory === undefined || options?.keepMarks === true) return loaded;
-          const { memory: _cleared, ...rest } = loaded;
-          yield* writeEvidence(rest);
-          return rest;
-        }),
-      );
-      // What a damaged record counted is lost: no total from it is evidence.
-      if (record.damaged === true)
-        return yield* new GameOperationError({
-          operation: "Explore evidence",
-          path: evidenceDir,
-          reason: "tool-failed",
-          detail: "explore evidence record damaged",
-        });
-      return ExploreEvidence.totals(record);
-    }),
-    // On the thread's evidence record, so a restart keeps a sample's budget.
-    // Cached only once on disk: a retry after a failed write must find the
-    // cap missing and write it again, not take the cache's word for it.
-    limitInput: (threadId, totalMs, root) =>
-      evidenceLock.withPermits(1)(
-        Effect.gen(function* () {
-          const record = yield* loadEvidence(String(threadId), root);
-          if (record.inputCapMs === totalMs) return;
-          yield* writeEvidence({ ...record, inputCapMs: totalMs });
-        }),
-      ),
-    markRefused: markFault,
-    memoryWait: Effect.fn("GameExplore.memoryWait")(function* (threadId) {
-      const record = yield* threadEvidence(threadId, "");
-      const { executedInputSteps } = ExploreEvidence.totals(record);
-      const memory = record.memory ?? { waitedMs: 0, refused: false };
-      // An older record's `true` was a low-memory refusal.
-      const refused = memory.refused === true ? "low-memory" : memory.refused || null;
-      return {
-        waitedMs: memory.waitedMs,
-        refused,
-        standing: refused !== null && memory.standing === true,
-        executedInputSteps,
-      };
-    }),
-    sheet: Effect.fn("GameExplore.sheet")(function* (threadId, output) {
-      const root = yield* projects.resolve(threadId);
-      const kept = ExploreEvidence.frames(yield* threadEvidence(threadId, root));
-      // A frame whose copy failed stays in temp scratch, which can be cleaned,
-      // and a capture can be cut off mid-write; only complete PNGs are drawn.
-      const present = yield* Effect.promise(() =>
-        Promise.all(
-          kept.map((frame) => ExploreSheet.pngSize(frame.path).then((size) => size !== null)),
-        ),
-      );
-      const onDisk = kept.filter((_, i) => present[i]);
-      if (onDisk.length < kept.length)
-        yield* Effect.logWarning(
-          "Some kept explore frames are gone or incomplete; the sheet draws the rest.",
-          {
-            threadId,
-            kept: kept.length,
-            lost: kept.length - onDisk.length,
-          },
-        );
-      const frames = ExploreSheet.pickFrames(onDisk);
-      const size =
-        frames.length === 0
-          ? null
-          : yield* Effect.promise(() => ExploreSheet.pngSize(frames[0]!.path));
-      if (size === null || size.w === 0) return 0;
-      const ffmpeg = yield* Effect.promise(() =>
-        GameProcesses.findExecutable("ffmpeg", {
-          pathEnv: process.env.PATH,
-          override: process.env.KURAMBIT_FFMPEG,
-        }),
-      );
-      if (ffmpeg === null)
-        return yield* new GameOperationError({
-          operation: "Explore sheet",
-          path: "ffmpeg",
-          reason: "tool-missing",
-          detail: "ffmpeg draws the frame sheet.",
-        });
-      const fontDirectory = yield* GameAssetLibrary.labelFontDirectory(templates);
-      // ffmpeg writes a fresh name, then the rename replaces whatever sits at
-      // `output` without following a link planted there.
-      const temporary = NodePath.join(
-        NodePath.dirname(output),
-        `.sheet-${NodeCrypto.randomUUID()}.jpg`,
-      );
-      const removeTemporary = Effect.promise(() =>
-        NodeFSP.rm(temporary, { force: true }).catch(() => undefined),
-      );
-      const result = yield* Effect.tryPromise({
-        try: () => NodeFSP.mkdir(NodePath.dirname(output), { recursive: true }),
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "Explore sheet",
-            path: output,
-            reason: "io",
-            detail: cause instanceof Error ? cause.message : String(cause),
-            cause,
-          }),
-      }).pipe(
-        Effect.andThen(
-          processes.run({
-            root,
-            ...(fontDirectory === undefined ? {} : { cwd: fontDirectory }),
-            executable: ffmpeg,
-            args: ExploreSheet.sheetArgs(
-              frames,
-              size.h / size.w,
-              fontDirectory === undefined ? null : GameAssetLibrary.LABEL_FONT,
-              temporary,
-            ),
-            operation: "explore-sheet",
-            timeoutMs: 60_000,
-            envMode: "replace",
-            env: GameProcesses.engineChildEnv(),
-          }),
-        ),
-      );
-      if (result.exitCode !== 0) {
-        yield* removeTemporary;
-        return yield* new GameOperationError({
-          operation: "Explore sheet",
-          path: output,
-          reason: "command-failed",
-          detail: result.stderr.slice(0, 1000),
-        });
-      }
-      yield* Effect.tryPromise({
-        try: () => NodeFSP.rename(temporary, output),
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "Explore sheet",
-            path: output,
-            reason: "command-failed",
-            detail: cause instanceof Error ? cause.message : String(cause),
-            cause,
-          }),
-      }).pipe(Effect.onError(() => removeTemporary));
-      return frames.length;
-    }),
     release: (threadId, root) =>
       Effect.gen(function* () {
         // A cancelled turn also releases the game's exploration session: the

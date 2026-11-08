@@ -38,9 +38,13 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import * as Loop from "./run/loop.ts";
 import { NO_TURN_LOOP_SENTENCE, keepGoingStatus } from "./run/runView.ts";
-import { RESUMABLE, isStepRecord, stepNumber } from "./run/state.ts";
+import {
+  RESUMABLE,
+  isStepRecord,
+  stepNumber,
+  undoReason,
+} from "../orchestration-v2/gameRun/decide.ts";
 import { ensureScaffold } from "./runSetup.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 
@@ -212,7 +216,7 @@ const make = Effect.gen(function* () {
         turnRecord?.step.kind === "turn" &&
         turnResult !== null &&
         judge !== null
-          ? Loop.undoReason({ turn: turnRecord.step, result: turnResult, since: 0, judge })
+          ? undoReason({ turn: turnRecord.step, result: turnResult, since: 0, judge })
           : null;
       return {
         records: records.gameRunRounds.flatMap((r) =>

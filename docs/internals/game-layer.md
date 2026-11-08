@@ -397,12 +397,12 @@ outside their catalog.
 Keep going takes a game's next step itself, in the chat that turned it on. It is records of that
 chat (`GameRun`, `GameRunStep`, and one `GameRunRound` per step with its
 `step` record; [gameRunRecords.ts](../../packages/contracts/src/gameRunRecords.ts)), changed only by
-`game-run.*` commands. The pure decider
-([decide.ts](../../apps/server/src/orchestration-v2/gameRun/decide.ts)) folds them into the run's
-state ([state.ts](../../apps/server/src/game/run/state.ts)), lets the policy
-([loop.ts](../../apps/server/src/game/run/loop.ts)) choose, and commits the new records with their
-outbox effects in one transaction, so a retried command changes nothing and a restart loses no
-decision. A game has one run, reached from every chat of its project through `getProjectGameRun`;
+`game-run.*` commands. One pure module
+([decide.ts](../../apps/server/src/orchestration-v2/gameRun/decide.ts)) is both the policy and the
+domain fold: it reads the records, decides the next step and when to keep, undo, pause or stop,
+and its records and outbox effects commit in one transaction, so a retried command changes nothing
+and a restart loses no decision. The orchestrator commits no command without an event, so even a
+timer (a cap set again, a recovery wake) records itself on its step. A game has one run, reached from every chat of its project through `getProjectGameRun`;
 `GameRunControl` reads and dispatches under the project's lock, so two chats turning it on at once
 cannot both find none.
 
@@ -425,6 +425,11 @@ cannot both find none.
   clipping, falling, the camera in a
   wall and sliding follow where random input led and how fast the machine ran it, and an undo
   must never hang on a path.
+- **The look reads the folder's build.** The current build is the newest turn build that changed
+  game files, or a later kept edit or restore target; turns that changed only notes are no builds,
+  so it is found by walking the turns page by page however far back (`GameBuilds.currentBuild`),
+  never in a fixed window. A folder whose game files are no build's (edited outside a turn) pauses
+  the run, since a step's undo would take those edits.
 - **Never two writers.** A look waits until no turn runs or is queued on any chat of the game; a
   step turn that comes up queued is cancelled and the run looks again; any other turn or folder
   move supersedes a pending proposal. A step acts only on the build its look read: its turn
@@ -445,13 +450,15 @@ cannot both find none.
 - **Gain and stopping.** A step gains when it was kept, changed the game (lane, `art/`,
   `ASSETS.md`) and made no watched fact worse; a closed target counts too (the person's own step,
   a kept retry, the bot once skilled is measured). Two steps in a row without gain pause the run
-  `stalled`; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
+  `stalled`; three steps in a row that never landed (a superseded proposal or turn, a turn that
+  started on another build) pause it `stalled` with why, so no mix of supersedes and looks runs
+  without bound, and a look after one takes the facts its cycle's look measured for the same build; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
   otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`.
   The budget is checked before each turn against a typical step (8 min), and it is what bounds an
   Autopilot that keeps adding content. Every ending but `done` resumes.
 - **Never repeat.** Each proposal has a key (`fact:<id>`, `bot`, `steer:<fnv>`, `next:<fnv>`; a
   retry carries the undone step's). Two misses of a key (undone, or kept with its target still
-  bad), a blocker or fact step that changed nothing (the agent declined it), Skip, or a bot step
+  bad), any step that changed nothing (it is never sent again as it was), Skip, or a bot step
   that left no bot set the key aside for the run.
 - **Notes and the captured prefix.** A steer step carries the run's waiting notes; its turn's
   start takes exactly that many off the front of `GameRun.steer`, and a turn that never landed
@@ -469,7 +476,8 @@ cannot both find none.
   ([EffectOutbox.ts](../../apps/server/src/orchestration-v2/EffectOutbox.ts)); otherwise the
   person's own turns would wait out every cap. Each timer checks the run again when it fires.
 - **Recovery** (`GameRunRecovery`, at startup): a step whose job died gets it again through a
-  `recover` timer, behind whatever its thread still owes; a judge or undo a pause cut off runs
+  `recover` timer, behind whatever its thread still owes, and a run whose step it cannot schedule
+  pauses with the cause rather than sit on it; a judge or undo a pause cut off runs
   again on resume. A step turn T3 carried over a restart that its run no longer wants (Off, an
   ended run, a step moved past) is interrupted, so nothing edits a game the person stopped.
 

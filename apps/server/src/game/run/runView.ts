@@ -12,8 +12,11 @@ import {
 } from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 
-import { proposalSummary } from "./loop.ts";
-import { RESUMABLE, type StepRecord } from "./state.ts";
+import {
+  RESUMABLE,
+  type StepRecord,
+  proposalSummary,
+} from "../../orchestration-v2/gameRun/decide.ts";
 
 /** The engine refusal and the control's tooltip. */
 export const NO_TURN_LOOP_SENTENCE =

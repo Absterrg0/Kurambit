@@ -29,7 +29,6 @@ import {
   type GameBotViewResult,
   type ThreadId,
   manifestProject,
-  gameOperationFault,
 } from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -38,7 +37,6 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as BotEvidence from "./botEvidence.ts";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
-import * as GameExplore from "./GameExplore.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { insideGame } from "./GameProjectService.ts";
@@ -95,11 +93,6 @@ const STOP_WAIT_MS = 60_000;
 const STOP_WAIT = Duration.millis(STOP_WAIT_MS);
 const JEV_DEFAULT_BASE = "https://api.typesafe.ai";
 
-interface RunOptions {
-  /** Hears each start's wait for the operation lock and the memory gate, and why it was refused. */
-  readonly onWaited?: (waitedMs: number, refused: "low-memory" | "busy" | null) => void;
-}
-
 /** The people-facing copy of a run in `.studio/bot-results.jsonl`, never through a planted link. */
 const appendResult = async (root: string, line: string) => {
   try {
@@ -137,10 +130,6 @@ export class GameBot extends Context.Service<
       root: string,
       input: GameBotRunInput,
     ) => Effect.Effect<GameBotRunResult, GameOperationError>;
-    /** The bot runs recorded on a thread; a run decides by these, never by a game file. */
-    readonly runs: (
-      threadId: ThreadId,
-    ) => Effect.Effect<BotEvidence.ThreadBots, GameOperationError>;
     /** A quick look at a finished bot run: summary, findings and evidence paths. */
     readonly view: (
       threadId: ThreadId,
@@ -148,11 +137,6 @@ export class GameBot extends Context.Service<
     ) => Effect.Effect<GameBotViewResult, GameOperationError>;
     /** Rebuild the facts-only player report across recorded runs. */
     readonly report: (threadId: ThreadId) => Effect.Effect<GameBotReportResult, GameOperationError>;
-    /** The report of exactly these runs, read-only; null when none has a trace. */
-    readonly reportText: (
-      root: string,
-      runIds: ReadonlyArray<string>,
-    ) => Effect.Effect<string | null, GameOperationError>;
     /**
      * The latest play-mode bot any thread ran on this game folder, from the
      * server's records (never the folder's own results file); null when none ran.
@@ -500,7 +484,6 @@ const make = Effect.gen(function* () {
   const engines = yield* GameEngine.GameEngine;
   const players = yield* GamePlayer.GamePlayer;
   const projects = yield* GameProjectService.GameProjectService;
-  const explore = yield* GameExplore.GameExplore;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const settings = yield* ServerSettings.ServerSettingsService;
   const processes = yield* GameProcesses.GameProcesses;
@@ -528,23 +511,6 @@ const make = Effect.gen(function* () {
   });
   yield* prune;
   yield* scheduler.register("game-bot-evidence", yield* Scheduler.every(3_600_000, prune));
-  /**
-   * The caller holds `evidenceLock`. A damaged record counts as none, and says
-   * so; the next recorded run moves it aside.
-   */
-  const loadRecord = (threadId: ThreadId, root: string) =>
-    Effect.tryPromise({
-      try: () => BotEvidence.read(evidenceDir, threadId),
-      catch: (cause) => opError("Bot evidence", evidenceDir, "io", undefined, cause),
-    }).pipe(
-      Effect.flatMap((found) =>
-        found === "damaged"
-          ? Effect.logWarning("A thread's bot evidence is unreadable; it counts as none.", {
-              threadId,
-            }).pipe(Effect.as(BotEvidence.empty(threadId, root)))
-          : Effect.succeed(found ?? BotEvidence.empty(threadId, root)),
-      ),
-    );
   /** Each game's latest play-mode bot, read from the records once and kept as runs are recorded. */
   const latestPlays = new Map<string, BotEvidence.BotRun | null>();
   const recordRun = (threadId: ThreadId, root: string, run: BotEvidence.BotRun) =>
@@ -643,12 +609,7 @@ const make = Effect.gen(function* () {
 
   const isGameOperationError = Schema.is(GameOperationError);
 
-  const runLocked = (
-    root: string,
-    input: GameBotRunInput,
-    owner: ThreadId | undefined,
-    options: RunOptions | undefined,
-  ) =>
+  const runLocked = (root: string, input: GameBotRunInput, owner: ThreadId | undefined) =>
     Effect.gen(function* () {
       // A bot is a game file under .studio/bot/*.mjs; anything else is refused.
       const botDir = NodePath.resolve(root, ".studio/bot");
@@ -880,7 +841,7 @@ const make = Effect.gen(function* () {
                     root,
                     BOT_ROOM,
                     Effect.andThen(imported, launch(player)),
-                    options?.onWaited,
+                    undefined,
                     startLock,
                   ),
                 ),
@@ -1126,9 +1087,9 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const run = (root: string, input: GameBotRunInput, owner?: ThreadId, options?: RunOptions) =>
+  const run = (root: string, input: GameBotRunInput, owner?: ThreadId) =>
     botLocks
-      .tryWithLock(root, 0, runLocked(root, input, owner, options))
+      .tryWithLock(root, 0, runLocked(root, input, owner))
       .pipe(
         Effect.flatMap((ran) =>
           Option.isSome(ran)
@@ -1227,13 +1188,6 @@ const make = Effect.gen(function* () {
       } satisfies GameBotReportResult;
     });
 
-  const reportText = (root: string, runIds: ReadonlyArray<string>) =>
-    Effect.promise(() => tracesOf(root, runIds)).pipe(
-      Effect.map((traces) => playerReportText(traces.picked, traces.unreadable)?.text ?? null),
-    );
-
-  const threadRuns = (threadId: ThreadId) => evidenceLock.withPermits(1)(loadRecord(threadId, ""));
-
   const latestPlayBot: GameBot["Service"]["latestPlayBot"] = (root) =>
     Effect.promise(async () => {
       if (latestPlays.has(root)) return latestPlays.get(root) ?? null;
@@ -1252,38 +1206,14 @@ const make = Effect.gen(function* () {
   return GameBot.of({
     // Its video lands in the game folder; the run is recorded on the thread.
     run: (threadId, input) =>
-      Effect.flatMap(projects.resolve(threadId), (root) =>
-        Effect.suspend(() => {
-          // A start refused for a cause not about the game (queued past its
-          // bound, memory short, a tool of ours) is marked with its wait, as
-          // an explore start's is.
-          const waited = { ms: 0, refused: null as "low-memory" | "busy" | null };
-          return run(root, input, threadId, {
-            onWaited: (ms, refused) => {
-              waited.ms += ms;
-              waited.refused = refused;
-            },
-          }).pipe(
-            Effect.tapError((error) => {
-              const fault = gameOperationFault(error.reason);
-              return error.reason === "cancelled" || (fault !== "machine" && fault !== "tool")
-                ? Effect.void
-                : explore
-                    .markRefused(threadId, root, waited.refused ?? error.reason, waited.ms)
-                    .pipe(Effect.ignore({ log: true }));
-            }),
-          );
-        }),
-      ),
+      Effect.flatMap(projects.resolve(threadId), (root) => run(root, input, threadId)),
     runIn: (root, input) => run(root, input),
-    runs: threadRuns,
     latestPlayBot,
     view: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) => view(root, input)),
     stop: (root) => stopWhere((each) => each === root),
     stopOwned: (threadId) => stopWhere((_root, owner) => owner === threadId),
     report: (threadId) => Effect.flatMap(projects.resolve(threadId), report),
-    reportText,
   });
 });
 

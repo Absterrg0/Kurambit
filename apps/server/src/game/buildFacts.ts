@@ -382,8 +382,19 @@ export const turnChangeBase = (
   earlier: ReadonlyArray<EarlierBuild>,
 ): string | null => {
   if (turn.turn <= 1) return null;
-  const previous = earlier.find((e) => e.thread === turn.thread && e.turn === turn.turn - 1);
-  if (previous === undefined) return null;
+  // The thread's newest earlier capture, as T3's own diff base is: a run with
+  // no checkpoint between them (a restart's continuation) takes a number too.
+  const previous = earlier.reduce<EarlierBuild | null>(
+    (best, e) =>
+      e.thread === turn.thread &&
+      e.turn !== null &&
+      e.turn < turn.turn &&
+      (best === null || e.turn > (best.turn ?? 0))
+        ? e
+        : best,
+    null,
+  );
+  if (previous === null) return null;
   const base = earlier
     .filter((e) => e.id !== turn.id && e.at > previous.at && e.at <= turn.startedAt)
     .reduce<EarlierBuild | null>(

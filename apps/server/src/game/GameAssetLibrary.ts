@@ -59,9 +59,9 @@ import * as GameTemplates from "./GameTemplates.ts";
 /** Beside the pinned tools, shared by every game on this machine. */
 const libraryDirectory = () => NodePath.join(NodePath.dirname(toolsDirectory()), "asset-library");
 
-/** Vendored beside the starter templates (see its THIRD-PARTY-NOTICES.md), so sheets never wait on a pack. */
-export const LABEL_FONT = "label-font.ttf";
-export const labelFontDirectory = (templates: GameTemplates.GameTemplates["Service"]) =>
+/** Vendored beside the starter templates (see its THIRD-PARTY-NOTICES.md), so a sheet never waits on a pack. */
+const LABEL_FONT = "label-font.ttf";
+const labelFontDirectory = (templates: GameTemplates.GameTemplates["Service"]) =>
   templates.directory.pipe(
     Effect.map((directory) => NodePath.join(directory, "asset-library")),
     Effect.flatMap((candidate) =>

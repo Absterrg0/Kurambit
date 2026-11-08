@@ -202,4 +202,8 @@ describe("turnChangeBase", () => {
     const later = { id: "r4", at: "2026-11-06T12:30:00.000Z", thread: null, turn: null };
     expect(turnChangeBase(turn, [t1, round, later])).toBe("r3");
   });
+  it("finds the thread's previous turn past a run that captured nothing (a restart's continuation)", () => {
+    const undo = { id: "u", at: "2026-11-06T11:00:00.000Z", thread: null, turn: null };
+    expect(turnChangeBase({ ...turn, turn: 3 }, [t1, undo])).toBe("u");
+  });
 });

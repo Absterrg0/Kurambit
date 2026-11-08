@@ -14,7 +14,6 @@ import {
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Random from "effect/Random";
 import * as Result from "effect/Result";
 
 import type * as EffectOutbox from "../EffectOutbox.ts";
@@ -40,7 +39,7 @@ interface PlanDeps {
   readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
 }
 
-const CYCLE_KINDS: ReadonlySet<string> = new Set(["propose", "judge", "undo"]);
+const CYCLE_KINDS: ReadonlySet<string> = new Set(["propose", "turn", "judge", "undo"]);
 
 export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameRunCommand) =>
   Effect.gen(function* () {
@@ -58,8 +57,8 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
         (step) => step.runId === latest?.id && step.seq === latest.inFlight,
       ) ?? null;
     // The policy reads the cycle the step in flight belongs to: a proposal's
-    // look, a judge's turn, an undo's judge and turn. Each is planned right
-    // after the one before it.
+    // look, a turn's look (and proposal), a judge's turn, an undo's judge and
+    // turn. Each is planned right after the one before it.
     const cycle =
       latest === undefined ||
       inFlight === null ||
@@ -82,11 +81,7 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
         chatDeleted: thread.deletedAt !== null,
         steps: cycle,
       },
-      {
-        at: yield* DateTime.now,
-        coin: yield* Random.next,
-        id: (yield* Random.nextIntBetween(0, 2 ** 48)).toString(36),
-      },
+      yield* DateTime.now,
     );
     if (Result.isFailure(decided))
       return Result.fail<GameRunPlanRefusal>({ kind: "refused", ...decided.failure });

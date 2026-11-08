@@ -13,8 +13,8 @@ import {
   gameRunStepId,
 } from "@kurambit/contracts";
 
-import * as Loop from "./loop.ts";
-import type { RunState } from "./state.ts";
+import * as Loop from "./decide.ts";
+import type { RunState } from "./decide.ts";
 
 const BASE = GameBuildId.make("a".repeat(40));
 const BUILD = GameBuildId.make("b".repeat(40));
@@ -82,6 +82,7 @@ const state = (patch: Partial<RunState> = {}): RunState => ({
   steer: [],
   setAside: [],
   stallStreak: 0,
+  superseded: 0,
   lastFailure: "",
   ending: null,
   records: [],
@@ -128,6 +129,7 @@ const look = (patch: Partial<Loop.LookResult> = {}): Loop.LookResult => ({
   facts: facts(),
   next: { text: "Add a score counter." },
   bot: true,
+  edited: false,
   ...patch,
 });
 const cycle = (turn = turnStep(), result = turnResult()): Loop.Cycle => ({

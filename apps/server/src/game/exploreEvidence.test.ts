@@ -1,5 +1,5 @@
-// Blind judges weigh exposure, so a session written after every act and at
-// close, or reloaded after a restart, must count exactly once.
+// A session written after every act and at close, or reloaded after a
+// restart, must count exactly once, and a record an older server wrote reads.
 // @effect-diagnostics nodeBuiltinImport:off -- The record is a file on disk; the test reads it back as a restart would.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -7,11 +7,6 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 
-// The record as the atomic writer leaves it (its own tests cover the write).
-const writeRecord = async (dir: string, record: ExploreEvidence.ThreadEvidence) => {
-  NodeFS.mkdirSync(dir, { recursive: true });
-  NodeFS.writeFileSync(ExploreEvidence.recordPath(dir, record.threadId), JSON.stringify(record));
-};
 const readRecord = async (dir: string, threadId: string) => {
   const found = await ExploreEvidence.read(dir, threadId);
   return found === "damaged" ? null : found;
@@ -23,7 +18,6 @@ const session = (id: string, actions: number, nominalMs: number, closed = false)
   executedInputSteps: actions * 2,
   nominalMs,
   images: actions,
-  frames: Array.from({ length: actions }, (_, i) => ({ step: i + 1, path: `/f/${id}-${i + 1}` })),
   closed,
   closeReason: closed ? "closed" : null,
 });
@@ -43,11 +37,6 @@ describe("explore evidence", () => {
       images: 3,
     });
     expect(ExploreEvidence.totals(record, "b").nominalMs).toBe(2500);
-    expect(ExploreEvidence.frames(record).map((f) => [f.session, f.step])).toEqual([
-      [1, 1],
-      [1, 2],
-      [2, 1],
-    ]);
   });
 
   it("closes a session the previous process left open, keeping what it recorded", () => {
@@ -64,27 +53,26 @@ describe("explore evidence", () => {
     expect(ExploreEvidence.closeOrphans(record, new Set(["b"])).sessions[1]!.closed).toBe(false);
   });
 
-  it("keeps a sample's input budget and its memory waits across a restart", async () => {
+  it("reads a record a stage-era server wrote, with its cap, memory marks and frames", async () => {
     const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "explore-evidence-"));
     try {
-      const record: ExploreEvidence.ThreadEvidence = {
-        ...ExploreEvidence.upsert(ExploreEvidence.empty("t", "/g"), session("a", 2, 30_000)),
-        inputCapMs: 120_000,
-        memory: { waitedMs: 45_000, refused: "busy" },
-      };
-      await writeRecord(dir, record);
-      const reloaded = await readRecord(dir, "t");
-      expect(reloaded?.inputCapMs).toBe(120_000);
-      expect(reloaded?.memory).toEqual({ waitedMs: 45_000, refused: "busy" });
-      // A record an older server wrote, with a refusal count and a plain flag, still reads.
+      const record = ExploreEvidence.upsert(
+        ExploreEvidence.empty("t", "/g"),
+        session("a", 2, 30_000),
+      );
       NodeFS.writeFileSync(
         ExploreEvidence.recordPath(dir, "t"),
-        JSON.stringify({ ...record, memory: { waitedMs: 1, refusals: 1, refused: true } }),
+        JSON.stringify({
+          ...record,
+          sessions: record.sessions.map((s) => ({ ...s, frames: [{ step: 1, path: "/f/a-1" }] })),
+          inputCapMs: 120_000,
+          memory: { waitedMs: 1, refusals: 1, refused: true },
+        }),
       );
-      expect((await readRecord(dir, "t"))?.memory).toEqual({
-        waitedMs: 1,
-        refused: true,
-      });
+      const reloaded = await readRecord(dir, "t");
+      expect(reloaded === null ? null : ExploreEvidence.totals(reloaded)).toEqual(
+        ExploreEvidence.totals(record),
+      );
     } finally {
       NodeFS.rmSync(dir, { recursive: true, force: true });
     }

@@ -109,7 +109,7 @@ class Store {
         threadId: chat,
       } as OrchestrationV2GameRunCommand,
       this.records(),
-      { at: DateTime.makeUnsafe(this.now), coin: 0.5, id: "x" },
+      DateTime.makeUnsafe(this.now),
     );
     if (Result.isSuccess(decided)) {
       for (const event of decided.success.events) {
@@ -159,6 +159,7 @@ const look = (patch: Partial<Extract<GameRunStepResult, { kind: "look" }>> = {})
     facts: facts(),
     next: { text: "Add a score counter." },
     bot: true,
+    edited: false,
     ...patch,
   }) as const;
 const turn = (
@@ -398,7 +399,7 @@ describe("a keep-going run", () => {
     store.complete(look());
     store.complete(turn());
     const judge = store.step();
-    store.ok({
+    const woken = store.ok({
       type: "game-run.step.schedule",
       runId: store.run.id,
       stepId: judge.id,
@@ -407,6 +408,8 @@ describe("a keep-going run", () => {
       timer: { kind: "recover" },
     });
     expect(store.effects.map((e) => e.request.type)).toEqual(["game-run.step.wake"]);
+    // The orchestrator commits no command without an event: a wake records itself on the step.
+    expect(woken.events.map((e) => e.type)).toEqual(["game-run-step.updated"]);
     store.complete({
       kind: "ended",
       ending: "tool-failed",
@@ -527,5 +530,102 @@ describe("a keep-going run", () => {
     store.ok({ type: "game-run.resume", runId: store.run.id, profile: "guided" });
     expect(store.run).toMatchObject({ status: "running", stallStreak: 0, profile: "guided" });
     expect(store.step().step.kind).toBe("look");
+  });
+
+  it("pauses when steps keep never landing, whatever made them, and never measures a build twice for it", () => {
+    const store = new Store();
+    store.start("guided");
+    // A proposal a turn superseded, a turn the folder moved under, and one
+    // that started on another build: each looks again, and the third pauses.
+    store.complete(look());
+    store.complete({ kind: "decided", answer: "superseded", by: "server" });
+    // The look again takes the facts its cycle measured, for the build it read.
+    expect(store.step().step).toEqual({
+      kind: "look",
+      id: 3,
+      known: { build: BASE, look: 1 },
+    });
+    store.complete(look());
+    store.ok({
+      type: "game-run.decide",
+      runId: store.run.id,
+      decisionId: store.step().id,
+      answer: "start",
+    });
+    store.complete(turn({ outcome: "superseded", startBuild: null, build: null }));
+    expect(store.step().step).toMatchObject({ kind: "look", known: { build: BASE } });
+    expect(store.run.supersededStreak).toBe(2);
+    store.complete(look());
+    store.ok({
+      type: "game-run.decide",
+      runId: store.run.id,
+      decisionId: store.step().id,
+      answer: "start",
+    });
+    store.complete(turn({ startBuild: GameBuildId.make("c".repeat(40)) }));
+    expect(store.run).toMatchObject({ status: "ended", ending: "stalled", inFlight: null });
+    expect(store.run.lastFailure).toMatch(/^3 steps in a row never started/);
+    expect(store.rounds).toEqual([]);
+    // A resume starts the count afresh.
+    store.ok({ type: "game-run.resume", runId: store.run.id });
+    expect(store.run.supersededStreak).toBe(0);
+  });
+
+  it("a landed step ends the streak of steps that never landed", () => {
+    const store = new Store();
+    store.start("autopilot");
+    for (let i = 0; i < 2; i++) {
+      store.complete(look());
+      store.complete(turn({ outcome: "superseded", startBuild: null, build: null }));
+    }
+    expect(store.run.supersededStreak).toBe(2);
+    store.complete(look());
+    store.complete(turn());
+    store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
+    expect(store.run).toMatchObject({ status: "running", supersededStreak: 0 });
+    // A look after a landed step measures afresh.
+    expect(store.step().step).toEqual({ kind: "look", id: 8 });
+  });
+
+  it("pauses on a folder edited outside any build, before planning a step its undo could hurt", () => {
+    const store = new Store();
+    store.start("autopilot");
+    store.complete(look({ edited: true, facts: null }));
+    expect(store.run).toMatchObject({ status: "ended", ending: "stalled" });
+    expect(store.run.lastFailure).toContain("changes no build holds");
+  });
+
+  it("never sends again a step that changed nothing", () => {
+    const store = new Store();
+    store.start("autopilot");
+    store.complete(look());
+    store.complete(turn({ files: 0 }));
+    expect(store.run.setAside?.map((entry) => entry.why)).toEqual([
+      "a step at it changed no game files",
+    ]);
+    // The agent repeats its line: nothing is left to propose, and no turn is spent on it.
+    store.complete(look());
+    expect(store.run).toMatchObject({ status: "ended", ending: "stalled" });
+    expect(store.run.lastFailure).toBe("every step left to propose was set aside");
+  });
+
+  it("tells the next step that the time cap, not the person, stopped the last one", () => {
+    const store = new Store();
+    store.start("autopilot");
+    store.complete(look());
+    store.complete(turn({ outcome: "capped" }));
+    store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
+    expect(store.rounds.at(-1)?.round.step?.capped).toBe(15);
+    const next = Decide.stepMessage(store.rounds, {
+      why: "next",
+      text: "Add a boss.",
+      target: null,
+    });
+    expect(next.text).toContain(
+      "Kurambit's 15-minute time cap stopped your last keep-going step's turn",
+    );
+    expect(
+      Decide.stepMessage([], { why: "next", text: "Add a boss.", target: null }).text,
+    ).not.toContain("time cap");
   });
 });

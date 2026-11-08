@@ -5,8 +5,9 @@
 // every result's command id is the attempt's, so a second report is a receipt.
 //
 // - look: waits for the game to be idle (GameRunTurnReactor wakes it when a
-//   turn ends), then reads the folder's build, its facts, the chat's last
-//   `Next:` line and whether a play bot exists.
+//   turn ends), then reads the folder's build and whether the folder still
+//   holds it, its facts (the ones the look before measured, when the build is
+//   the same), the chat's last `Next:` line and whether a play bot exists.
 // - turn: posts the step's message in the chat as an ordinary queued turn;
 //   GameRunTurnReactor follows that turn to its build.
 // - judge: measures the step's build and its base, never superseded, and
@@ -20,8 +21,10 @@ import {
   type GameRunStepResult,
   type ThreadId,
   gameRunStepCommandId,
+  gameRunStepId,
 } from "@kurambit/contracts";
 import { readNextLine } from "@kurambit/shared/gameNextLine";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -29,6 +32,7 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import type * as Scope from "effect/Scope";
 
+import { stepMessage } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   stepCapCommandId,
@@ -45,9 +49,7 @@ import * as GameBuilds from "../GameBuilds.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameRunTurnReactor from "./GameRunTurnReactor.ts";
 import { toolReason, toolWait } from "./handBack.ts";
-import { stepMessage } from "./loop.ts";
 import { retrying } from "./retrying.ts";
-import { stepNumber } from "./state.ts";
 
 /** How long a judge or a look waits for a build's facts before the step ends unmeasured. */
 const FACTS_WAIT = "10 minutes";
@@ -126,9 +128,10 @@ const make = Effect.gen(function* () {
           .pipe(
             Effect.map((facts): GameBuildFacts | null => facts),
             Effect.catchCause((cause) =>
-              Effect.logWarning("keep going could not measure a build", { build, cause }).pipe(
-                Effect.as(null),
-              ),
+              Effect.logWarning("keep going could not measure a build", {
+                build,
+                cause: Cause.pretty(cause),
+              }).pipe(Effect.as(null)),
             ),
           );
 
@@ -149,20 +152,41 @@ const make = Effect.gen(function* () {
       return reply === undefined ? null : readNextLine(reply.text);
     });
 
+  /** The facts an earlier look of the run measured; null when they cannot be read. */
+  const lookedAt = (located: GameRunTurnReactor.Located, seq: number) =>
+    projections
+      .getGameRunRecords(located.run.threadId, { steps: [gameRunStepId(located.run.id, seq)] })
+      .pipe(
+        Effect.map((records) => {
+          const result = records.gameRunSteps[0]?.result;
+          return result?.kind === "look" && "facts" in result
+            ? (result.facts as GameBuildFacts | null)
+            : null;
+        }),
+        Effect.orElseSucceed(() => null),
+      );
+
   const look = (located: GameRunTurnReactor.Located) =>
     Effect.gen(function* () {
+      const step = located.record.step;
+      if (step.kind !== "look") return;
       // Never two writers: the person's turn goes first. A turn that ends wakes this job again.
       if (!(yield* gameIdle(located))) return;
       yield* startStep(located);
       const threadId = located.run.threadId;
       const root = yield* projects.resolve(threadId);
-      const listed = yield* builds.list(threadId, { limit: 1 });
+      const { build, edited } = yield* builds.current(threadId);
       yield* complete(located, {
         kind: "look",
-        current: listed.current,
-        facts: yield* factsOf(threadId, listed.current),
+        current: build,
+        facts: edited
+          ? null
+          : ((step.known !== undefined && step.known.build === build
+              ? yield* lookedAt(located, step.known.look)
+              : null) ?? (yield* factsOf(threadId, build))),
         next: yield* nextLine(threadId),
         bot: (yield* bots.latestPlayBot(root)) !== null,
+        edited,
       });
     });
 
@@ -171,7 +195,7 @@ const make = Effect.gen(function* () {
    * behind any turn so it never steers someone else's; then the reactor
    * follows it. A turn another chat started since the look goes first.
    */
-  const turn = (located: GameRunTurnReactor.Located, rounds: Parameters<typeof stepNumber>[0]) =>
+  const turn = (located: GameRunTurnReactor.Located, rounds: Parameters<typeof stepMessage>[0]) =>
     Effect.gen(function* () {
       const step = located.record.step;
       if (step.kind !== "turn") return;
@@ -195,7 +219,7 @@ const make = Effect.gen(function* () {
           );
         // The step starts a turn in the chat, so it takes the admission any message turn does.
         yield* turnAdmission.admit(yield* projections.getThread(threadId));
-        const message = stepMessage(stepNumber(rounds), step.proposal);
+        const message = stepMessage(rounds, step.proposal);
         yield* GameRunTurnReactor.refusedOnly(
           engine.dispatch({
             type: "message.dispatch",
@@ -308,7 +332,7 @@ const make = Effect.gen(function* () {
       Effect.catch((cause) =>
         Effect.logWarning("a keep-going step's job failed; recovery owes it", {
           stepId: job.stepId,
-          cause,
+          cause: Cause.pretty(Cause.fail(cause)),
         }),
       ),
     );

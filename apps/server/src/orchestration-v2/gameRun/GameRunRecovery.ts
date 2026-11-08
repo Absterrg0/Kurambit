@@ -10,11 +10,13 @@ import {
   type OrchestrationV2Run,
   type ThreadId,
 } from "@kurambit/contracts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import { refusedOnly } from "../../game/run/inFlight.ts";
 import { retrying } from "../../game/run/retrying.ts";
 import * as EffectOutbox from "../EffectOutbox.ts";
 import * as Orchestrator from "../Orchestrator.ts";
@@ -70,7 +72,10 @@ export const stopStepTurns = (
     }
   }).pipe(
     Effect.catchCause((cause) =>
-      Effect.logWarning("a keep-going step turn could not be stopped", { threadId, cause }),
+      Effect.logWarning("a keep-going step turn could not be stopped", {
+        threadId,
+        cause: Cause.pretty(cause),
+      }),
     ),
   );
 
@@ -122,7 +127,9 @@ const make = Effect.gen(function* () {
     }
   }).pipe(
     Effect.catchCause((cause) =>
-      Effect.logWarning("game run recovery could not check step turns", { cause }),
+      Effect.logWarning("game run recovery could not check step turns", {
+        cause: Cause.pretty(cause),
+      }),
     ),
   );
 
@@ -160,24 +167,67 @@ const make = Effect.gen(function* () {
       )
         return;
       const now = DateTime.toEpochMillis(yield* DateTime.now);
-      yield* engine.dispatch({
-        type: "game-run.step.schedule",
-        commandId: CommandId.make(
-          `server:game-run-recover:${step.id}:attempt:${step.attempt}:${now}`,
-        ),
-        threadId,
-        runId: run.id,
-        stepId: step.id,
-        attempt: step.attempt,
-        at: now,
-        timer: { kind: "recover" },
-      });
+      // A refusal is the run's own answer (it moved on or stopped): nothing to retry.
+      yield* refusedOnly(
+        engine.dispatch({
+          type: "game-run.step.schedule",
+          commandId: CommandId.make(
+            `server:game-run-recover:${step.id}:attempt:${step.attempt}:${now}`,
+          ),
+          threadId,
+          runId: run.id,
+          stepId: step.id,
+          attempt: step.attempt,
+          at: now,
+          timer: { kind: "recover" },
+        }),
+      );
     }).pipe(
-      // Every part of it is safe to repeat; a thread whose reads never get
-      // through is logged and recovered at the next startup.
+      // Every part of it is safe to repeat.
       retrying,
       Effect.catchCause((cause) =>
-        Effect.logWarning("game run recovery failed for a thread", { threadId, cause }),
+        Effect.logWarning("game run recovery failed for a thread", {
+          threadId,
+          cause: Cause.pretty(cause),
+        }).pipe(Effect.andThen(pauseStuck(threadId, cause))),
+      ),
+    );
+
+  /**
+   * Nothing drives a step recovery could not schedule, so the run would sit
+   * on it for good: it pauses instead, with the cause, and resumes from a
+   * fresh look. A pause that cannot be written is left to the next startup.
+   */
+  const pauseStuck = (threadId: ThreadId, cause: Cause.Cause<unknown>) =>
+    Effect.gen(function* () {
+      const run = (yield* projections.getGameRunRecords(threadId, { steps: [] })).gameRuns.at(-1);
+      if (run === undefined || run.status === "ended") return;
+      // The failure's own lines and its causes', without the stack.
+      const why = Cause.pretty(cause)
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "" && !line.startsWith("at ") && line !== "}")
+        .join(" ");
+      yield* refusedOnly(
+        engine.dispatch({
+          type: "game-run.stop",
+          commandId: CommandId.make(`server:game-run-recover-paused:${run.id}:${run.seq}`),
+          threadId,
+          runId: run.id,
+          ending: "tool-failed",
+          reason:
+            `keep going could not pick up step ${run.seq} after a restart: ${why || "no detail given"}`.slice(
+              0,
+              300,
+            ),
+        }),
+      );
+    }).pipe(
+      Effect.catchCause((stuck) =>
+        Effect.logWarning("a keep-going run recovery could not resume stays as it is", {
+          threadId,
+          cause: Cause.pretty(stuck),
+        }),
       ),
     );
 
@@ -185,7 +235,9 @@ const make = Effect.gen(function* () {
     retrying(projections.listGameRunThreadsToRecover()).pipe(
       Effect.flatMap((threads) => Effect.forEach(threads, recoverThread, { discard: true })),
       Effect.andThen(stopUnwantedStepTurns),
-      Effect.catchCause((cause) => Effect.logWarning("game run recovery failed", { cause })),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("game run recovery failed", { cause: Cause.pretty(cause) }),
+      ),
     );
 
   return GameRunRecovery.of({ recover });

@@ -196,3 +196,62 @@ describe("GameBuilds base", () => {
     }).pipe(Effect.provide(Layer.merge(NodeServices.layer, SqlitePersistence.layerMemory))),
   );
 });
+
+describe("the folder's current build", () => {
+  const at = (minute: number) => `2026-11-08T10:${String(minute).padStart(2, "0")}:00.000Z`;
+  // Turn rows newest first, one a minute: `builds` are the minutes whose turn changed game files.
+  const pages = (rows: number, builds: ReadonlyArray<number>, size = 30) => {
+    let read = 0;
+    const turns = (before: string | undefined) =>
+      Effect.sync(() => {
+        read += 1;
+        const minutes = Array.from({ length: rows }, (_, i) => rows - i).filter(
+          (m) => before === undefined || at(m) < before,
+        );
+        const page = minutes.slice(0, size);
+        const found = page.find((m) => builds.includes(m));
+        return {
+          newest: found === undefined ? null : { id: `turn-${found}`, at: at(found) },
+          oldest: page.length === 0 ? null : at(page.at(-1)!),
+          more: page.length === size,
+        };
+      });
+    return { turns, reads: () => read };
+  };
+
+  it.effect("finds the newest turn build behind any number of notes-only turns", () =>
+    Effect.gen(function* () {
+      // Fifty-five turns, only the first changed game files; an hours-old restore is older still.
+      const walk = pages(55, [1], 10);
+      const current = yield* GameBuilds.currentBuild([{ id: "restore", at: at(0) }], walk.turns);
+      assert.strictEqual(current, "turn-1");
+      assert.strictEqual(walk.reads(), 6);
+    }),
+  );
+
+  it.effect("takes a later restore or kept edit, and stops reading once turns are older", () =>
+    Effect.gen(function* () {
+      const walk = pages(55, [1], 10);
+      const current = yield* GameBuilds.currentBuild(
+        [
+          { id: "restore", at: at(40) },
+          { id: "edit", at: at(30) },
+        ],
+        walk.turns,
+      );
+      assert.strictEqual(current, "restore");
+      assert.strictEqual(walk.reads(), 2);
+      const newer = yield* GameBuilds.currentBuild(
+        [{ id: "restore", at: at(40) }],
+        pages(55, [50]).turns,
+      );
+      assert.strictEqual(newer, "turn-50");
+    }),
+  );
+
+  it.effect("is none when no turn changed game files and nothing was restored", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* GameBuilds.currentBuild([], pages(12, [], 5).turns), null);
+    }),
+  );
+});

@@ -24,6 +24,7 @@ import {
   gameRunStepCommandId,
 } from "@kurambit/contracts";
 import { latestRootProviderFailure } from "@kurambit/shared/orchestrationV2ThreadError";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -475,7 +476,7 @@ const make = Effect.gen(function* () {
           Effect.logWarning("a keep-going step's turn could not be read; recovery owes it", {
             threadId,
             stepId: turn.stepId,
-            cause,
+            cause: Cause.pretty(cause),
           }),
         ),
       ),
@@ -601,7 +602,7 @@ const make = Effect.gen(function* () {
           Effect.catchCause((cause) =>
             Effect.logWarning("keep going's change could not be pushed", {
               threadId: event.threadId,
-              cause,
+              cause: Cause.pretty(cause),
             }),
           ),
         )
@@ -611,7 +612,7 @@ const make = Effect.gen(function* () {
             Effect.catchCause((cause) =>
               Effect.logWarning("keep going could not stop in an archived chat", {
                 threadId: event.threadId,
-                cause,
+                cause: Cause.pretty(cause),
               }),
             ),
           )
@@ -633,7 +634,7 @@ const make = Effect.gen(function* () {
               Effect.catchCause((cause) =>
                 Effect.logWarning("keep going could not follow a turn", {
                   threadId: event.threadId,
-                  cause,
+                  cause: Cause.pretty(cause),
                 }),
               ),
             );
@@ -642,7 +643,7 @@ const make = Effect.gen(function* () {
     forkParked(
       Stream.runForEach(engine.streamDomainEvents, handle).pipe(
         Effect.catchCause((cause) =>
-          Effect.logWarning("keep going's turn stream failed", { cause }),
+          Effect.logWarning("keep going's turn stream failed", { cause: Cause.pretty(cause) }),
         ),
       ),
     );

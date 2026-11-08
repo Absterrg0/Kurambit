@@ -1,25 +1,23 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Evidence records and their frame copies are files the server owns.
-// A blind sample's play exposure must survive a server restart, or judges see
-// under-counted, unequal evidence. Each thread's record lives under the server
-// state dir, outside every game folder and worktree a role agent works in;
-// an agent with an unrestricted shell running as the same user could still
-// edit it, as it could the server database, so it is server-owned, not sealed.
-// Sessions are keyed by id and totals are always summed from them, so a
-// session written after every act and again at close counts once.
+// A thread's explore play across its sessions survives a server restart, so
+// the input it reads as used is never under-counted. Each thread's record
+// lives under the server state dir, outside every game folder. Sessions are
+// keyed by id and totals are always summed from them, so a session written
+// after every act and again at close counts once. Records an earlier server
+// wrote may carry a blind sample's input cap, memory marks and kept frames:
+// they decode with those keys ignored, and the age bound prunes the frames.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 
-const Frame = Schema.Struct({ step: Schema.Number, path: Schema.String });
 const SessionEvidence = Schema.Struct({
   id: Schema.String,
   actions: Schema.Number,
   executedInputSteps: Schema.Number,
   nominalMs: Schema.Number,
   images: Schema.Number,
-  frames: Schema.Array(Frame),
   closed: Schema.Boolean,
   closeReason: Schema.NullOr(Schema.String),
 });
@@ -28,27 +26,7 @@ const ThreadEvidence = Schema.Struct({
   version: Schema.Literal(1),
   threadId: Schema.String,
   root: Schema.String,
-  // In start order; a session's 1-based position is its label on the frame sheet.
   sessions: Schema.Array(SessionEvidence),
-  /** The input this thread may use across its sessions (a blind sample's), set by the run. */
-  inputCapMs: Schema.optionalKey(Schema.Number),
-  /**
-   * Since the thread's last finish: how long its starts waited (the run gives
-   * that time back to its cap), and why the latest was refused (memory short,
-   * or queued behind another start), else false. An older record's `true` was
-   * memory short.
-   */
-  memory: Schema.optionalKey(
-    Schema.Struct({
-      waitedMs: Schema.Number,
-      refused: Schema.Union([
-        Schema.Boolean,
-        Schema.Literals(["low-memory", "busy", "tool-failed"]),
-      ]),
-      /** The refusal is one waiting cannot clear (isStandingFault). */
-      standing: Schema.optionalKey(Schema.Boolean),
-    }),
-  ),
   /**
    * The thread's earlier record could not be decoded and was set aside: what
    * it counted is lost, so its totals are not to be trusted until the
@@ -110,12 +88,6 @@ export const totals = (record: ThreadEvidence, exceptSessionId?: string) => {
   };
 };
 
-/** Every kept frame in play order, labelled with its session's position. */
-export const frames = (record: ThreadEvidence) =>
-  record.sessions.flatMap((s, i) =>
-    s.frames.map((frame) => ({ session: i + 1, step: frame.step, path: frame.path })),
-  );
-
 /** One readable, collision-free file stem per thread id. */
 export const keyOf = (threadId: string) =>
   `${threadId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64)}-${NodeCrypto.createHash("sha256")
@@ -125,7 +97,6 @@ export const keyOf = (threadId: string) =>
 
 export const recordPath = (dir: string, threadId: string) =>
   NodePath.join(dir, `${keyOf(threadId)}.json`);
-const framesDir = (dir: string, threadId: string) => NodePath.join(dir, keyOf(threadId));
 
 /**
  * The record on disk: null when there is none. A record that does not decode,
@@ -164,25 +135,6 @@ export const write = (dir: string, record: ThreadEvidence) =>
     filePath: recordPath(dir, record.threadId),
     contents: encode(record),
   });
-
-/**
- * Copies a kept frame next to the record; explore scratch sits in the temp
- * dir, which a reboot can clear. Returns the copy, or the original when the
- * copy fails (the sheet then draws only frames still on disk).
- */
-export const keepFrame = async (dir: string, threadId: string, sessionId: string, file: string) => {
-  const target = NodePath.join(
-    framesDir(dir, threadId),
-    `${sessionId.slice(0, 8)}-${NodePath.basename(file)}`,
-  );
-  try {
-    await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
-    await NodeFSP.copyFile(file, target);
-    return target;
-  } catch {
-    return file;
-  }
-};
 
 /** Removes records, and their frame copies, untouched for `RETAIN_MS`. */
 export const prune = async (dir: string, nowMs: number) => {

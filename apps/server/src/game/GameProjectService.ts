@@ -40,7 +40,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { stepLine } from "./run/runView.ts";
-import { stepNumber } from "./run/state.ts";
+import { stepNumber } from "../orchestration-v2/gameRun/decide.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";

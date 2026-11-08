@@ -118,6 +118,8 @@ export const GameRunRoundRecord = Schema.Struct({
       gain: Schema.Boolean,
       delta: Schema.Array(GameFactDelta).check(Schema.isMaxLength(3)),
       tokens: Schema.NullOr(Schema.Number),
+      /** The cap in minutes, when Kurambit's time cap stopped the step's turn. */
+      capped: Schema.optionalKey(Schema.Number),
     }),
   ),
 });
@@ -135,7 +137,16 @@ export const GameRunProposal = Schema.Struct({
 });
 export type GameRunProposal = typeof GameRunProposal.Type;
 
-export const GameRunLookStep = Schema.Struct({ kind: Schema.Literal("look"), id: Schema.Number });
+export const GameRunLookStep = Schema.Struct({
+  kind: Schema.Literal("look"),
+  id: Schema.Number,
+  /**
+   * The step number of the look before it, which measured `build`, when no
+   * step landed since: a look that finds the folder still holds `build`
+   * takes that look's facts and measures nothing.
+   */
+  known: Schema.optionalKey(Schema.Struct({ build: GameBuildId, look: Schema.Number })),
+});
 export type GameRunLookStep = typeof GameRunLookStep.Type;
 export const GameRunProposeStep = Schema.Struct({
   kind: Schema.Literal("propose"),
@@ -231,6 +242,8 @@ export const GameRunStepResult = Schema.Union([
     next: NextLine,
     /** A play bot exists (GameBot.latestPlayBot). */
     bot: Schema.Boolean,
+    /** The folder's game files are not `current`'s: edited outside any build. */
+    edited: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   }),
   Schema.Struct({
     kind: Schema.Literal("decided"),
@@ -307,6 +320,8 @@ export const GameRun = Schema.Struct({
   ),
   /** The quiet streak: steps in a row that gained nothing. */
   stallStreak: Schema.Number,
+  /** Steps in a row that never landed (superseded, or started on another build); absent is 0. */
+  supersededStreak: Schema.optionalKey(NonNegativeInt),
   lastFailure: Schema.String,
   /** The number of the last step planned. */
   seq: NonNegativeInt,

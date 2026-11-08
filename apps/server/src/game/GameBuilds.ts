@@ -227,6 +227,17 @@ export class GameBuilds extends Context.Service<
       typeof GameBuildRestoreResult.Type & { readonly moved: RestoreMoved },
       GameOperationError
     >;
+    /**
+     * The folder's current build (currentBuild), and whether its engine
+     * project, art and ASSETS.md are no longer that build's, read under the
+     * game's lock.
+     */
+    readonly current: (
+      threadId: ThreadId,
+    ) => Effect.Effect<
+      { readonly build: GameBuildId | null; readonly edited: boolean },
+      GameOperationError
+    >;
     /** The folder still holds `build` in its engine project, art and ASSETS.md, read under the game's lock. */
     readonly holds: (
       threadId: ThreadId,
@@ -262,6 +273,56 @@ export class GameBuilds extends Context.Service<
     >;
   }
 >()("kurambit/game/GameBuilds") {}
+
+/** A build that may be the folder's, with when it came into the folder. */
+interface Placed {
+  readonly id: string;
+  readonly at: string;
+}
+
+/** A page of turn builds, newest first, from the projection's newest-first turn rows. */
+export interface TurnPage {
+  readonly newest: Placed | null;
+  /** When the page's oldest row was captured: the next page starts below it. */
+  readonly oldest: string | null;
+  /** The page was full: older turns may follow. */
+  readonly more: boolean;
+}
+
+/**
+ * The folder's current build: the newest turn build that changed game files,
+ * or a later kept edit or restore target (`others`). Turns that changed only
+ * notes are no builds, so the turns are read page by page however far back
+ * they go. The walk ends when a page holds a build, the turns end, or a page
+ * reaches back past the newest of `others` (an older turn cannot win). Each
+ * page starts strictly below the last, so it always ends.
+ */
+export const currentBuild = <E, R>(
+  others: ReadonlyArray<Placed>,
+  turns: (before: string | undefined) => Effect.Effect<TurnPage, E, R>,
+): Effect.Effect<string | null, E, R> =>
+  Effect.gen(function* () {
+    const newestOf = (all: ReadonlyArray<Placed>) =>
+      all.reduce<Placed | null>((best, e) => (best === null || e.at > best.at ? e : best), null);
+    const floor = newestOf(others)?.at ?? null;
+    let before: string | undefined;
+    for (;;) {
+      const page = yield* turns(before);
+      if (page.newest !== null) return newestOf([page.newest, ...others])?.id ?? null;
+      const oldest = page.oldest;
+      if (
+        !page.more ||
+        oldest === null ||
+        (floor !== null && oldest <= floor) ||
+        (before !== undefined && oldest >= before)
+      )
+        return newestOf(others)?.id ?? null;
+      before = oldest;
+    }
+  });
+
+/** Turn rows a page of the current-build walk reads. */
+const TURN_PAGE = 30;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -403,9 +464,10 @@ const make = Effect.gen(function* () {
       const noRun = yield* noRunRestoreOf(g.root);
       const restoreTargets =
         noRun?.outcome?.restored === true ? [{ id: noRun.target, at: noRun.requestedAt }] : [];
+      // A restore's "before" can be a build listed in its own right (a turn's,
+      // a kept edit), so only the park's own entry is left out.
       const restoreBefore = (e: Entry) =>
-        e.source._tag === "saved" &&
-        (noRun?.before === e.id || e.source.label === RESTORE_BEFORE_LABEL);
+        e.source._tag === "saved" && e.source.label === RESTORE_BEFORE_LABEL;
       const captures = rows.flatMap((row) => {
         const oid = refs.get(row.checkpoint.ref);
         return row.cwd !== g.root || oid === undefined || !isGameBuildId(oid)
@@ -598,6 +660,14 @@ const make = Effect.gen(function* () {
             : [],
         ),
       );
+      const turnPage = (rows: number, from: string | undefined) =>
+        turnEntries(g, byRef, rows, from, saved, recorded).pipe(
+          Effect.map((page): TurnPage => ({
+            newest: page.entries[0] ?? null,
+            oldest: page.oldest,
+            more: page.scanned === rows,
+          })),
+        );
       const turns = yield* turnEntries(g, byRef, limit * 3, before, saved, recorded);
       const savedPage = saved.filter((entry) => before === undefined || entry.at < before);
       // A saved build is also a turn's at times; one entry each, the saved one first.
@@ -614,7 +684,34 @@ const make = Effect.gen(function* () {
         more: floor !== null || listed.length > limit,
         refs: byRef,
         recorded,
+        saved,
+        // The first page as read above, then older pages of TURN_PAGE rows.
+        turns: (from: string | undefined) =>
+          from === undefined
+            ? Effect.succeed<TurnPage>({
+                newest: turns.entries[0] ?? null,
+                oldest: turns.oldest,
+                more: turns.scanned === limit * 3,
+              })
+            : turnPage(TURN_PAGE, from),
       };
+    });
+
+  /** The folder's current build (currentBuild) over the game's turns, its newest kept edit and restore. */
+  const currentOf = (g: Game, listed: Effect.Success<ReturnType<typeof allEntries>>) =>
+    Effect.gen(function* () {
+      const restore = yield* noRunRestoreOf(g.root);
+      const edits = listed.saved.filter(
+        (entry) => entry.source._tag === "saved" && entry.source.edit !== undefined,
+      );
+      const others = [
+        ...edits.map((entry) => ({ id: entry.id, at: entry.at })),
+        ...(restore?.outcome?.restored === true
+          ? [{ id: restore.target, at: restore.requestedAt }]
+          : []),
+      ];
+      const id = yield* currentBuild(others, listed.turns);
+      return id !== null && isGameBuildId(id) ? id : null;
     });
 
   /** The content key of each build: its engine folder's tree. */
@@ -721,13 +818,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const limit = Math.min(50, Math.max(1, input.limit ?? 30));
-      // The first page reads as far as the timeline's own, whatever its size: the folder's
-      // current build is the newest turn build, and a short read can find none behind turns
-      // that changed only notes, then take an old restore's target for the folder.
-      const scan = input.before === undefined ? Math.max(limit, 30) : limit;
-      const scanned = yield* allEntries(g, scan, input.before);
-      const { entries, kept } = scanned;
-      const more = scanned.more || entries.length > limit;
+      const listed = yield* allEntries(g, limit, input.before);
+      const { entries, kept, more } = listed;
       const page = entries.slice(0, limit);
       const { builds, measured } = yield* rowsOf(g, page, kept);
       // The generation cards read the newest build whose asset use was measured.
@@ -740,26 +832,13 @@ const make = Effect.gen(function* () {
                 : [];
             })[0]
           : undefined;
-      const newestTurn = entries.find((entry) => entry.source._tag === "turn");
-      const newestEdit = entries.find(
-        (entry) => entry.source._tag === "saved" && entry.source.edit !== undefined,
-      );
       const restore = yield* restoreRefOf(g, entries);
-      const candidates = [
-        ...(newestTurn === undefined ? [] : [{ id: newestTurn.id, at: newestTurn.at }]),
-        ...(newestEdit === undefined ? [] : [{ id: newestEdit.id, at: newestEdit.at }]),
-        ...(restore !== null && restore.outcome?.restored === true
-          ? [{ id: restore.target, at: restore.requestedAt }]
-          : []),
-      ].toSorted((a, b) => (a.at < b.at ? 1 : -1));
+      const current = input.before === undefined ? yield* currentOf(g, listed) : null;
       return {
         builds,
         next: more && page.length > 0 ? page.at(-1)!.at : null,
-        current: input.before === undefined ? (candidates[0]?.id ?? null) : null,
-        folderEdited:
-          input.before === undefined && candidates[0] !== undefined
-            ? yield* folderEditedSince(g, candidates[0].id)
-            : "unknown",
+        current,
+        folderEdited: current !== null ? yield* folderEditedSince(g, current) : "unknown",
         restore,
         ...(latestUse === undefined ? {} : { latestUse }),
       } satisfies GameBuildsResult;
@@ -948,20 +1027,29 @@ const make = Effect.gen(function* () {
       return result;
     });
 
+  const holdsIn = (g: Game, build: GameBuildId, owner: string) =>
+    operations.exclusive(
+      g.root,
+      "Keep going check",
+      folderAgainst(g, [build]).pipe(
+        Effect.map(([changed]) => changed === false),
+        Effect.mapError((cause) =>
+          failed("Builds", g.root, "io", "the folder could not be compared", cause),
+        ),
+      ),
+      owner,
+    );
   const holds: GameBuilds["Service"]["holds"] = (threadId, build) =>
+    Effect.flatMap(gameOf(threadId), (g) => holdsIn(g, build, String(threadId)));
+
+  const current: GameBuilds["Service"]["current"] = (threadId) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
-      return yield* operations.exclusive(
-        g.root,
-        "Keep going check",
-        folderAgainst(g, [build]).pipe(
-          Effect.map(([changed]) => changed === false),
-          Effect.mapError((cause) =>
-            failed("Builds", g.root, "io", "the folder could not be compared", cause),
-          ),
-        ),
-        String(threadId),
-      );
+      const build = yield* currentOf(g, yield* allEntries(g, 1, undefined));
+      return {
+        build,
+        edited: build !== null && !(yield* holdsIn(g, build, String(threadId))),
+      };
     });
 
   const turnBuild: GameBuilds["Service"]["turnBuild"] = (threadId, runId, fallback) =>
@@ -1047,7 +1135,13 @@ const make = Effect.gen(function* () {
   // The record is written before the folder moves; the moves are safe to run
   // again with the same request (the park is found, never retaken), so a
   // restart settles any restore it cut short (settleRestores).
-  const moveWithoutRun = (root: string, lane: string, record: NoRunRestore, owner: string) =>
+  const moveWithoutRun = (
+    root: string,
+    lane: string,
+    record: NoRunRestore,
+    owner: string,
+    folderBuild: GameBuildId | null,
+  ) =>
     Effect.gen(function* () {
       const moved = yield* withBuildInFolder(
         { stage, checkpoints, lock: { operations, owner, waitUntil: null } },
@@ -1079,10 +1173,21 @@ const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => null),
       );
       const what = `${lane}/, art/ and ASSETS.md`;
+      // A folder that was exactly a build already (an Undo, a Redo) needs no
+      // park of its own: that build is what undoes this restore.
+      const same =
+        moved.kind === "done" &&
+        before !== null &&
+        folderBuild !== null &&
+        !(yield* measureChange(checkpoints, root, isRestored(lane), before, folderBuild)).changed
+          ? folderBuild
+          : null;
       const kept =
         before === null
           ? ""
-          : ` What the folder held is kept as a build ("The game before a restore").`;
+          : same !== null
+            ? ` What the folder held is Build ${same.slice(0, 8)}.`
+            : ` What the folder held is kept as a build ("The game before a restore").`;
       const movedOn = moved.kind === "refused" && moved.why === "moved-on";
       const outcome =
         moved.kind === "current"
@@ -1112,11 +1217,17 @@ const make = Effect.gen(function* () {
       yield* saveNoRunRestore(root, {
         ...record,
         before:
-          moved.kind !== "current" && !movedOn && before !== null && isGameBuildId(before)
+          same ??
+          (moved.kind !== "current" && !movedOn && before !== null && isGameBuildId(before)
             ? before
-            : null,
+            : null),
         outcome,
       });
+      // After the record names the build, so a death in between leaves at most a spare mark.
+      if (same !== null)
+        yield* checkpoints
+          .deleteCheckpointRefs({ cwd: root, checkpointRefs: [beforeRef] })
+          .pipe(Effect.ignore);
       yield* operations.changed(root, GAME_BUILDS_EVENT, outcome.message);
       return outcome;
     });
@@ -1174,6 +1285,13 @@ const make = Effect.gen(function* () {
         if (movedOn !== false)
           return { requestId, done: false, message: MOVED_ON, moved: "moved-on" as const };
       }
+      // The build the folder holds as it moves: a park equal to it is no mark of its own.
+      const folderBuild =
+        earlier?.requestId === requestId
+          ? null
+          : yield* currentOf(g, yield* allEntries(g, 1, undefined)).pipe(
+              Effect.orElseSucceed(() => null),
+            );
       const record: NoRunRestore =
         earlier?.requestId === requestId
           ? earlier
@@ -1189,7 +1307,10 @@ const make = Effect.gen(function* () {
       yield* saveNoRunRestore(g.root, record);
       // In the service's own fiber: a caller that goes away (a closed client)
       // stops waiting, never the folder's move.
-      const fiber = yield* Effect.forkIn(moveWithoutRun(g.root, g.lane, record, owner), scope);
+      const fiber = yield* Effect.forkIn(
+        moveWithoutRun(g.root, g.lane, record, owner, folderBuild),
+        scope,
+      );
       const outcome = yield* Fiber.join(fiber);
       if (outcome.moved === "refused")
         return yield* failed("Restore build", g.root, "tool-failed", outcome.message);
@@ -1318,7 +1439,13 @@ const make = Effect.gen(function* () {
       if (Option.isNone(decoded) || decoded.value.outcome !== null) continue;
       yield* projects.read(row.root).pipe(
         Effect.flatMap((manifest) =>
-          moveWithoutRun(row.root, manifestProject(manifest), decoded.value, "game-builds:settle"),
+          moveWithoutRun(
+            row.root,
+            manifestProject(manifest),
+            decoded.value,
+            "game-builds:settle",
+            null,
+          ),
         ),
         Effect.catchCause((cause) =>
           Effect.logWarning("A cut-short restore could not be settled.", { root: row.root, cause }),
@@ -1398,6 +1525,7 @@ const make = Effect.gen(function* () {
     play,
     restore,
     holds,
+    current,
     keepValues,
     turnBuild,
   });

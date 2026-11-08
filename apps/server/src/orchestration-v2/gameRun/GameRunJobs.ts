@@ -126,7 +126,7 @@ export const make = Effect.gen(function* () {
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.failCause(cause)
-            : Effect.logWarning("game run job failed", { key, cause }),
+            : Effect.logWarning("game run job failed", { key, cause: Cause.pretty(cause) }),
         ),
         Effect.andThen(settle),
       );
