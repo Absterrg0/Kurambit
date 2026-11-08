@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import { diffBuildFacts, GameBuildFacts, GameBuildId, gameFactsView } from "./gameBuilds.ts";
+import type { GameSceneFinding } from "./gameScene.ts";
 
 const tier = (ending: "won" | "lost" | "no-ending", at: number | null) => ({
   status: "measured" as const,
@@ -33,6 +34,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   assets: { status: "not-measured", why: "not built", retry: false },
   use: { status: "not-measured", why: "not built", retry: false },
   performance: { status: "not-measured", why: "not built", retry: false },
+  scene: { status: "not-measured", why: "not built", retry: false },
   message: "",
   ...patch,
 });
@@ -137,6 +139,76 @@ describe("assets", () => {
     expect(Schema.decodeSync(GameBuildFacts)(old).assets).toEqual({
       status: "not-measured",
       why: "measured before asset facts existed",
+      retry: false,
+    });
+  });
+});
+
+describe("scene", () => {
+  const scene = (findings: ReadonlyArray<GameSceneFinding>) =>
+    facts({
+      scene: {
+        status: "measured",
+        value: {
+          seconds: 58,
+          findings,
+          player: {
+            kind: "body",
+            name: "Fox",
+            hidden: 0.96,
+            offscreen: 0,
+            blocker: "Ground",
+            heightPx: 98,
+            canvasHeight: 720,
+            notVisible: true,
+            small: false,
+            frame: "builds/logs/x/scene-1.png",
+            smallFrame: null,
+          },
+          unseen: [],
+          unseenMore: 0,
+          cost: { meanMs: 1, worstMs: 3 },
+        },
+      },
+    });
+  const buried: GameSceneFinding = {
+    kind: "buried",
+    thing: "Fox",
+    other: "Ground",
+    at: 0.3,
+    seconds: 58,
+    share: 1,
+    amount: 1.03,
+    frame: "builds/logs/x/scene-2.png",
+  };
+
+  it("words each problem with its frame, worse than clean, and reads old rows as not measured", () => {
+    const rows = Object.fromEntries(gameFactsView(scene([buried])).map((r) => [r.id, r]));
+    expect(rows["buried"]?.reading).toMatchObject({
+      text: "Fox is buried 1.0 m in Ground for 100% of play",
+      tone: "bad",
+    });
+    expect(rows["buried"]?.evidence).toEqual([
+      {
+        kind: "frame",
+        label: "Fox is buried 1.0 m in Ground for 100% of play",
+        path: buried.frame,
+      },
+    ]);
+    expect(rows["player-view"]?.reading).toMatchObject({
+      text: "Fox is hidden behind Ground for 96% of play",
+      tone: "bad",
+    });
+    expect(rows["clipping"]?.reading).toMatchObject({ tone: "good" });
+    expect(byId(diffBuildFacts(scene([]), scene([buried])))["buried"]).toMatchObject({
+      change: "changed",
+      tone: "worse",
+    });
+
+    const { scene: _, ...old } = Schema.encodeSync(GameBuildFacts)(facts());
+    expect(Schema.decodeSync(GameBuildFacts)(old).scene).toEqual({
+      status: "not-measured",
+      why: "measured before scene reports existed",
       retry: false,
     });
   });

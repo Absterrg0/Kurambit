@@ -4,6 +4,13 @@ import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchema
 import { GameBotDecider } from "./gameBot.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameAssetSource } from "./gameModel.ts";
+import {
+  type GameSceneFinding,
+  type GameSceneFindingKind,
+  GameSceneReport,
+  sceneFindingText,
+  scenePlayerText,
+} from "./gameScene.ts";
 
 // GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
 // it without importing this module, which would close an import cycle through gameBot.ts.
@@ -122,6 +129,13 @@ export const GameFactId = Schema.Literals([
   "performance",
   "assets",
   "use",
+  "player-view",
+  "buried",
+  "clipping",
+  "fell",
+  "camera",
+  "sliding",
+  "unseen",
 ]);
 export type GameFactId = typeof GameFactId.Type;
 export const GameFactTone = Schema.Literals(["good", "bad", "neutral"]);
@@ -363,6 +377,20 @@ export const GameBuildFacts = Schema.Struct({
       }),
     ),
   ),
+  /**
+   * Measured during the random-input play by the game's shell: what a person sees at a
+   * glance (the player in view, bodies buried, inside each other or fallen out of the
+   * world, the camera inside a wall, sliding, things never on screen), with frames.
+   */
+  scene: gameFact(GameSceneReport).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        status: "not-measured" as const,
+        why: "measured before scene reports existed",
+        retry: false,
+      }),
+    ),
+  ),
   /** For people and agents: what is measuring, queued behind what, about how long is left. */
   message: Schema.String,
 });
@@ -425,7 +453,30 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   performance: "Performance",
   assets: "Assets",
   use: "Asset use",
+  "player-view": "Player in view",
+  buried: "Buried",
+  clipping: "Clipping",
+  fell: "Out of the world",
+  camera: "Camera",
+  sliding: "Sliding",
+  unseen: "Never on screen",
 };
+
+/** The scene rows past the player's, the finding kinds each shows, and its clean reading. */
+const SCENE_ROWS: Readonly<
+  Record<
+    "buried" | "clipping" | "fell" | "camera" | "sliding",
+    { readonly kinds: ReadonlyArray<GameSceneFindingKind>; readonly clean: string }
+  >
+> = {
+  buried: { kinds: ["buried", "inside"], clean: "Nothing buried or inside a solid" },
+  clipping: { kinds: ["clipping"], clean: "No bodies inside each other" },
+  fell: { kinds: ["fell"], clean: "Nothing fell out of the world" },
+  camera: { kinds: ["camera"], clean: "The camera stays out of walls" },
+  sliding: { kinds: ["sliding"], clean: "Nothing slides in idle or a frozen pose" },
+};
+const sceneFindingsOf = (report: GameSceneReport, id: keyof typeof SCENE_ROWS) =>
+  report.findings.filter((finding) => SCENE_ROWS[id].kinds.includes(finding.kind));
 
 const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
 const at = (tier: BotTier) => (tier.at === null ? "" : ` at ${seconds(tier.at)}`);
@@ -610,8 +661,89 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
         // Evidence for the next step, never a verdict: unused art is no worse a game.
         return { text, value: used, tone: "neutral", kind: "use" };
       });
+    case "player-view":
+      return fromScene(facts, (report): Read => {
+        const player = report.player;
+        switch (player.kind) {
+          case "none":
+            return { _tag: "not-measured", why: "the game sets no ctx.player" };
+          case "point":
+            return { _tag: "not-measured", why: "ctx.player is a position, not a body on screen" };
+          case "hidden-by-game":
+            return {
+              _tag: "not-measured",
+              why: "the game kept the player hidden or out of the scene the whole play",
+            };
+          case "no-body":
+          case "first-person":
+            return measured({
+              text: "First person: the player has no body on screen",
+              value: null,
+              tone: "neutral",
+              kind: "first-person",
+            });
+          case "body": {
+            const problem = scenePlayerText(player);
+            const visible = Math.max(0, 1 - player.hidden - player.offscreen);
+            return measured({
+              text:
+                problem ??
+                `In view ${Math.round(visible * 100)}% of play${player.heightPx === null ? "" : ` · ${Math.round(player.heightPx)} px tall`}`,
+              value: Math.round(visible * 100),
+              tone: problem === null ? "good" : "bad",
+              kind: problem === null ? "clean" : "flagged",
+            });
+          }
+        }
+      });
+    case "buried":
+    case "clipping":
+    case "fell":
+    case "camera":
+    case "sliding":
+      return fromScene(facts, (report) => {
+        const found = sceneFindingsOf(report, id);
+        const first = found[0];
+        return measured(
+          first === undefined
+            ? { text: SCENE_ROWS[id].clean, value: 0, tone: "good", kind: "clean" }
+            : {
+                text: `${sceneFindingText(first)}${found.length > 1 ? ` (+${found.length - 1} more)` : ""}`,
+                value: found.length,
+                tone: "bad",
+                kind: "flagged",
+              },
+        );
+      });
+    case "unseen":
+      return fromScene(facts, (report) => {
+        const count = report.unseen.length + report.unseenMore;
+        // Things may come later than a minute of random play reaches: evidence, never a verdict.
+        return measured({
+          text:
+            count === 0
+              ? `Every named thing came on screen in ${Math.round(report.seconds)} s of play`
+              : `${count} never on screen in ${Math.round(report.seconds)} s of play: ${report.unseen.slice(0, 4).join(", ")}${count > 4 ? ", …" : ""}`,
+          value: count,
+          tone: "neutral",
+          kind: "unseen",
+        });
+      });
   }
 };
+
+const measured = (reading: Reading): Read => ({ _tag: "measured", reading });
+const fromScene = (facts: GameBuildFacts, read: (report: GameSceneReport) => Read): Read =>
+  facts.scene.status === "measured"
+    ? read(facts.scene.value)
+    : facts.scene.status === "pending"
+      ? { _tag: "pending" }
+      : { _tag: "not-measured", why: facts.scene.why };
+
+const sceneFrame = (finding: GameSceneFinding): GameFactView["evidence"] =>
+  finding.frame === null
+    ? []
+    : [{ kind: "frame", label: sceneFindingText(finding), path: finding.frame }];
 
 const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["evidence"] => {
   const tier = (fact: Fact<BotTier>) =>
@@ -628,6 +760,23 @@ const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["eviden
     case "colour":
     case "first-response":
       return tier(facts.masher).filter((entry) => entry.kind === "video");
+    // The scene report's frames, the problem outlined in each.
+    case "player-view": {
+      if (facts.scene.status !== "measured") return [];
+      const player = facts.scene.value.player;
+      if (player.kind !== "body") return [];
+      const frame = player.notVisible ? player.frame : player.small ? player.smallFrame : null;
+      const text = scenePlayerText(player);
+      return frame === null || text === null ? [] : [{ kind: "frame", label: text, path: frame }];
+    }
+    case "buried":
+    case "clipping":
+    case "fell":
+    case "camera":
+    case "sliding":
+      return facts.scene.status === "measured"
+        ? sceneFindingsOf(facts.scene.value, id).flatMap(sceneFrame).slice(0, 4)
+        : [];
     default:
       return [];
   }
@@ -659,8 +808,17 @@ export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView
   });
 
 /** For these numbers lower is better, for these higher; the other numbers are neutral. */
-const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["freeze", "colour", "first-response"]);
-const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance"]);
+const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set([
+  "freeze",
+  "colour",
+  "first-response",
+  "buried",
+  "clipping",
+  "fell",
+  "camera",
+  "sliding",
+]);
+const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance", "player-view"]);
 const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 /** How good a reading's kind is, for the facts whose kinds have an order; null for the rest. */
 const rank = (id: GameFactId, kind: string): number | null => {
@@ -675,6 +833,13 @@ const rank = (id: GameFactId, kind: string): number | null => {
       return BROKE.has(kind) ? 0 : kind === "won" ? 1 : kind === "no-ending" ? 2 : 3;
     case "skilled":
       return BROKE.has(kind) ? 0 : kind === "won" ? 2 : 1;
+    case "player-view":
+    case "buried":
+    case "clipping":
+    case "fell":
+    case "camera":
+    case "sliding":
+      return kind === "clean" ? 1 : kind === "flagged" ? 0 : null;
     default:
       return null;
   }

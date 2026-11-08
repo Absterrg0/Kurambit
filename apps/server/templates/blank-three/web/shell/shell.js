@@ -46,6 +46,7 @@
 import * as THREE from "../vendor/three.module.js";
 import { installStudio } from "./studio.js";
 import { createStageBridge, loadTuning } from "./stage-bridge.js";
+import { createSceneReport } from "./scene-report.js";
 import {
   GameState,
   hasProgress,
@@ -775,16 +776,17 @@ function applyHold() {
 
 // One object, refilled: the bridge's trace reads it 30 times a second.
 const stageView = { scene: null, camera: null };
+const view = () => {
+  const shown = run?.ctx ?? titleCtx;
+  if (shown?.camera?.isCamera !== true) return null;
+  stageView.scene = shown.scene;
+  stageView.camera = shown.camera;
+  return stageView;
+};
 const bridge = createStageBridge({
   canvas,
   renderer,
-  view: () => {
-    const shown = run?.ctx ?? titleCtx;
-    if (shown?.camera?.isCamera !== true) return null;
-    stageView.scene = shown.scene;
-    stageView.camera = shown.camera;
-    return stageView;
-  },
+  view,
   freeze(on) {
     frozen = on;
     // The pointer is the Stage's while frozen; giving up the lock is not the pause press.
@@ -803,6 +805,15 @@ const bridge = createStageBridge({
 });
 onModelCopy(bridge.assetCopy);
 
+// Looks at the scene only once the harness starts a measured play (window.__studio.scene).
+const sceneReport = createSceneReport({
+  canvas,
+  view: () => (run === null ? null : view()),
+  player: () => run?.ctx.player ?? null,
+  bridge,
+  animation: (object) => animateShell.stateOf(object),
+});
+
 const studio = installStudio({
   ui,
   perf: () => look.stats(),
@@ -813,6 +824,7 @@ const studio = installStudio({
     return applyHold();
   },
   bridge,
+  scene: sceneReport,
 });
 
 loadSettings();
@@ -907,7 +919,8 @@ renderer.setAnimationLoop((now) => {
     redraw = true;
   }
   // A frozen frame stays on the canvas; nothing redraws until something moves.
-  if (redraw && run?.compiling !== true) {
+  const drawing = redraw && run?.compiling !== true;
+  if (drawing) {
     look.update();
     look.frame(
       () => {
@@ -919,5 +932,6 @@ renderer.setAnimationLoop((now) => {
     redraw = false;
   }
   bridge.tick(dt);
+  sceneReport.tick(dt, drawing);
   studio.ready = true;
 });

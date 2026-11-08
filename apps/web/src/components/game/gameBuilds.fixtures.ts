@@ -267,6 +267,40 @@ export const FAKE_FACTS: GameBuildFacts = {
       frames: 4980,
     },
   },
+  scene: {
+    status: "measured",
+    value: {
+      seconds: 58.4,
+      findings: [
+        {
+          kind: "buried",
+          thing: "Space cat",
+          other: "Ground",
+          at: 0.3,
+          seconds: 58.1,
+          share: 1,
+          amount: 0.9,
+          frame: "builds/logs/game-bot-facts-0123456789ab-masher/scene-2.png",
+        },
+      ],
+      player: {
+        kind: "body",
+        name: "Space cat",
+        hidden: 0.04,
+        offscreen: 0,
+        blocker: "Rock",
+        heightPx: 96,
+        canvasHeight: 720,
+        notVisible: false,
+        small: false,
+        frame: null,
+        smallFrame: null,
+      },
+      unseen: [],
+      unseenMore: 0,
+      cost: { meanMs: 1.2, worstMs: 4.1 },
+    },
+  },
   message: "",
 };
 
