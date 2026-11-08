@@ -39,6 +39,9 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   ...patch,
 });
 
+const encodeFacts = Schema.encodeSync(GameBuildFacts);
+const decodeFacts = Schema.decodeSync(GameBuildFacts);
+
 const byId = (deltas: ReturnType<typeof diffBuildFacts>) =>
   Object.fromEntries(deltas.map((delta) => [delta.id, delta]));
 
@@ -135,8 +138,8 @@ describe("assets", () => {
     const delta = byId(diffBuildFacts(assets(), assets(model("measured"))))["assets"];
     expect(delta).toMatchObject({ change: "changed", tone: "neutral" });
 
-    const { assets: _, ...old } = Schema.encodeSync(GameBuildFacts)(facts());
-    expect(Schema.decodeSync(GameBuildFacts)(old).assets).toEqual({
+    const { assets: _, ...old } = encodeFacts(facts());
+    expect(decodeFacts(old).assets).toEqual({
       status: "not-measured",
       why: "measured before asset facts existed",
       retry: false,
@@ -205,8 +208,8 @@ describe("scene", () => {
       tone: "worse",
     });
 
-    const { scene: _, ...old } = Schema.encodeSync(GameBuildFacts)(facts());
-    expect(Schema.decodeSync(GameBuildFacts)(old).scene).toEqual({
+    const { scene: _, ...old } = encodeFacts(facts());
+    expect(decodeFacts(old).scene).toEqual({
       status: "not-measured",
       why: "measured before scene reports existed",
       retry: false,

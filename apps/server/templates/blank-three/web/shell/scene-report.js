@@ -104,18 +104,17 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
   const projection = new THREE.Matrix4();
   const solids = [];
   const notSolid = new Set();
-  const levelSolid = new Set();
   const bodies = [];
   const heights = new Float32Array(HEIGHTS);
   let heightCount = 0;
   // One column: the tops a ray from above enters and the bottoms one from below enters.
   const column = {
     tops: new Float64Array(MAX_HITS),
-    topObjects: new Array(MAX_HITS).fill(null),
+    topObjects: Array.from({ length: MAX_HITS }, () => null),
     topInstances: new Int32Array(MAX_HITS),
     nTops: 0,
     bottoms: new Float64Array(MAX_HITS),
-    bottomObjects: new Array(MAX_HITS).fill(null),
+    bottomObjects: Array.from({ length: MAX_HITS }, () => null),
     bottomInstances: new Int32Array(MAX_HITS),
     nBottoms: 0,
     x: 0,
@@ -389,7 +388,6 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
     return best;
   };
 
-  // ── Names ─────────────────────────────────────────────────────────────
   const nameOf = (object) => {
     if (object === null) return null;
     const record = bridge.thingOf(object, false);

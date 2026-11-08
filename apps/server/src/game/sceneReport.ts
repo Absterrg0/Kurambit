@@ -198,7 +198,8 @@ export const playRandomly = async (
   const pick = <A>(list: ReadonlyArray<A>) => list[Math.floor(random() * list.length)]!;
   const until = Date.now() + ms;
   try {
-    while (Date.now() < until && signal?.aborted !== true) {
+    for (;;) {
+      if (Date.now() >= until || signal?.aborted === true) break;
       const held = new Set<string>(pick(DIRECTIONS));
       if (random() < 0.4) for (const key of pick(DIRECTIONS)) held.add(key);
       const taps = random() < 0.6 ? [pick(TAPS)] : [];
