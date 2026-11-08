@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+  # Runs every job on any branch: with no base commit, `changes` fails open.
+  workflow_dispatch:
 
 permissions:
   contents: read
