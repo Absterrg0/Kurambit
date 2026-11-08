@@ -91,7 +91,7 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
 
 type Step = NonNullable<Extract<GameBuild["source"], { _tag: "turn" }>["step"]>;
 
-/** A keep-going step's verdict and why (design §7.4). */
+/** A keep-going step's verdict and why. */
 function StepLine({ step }: { step: Step }) {
   return (
     <p data-game-step={step.verdict ?? "measuring"} className="text-2xs text-muted-foreground">

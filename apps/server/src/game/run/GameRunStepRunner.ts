@@ -49,7 +49,7 @@ import { stepMessage } from "./loop.ts";
 import { retrying } from "./retrying.ts";
 import { stepNumber } from "./state.ts";
 
-/** K6: how long a judge or a look waits for a build's facts. */
+/** How long a judge or a look waits for a build's facts before the step ends unmeasured. */
 const FACTS_WAIT = "10 minutes";
 
 /** A thread whose turn is running, queued or being captured keeps the game busy. */
@@ -151,7 +151,7 @@ const make = Effect.gen(function* () {
 
   const look = (located: GameRunTurnReactor.Located) =>
     Effect.gen(function* () {
-      // K2: never two writers. A turn that ends wakes this job again.
+      // Never two writers: the person's turn goes first. A turn that ends wakes this job again.
       if (!(yield* gameIdle(located))) return;
       yield* startStep(located);
       const threadId = located.run.threadId;
@@ -229,8 +229,8 @@ const make = Effect.gen(function* () {
       if (step.kind !== "judge") return;
       yield* startStep(located);
       const threadId = located.run.threadId;
-      // Both register at once and wait on the server's one facts permit (B3:
-      // no supersede, so the reactor's own measure of the build is kept too).
+      // Both register at once and wait on the server's one facts permit (no
+      // supersede, so the reactor's own measure of the build is kept too).
       const [base, build] = yield* Effect.all(
         [factsOf(threadId, step.base), factsOf(threadId, step.build)],
         { concurrency: 2 },
@@ -242,7 +242,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const step = located.record.step;
       if (step.kind !== "undo") return;
-      // K2: a turn at work may not have written yet, so `expect` alone cannot
+      // A turn at work may not have written yet, so `expect` alone cannot
       // tell; the undo waits for it to end like a look does.
       if (!(yield* gameIdle(located))) return;
       yield* startStep(located);

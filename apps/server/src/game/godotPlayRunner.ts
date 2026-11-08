@@ -19,8 +19,8 @@
  * Input lands before game nodes read it by frame order: every event is
  * injected synchronously and the next physics frame is awaited before the
  * release, so the game polls the already-queued event. A key tap stays down
- * for at least 10 physics frames (~167 ms at 60 Hz): T16 showed shorter
- * presses land between physics frames and are missed despite input latches.
+ * for at least 10 physics frames (~167 ms at 60 Hz): shorter presses were
+ * seen to land between physics frames and are missed despite input latches.
  * Keys go through `Input.parse_input_event`, so `_input`/`_unhandled_input`
  * handlers and runtime-registered InputMap actions both see them. Mouse goes
  * through the real viewport (`push_input` at the control's centre); the

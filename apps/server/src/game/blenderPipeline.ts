@@ -102,7 +102,7 @@ export const reviewKey = (
     .update(`\0${styleHash}\0${kit}`)
     .digest("hex");
 
-/** What `run.py pass` prints (§2.8). */
+/** What `run.py pass` prints: one JSON result line. */
 export const PassResult = Schema.Struct({
   kind: Schema.Literals(["character", "prop"]),
   objects: Schema.Array(Schema.String),

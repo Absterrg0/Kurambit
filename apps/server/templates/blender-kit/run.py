@@ -10,7 +10,7 @@ params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.js
 Writes the GLB and prints KURAMBIT_RESULT {kind, objects, measured, refusals, parts,
 usedPalette, armatures, creatures, notes}: armatures are those the lock's rig governs, creatures
 (name to its own rig id) those a generated creature brought, which keep their own skeleton. It works on its own copy of the scene: the live scene and the game folder
-are never touched (D7), and what it measures is the GLB it wrote, so the review, the export and
+are never touched, and what it measures is the GLB it wrote, so the review, the export and
 the sidecar all describe the same bytes."""
 import json
 import os

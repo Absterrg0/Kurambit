@@ -294,7 +294,7 @@ export const comparedSource = (
 
 /**
  * Why an operation's sources could not be identified, as the one error every
- * consumer raises (CONTRACT A7): a link in the project is the game's
+ * consumer raises, so every operation refuses alike: a link in the project is the game's
  * (`symlink`); more files than a build reads is the game's (`command-failed`,
  * naming the limit); a tree that changed while it was read is transient
  * (`tool-failed`); an unreadable one is ours (`io`). Never `invalid-input`,

@@ -41,7 +41,7 @@ export type GameRunEnding = typeof GameRunEnding.Type;
 export const GameKeepGoingMode = Schema.Literals(["off", "guided", "autopilot"]);
 export type GameKeepGoingMode = typeof GameKeepGoingMode.Type;
 
-/** Why the run chose a step, in the order it looks (design §2.2). */
+/** Why the run chose a step, in the order it looks. */
 export const GameRunStepWhy = Schema.Literals([
   "steer",
   "blocker",
@@ -91,7 +91,7 @@ export const GameKeepGoingStepRef = Schema.Struct({
   /** Null while in flight. */
   verdict: Schema.NullOr(GameStepVerdict),
   reason: Schema.String,
-  /** Kept, changed game files, and made no watched fact worse (contract §8, F2). */
+  /** Kept, changed game files, and made no watched fact worse. */
   gain: Schema.Boolean,
   delta: Schema.Array(GameFactDelta).check(Schema.isMaxLength(3)),
   minutes: Schema.NullOr(Schema.Number),
@@ -134,7 +134,7 @@ export const GameKeepGoingStatus = Schema.Struct({
   resumable: Schema.Boolean,
   /** Why keep going cannot run on this game or chat ("Keep going needs an engine…", "Keep going is on in <chat>"); null when it can. */
   blocked: Schema.NullOr(Schema.String),
-  /** The one plain line (design §4.3, §7.2). */
+  /** The one plain line the control, the banner and the tool show. */
   message: Schema.String,
 });
 export type GameKeepGoingStatus = typeof GameKeepGoingStatus.Type;

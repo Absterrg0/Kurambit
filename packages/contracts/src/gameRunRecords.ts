@@ -126,7 +126,7 @@ export type GameRunRoundRecord = typeof GameRunRoundRecord.Type;
 // ── Steps the decider plans. ───────────────────────────────────────────────
 export const GameRunProposal = Schema.Struct({
   why: GameRunStepWhy,
-  /** The body the step message carries (design §2.2), without its header and tail. */
+  /** The body the step message carries, without its header and tail. */
   text: Schema.String.check(Schema.isMaxLength(8000)),
   /** The fact a blocker or fact step targets; null otherwise. */
   target: Schema.NullOr(GameFactId),
@@ -149,7 +149,7 @@ export const GameRunTurnStep = Schema.Struct({
   kind: Schema.Literal("turn"),
   id: Schema.Number,
   proposal: GameRunProposal,
-  /** The steer entries this message carries: the captured prefix of GameRun.steer (design §9). */
+  /** The steer entries this message carries: the captured prefix of GameRun.steer. */
   steer: Schema.Array(Schema.String),
   /** The folder's build at the look; the reactor compares nothing against it, it is for the record. */
   base: Schema.NullOr(GameBuildId),
@@ -162,7 +162,7 @@ export const GameRunJudgeStep = Schema.Struct({
   kind: Schema.Literal("judge"),
   id: Schema.Number,
   build: GameBuildId,
-  /** The turn build's recorded base (phase 1 recordTurn). */
+  /** The turn build's recorded base (GameBuilds.recordTurn). */
   base: Schema.NullOr(GameBuildId),
 });
 export type GameRunJudgeStep = typeof GameRunJudgeStep.Type;
@@ -301,7 +301,7 @@ export const GameRun = Schema.Struct({
   ending: Schema.NullOr(GameRunEnding),
   /** The person's notes for the next step. */
   steer: Schema.Array(Schema.String),
-  /** Never-repeat (design §4.2): proposals the run will not make again, with why. */
+  /** Never-repeat: proposals the run will not make again, with why. */
   setAside: Schema.optionalKey(
     Schema.Array(Schema.Struct({ key: Schema.String, text: Schema.String, why: Schema.String })),
   ),

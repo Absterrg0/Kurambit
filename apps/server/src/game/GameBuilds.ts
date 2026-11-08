@@ -930,7 +930,7 @@ const make = Effect.gen(function* () {
       const build = yield* resolve(g, ref);
       const result = yield* restoreWithoutRun(threadId, g, build, commandId, options.expect);
       if (result.moved !== "moved-on") yield* playRestored(threadId, g);
-      // Undo, Redo or Go back moved the folder a Guided proposal read (K2).
+      // Undo, Redo or Go back moved the folder a Guided proposal read: the person goes first.
       if (result.moved === "restored")
         yield* Effect.flatMap(projectStep(projections, g.projectId), (located) =>
           located === null ? Effect.void : supersedeProposal(engine, located),

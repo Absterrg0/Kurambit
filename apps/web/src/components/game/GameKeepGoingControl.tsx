@@ -33,7 +33,7 @@ const isMode = (value: unknown): value is GameKeepGoingMode =>
   KEEP_GOING_MODES.some((entry) => entry.mode === value);
 
 /**
- * Keep going in the composer's mode position (design §1.1), the way T3's
+ * Keep going in the composer's mode position, the way T3's
  * runtime-mode select rises in autonomy: Off, Guided, Autopilot, and a budget.
  * `composer.mode` opens it. It re-renders only when a run push rereads the status.
  */

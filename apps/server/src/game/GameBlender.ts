@@ -321,7 +321,7 @@ const GAME_PX: Readonly<Record<GameStyleView, number>> = {
   isometric: 64,
 };
 const isReason = Schema.is(GameOperationError.fields.reason);
-/** What kurambit.character prints (§2.8). */
+/** What kurambit.character prints: one JSON result line. */
 const CharacterMade = Schema.Struct({
   armature: Schema.String,
   meshes: Schema.Array(Schema.String),
@@ -331,7 +331,7 @@ const CharacterMade = Schema.Struct({
   height: Schema.Number,
   notes: Schema.Array(Schema.String),
 });
-/** What kurambit.review prints (§2.8). */
+/** What kurambit.review prints: one JSON result line. */
 const ReviewRender = Schema.Struct({
   image: Schema.String,
   width: Schema.Number,
@@ -390,7 +390,7 @@ const STANDARD_BODY_PACKS = LIBRARY_CATALOG.filter(
 const MPFB_MISSING = `An mpfb body needs MPFB2, which is not installed. Only the person installs it, in Settings → Game tools (the MPFB2 row); say so in your reply if the request needs it. Meanwhile use a library body: {library: {pack: "quaternius-universal-base-characters", file: "Base Characters/Godot - UE/Superhero_Female_FullBody.gltf"}} (or Superhero_Male_FullBody.gltf), or the Universal Animation Library's mannequin.`;
 /**
  * The person's route refuses a made character on library: an MPFB2 body, or a mesh no library
- * or import stamped (§8). Props are modelled on every route, and a clip keyed here is no mesh.
+ * or import stamped. Props are modelled on every route, and a clip keyed here is no mesh.
  */
 const routeRefusalOf = (candidate: Candidate, route: GameCharacterRoute) =>
   candidate.kind !== "character"
@@ -1342,7 +1342,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * One kit entry in the live scene (§2.8): its one result line, decoded; its refusal as the
+   * One kit entry in the live scene: its one result line, decoded; its refusal as the
    * reason it names; anything it raised fails the call with the traceback already.
    */
   const kitCall = <A>(
@@ -1525,7 +1525,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The one-shot pass on a copy of the saved scene (§2.8): the style pass and the measurement.
+   * The one-shot pass on a copy of the saved scene: the style pass and the measurement.
    * It writes the GLB to `glb`, a name of this run's that the caller renames into place; its
    * result is returned as it measured it.
    */
@@ -1696,7 +1696,7 @@ const make = Effect.gen(function* () {
   /**
    * The locked part of a review: the pass of this key (run now, or the one a review already ran,
    * kept as pass.json), its composite rendered in a throwaway scene of the live session, and only
-   * then candidate.json, so an export never follows a review nobody saw (§0.5).
+   * then candidate.json, so an export never follows a review nobody saw.
    */
   const reviewed = (
     root: string,
@@ -1798,7 +1798,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Look's review mode (§2.2): digest the objects, reuse the pass of that key or run it, then
+   * Look's review mode: digest the objects, reuse the pass of that key or run it, then
    * render its composite in a throwaway scene of the live session.
    */
   const review = (root: string, input: GameBlenderLookInput) =>
@@ -2570,7 +2570,7 @@ const make = Effect.gen(function* () {
               `${offRig} The import was taken out of the live scene again.`,
             );
           }
-          // The import stays in the live scene, stamped with its source and licence (§2.8): the
+          // The import stays in the live scene, stamped with its source and licence: the
           // export composes the ledger from the stamps, after a review like anything built here.
           // Its clips are stamped too, so a rigged import's animations are credited to it, not
           // called made here; a clip keyed later on its armature carries no stamp and is.
@@ -2611,8 +2611,8 @@ const make = Effect.gen(function* () {
       holding(
         root,
         Effect.gen(function* () {
-          // An export promotes the candidate its review left for these objects as they are now
-          // (F1, D6): nothing is passed, measured or refused again here.
+          // An export promotes the candidate its review left for these objects as they are now:
+          // nothing is passed, measured or refused again here, so it ships what was reviewed.
           const manifest = yield* projects.read(root);
           const engineDir = manifestProject(manifest);
           const realRoot = yield* realRootOf(root);

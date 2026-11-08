@@ -1,4 +1,4 @@
-// PURE. Keep going's policy (design §2–§5, contract K1–K10, F2): records and
+// PURE. Keep going's policy: records and
 // measured evidence in, the next step out. One cycle is look, then (Guided)
 // propose, then turn, judge, maybe undo, then the step's record, then look
 // again. Every input arrives as a step result a job measured; nothing here
@@ -29,20 +29,20 @@ export type JudgeResult = Result<"judge">;
 export type UndoResult = Result<"undo">;
 
 const MIN = 60_000;
-/** A typical step: a turn of about 5 min, then facts of about 3 (K7). */
+/** A typical step: a turn of about 5 min, then facts of about 3. */
 const STEP_TYPICAL_MS = 8 * MIN;
 const CAP_FLOOR_MS = 5 * MIN;
 const CAP_CEILING_MS = 15 * MIN;
-/** Guided starts its proposal after this unless the person answers (K9). */
+/** Guided starts its proposal after this unless the person answers. */
 const PROPOSAL_WAIT_MS = 60_000;
-/** Steps in a row with no gain before the run pauses (F2). */
+/** Steps in a row with no gain before the run pauses: it stopped improving the game. */
 const STALL_LIMIT = 2;
-/** Misses of one key (undone, or its target still bad) before it is set aside (K8). */
+/** Misses of one key (undone, or its target still bad) before it is set aside, so it is never tried forever. */
 const MISS_LIMIT = 2;
 const TEXT_MAX = 8000;
 
 /**
- * The facts keep going acts on and guards (design §3.1). Motion, detail and
+ * The facts keep going acts on and guards. Motion, detail and
  * colour are heuristics: shown, never proposed and never guarded. Of the scene
  * report, only what the scene's own geometry decides is watched (a body sunk in
  * the ground, a player the camera cannot see); clipping, falling, the camera in
@@ -63,7 +63,7 @@ const WATCHED: ReadonlySet<GameFactId> = new Set([
 ]);
 const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 
-// ── The step's text (design §2.2): four templates, the facts' own wording and the agent's own line.
+// ── The step's text: four templates, the facts' own wording and the agent's own line.
 const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
   steer: "your note",
   blocker: "blocker",
@@ -170,7 +170,7 @@ const tierEnding = (facts: GameBuildFacts, id: "idle" | "masher" | "skilled") =>
   return fact.status === "measured" ? fact.value.ending : null;
 };
 
-/** The facts that block the game, in display order (design §2.2, row 2). */
+/** The facts that block the game, in display order. */
 const blockers = (facts: GameBuildFacts, views: Views): ReadonlyArray<GameFactId> =>
   (["boots", "idle", "masher", "skilled", "freeze"] as const).filter((id) =>
     id === "idle" || id === "masher" || id === "skilled"
@@ -185,7 +185,7 @@ export interface Regression {
 }
 
 /**
- * K4: what got worse from `base` to `build`. Only a comparable delta of a
+ * What got worse from `base` to `build`. Only a comparable delta of a
  * watched fact counts, and only when its reading crosses into `bad` (or
  * skilled stops winning); a fact already bad that gets worse is the next
  * blocker, not a regression. Design regressions do not count on a step the
@@ -238,7 +238,7 @@ const chips = (
   ].slice(0, 3);
 };
 
-// ── Choosing the next step (K3). ────────────────────────────────────────────
+// ── Choosing the next step. ─────────────────────────────────────────────────
 const asideKeys = (state: RunState) => new Set(state.setAside.map((entry) => entry.key));
 
 const factStep = (why: "blocker" | "fact", id: GameFactId, views: Views): GameRunProposal => {
@@ -271,7 +271,7 @@ export const steerProposal = (state: RunState): GameRunProposal | null => {
 };
 
 /**
- * The order of evidence (design §2.2): the person's notes, a blocker, a retry
+ * The order of evidence, the person's first: their notes, a blocker, a retry
  * of an undone step, the play bot, a failing fact, then the agent's own next
  * line. Every candidate whose key is set aside is passed over. Null: nothing
  * left to propose.
@@ -328,7 +328,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
   return null;
 };
 
-// ── Budget (K7). ────────────────────────────────────────────────────────────
+// ── Budget. ─────────────────────────────────────────────────────────────────
 const remaining = (state: RunState, now: number) =>
   state.budgetEndsAt === null ? Number.POSITIVE_INFINITY : state.budgetEndsAt - now;
 /** Another step fits: a turn and its facts take about 8 minutes. */
@@ -338,7 +338,7 @@ const fitsBudget = (state: RunState, now: number): boolean =>
 const turnCap = (state: RunState, now: number): number =>
   Math.max(CAP_FLOOR_MS, Math.min(CAP_CEILING_MS, remaining(state, now)));
 
-// ── Steer and its captured prefix (K14, design §9). ─────────────────────────
+// ── Steer and its captured prefix. ──────────────────────────────────────────
 /**
  * How many entries at the front of GameRun.steer the step in flight carries
  * and has not yet taken: a turn step holds them until its turn starts. A
@@ -418,7 +418,7 @@ export const startTurn = (
 /**
  * The look's evidence becomes a proposal: Autopilot starts it at once; Guided
  * shows it with a deadline, except the person's own note, which they already
- * asked for (K9).
+ * asked for.
  */
 export const applyLook = (state: RunState, look: LookResult, now: number): Next => {
   if (!fitsBudget(state, now)) return end(state, "budget", "", "the budget holds no other step");
@@ -517,7 +517,7 @@ const targetStillBad = (turn: GameRunTurnStep, build: GameBuildFacts | null) =>
   toneOf(viewsOf(build), turn.proposal.target) === "bad";
 
 /**
- * F2: a step gains when it was kept, made no watched fact worse, and changed
+ * A step gains when it was kept, made no watched fact worse, and changed
  * the game (lane, art/, ASSETS.md). A watched fact that got better, or the
  * step's own target closing, count too: the person's own step, a kept retry,
  * the bot step once skilled is measured, a blocker or fact no longer bad.
@@ -547,7 +547,7 @@ const misses = (records: ReadonlyArray<StepRecord>, key: string) =>
 
 /**
  * A step's record lands: never-repeat, the stall and harness streaks, then the
- * next look, or the ending they call for (K6, K7, K8, F2).
+ * next look, or the ending they call for.
  */
 const settle = (state: RunState, record: StepRecord, log: string): Next => {
   const records = [...state.records, record];
@@ -576,7 +576,7 @@ const settle = (state: RunState, record: StepRecord, log: string): Next => {
   return go(next, LOOK, log, record);
 };
 
-/** The step's turn ended (K2, design §2.5): judge what it landed, or look again. */
+/** The step's turn ended: judge what it landed, or look again. */
 export const applyTurn = (
   state: RunState,
   turn: GameRunTurnStep,
@@ -660,7 +660,7 @@ export const applyTurn = (
 
 /**
  * The folder's build when the step's turn started (the turn build's recorded
- * base, contract §2.3); absent or null is unknown, never a match.
+ * base); absent or null is unknown, never a match.
  */
 const startBuildOf = (result: TurnResult): GameBuildId | null =>
   (result as TurnResult & { readonly startBuild?: GameBuildId | null }).startBuild ?? null;
@@ -680,7 +680,7 @@ export const undoReason = (cycle: Cycle & { readonly judge: JudgeResult }): stri
     .map((r) => deltaText(r.delta))
     .join("; ");
 
-/** K4: keep, or undo the step whose build made a watched fact worse. */
+/** Keep, or undo the step whose build made a watched fact worse. */
 export const applyJudge = (
   state: RunState,
   cycle: Cycle,
@@ -735,7 +735,7 @@ export const applyJudge = (
   );
 };
 
-/** K5: the undo landed, or found the game moved on, or the person had undone it first. */
+/** The undo landed, or found the game moved on, or the person had undone it first. */
 export const applyUndo = (
   state: RunState,
   cycle: Cycle & { readonly judge: JudgeResult },

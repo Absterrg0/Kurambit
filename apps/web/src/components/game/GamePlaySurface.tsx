@@ -34,7 +34,7 @@ const frameStyle = (viewport: GameViewport) => ({
 const visibilityMessage = (visible: boolean) => ({ type: "studio-visibility" as const, visible });
 
 /**
- * What the template's bridge (`shell/studio.js`) says about the page (D3): its
+ * What the template's bridge (`shell/studio.js`) says about the page: its
  * first error, bounded, or that the game booted. Older games never send them.
  */
 export type StudioMessage =

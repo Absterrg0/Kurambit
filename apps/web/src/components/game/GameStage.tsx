@@ -218,7 +218,7 @@ function ThreadGameStage({
     turnUndo.canRestore &&
     !turnUndo.pending;
   const live = useAtomValue(liveSignal(threadRef));
-  // Which live change the frame shows (A6): while this chat's turn runs, at
+  // Which live change the frame shows: while this chat's turn runs, at
   // most one per window, latest wins; at once otherwise and at the turn's end.
   const [liveShown, setLiveShown] = useState<LiveShown | null>(null);
   const [liveWokeAt, setLiveWokeAt] = useState(0);
@@ -303,7 +303,7 @@ function ThreadGameStage({
   // The live game's first page error, for the frame that threw it.
   const [studioError, setStudioError] = useState<{ key: string; text: string } | null>(null);
   // A shown live game opens itself while the server says nobody asked for it
-  // since it started (A4); once someone stopped it, Play is the person's.
+  // since it started; once someone stopped it, Play is the person's.
   const [liveOpenAsked, setLiveOpenAsked] = useState(false);
   // The action in flight or failed here, so a live game's card names it.
   const [errorAction, setErrorAction] = useState<GameAction | null>(null);
@@ -488,7 +488,7 @@ function ThreadGameStage({
   const engine = GAME_ENGINES[data.manifest.engine.name];
   const stageKind = engine.stage;
   // The copy the stage was asked to play shows only while the server says it
-  // plays (CONTRACT A3), so a Stop from the palette, another client or an
+  // plays, so a Stop from the palette, another client or an
   // agent takes the banner down. Until the status is read again after the ask,
   // the ask stands.
   if (asked !== askedSeen) {
@@ -532,7 +532,7 @@ function ThreadGameStage({
     turnBuildPending: sawTurnEnd && endedTurnBuilt && !operationSinceTurnEnd,
   });
   // An ask is answered once the server serves it; a later loss of the serve
-  // (a server restart) asks again (design §2.2).
+  // (a server restart) asks again.
   if (liveOpenAsked && data.live !== "off") setLiveOpenAsked(false);
   if (
     stageKind === "live" &&
@@ -569,7 +569,7 @@ function ThreadGameStage({
     operation.revision > seenRevision;
   // The folder's frame is not on screen: a copy, a compare, or another pane.
   const frameHidden = hidden || playTarget !== null || compare !== null;
-  // Fold the served identity across reads (D2): a live change or a replaced
+  // Fold the served identity across reads: a live change or a replaced
   // export remounts the game, unless the person is in it (the chip asks) or
   // it is not on screen (it loads when shown). Absorbed reads return the same
   // object, so this only adjusts state when the fold advanced.
@@ -1103,7 +1103,7 @@ function ThreadGameStage({
           phase={phase}
           viewport={data.viewport}
           gameName={data.manifest.name}
-          // A live remount lands in play, the first load and Reload on the title (A5).
+          // A live remount lands in play, the first load and Reload on the title.
           previewUrl={
             stageKind === "live" && frame.intoPlay && data.previewUrl !== null
               ? `${data.previewUrl}${LIVE_PLAY_HASH}`

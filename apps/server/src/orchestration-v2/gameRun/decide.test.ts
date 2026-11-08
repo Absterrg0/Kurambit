@@ -199,7 +199,7 @@ describe("a keep-going run", () => {
     ).toBe("no-turn-loop");
   });
 
-  it("goes look, turn, judge, undo, record, and proposes the retry next (K1, K4, K5)", () => {
+  it("goes look, turn, judge, undo, record, and proposes the retry next", () => {
     const store = new Store();
     store.start("autopilot", 60);
     expect(store.run).toMatchObject({
@@ -290,7 +290,7 @@ describe("a keep-going run", () => {
     ).toBe("wrong-kind");
   });
 
-  it("keeps the turn's notes until it starts, and gives them back when Off stops it (K11, K14)", () => {
+  it("keeps the turn's notes until it starts, and gives them back when Off stops it", () => {
     const store = new Store();
     store.start("autopilot");
     store.ok({ type: "game-run.steer", runId: store.run.id, note: "Make it night." });
@@ -316,7 +316,7 @@ describe("a keep-going run", () => {
     });
   });
 
-  it("Guided: the default starts at its deadline, hold clears it, Skip sets the step aside (K9)", () => {
+  it("Guided: the default starts at its deadline, hold clears it, Skip sets the step aside", () => {
     const store = new Store();
     store.start("guided");
     store.complete(look());
@@ -375,7 +375,7 @@ describe("a keep-going run", () => {
     ).toBe("no-decision");
   });
 
-  it("a turn on the game supersedes the proposal, and a note starts as the person's step (K2, K9)", () => {
+  it("a turn on the game supersedes the proposal, and a note starts as the person's step", () => {
     const store = new Store();
     store.start("guided");
     store.complete(look());

@@ -62,7 +62,7 @@ export const projectStep = (
       : ({ run, record } satisfies Located);
   });
 
-/** A pending proposal is superseded (K2): the run looks again once the game is idle. */
+/** A pending proposal is superseded, since the person goes first: the run looks again once the game is idle. */
 export const supersedeProposal = (
   engine: Orchestrator.OrchestratorV2["Service"],
   located: Located,

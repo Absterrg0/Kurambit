@@ -5,7 +5,7 @@
 // the step when its run starts, cancels a step run that came up queued behind
 // someone else's turn, and reports the turn's typed result once its run is
 // over and its checkpoint (the build) has landed. It also does what keep going
-// owes the game's other turns (K2: the person goes first, in any chat): a turn
+// owes the game's other turns (the person goes first, in any chat): a turn
 // that starts in another chat supersedes a waiting proposal and stops a step
 // turn at work, a turn that ends wakes a look or an undo waiting for the game
 // to be idle, and archiving the chat keep going runs in stops it. Every change
@@ -565,7 +565,7 @@ const make = Effect.gen(function* () {
   /**
    * Keep going runs in an open chat: archiving the chat it runs in stops it
    * (resumable once the chat is back), and its step turn at work is stopped
-   * with it (K11). The person's own turns there are left to T3.
+   * with it. The person's own turns there are left to T3.
    */
   const onArchived = (threadId: ThreadId) =>
     Effect.gen(function* () {

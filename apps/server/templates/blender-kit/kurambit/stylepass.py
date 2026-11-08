@@ -7,9 +7,9 @@ agent's materials and modifiers. From STYLE.json:
            one small atlas of vertical-gradient swatches (shading.gradient); each face samples its
            swatch by height in the model, so every part gets the same soft top light. Two
            materials result, Palette and Glow (shading.glow), on the one atlas. Without a hex list
-           the materials are kept (D3), their textures scaled down to budget.texture.
+           the materials are kept, their textures scaled down to budget.texture.
   scale    scale.character: a character is scaled to that standing height on its armature's
-           object, so clip units are unchanged (D4). Props and generated creatures keep their
+           object, so clip units are unchanged. Props and generated creatures keep their
            modelled metres.
 A character's meshes are joined into one skinned mesh: one mesh, two draw calls."""
 import math

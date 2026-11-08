@@ -1012,7 +1012,7 @@ const make = Effect.gen(function* () {
         processes: processes.list(root),
         // Status observes the preview; it never switches it.
         previewUrl: live ? preview.liveUrl(root) : preview.url(root),
-        // Phase 2 fix round (L): the serve's state, held by GamePreview.
+        // The serve's state, held by GamePreview.
         live: live ? preview.liveState(root) : ("off" as const),
         characters: characterRoute(manifest),
         ...(yield* art.lanes.pipe(

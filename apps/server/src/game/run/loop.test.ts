@@ -138,7 +138,7 @@ const cycle = (turn = turnStep(), result = turnResult()): Loop.Cycle => ({
 const judged = (s: RunState, base: GameBuildFacts, build: GameBuildFacts, c = cycle()) =>
   Loop.applyJudge(s, c, { kind: "judge", base, build: { ...build, build: BUILD } }, NOW);
 
-describe("worse (K4)", () => {
+describe("worse", () => {
   it("counts a crossing into bad, never a fact already bad that gets worse", () => {
     const crashed = facts({ masher: tier("crashed", 12) });
     expect(Loop.regressions(facts(), crashed, false).map((r) => [r.delta.id, r.kind])).toEqual([
@@ -215,7 +215,7 @@ describe("worse (K4)", () => {
   });
 });
 
-describe("gain (F2)", () => {
+describe("gain", () => {
   const input = (patch: Partial<Parameters<typeof Loop.gain>[0]> = {}) => ({
     verdict: "kept" as const,
     files: 0,
@@ -276,7 +276,7 @@ describe("gain (F2)", () => {
   });
 });
 
-describe("never repeat (K8)", () => {
+describe("never repeat", () => {
   const easier = facts({ winnableWithoutSkill: { status: "measured", value: true } });
   const undoOnce = (s: RunState, c: Loop.Cycle) =>
     Loop.applyUndo(
@@ -332,7 +332,7 @@ describe("never repeat (K8)", () => {
   });
 });
 
-describe("the proposal (K3, K10)", () => {
+describe("the proposal", () => {
   it("follows the order of evidence and ends done only on Next: none", () => {
     const crashing = facts({ masher: tier("crashed", 12) });
     expect(Loop.propose(state({ steer: ["Make it night."] }), look({ facts: crashing }))?.why).toBe(
@@ -384,7 +384,7 @@ describe("the proposal (K3, K10)", () => {
   });
 });
 
-describe("the captured prefix (K14)", () => {
+describe("the captured prefix", () => {
   const runId = GameRunId.make("run_1");
   const record = (status: GameRunStep["status"], steer: ReadonlyArray<string>): GameRunStep => ({
     id: gameRunStepId(runId, 3),

@@ -103,7 +103,7 @@ export function useBuildRestore(
 }
 
 /**
- * One chat turn's Undo, Redo or Go back (B4), or the game's latest turn's when
+ * One chat turn's Undo, Redo or Go back, or the game's latest turn's when
  * `runId` is null: the strip and the palette offer the same restore. It is
  * Kurambit's build restore, never T3's conversation revert, so the agent keeps
  * the turn in its context and the undo has its own way back.
@@ -210,7 +210,7 @@ export function useMeasureOnOpen(threadRef: ScopedThreadRef) {
   };
 }
 
-/** Stops one build's copy, never the folder's own preview (CONTRACT A3, `game.buildStop`). */
+/** Stops one build's copy, never the folder's own preview (`game.buildStop`). */
 export function useBuildStop(threadRef: ScopedThreadRef) {
   const stop = useAtomCommand(gameEnvironment.buildStop, { reportFailure: true });
   return async (build: GameBuildId) => {

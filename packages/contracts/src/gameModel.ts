@@ -27,7 +27,7 @@ export const GameAssetSource = Schema.Struct({
   /** The game's character route when it was exported; where each part came from is in parts. */
   route: Schema.Literals(["blender", "library", "generated"]),
   parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
-  /** The named subject a placeholder stands in for; null when it is the real thing. (Phase 2 writes it.) */
+  /** The named subject a placeholder stands in for; null when it is the real thing. Nothing writes one yet. */
   standIn: Schema.NullOr(Schema.String.check(Schema.isMaxLength(140))),
   /** The concept it was reviewed beside: "art/CONCEPT.md#<name>" and/or "art/concepts/<name>.png"; null when none. */
   concept: Schema.NullOr(Schema.String.check(Schema.isMaxLength(300))),
@@ -149,7 +149,7 @@ export const GameModelSidecar = Schema.Struct({
   bytes: NonNegativeInt,
   ...GameModelMeasure.fields,
   measured: Schema.Struct({
-    /** The kit's content hash (§2.8). */
+    /** The Blender kit's content hash. */
     kit: Schema.String,
     /** The review key the export promoted. */
     key: Schema.String,

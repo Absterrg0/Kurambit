@@ -12,7 +12,7 @@ const modeLabel = (mode: string) =>
   KEEP_GOING_MODES.find((entry) => entry.mode === mode)?.label ?? mode;
 
 /**
- * Keep going above the composer, in its own chat (design §7.2, §7.3): what
+ * Keep going above the composer, in its own chat: what
  * the live run is doing with Stop, a Guided proposal with Start now, Edit
  * and Skip, or why it paused with Resume. Times are clock times; nothing
  * ticks, and it re-renders only on run pushes. `hidesNext` says when keep

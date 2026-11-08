@@ -68,8 +68,8 @@ export function GameBuildDetail({
   useEffect(() => {
     if (neverMeasured) void sendMeasure(build.id);
   }, [neverMeasured, build.id, sendMeasure]);
-  // The folder holds this build unless the list knows of an edit since (phase
-  // 1's folder-build rule): going back to it restores nothing, and its record
+  // The folder holds this build unless the list knows of an edit since: going
+  // back to it restores nothing, and its record
   // would replace the undo's, taking Redo away.
   const isCurrent = list?.current === build.id && list.folderEdited !== true;
   // The server stays authoritative; these say why before the person presses.

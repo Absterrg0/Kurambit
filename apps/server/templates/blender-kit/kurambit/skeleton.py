@@ -446,7 +446,7 @@ def align_pose(body_arm, std_world, std_bones, std_name):
 
 def conform(std_arm, body_arm, body_meshes, name_map, chains=()):
     """Fits std_arm (the standard armature, freshly imported) to a body, keeping every bone's
-    orientation and roll (D5), and skins the body to it. body_arm is removed afterwards.
+    orientation and roll, so clips made for it play on the body, and skins the body to it. body_arm is removed afterwards.
 
     1. Pose the body's rig onto the standard rest directions and bake that pose into the meshes.
     2. Move each standard joint onto the body's joint; joints the body lacks (leaf bones) keep

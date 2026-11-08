@@ -1322,7 +1322,7 @@ type GameChatShell = Pick<
 >;
 
 /**
- * A game's main chat (D6): its oldest live top-level chat. Phase 1's create
+ * A game's main chat: its oldest live top-level chat. A game's create
  * launches exactly this thread with the brief; archiving it promotes the next.
  */
 export function gameMainThread<T extends GameChatShell>(threads: readonly T[]): T | null {

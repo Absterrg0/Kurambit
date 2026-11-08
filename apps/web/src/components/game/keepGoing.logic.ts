@@ -7,7 +7,7 @@ import type {
   GameRunStepWhy,
 } from "@kurambit/contracts";
 
-/** A clock time in the reader's locale: nothing on the client counts down (K15). */
+/** A clock time in the reader's locale: nothing on the client counts down. */
 const clockTime = (at: string): string => {
   const date = new Date(at);
   return Number.isNaN(date.getTime())
@@ -187,7 +187,7 @@ export type KeepGoingBannerView =
   | { readonly kind: "ended"; readonly id: string; readonly title: string };
 
 /**
- * PURE. The keep-going banner in the run's own chat (design §7.2, §7.3), or
+ * PURE. The keep-going banner in the run's own chat, or
  * null. Live lines are composed here so their times are the reader's clock;
  * a pause or an end reads the server's one plain line.
  */

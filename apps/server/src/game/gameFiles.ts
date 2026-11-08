@@ -10,7 +10,8 @@ import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
  * The shared atomic write for files the server keeps in a game folder (records,
  * the selected build, settings it rewrites), as a game operation's error. Made
  * once per service so its methods need nothing from the environment. A link an
- * agent planted at the target is replaced, never written through (CONTRACT §7).
+ * agent planted at the target is replaced, never written through, so no write
+ * leaves the game folder.
  */
 export const makeAtomicWriter = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;

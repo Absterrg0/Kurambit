@@ -67,7 +67,7 @@ export type GameTimelineRequest = {
 };
 
 /**
- * The game's builds under the Stage (D5): one mark per build, oldest to
+ * The game's builds under the Stage: one mark per build, oldest to
  * newest, then Now, the live folder. The selected mark's line holds Play and
  * its one restore; its popover holds the full detail. Reads only the builds
  * list and its chips; a build's facts load only in an open popover.

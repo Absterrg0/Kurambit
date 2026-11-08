@@ -12,7 +12,7 @@ export const turnBuildIsFolder = (view: TurnBuildView): boolean =>
   view.current === view.build.id && view.folderEdited !== true;
 
 /**
- * What a turn's strip offers for the folder (B4): Undo on the game's latest
+ * What a turn's strip offers for the folder: Undo on the game's latest
  * turn build restores the build it was made from; after that, Redo restores
  * the folder from before the undo; an older turn goes back to its own build.
  */

@@ -558,7 +558,7 @@ const pendingProposal = (work: Work, run: GameRun, decisionId: string) => {
   return Result.succeed({ record, step: record.step });
 };
 
-/** K9: Start now, Skip, or hold the proposal while the person edits it. */
+/** The person's answer to a Guided proposal: Start now, Skip, or hold it while they edit it. */
 const decideCommand = (work: Work, command: Command<"game-run.decide">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(pendingProposal(work, run, command.decisionId), ({ record, step }) => {
@@ -648,7 +648,7 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
 
 /**
  * A step's work began. A turn step's turn is running: it takes the notes it
- * carries off the front of the run's steer (K14) and starts its cap.
+ * carries off the front of the run's steer and starts its cap.
  */
 const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
   Result.flatMap(live(work, command.runId), (run) =>
@@ -710,7 +710,7 @@ const nextOf = (
   result: GameRunStepResult,
 ): Result.Result<Loop.Next, GameRunRefusal> => {
   // A started turn that ends without landing gives back the notes its start
-  // took (K14), whichever way it ends.
+  // took, whichever way it ends, so no note of the person's is lost.
   const state =
     (result.kind === "ended" || result.kind === "failed") &&
     record.step.kind === "turn" &&
@@ -744,7 +744,7 @@ const nextOf = (
       return look === null ? wrong() : Result.succeed(Loop.applyLook(state, look, work.now));
     }
     case "propose": {
-      // Only the server reports on a proposal: a turn started on the game (K2.4).
+      // Only the server reports on a proposal: a turn started on the game.
       const decided = resultOf(result, "decided");
       return decided === null || decided.answer !== "superseded"
         ? refuse("wrong-kind", "A proposal is answered with game-run.decide.")

@@ -72,11 +72,11 @@ export interface GameLiveChange {
   readonly at: string;
 }
 
-/** A live push about the serve itself (A4), not a change under the folder. */
+/** A live push about the serve itself, not a change under the folder. */
 const LIVE_SERVE_MESSAGES: ReadonlySet<string> = new Set(["Serving", "Stopped"]);
 
 /**
- * Each live push for one thread's game (D1): files under the served folder
+ * Each live push for one thread's game: files under the served folder
  * changed and settled. Only the Stage's frame reads it; no query rereads on
  * it. `revision` counts pushes seen here, so it starts at 0 with none. The
  * serve opening or closing is the status's news, not a change to show.
@@ -129,7 +129,7 @@ export const projectTurnRunning = (ref: ScopedProjectRef | null) =>
 
 /**
  * What rereads a game's status: its operations and builds, and its live serve
- * opening or closing (A4), from any client, the palette or an agent. A
+ * opening or closing, from any client, the palette or an agent. A
  * "Changed <path>" push rereads nothing.
  */
 const statusSignalAtom = Atom.family((key: string) => {
@@ -384,7 +384,7 @@ export const turnBuild = (ref: ScopedThreadRef | null, runId: string | null) =>
     ? NO_TURN_BUILD
     : turnBuildAtom(`${ref.environmentId}\0${ref.threadId}\0${runId ?? ""}`);
 
-/** The build copies the server is playing for this game (CONTRACT A3). */
+/** The build copies the server is playing for this game. */
 export type GameBuildPlaying = GameStatus["buildPlays"][number];
 export const buildPlaysOf = (status: GameStatus): ReadonlyArray<GameBuildPlaying> =>
   status.buildPlays;
@@ -440,7 +440,7 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameStatus,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    // A build copy starting or stopping (A3) is a builds push; the status lists the copies.
+    // A build copy starting or stopping is a builds push; the status lists the copies.
     refreshTrigger: (target) =>
       statusSignalAtom(`${target.environmentId}\0${target.input.threadId}`),
   }),

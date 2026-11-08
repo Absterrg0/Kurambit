@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- Reads a build copy's GLB headers and sidecars from disk.
 // The static assets tier of a build's facts: every GLB under the engine's assets folder,
-// outside library/, read from its JSON and its sidecar. Never plays and never runs Blender
-// (D9). Numbers, not verdicts: Keep going does not watch this tier.
+// outside library/, read from its JSON and its sidecar. Never plays and never runs Blender,
+// so it is cheap on every build. Numbers, not verdicts: Keep going does not watch this tier.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";

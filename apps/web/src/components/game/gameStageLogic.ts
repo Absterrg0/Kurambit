@@ -213,7 +213,7 @@ export interface GameFrameFold {
   readonly key: string;
   readonly serve: GamePreviewServe;
   /**
-   * The load lands in play, not on the title (A5): a remount for a change the
+   * The load lands in play, not on the title: a remount for a change the
    * person was watching. The first load, a new session and Reload go to the title.
    */
   readonly intoPlay: boolean;
@@ -232,7 +232,7 @@ const showing = (serve: GamePreviewServe, intoPlay: boolean): GameFrameFold => (
 });
 
 /**
- * PURE. The frame after one read of what is served (D2). A new build or a
+ * PURE. The frame after one read of what is served. A new build or a
  * live change remounts a visible frame nobody is in. Under a player whose
  * frame has focus it is held until they press Reload, even after focus
  * leaves; while the Stage is hidden it is held silently and loads when the
@@ -276,7 +276,7 @@ export function reloadFrame(fold: GameFrameFold, at: number): GameFrameFold {
   return { ...showing(serve, false), key: `${frameKeyOf(serve)}#reload:${at}` };
 }
 
-/** The hash the three.js shell reads to skip its title and start the run (A5). */
+/** The hash the three.js shell reads to skip its title and start the run. */
 export const LIVE_PLAY_HASH = "#kurambit-play";
 
 /** A live change the Stage has applied: its push count and when it applied it (ms). */
@@ -285,11 +285,11 @@ export interface LiveShown {
   readonly at: number;
 }
 
-/** While this chat's turn runs, a live change applies at most this often (A6). */
+/** While this chat's turn runs, a live change applies at most this often. */
 export const LIVE_TURN_WINDOW_MS = 10_000;
 
 /**
- * PURE (A6). Which live change the frame shows. With no turn running, the
+ * PURE. Which live change the frame shows. With no turn running, the
  * latest at once. While this chat's turn runs, at most one change per window
  * (the latest wins); `wakeAt` is when the waiting one may apply, for one
  * timeout. A turn that ends applies what waits at once.
