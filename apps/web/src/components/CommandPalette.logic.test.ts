@@ -554,6 +554,37 @@ describe("buildThreadActionItems", () => {
     ]);
   });
 
+  it("finds an action by the title it shows and ranks that match first", () => {
+    const action = (value: string, title: string, searchTerms: ReadonlyArray<string>) => ({
+      kind: "action" as const,
+      value,
+      title,
+      searchTerms,
+      icon: null,
+      run: async () => undefined,
+    });
+    const actions: CommandPaletteGroup = {
+      value: "actions",
+      label: "Actions",
+      items: [
+        action("action:art-providers", "Art providers", ["art providers generated keys"]),
+        action("action:generated-art", "Generated art…", ["images", "sounds", "cost"]),
+        action("action:facts", "Show the build's facts", ["facts", "measured"]),
+      ],
+    };
+    const search = (query: string) =>
+      filterCommandPaletteGroups({
+        activeGroups: [actions],
+        query,
+        isInSubmenu: false,
+        projectSearchItems: [],
+        threadSearchItems: [],
+      })[0]?.items.map((item) => item.value);
+
+    expect(search("Show the build's facts")).toEqual(["action:facts"]);
+    expect(search("generated art")).toEqual(["action:generated-art", "action:art-providers"]);
+  });
+
   it("keeps accent-insensitive setting results", () => {
     const groups = filterCommandPaletteGroups({
       activeGroups: [],

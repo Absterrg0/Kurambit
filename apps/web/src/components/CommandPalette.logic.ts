@@ -394,6 +394,12 @@ function rankCommandPaletteItemMatch(
   normalizedQuery: string,
   queryTokens: ReadonlyArray<string>,
 ): number {
+  if (item.searchRecency === undefined && typeof item.title === "string") {
+    const titleRank = rankSearchFieldMatch(item.title, normalizedQuery, queryTokens);
+    if (titleRank !== Number.NEGATIVE_INFINITY) {
+      return 1_000 + titleRank;
+    }
+  }
   const terms = item.searchTerms.filter((term) => term.length > 0);
   if (terms.length === 0) {
     return 0;
@@ -466,7 +472,10 @@ export function filterCommandPaletteGroups(input: {
 
   return searchableGroups.flatMap((group) => {
     const items = Arr.filterMap(group.items, (item, index) => {
-      const haystack = normalizeSearchText(item.searchTerms.join(" "));
+      // The title too: typing what the palette shows must find it.
+      const haystack = normalizeSearchText(
+        [...item.searchTerms, typeof item.title === "string" ? item.title : ""].join(" "),
+      );
       if (!queryTokens.every((token) => haystack.includes(token))) {
         return Result.failVoid;
       }
