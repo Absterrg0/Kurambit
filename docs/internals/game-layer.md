@@ -6,29 +6,20 @@
 A new game is a chat: its first message is the brief, and every turn that changes the game is a
 build (the turn's T3 checkpoint). On engines whose profile has `turnLoop`, the harness plays that
 build on the Stage and measures its facts in the background. Undo restores the build it was made
-from (`base`). The production run is an older, separate loop. It stays until phase 3, keep going, replaces it
-with a run on top of the same turns (phase 2 is the one-screen app). The harness, not the model, owns every check that
-matters.
+from (`base`). Keep going is a run on top of the same turns. The harness, not the model, owns every
+check that matters.
 
 ## Decisions that span the services
 
 - Game operations are exclusive per game (`GameOperations.exclusive`) and reported as events, so
   the Game panel and the agent tools see the same operation, and a second operation on a game
-  refuses as busy rather than racing the first. While a production run holds the game (live,
-  finishing or restoring), it is the folder's one writer: other owners' writing operations are
-  refused `busy` with `runReason: "run-live"` (`GameProjectService.admitWrite`), reads and Play of
-  an exported build stay open, and the run's role threads pass only for their own agent: admission
-  trusts `GameCaller` (the MCP game tools mark an agent and whether it is a run role; a client call
-  is the client), never the thread being viewed, so a person looking at a role's chat or a blind
-  sample's copy cannot write as that role. The run's own folder moves
-  (captures, restores, kept names) run as operations owned by the run, taking the operation lock
-  and then the checkpoint workspace lock; T3's turn captures take only the latter, so the two
-  never wait in a cycle.
-- Every role of a production run is a fresh ordinary Kurambit thread on the game's project with a
-  `role` lineage under the creator's chat. `role` only groups: sidebars, game opens and session
-  lists skip it, and it has none of the subagent run takeover, controls or completion delivery,
-  which would tie a role to the creator's live turn. Code never interprets model prose: a role
-  hands its result through `game_run_submit`, typed by the kind its step asks for.
+  refuses as busy rather than racing the first. A restore's folder moves (captures, restores,
+  kept names) run as operations of the game, taking the operation lock and then the checkpoint
+  workspace lock; T3's turn captures take only the latter, so the two never wait in a cycle.
+- Keep going never launches a thread of its own: its steps are turns of the chat that turned it
+  on, so no game thread is owned by anything but its chat. Event logs still hold the role threads
+  (`role` lineage) and run records an earlier Kurambit's production runs wrote; their shapes keep
+  decoding, `role` threads are left out of a game's chats, and nothing else reads them.
 - The live editors (Blender with its pinned MCP addon per game; one batchmode Unity editor per
   server, since one costs 2-3 GB, reached through the official `unity` CLI and its `unity mcp`
   server) run on private displays with session.json launch records, reaping and idle shutdown
@@ -158,8 +149,8 @@ matters.
   `engine-parked` (`GameEngine`'s runner), while their chats, builds and history still open.
   The game tools an agent is listed follow from the same data: each declares in
   [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) what it needs of the
-  engine (`engineCapabilities`, derived from the profile, empty for a parked engine) and whether it
-  belongs to chats, a run's roles or both; the MCP auth middleware puts the thread's engine in the
+  engine (`engineCapabilities`, derived from the profile, empty for a parked engine) and whether a
+  chat lists it only when asked; the MCP auth middleware puts the thread's engine in the
   invocation and `McpSchema.EnabledWhen` decides, which Effect's MCP core also applies to calls. A
   provider reads the list once per session, so nothing waits for a request to appear: what a chat
   uses only when the person asks stays reachable through `game_more`, which runs it through its own
@@ -243,11 +234,9 @@ while the tree runs, Unity reads `Time.time`, a page sums its frames' clamped de
   the server writes under the game's ignored `builds/logs/` for each session, so it always matches
   the server.
 - Unity's runner is `Assets/Kurambit/StudioProbe.cs` inside the game, because a player only runs
-  code it was built with. The harness owns that file: a new production run copies it from the
-  template (`profile.run.harnessFiles`) before the run's base build, so every build the run keeps
-  carries the same runner and none counts it as a role's work. A game whose probe predates
-  the versioned protocol still explores (it reads as protocol 0, acts only) but refuses bots with a
-  message saying so, until a fresh run refreshes it.
+  code it was built with. The template ships it. A game whose probe predates the versioned
+  protocol still explores (it reads as protocol 0, acts only) but refuses bots with a message
+  saying so.
 - three.js has no runner process. The browser host speaks the protocol to the page through the
   shell's `window.__studio` bridge, which the game owns and may have edited, so the protocol stays in
   the server instead of the page. Pages read no control tree: no ui or inspect steps, and a bot's
@@ -316,28 +305,24 @@ from one per-OS/CPU table of official builds with their published SHA-256
 ## Tools
 
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
-over RPC. Threads the production run launches get play-level tools (plus `game_run_submit`) only (status, check, import,
-export, explore start/act/close, bot run/view/report, `game_run_checks`, blender, unity and asset library tools); every
-other MCP tool (threads, worktrees, projects, previews) hides from them unless it declares
-`EnabledWhen` itself, since a blind role that could list threads could map builds to reports. The `game_unity_*` tools
+over RPC. The `game_unity_*` tools
 are a curated front for `unity mcp`: a fixed allowlist of editing tools behind one
 `game_unity_edit`, plus eval, recompile, play, screenshot and console; builds, tests, packages and
 editor lifecycle stay with Kurambit's own operations. The live editor runs with one asset import
 worker and `-job-worker-count 2` (the worker count is a per-user setting in
 `UserSettings/EditorUserSettings.asset`, rewritten before every start), because Unity's default
-three import workers cost about 0.7 GB each. Packaging, preview, stop and the
-run's own status, round, steer, decide and profile tools stay outside their catalog.
+three import workers cost about 0.7 GB each. Packaging, preview, stop and keep going's tools stay
+outside their catalog.
 
 ## Builds and facts
 
 - **A build is no record of its own.** [GameBuilds](../../apps/server/src/game/GameBuilds.ts)
-  reads the rail each time from the turn checkpoints and the run's records; a build's id is its
+  reads the rail each time from the turn checkpoints and the restore refs; a build's id is its
   commit. Every surface (its RPCs, the `game_builds`, `game_facts`, `game_build_restore` and
   `game_tune` tools) is one method of that service.
 - **A turn's change is its own.** T3 diffs a turn's checkpoint against its thread's previous
-  one, which in a game includes whatever the run or another chat did in between. A turn build
-  counts from the newest build of the game captured before the turn began, and says so when the
-  turn began while a run round was building, since concurrent edits to one folder cannot be split.
+  one, which in a game includes whatever another chat or a restore did in between. A turn build
+  counts from the newest build of the game captured before the turn began.
 - **Turn builds measure themselves.** On an engine whose profile has `turnLoop`
   (three.js; Godot and Unity are parked), `GameBuildsReactor` takes a chat turn's checkpoint
   that changed files and measures the turn's build in the background. A live-staged engine's
@@ -347,8 +332,8 @@ run's own status, round, steer, decide and profile tools stay outside their cata
   is measured but not played. Freshness is decided inside the game's lock, and a fresh build is
   left as it is, so a turn that changed nothing playable never restarts a game the person
   stopped. Each thread's turns run forked, in order, off the event
-  stream, so one game's wait for its lock never holds another's. Subagent turns (and a stage-era
-  run's role turns) are no builds of their own. A newer turn's measure drops an earlier turn's
+  stream, so one game's wait for its lock never holds another's. Subagent turns are no builds of
+  their own. A newer turn's measure drops an earlier turn's
   that is still queued (`supersede`), never one running, a person's or keep going's. A restart can
   cut a turn's work off, so the reconcile measures the newest turn build of each turn-loop game
   that has no facts. A keep-going step is such a turn: its row carries `source.step` (number,
@@ -402,7 +387,7 @@ run's own status, round, steer, decide and profile tools stay outside their cata
 ## Keep going
 
 Keep going takes a game's next step itself, in the chat that turned it on. It is records of that
-chat (`GameRun` with `loop: "turns"`, `GameRunStep`, and one `GameRunRound` per step with its
+chat (`GameRun`, `GameRunStep`, and one `GameRunRound` per step with its
 `step` record; [gameRunRecords.ts](../../packages/contracts/src/gameRunRecords.ts)), changed only by
 `game-run.*` commands. The pure decider
 ([decide.ts](../../apps/server/src/orchestration-v2/gameRun/decide.ts)) folds them into the run's
@@ -479,10 +464,6 @@ cannot both find none.
   `recover` timer, behind whatever its thread still owes; a judge or undo a pause cut off runs
   again on resume. A step turn T3 carried over a restart that its run no longer wants (Off, an
   ended run, a step moved past) is interrupted, so nothing edits a game the person stopped.
-- **The stage era.** A run without `loop` was made by an earlier Kurambit. Its records decode
-  (stage-era fields as `Schema.Unknown`, steps through `GameRunLegacyStep`), so round cards and
-  Past runs still read; it takes only a stop, one still live is stopped at startup with why, and
-  turning keep going on starts a new run beside it.
 
 `game_blender_render_sprites` exists because weak models cannot write sprite framing: their
 renders cropped heads, drifted across a walk cycle and came out near-black. It fits one fixed

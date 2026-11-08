@@ -72,7 +72,7 @@ tools, with a Web export.
 To continue an existing game, choose its card under **Your games** or its row in the sidebar, or use
 **Open game** and pick a folder that contains `game.json`. A game opens on its main chat: the first
 chat it was made in, or the next oldest if you archive that one. The arrow on the game's sidebar row
-lists its **Other chats** and its **Past runs**, and **+** starts a new chat.
+lists its **Other chats**, and **+** starts a new chat.
 
 ## Style
 
@@ -218,12 +218,6 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 **Keep going: Autopilot**, **Stop keep going**, and the proposal's **Start the proposed step now** and
 **Skip the proposed step**. Your agent can turn keep going on or off and leave it notes itself.
 
-**Past runs.** Games made by an earlier Kurambit may have production runs: a vision, prototypes, a
-blind pick, a plan, then rounds of building, playtesting and judging. They never continue, but stay
-readable: their round cards stay in the chat, their rounds are marks on the build timeline, and the
-chats their roles worked in are under **Past runs** in the game's sidebar row. A run that was live
-when Kurambit updated is stopped, and keep going starts from the game as it is now.
-
 ## Play and revise
 
 A game opens on its main chat: the game owns the middle of the window, its build timeline sits under
@@ -263,7 +257,7 @@ keeps running; use **Stop game** to close it.
 ## Builds and undo
 
 Every agent turn that changes the game is a build, in any of the game's chats, keep-going steps
-included, and so is every round of a past production run. A build is the game folder as its turn
+included. A build is the game folder as its turn
 left it. A three.js game's stage shows the folder live, so while your agent works it can be ahead of
 the latest build.
 
@@ -280,7 +274,7 @@ three facts, with:
 - **Undo** on the latest turn, which puts back the build the turn started from. After an undo,
   **Redo** puts the turn's change back.
 - **Go back** on an older build, which puts it in the game folder: the engine project, `art/` and
-  `ASSETS.md` return to that build, and notes, `PLAN.md`, `VISION.md`, bots and run records stay as
+  `ASSETS.md` return to that build, and notes, bots and saved media stay as
   they are. What the folder held is saved as a build first, so going back never discards work, and
   **Redo** puts it back.
 
@@ -300,10 +294,6 @@ Undo changes the game's files, not the chat: the conversation stays as it is, so
 knows what it tried, and it sees from the files that you undid it. Undo, Redo and going back wait
 for the agent's turn to end. The chat's own **Edit from here**
 still rewinds the conversation itself.
-
-After each round of a past production run, the run's chat shows a round card: the round's build,
-what changed, its facts against the build before it, and the minutes and tokens it took. **Revert to
-the build before it** puts back the build a kept round was judged against.
 
 **Keys.** `mod+Alt+Z` undoes the latest turn's change and `mod+Alt+Shift+Z` redoes it; `mod+Alt+[`
 and `mod+Alt+]` play the previous and next build on the timeline (past the newest, back to the live
@@ -384,5 +374,5 @@ Each game is a self-contained git repository you can move, back up, or open on a
   `web/main.js`, and the credits screen shows `web/credits.txt`.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
-- `.studio/` holds the game's bots, notes and videos, and a past production run's rounds.
+- `.studio/` holds the game's bots, their reports and kept play saves.
 - `saved/` holds the videos and images you chose to keep; it is not committed.
