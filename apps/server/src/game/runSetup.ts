@@ -49,6 +49,12 @@ const ioError = (operation: string, path: string, cause: unknown) =>
   });
 
 /**
+ * Skills an earlier Kurambit shipped whose readers are gone (the stage-era run's roles). A refresh
+ * removes these by name, and only these, so a file the person or agent put in studio-skills stays.
+ */
+const RETIRED_SKILLS = ["planning", "art-director", "stranger", "game-foundations"];
+
+/**
  * The studio skills as this server ships them, for the game's engine only (a role told to read
  * every skill must not get another engine's rules). Files whose text did not change stay as they
  * are, so a refresh with nothing new leaves the game's diff empty.
@@ -58,7 +64,7 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
     try: async () => {
       const skills = NodePath.join(root, "studio-skills");
       const own = engineProfile(engine).run.skill;
-      const others = ENGINE_SKILLS.filter((name) => name !== own);
+      const others = [...ENGINE_SKILLS.filter((name) => name !== own), ...RETIRED_SKILLS];
       await NodeFSP.cp(NodePath.join(templates, "studio"), skills, {
         recursive: true,
         force: true,

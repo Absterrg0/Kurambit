@@ -1,44 +1,19 @@
 # Three.js game
 
-The browser lane: one static project under `web/`, checked, played and
-exported with the same `game_*` tools as a Godot game.
-
-The Stage is live: keep the game booting between saves. Kurambit serves
-`web/` itself on the person's Stage and reloads it a moment after each save,
-so every save is a version they may be playing. Write a new module before
-the line that imports it, change `main.js` in whole working steps, and add a
-model to `ASSETS` only once its file is in place. A save that throws shows
-the person the error until a save boots again.
+The browser lane: one static project under `web/` on Kurambit's runtime, the
+shell and three.js (TEMPLATE.md). The Stage reloads the game on every save, so
+add a model to `ASSETS` only once its file is in place.
 
 ## The first turn
 
-- Library art from the first build. The player, threats and level pieces
-  are library models (sprites in 2D) named in `ASSETS`; the starter's sphere
-  and beacon are placeholders. A Box, Sphere or Cylinder never stands in for
-  a character, an enemy or a prop. Effects (`Juice.burst`, a glow) are fine.
-- three.js loads GLB and glTF only. Animated GLB characters are in
-  `kaykit-adventurers` and `kaykit-skeletons` (rig `kaykit-1`),
-  `kenney-mini-characters` and `kenney-mini-dungeon` (rig `kenney-mini`) and
-  `kenney-blocky-characters`; the FBX-only character packs
-  (`quaternius-knight`, `quaternius-ultimate-characters`,
-  `quaternius-monsters`, `kenney-animated-characters-1`) do not load here. Put in `ASSETS`
-  the path `game_assets_add` reports: it renames folders (Kenney's
-  `GLB format` becomes `GLB-format`). Packs differ in scale (a Kenney blocky
-  character stands several times a mini one): when you mix packs, size each
-  model with `root.scale.setScalar(n)`.
-- Keep the default look on the first build (`day`), or name the one preset
-  the brief calls for (`export const LOOK = { preset: "night" }`), with no
-  lights besides `ctx.look.sun`. The look draws the sky, its light and the fog;
-  do not set `scene.background` or `scene.fog` over them. Where the camera looks
-  down, ground fills the view to its edges (`buildLevel` lays it; a board built
-  by hand stands on a wide ground of its own). The shell loads every
-  `ASSETS` model and compiles its shaders behind the loading screen, so play
-  starts without a freeze. Glows and extra lights are a later turn.
-- No Blender, no key art, no plan, no `game_explore_*` to check your work:
-  `game_check` clean, with each line its scene report lists fixed (open the
-  frame it names), is the check, and Kurambit plays and measures the build
-  when the turn ends. On the `generated` route the one exception is the key
-  art `game_generate` starts; you build on library stand-ins while it renders.
+- Library art from the first build: the player, threats and level pieces are
+  library models (sprites in 2D) named in `ASSETS`. A Box, Sphere or Cylinder
+  never stands in for a character, an enemy or a prop; effects (`Juice.burst`,
+  a glow) are fine.
+- Packs differ in scale (a Kenney blocky character stands several times a
+  mini one): when you mix packs, size each model with `root.scale.setScalar(n)`.
+- In a 3D view the look draws the sky, its light and the fog: do not set
+  `scene.background` or `scene.fog` over them.
 - Start from the recipe for your view below and grow it into the brief's
   loop. Each is pasted whole over `web/main.js` and passes `game_check`.
 
@@ -77,7 +52,7 @@ export function start(ctx) {
   hero.root.position.copy(level.spawns.P[0]);
   foe.root.position.copy(level.spawns.E[0]);
   ctx.scene.add(hero.root, foe.root);
-  ctx.thing(hero.root, { name: "Hero", kind: "character" }); // what the person points at (rule 9)
+  ctx.thing(hero.root, { name: "Hero", kind: "character" }); // what the person points at (Rules 4)
   ctx.thing(foe.root, { name: "Foe", kind: "creature" });
   tuned = ctx.tune("Hero", { speed: 5 }, { speed: [1, 12, 0.5] }); // read live, every frame
   ctx.player = hero.root;
@@ -226,179 +201,48 @@ export function update(dt, ctx) {
 
 ## Rules
 
-1. No install step, no bundler, no CDN. three.js and the shell's kits
-   (`shell/*.js`) are pinned: in Kurambit's runtime when `game.json` names a
-   `runtime` (never copy or edit it; read the kits' comment blocks in
-   `studio-skills/runtime/shell/`), or in an older game's own `web/vendor/`
-   and `shell/` (keep the pin and its LICENSE). Either way, import them
-   as the recipes do: `./vendor/three.module.js`, `./shell/juice.js`.
-2. The file the browser loads is the file you edit: `web/index.html`,
-   `web/main.js` (the gameplay), `web/style.css`, `web/assets/` for every
-   visual and sound.
-   Nothing loads from the network at runtime.
-   Models are GLB files under `web/assets/`, from the library
-   (`game_assets_add` puts them under `web/assets/library/<pack>/`) or the
-   live Blender. Name every model and texture in
-   `export const ASSETS = { knight: "assets/library/kaykit-adventurers/Characters/gltf/Knight.glb", ... }` in
-   `main.js`: the shell loads them before the title, and `ctx.assets.model("knight")`
-   returns a fresh copy (skinned characters included; `.animations` holds its
-   clips) and `ctx.assets.texture(name)` a texture, both synchronously in
-   `start`. A model from `game_blender_export` is named by its sidecar
-   (`cat: "assets/blender/space_cat.asset.json"`), never its GLB, so `animate`
-   gets its measurements. Never load files inside `start` or `update`. Keep the import map.
-3. Never launch your own browser. Check, play, export, bot-test and package
-   ONLY with the `game_*` tools (`game_check` to check, `game_export`
-   to export).
-4. The starter has title, pause, settings, end and credits screens and owns
-   the render loop (TEMPLATE.md). Never build your own menus or loop: build
-   each run in `start(ctx)` and move it in `update(dt, ctx)` in `web/main.js`,
-   end it with `GameState.win(text, stats)` or `GameState.lose(text, stats)`,
-   and restyle the shell instead of replacing it; for the title backdrop,
-   set `--title-art: linear-gradient(rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.55)), url("assets/ui/title_bg.png")`
-   in `style.css` with the key art there, and replace the placeholder tab icon
-   `web/assets/ui/icon.png` with a 256x256 cut of its main subject. Read controls as named actions
-   through `ctx.input` (`vector()`, `down`, `pressed`), never key codes, so
-   the gamepad and the player's rebinding work; add the game's own and drop
-   unused defaults with `export const ACTIONS = { dash: { keys: ["ShiftLeft"], pad: ["rb"] }, alt: null }`
-   in `main.js` (TEMPLATE.md). Use `ctx.input`,
-   `ctx.mouse`, `ctx.listen` and `ctx.after`, never raw listeners,
-   `setTimeout` or `requestAnimationFrame`: those run through pause and pile
-   up across retries. Retry resets every plain-data GameState value (numbers,
-   strings, arrays, plain objects) to a copy of its starting value; list the
-   ones that must survive (best score, unlocks) in
-   `export const KEEP_ACROSS_RUNS = [...]`; the shell saves those between
-   visits (numbers, strings, arrays, plain objects) and Settings can reset them.
-   Show the score, health, timer, objective, event toasts and control hints
-   through `ctx.ui` (`shell/hud.js`; TEMPLATE.md), never raw text, and
-   teach each control with a `hint` the first time it matters.
-   Answer every player action through `Juice` (`shell/juice.js`):
-   `shake`, `hitPause`, `pop`, `squash`, `flash`, `flashScreen`, `burst`,
-   `sfx`.
-5. Never hand-write clip switching or camera follow; the shell kits do it
-   and the shell ticks them on game time. Character: `const hero =
-animate(ctx.assets.model("knight"))` (`shell/animate.js`), then every frame
-   `hero.play(state, { speed })` with the state chosen from gameplay (on
-   floor, speed, attacking) and `hero.play("attack")` on the event; it finds
-   clips by name, crossfades, returns from one-shots, and the console line
-   says which clip each state got. Library models face +z: face the move
-   direction with `rotation.y = Math.atan2(dir.x, dir.z)`. Camera
-   (`shell/camera.js`): `followCamera2D(ctx, player, { bounds })` for a
-   side or top-down view, `followCamera3D(ctx, player, { blockers: [level] })`
-   for third person, moving the player relative to `cam.yaw`. Juice.shake
-   applies on top. Each `ctx.assets.model` call is its own copy, so every
-   character or enemy gets its own `animate`; call its `dispose()` when the
-   enemy is gone for good. A character loaded from its sidecar moves with
-   `locomotion` (`shell/locomotion.js`) instead of a hand-picked state:
-
-   ```js
-   import { locomotion } from "./shell/locomotion.js";
-   // in start(ctx):
-   hero = animate(ctx.assets.model("cat")); // its tail and ears spring on their own
-   loco = locomotion(hero, { walk: 0.3, run: 3.2 });
-   // in update(dt, ctx), after moving it: the speed it really moved (walls stop it)
-   loco.update({ speed: moved / dt, grounded: !airborne, vy, dt });
-   if (ctx.input.pressed("action")) loco.act("attack");
-   hero.lookAt(nearestFoe?.position ?? null);
-   ```
-
-   The standard clips have no attack: name one in `game_blender_character`'s
-   `clips` (`Punch_Jab`, `Sword_Attack`, `Spell_Simple_Shoot`) when the
-   character fights.
-
-   Walk and run then play at the clip's measured ground speed, so the feet
-   stay planted; never pass `speed` for them. Retune a chain with
-   `hero.spring("tail", { stiffness: 0.09, damping: 0.14, gravity: 4 })`.
-
-   A fight plays clips by their exact names with its own timing
-   (`hero.play("Sword_Attack", { once: true, fade: 0.08, from: 0.25 })`,
-   `reverse: true`, `restart: true` for a combo's next cut) and reads
-   `hero.time` for hit windows; frame it with `followCamera3D(ctx, hero.root,
-{ shoulder: 0.55, orbitButton: null, blockers: [level, props] })` and
-   `cam.focus = foe.root`; a clip from the sidecar knows its hit windows, so
-   strike when `hero.striking` (the measured window, `by: "prop"` for a held
-   blade) instead of guessing seconds. On top of any clip:
-   `hero.react("Hit_Chest")` plays a clip's upper body once over the walk (a
-   flinch without a hit clip), `hero.lean()` leans into turns from how the
-   game moves `hero.root`, `hero.lookAt(foe.root.position, { maxYaw: 1,
-maxPitch: 0.5 })` turns neck and head within limits, and
-   `hero.feetOn((x, z) => groundHeight(x, z))` keeps the feet on stairs and
-   slopes through the sidecar's measured stances. Each is off until called and
-   runs on game time. Answer hits with `Juice.sparks(at, away)`,
-   `Juice.blood(at, away)`, `Juice.dust(at)` and a
-   `Juice.trail(hero.root, { bone: "hand_r" })` switched on through each cut
-   (TEMPLATE.md).
-
-6. Never write a renderer, post-processing or lighting rig; the shell's look
-   (`shell/look.js`; TEMPLATE.md) does it. Pick a preset in one line,
-   `export const LOOK = { preset: "golden" }` (`day`, `golden`, `night`,
-   `interior`, `flat`), and override parts of it there (`sun`, `sky`, `fog`,
-   `ao`, `bloom`, `grade`, `exposure`). `day` and `flat` cost what a plain frame
-   costs; `golden`, `night`, `interior`, `ao: true` and `bloom: true` add the
-   post chain, which the look's adaptive resolution keeps near 60 fps. Light the
-   run with `ctx.look.sun({ follow: ctx.player, size })`, and bake a big static
-   level's shadow once with `ctx.look.bake(level)`. A game that builds a large
-   world once, draws its own frame or wants a live title exports `prepare`,
-   `render` or `title` (TEMPLATE.md) instead of forking the shell. The facts'
-   Performance row is how the random-input play ran ("60 fps · 1% low 48 · GPU
-   9 ms at 0.8× of 1280×720"): a low 1% or a small scale is a reason to bake,
-   trim triangles or drop a pass; "not measured" because the harness drew in
-   software is Kurambit's machine, not your game. Through an orthographic camera
-   with no preset named nothing is tone mapped, so a 2D or pixel-art game's
-   sprites keep their files' colours; it also sets
-   `LOOK = { environment: false, shadows: false }`.
-7. Write every top-down level (rows run along x/z on the ground) as a text map with `buildLevel(ctx, rows, legend, { floor })`
-   (`shell/level.js`), never pieces placed by coordinates: `#` walls,
-   `.` floor, a letter per spawn, the legend naming ASSETS models. Make more
-   than one room, joined by corridors, when the brief allows. Put the player,
-   enemies and pickups at `level.spawns.P[0]`, `level.spawns.E`, never at
-   hard-coded positions; move them with `level.move(position, step, radius)`
-   so they slide along walls (keep the radius under half a cell); a side-view
-   level is built by hand; pass `level.walls` to `followCamera3D`'s
-   `blockers` and `level.bounds` to `followCamera2D`.
-8. Keep `window.__studio`: `ready` after the first frame, `getState()`
-   returning `{gameState, player, hudText}`, page errors in `errors[]`,
-   `setState(target, values)` for named late content (the starter refuses).
-   Extend `GameState`, not the bridge. Keep the shell's stage bridge and
-   `web/tune.json` too: they are how the person points at the running game.
-9. Name what a person would point at, and put every number they would tune
-   in `ctx.tune`. On the Stage the person freezes the game, selects things,
-   drags their values live and asks you about one. `ASSETS` models select by
-   themselves (by their path, with their sidecar); name the player, each kind
-   of enemy, the level and the pickups in `start(ctx)` with
-   `ctx.thing(object, { name: "Cat", kind: "character" })` (`character`,
-   `creature`, `prop`, `level`, `effect`, `ui`, `rule`, `sound`, `other`), and
-   what has no body with `ctx.thing(null, { name: "Music", kind: "sound" })`.
-   Speeds, jump height, gravity, spawn rates, lives, damage and timers come
-   from `const cat = ctx.tune("Cat", { jump: 8, speed: 5 }, { jump: [2, 20],
-speed: [1, 12, 0.5] })` and are read where they are used, every frame
-   (`cat.jump`), never copied into a constant. Give each number its range
-   `[min, max, step]`. The id is the thing's name (an id with no `ctx.thing`
-   becomes a rule of its own, like `ctx.tune("Difficulty", …)`), and the same
-   id returns the same live object, so a retry keeps what the person set.
-   Their "Keep as a build" writes the values into `web/tune.json` by id and
-   key, which the shell reads at boot over your defaults; `game_tune` does
-   the same when the person asks you to keep values.
-10. A message that starts "The person selected this in the running game"
-    is an Ask from the Stage's Inspector. The attached image is the canvas
-    as they asked; the block names the thing (its id: a `ctx.thing` name, a
-    `ctx.tune` id or an `ASSETS` path), its asset and sidecar, its live values
-    (the ones the person was trying, which may differ from `web/tune.json`
-    and your defaults), where it sits on that frame and its path over the
-    last 10 s in canvas pixels. Find it in the code by its id and answer
-    about that thing.
-11. Keep `GameState` the single source of truth with public primitives only
-    (the probe reports those; Retry resets them too). Build meshes, class
-    instances and functions in `start(ctx)`, never on `GameState`.
-    Keep the values that matter on screen too (the probe reports the overlay).
-    Set `ctx.player` so the probe reports the player's position.
-12. Play-test with `game_explore_*` only when you need to see play: in a
-    chat turn when the person asks or a fact names something the code cannot
-    show, in a run when your role says so. Real keys
-    (`"Enter"`, `"w"`, `"ArrowLeft"`, not Godot action names), real clicks.
-    The game opens on the title: press `"Enter"` to play.
-    Bots read the probe and write `clickAt(x, y)`; id-clicks have no control
-    to land on. `setState` reaches late content; verdicts still come from
-    real input after.
-13. Export checklist before calling it done: web export builds, the page
-    stays clean in `game_check`, the game is playable from `web/index.html`
-    on a fresh checkout.
+1. The shell owns the page: the title, pause, settings, end and credits
+   screens, the render loop, the look and the Stage bridge. Build each run in
+   `start(ctx)`, move it in `update(dt, ctx)`, end it with `GameState.win` or
+   `lose`, and restyle the screens rather than replace them. Never write your
+   own menus, loop, renderer, post chain, lighting rig, clip switching or
+   camera follow: the kits do it (TEMPLATE.md lists them; each kit's comment
+   block shows every call). An older game with no `runtime` in game.json keeps
+   its own copy in `web/vendor/` and `web/shell/`: keep that pin and its LICENSE.
+2. Go through `ctx`: controls through `ctx.input` (named actions, never key
+   codes, so the gamepad and rebinding work), the HUD through `ctx.ui`,
+   listeners and timers through `ctx.listen` and `ctx.after` (a raw listener,
+   `setTimeout` or `requestAnimationFrame` runs through pause and piles up
+   across retries). Answer every player action with `Juice`.
+3. `GameState` is the single source of truth, in public plain data (the probe
+   reports it and Retry resets it); build meshes, class instances and
+   functions in `start(ctx)`. Keep the values that matter on screen too, and
+   set `ctx.player`.
+4. Name what a person would point at and tune. On the Stage the person
+   freezes the game, selects things, drags their values live and asks you
+   about one. Name the player, each kind of enemy, the level and the pickups
+   with `ctx.thing`, and read every speed, jump, gravity, spawn rate, life
+   count, damage and timer from `ctx.tune` where it is used, every frame,
+   never copied into a constant, each with its range (TEMPLATE.md, Things and
+   live values).
+5. A message that starts "The person selected this in the running game" is
+   an Ask from the Stage's Inspector. The attached image is the canvas as
+   they asked; the block names the thing (a `ctx.thing` name, a `ctx.tune` id
+   or an `ASSETS` path), its asset and sidecar, its live values (what the
+   person was trying, which may differ from `web/tune.json` and your
+   defaults), where it sits on that frame and its path over the last 10 s.
+   Find it in the code by its id and answer about that thing.
+6. Levels seen from above are text maps through `buildLevel`, with more than
+   one room joined by corridors when the brief allows; spawn from
+   `level.spawns` and move with `level.move`. A side-view level is built by hand.
+7. Library models face +z: face the move with `rotation.y = Math.atan2(dir.x,
+dir.z)`. Each `ctx.assets.model` call is its own copy, so each character
+   gets its own `animate`; `dispose()` it when it is gone for good. A
+   character exported from Blender is named in `ASSETS` by its sidecar and
+   moves with `locomotion`, so its feet stay planted.
+8. The facts' Performance row is the random-input play ("60 fps · 1% low 48 ·
+   GPU 9 ms at 0.8× of 1280×720"): a low 1% or a small scale is a reason to
+   bake the level's shadow, trim triangles or drop a pass. "Not measured"
+   because the harness drew in software is Kurambit's machine, not your game.
+9. When you play with `game_explore_*`, send real keys (`"Enter"`, `"w"`,
+   `"ArrowLeft"`); the game opens on the title, so press `"Enter"` first.
