@@ -3,6 +3,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
+  GameOperationError,
   OrchestratorMcpFailure,
   PreviewTabId,
   ProviderInstanceId,
@@ -26,6 +27,7 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
+import * as GameProjectService from "../game/GameProjectService.ts";
 import * as GameService from "../game/GameService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerConfig from "../config.ts";
@@ -42,9 +44,22 @@ const tabId = PreviewTabId.make("tab-mcp-test");
 const alternateTabId = PreviewTabId.make("tab-mcp-alternate");
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 // Every caller here is a creator thread; only its record's thread is read.
-const layerCreatorThreads = Layer.mock(ThreadManagementService.ThreadManagementService)({
-  getThreadRecords: () => Effect.succeed({ thread: {} } as never),
-});
+// No caller here works in a game, so no game tool is listed.
+const layerCreatorThreads = Layer.merge(
+  Layer.mock(ThreadManagementService.ThreadManagementService)({
+    getThreadRecords: () => Effect.succeed({ thread: {} } as never),
+  }),
+  Layer.mock(GameProjectService.GameProjectService)({
+    resolve: (threadId) =>
+      Effect.fail(
+        new GameOperationError({
+          operation: "resolve-thread",
+          path: threadId,
+          reason: "project-not-found",
+        }),
+      ),
+  }),
+);
 const invocation = {
   environmentId,
   requestNamespace: "provider-session-mcp-test",

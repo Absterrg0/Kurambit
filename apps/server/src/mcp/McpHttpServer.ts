@@ -1,5 +1,6 @@
 import {
   GameToolkit,
+  GameMoreToolkit,
   GameAssetsSearchTool,
   GameAssetsSearchToolkit,
   GameAnimateTool,
@@ -32,6 +33,7 @@ import { OrchestratorMcpFailure, PreviewAutomationError } from "@kurambit/contra
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
+import * as GameProjectService from "../game/GameProjectService.ts";
 import * as GameService from "../game/GameService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
@@ -150,6 +152,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
   const clients = yield* McpClientAuthenticator;
   const threads = yield* ThreadManagementService.ThreadManagementService;
+  const gameProjects = yield* GameProjectService.GameProjectService;
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const authorization = request.headers.authorization;
@@ -179,10 +182,20 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
             Effect.map(({ thread }) => (thread.launchedBy === "game_run" ? "run" : null)),
             Effect.orElseSucceed(() => "run" as const),
           );
+    // Which game tools a thread sees follows its game's engine (toolkits/game/placement.ts).
+    const gameEngine =
+      invocation.thread === undefined
+        ? null
+        : yield* gameProjects.resolve(invocation.thread.threadId).pipe(
+            Effect.flatMap(gameProjects.read),
+            Effect.map((manifest) => manifest.engine.name),
+            Effect.orElseSucceed(() => null),
+          );
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
         gameRunRole,
+        gameEngine,
       }),
       Effect.map(normalizeMcpHttpResponse),
     );
@@ -1039,6 +1052,7 @@ export const layerGameToolkit = Layer.mergeAll(
   layerGameAssetsSearch,
   layerGameUnityScreenshot,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
+  toolkitRegistration(GameMoreToolkit, GameHandlers.layerMore),
 );
 
 export const layer = Layer.mergeAll(

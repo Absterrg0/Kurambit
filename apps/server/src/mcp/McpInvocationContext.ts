@@ -1,6 +1,7 @@
 import {
   type AuthMcpClientAccess,
   type EnvironmentId,
+  type GameEngineId,
   McpCapabilityUnavailableError,
   OrchestratorMcpFailure,
   PreviewAutomationUnavailableError,
@@ -44,6 +45,8 @@ export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
   /** Threads the production run launched. They get play-level tools only. */
   readonly gameRunRole?: "run" | null;
+  /** The engine of the calling thread's game; null when the thread works in no game. */
+  readonly gameEngine?: GameEngineId | null;
   readonly capabilities: ReadonlySet<McpCapability>;
   readonly issuedAt: number;
   readonly requestNamespace: string;
@@ -127,12 +130,19 @@ export const requireThreadScope = (scope: McpInvocationScope, operation: string)
     ? Effect.fail(threadCallerRequired(operation))
     : Effect.succeed(scope as McpThreadInvocationScope);
 
-/** True inside a tool call from a thread the production run launched. */
-export const isGameRunThread = () => {
+/**
+ * The invocation a tool listing or call runs in, read synchronously, as
+ * `McpSchema.EnabledWhen` predicates must; undefined outside one.
+ */
+export const currentInvocation = (): McpInvocationScope | undefined => {
   const fiber = Fiber.getCurrent();
-  if (fiber === undefined) return false;
-  return Context.getOrUndefined(fiber.context, McpInvocationContext)?.gameRunRole === "run";
+  return fiber === undefined
+    ? undefined
+    : Context.getOrUndefined(fiber.context, McpInvocationContext);
 };
+
+/** True inside a tool call from a thread the production run launched. */
+export const isGameRunThread = () => currentInvocation()?.gameRunRole === "run";
 
 /**
  * A tool that says nothing about production-run threads hides from them. A
