@@ -84,6 +84,7 @@ import {
   type GameBotViewInput,
   type GameBotViewResult,
   GAME_LIVE_EVENT,
+  isGameEngineActive,
   manifestProject,
 } from "@kurambit/contracts";
 import { engineProfile, type GameEngineProfile } from "./engineProfile.ts";
@@ -723,7 +724,10 @@ const make = Effect.gen(function* () {
       );
   const play = Effect.fn("GameService.play")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
-    const profile = engineProfile((yield* projects.read(root)).engine.name);
+    const engine = (yield* projects.read(root)).engine.name;
+    // A parked engine's game plays nothing, not even an export it made before.
+    if (!isGameEngineActive(engine)) return yield* GameEngine.parkedEngine(engine);
+    const profile = engineProfile(engine);
     if (profile.stage === "live")
       return yield* playLive(
         root,
@@ -817,7 +821,11 @@ const make = Effect.gen(function* () {
   const playCurrent = Effect.fn("GameService.playCurrent")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
-    if (!engineProfile(manifest.engine.name).exportTargets.includes("Web")) return;
+    if (
+      !isGameEngineActive(manifest.engine.name) ||
+      !engineProfile(manifest.engine.name).exportTargets.includes("Web")
+    )
+      return;
     // A turn's own check or Play may still hold the game for a moment.
     const waitUntil = (yield* Clock.currentTimeMillis) + 120_000;
     yield* currentWeb(threadId, root, manifest, { serveFresh: false, waitUntil });
@@ -825,6 +833,8 @@ const make = Effect.gen(function* () {
   const gamePreview = Effect.fn("GameService.preview")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
+    if (!isGameEngineActive(manifest.engine.name))
+      return yield* GameEngine.parkedEngine(manifest.engine.name);
     const profile = engineProfile(manifest.engine.name);
     if (profile.stage === "live")
       return yield* playLive(
