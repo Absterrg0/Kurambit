@@ -3,13 +3,8 @@ import type {
   AuthAccessStreamEvent,
   AuthAccessStreamSnapshotEvent,
 } from "@kurambit/contracts";
-import { WS_METHODS } from "@kurambit/contracts";
-import * as Stream from "effect/Stream";
-import { Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
-import { subscribe } from "../rpc/client.ts";
-import { createEnvironmentSubscriptionAtomFamily } from "./runtime.ts";
 
 export const EMPTY_AUTH_ACCESS_SNAPSHOT: AuthAccessSnapshot = {
   pairingLinks: [],
@@ -59,32 +54,4 @@ export function applyAuthAccessStreamEvent(
         ),
       };
   }
-}
-
-function projectAuthAccessSnapshot(
-  current: AuthAccessSnapshot,
-  event: AuthAccessStreamEvent,
-): readonly [AuthAccessSnapshot, ReadonlyArray<AuthAccessStreamEvent>] {
-  const snapshot = applyAuthAccessStreamEvent(current, event);
-  const projected: AuthAccessStreamSnapshotEvent = {
-    version: 1,
-    revision: event.revision,
-    type: "snapshot",
-    payload: snapshot,
-  };
-  return [snapshot, [projected]];
-}
-
-export function createAuthEnvironmentAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
-) {
-  return {
-    accessChanges: createEnvironmentSubscriptionAtomFamily(runtime, {
-      label: "environment-data:server:auth-access-changes",
-      subscribe: (_input: null) =>
-        subscribe(WS_METHODS.subscribeAuthAccess, {}).pipe(
-          Stream.mapAccum(() => EMPTY_AUTH_ACCESS_SNAPSHOT, projectAuthAccessSnapshot),
-        ),
-    }),
-  };
 }

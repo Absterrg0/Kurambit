@@ -34,7 +34,7 @@ interface BuildOutcome {
 export const NOT_IN_SAMPLE = [".studio", "NOTES.md"];
 
 /** Game code: the engine project, without what an engine import rewrites on its own. */
-export const isGameCode = (lane: string) => (path: string) =>
+const isGameCode = (lane: string) => (path: string) =>
   path.startsWith(`${lane}/`) &&
   !path.startsWith(`${lane}/.godot/`) &&
   !path.endsWith(".import") &&

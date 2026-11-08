@@ -87,16 +87,8 @@ describe("closedViewStore", () => {
     const surfaces = [
       { kind: "diff", id: "diff" },
       { kind: "files", id: "files" },
-      { kind: "pull-requests", id: "pull-requests" },
       { kind: "preview", id: "browser:new", resourceId: null },
       { kind: "preview", id: "browser:saved", resourceId: "saved" },
-      { kind: "device", id: "device" },
-      {
-        kind: "device",
-        id: "device:phone",
-        title: "My phone",
-        target: { hostId: "mac", deviceId: "phone", platform: "ios", name: "iPhone" },
-      },
       { kind: "file", id: "file:x", relativePath: "x", revealLine: 12, revealRequestId: 1 },
       {
         kind: "file",
@@ -111,16 +103,6 @@ describe("closedViewStore", () => {
           mimeType: "application/pdf",
           sizeBytes: 1,
         },
-      },
-      {
-        kind: "pull-request",
-        id: "pull-request:x",
-        projectId: "project",
-        repository: "owner/repo",
-        number: 1,
-        environmentId: "env-1",
-        host: "github.com",
-        url: "https://github.com/owner/repo/pull/1",
       },
     ];
     const entries = surfaces.map((surface, index) => ({

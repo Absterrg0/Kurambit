@@ -1,6 +1,4 @@
 const CLI_RELEASE_REPOSITORY = "Absterrg0/Kurambit";
-export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
-export const CLI_RELEASE_BASE_URL_ENV = "KURAMBIT_RELEASE_BASE_URL";
 
 /**
  * Kept in step with the build_linux_cli matrix, build_windows_arm64_cli, and
@@ -66,11 +64,6 @@ export function parseChecksums(text: string): ReadonlyMap<string, string> {
 }
 
 export type CliReleaseChannel = "stable" | "nightly" | "preview";
-export const CLI_RELEASE_CHANNELS: ReadonlyArray<CliReleaseChannel> = [
-  "stable",
-  "nightly",
-  "preview",
-];
 
 export function cliReleaseChannelOf(version: string): CliReleaseChannel {
   const channel = /^[^-+]+-(nightly|preview)\.\d{8}\.\d+$/.exec(version)?.[1];

@@ -178,14 +178,6 @@ export function connectionRouteLabel(route: ConnectionRoute): string {
   }
 }
 
-export function connectionRouteAddress(route: ConnectionRoute): string | null {
-  if (route.target._tag === "SshConnectionTarget") {
-    const profile = Option.getOrNull(route.profile);
-    return profile?._tag === "SshConnectionProfile" ? profile.target.alias : null;
-  }
-  return routeHttpBaseUrl(route);
-}
-
 export function hasRelayRoute(
   entry: Pick<ConnectionCatalogEntry, "target" | "alternateRoutes">,
 ): boolean {
@@ -425,6 +417,6 @@ export function removedWithRelay(entry: ConnectionCatalogEntry): boolean {
   return routesAfterRemoving(connectionRoutes(entry), RELAY_ROUTE_ID).length === 0;
 }
 
-export function sshTargetKey(target: DesktopSshEnvironmentTarget): string {
+function sshTargetKey(target: DesktopSshEnvironmentTarget): string {
   return JSON.stringify([target.alias, target.hostname, target.username, target.port]);
 }

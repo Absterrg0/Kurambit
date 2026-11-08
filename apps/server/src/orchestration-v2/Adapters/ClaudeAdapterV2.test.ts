@@ -14178,6 +14178,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               .pipe(Effect.forkScoped);
             yield* Deferred.await(lateReplyWritten);
             for (let tick = 0; tick < 20 && texts(2).at(-1) !== "a2 found README.md"; tick += 1) {
+              // A macrotask turn first, so the adapter reaches its flush-window
+              // sleep before time moves; ticks alone can all run before it does.
+              yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
               yield* TestClock.adjust("100 millis");
             }
             yield* Fiber.join(notified);

@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "./hooks/useLocalStorage";
+import { getLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 
 export const PROVIDER_UPDATE_DISMISSALS_STORAGE_KEY = "kurambit:provider-update-dismissals:v1";
 
@@ -59,31 +59,4 @@ export function dismissProviderUpdateNotification(dismissalKey: string | null | 
   writeProviderUpdateDismissals({
     keys: [...document.keys, trimmedKey],
   });
-}
-
-export function useDismissedProviderUpdateNotificationKeys() {
-  const [dismissals, setDismissals] = useLocalStorage(
-    PROVIDER_UPDATE_DISMISSALS_STORAGE_KEY,
-    { keys: [] },
-    ProviderUpdateDismissalsSchema,
-  );
-  const dismissedKeys = dismissals.keys;
-
-  const dismissedKeySet = new Set(dismissedKeys);
-
-  const dismissNotificationKey = (key: string) => {
-    const trimmedKey = key.trim();
-    if (trimmedKey.length === 0 || dismissedKeySet.has(trimmedKey)) {
-      return;
-    }
-
-    setDismissals({
-      keys: [...dismissedKeys, trimmedKey],
-    });
-  };
-
-  return {
-    dismissedNotificationKeys: dismissedKeySet,
-    dismissNotificationKey,
-  };
 }

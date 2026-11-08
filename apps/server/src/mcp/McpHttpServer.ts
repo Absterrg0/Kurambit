@@ -1020,32 +1020,29 @@ export const layerMcpTransport = McpServer.layerHttp({
   allowSessionTermination: true,
 }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
-export const layerGameBlenderLook = imageToolRegistration(
+const layerGameBlenderLook = imageToolRegistration(
   registerGameBlenderLook(),
   GameHandlers.layerBlenderLook,
 );
 
-export const layerGameBlenderRenderSprites = imageToolRegistration(
+const layerGameBlenderRenderSprites = imageToolRegistration(
   registerGameBlenderRenderSprites(),
   GameHandlers.layerBlenderRenderSprites,
 );
 
-export const layerGameAnimate = imageToolRegistration(
-  registerGameAnimate(),
-  GameHandlers.layerAnimate,
-);
+const layerGameAnimate = imageToolRegistration(registerGameAnimate(), GameHandlers.layerAnimate);
 
-export const layerGameUnityScreenshot = imageToolRegistration(
+const layerGameUnityScreenshot = imageToolRegistration(
   registerGameUnityScreenshot(),
   GameHandlers.layerUnityScreenshot,
 );
 
-export const layerGameAssetsSearch = imageToolRegistration(
+const layerGameAssetsSearch = imageToolRegistration(
   registerGameAssetsSearch(),
   GameHandlers.layerAssetsSearch,
 );
 
-export const layerGameToolkit = Layer.mergeAll(
+const layerGameToolkit = Layer.mergeAll(
   layerGameBlenderLook,
   layerGameAnimate,
   layerGameBlenderRenderSprites,

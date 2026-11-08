@@ -5,9 +5,8 @@ import {
 } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 
-export class DesktopAppUpdate extends Context.Service<
+class DesktopAppUpdate extends Context.Service<
   DesktopAppUpdate,
   {
     readonly available: boolean;
@@ -39,4 +38,3 @@ export const make = () =>
         ),
     }),
   );
-export const layer = Layer.effect(DesktopAppUpdate, make());

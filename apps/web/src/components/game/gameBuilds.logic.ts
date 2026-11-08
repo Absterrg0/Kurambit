@@ -162,14 +162,6 @@ export const deltaLine = (delta: GameFactDelta): DeltaLine => {
   return { label: delta.label, a, b, mark: MARK[delta.change], tone: delta.tone, why: null };
 };
 
-/** The latest restore in one line, whoever asked for it. */
-export const restoreLine = (restore: GameBuildRestore): string =>
-  restore.outcome === null
-    ? `Restoring ${restore.label}…`
-    : restore.outcome.restored
-      ? `Restored ${restore.label}.`
-      : `Restoring ${restore.label} failed: ${restore.outcome.message}`;
-
 export interface RoundCardAction {
   readonly kind: "revert";
   /** The build the restore puts in the folder. */

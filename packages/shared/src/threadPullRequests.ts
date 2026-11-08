@@ -6,19 +6,15 @@ import type {
   ThreadPullRequestKey,
   ThreadPullRequestLink,
 } from "@kurambit/contracts";
-
-import { pullRequestHostOf } from "@kurambit/contracts";
 import { parseChangeRequestUrl } from "./changeRequestUrl.ts";
-import { canonicalRepositoryKey, sourceControlRepositorySelector } from "./sourceControl.ts";
+import { canonicalRepositoryKey } from "./sourceControl.ts";
 
 type ThreadPullRequestKeySource = ThreadPullRequestKey & {
   readonly authority?: string;
   readonly url?: string;
 };
 
-export function normalizeThreadPullRequestKey(
-  key: ThreadPullRequestKeySource,
-): ThreadPullRequestKey {
+function normalizeThreadPullRequestKey(key: ThreadPullRequestKeySource): ThreadPullRequestKey {
   const parsed = key.url === undefined ? null : parseChangeRequestUrl(key.url);
   const authority =
     key.authority ??
@@ -122,7 +118,7 @@ function layersFromTop(chain: ThreadPullRequestChain): Array<ThreadPullRequestLi
     .map((entry) => entry.link);
 }
 
-export function resolveThreadCurrentPullRequest(
+function resolveThreadCurrentPullRequest(
   links: ReadonlyArray<ThreadPullRequestLink>,
 ): ThreadCurrentPullRequest | null {
   const visible = visibleThreadPullRequests(links);
@@ -159,53 +155,6 @@ export function resolveThreadCurrentPullRequestLink(
   return current.kind === "single" ? current.link : current.top;
 }
 
-export function legacyLinkedPullRequestOf(
-  links: ReadonlyArray<ThreadPullRequestLink>,
-  projectId: ThreadLinkedPullRequest["projectId"],
-  identity: RepositoryIdentity | null | undefined,
-): ThreadLinkedPullRequest | null {
-  if (!identity) return null;
-  const host = pullRequestHostOf(identity, identity.provider as SourceControlProviderKind);
-  if (typeof host !== "string") return null;
-  const repository = sourceControlRepositorySelector(identity);
-  if (repository === null) return null;
-  const azureKey =
-    identity.provider === "azure-devops"
-      ? canonicalRepositoryKey(identity.canonicalKey.toLowerCase())
-      : null;
-  const link = resolveThreadCurrentPullRequestLink(
-    links.filter((link) => {
-      if (azureKey !== null) {
-        const key = legacyThreadPullRequestKey(link, link.host);
-        return canonicalRepositoryKey(`${key.host}/${key.repository}`) === azureKey;
-      }
-      const parsed = parseChangeRequestUrl(link.url);
-      if (parsed?.authority !== undefined) {
-        try {
-          const remote = new URL(identity.locator.remoteUrl);
-          if (remote.protocol === "http:" || remote.protocol === "https:") {
-            return (
-              parsed.authority === remote.host && parsed.repository === repository.toLowerCase()
-            );
-          }
-        } catch {}
-        return parsed.host === host && parsed.repository === repository.toLowerCase();
-      }
-      return (
-        link.host.toLowerCase() === host.toLowerCase() &&
-        link.repository.toLowerCase() === repository.toLowerCase()
-      );
-    }),
-  );
-  if (link === null) return null;
-  return {
-    projectId,
-    repository: azureKey === null ? link.repository : repository,
-    number: link.number,
-    url: link.url,
-  };
-}
-
 export interface ThreadPullRequestChain {
   readonly kind: "native" | "derived";
   readonly layers: ReadonlyArray<ThreadPullRequestLink>;
@@ -213,7 +162,7 @@ export interface ThreadPullRequestChain {
   readonly depths: ReadonlyArray<number>;
 }
 
-export function resolveThreadPullRequestChains(
+function resolveThreadPullRequestChains(
   links: ReadonlyArray<ThreadPullRequestLink>,
 ): ReadonlyArray<ThreadPullRequestChain> {
   const visible = visibleThreadPullRequests(links);
@@ -300,26 +249,6 @@ export type ThreadPullRequestBadge = {
   | { readonly kind: "pull-request"; readonly others: number }
 );
 
-export function resolveThreadPullRequestBadge(
-  pullRequests: ReadonlyArray<ThreadPullRequestLink> | undefined,
-): ThreadPullRequestBadge | null {
-  const visible = visibleThreadPullRequests(pullRequests ?? []);
-  if (visible.length === 0) return null;
-  const states = visible.map((link) => link.snapshot?.state ?? "open");
-  const state = visible.every((link) => link.snapshot?.state === "open" && link.snapshot.isDraft)
-    ? "draft"
-    : states.includes("open")
-      ? "open"
-      : states.every((entry) => entry === "merged")
-        ? "merged"
-        : "closed";
-  const chains = resolveThreadPullRequestChains(visible);
-  if (visible.length > 1 && chains.length === 1) {
-    return { kind: "stack", layers: visible.length, state };
-  }
-  return { kind: "pull-request", others: visible.length - 1, state };
-}
-
 export function threadPullRequestSearchTerms(thread: {
   readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
@@ -383,31 +312,4 @@ export interface PullRequestListLine {
   readonly depth: number;
   readonly chainKey: string;
   readonly stack: { readonly kind: ThreadPullRequestChain["kind"]; readonly size: number } | null;
-}
-
-function chainKeyOf(chain: ThreadPullRequestChain): string {
-  const bottom = chain.layers[0]!;
-  return `${bottom.host}/${bottom.repository}#${bottom.number}`;
-}
-
-export function pullRequestListLines(
-  chains: ReadonlyArray<ThreadPullRequestChain>,
-): ReadonlyArray<PullRequestListLine> {
-  const ordered = [...chains].sort(
-    (left, right) =>
-      Math.max(...right.layers.map(latestUpdatedAt)) -
-      Math.max(...left.layers.map(latestUpdatedAt)),
-  );
-  return ordered.flatMap((chain) => {
-    const chainKey = chainKeyOf(chain);
-    return chain.layers.map((link, index) => ({
-      link,
-      depth: chain.depths[index]!,
-      chainKey,
-      stack:
-        index === 0 && chain.layers.length > 1
-          ? { kind: chain.kind, size: chain.layers.length }
-          : null,
-    }));
-  });
 }

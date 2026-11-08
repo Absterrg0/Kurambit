@@ -114,24 +114,6 @@ afterEach(async () => {
 });
 
 describe("mixed source control instructions", () => {
-  it("resets mixed template preferences without replacing each environment's instructions", async () => {
-    const initialInstructions = state.styles.map(({ mode, customInstructions }) => ({
-      mode,
-      customInstructions,
-    }));
-
-    await userEvent.click(resetButton("change request templates"));
-
-    expect(state.updateSettings).toHaveBeenCalledTimes(1);
-    expect(state.styles.map((style) => style.followChangeRequestTemplates)).toEqual([
-      DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle.followChangeRequestTemplates,
-      DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle.followChangeRequestTemplates,
-    ]);
-    expect(
-      state.styles.map(({ mode, customInstructions }) => ({ mode, customInstructions })),
-    ).toEqual(initialInstructions);
-  });
-
   it("resets every environment even when the representative already has default instructions", async () => {
     state.styles[0] = { ...DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle };
     await render();

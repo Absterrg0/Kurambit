@@ -19,20 +19,6 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 
 import type { ResolvedSettingsScope } from "./settingsScope";
 
-export function matchesScheduledTaskScope(
-  scope: ResolvedSettingsScope,
-  environmentId: EnvironmentId,
-  projectId: ProjectId,
-): boolean {
-  if (scope.kind === "unavailable" || !scope.environmentIds.includes(environmentId)) return false;
-  if (scope.kind === "project" || scope.kind === "checkout") {
-    return scope.members.some(
-      (member) => member.environmentId === environmentId && member.id === projectId,
-    );
-  }
-  return true;
-}
-
 export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
   return {
     ...(typeof raw.environmentId === "string" && raw.environmentId.trim()
@@ -79,7 +65,7 @@ export interface DraftState {
   readonly maxDeliveryAgeMinutes: string;
 }
 
-export const WEBHOOK_SIGNATURE_DEFAULTS = {
+const WEBHOOK_SIGNATURE_DEFAULTS = {
   signatureHeader: "x-hub-signature-256",
   signatureEncoding: "hex",
   signaturePrefix: "sha256=",

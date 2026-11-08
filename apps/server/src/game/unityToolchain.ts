@@ -112,7 +112,7 @@ export const parseUnityVersion = (text: string): UnityVersion | null => {
   };
 };
 
-export const compareUnityVersions = (a: UnityVersion, b: UnityVersion): number => {
+const compareUnityVersions = (a: UnityVersion, b: UnityVersion): number => {
   for (let index = 0; index < a.parts.length; index++) {
     const difference = a.parts[index]! - b.parts[index]!;
     if (difference !== 0) return difference;
@@ -123,7 +123,7 @@ export const compareUnityVersions = (a: UnityVersion, b: UnityVersion): number =
 const MIN_VERSION = parseUnityVersion(UNITY_MIN_VERSION)!;
 
 /** Unity 6 (6000.x) at or above the version the blank template was authored with. */
-export const supportedUnityVersion = (version: UnityVersion): boolean =>
+const supportedUnityVersion = (version: UnityVersion): boolean =>
   version.parts[0] === MIN_VERSION.parts[0] && compareUnityVersions(version, MIN_VERSION) >= 0;
 
 /**

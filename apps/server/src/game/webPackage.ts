@@ -22,11 +22,11 @@ import {
 import { candidateBuildId, hashWebBuild, type WebBuildFile } from "./webBuild.ts";
 
 export const WEB_PACKAGES_DIRECTORY = "builds/web-packages";
-export const WEB_PACKAGE_FILE = "game-web.zip";
+const WEB_PACKAGE_FILE = "game-web.zip";
 const BUILD_ID = /^[0-9a-f]{64}$/;
 
 /** A packaged build is addressed by its build id, so an old URL can never name another build. */
-export const webPackageArchivePath = (root: string, buildId: string) =>
+const webPackageArchivePath = (root: string, buildId: string) =>
   NodePath.join(root, WEB_PACKAGES_DIRECTORY, `${buildId}.zip`);
 
 export class WebPackageError extends Error {

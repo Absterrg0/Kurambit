@@ -25,21 +25,6 @@ export interface CloudSessionIdentity {
   readonly accountId: string;
 }
 
-export class CloudSession extends Context.Service<
-  CloudSession,
-  {
-    readonly identity: Effect.Effect<Option.Option<CloudSessionIdentity>>;
-    readonly clerkToken: Effect.Effect<string, ConnectionAttemptError>;
-  }
->()("@kurambit/client-runtime/platform/capabilities/CloudSession") {}
-
-export class RelayDeviceIdentity extends Context.Service<
-  RelayDeviceIdentity,
-  {
-    readonly deviceId: Effect.Effect<Option.Option<string>, ConnectionAttemptError>;
-  }
->()("@kurambit/client-runtime/platform/capabilities/RelayDeviceIdentity") {}
-
 export class ClientPresentation extends Context.Service<
   ClientPresentation,
   {

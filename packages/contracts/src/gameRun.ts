@@ -238,39 +238,3 @@ export const GameRunRoundsResult = Schema.Struct({
   ),
 });
 export type GameRunRoundsResult = typeof GameRunRoundsResult.Type;
-
-/**
- * A readable name for a run role thread ("tester-3" is "Tester, round 3").
- * Blind samples and comparators carry random ids, which say nothing to a reader.
- */
-export const gameRunRoleLabel = (role: string): string => {
-  const [head = role, ...rest] = role.split("-");
-  const tail = rest.join("-");
-  const round = /^\d+$/.test(tail) ? Number(tail) : null;
-  switch (head) {
-    case "vision":
-      return "Vision";
-    case "plan":
-      return "Plan";
-    case "art":
-      return tail === "director" ? "Art director" : "Art";
-    case "proto":
-      return round === null ? "Prototype" : `Prototype ${round + 1}`;
-    case "builder":
-      if (tail === "build") return "First full build";
-      if (/^\d+b$/.test(tail)) return `Builder retry, round ${tail.slice(0, -1)}`;
-      return round === null ? "Builder" : `Builder, round ${round}`;
-    case "tester":
-      return round === null ? "Tester" : `Tester, round ${round}`;
-    case "reviewer":
-      return round === null ? "Reviewer" : `Reviewer, round ${round}`;
-    case "ship":
-      return round === null ? "Ship review" : `Ship review after round ${round}`;
-    case "sample":
-      return "Blind play sample";
-    case "compare":
-      return "Blind comparison";
-    default:
-      return role;
-  }
-};

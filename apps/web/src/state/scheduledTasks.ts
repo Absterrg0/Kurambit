@@ -2,7 +2,6 @@ import { WS_METHODS } from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
-  createEnvironmentRpcSubscriptionAtomFamily,
 } from "@kurambit/client-runtime/state/runtime";
 
 import { connectionAtomRuntime } from "../connection/runtime";
@@ -13,15 +12,6 @@ export const scheduledTaskListQuery = createEnvironmentRpcQueryAtomFamily(connec
   staleTimeMs: 15_000,
   idleTtlMs: 5 * 60_000,
 });
-
-export const scheduledTaskListSubscription = createEnvironmentRpcSubscriptionAtomFamily(
-  connectionAtomRuntime,
-  {
-    label: "environment-data:scheduled-tasks:subscribe",
-    tag: WS_METHODS.scheduledTasksSubscribe,
-    idleTtlMs: 5 * 60_000,
-  },
-);
 
 export const scheduledTaskUpsert = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:scheduled-tasks:upsert",

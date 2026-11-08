@@ -18,12 +18,9 @@ import { GameBuildId } from "./gameBuildId.ts";
  * canvas's top-left corner. The shell's canvas fills its page, so they are the
  * iframe's own viewport pixels.
  */
-export const GAME_STAGE_BRIDGE_VERSION = 1;
+const GAME_STAGE_BRIDGE_VERSION = 1;
 /** The most things a game reports; the rest are left out. */
-export const GAME_STAGE_MAX_THINGS = 200;
-/** The trace a selection reports: its last this many seconds of screen path, sampled at this rate. */
-export const GAME_STAGE_TRACE_SECONDS = 10;
-export const GAME_STAGE_TRACE_HZ = 30;
+const GAME_STAGE_MAX_THINGS = 200;
 
 export const GameStageCapability = Schema.Literals(["freeze", "select", "tune", "trace"]);
 export type GameStageCapability = typeof GameStageCapability.Type;
@@ -193,12 +190,11 @@ export type GameToStageMessage = typeof GameToStageMessage.Type;
 
 /** The Stage's decoder for what a game page posts: None for anything else, old shells' bare ready included. */
 export const decodeGameToStageMessage = Schema.decodeUnknownOption(GameToStageMessage);
-export const decodeGameStageToGameMessage = Schema.decodeUnknownOption(GameStageToGameMessage);
 
 // Keep as a build
 
-export const GAME_KEEP_VALUES_MAX_THINGS = GAME_STAGE_MAX_THINGS;
-export const GAME_KEEP_VALUES_MAX_VALUES = 64;
+const GAME_KEEP_VALUES_MAX_THINGS = GAME_STAGE_MAX_THINGS;
+const GAME_KEEP_VALUES_MAX_VALUES = 64;
 
 /** One thing's values to keep, with the ranges the game registered (the Stage sends what it got). */
 export const GameKeepValuesThing = Schema.Struct({
@@ -240,7 +236,7 @@ const valueText = (value: GameThingValue) => {
 };
 
 /** A path in canvas pixels, said in one line: where it began and ended, how far it went and where it stayed. */
-export const gameStageTraceSummary = (trace: GameStageTrace | undefined): string => {
+const gameStageTraceSummary = (trace: GameStageTrace | undefined): string => {
   const points = trace?.points ?? [];
   if (points.length === 0) return "No path recorded (off screen, or not seen moving yet).";
   const [x0, y0] = points[0]!;

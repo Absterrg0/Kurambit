@@ -74,12 +74,6 @@ export function addProjectRemoteSourceProvider(_source: AddProjectRemoteSource):
   return null;
 }
 
-export function parseAddProjectRemoteSource(
-  _value: string | null | undefined,
-): AddProjectRemoteSource {
-  return "url";
-}
-
 const GITHUB_REPOSITORY_SHORTHAND =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]+(?:\.git)?$/;
 

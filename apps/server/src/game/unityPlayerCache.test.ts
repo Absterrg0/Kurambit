@@ -17,18 +17,10 @@ import {
 } from "./unityPlayerCache.ts";
 
 // The checkout reading runs through T3's real git driver.
-const checkoutOf = (root: string) =>
-  Effect.runPromise(
-    Effect.flatMap(makeCheckoutOf, (of) => of(root)).pipe(
-      Effect.provide(
-        GitVcsDriver.layer.pipe(
-          Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "unity-cache-" })),
-          Layer.provideMerge(NodeServices.layer),
-        ),
-      ),
-      Effect.scoped,
-    ),
-  );
+const checkoutLayer = GitVcsDriver.layer.pipe(
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "unity-cache-" })),
+  Layer.provideMerge(NodeServices.layer),
+);
 
 const SOURCE = "a".repeat(64);
 
@@ -85,9 +77,12 @@ it("copies only a complete player of the exact sources and leaves the main's unt
   }
 });
 
-it("names a linked worktree's main checkout", async () => {
-  const base = await scratch();
-  try {
+it.effect("names a linked worktree's main checkout", () =>
+  Effect.gen(function* () {
+    const checkoutOf = yield* makeCheckoutOf;
+    const base = yield* Effect.acquireRelease(Effect.promise(scratch), (directory) =>
+      Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
+    );
     const main = NodePath.join(base, "main");
     const worktree = NodePath.join(base, "worktree");
     const git = (cwd: string, ...args: string[]) =>
@@ -95,7 +90,7 @@ it("names a linked worktree's main checkout", async () => {
         cwd,
         env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))),
       });
-    await NodeFSP.mkdir(main);
+    yield* Effect.promise(() => NodeFSP.mkdir(main));
     git(main, "init", "-q");
     git(
       main,
@@ -110,15 +105,15 @@ it("names a linked worktree's main checkout", async () => {
       "x",
     );
     git(main, "worktree", "add", "-q", "--detach", worktree);
-    const real = await NodeFSP.realpath(main);
-    expect(await checkoutOf(main)).toEqual({ kind: "own" });
-    expect(await checkoutOf(worktree)).toEqual({ kind: "linked", main: real });
+    const real = yield* Effect.promise(() => NodeFSP.realpath(main));
+    expect(yield* checkoutOf(main)).toEqual({ kind: "own" });
+    expect(yield* checkoutOf(worktree)).toEqual({ kind: "linked", main: real });
     // A run's plain copy of a build names its game folder instead.
     const copy = NodePath.join(base, "copy");
-    await NodeFSP.mkdir(copy);
-    await NodeFSP.writeFile(NodePath.join(copy, COPY_OF), `${main}\n`);
-    expect(await checkoutOf(copy)).toEqual({ kind: "linked", main: real });
-  } finally {
-    await NodeFSP.rm(base, { recursive: true, force: true });
-  }
-});
+    yield* Effect.promise(async () => {
+      await NodeFSP.mkdir(copy);
+      await NodeFSP.writeFile(NodePath.join(copy, COPY_OF), `${main}\n`);
+    });
+    expect(yield* checkoutOf(copy)).toEqual({ kind: "linked", main: real });
+  }).pipe(Effect.provide(checkoutLayer), Effect.scoped),
+);

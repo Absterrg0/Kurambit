@@ -84,8 +84,7 @@ export class GameRunJobs extends Context.Service<
   }
 >()("kurambit/orchestration-v2/gameRun/GameRunJobs") {}
 
-export const stepJobKey = (job: GameRunStepJob): string =>
-  `execute:${job.stepId}:attempt:${job.attempt}`;
+const stepJobKey = (job: GameRunStepJob): string => `execute:${job.stepId}:attempt:${job.attempt}`;
 
 export const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;

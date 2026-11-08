@@ -6,20 +6,20 @@ import { resolveStorage } from "./lib/storage";
 
 /** The chat is docked beside the game, so it starts narrow enough to leave the stage room. */
 export const GAME_CHAT_DEFAULT_WIDTH = 360;
-export const GAME_CHAT_MIN_WIDTH = 300;
-export const GAME_CHAT_MAX_WIDTH = 760;
+const GAME_CHAT_MIN_WIDTH = 300;
+const GAME_CHAT_MAX_WIDTH = 760;
 /**
  * The stage is the product. However wide the chat was left in an old session,
  * it never gets more than this share of the workspace.
  */
-export const GAME_CHAT_MAX_WORKSPACE_SHARE = 0.45;
+const GAME_CHAT_MAX_WORKSPACE_SHARE = 0.45;
 /**
  * Below this workspace width (the row after the sidebar, not the window) the
  * chat and the stage cannot both stay usable, so the workbench shows one pane
  * at a time. The threshold leaves a docked stage at least 600px at the default
  * chat width.
  */
-export const GAME_WORKSPACE_DOCK_MIN_WIDTH = 960;
+const GAME_WORKSPACE_DOCK_MIN_WIDTH = 960;
 
 export const isGameWorkspaceCompact = (workspaceWidth: number) =>
   workspaceWidth > 0 && workspaceWidth < GAME_WORKSPACE_DOCK_MIN_WIDTH;

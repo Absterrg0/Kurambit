@@ -56,7 +56,7 @@ const DEFAULT_DIFF_LAYOUT: DiffLayout = "stacked";
 
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
-export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
+const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
 
 export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at"]);
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
@@ -528,7 +528,7 @@ export function secretSetting<S extends Schema.Top>(schema: S): S["Rebuild"] {
 }
 
 /** A secret setting kept under a fixed store name, so a key stored there before the field existed is its value. */
-export const namedSecretSetting =
+const namedSecretSetting =
   (secretName: string) =>
   <S extends Schema.Top>(schema: S): S["Rebuild"] =>
     schema.annotateKey({ settingsSecret: true, settingsSecretName: secretName });

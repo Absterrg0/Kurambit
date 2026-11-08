@@ -17,8 +17,9 @@
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option; native verification and
-      // worktree setup (from kurambit.json) run directly.
-      "entry": ["knip-schemas.ts", "setup-worktree.ts"],
+      // worktree setup (from kurambit.json) run directly, as do the maintainer
+      // reports and the CLI archive smoke (docs/operations/release.md).
+      "entry": ["knip-schemas.ts", "setup-worktree.ts", "game-run-cost.ts", "smoke-cli-archive.ts"],
       // The `kurambit` npm package's files: copied into the package, never imported.
       "ignore": ["npm-launcher/**"],
     },
@@ -39,6 +40,14 @@
       // Native and disk-loaded provider packages stay external to the bundle; the
       // CLI archive and desktop sidecar stage them from this manifest.
       "ignoreDependencies": ["@effect/platform-node-shared", "@kurambit/web", "@napi-rs/keyring"],
+      // Game templates and the bot kit are copied into each game's own folder and
+      // run there; nothing in the server imports them.
+      "ignore": ["templates/**"],
+    },
+    "apps/marketing": {
+      // Static pages load these by <script> tag; Vercel runs each site/api file
+      // that is not prefixed with an underscore as a function.
+      "entry": ["site/*.js", "site/hill-temple/*.js", "site/api/[!_]*.ts", "brand/src/*.js"],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.

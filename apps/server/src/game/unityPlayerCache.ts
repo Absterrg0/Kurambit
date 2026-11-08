@@ -31,7 +31,7 @@ export const COPY_OF = ".kurambit-copy-of";
  * other folder whose .git is a file (a submodule, a separate git dir) has no
  * game folder to share an import with.
  */
-export const checkoutOf = (
+const checkoutOf = (
   root: string,
   gitDirs: (cwd: string) => Effect.Effect<readonly [common: string, gitDir: string] | null>,
 ): Effect.Effect<Checkout> =>

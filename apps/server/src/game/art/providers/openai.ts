@@ -21,7 +21,7 @@ import {
   roundUsd,
 } from "./adapter.ts";
 
-export const OPENAI_IMAGE_MODEL = "gpt-image-2.5-sunburst";
+const OPENAI_IMAGE_MODEL = "gpt-image-2.5-sunburst";
 const BASE = "https://api.openai.com/v1";
 const QUALITY = "high";
 
@@ -33,7 +33,7 @@ const OUTPUT_HIGH_1024 = 0.053;
 const PER_REFERENCE = 0.012;
 
 /** Sizes by aspect: multiples of 16, within the documented pixel bounds. */
-export const openAiSize = (options: GameArtOptions): string => {
+const openAiSize = (options: GameArtOptions): string => {
   switch (options.aspect) {
     case "16:9":
       return "1536x864";
@@ -52,7 +52,7 @@ export const openAiSize = (options: GameArtOptions): string => {
  * multiples of 16, at most 3840, between 1:3 and 3:1, 655,360 to 8,294,400 pixels); otherwise
  * the API sizes it ("auto"). An aspect asked outright wins.
  */
-export const openAiEditSize = (
+const openAiEditSize = (
   options: GameArtOptions,
   edited: { readonly width: number; readonly height: number } | null,
 ): string => {

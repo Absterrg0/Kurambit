@@ -283,7 +283,7 @@ function GameAudio({
 const PICK_COLUMNS = 2;
 
 /** The candidates as a grid: click or arrow to one, then Use this (or Enter). */
-export function CandidatePicker({
+function CandidatePicker({
   threadRef,
   root,
   generation,
@@ -746,7 +746,7 @@ export function GameGenerationCard({
 }
 
 /** Whether any generation of the game waits on the person's pick, for the Stage's menu. */
-export const selectChoosingCount = (result: GenerationsResult): number =>
+const selectChoosingCount = (result: GenerationsResult): number =>
   AsyncResult.isSuccess(result)
     ? result.value.generations.filter(
         (generation) => generation.state === "choosing" && generation.filesUndone !== true,

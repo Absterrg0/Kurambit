@@ -1,7 +1,7 @@
 import { EnvironmentId } from "@kurambit/contracts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn<() => Promise<string | null>>() }));
 
@@ -23,6 +23,12 @@ describe("attachment HTML preview recovery", () => {
   let now = 0;
   let root: Root;
   let container: HTMLDivElement;
+
+  // The preview loads the source view lazily, and a cold first load can outlast
+  // waitFor on a busy runner; the test is about which URL is fetched.
+  beforeAll(async () => {
+    await import("./ReadOnlySourcePreview");
+  });
 
   beforeEach(() => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

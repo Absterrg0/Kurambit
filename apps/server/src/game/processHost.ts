@@ -49,7 +49,7 @@ export interface LaunchRecord {
   readonly token: string;
 }
 
-export const isLaunchRecord = (value: unknown): value is LaunchRecord => {
+const isLaunchRecord = (value: unknown): value is LaunchRecord => {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Partial<LaunchRecord>;
   return (
@@ -674,10 +674,6 @@ export const adoptLaunch = async (
   host.joinJob(pid);
   return { pid, start: facts.start, token };
 };
-
-/** Whether a recorded launch still runs as the process it named. */
-export const launchAlive = async (record: unknown): Promise<boolean> =>
-  (await verified(record)) !== null;
 
 /**
  * Stops recorded launches that still verify as ours, with the rest of their

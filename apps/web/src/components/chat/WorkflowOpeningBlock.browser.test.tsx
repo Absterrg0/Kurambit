@@ -10,6 +10,7 @@ import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import { MarkdownFindContext } from "./markdownFindContext";
 import { useThreadFindHighlights } from "./threadFindHighlights";
 import { WorkflowOpeningBlock } from "./WorkflowOpeningBlock";
+import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
 
 vi.mock(import("../../state/server"), async (original) => {
   const actual = await original();
@@ -98,6 +99,9 @@ const foldToggle = () =>
   );
 
 it("shows a short script as highlighted code with nothing to open", async () => {
+  // A cold grammar load can outlast waitFor on a busy runner; the highlight is
+  // asserted, not how fast the first load is.
+  await getSyntaxHighlighterPromise("javascript");
   await render(SHORT_SCRIPT);
   expect(host.querySelector('[data-language="javascript"]')?.textContent).toContain("SCRIPTONLY");
   await vi.waitFor(() => expect(host.querySelector(".chat-markdown-shiki")).not.toBeNull());

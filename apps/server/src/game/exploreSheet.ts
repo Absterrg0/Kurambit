@@ -12,7 +12,7 @@ export interface ExploreFrame {
 }
 
 /** 4 x 3 cells of 400 px: about 1600 px wide, readable at a glance. */
-export const SHEET_FRAMES = 12;
+const SHEET_FRAMES = 12;
 const COLUMNS = 4;
 const CELL_W = 400;
 // Labels sit in a band above each frame, so they never cover the game's own HUD.

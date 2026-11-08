@@ -35,8 +35,8 @@ import {
 } from "./adapter.ts";
 
 const GRAPHQL = "https://uthana.com/graphql";
-export const UTHANA_TEXT_MODEL = "text-to-motion-3.0";
-export const UTHANA_VIDEO_MODEL = "video-to-motion-3.0";
+const UTHANA_TEXT_MODEL = "text-to-motion-3.0";
+const UTHANA_VIDEO_MODEL = "video-to-motion-3.0";
 /** USD per second of output motion, uthana.com/pricing and llms.txt, 2026-11. */
 const PRICE = { text: 0.1, video: 0.06, locomotion: 0.02, loop: 0.01 } as const;
 /** create_text_to_motion_job's length: whole seconds, 4 to 10, 8 when omitted. */
@@ -63,7 +63,7 @@ const DIRECTIONS = [
   { name: "Left", angle: -90 },
   { name: "Fwd_Left", angle: -45 },
 ] as const;
-export const UTHANA_LOCOMOTION = GAITS.flatMap((gait) =>
+const UTHANA_LOCOMOTION = GAITS.flatMap((gait) =>
   DIRECTIONS.map((direction) => ({
     clip: `${gait.gait}_${direction.name}_Loop`,
     speed: gait.speed,
@@ -189,7 +189,7 @@ const readUpload = (context: ArtContext, path: string, limit: number, what: stri
     ),
   );
 
-export const UTHANA_QUERIES = {
+const UTHANA_QUERIES = {
   character: `mutation CreateCharacter($name: String!, $file: Upload!, $auto_rig: Boolean) {
   create_character(name: $name, file: $file, auto_rig: $auto_rig) { character { id name } auto_rig_confidence message }
 }`,

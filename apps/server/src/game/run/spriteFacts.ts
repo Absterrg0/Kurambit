@@ -142,7 +142,7 @@ const rawBytes = ({ width, height, depth, type }: Header) =>
   height * (Math.ceil((width * CHANNELS[type]! * depth) / 8) + 1);
 
 /** The IHDR, read from the first 33 bytes, or why the file is not a PNG this decoder reads. */
-export const pngHeader = (file: Buffer): Header | Skip => {
+const pngHeader = (file: Buffer): Header | Skip => {
   if (file.length < 8 || file.readUInt32BE(0) !== 0x89504e47 || file.readUInt32BE(4) !== 0x0d0a1a0a)
     return { skip: "not a PNG" };
   if (file.length < 33 || file.readUInt32BE(8) !== 13 || file.toString("latin1", 12, 16) !== "IHDR")

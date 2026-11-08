@@ -8,6 +8,9 @@ import * as NodeURL from "node:url";
 
 import { expect, it } from "vite-plus/test";
 
+import { Tool } from "effect/ai";
+
+import * as GameTools from "./toolkits/game/tools.ts";
 import { startBenchmarkServer } from "../../../../scripts/lib/benchmark-server.ts";
 import { prepareDisplaySandbox } from "../../../../scripts/lib/display-sandbox.ts";
 
@@ -100,6 +103,7 @@ const postMcp = async (input: {
   readonly method: string;
   readonly params: unknown;
   readonly sessionId?: string;
+  readonly allowError?: boolean;
 }): Promise<{ readonly reply: JsonRpcReply; readonly sessionId: string | null }> => {
   const response = await fetch(`${input.origin}/mcp`, {
     method: "POST",
@@ -132,14 +136,14 @@ const postMcp = async (input: {
     throw new Error(`MCP ${input.method} returned an empty response.`);
   }
   const reply = JSON.parse(payloadText) as JsonRpcReply;
-  if (reply.error !== undefined) {
+  if (reply.error !== undefined && input.allowError !== true) {
     throw new Error(`MCP ${input.method} failed: ${reply.error.message ?? "unknown error"}`);
   }
   return { reply, sessionId: response.headers.get("mcp-session-id") };
 };
 
 it(
-  "starts the production server and registers the package tools with object inputs",
+  "starts the production server and registers its toolkits with object inputs",
   { timeout: 45_000 },
   async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kurambit-mcp-startup-"));
@@ -184,39 +188,26 @@ it(
       const names = tools.map((tool) => tool.name);
 
       // A toolkit that failed to register usually leaves its names out entirely.
-      for (const name of [
-        "kurambit_worktree_status",
-        "preview_status",
-        "game_status",
-        "game_package_windows",
-        "game_package_web",
-      ]) {
+      for (const name of ["kurambit_worktree_status", "preview_status"]) {
         expect(names, name).toContain(name);
       }
-
       for (const tool of tools) {
         expect(tool.inputSchema.type, `inputSchema.type of ${tool.name}`).toBe("object");
       }
-      for (const name of ["game_package_windows", "game_package_web"]) {
-        const tool = tools.find((candidate) => candidate.name === name);
-        expect(tool, name).toBeDefined();
-        expect(tool?.inputSchema.anyOf, `${name} must not export a root anyOf`).toBeUndefined();
-        expect(tool?.inputSchema.oneOf, `${name} must not export a root oneOf`).toBeUndefined();
-      }
 
-      // Empty arguments must reach the handler and its normal access boundary,
-      // never a parameter decode or registration failure. A signed-in client
-      // has no calling thread, so the service gate is the expected stop here.
+      // Game tools are listed only to a thread whose game's engine and moment fit
+      // them (toolkits/game/placement.ts). A signed-in client has no thread, so it
+      // is offered none and cannot call one by name.
+      expect(names.filter((name) => name.startsWith("game_"))).toEqual([]);
       const called = await postMcp({
         origin: server.url,
         token,
         method: "tools/call",
         params: { name: "game_package_windows", arguments: {} },
+        allowError: true,
         ...(initialized.sessionId === null ? {} : { sessionId: initialized.sessionId }),
       });
-      expect(called.reply.result?.isError).toBe(true);
-      const text = called.reply.result?.content?.find((part) => part.type === "text")?.text ?? "";
-      expect(JSON.parse(text)).toMatchObject({ code: "thread_credential_required" });
+      expect(called.reply.error?.message ?? "").toMatch(/not found/i);
     } finally {
       try {
         if (server !== undefined) await server.stop();
@@ -226,3 +217,24 @@ it(
     }
   },
 );
+
+// The server lists game tools only inside a game's thread, so their exported
+// schemas are checked here: providers reject a tool whose root is not an object.
+it("exports every game tool's input as a root object schema", () => {
+  const gameTools: Array<Tool.Any> = [];
+  for (const value of Object.values(GameTools) as ReadonlyArray<unknown>) {
+    if ((typeof value === "object" || typeof value === "function") && value !== null) {
+      if ("tools" in value) {
+        const toolkit = value as { readonly tools: Readonly<Record<string, Tool.Any>> };
+        gameTools.push(...Object.values(toolkit.tools));
+      }
+    }
+  }
+  expect(gameTools.map((tool) => tool.name)).toContain("game_package_windows");
+  for (const tool of gameTools) {
+    const schema = Tool.getJsonSchema(tool) as AdvertisedTool["inputSchema"];
+    expect(schema.type, `inputSchema.type of ${tool.name}`).toBe("object");
+    expect(schema.anyOf, `${tool.name} must not export a root anyOf`).toBeUndefined();
+    expect(schema.oneOf, `${tool.name} must not export a root oneOf`).toBeUndefined();
+  }
+});

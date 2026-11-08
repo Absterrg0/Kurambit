@@ -14,7 +14,7 @@ import {
   type WindowsBuildSource,
 } from "./windowsExport.ts";
 
-export const WINDOWS_PACKAGE_FILE = "game-windows.zip";
+const WINDOWS_PACKAGE_FILE = "game-windows.zip";
 
 export class WindowsPackageError extends Error {
   readonly path: string;
@@ -52,7 +52,7 @@ export interface WindowsPackageResult {
   readonly notes: readonly string[];
 }
 
-export const windowsPackageArchivePath = (root: string) =>
+const windowsPackageArchivePath = (root: string) =>
   NodePath.join(root, "builds/windows", WINDOWS_PACKAGE_FILE);
 
 const isNotFound = (cause: unknown) =>
@@ -182,7 +182,7 @@ const nativeFileSystem: ArchiveFileSystem = {
 };
 
 /** Windows-specific error shape around the shared atomic publish rename. */
-export const publishWindowsArchive = async (
+const publishWindowsArchive = async (
   input: { readonly stagedArchive: string; readonly archive: string },
   fileSystem: WindowsPackageFileSystem = nativeFileSystem,
 ): Promise<{ readonly notes: readonly string[] }> => {

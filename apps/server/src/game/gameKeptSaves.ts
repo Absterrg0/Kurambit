@@ -8,7 +8,7 @@ import { isPathInside } from "./gameNativeUserDir.ts";
 import type { KeptStorage } from "./webPlaySession.ts";
 
 /** Game-relative home of kept saves; run state, ignored and never merged. */
-export const KEPT_SAVES_DIR = ".studio/saves";
+const KEPT_SAVES_DIR = ".studio/saves";
 
 /**
  * A directory inside the game folder, created when missing, that resolves
@@ -61,7 +61,7 @@ export const keptSavesDir = async (root: string, engine: string): Promise<string
 };
 
 /** Writes a file the server owns inside a checked game directory, replacing a link at its name. */
-export const writeNoFollow = async (file: string, text: string): Promise<void> => {
+const writeNoFollow = async (file: string, text: string): Promise<void> => {
   await NodeFSP.rm(file, { force: true }).catch(() => undefined);
   await NodeFSP.writeFile(file, text, { flag: "wx" });
 };

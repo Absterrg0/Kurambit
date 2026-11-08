@@ -419,4 +419,4 @@ export const extractRunFrames = async (
 };
 
 /** Stills extraction runs fixed ffmpeg args on already-written video: allowlisted engine base only. */
-export const headlessEnv = (): NodeJS.ProcessEnv => engineChildEnv();
+const headlessEnv = (): NodeJS.ProcessEnv => engineChildEnv();

@@ -243,10 +243,5 @@ export const gamePaths = (engine: GameEngineId, project: string) => {
  */
 export const legacyLaneEngine = (lane: string): GameEngineId =>
   (PROFILES.find((profile) => profile.projectDirectory === lane) ?? GODOT_PROFILE).id;
-/** A run's engine: the one it recorded, else the one its project folder implies. */
-export const runEngine = (run: {
-  readonly engine?: GameEngineId;
-  readonly lane: string;
-}): GameEngineId => run.engine ?? legacyLaneEngine(run.lane);
 /** Every engine's skill name, for dropping the ones a lane does not use. */
 export const ENGINE_SKILLS: ReadonlyArray<string> = PROFILES.map((profile) => profile.run.skill);

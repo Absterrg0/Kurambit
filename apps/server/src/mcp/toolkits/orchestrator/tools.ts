@@ -114,7 +114,7 @@ const WorkflowStopTool = Tool.make("kurambit_workflow_stop", {
   .annotate(Tool.Title, "Stop a workflow")
   .annotate(Tool.Destructive, true);
 
-export const ScheduleTaskTool = Tool.make("schedule_task", {
+const ScheduleTaskTool = Tool.make("schedule_task", {
   description:
     "Create persistent work in the app scheduler that runs even when no turn is active. Pass schedule as a STRUCTURED OBJECT, never JSON text. Timers: {type:'interval', everyMs:3600000} is hourly; {type:'fixed_time', timeOfDay:'09:00', weekdays:[1,2,3,4,5]} is weekday mornings; report the returned nextRunAt. This local environment has no public webhook URL, so prefer interval or fixed_time schedules here. Omit projectId for this thread's project. In this thread's project, runs post into THIS thread by default (bindToCurrentThread=true), which suits an orchestrator that sees every trigger, delegates work, and can dedupe against what is in flight; use false only when the user wants a fresh top-level thread per run. Elsewhere each run launches a fresh thread. Provider, model, and runtime settings inherit from this thread, or from the project default when there is no calling thread.",
   parameters: OrchestratorMcpScheduleTaskInput,

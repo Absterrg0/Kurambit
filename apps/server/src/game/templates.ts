@@ -28,10 +28,10 @@ const textFileExtensions = [
   ".asset",
 ];
 
-export const isTemplateTextFile = (relativePath: string): boolean =>
+const isTemplateTextFile = (relativePath: string): boolean =>
   textFileExtensions.some((extension) => relativePath.endsWith(extension));
 
-export const substituteGameName = (text: string, gameName: string): string =>
+const substituteGameName = (text: string, gameName: string): string =>
   text
     .replaceAll(gameNameEscapedPlaceholder, JSON.stringify(gameName).slice(1, -1))
     .replaceAll(gameNamePlaceholder, gameName);
@@ -41,7 +41,7 @@ export const substituteGameName = (text: string, gameName: string): string =>
  * (player prefs, analytics, cloud links); every game gets its own instead of
  * the template's.
  */
-export const withProductGuid = (relativePath: string, text: string, guid: string): string =>
+const withProductGuid = (relativePath: string, text: string, guid: string): string =>
   relativePath.endsWith("ProjectSettings.asset")
     ? text.replace(/^(\s*productGUID: )[0-9a-f]{32}$/m, `$1${guid}`)
     : text;

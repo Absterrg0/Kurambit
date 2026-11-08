@@ -61,7 +61,7 @@ export const findExecutable = async (
   return null;
 };
 /** The environment headless children get: the server's, minus every display route. */
-export const headlessEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+const headlessEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const headless: NodeJS.ProcessEnv = { ...environment };
   for (const name of DISPLAY_VARIABLES) delete headless[name];
   return headless;

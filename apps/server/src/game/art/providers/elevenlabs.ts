@@ -13,13 +13,13 @@ import {
 } from "./adapter.ts";
 
 const BASE = "https://api.elevenlabs.io/v1";
-export const ELEVENLABS_MODELS = {
+const ELEVENLABS_MODELS = {
   sfx: "eleven_text_to_sound_v3",
   music: "music_v2_5",
   voice: "eleven_v4",
 } as const;
 /** The voice ElevenLabs' own text-to-speech examples use: the default until the person picks one. */
-export const ELEVENLABS_DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb";
+const ELEVENLABS_DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb";
 /** USD, 2026-11: per minute of sound effects and of music, per 1K characters spoken. */
 const PRICE = { sfxMinute: 0.12, musicMinute: 0.15, voiceKChars: 0.08 } as const;
 const DEFAULT_SECONDS = { sfx: 2, music: 60 } as const;
@@ -93,7 +93,7 @@ const start = (context: ArtContext, request: ArtRequest) =>
     };
   });
 
-export const ELEVENLABS_MUSIC_LICENCE =
+const ELEVENLABS_MUSIC_LICENCE =
   "ElevenLabs music on a paid self-serve plan: commercial use except film, TV, radio and Studio Games (a monetized game over $500k lifetime revenue, or from a developer over $1M a year, needs Enterprise Music). The free plan has no commercial licence.";
 
 export const elevenlabs: ArtAdapter = {

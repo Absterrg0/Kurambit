@@ -62,7 +62,7 @@ const decode = Schema.decodeUnknownOption(ThreadEvidenceJson);
 const encode = Schema.encodeSync(ThreadEvidenceJson);
 
 /** Records untouched this long belong to runs long finished. */
-export const RETAIN_MS = 14 * 24 * 60 * 60_000;
+const RETAIN_MS = 14 * 24 * 60 * 60_000;
 
 export const empty = (threadId: string, root: string): ThreadEvidence => ({
   version: 1,
@@ -125,7 +125,7 @@ export const keyOf = (threadId: string) =>
 
 export const recordPath = (dir: string, threadId: string) =>
   NodePath.join(dir, `${keyOf(threadId)}.json`);
-export const framesDir = (dir: string, threadId: string) => NodePath.join(dir, keyOf(threadId));
+const framesDir = (dir: string, threadId: string) => NodePath.join(dir, keyOf(threadId));
 
 /**
  * The record on disk: null when there is none. A record that does not decode,

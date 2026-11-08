@@ -23,7 +23,5 @@ export class AnalyticsService extends Context.Service<
 }
 
 // Kurambit has no product analytics sender, identity lookup, or background flush.
-export const make = Effect.succeed(
-  AnalyticsService.of({ record: () => Effect.void, flush: Effect.void }),
-);
+const make = Effect.succeed(AnalyticsService.of({ record: () => Effect.void, flush: Effect.void }));
 export const layer = Layer.effect(AnalyticsService, make);

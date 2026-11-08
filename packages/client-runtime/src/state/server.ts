@@ -82,7 +82,7 @@ const IDLE_SERVER_UPDATE_STATE: ServerUpdateState = { status: "idle" };
 const EMPTY_SERVER_UPDATE_STATE_ATOM = Atom.make<ServerUpdateState>(IDLE_SERVER_UPDATE_STATE).pipe(
   Atom.withLabel("environment-data:server:update-state:empty"),
 );
-export const serverUpdateStateAtom = Atom.family((environmentId: EnvironmentId) =>
+const serverUpdateStateAtom = Atom.family((environmentId: EnvironmentId) =>
   Atom.make<ServerUpdateState>(IDLE_SERVER_UPDATE_STATE).pipe(
     Atom.withLabel(`environment-data:server:update-state:${environmentId}`),
   ),
@@ -297,10 +297,6 @@ export function serverUpdateStateForServerVersion(
     state.fromVersion === serverVersion
     ? state
     : IDLE_SERVER_UPDATE_STATE;
-}
-
-export function serverUpdateFailureMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Server update failed.";
 }
 
 function isRpcSocketError(error: unknown): boolean {

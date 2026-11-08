@@ -89,7 +89,17 @@ function mockThreadShell() {
 }
 
 let stableParent: ReturnType<typeof mockThreadShell> | null = null;
+let subagentParent: ReturnType<typeof mockThreadShell> | null = null;
 function mockThreads() {
+  // A subagent notifies through its parent only while that parent is live.
+  if (state.subagent) {
+    subagentParent ??= {
+      ...mockThreadShell(),
+      id: "parent",
+      lineage: { rootThreadId: "parent", parentThreadId: null, relationshipToParent: null },
+    };
+    return [subagentParent, mockThreadShell()];
+  }
   if (state.delegatedChild === null) return [mockThreadShell()];
   stableParent ??= mockThreadShell();
   const child = {
@@ -182,6 +192,7 @@ beforeEach(() => {
     delegatedChild: null,
   });
   stableParent = null;
+  subagentParent = null;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.spyOn(document, "visibilityState", "get").mockImplementation(
     () => state.visible as DocumentVisibilityState,
@@ -198,18 +209,21 @@ afterEach(async () => {
 });
 
 describe("thread notifications", () => {
-  it.each([true, false])("keeps subagents silent with focus=%s", async (focused) => {
-    state.subagent = true;
-    state.focused = focused;
-    state.mode = "notifications-and-sound";
-    await render();
-    await complete();
-    state.input = true;
-    await render();
-    expect(state.sound).not.toHaveBeenCalled();
-    expect(state.add).not.toHaveBeenCalled();
-    expect(state.notification).not.toHaveBeenCalled();
-  });
+  it.each([true, false])(
+    "keeps a live parent's subagents silent with focus=%s",
+    async (focused) => {
+      state.subagent = true;
+      state.focused = focused;
+      state.mode = "notifications-and-sound";
+      await render();
+      await complete();
+      state.input = true;
+      await render();
+      expect(state.sound).not.toHaveBeenCalled();
+      expect(state.add).not.toHaveBeenCalled();
+      expect(state.notification).not.toHaveBeenCalled();
+    },
+  );
 
   it("alerts on the parent when its delegated subagent asks for approval", async () => {
     state.mode = "notifications-and-sound";

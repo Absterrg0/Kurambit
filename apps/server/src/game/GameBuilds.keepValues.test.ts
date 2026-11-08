@@ -142,8 +142,11 @@ it.effect("keeps values as a build that Undo takes back, and refuses one outside
     assert.strictEqual(after.restore?.target, kept.base);
     assert.isNotNull(after.restore?.undo);
   }).pipe(
-    Effect.provide(layerFor(root)),
-    Effect.provide(Layer.merge(NodeServices.layer, SqlitePersistence.layerMemory)),
+    Effect.provide(
+      layerFor(root).pipe(
+        Layer.provideMerge(Layer.merge(NodeServices.layer, SqlitePersistence.layerMemory)),
+      ),
+    ),
     Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
   );
 });

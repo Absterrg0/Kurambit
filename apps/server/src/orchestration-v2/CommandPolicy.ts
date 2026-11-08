@@ -138,7 +138,11 @@ export function threadTurnsOwnedByRun(thread: {
  * lane could land after that move and record the run's restore as the role's
  * work. The turn's run still settles; it just has no diff or rollback point.
  */
-export const threadCheckpointsOwnedByRun = threadTurnsOwnedByRun;
+export function threadCheckpointsOwnedByRun(thread: {
+  readonly launchedBy?: OrchestrationV2AppThread["launchedBy"];
+}): boolean {
+  return threadTurnsOwnedByRun(thread);
+}
 
 /**
  * Whether a run holds its game's folder: only a stage-era run while it is

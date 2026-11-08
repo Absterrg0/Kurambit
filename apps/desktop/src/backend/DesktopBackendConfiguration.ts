@@ -244,7 +244,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
   },
 );
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;

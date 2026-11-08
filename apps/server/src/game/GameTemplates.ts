@@ -28,7 +28,7 @@ export class GameTemplates extends Context.Service<
   }
 >()("kurambit/game/GameTemplates") {}
 
-export const TEMPLATES_ARCHIVE = "templates.zip";
+const TEMPLATES_ARCHIVE = "templates.zip";
 
 /** The archive holds about 200 small files; anything far past that is not ours. */
 const TEMPLATE_LIMITS: UnpackLimits = {
@@ -41,7 +41,7 @@ const TEMPLATE_LIMITS: UnpackLimits = {
  * One folder per app version and archive content, so an update (or a rebuilt
  * archive under the same version) extracts afresh instead of reusing old files.
  */
-export const extractedTemplatesDirectory = (baseDir: string, version: string, digest: string) =>
+const extractedTemplatesDirectory = (baseDir: string, version: string, digest: string) =>
   NodePath.join(
     baseDir,
     "templates",

@@ -50,7 +50,7 @@ export class DesktopUpdates extends Context.Service<
   }
 >()("@kurambit/desktop/updates/DesktopUpdates") {}
 
-export const UPDATES_DISABLED_REASON = "Automatic updates are unavailable in Kurambit.";
+const UPDATES_DISABLED_REASON = "Automatic updates are unavailable in Kurambit.";
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

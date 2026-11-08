@@ -61,7 +61,7 @@ const PACK_ID = /^[a-z0-9][a-z0-9-]{1,63}$/;
 export const resolveRig = (rig: string) => LIBRARY_RIG_ALIASES[rig] ?? rig;
 
 /** What in a decoded lock names nothing in the library, or null. */
-export const styleProblem = (style: GameStyle): string | null => {
+const styleProblem = (style: GameStyle): string | null => {
   const packIds = LIBRARY_CATALOG.map((pack) => pack.id);
   for (const [field, ids] of [
     ["packs", style.packs],

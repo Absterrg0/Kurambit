@@ -67,17 +67,17 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
     if (saving) return;
     setSaving(true);
     setError(null);
-    try {
-      const saved = await update({ environmentId, input: { patch: paths } });
-      if (saved._tag === "Failure") {
-        setError(String(squashAtomCommandFailure(saved)));
-        return;
-      }
-      setPaths({});
-    } finally {
-      setSaving(false);
-      query.refresh();
-    }
+    // A promise chain, not try/finally: React Compiler skips a component whose
+    // handler has a finally clause.
+    await update({ environmentId, input: { patch: paths } })
+      .then((saved) => {
+        if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
+        else setPaths({});
+      })
+      .finally(() => {
+        setSaving(false);
+        query.refresh();
+      });
   };
   return (
     <SettingsSection id="game-tools" title="Game tools">

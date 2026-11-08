@@ -142,7 +142,7 @@ export const currentInvocation = (): McpInvocationScope | undefined => {
 };
 
 /** True inside a tool call from a thread the production run launched. */
-export const isGameRunThread = () => currentInvocation()?.gameRunRole === "run";
+const isGameRunThread = () => currentInvocation()?.gameRunRole === "run";
 
 /**
  * A tool that says nothing about production-run threads hides from them. A

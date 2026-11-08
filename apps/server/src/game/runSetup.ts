@@ -35,10 +35,6 @@ const readText = (path: string): Promise<string | null> =>
     throw error;
   });
 
-/** A run's line for people, in the server log: the run's step records are its history. */
-export const logLine = (root: string, line: string): Effect.Effect<void> =>
-  Effect.logInfo(line).pipe(Effect.annotateLogs({ game: root }));
-
 const ioError = (operation: string, path: string, cause: unknown) =>
   new GameOperationError({
     operation,
