@@ -462,8 +462,28 @@ async function keepGoing(
     if (projection.runs.every((run) => TERMINAL_RUN.has(run.status))) break;
     await sleep(WAIT.pollSeconds);
   }
-  const seconds = (Date.now() - started) / 1000;
-  now = await status();
+  return readKeepGoing(server, cookie, game, first, id, {
+    ending,
+    seconds: (Date.now() - started) / 1000,
+  });
+}
+
+/**
+ * What a game's keep-going steps did: each step's facts against the build it
+ * started from, the way keep going judged it, and the last build against the
+ * first, each read once its facts settled.
+ */
+async function readKeepGoing(
+  server: BenchmarkServer,
+  cookie: string,
+  game: { readonly threadId: ThreadId; readonly root: string },
+  first: { readonly build: string; readonly turnSeconds: number | null },
+  id: string,
+  run: { readonly ending: string | null; readonly seconds: number },
+): Promise<BenchKeepGoing> {
+  const now = await call(server, cookie, (client) =>
+    client[WS_METHODS.gameKeepGoingStatus]({ threadId: game.threadId }),
+  );
   const listed = await call(server, cookie, (client) =>
     client[WS_METHODS.gameBuilds]({ threadId: game.threadId, limit: 50 }),
   );
@@ -475,12 +495,23 @@ async function keepGoing(
         b: { _tag: "build", build: b as never },
       }),
     ).catch(() => null);
+  // A step's measure may still run when the run stops (a judge waits only so long):
+  // every build read here is read once its facts settle, never while pending.
+  const settle = async (build: string | null) => {
+    if (build !== null) await settledFacts(server, cookie, game.threadId, build, id);
+  };
   const steps: Array<BenchStep> = [];
+  let previous: string = first.build;
   for (const step of now.steps.filter((each) => each.n <= STEPS).toSorted((a, b) => a.n - b.n)) {
+    // A build whose start the server could not record (keep going's own files moved the folder
+    // before its first step) is read against the build the run stood on before it.
     const base =
       step.build === null
         ? null
-        : (listed.builds.find((build) => build.id === step.build)?.base ?? null);
+        : (listed.builds.find((build) => build.id === step.build)?.base ?? previous);
+    await settle(base);
+    await settle(step.build);
+    if (step.build !== null && step.verdict !== "undone") previous = step.build;
     const comparison =
       step.build === null || base === null ? null : await compare(base, step.build);
     const video = comparison === null ? null : videoOf(game.root, comparison.factsB.masher);
@@ -502,6 +533,7 @@ async function keepGoing(
     });
   }
   const final = listed.current;
+  await settle(final);
   const net = final === null || final === first.build ? null : await compare(first.build, final);
   const finalFacts =
     final === null
@@ -515,8 +547,8 @@ async function keepGoing(
         )));
   return {
     asked: STEPS,
-    ending,
-    seconds,
+    ending: run.ending,
+    seconds: run.seconds,
     steps,
     first: first.build,
     final,
@@ -800,8 +832,9 @@ async function main() {
 interface Remeasured {
   readonly id: string;
   readonly harness: string | null;
-  readonly before: { readonly score: number; readonly factsSeconds: number | null };
-  readonly after: { readonly score: number; readonly factsSeconds: number | null };
+  /** Passed and measured criteria, as score version 3 counts them. */
+  readonly before: { readonly floor: string; readonly factsSeconds: number | null };
+  readonly after: { readonly floor: string; readonly factsSeconds: number | null };
   readonly criteria: ReadonlyArray<{
     readonly criterion: string;
     readonly before: string;
@@ -869,8 +902,11 @@ async function remeasure() {
       out.push({
         id: game.id,
         harness: settled.facts?.harness ?? null,
-        before: { score: game.score.passed, factsSeconds: game.factsSeconds ?? null },
-        after: { score: score.passed, factsSeconds: settled.seconds },
+        before: {
+          floor: `${game.score.passed}/${CRITERIA.filter((c) => game.score.verdicts[c].result !== "not-measured").length}`,
+          factsSeconds: game.factsSeconds ?? null,
+        },
+        after: { floor: `${score.passed}/${score.measured}`, factsSeconds: settled.seconds },
         criteria: CRITERIA.map((criterion) => ({
           criterion,
           before: `${game.score.verdicts[criterion].result}: ${game.score.verdicts[criterion].detail}`,
@@ -894,7 +930,7 @@ async function remeasure() {
   }
   for (const game of out)
     log(
-      `${game.id}: floor ${game.before.score} -> ${game.after.score}, facts ${game.before.factsSeconds ?? "?"} s -> ${game.after.factsSeconds ?? "?"} s, ${game.moved.length} fact(s) read differently`,
+      `${game.id}: floor ${game.before.floor} -> ${game.after.floor}, facts ${game.before.factsSeconds ?? "?"} s -> ${game.after.factsSeconds ?? "?"} s, ${game.moved.length} fact(s) read differently`,
     );
   log(`written ${NodePath.join(runDir, `remeasure-${when}.json`)}`);
 }
