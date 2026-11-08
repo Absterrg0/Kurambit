@@ -9,7 +9,9 @@ import {
   GameOperationError,
   type GameActionResult,
   type GameCheckIssue,
+  type GameCheckScene,
   type GameProcessResult,
+  sceneLines,
   manifestProject,
 } from "@kurambit/contracts";
 import { insideGame } from "./GameProjectService.ts";
@@ -27,8 +29,49 @@ import {
 import type { GameEngineBackend } from "./GameEngine.ts";
 import { copyTree } from "./gameFiles.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
+import {
+  keepSceneReport,
+  playRandomly,
+  SCENE_CHECK_PLAY_MS,
+  SCENE_OLD_SHELL,
+  type PageScene,
+} from "./sceneReport.ts";
 
 const BOOT_TIMEOUT_MS = 60_000;
+
+/** The check's scene report, its frames kept in the check's own log folder. */
+const sceneOf = async (
+  play: { readonly page: PageScene; readonly ms: number } | null,
+  folder: string,
+  relative: string,
+  browser: GameBrowser,
+): Promise<GameCheckScene> => {
+  if (play === null)
+    return {
+      status: "not-measured",
+      why: "the gameplay entry did not open, so there was no play to look at",
+    };
+  if (play.page === "no-shell") return { status: "not-measured", why: SCENE_OLD_SHELL };
+  const report =
+    play.page === null
+      ? null
+      : await keepSceneReport(play.page.raw, folder, `${relative.split(NodePath.sep).join("/")}/`);
+  if (report === null)
+    return { status: "not-measured", why: "the page's scene report could not be read" };
+  return {
+    status: "measured",
+    lines: sceneLines(report).map((line) =>
+      line.frame === null ? line.text : `${line.text} [frame: ${line.frame}]`,
+    ),
+    report,
+    ms: play.ms,
+    ...(browser.software
+      ? {
+          note: `Drawn in software (${browser.renderer ?? "SwiftShader"}): this machine's GPU was not found, so the play ran slowly; what the report measures is the scene's geometry, which is the same.`,
+        }
+      : {}),
+  };
+};
 
 const response = (
   process: GameProcessResult,
@@ -125,10 +168,13 @@ export const makeThreeBackend = (
       const entries: Array<readonly [string, string]> = [["boot", server.url]];
       if (input.gameplayScene !== "")
         entries.push(["gameplay", new URL(input.gameplayScene, server.url).href]);
+      // The gameplay entry's play, measured by the shell's scene report: what it left, and how long it took.
+      let scenePlay: { readonly page: PageScene; readonly ms: number } | null = null;
       const played = yield* Effect.tryPromise({
         try: async (signal) => {
           let timedOut = false;
           for (const [entry, entryUrl] of entries) {
+            const measure = input.scene && entry === "gameplay";
             const session = await openWebPlaySession({
               browser,
               url: entryUrl,
@@ -137,6 +183,7 @@ export const makeThreeBackend = (
               signal,
               onPageEvent,
               stopOnPageError: true,
+              sceneReport: measure,
             }).catch((cause: unknown) => {
               // The game's page crashing is what the check measures; our browser
               // going away is not, and fails the check below.
@@ -154,9 +201,13 @@ export const makeThreeBackend = (
               return null;
             });
             if (session !== null) {
-              // One extra beat so late module errors still land in the listeners above.
-              await new Promise((resolve) => setTimeout(resolve, 2000));
+              const started = Date.now();
+              // A short random-input play the scene report watches; without one, one extra
+              // beat. Either way late module errors still land in the listeners above.
+              if (measure) await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
+              else await new Promise((resolve) => setTimeout(resolve, 2000));
               await session.close();
+              if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
               reached.push(entry);
             } else if (
               entry !== "boot" &&
@@ -200,6 +251,11 @@ export const makeThreeBackend = (
             ? `The page never reported ready (window.__studio.ready stayed false past ${BOOT_TIMEOUT_MS / 1000}s).`
             : "The page did not boot: window.__studio had not appeared when the page errored. Fix the errors this check lists, and keep the studio bridge from the starter.",
         });
+      const scene = input.scene
+        ? yield* Effect.promise(() =>
+            sceneOf(scenePlay, temporary, NodePath.relative(ctx.root, temporary), browser),
+          )
+        : undefined;
       // The log is for people; the verdict above does not depend on it.
       yield* Effect.promise(() =>
         NodeFSP.writeFile(logPath, `${lines.join("\n")}\n`).catch(() => undefined),
@@ -227,6 +283,7 @@ export const makeThreeBackend = (
         },
         issues: [...issues],
         run,
+        ...(scene === undefined ? {} : { scene }),
       };
     });
   return {

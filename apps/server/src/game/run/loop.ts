@@ -43,7 +43,11 @@ const TEXT_MAX = 8000;
 
 /**
  * The facts keep going acts on and guards (design §3.1). Motion, detail and
- * colour are heuristics: shown, never proposed and never guarded.
+ * colour are heuristics: shown, never proposed and never guarded. Of the scene
+ * report, only what the scene's own geometry decides is watched (a body sunk in
+ * the ground, a player the camera cannot see); clipping, falling, the camera in
+ * a wall and sliding depend on where random input led and how fast this
+ * machine ran it, so they are shown and never guarded.
  */
 const WATCHED: ReadonlySet<GameFactId> = new Set([
   "boots",
@@ -53,6 +57,8 @@ const WATCHED: ReadonlySet<GameFactId> = new Set([
   "winnable-without-skill",
   "freeze",
   "first-response",
+  "buried",
+  "player-view",
 ]);
 const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 
@@ -100,6 +106,8 @@ const FACT_GOAL: Readonly<Partial<Record<GameFactId, string>>> = {
   "winnable-without-skill": "Make winning take skill",
   freeze: "Remove the stretches where the game stands still",
   "first-response": "Make the controls respond sooner",
+  buried: "Stand the characters on the ground, not in it",
+  "player-view": "Keep the player in view",
 };
 
 /**
@@ -300,7 +308,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     },
     ...(facts === null || views === null
       ? []
-      : (["winnable-without-skill", "first-response"] as const)
+      : (["winnable-without-skill", "first-response", "buried", "player-view"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
     () => {

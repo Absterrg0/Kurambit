@@ -11,6 +11,7 @@ import {
   type GameBrowser,
 } from "./gameChromium.ts";
 import { asGameState } from "./gameBotRuntime.ts";
+import { READ_SCENE, START_SCENE, type PageScene } from "./sceneReport.ts";
 import { chromiumChildEnv } from "./gameWebServer.ts";
 import {
   PLAY_BOUNDS,
@@ -325,6 +326,12 @@ export interface WebPlaySession extends PlaySession {
    * when the shell has none or the page could not answer.
    */
   readonly perf: () => unknown;
+  /**
+   * After `close`: the scene report of a session opened with `sceneReport`, read just before
+   * the page closed; "no-shell" when the game's shell has none, null when it could not be read
+   * or was not asked for.
+   */
+  readonly scene: () => PageScene;
 }
 
 /**
@@ -362,6 +369,8 @@ export const openWebPlaySession = async (input: {
    * bots) waits for ready or the deadline, as a page that recovers would.
    */
   readonly stopOnPageError?: boolean | undefined;
+  /** Starts the shell's scene report once the page is ready; `scene()` has it after close. */
+  readonly sceneReport?: boolean | undefined;
 }): Promise<WebPlaySession> => {
   input.signal?.throwIfAborted();
   const { chromium } = loadPlaywright();
@@ -613,6 +622,15 @@ export const openWebPlaySession = async (input: {
     } finally {
       input.signal?.removeEventListener("abort", abortBoot);
     }
+    // The scene report looks only at a measured play: started once the page is ready.
+    let sceneStarted: boolean | null = null;
+    if (input.sceneReport === true) {
+      const started = await bounded(
+        page.evaluate(START_SCENE).catch(() => false),
+        PLAY_BOUNDS.webCallMs,
+      );
+      sceneStarted = started === null ? null : started === true;
+    }
     const bootState = await readState(PLAY_BOUNDS.webCallMs);
     const bootProbe = sanitizeProbe(bootState === TIMED_OUT ? null : bootState);
     const bootConsole = drain();
@@ -766,6 +784,7 @@ export const openWebPlaySession = async (input: {
     const gameT = () => Math.max(0, pageSeconds - realtimeSeconds);
     let kept: KeptStorage | null = null;
     let perf: unknown = null;
+    let scene: PageScene = input.sceneReport === true && sceneStarted === null ? "no-shell" : null;
     const session: WebPlaySession = {
       protocol: 2,
       capabilities: new Set(["realtime", "setState", "frames"]),
@@ -774,6 +793,7 @@ export const openWebPlaySession = async (input: {
       ended,
       keptStorage: () => kept,
       perf: () => perf,
+      scene: () => scene,
       act,
       realtime: async (frames) => {
         realtimeSeconds = pageSeconds;
@@ -931,6 +951,18 @@ export const openWebPlaySession = async (input: {
               } catch {
                 perf = null;
               }
+            if (sceneStarted === true) {
+              const report = await bounded(
+                page.evaluate(READ_SCENE).catch(() => null),
+                PLAY_BOUNDS.webCallMs,
+              );
+              if (typeof report === "string")
+                try {
+                  scene = { raw: JSON.parse(report) };
+                } catch {
+                  scene = null;
+                }
+            }
           }
           if (keptStorage !== null && endedWith === null) {
             // Leaving the page fires pagehide as closing the tab would, so a game

@@ -35,7 +35,7 @@ export const THREE_PROFILE: GameEngineProfile = {
   tools: {
     import: "three.js games have no import step: the static folder is the game.",
     check:
-      "three.js games load the static page and then the gameplay entry in headless Chromium and report console and page errors; a page that crashes is the game's error, a browser that is lost is a tool failure.",
+      "three.js games load the static page and then the gameplay entry in headless Chromium and report console and page errors; a page that crashes is the game's error, a browser that is lost is a tool failure. The gameplay entry then plays 6 s of random keys for the scene report, which the game's shell measures (a shell from before scene reports says so).",
     export:
       "three.js games export Web only (a static copy of web/); Windows and Linux are refused.",
     explore: "three.js games load the static folder in headless Chromium and play in real time.",

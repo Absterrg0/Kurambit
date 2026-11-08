@@ -18,7 +18,8 @@ The first playable build, in this order (the game's AGENTS.md, "The first turn")
    (third person, top-down, side view) over `web/main.js`, swap in your
    models, and grow it into the brief's core loop with the kits below.
 3. A win and a lose through `GameState`, the HUD through `ctx.ui`, `Juice` on
-   every action, then `game_check` clean. Ending the turn plays the build.
+   every action, then `game_check` clean, with each problem its scene report
+   lists fixed. Ending the turn plays the build.
 
 The rest of this file is reference: read a section when you use its kit.
 
@@ -302,6 +303,17 @@ const rules = ctx.tune("Difficulty", { spawnEvery: 2.5, hard: false }, { spawnEv
 console and page errors with file and line, so a failure in `start` cannot
 hide behind the title. Keep both clean. A clean check says the page boots; it
 cannot establish that the game is good to play.
+
+Its scene report then plays `index.html?play` for 6 s with random keys and
+lists what a person would see is wrong, each with a frame outlining it: the
+player hidden behind solids, off screen or too small, a character's feet sunk
+in the ground or its body inside a solid, two characters inside each other, a
+thing fallen out of the world, the camera inside a wall, a skinned character
+sliding over the ground in its idle clip or a frozen pose. It knows the player
+from `ctx.player` and the characters from `ctx.thing` kinds (`character`,
+`creature`; ASSETS models with clips are characters already). Fix what it
+lists before ending the turn; the build's facts measure the same during their
+minute of random input.
 
 Kurambit plays and measures the build when a chat turn ends; its facts include
 the game's performance during the random-input play, as the shell measured
