@@ -7,6 +7,7 @@ import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 import { chromiumChildEnv } from "./gameWebServer.ts";
+import { RUNTIME_ROUTE } from "./gameRuntime.ts";
 
 export interface GameBrowser {
   readonly executable: string;
@@ -299,11 +300,16 @@ export const STUDIO_SET_STATE = `(input) => {
 /** The route vocabulary uses "Space"; Playwright and DOM key values want " ". */
 export const toPlaywrightKey = (key: string): string => (key === "Space" ? " " : key);
 
-/** Maps a page error's stack URL back to the game file it came from. */
+/**
+ * Maps a page error's stack URL back to the game file it came from: the first frame in the
+ * game's own files, past Kurambit's runtime (which the game does not hold).
+ */
 export const stackToGameFile = (stack: string | undefined, origin: string): string => {
   if (stack === undefined || stack === "") return "web/main.js";
-  const match = new RegExp(`${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/([^:),\\s]+)`).exec(
-    stack,
+  const frames = stack.matchAll(
+    new RegExp(`${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/([^:),\\s]+)`, "g"),
   );
-  return match?.[1] === undefined ? "web/main.js" : `web/${match[1]}`;
+  for (const [, file] of frames)
+    if (file !== undefined && !file.startsWith(`${RUNTIME_ROUTE}/`)) return `web/${file}`;
+  return "web/main.js";
 };

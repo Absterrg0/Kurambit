@@ -13,7 +13,7 @@ export const SCORE_VERSION = 2;
 /**
  * Every number the score judges against. Change one here, never at a use site. What a person
  * sees (the player too small, the view empty) is judged by the game's shell, by the limits in
- * its scene report (templates/blank-three/web/shell/scene-report.js); the score reads its verdicts.
+ * its scene report (templates/runtime/three/1/shell/scene-report.js); the score reads its verdicts.
  */
 export const THRESHOLDS = {
   /**

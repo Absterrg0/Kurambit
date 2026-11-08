@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import { NonNegativeInt } from "./baseSchemas.ts";
 
 // The scene report: what a person sees at a glance, measured inside the running game by the
-// three.js shell (templates/blank-three/web/shell/scene-report.js) during a measured play.
+// three.js shell (templates/runtime/three/1/shell/scene-report.js) during a measured play.
 // Its own module, so game.ts (game_check) and gameBuilds.ts (the build's facts) share it
 // without importing each other.
 

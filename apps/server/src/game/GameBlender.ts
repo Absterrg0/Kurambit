@@ -47,6 +47,7 @@ import {
   type GameStyleView,
   GAME_STYLE_FILE,
   manifestProject,
+  manifestRuntime,
 } from "@kurambit/contracts";
 import * as GameArt from "./art/GameArt.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
@@ -166,7 +167,8 @@ const BLENDER_ROOM: MemoryRoom = {
 const RENDER_NEEDED_MB = 2048;
 const BLEND_REL = "art/blender/live.blend";
 /** The three.js template's model loader and the meshopt decoder it vendors, under its web folder. */
-const THREE_TEMPLATE_WEB = "blank-three/web";
+// Games carrying their own copy got it from runtime major 1, which keeps this decoder.
+const THREE_RUNTIME_1 = "runtime/three/1";
 const MESHOPT_LOADER = "shell/assets.js";
 const MESHOPT_DECODER = "vendor/addons/libs/meshopt_decoder.module.js";
 const SESSION_FILE = "session.json";
@@ -2094,14 +2096,11 @@ const make = Effect.gen(function* () {
       const present = yield* Effect.tryPromise(async () => {
         if ((await NodeFSP.stat(target).catch(() => null)) === null) {
           await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
-          await NodeFSP.copyFile(
-            NodePath.join(template, THREE_TEMPLATE_WEB, MESHOPT_DECODER),
-            target,
-          );
+          await NodeFSP.copyFile(NodePath.join(template, THREE_RUNTIME_1, MESHOPT_DECODER), target);
         }
         return true;
       }).pipe(Effect.orElseSucceed(() => false));
-      return `This game's ${engineDir}/${MESHOPT_LOADER} has no meshopt decoder, so the geometry shipped quantized but not meshopt-compressed. To ship it smaller, ${present ? "" : `copy the blank-three template's ${MESHOPT_DECODER} into ${engineDir}/, `}add import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js"${present ? ` (now in ${engineDir}/${MESHOPT_DECODER})` : ""}, make the loader new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder), and export again.`;
+      return `This game's ${engineDir}/${MESHOPT_LOADER} has no meshopt decoder, so the geometry shipped quantized but not meshopt-compressed. To ship it smaller, ${present ? "" : `copy three.js 0.180's examples/jsm/libs/meshopt_decoder.module.js to ${engineDir}/${MESHOPT_DECODER}, `}add import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js"${present ? ` (now in ${engineDir}/${MESHOPT_DECODER})` : ""}, make the loader new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder), and export again.`;
     });
 
   return GameBlender.of({
@@ -2674,13 +2673,15 @@ const make = Effect.gen(function* () {
           });
           // A game made before compressed exports has a loader with no meshopt decoder: its model
           // ships quantized but not meshopt-compressed, and the decoder is put in its vendor folder.
+          // Kurambit's runtime decodes them.
           const decodes =
             compress &&
-            (yield* Effect.promise(() =>
-              NodeFSP.readFile(NodePath.join(realRoot, engineDir, MESHOPT_LOADER), "utf8").catch(
-                () => "",
-              ),
-            )).includes("setMeshoptDecoder");
+            (manifestRuntime(manifest) !== null ||
+              (yield* Effect.promise(() =>
+                NodeFSP.readFile(NodePath.join(realRoot, engineDir, MESHOPT_LOADER), "utf8").catch(
+                  () => "",
+                ),
+              )).includes("setMeshoptDecoder"));
           const decoderNote =
             compress && !decodes ? yield* offerMeshoptDecoder(realRoot, engineDir) : null;
           const measuredTriangles = candidate.measured.triangles;

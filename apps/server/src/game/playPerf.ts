@@ -14,7 +14,7 @@ import { busyReading, type MachineLoad, notMeasured } from "./buildFacts.ts";
 export const PLAY_PERF_FILE = "perf.json";
 
 const Finite = Schema.Finite;
-/** The shell's play stats (templates/blank-three/web/shell/look.js); extra fields are ignored. */
+/** The shell's play stats (templates/runtime/three/1/shell/look.js); extra fields are ignored. */
 export const PlayPerf = Schema.Struct({
   frames: Finite,
   seconds: Schema.NullOr(Finite),

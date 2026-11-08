@@ -68,6 +68,8 @@ import {
   type Session,
 } from "./gameBotRuntime.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
+import { runtimesFor } from "./gameRuntime.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
 import { PLAY_BOUNDS, bounded } from "./playSession.ts";
@@ -489,6 +491,7 @@ const make = Effect.gen(function* () {
   const gameBrowser = yield* makeGameBrowser;
   const scheduler = yield* Scheduler.Scheduler;
   const gate = yield* GameMemoryGate.GameMemoryGate;
+  const templates = yield* GameTemplates.GameTemplates;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const fileServices = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
@@ -669,6 +672,7 @@ const make = Effect.gen(function* () {
       const isWeb = profile.play === "browser";
       const viewport = yield* backend.viewport(projectDir);
       const browser = isWeb ? yield* gameBrowser("Bot run", root) : null;
+      const runtimes = isWeb ? yield* runtimesFor(templates, manifest) : null;
       const ffmpeg = yield* Effect.promise(() =>
         findExecutable("ffmpeg", { pathEnv, override: process.env.KURAMBIT_FFMPEG }),
       );
@@ -820,6 +824,7 @@ const make = Effect.gen(function* () {
                       keptStorage: keptWebStorage(saves),
                       recordUse: true,
                       sceneReport: true,
+                      runtimes,
                     })
                   : openRunnerPlay(processes, {
                       operation: "Bot run",

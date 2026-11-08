@@ -135,6 +135,9 @@ export function GameBuildFactsList({
       {facts.renderer ? (
         <p className="text-2xs text-muted-foreground">Played with {facts.renderer}.</p>
       ) : null}
+      {facts.runtime ? (
+        <p className="text-2xs text-muted-foreground">Kurambit runtime {facts.runtime}.</p>
+      ) : null}
     </div>
   );
 }

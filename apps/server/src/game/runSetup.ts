@@ -6,11 +6,20 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
-import { GameOperationError, type GameEngineId } from "@kurambit/contracts";
+import * as Schema from "effect/Schema";
+import {
+  GameManifest,
+  GameOperationError,
+  manifestRuntime,
+  type GameEngineId,
+} from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
 import { RUN_STATE_IGNORES, withEveryTurn, withKeepGoing } from "./scaffold.ts";
 import { failureText } from "./run/handBack.ts";
+import { runtimesDirectory } from "./gameRuntime.ts";
+
+const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones this turn needs)";
@@ -40,37 +49,6 @@ const ioError = (operation: string, path: string, cause: unknown) =>
   });
 
 /**
- * The engine's in-game play runner speaks this server's protocol, so a new
- * run brings it up to date before its base build captures the folder: the
- * base carries it, and no role's work does. A runner that cannot be copied
- * fails the capture: a build with a stale runner would be played wrong.
- */
-export const refreshHarnessFiles = (
-  templates: string,
-  root: string,
-  engine: GameEngineId,
-  project: string,
-  log: (line: string) => Effect.Effect<void>,
-) =>
-  Effect.gen(function* () {
-    const owned = engineProfile(engine).run.harnessFiles;
-    if (owned === null) return;
-    const paths = owned.files.map((file) => NodePath.join(project, file));
-    yield* Effect.tryPromise({
-      try: async () => {
-        for (const file of owned.files) {
-          const to = NodePath.join(root, project, file);
-          await NodeFSP.mkdir(NodePath.dirname(to), { recursive: true });
-          await NodeFSP.copyFile(NodePath.join(templates, owned.template, project, file), to);
-        }
-      },
-      catch: (cause) => ioError("Refresh harness files", paths.join(", "), cause),
-    });
-    // The run's base build carries them; the run never commits them.
-    yield* log(`harness files refreshed: ${paths.join(", ")}`);
-  }).pipe(Effect.uninterruptible);
-
-/**
  * The studio skills as this server ships them, for the game's engine only (a role told to read
  * every skill must not get another engine's rules). Files whose text did not change stay as they
  * are, so a refresh with nothing new leaves the game's diff empty.
@@ -89,6 +67,19 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
       await Promise.all(
         others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
       );
+      // A game that loads Kurambit's runtime reads its kits' comment blocks here; the game
+      // never loads this copy, so an edit to it changes nothing.
+      const major = await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")
+        .then((text) => manifestRuntime(decodeManifest(text)))
+        .catch(() => null);
+      const kits = NodePath.join(skills, "runtime");
+      await NodeFSP.rm(kits, { recursive: true, force: true });
+      if (major !== null)
+        await NodeFSP.cp(
+          NodePath.join(runtimesDirectory(templates), engine, String(major), "shell"),
+          NodePath.join(kits, "shell"),
+          { recursive: true },
+        );
       const index = NodePath.join(skills, "AGENTS.md");
       const text = await NodeFSP.readFile(index, "utf8");
       const kept = text

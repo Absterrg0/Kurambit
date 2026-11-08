@@ -36,6 +36,7 @@ import {
 } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
 import * as GameTemplates from "./GameTemplates.ts";
+import { runtimesFor } from "./gameRuntime.ts";
 import { engineProfile } from "./engineProfile.ts";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as ExploreSheet from "./exploreSheet.ts";
@@ -1012,6 +1013,7 @@ const make = Effect.gen(function* () {
         viewport,
         bootTimeoutMs,
         keptStorage: keptWebStorage(saves),
+        runtimes: yield* runtimesFor(templates, manifest),
       }).pipe(Effect.catchTags({ PlayDidNotBoot: notBooted(root) }));
       return yield* exploreRegister(
         threadId,

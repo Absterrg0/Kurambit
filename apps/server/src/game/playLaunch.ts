@@ -249,6 +249,8 @@ export const openPagePlay = (input: {
   readonly recordUse?: boolean;
   /** Start the shell's scene report as the page is ready; `stop` returns it. */
   readonly sceneReport?: boolean;
+  /** The server's runtimes folder, for a game that loads Kurambit's runtime (gameRuntime.ts). */
+  readonly runtimes: string | null;
 }): Effect.Effect<PlayLaunch, GameOperationError | PlayDidNotBoot> =>
   Effect.gen(function* () {
     const { operation, root } = input;
@@ -260,11 +262,10 @@ export const openPagePlay = (input: {
       Effect.gen(function* () {
         const served = yield* Effect.tryPromise({
           try: () =>
-            serveGameDirectory(
-              root,
-              project || ".",
-              input.recordUse === true ? { onServed: (path) => loads.add(path) } : {},
-            ),
+            serveGameDirectory(root, project || ".", {
+              ...(input.recordUse === true ? { onServed: (path) => loads.add(path) } : {}),
+              runtimes: input.runtimes,
+            }),
           catch: failure(operation, root, "io", "The static project could not be served."),
         });
         const unserve = () => served.close().catch(() => undefined);

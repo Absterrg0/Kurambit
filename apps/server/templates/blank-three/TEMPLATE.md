@@ -25,7 +25,15 @@ The rest of this file is reference: read a section when you use its kit.
 
 ## Demo shell
 
-- `web/index.html` loads `web/shell/shell.js`, which owns the page: a title
+- The shell, its kits and three.js are Kurambit's runtime, not files of this
+  game: `web/index.html` loads them from `_kurambit/runtime/three/1/` (the
+  major `game.json` pins as `runtime`), and its import map points the
+  game's `./shell/...` and `./vendor/...` imports there. Kurambit serves the
+  runtime, copies it into every export, and brings fixes to it without a
+  change here. Never copy or edit it: a variant is a module of the game's own
+  beside `main.js`. Each kit's comment block, which shows every call, is
+  readable in `studio-skills/runtime/shell/`; `shell/x.js` below names those.
+- `web/index.html` loads `shell/shell.js`, which owns the page: a title
   screen (the game's name, Play, Settings, Credits), pause on Esc, P,
   gamepad Start or a hidden tab (Resume, Settings, Main menu), settings
   (master, music and sound-effect volume, plus fullscreen; an exported build
@@ -93,8 +101,7 @@ progress })` runs once behind the loading bar, after `ASSETS` (build a big
 - `GameState.state` reads `"title"`, `"playing"`, `"paused"` or `"ended"`
   (`GameState.result` is `"won"` or `"lost"` after a run). The shell sets it;
   the game reads it.
-- To boot straight into play while building, set `BOOT_INTO_PLAY = true` in
-  `web/shell/shell.js` (or open `index.html?play`). Ship with it `false`.
+- To boot straight into play while building, open `index.html?play`.
   The Stage reloads a game the person is playing with `#kurambit-play`,
   which starts the run the same way, so a save lands them back in play.
 - `web/credits.txt` is what the credits screen shows. ASSETS.md stays the
@@ -103,8 +110,8 @@ progress })` runs once behind the loading bar, after `ASSETS` (build a big
 - The look lives in `web/style.css` (theme tokens at the top, then one rule
   set per screen) and the screen markup in `web/index.html`. The art pass
   restyles both to the game's key art; keep the element ids and
-  `data-action` attributes. `CLICK_SOUND` in `shell.js` names a file to
-  replace the synthesized menu tick.
+  `data-action` attributes. `export const CLICK_SOUND = "assets/sfx/click.ogg"`
+  in `main.js` names a file to replace the synthesized menu tick.
 - Play music with `playMusic(url)`, an ambience bed (wind, rain, a room's hum)
   with `playAmbience(url, { volume })` (one at a time, crossfading;
   `stopAmbience()`), and effects with `Juice.sfx(url)` (or `playSfx`) from
@@ -117,7 +124,7 @@ progress })` runs once behind the loading bar, after `ASSETS` (build a big
   stick), `input.down("jump")`, `input.pressed("action")` (once per press),
   `input.released("alt")`, `input.axis("move_left", "move_right")`. A raw
   key check skips the gamepad and the player's rebinding.
-- The defaults (`web/shell/controls.js`): `move_left` / `move_right` /
+- The defaults (`shell/controls.js`): `move_left` / `move_right` /
   `move_up` / `move_down` (WASD, arrows, left stick, d-pad), `jump` (Space,
   gamepad A), `action` (J, Enter, left click on the canvas, gamepad X), `alt`
   (K, Shift, gamepad B) and the shell's `pause` (Esc, P, Start).
@@ -131,7 +138,7 @@ progress })` runs once behind the loading bar, after `ASSETS` (build a big
   rebinds keys (saved with the other settings; Reset to defaults) and is the
   place players and testers read the controls. Name keys in a HUD hint as
   `{dash}`, as the starter does, so the hint stays true after a rebind.
-- Put every HUD line through `ctx.ui` (`web/shell/hud.js`), called each frame
+- Put every HUD line through `ctx.ui` (`shell/hud.js`), called each frame
   from `update`: `counter("Gems", n, 5)`, `bar("Health", hp, 3)` (hearts up to
   10), `timer("Time", seconds)`, `objective(text)`; `toast("Gate opened!")` on
   the event; `hint("{jump} to jump", { until: () => jumped })` teaches a
@@ -140,7 +147,7 @@ progress })` runs once behind the loading bar, after `ASSETS` (build a big
 
 ## Game feel
 
-`Juice` (`web/shell/juice.js`) answers player actions in one call each:
+`Juice` (`shell/juice.js`) answers player actions in one call each:
 `Juice.shake(0.4)`, `Juice.hitPause()`, `Juice.pop(mesh)`,
 `Juice.squash(mesh)`, `Juice.flash(mesh)`, `Juice.flashScreen(color)`,
 `Juice.burst(position, color)` and `Juice.sfx("./assets/sfx/hit.wav")`.
@@ -153,7 +160,7 @@ The comment block at the top of the file shows each call.
 
 ## Characters and cameras
 
-`animate(ctx.assets.model("hero"))` (`web/shell/animate.js`) plays a model's clips by state: call
+`animate(ctx.assets.model("hero"))` (`shell/animate.js`) plays a model's clips by state: call
 `hero.play("idle" | "walk" | "run" | "jump" | "fall" | "attack" | "hit" |
 "die", { speed })` every frame and it crossfades, returns from one-shots and
 falls back (run to walk to idle) when a clip is missing. A generated
@@ -167,7 +174,7 @@ planted; its spring chains (a tail, ears) swing on their own, and
 `hero.lookAt(point)` turns the head; a sidecar `face` (eyes made with the
 Blender kit's `eye_lid` or `eye_squash`) blinks on its own every 2–6 s, and
 `hero.blink()` blinks now. `locomotion(hero, { walk, run })`
-(`web/shell/locomotion.js`) drives it: call `loco.update({ speed, grounded,
+(`shell/locomotion.js`) drives it: call `loco.update({ speed, grounded,
 vy, dt })` every frame with the speed the body really moved, and
 `loco.act("attack")` for a one-shot move. The console's `animate:` line names
 each state's clip and its ground speed. For combat, a call can play a clip by
@@ -182,7 +189,7 @@ null). The runtime layer goes on top of any clip, each part off until called:
 maxYaw, maxPitch })` turns neck and head within limits, and
 `hero.feetOn((x, z) => height)` holds each foot on the ground through the
 clip's measured stances, dropping the pelvis for the lower foot. `followCamera2D`
-and `followCamera3D` (`web/shell/camera.js`) follow the player with a dead
+and `followCamera3D` (`shell/camera.js`) follow the player with a dead
 zone, look-ahead, damping and level bounds, and in 3D pull in at walls and
 props (its near plane's corners too, so a post never fills the view). For
 action, `followCamera3D` takes `shoulder` (an over-the-shoulder offset),
@@ -194,7 +201,7 @@ block at the top of each file shows each call.
 
 ## The look
 
-`web/shell/look.js` draws every frame. A preset picks the light, the sky, the
+`shell/look.js` draws every frame. A preset picks the light, the sky, the
 fog and the post chain, in one line in `main.js`:
 `export const LOOK = { preset: "golden" }`. `day` is the default: a soft sky
 that lights the scene (an environment probe drawn from it), height fog, soft
@@ -227,7 +234,7 @@ draw their files' exact colours; such a game also sets
 
 ## Levels
 
-`buildLevel(ctx, rows, legend, { floor })` (`web/shell/level.js`) builds a
+`buildLevel(ctx, rows, legend, { floor })` (`shell/level.js`) builds a
 level from a text map and a legend of ASSETS models, instanced so a large map
 stays cheap, and returns `spawns` by letter, `bounds`, `walls` (camera
 blockers) and `move(position, step, radius)`, which slides a circle along the
@@ -237,19 +244,18 @@ over a drop). The comment block at the top of the file shows each call.
 
 ## What else the template ships
 
-- `web/vendor/three.module.js` + `web/vendor/three.core.js` — three.js
-  r0.180.0, pinned and vendored (MIT, see `web/vendor/LICENSE`), imported
-  with a relative path. The module entry re-exports the core file, so both
-  stay together. No install step, no bundler, no CDN. Keep the pin; say why
-  in `web/vendor/PROVENANCE.md` before changing it. `web/vendor/postprocessing/`
-  (Zlib) and `web/vendor/n8ao/` (CC0) are the look's post chain, loaded only
-  when the look uses it.
+- three.js r0.180.0 and its addons, pinned in the runtime (MIT; the
+  runtime's `vendor/LICENSE` and `vendor/PROVENANCE.md` travel with every
+  export). Import it as `./vendor/three.module.js` or `three`; addons as
+  `three/addons/...`. No install step, no bundler, no CDN. postprocessing
+  (Zlib) and n8ao (CC0) are the look's post chain, loaded only when the look
+  uses it.
 - `web/assets/` — every visual and sound the game adds. Reference local
   files; nothing loads from the network at runtime.
 
 ## The studio bridge (keep it)
 
-`window.__studio` (`web/shell/studio.js`) is how the harness plays this game:
+`window.__studio` (`shell/studio.js`) is how the harness plays this game:
 `ready` after the first frame, `getState()` returning `{gameState, player,
 hudText}` (the shell's `state` and `result` first, then the game's values;
 `hudText` is the text on screen, menus included), `errors[]` carrying page
@@ -262,7 +268,7 @@ holds play and suspends sound, then restores what it found.
 
 ## Things and live values (the Stage)
 
-`web/shell/stage-bridge.js` lets the Kurambit Stage that frames the game
+`shell/stage-bridge.js` lets the Kurambit Stage that frames the game
 freeze it (play, timers and sound hold with no menu), point at things
 (outlined while frozen), tune their values live and see where a thing went
 over the last 10 s. It does nothing until the Stage asks, so plays,

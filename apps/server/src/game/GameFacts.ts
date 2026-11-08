@@ -42,6 +42,7 @@ import {
   GameManifest,
   GameOperationError,
   manifestProject,
+  manifestRuntime,
 } from "@kurambit/contracts";
 import {
   bootsFact,
@@ -70,6 +71,7 @@ import { findExecutable } from "./GameProcesses.ts";
 import * as GameService from "./GameService.ts";
 import { HOST_OS } from "./processHost.ts";
 import * as GameTemplates from "./GameTemplates.ts";
+import { runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
 import { measureAssets } from "./assetFacts.ts";
 import { assetUseOf, generationsShipped, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
 import { performanceOf, readPlayPerf } from "./playPerf.ts";
@@ -155,6 +157,7 @@ const Stored = Schema.Struct({
   engine: Schema.optionalKey(GameEngineId),
   measuredAt: Schema.NullOr(Schema.String),
   renderer: Schema.NullOr(Schema.String),
+  runtime: Schema.optionalKey(Schema.String),
   boots: Schema.optionalKey(GameBuildFacts.fields.boots),
   idle: Schema.optionalKey(GameBuildFacts.fields.idle),
   masher: Schema.optionalKey(GameBuildFacts.fields.masher),
@@ -463,6 +466,7 @@ const make = Effect.gen(function* () {
       state,
       measuredAt: stored?.measuredAt ?? null,
       renderer: stored?.renderer ?? null,
+      ...(stored?.runtime === undefined ? {} : { runtime: stored.runtime }),
       ...facts,
       message,
     };
@@ -623,6 +627,15 @@ const make = Effect.gen(function* () {
         .catch(() => ""),
     ).pipe(Effect.map((project) => project || engineProfile(engine).projectDirectory));
 
+  /** The runtime the copy's plays load now, for a game that loads one (gameRuntime.ts). */
+  const runtimeOf = (copy: string, engine: GameEngineId) =>
+    Effect.promise(async () => {
+      const major = await NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
+        .then((text) => manifestRuntime(decodeCopyManifest(text)))
+        .catch(() => null);
+      return major === null ? null : runtimeVersion(runtimesDirectory(templates), engine, major);
+    });
+
   const measureJob = (build: ResolvedBuild, tiers: ReadonlySet<Tier>, found: Found | null) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -671,13 +684,17 @@ const make = Effect.gen(function* () {
             ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
             : Option.none();
         const software = Option.isSome(backend) && backend.value.software;
-        if (plays)
+        if (plays) {
+          const { runtime: _measuredWith, ...rest } = stored;
+          const runtime = yield* runtimeOf(copy, build.engine);
           stored = {
-            ...stored,
+            ...rest,
             renderer: Option.isSome(backend)
               ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
               : yield* rendererOf(copy, build.engine),
+            ...(runtime === null ? {} : { runtime }),
           };
+        }
         if (tiers.has("boots")) {
           const boots = yield* step(game.checkIn(copy, OWNER)).pipe(
             Effect.map(bootsFact),

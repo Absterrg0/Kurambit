@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off -- Writes a scene report's frames beside its play's evidence, reads it back, and plays game_check's short random input in real time.
 // The scene report, measured inside the running game by the three.js shell
-// (templates/blank-three/web/shell/scene-report.js, which holds every threshold) while the
+// (templates/runtime/three/1/shell/scene-report.js, which holds every threshold) while the
 // harness plays it: game_check's short play and the facts' random-input play. What the page
 // says is checked here before it becomes evidence, and its frames become files.
 import * as NodeFSP from "node:fs/promises";

@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectId, ThreadId } from "./baseSchemas.ts";
+import { PositiveInt, ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason } from "./gameRunReasons.ts";
@@ -103,6 +103,8 @@ export const GameTemplate = Schema.Struct({
    * nothing about play, so it must not qualify the game.
    */
   probe: Schema.optionalKey(Schema.Boolean),
+  /** The Kurambit runtime major the template's files load (see GameRuntimes); absent when the template carries its own copy. */
+  runtime: Schema.optionalKey(PositiveInt),
 });
 export type GameTemplate = typeof GameTemplate.Type;
 /**
@@ -124,11 +126,12 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     id: "blank-three",
     name: "Blank (browser)",
     description:
-      "An empty three.js game inside a demo shell (title, pause, settings, end and credits screens), a game feel kit, a read-only studio probe and a single static web export. No install step; three.js is vendored.",
+      "An empty three.js game inside a demo shell (title, pause, settings, end and credits screens), a game feel kit, a read-only studio probe and a single static web export. No install step; three.js and the shell load from Kurambit's runtime.",
     dimension: "3d",
     // The page opens on the shell's title; "?play" boots straight into a run, so the check covers gameplay start.
     gameplayScene: "index.html?play",
     probe: true,
+    runtime: 1,
   },
   {
     id: "blank-unity",
@@ -250,6 +253,11 @@ export const gameTemplateForEngine = (engine: GameEngineId): GameTemplateId =>
 /** The release targets an engine may export. */
 export const GameExportTarget = Schema.Literals(["Web", "Linux", "Windows"]);
 export type GameExportTarget = typeof GameExportTarget.Type;
+/** Runtime majors by engine, as a manifest pins them. */
+export const GameRuntimes = Schema.Struct({
+  three: Schema.optionalKey(PositiveInt),
+});
+export type GameRuntimes = typeof GameRuntimes.Type;
 export const GameManifest = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   name: Schema.String,
@@ -281,12 +289,23 @@ export const GameManifest = Schema.Struct({
    * Blender, or generated with Tripo. Default library. Only the person changes it.
    */
   characters: Schema.optionalKey(GameCharacterRoute),
+  /**
+   * The Kurambit runtime major the game loads, by engine ({ three: 1 }): Kurambit serves it
+   * at _kurambit/runtime/<engine>/<major>/ and copies it into exports, and every minor and
+   * patch of that major reaches the game. Absent on a game that carries its own copy.
+   */
+  runtime: Schema.optionalKey(GameRuntimes),
 }).check(
   Schema.makeFilter((manifest) => (manifest.project ?? manifest.godotProject) !== undefined, {
     description: "a game.json that names its engine project folder (project)",
   }),
 );
 export type GameManifest = typeof GameManifest.Type;
+/** The runtime major the game loads for its engine, or null when it carries its own copy. */
+export const manifestRuntime = (manifest: GameManifest): number | null => {
+  const majors: { readonly [Engine in GameEngineId]?: number } = manifest.runtime ?? {};
+  return majors[manifest.engine.name] ?? null;
+};
 /** The engine project's folder in the game: the one reader of the manifest's project key. */
 export const manifestProject = (manifest: GameManifest): string =>
   manifest.project ?? manifest.godotProject ?? "";

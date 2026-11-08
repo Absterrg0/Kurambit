@@ -168,6 +168,7 @@ export const fakeGameEngine = (
           projectName: manifest.project,
           projectDir: NodePath.join(root, manifest.project),
           binary: { path: "", version: "0", templates: null },
+          runtime: null,
         },
       };
     });

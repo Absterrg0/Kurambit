@@ -505,13 +505,13 @@ resume keeps the run's copy, so every build of one run is made and judged under 
 build carries harness text as its own work. `GameCreateInput.engine`
 (`godot` when omitted on the wire; the app defaults new games to the first ready engine with `turnLoop`, three.js today; `three` for the browser lane, `unity`) picks the starter template (`blank` /
 `blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
-project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.
+project that loads three.js r0.180.0 and the shell from Kurambit's runtime / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.
 The Godot starter's main scene is a genre-free demo shell (title, pause, settings, controls, end, credits)
 and it ships the `Juice` feel kit, because weak builder models skip or break both when they write
 them from scratch; the manifest's gameplay scene (`scenes/game.tscn`) is the seam the shell
 instances, so the check boots both. The shell pauses with `SceneTree.paused`, which is why the
 Godot play runner resumes the game's own pause after each act instead of forcing it off.
-The shells carry the controls as named actions (the Godot InputMap, `web/shell/controls.js`,
+The shells carry the controls as named actions (the Godot InputMap, the three.js runtime's `shell/controls.js`,
 `Controls.cs` over the Unity Input System)
 that players rebind on the Controls screen; every default keeps a keyboard key, because explore
 acts and bots press keys by name and cannot reach an action bound only to a gamepad.
@@ -533,13 +533,37 @@ The build-source identity leaves that list out ([sourceSnapshot.ts](../../apps/s
 counting it failed the first boot after every warm-up. Domain reload stays on (`EditorSettings` enter-play-mode options
 off): the kits keep static state, and a second play session in one editor would otherwise
 reach objects the previous session destroyed.
-The three.js starter carries the same shell in `web/shell/`: it owns the render loop and calls
+The three.js shell does the same: it owns the render loop and calls
 the gameplay module `web/main.js` through `start`/`update`/`stop`. Its page opens on the title,
 so the template's `gameplayScene` is `index.html?play` (boots straight into a run) and the
 three.js check loads that entry after the plain page, like the Godot check runs `game.tscn`. The manifest's
 `godotProject` names the engine project directory for every lane (`web` for three.js, `unity`), so snapshots,
 exports and the run resolve it unchanged. A run takes the lane (the engine directory) from the
 manifest, and every engine question the run has is the lane's engine profile.
+
+### The three.js runtime
+
+A three.js game does not carry the shell or three.js. They live once in
+`apps/server/templates/runtime/<engine>/<major>/` ([gameRuntime.ts](../../apps/server/src/game/gameRuntime.ts)),
+and `game.json`'s `runtime` pins a major per engine (`{ "three": 1 }`). The game's import map
+loads `_kurambit/runtime/three/1/`, and maps the game's own `./shell/` and `./vendor/` imports
+there, so the recipes and skills read the same for a game with its own copy. The shell loads
+`main.js` through the import map's `#main`, since a relative import from the runtime would
+resolve inside the runtime.
+
+- Every game server answers that path through `serveGameDirectory`'s `runtimes` option: the
+  live Stage, the check, bot and explore plays, and build copies. A selected export is served
+  without it, because the export holds the runtime as files (`copyRuntimeInto`); that is what
+  lets a release run from any static server, licences and provenance included.
+- Within a major, the API `main.js` uses stays backward compatible, and a minor or patch reaches
+  every game of that major on its next load. Bump `runtime.json`'s version with each change. A
+  breaking change is a new major folder; the old majors keep shipping, since games pin them.
+- The URL names only the major, so runtime files are served `no-cache` with a stat ETag rather
+  than immutable: a reload revalidates (304) and keeps the browser's compiled modules.
+- Facts record the runtime the plays loaded (version and file digest), and two builds measured
+  under different runtimes are not comparable, as with different renderers.
+- Games made before the runtime keep their copied `web/shell/` and `web/vendor/` and no
+  `runtime` key; nothing in the server converts them. Their facts carry no runtime.
 
 Two constraints hold everywhere:
 

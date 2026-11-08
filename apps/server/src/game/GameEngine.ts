@@ -11,6 +11,7 @@ import {
   parkedEngineMessage,
   type GameEngineId,
   manifestProject,
+  manifestRuntime,
   type GameManifest,
   type GameActionResult,
   type GameCheckIssue,
@@ -26,6 +27,8 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import { makeGodotBackend } from "./GameGodotEngine.ts";
 import { makeThreeBackend } from "./GameThreeEngine.ts";
+import { runtimesDirectory } from "./gameRuntime.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import * as GameUnity from "./GameUnity.ts";
 import { makeUnityBackend } from "./GameUnityEngine.ts";
@@ -56,6 +59,8 @@ export interface GameEngineContext {
   /** Game-relative engine project directory. */
   readonly projectName: string;
   readonly binary: GameEngineBinary;
+  /** The Kurambit runtime major the game loads (game.json `runtime`); null when it carries its own copy. */
+  readonly runtime: number | null;
 }
 
 export interface GameEngineCheckReport {
@@ -127,7 +132,7 @@ export interface GameEngineBackend {
   readonly resolveProject: (
     root: string,
     manifest: GameManifest,
-  ) => Effect.Effect<Omit<GameEngineContext, "root">, GameOperationError>;
+  ) => Effect.Effect<Omit<GameEngineContext, "root" | "runtime">, GameOperationError>;
   /** The one tool this game's engine needs, for this project (Unity's editor by its version); null when it needs none. */
   readonly toolStatus: (
     root: string,
@@ -294,10 +299,11 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const unity = yield* GameUnity.GameUnity;
   const gameBrowser = yield* makeGameBrowser;
+  const templates = yield* GameTemplates.GameTemplates;
   const writeAtomic = yield* makeAtomicWriter;
   const backends = new Map<string, GameEngineBackend>([
     ["godot", makeGodotBackend(processes, tools, writeAtomic)],
-    ["three", makeThreeBackend(gameBrowser)],
+    ["three", makeThreeBackend(gameBrowser, Effect.map(templates.directory, runtimesDirectory))],
     ["unity", makeUnityBackend(unity, tools)],
   ]);
   const backendFor = (engineName: string): Effect.Effect<GameEngineBackend, GameOperationError> => {
@@ -315,7 +321,7 @@ const make = Effect.gen(function* () {
     const manifest = yield* projects.read(root);
     const backend = yield* runner(manifest);
     const project = yield* backend.resolveProject(root, manifest);
-    return { backend, ctx: { root, ...project } };
+    return { backend, ctx: { root, ...project, runtime: manifestRuntime(manifest) } };
   });
   const importProject = Effect.fn("GameEngine.importProject")(function* (root: string) {
     const { backend, ctx } = yield* context(root);
@@ -435,7 +441,7 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const backend = yield* runner(manifest);
       const project = yield* backend.resolveProject(root, manifest);
-      const ctx = { root, ...project };
+      const ctx = { root, ...project, runtime: manifestRuntime(manifest) };
       const work = checkSources(root, backend, ctx, manifest, startedAt, options?.scene === true);
       // With a live editor, import and check share one hold, as export does:
       // another game cannot take the editor between them.

@@ -85,7 +85,6 @@ Use the game_* tools to check, play, export and package the game, and the game_u
   },
   run: {
     skill: "unity",
-    harnessFiles: { template: "blank-unity", files: ["Assets/Kurambit/StudioProbe.cs"] },
     // One editor per server builds every sample's player, so a second sample would wait on it.
     parallelSamples: false,
     // The project's first editor open imports everything (minutes; later opens take seconds).
