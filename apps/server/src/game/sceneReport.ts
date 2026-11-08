@@ -8,6 +8,7 @@ import * as NodePath from "node:path";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
+  GameSceneEmpty,
   GameSceneFinding,
   GameScenePlayer,
   GameSceneReport,
@@ -55,6 +56,7 @@ const PageReport = Schema.Struct({
   player: GameScenePlayer,
   unseen: Schema.Array(Schema.String).check(Schema.isMaxLength(16)),
   unseenMore: Schema.Finite,
+  empty: Schema.optionalKey(GameSceneEmpty),
   cost: Schema.Struct({ meanMs: Schema.Finite, worstMs: Schema.Finite }),
   frames: Schema.Array(Schema.Struct({ id: Schema.String, png: Schema.String })).check(
     Schema.isMaxLength(8),
@@ -117,6 +119,15 @@ export const keepSceneReport = async (
         : player,
     unseen: page.unseen.map((name) => name.slice(0, 120)),
     unseenMore: Math.max(0, Math.round(page.unseenMore)),
+    ...(page.empty === undefined
+      ? {}
+      : {
+          empty: {
+            ...page.empty,
+            colour: page.empty.colour.slice(0, 16),
+            frame: frameOf(page.empty.frame),
+          },
+        }),
     cost: page.cost,
   };
 };
@@ -150,6 +161,9 @@ export const readSceneFile = (
                 smallFrame: from(report.player.smallFrame),
               }
             : report.player,
+        ...(report.empty === undefined
+          ? {}
+          : { empty: { ...report.empty, frame: from(report.empty.frame) } }),
       };
     },
     () => null,

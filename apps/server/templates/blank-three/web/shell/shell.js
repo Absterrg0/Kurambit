@@ -808,6 +808,7 @@ onModelCopy(bridge.assetCopy);
 // Looks at the scene only once the harness starts a measured play (window.__studio.scene).
 const sceneReport = createSceneReport({
   canvas,
+  gl: renderer.getContext(),
   view: () => (run === null ? null : view()),
   player: () => run?.ctx.player ?? null,
   bridge,

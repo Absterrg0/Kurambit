@@ -29,7 +29,9 @@ the person the error until a save boots again.
 - Keep the default look on the first build (`day`), or name the one preset
   the brief calls for (`export const LOOK = { preset: "night" }`), with no
   lights besides `ctx.look.sun`. The look draws the sky, its light and the fog;
-  do not set `scene.background` or `scene.fog` over them. The shell loads every
+  do not set `scene.background` or `scene.fog` over them. Where the camera looks
+  down, ground fills the view to its edges (`buildLevel` lays it; a board built
+  by hand stands on a wide ground of its own). The shell loads every
   `ASSETS` model and compiles its shaders behind the loading screen, so play
   starts without a freeze. Glows and extra lights are a later turn.
 - No Blender, no key art, no plan, no `game_explore_*` to check your work:

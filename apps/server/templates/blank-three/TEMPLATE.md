@@ -231,7 +231,9 @@ draw their files' exact colours; such a game also sets
 level from a text map and a legend of ASSETS models, instanced so a large map
 stays cheap, and returns `spawns` by letter, `bounds`, `walls` (camera
 blockers) and `move(position, step, radius)`, which slides a circle along the
-walls. The comment block at the top of the file shows each call.
+walls. The map stands on a plain ground out to the horizon in the floor's tone
+(`ground: 0x4a6b3a` names its colour, `ground: false` leaves none for a level
+over a drop). The comment block at the top of the file shows each call.
 
 ## What else the template ships
 
@@ -306,7 +308,8 @@ cannot establish that the game is good to play.
 
 Its scene report then plays `index.html?play` for 6 s with random keys and
 lists what a person would see is wrong, each with a frame outlining it: the
-player hidden behind solids, off screen or too small, a character's feet sunk
+player hidden behind solids, off screen or too small, most of the view an
+empty flat backdrop where the camera looks down past the edge of the world, a character's feet sunk
 in the ground or its body inside a solid, two characters inside each other, a
 thing fallen out of the world, the camera inside a wall, a skinned character
 sliding over the ground in its idle clip or a frozen pose. It knows the player

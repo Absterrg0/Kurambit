@@ -425,8 +425,11 @@ cannot both find none.
   the Next banner exactly the line the run will use), in a fixed order: the person's notes, a
   blocker, a retry of an undone step, the play bot, a failing fact, the agent's next line. Only
   watched facts are proposed or guarded: motion, detail and colour are heuristics, and a space
-  game's black sky must never cost a step. Of the scene report only buried bodies and the player in
-  view are watched, because the scene's geometry decides them; clipping, falling, the camera in a
+  game's black sky must never cost a step. Of the scene report only buried bodies, the player in
+  view and the empty view are watched, because the scene's geometry decides them (the empty view
+  counts only flat backdrop below the horizon with nothing drawn on the ray, so a sky or a space
+  backdrop seen level never counts, and it is a design regression a person's step may make);
+  clipping, falling, the camera in a
   wall and sliding follow where random input led and how fast the machine ran it, and an undo
   must never hang on a path.
 - **Never two writers.** A look waits until no turn runs or is queued on any chat of the game; a

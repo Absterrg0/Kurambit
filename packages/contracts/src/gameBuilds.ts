@@ -8,6 +8,7 @@ import {
   type GameSceneFinding,
   type GameSceneFindingKind,
   GameSceneReport,
+  sceneEmptyText,
   sceneFindingText,
   scenePlayerText,
 } from "./gameScene.ts";
@@ -130,6 +131,7 @@ export const GameFactId = Schema.Literals([
   "assets",
   "use",
   "player-view",
+  "empty",
   "buried",
   "clipping",
   "fell",
@@ -454,6 +456,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   assets: "Assets",
   use: "Asset use",
   "player-view": "Player in view",
+  empty: "Empty view",
   buried: "Buried",
   clipping: "Clipping",
   fell: "Out of the world",
@@ -696,6 +699,23 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
           }
         }
       });
+    case "empty":
+      return fromScene(facts, (report): Read => {
+        const empty = report.empty;
+        if (empty === undefined)
+          return { _tag: "not-measured", why: "the game's shell predates the empty-view measure" };
+        const problem = sceneEmptyText(empty);
+        return measured({
+          text:
+            problem ??
+            (empty.share === 0
+              ? "Something is drawn across the view"
+              : `${Math.round(empty.share * 100)}% of the view is empty backdrop`),
+          value: Math.round(empty.share * 100),
+          tone: problem === null ? "good" : "bad",
+          kind: problem === null ? "clean" : "flagged",
+        });
+      });
     case "buried":
     case "clipping":
     case "fell":
@@ -768,6 +788,13 @@ const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["eviden
       const frame = player.notVisible ? player.frame : player.small ? player.smallFrame : null;
       const text = scenePlayerText(player);
       return frame === null || text === null ? [] : [{ kind: "frame", label: text, path: frame }];
+    }
+    case "empty": {
+      const empty = facts.scene.status === "measured" ? facts.scene.value.empty : undefined;
+      const text = empty === undefined ? null : sceneEmptyText(empty);
+      return empty?.frame == null || text === null
+        ? []
+        : [{ kind: "frame", label: text, path: empty.frame }];
     }
     case "buried":
     case "clipping":

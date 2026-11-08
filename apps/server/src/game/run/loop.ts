@@ -59,6 +59,7 @@ const WATCHED: ReadonlySet<GameFactId> = new Set([
   "first-response",
   "buried",
   "player-view",
+  "empty",
 ]);
 const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 
@@ -108,6 +109,7 @@ const FACT_GOAL: Readonly<Partial<Record<GameFactId, string>>> = {
   "first-response": "Make the controls respond sooner",
   buried: "Stand the characters on the ground, not in it",
   "player-view": "Keep the player in view",
+  empty: "Fill the empty part of the view",
 };
 
 /**
@@ -209,7 +211,8 @@ export const regressions = (
         ? BROKE.has(tierEnding(build, delta.id) ?? "")
           ? "health"
           : "design"
-        : delta.id === "winnable-without-skill"
+        : // An empty view can be the look the person asked for.
+          delta.id === "winnable-without-skill" || delta.id === "empty"
           ? "design"
           : "health";
     return kind === "design" && exemptDesign ? [] : [{ delta, kind }];
@@ -308,7 +311,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     },
     ...(facts === null || views === null
       ? []
-      : (["winnable-without-skill", "first-response", "buried", "player-view"] as const)
+      : (["winnable-without-skill", "first-response", "buried", "player-view", "empty"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
     () => {
