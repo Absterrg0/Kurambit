@@ -1,8 +1,4 @@
-import {
-  EnvironmentId,
-  ORCHESTRATION_PROTOCOL_VERSION,
-  type DesktopSshEnvironmentTarget,
-} from "@kurambit/contracts";
+import { EnvironmentId, ORCHESTRATION_PROTOCOL_VERSION } from "@kurambit/contracts";
 
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -25,13 +21,6 @@ import * as RpcHttp from "../rpc/http.ts";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 
-const SSH_TARGET: DesktopSshEnvironmentTarget = {
-  alias: "development",
-  hostname: "development.example.test",
-  username: "developer",
-  port: 22,
-};
-
 function catalogEntry(
   target: ConnectionTarget,
   profile: Option.Option<ConnectionProfile> = Option.none(),
@@ -45,7 +34,6 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
   readonly credentials?: ReadonlyArray<readonly [string, ConnectionCredential]>;
   readonly authorizeBearer?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeBearer"];
   readonly primaryBearerToken?: string;
-  readonly prepareSsh?: ClientCapabilities.SshEnvironmentGateway["Service"]["prepare"];
   readonly descriptorProtocolVersion?: number | null | undefined;
 }) => {
   const profiles = new Map(
@@ -78,22 +66,6 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
             token: input.bearerToken,
           },
         })),
-  });
-  const ssh = ClientCapabilities.SshEnvironmentGateway.of({
-    provision: () => Effect.die("unused"),
-    prepare:
-      options?.prepareSsh ??
-      (() =>
-        Effect.succeed({
-          bootstrap: {
-            target: SSH_TARGET,
-            httpBaseUrl: "http://127.0.0.1:4010",
-            wsBaseUrl: "ws://127.0.0.1:4010",
-            pairingToken: null,
-          },
-          bearerToken: "ssh-bearer",
-        })),
-    disconnect: () => Effect.void,
   });
 
   const layerDependencies = Layer.mergeAll(
@@ -130,7 +102,6 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
       }),
     ),
     Layer.succeed(RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization, remote),
-    Layer.succeed(ClientCapabilities.SshEnvironmentGateway, ssh),
   );
 
   return Effect.succeed(ConnectionResolver.layer.pipe(Layer.provide(layerDependencies)));

@@ -1,13 +1,17 @@
-import { EnvironmentId } from "@kurambit/contracts";
+import { EnvironmentId, ForwardCompatibleArray } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
   type ConnectionRegistration,
+  BearerConnectionProfile,
   ConnectionCredential,
-  ConnectionProfile,
 } from "../connection/catalog.ts";
-import { type ConnectionTarget, PersistedConnectionTarget } from "../connection/model.ts";
+import {
+  type ConnectionTarget,
+  type PersistedConnectionTarget,
+  BearerConnectionTarget,
+} from "../connection/model.ts";
 import { StoredGitHubRoutingPermission } from "../connection/githubRoutingPermissions.ts";
 
 export const StoredConnectionCredential = Schema.Struct({
@@ -18,8 +22,10 @@ export type StoredConnectionCredential = typeof StoredConnectionCredential.Type;
 
 export const ConnectionCatalogDocument = Schema.Struct({
   schemaVersion: Schema.Literal(1),
-  targets: Schema.Array(PersistedConnectionTarget),
-  profiles: Schema.Array(ConnectionProfile),
+  // Routes of kinds this build no longer supports (SSH) drop out instead of
+  // failing the whole document.
+  targets: ForwardCompatibleArray(BearerConnectionTarget),
+  profiles: ForwardCompatibleArray(BearerConnectionProfile),
   credentials: Schema.Array(StoredConnectionCredential),
   githubRoutingPermissions: Schema.optionalKey(Schema.Array(StoredGitHubRoutingPermission)),
   disabledEnvironmentIds: Schema.Array(EnvironmentId).pipe(
@@ -58,7 +64,6 @@ function connectionIdOf(target: ConnectionTarget): string | null {
     case "PrimaryConnectionTarget":
       return null;
     case "BearerConnectionTarget":
-    case "SshConnectionTarget":
       return target.connectionId;
   }
 }

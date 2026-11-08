@@ -31,7 +31,7 @@ import {
 import * as RpcSession from "../rpc/session.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
-import { connectionRouteId, entryWithRoutes, isLearned, mergeLearnedRoutes } from "./routes.ts";
+import { connectionRouteId } from "./routes.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -1560,60 +1560,6 @@ describe("EnvironmentSupervisor routes", () => {
       expect(
         isPublic(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target),
       ).toBe(true);
-    }),
-  );
-
-  it.effect("learns the LAN address over a public route and moves to it", () =>
-    Effect.gen(function* () {
-      const publicEntry: ConnectionCatalogEntry = { ...PUBLIC_ROUTE, enabled: true };
-      const lanAddress = yield* Ref.make("https://192.168.1.10:3773/");
-      const learned = yield* Ref.make<ReadonlyArray<string>>([]);
-      const harness = yield* makeHarness({
-        checkRoute: (route) =>
-          isPublic(route.target) ? Effect.succeed("unchecked") : Effect.succeed("answered"),
-        prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-        initialConfig: () =>
-          Ref.get(lanAddress).pipe(
-            Effect.map((httpBaseUrl): Pick<ServerConfig, "directEndpoints"> => ({
-              directEndpoints: [{ kind: "lan", httpBaseUrl }],
-            })),
-            Effect.map((config) => config as ServerConfig),
-          ),
-      });
-      const current = yield* Ref.make(publicEntry);
-      const supervisor = yield* EnvironmentSupervisor.make(publicEntry, {
-        initiallyDesired: true,
-        learnRoutes: ({ activeRoute, reported }) =>
-          Effect.gen(function* () {
-            const entry = yield* Ref.get(current);
-            const routes = mergeLearnedRoutes({
-              entry,
-              activeRoute,
-              reported,
-              allowInsecure: true,
-            });
-            if (routes === null) return Option.none();
-            const next = entryWithRoutes(entry, routes);
-            yield* Ref.set(current, next);
-            yield* Ref.update(learned, (all) => [
-              ...all,
-              ...routes.filter(isLearned).map((route) => connectionRouteId(route.target)),
-            ]);
-            return Option.some(next);
-          }),
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2,
-      );
-      const learnedId = `learned:${TARGET.environmentId}:https://192.168.1.10:3773@bearer:public`;
-      expect(
-        connectionRouteId(
-          Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target,
-        ),
-      ).toBe(learnedId);
-      expect(yield* Ref.get(learned)).toEqual([learnedId]);
     }),
   );
 });

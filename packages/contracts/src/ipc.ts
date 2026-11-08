@@ -9,10 +9,7 @@ import type {
   BrowserImportSourceId,
 } from "./browserImport.ts";
 
-import { AdvertisedEndpoint } from "./remoteAccess.ts";
-
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
-import type { EditorId } from "./editor.ts";
 import type { PreviewForwardedShortcut } from "./keybindings.ts";
 
 import type {
@@ -368,125 +365,6 @@ export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
   httpBaseUrl: Schema.NullOr(Schema.String),
   wsBaseUrl: Schema.NullOr(Schema.String),
   bootstrapToken: Schema.optionalKey(Schema.String),
-});
-
-export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
-  alias: Schema.String,
-  hostname: Schema.String,
-  username: Schema.NullOr(Schema.String),
-  port: Schema.NullOr(Schema.Number),
-});
-export type DesktopSshEnvironmentTarget = typeof DesktopSshEnvironmentTargetSchema.Type;
-
-export type DesktopSshHostSource = "ssh-config" | "known-hosts";
-export const DesktopSshHostSourceSchema = Schema.Literals(["ssh-config", "known-hosts"]);
-
-export interface DesktopDiscoveredSshHost extends DesktopSshEnvironmentTarget {
-  source: DesktopSshHostSource;
-}
-
-export const DesktopDiscoveredSshHostSchema = Schema.Struct({
-  alias: Schema.String,
-  hostname: Schema.String,
-  username: Schema.NullOr(Schema.String),
-  port: Schema.NullOr(Schema.Number),
-  source: DesktopSshHostSourceSchema,
-});
-
-export interface DesktopSshEnvironmentBootstrap {
-  target: DesktopSshEnvironmentTarget;
-  httpBaseUrl: string;
-  wsBaseUrl: string;
-  pairingToken: string | null;
-  remotePort?: number;
-  remoteServerKind?: "external" | "managed";
-}
-
-export const DesktopSshEnvironmentBootstrapSchema = Schema.Struct({
-  target: DesktopSshEnvironmentTargetSchema,
-  httpBaseUrl: Schema.String,
-  wsBaseUrl: Schema.String,
-  pairingToken: Schema.NullOr(Schema.String),
-  remotePort: Schema.optionalKey(Schema.Number),
-  remoteServerKind: Schema.optionalKey(Schema.Literals(["external", "managed"])),
-});
-
-export interface DesktopSshPasswordPromptRequest {
-  requestId: string;
-  destination: string;
-  username: string | null;
-  prompt: string;
-  expiresAt: string;
-}
-
-const DesktopSshPasswordPromptCancelledType = "ssh-password-prompt-cancelled" as const;
-
-export const DesktopSshPasswordPromptCancelledResultSchema = Schema.Struct({
-  type: Schema.Literal(DesktopSshPasswordPromptCancelledType),
-  message: Schema.String,
-});
-
-export const DesktopSshEnvironmentEnsureOptionsSchema = Schema.Struct({
-  issuePairingToken: Schema.optionalKey(Schema.Boolean),
-});
-
-export const DesktopSshEnvironmentEnsureInputSchema = Schema.Struct({
-  target: DesktopSshEnvironmentTargetSchema,
-  options: Schema.optionalKey(DesktopSshEnvironmentEnsureOptionsSchema),
-});
-
-export const DesktopSshEnvironmentEnsureResultSchema = Schema.Union([
-  DesktopSshEnvironmentBootstrapSchema,
-  DesktopSshPasswordPromptCancelledResultSchema,
-]);
-
-export const DesktopSshHttpBaseUrlInputSchema = Schema.Struct({
-  httpBaseUrl: Schema.String,
-});
-
-export const DesktopSshBearerRequestInputSchema = Schema.Struct({
-  httpBaseUrl: Schema.String,
-  bearerToken: Schema.String,
-});
-
-export const DesktopSshBearerBootstrapInputSchema = Schema.Struct({
-  httpBaseUrl: Schema.String,
-  credential: Schema.String,
-});
-
-export const DesktopSshPasswordPromptResolutionInputSchema = Schema.Struct({
-  requestId: Schema.String,
-  password: Schema.NullOr(Schema.String),
-});
-
-export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
-  environmentId: EnvironmentId,
-  label: Schema.String,
-  wsBaseUrl: Schema.String,
-  httpBaseUrl: Schema.String,
-  createdAt: Schema.String,
-  lastConnectedAt: Schema.NullOr(Schema.String),
-  desktopSsh: Schema.optionalKey(DesktopSshEnvironmentTargetSchema),
-});
-export type PersistedSavedEnvironmentRecord = typeof PersistedSavedEnvironmentRecordSchema.Type;
-
-export type DesktopServerExposureMode = "local-only" | "network-accessible";
-
-export const DesktopServerExposureModeSchema = Schema.Literals([
-  "local-only",
-  "network-accessible",
-]);
-
-export interface DesktopServerExposureState {
-  mode: DesktopServerExposureMode;
-  endpointUrl: string | null;
-  advertisedHost: string | null;
-}
-
-export const DesktopServerExposureStateSchema = Schema.Struct({
-  mode: DesktopServerExposureModeSchema,
-  endpointUrl: Schema.NullOr(Schema.String),
-  advertisedHost: Schema.NullOr(Schema.String),
 });
 
 export interface PickFolderOptions {
@@ -1056,8 +934,6 @@ export interface DesktopBridge {
   ) => Promise<void>;
   dismissSnapShotAnimation?: (id: DesktopSnapShotId) => Promise<void>;
   acknowledgeSnapShot?: (id: string) => Promise<void>;
-  getServerExposureState: () => Promise<DesktopServerExposureState>;
-  getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   /** Optional while older desktop shells can host a newer web client. */
   pickProjectFavicon?: (initialPath?: string) => Promise<string | null>;
@@ -1075,7 +951,6 @@ export interface DesktopBridge {
   /**
    * Optional: older desktop builds lack it; callers fall back to VS Code only.
    */
-  probeRemoteEditors?: () => Promise<readonly EditorId[]>;
   pasteAsText?: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   onSnapShotEvent?: (listener: (event: DesktopSnapShotEvent) => void) => () => void;

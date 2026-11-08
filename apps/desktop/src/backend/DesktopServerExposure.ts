@@ -1,5 +1,3 @@
-import type { AdvertisedEndpoint, DesktopServerExposureState } from "@kurambit/contracts";
-import { createAdvertisedEndpoint } from "@kurambit/shared/advertisedEndpoint";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -11,50 +9,27 @@ export interface DesktopServerExposureBackendConfig {
   readonly httpBaseUrl: URL;
 }
 
+/** The backend listens on loopback only; the desktop app never exposes it to the network. */
 export class DesktopServerExposure extends Context.Service<
   DesktopServerExposure,
   {
-    readonly getState: Effect.Effect<DesktopServerExposureState>;
     readonly backendConfig: Effect.Effect<DesktopServerExposureBackendConfig>;
-    readonly configureFromSettings: (input: {
-      readonly port: number;
-    }) => Effect.Effect<DesktopServerExposureState>;
-    readonly getAdvertisedEndpoints: Effect.Effect<readonly AdvertisedEndpoint[]>;
+    readonly configureFromSettings: (input: { readonly port: number }) => Effect.Effect<void>;
   }
 >()("@kurambit/desktop/backend/DesktopServerExposure") {}
-
-const state: DesktopServerExposureState = {
-  mode: "local-only",
-  endpointUrl: null,
-  advertisedHost: null,
-};
 
 export const layer = Layer.effect(
   DesktopServerExposure,
   Effect.gen(function* () {
     const portRef = yield* Ref.make(0);
     return DesktopServerExposure.of({
-      getState: Effect.succeed(state),
-      configureFromSettings: ({ port }) => Ref.set(portRef, port).pipe(Effect.as(state)),
+      configureFromSettings: ({ port }) => Ref.set(portRef, port),
       backendConfig: Ref.get(portRef).pipe(
         Effect.map((port) => ({
           port,
           bindHost: "127.0.0.1",
           httpBaseUrl: new URL(`http://127.0.0.1:${port}`),
         })),
-      ),
-      getAdvertisedEndpoints: Ref.get(portRef).pipe(
-        Effect.map((port) => [
-          createAdvertisedEndpoint({
-            id: `desktop-loopback:${port}`,
-            label: "This machine",
-            httpBaseUrl: `http://127.0.0.1:${port}`,
-            reachability: "loopback",
-            status: "available",
-            provider: { id: "desktop", label: "Desktop", kind: "core", isAddon: false },
-            source: "desktop-core",
-          }),
-        ]),
       ),
     });
   }),

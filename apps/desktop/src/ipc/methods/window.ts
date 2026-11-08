@@ -3,18 +3,14 @@ import {
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
   DesktopThemeSchema,
-  EDITORS,
-  EditorId,
   PickedThemeFileSchema,
   PickFolderOptionsSchema,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
-  REMOTE_CAPABLE_EDITOR_IDS,
   SystemSettingsPaneSchema,
   type DesktopEnvironmentBootstrap,
   type PickedThemeFile,
 } from "@kurambit/contracts";
 import { PROJECT_FAVICON_EXTENSIONS } from "@kurambit/shared/projectFavicon";
-import { resolveEditorCommand } from "@kurambit/shared/editor";
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -245,23 +241,6 @@ export const openSystemSettings = DesktopIpc.makeIpcMethod({
       yield* permissions.showHelper(pane, owner, isGranted);
     }
     return opened;
-  }),
-});
-
-export const probeRemoteEditors = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL,
-  payload: Schema.Undefined,
-  result: Schema.Array(EditorId),
-  handler: Effect.fn("desktop.ipc.window.probeRemoteEditors")(function* () {
-    const available: Array<EditorId> = [];
-    const env = yield* HostProcess.Environment;
-    for (const editorId of REMOTE_CAPABLE_EDITOR_IDS) {
-      const editor = EDITORS.find((editor) => editor.id === editorId);
-      if (editor && Option.isSome(yield* resolveEditorCommand(editor, env))) {
-        available.push(editorId);
-      }
-    }
-    return available;
   }),
 });
 

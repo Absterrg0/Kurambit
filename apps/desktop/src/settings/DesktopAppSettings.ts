@@ -1,9 +1,4 @@
-import {
-  DesktopServerExposureModeSchema,
-  DesktopUpdateChannelSchema,
-  type DesktopServerExposureMode,
-  type DesktopUpdateChannel,
-} from "@kurambit/contracts";
+import { DesktopUpdateChannelSchema, type DesktopUpdateChannel } from "@kurambit/contracts";
 import { fromLenientJson } from "@kurambit/shared/schemaJson";
 import { resolveSymlinkTarget } from "@kurambit/shared/symlink";
 import * as Context from "effect/Context";
@@ -29,7 +24,6 @@ export interface DesktopSettings {
   readonly linuxPasswordStore: LinuxPasswordStorePreference;
   readonly mainWindowBounds: DesktopWindowBounds | null;
   readonly mainWindowMaximized: boolean;
-  readonly serverExposureMode: DesktopServerExposureMode;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
 }
@@ -60,7 +54,6 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   linuxPasswordStore: DEFAULT_LINUX_PASSWORD_STORE,
   mainWindowBounds: null,
   mainWindowMaximized: false,
-  serverExposureMode: "local-only",
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
 };
@@ -77,7 +70,6 @@ const DesktopSettingsDocument = Schema.Struct({
   linuxPasswordStore: Schema.optionalKey(Schema.Unknown),
   mainWindowBounds: Schema.optionalKey(Schema.NullOr(DesktopWindowBoundsDocument)),
   mainWindowMaximized: Schema.optionalKey(Schema.Boolean),
-  serverExposureMode: Schema.optionalKey(DesktopServerExposureModeSchema),
   updateChannel: Schema.optionalKey(DesktopUpdateChannelSchema),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
 });
@@ -131,9 +123,6 @@ export class DesktopAppSettings extends Context.Service<
       bounds: DesktopWindowBounds,
       isMaximized: boolean,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
-    readonly setServerExposureMode: (
-      mode: DesktopServerExposureMode,
-    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setUpdateChannel: (
       channel: DesktopUpdateChannel,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
@@ -168,8 +157,6 @@ function normalizeDesktopSettingsDocument(
     linuxPasswordStore: normalizeLinuxPasswordStorePreference(parsed.linuxPasswordStore),
     mainWindowBounds,
     mainWindowMaximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,
-    serverExposureMode:
-      parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
     updateChannel: updateChannelConfiguredByUser
       ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
       : defaultSettings.updateChannel,
@@ -196,9 +183,6 @@ function toDesktopSettingsDocument(
   if (settings.mainWindowMaximized) {
     document.mainWindowMaximized = true;
   }
-  if (settings.serverExposureMode !== defaults.serverExposureMode) {
-    document.serverExposureMode = settings.serverExposureMode;
-  }
   if (settings.updateChannel !== defaults.updateChannel) {
     document.updateChannel = settings.updateChannel;
   }
@@ -207,18 +191,6 @@ function toDesktopSettingsDocument(
   }
 
   return document;
-}
-
-function setServerExposureMode(
-  settings: DesktopSettings,
-  requestedMode: DesktopServerExposureMode,
-): DesktopSettings {
-  return settings.serverExposureMode === requestedMode
-    ? settings
-    : {
-        ...settings,
-        serverExposureMode: requestedMode,
-      };
 }
 
 function setMainWindowBounds(
@@ -408,10 +380,6 @@ export const make = Effect.gen(function* () {
           },
         }),
       ),
-    setServerExposureMode: (mode) =>
-      persist((settings) => setServerExposureMode(settings, mode)).pipe(
-        Effect.withSpan("desktop.settings.setServerExposureMode", { attributes: { mode } }),
-      ),
     setUpdateChannel: (channel) =>
       persist((settings) => setUpdateChannel(settings, channel)).pipe(
         Effect.withSpan("desktop.settings.setUpdateChannel", { attributes: { channel } }),
@@ -448,8 +416,6 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
         load: SynchronizedRef.get(settingsRef),
         setMainWindowBounds: (bounds, isMaximized) =>
           update((settings) => setMainWindowBounds(settings, bounds, isMaximized)),
-        setServerExposureMode: (mode) =>
-          update((settings) => setServerExposureMode(settings, mode)),
         setUpdateChannel: (channel) => update((settings) => setUpdateChannel(settings, channel)),
 
         setLocalEnvironmentEnabled: (enabled) =>

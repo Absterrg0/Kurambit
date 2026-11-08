@@ -24,6 +24,7 @@ const DesktopSettingsPatch = Schema.Struct({
     ),
   ),
   mainWindowMaximized: Schema.optionalKey(Schema.Boolean),
+  // Written by earlier versions; loading ignores it.
   serverExposureMode: Schema.optionalKey(Schema.Literals(["local-only", "network-accessible"])),
   updateChannel: Schema.optionalKey(Schema.Literals(["latest", "nightly"])),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
@@ -102,7 +103,6 @@ describe("DesktopSettings", () => {
         localEnvironmentEnabled: true,
         mainWindowBounds: null,
         mainWindowMaximized: false,
-        serverExposureMode: "local-only",
         updateChannel: "nightly",
         updateChannelConfiguredByUser: false,
       } satisfies DesktopAppSettings.DesktopSettings,
@@ -125,14 +125,9 @@ describe("DesktopSettings", () => {
           localEnvironmentEnabled: true,
           mainWindowBounds: null,
           mainWindowMaximized: false,
-          serverExposureMode: "network-accessible",
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
         } satisfies DesktopAppSettings.DesktopSettings);
-
-        const exposure = yield* settings.setServerExposureMode("local-only");
-        assert.isTrue(exposure.changed);
-        assert.equal(exposure.settings.serverExposureMode, "local-only");
 
         const updateChannel = yield* settings.setUpdateChannel("nightly");
         assert.isTrue(updateChannel.changed);
@@ -150,7 +145,7 @@ describe("DesktopSettings", () => {
         const settings = yield* DesktopAppSettings.DesktopAppSettings;
         yield* fileSystem.makeDirectory(environment.desktopSettingsPath, { recursive: true });
 
-        const error = yield* settings.setServerExposureMode("network-accessible").pipe(Effect.flip);
+        const error = yield* settings.setUpdateChannel("nightly").pipe(Effect.flip);
         assert.instanceOf(error, DesktopAppSettings.DesktopSettingsWriteError);
         assert.equal(error.operation, "replace-settings-file");
         assert.equal(error.path, environment.desktopSettingsPath);
@@ -167,9 +162,6 @@ describe("DesktopSettings", () => {
     withSettings(
       Effect.gen(function* () {
         const settings = yield* DesktopAppSettings.DesktopAppSettings;
-
-        const exposure = yield* settings.setServerExposureMode("local-only");
-        assert.isFalse(exposure.changed);
 
         const updateChannel = yield* settings.setUpdateChannel("latest");
         assert.isFalse(updateChannel.changed);
@@ -215,7 +207,6 @@ describe("DesktopSettings", () => {
           localEnvironmentEnabled: true,
           mainWindowBounds: { x: 120, y: 80, width: 1280, height: 900 },
           mainWindowMaximized: false,
-          serverExposureMode: "network-accessible",
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
         } satisfies DesktopAppSettings.DesktopSettings);
@@ -236,7 +227,6 @@ describe("DesktopSettings", () => {
         const loaded = yield* settings.load;
         assert.isNull(loaded.mainWindowBounds);
         assert.isFalse(loaded.mainWindowMaximized);
-        assert.equal(loaded.serverExposureMode, "network-accessible");
       }),
     ),
   );
@@ -267,7 +257,6 @@ describe("DesktopSettings", () => {
             localEnvironmentEnabled: true,
             mainWindowBounds: null,
             mainWindowMaximized: false,
-            serverExposureMode: "network-accessible",
             updateChannel: "nightly",
             updateChannelConfiguredByUser: true,
           } satisfies DesktopAppSettings.DesktopSettings);
@@ -283,7 +272,6 @@ describe("DesktopSettings", () => {
         const settings = yield* DesktopAppSettings.DesktopAppSettings;
 
         yield* settings.setMainWindowBounds({ x: -1200, y: 40, width: 1440, height: 960 }, true);
-        yield* settings.setServerExposureMode("network-accessible");
 
         const persisted = yield* decodeDesktopSettingsPatch(
           yield* fileSystem.readFileString(environment.desktopSettingsPath),
@@ -291,7 +279,6 @@ describe("DesktopSettings", () => {
         assert.deepEqual(persisted, {
           mainWindowBounds: { x: -1200, y: 40, width: 1440, height: 960 },
           mainWindowMaximized: true,
-          serverExposureMode: "network-accessible",
         } satisfies typeof DesktopSettingsPatch.Type);
       }),
     ),
@@ -311,7 +298,7 @@ describe("DesktopSettings", () => {
         yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
         yield* fileSystem.symlink(linkedSettingsPath, environment.desktopSettingsPath);
 
-        yield* settings.setServerExposureMode("network-accessible");
+        yield* settings.setUpdateChannel("nightly");
 
         assert.equal(
           yield* fileSystem.readLink(environment.desktopSettingsPath),
@@ -320,7 +307,7 @@ describe("DesktopSettings", () => {
         const persisted = yield* decodeDesktopSettingsPatch(
           yield* fileSystem.readFileString(linkedSettingsPath),
         );
-        assert.equal(persisted.serverExposureMode, "network-accessible");
+        assert.equal(persisted.updateChannel, "nightly");
       }),
     ),
   );
@@ -339,7 +326,6 @@ describe("DesktopSettings", () => {
           localEnvironmentEnabled: true,
           mainWindowBounds: null,
           mainWindowMaximized: false,
-          serverExposureMode: "local-only",
           updateChannel: "nightly",
           updateChannelConfiguredByUser: false,
         } satisfies DesktopAppSettings.DesktopSettings);
@@ -363,7 +349,6 @@ describe("DesktopSettings", () => {
           localEnvironmentEnabled: true,
           mainWindowBounds: null,
           mainWindowMaximized: false,
-          serverExposureMode: "local-only",
           updateChannel: "latest",
           updateChannelConfiguredByUser: true,
         } satisfies DesktopAppSettings.DesktopSettings);

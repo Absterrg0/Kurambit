@@ -4,24 +4,18 @@ import {
   isSharedAddressSpaceHost,
   isTailnetHost,
 } from "@kurambit/shared/hostClassification";
-import type { DesktopSshEnvironmentTarget } from "@kurambit/contracts";
 import * as Option from "effect/Option";
 
-import {
-  BearerConnectionProfile,
-  type ConnectionCatalogEntry,
-  type ConnectionRoute,
-} from "./catalog.ts";
-import { BearerConnectionTarget, type ConnectionTarget } from "./model.ts";
+import { type ConnectionCatalogEntry, type ConnectionRoute } from "./catalog.ts";
+import type { ConnectionTarget } from "./model.ts";
 
-export type ConnectionRouteKind = "loopback" | "lan" | "tailnet" | "vpn" | "public" | "ssh";
+export type ConnectionRouteKind = "loopback" | "lan" | "tailnet" | "vpn" | "public";
 
 export function connectionRouteId(target: ConnectionTarget): string {
   switch (target._tag) {
     case "PrimaryConnectionTarget":
       return "primary";
     case "BearerConnectionTarget":
-    case "SshConnectionTarget":
       return target.connectionId;
   }
 }
@@ -71,22 +65,14 @@ function routeHostname(route: ConnectionRoute): string | null {
 }
 
 export function connectionRouteKind(route: ConnectionRoute): ConnectionRouteKind {
-  switch (route.target._tag) {
-    case "SshConnectionTarget":
-      return "ssh";
-    case "PrimaryConnectionTarget":
-    case "BearerConnectionTarget": {
-      const hostname = routeHostname(route);
-      if (hostname === null) return "public";
-      if (isLocalLoopbackHost(hostname)) return "loopback";
-      const profile = Option.getOrNull(route.profile);
-      const tailscale =
-        profile?._tag === "BearerConnectionProfile" && profile.network === "tailscale";
-      if (tailscale || isTailnetHost(hostname)) return "tailnet";
-      if (isSharedAddressSpaceHost(hostname)) return "vpn";
-      return isPrivateNetworkHost(hostname) ? "lan" : "public";
-    }
-  }
+  const hostname = routeHostname(route);
+  if (hostname === null) return "public";
+  if (isLocalLoopbackHost(hostname)) return "loopback";
+  const profile = Option.getOrNull(route.profile);
+  const tailscale = profile?._tag === "BearerConnectionProfile" && profile.network === "tailscale";
+  if (tailscale || isTailnetHost(hostname)) return "tailnet";
+  if (isSharedAddressSpaceHost(hostname)) return "vpn";
+  return isPrivateNetworkHost(hostname) ? "lan" : "public";
 }
 
 const ROUTE_KIND_RANK: Record<ConnectionRouteKind, number> = {
@@ -95,7 +81,6 @@ const ROUTE_KIND_RANK: Record<ConnectionRouteKind, number> = {
   tailnet: 2,
   vpn: 2,
   public: 3,
-  ssh: 4,
 };
 
 export function insertRoute(
@@ -131,14 +116,7 @@ export function findRouteToSameAddress(
 
 function routeAddressKey(route: ConnectionRoute): string | null {
   const profile = Option.getOrNull(route.profile);
-  switch (profile?._tag) {
-    case "BearerConnectionProfile":
-      return `bearer:${profile.httpBaseUrl.replace(/\/+$/, "")}`;
-    case "SshConnectionProfile":
-      return `ssh:${sshTargetKey(profile.target)}`;
-    default:
-      return null;
-  }
+  return profile === null ? null : `bearer:${profile.httpBaseUrl.replace(/\/+$/, "")}`;
 }
 
 export function connectionRouteLabel(route: ConnectionRoute): string {
@@ -151,111 +129,9 @@ export function connectionRouteLabel(route: ConnectionRoute): string {
       return "Tailscale";
     case "vpn":
       return "VPN";
-    case "ssh": {
-      const profile = Option.getOrNull(route.profile);
-      return profile?._tag === "SshConnectionProfile"
-        ? `SSH ${profile.target.username ? `${profile.target.username}@` : ""}${profile.target.hostname}`
-        : "SSH";
-    }
     case "public":
       return routeHostname(route) ?? "Remote link";
   }
-}
-
-export function mergeLearnedRoutes(input: {
-  readonly entry: ConnectionCatalogEntry;
-  readonly activeRoute: ConnectionRoute;
-  readonly reported: ReadonlyArray<ReportedEndpoint>;
-  /** Plain HTTP routes are unusable from an HTTPS page (mixed content). */
-  readonly allowInsecure: boolean;
-}): ReadonlyArray<ConnectionRoute> | null {
-  const { entry } = input;
-  const active = input.activeRoute.target;
-  const saved = connectionRoutes(entry);
-  if (active._tag !== "BearerConnectionTarget") {
-    return null;
-  }
-  const sharedCredential = credentialConnectionId(active.connectionId);
-  const reported = new Map<string, URL>();
-  const tailscaleOrigins = new Set<string>();
-  for (const endpoint of input.reported) {
-    let url: URL;
-    try {
-      url = new URL(endpoint.httpBaseUrl);
-    } catch {
-      continue;
-    }
-    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
-    if (url.protocol === "http:" && !input.allowInsecure) continue;
-    // A loopback address names whichever device opens it, never the server.
-    if (isLocalLoopbackHost(url.hostname)) continue;
-    reported.set(url.origin, url);
-    if (endpoint.kind === "tailnet") tailscaleOrigins.add(url.origin);
-  }
-  const normalized = (url: string) => url.replace(/\/+$/, "");
-  const known = new Set(
-    saved.flatMap((route) => {
-      const url = routeHttpBaseUrl(route);
-      return url === null || isLearned(route) ? [] : [normalized(url)];
-    }),
-  );
-  const kept = saved.flatMap((route): ReadonlyArray<ConnectionRoute> => {
-    const url = routeHttpBaseUrl(route);
-    if (!isLearned(route)) {
-      return [
-        url === null || !reported.has(normalized(url))
-          ? route
-          : withNetwork(route, tailscaleOrigins.has(normalized(url))),
-      ];
-    }
-    if (url === null || !reported.has(normalized(url)) || known.has(normalized(url))) return [];
-    if (sendsTokenInClear(saved, route, tailscaleOrigins.has(normalized(url)))) return [];
-    known.add(normalized(url));
-    return [withNetwork(route, tailscaleOrigins.has(normalized(url)))];
-  });
-  let next: ReadonlyArray<ConnectionRoute> = kept;
-  for (const url of reported.values()) {
-    if (known.has(url.origin)) continue;
-    if (
-      url.protocol === "http:" &&
-      !tailscaleOrigins.has(url.origin) &&
-      !tokenAllowsPlainHttp(saved, sharedCredential)
-    ) {
-      continue;
-    }
-    const httpBaseUrl = `${url.origin}/`;
-    const connectionId = learnedConnectionId(
-      entry.target.environmentId,
-      url.origin,
-      sharedCredential,
-    );
-    next = insertRoute(next, {
-      target: new BearerConnectionTarget({
-        environmentId: entry.target.environmentId,
-        label: entry.target.label,
-        connectionId,
-      }),
-      profile: Option.some(
-        new BearerConnectionProfile({
-          connectionId,
-          environmentId: entry.target.environmentId,
-          label: entry.target.label,
-          httpBaseUrl,
-          wsBaseUrl: `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}/`,
-          learned: true,
-          ...(tailscaleOrigins.has(url.origin) ? { network: "tailscale" as const } : {}),
-        }),
-      ),
-    });
-  }
-  const signature = (routes: ReadonlyArray<ConnectionRoute>) =>
-    routes
-      .map(
-        (route) =>
-          `${connectionRouteId(route.target)} ${routeHttpBaseUrl(route) ?? ""} ${connectionRouteKind(route)}`,
-      )
-      .join("\n");
-  return signature(saved) === signature(next) ? null : next;
 }
 
 // A paired token goes to a plain HTTP address outside the tailnet only when
@@ -301,39 +177,6 @@ export function usableRoutes(entry: ConnectionCatalogEntry): ReadonlyArray<Conne
   return routes.filter((route) => !sendsTokenInClear(routes, route));
 }
 
-export interface ReportedEndpoint {
-  readonly httpBaseUrl: string;
-  readonly kind?: string;
-}
-
-function withNetwork(route: ConnectionRoute, tailscale: boolean): ConnectionRoute {
-  const profile = Option.getOrNull(route.profile);
-  if (profile?._tag !== "BearerConnectionProfile") return route;
-  if ((profile.network === "tailscale") === tailscale) return route;
-  return {
-    target: route.target,
-    profile: Option.some(
-      new BearerConnectionProfile({
-        connectionId: profile.connectionId,
-        environmentId: profile.environmentId,
-        label: profile.label,
-        httpBaseUrl: profile.httpBaseUrl,
-        wsBaseUrl: profile.wsBaseUrl,
-        ...(profile.learned === undefined ? {} : { learned: profile.learned }),
-        ...(tailscale ? { network: "tailscale" as const } : {}),
-      }),
-    ),
-  };
-}
-
-function learnedConnectionId(
-  environmentId: string,
-  origin: string,
-  sharedCredential: string,
-): string {
-  return `learned:${environmentId}:${origin}@${sharedCredential}`;
-}
-
 export function credentialConnectionId(connectionId: string): string {
   const at = connectionId.indexOf("@");
   return connectionId.startsWith("learned:") && at !== -1
@@ -341,7 +184,7 @@ export function credentialConnectionId(connectionId: string): string {
     : connectionId;
 }
 
-export function isLearned(route: ConnectionRoute): boolean {
+function isLearned(route: ConnectionRoute): boolean {
   const profile = Option.getOrNull(route.profile);
   return profile?._tag === "BearerConnectionProfile" && profile.learned === true;
 }
@@ -362,8 +205,4 @@ export function routesAfterRemoving(
     if (!isLearned(route)) return true;
     return credentialConnectionId(connectionRouteId(route.target)) !== removedId;
   });
-}
-
-function sshTargetKey(target: DesktopSshEnvironmentTarget): string {
-  return JSON.stringify([target.alias, target.hostname, target.username, target.port]);
 }

@@ -66,8 +66,7 @@ export class DesktopDevelopmentBackendPortRequiredError extends Schema.TaggedErr
   }
 }
 
-const { logInfo: logBootstrapInfo, logWarning: logBootstrapWarning } =
-  DesktopObservability.makeComponentLogger("desktop-bootstrap");
+const { logInfo: logBootstrapInfo } = DesktopObservability.makeComponentLogger("desktop-bootstrap");
 
 const { logInfo: logStartupInfo, logError: logStartupError } =
   DesktopObservability.makeComponentLogger("desktop-startup");
@@ -160,13 +159,10 @@ export const stopAllPoolInstances = Effect.fn("desktop.app.stopAllPoolInstances"
 const bootstrap = Effect.gen(function* () {
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
-
   const snapShot = yield* DesktopSnapShot.DesktopSnapShot;
   const appActivation = yield* DesktopAppActivation.DesktopAppActivation;
   yield* logBootstrapInfo("bootstrap start");
 
-  const settings = yield* desktopSettings.get;
   const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
   yield* electronProtocol.registerDesktopProtocol({
     scheme: ElectronProtocol.getDesktopScheme(environment.isDevelopment),
@@ -198,28 +194,11 @@ const bootstrap = Effect.gen(function* () {
     },
   );
 
-  if (settings.serverExposureMode !== environment.defaultDesktopSettings.serverExposureMode) {
-    yield* logBootstrapInfo("bootstrap restoring persisted server exposure mode", {
-      mode: settings.serverExposureMode,
-    });
-  }
-  const serverExposureState = yield* serverExposure.configureFromSettings({ port: backendPort });
+  yield* serverExposure.configureFromSettings({ port: backendPort });
   const backendConfig = yield* serverExposure.backendConfig;
   yield* logBootstrapInfo("bootstrap resolved backend endpoint", {
     baseUrl: backendConfig.httpBaseUrl.href,
   });
-  if (serverExposureState.endpointUrl) {
-    yield* logBootstrapInfo("bootstrap enabled network access", {
-      endpointUrl: serverExposureState.endpointUrl,
-    });
-  } else if (
-    settings.serverExposureMode === "network-accessible" &&
-    serverExposureState.mode === "local-only"
-  ) {
-    yield* logBootstrapWarning(
-      "bootstrap fell back to local-only because no advertised network host was available",
-    );
-  }
 
   if (!(yield* Ref.get(state.quitting))) {
     yield* primaryBackend.start;

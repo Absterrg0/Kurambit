@@ -177,7 +177,6 @@ import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
-import { useRemoteOpenResolution, type RemoteOpenMode } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useProjects } from "../state/entities";
 import { serverEnvironment } from "../state/server";
@@ -239,14 +238,6 @@ export interface ChatMarkdownContextReference {
   kind: string;
   contextId: string;
   label: string;
-}
-
-export function canUseMarkdownFileShellActions(
-  environmentId: EnvironmentId | null,
-  remoteOpenMode: RemoteOpenMode,
-  isRemoteOpenResolved: boolean,
-): boolean {
-  return environmentId !== null && isRemoteOpenResolved && remoteOpenMode === "local-exec";
 }
 
 function hasMarkdownFilePrimaryAction(input: {
@@ -2343,10 +2334,7 @@ function useChatMarkdownState({
   const environmentId = threadRef?.environmentId ?? explicitEnvironmentId ?? null;
   const canOperateHost = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperatePreview = useEnvironmentScope(environmentId, AuthPreviewOperateScope);
-  const remoteOpen = useRemoteOpenResolution(environmentId);
-  const canUseShellActions =
-    canOperateHost &&
-    canUseMarkdownFileShellActions(environmentId, remoteOpen.state.mode, remoteOpen.isResolved);
+  const canUseShellActions = canOperateHost;
   const openMarkdownMedia = (
     source: string,
     resolvedFilePath?: string,

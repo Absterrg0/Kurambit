@@ -1,22 +1,6 @@
-import { EnvironmentId } from "@kurambit/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  canUseMarkdownFileShellActions,
-  shouldUseMarkdownFileBrowserPrimaryAction,
-} from "./ChatMarkdown";
-
-describe("canUseMarkdownFileShellActions", () => {
-  const environmentId = EnvironmentId.make("environment-1");
-
-  it("allows editor and file manager actions only for resolved local environments", () => {
-    expect(canUseMarkdownFileShellActions(environmentId, "local-exec", true)).toBe(true);
-    expect(canUseMarkdownFileShellActions(environmentId, "local-exec", false)).toBe(false);
-    expect(canUseMarkdownFileShellActions(environmentId, "remote-links", true)).toBe(false);
-    expect(canUseMarkdownFileShellActions(environmentId, "remote-unavailable", true)).toBe(false);
-    expect(canUseMarkdownFileShellActions(null, "local-exec", true)).toBe(false);
-  });
-});
+import { shouldUseMarkdownFileBrowserPrimaryAction } from "./ChatMarkdown";
 
 describe("shouldUseMarkdownFileBrowserPrimaryAction", () => {
   const html = { iconPath: "/tmp/report.html", canOpenInBrowser: true };

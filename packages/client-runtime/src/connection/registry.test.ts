@@ -1,9 +1,4 @@
-import {
-  type DesktopSshEnvironmentTarget,
-  EnvironmentId,
-  type OrchestrationV2ShellSnapshot,
-  type ServerConfig,
-} from "@kurambit/contracts";
+import { EnvironmentId, type OrchestrationV2ShellSnapshot } from "@kurambit/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -19,7 +14,6 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
-import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   BearerConnectionCredential,
   BearerConnectionProfile,
@@ -28,8 +22,6 @@ import {
   type ConnectionRegistration,
   type ConnectionRoute,
   PrimaryConnectionRegistration,
-  SshConnectionProfile,
-  SshConnectionRegistration,
   type ConnectionCredential,
   type ConnectionProfile,
 } from "./catalog.ts";
@@ -37,13 +29,12 @@ import * as Connectivity from "./connectivity.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import * as ConnectionDriver from "./driver.ts";
 import type { RouteCheck } from "./driver.ts";
-import { connectionRouteId, connectionRouteKind } from "./routes.ts";
+import { connectionRouteId } from "./routes.ts";
 import {
   ConnectionTransientError,
   ConnectionBlockedError,
   BearerConnectionTarget,
   PrimaryConnectionTarget,
-  SshConnectionTarget,
   type ConnectionTarget,
   type PreparedConnection,
   type SupervisorConnectionState,
@@ -122,24 +113,6 @@ const REMOTE_TARGET = new BearerConnectionTarget({
   connectionId: "bearer:remote",
 });
 
-const SSH_TARGET: DesktopSshEnvironmentTarget = {
-  alias: "test",
-  hostname: "test.example.test",
-  username: "developer",
-  port: 22,
-};
-const SSH_CONNECTION = new SshConnectionTarget({
-  environmentId: EnvironmentId.make("environment-ssh"),
-  label: "SSH environment",
-  connectionId: "ssh-connection",
-});
-const SSH_PROFILE = new SshConnectionProfile({
-  connectionId: SSH_CONNECTION.connectionId,
-  environmentId: SSH_CONNECTION.environmentId,
-  label: SSH_CONNECTION.label,
-  target: SSH_TARGET,
-});
-
 const CACHED_SNAPSHOT: OrchestrationV2ShellSnapshot = {
   ...v2ShellSnapshot,
   snapshotSequence: 1,
@@ -168,7 +141,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
       target: ConnectionTarget,
     ) => Effect.Effect<ConnectionBlockedError | undefined>;
     readonly initialDisabled?: ReadonlyArray<EnvironmentId>;
-    readonly directEndpoints?: ServerConfig["directEndpoints"];
   },
 ) {
   const storedTargets = yield* Ref.make<ReadonlyArray<ConnectionTarget>>(initialTargets);
@@ -187,7 +159,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   );
   const profileReadCount = yield* Ref.make(0);
   const storedCredentials = yield* Ref.make(new Map(initialCredentials));
-  const disconnectedSshTargets = yield* Ref.make<ReadonlyArray<DesktopSshEnvironmentTarget>>([]);
 
   const storedDisabled = yield* Ref.make<ReadonlySet<EnvironmentId>>(
     new Set(options?.initialDisabled ?? []),
@@ -226,7 +197,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
           current.filter((target) => target.environmentId !== environmentId),
         );
         for (const target of removed) {
-          if (target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget") {
+          if (target._tag === "BearerConnectionTarget") {
             yield* Ref.update(storedProfiles, (current) => {
               const next = new Map(current);
               next.delete(target.connectionId);
@@ -328,11 +299,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         return next;
       }),
   });
-  const sshGateway = ClientCapabilities.SshEnvironmentGateway.of({
-    provision: () => Effect.die(new Error("SSH provisioning is not used.")),
-    prepare: () => Effect.die(new Error("SSH preparation is not used.")),
-    disconnect: (target) => Ref.update(disconnectedSshTargets, (current) => [...current, target]),
-  });
   const connectedRoutes = yield* Ref.make<ReadonlyArray<string>>([]);
   const checkRoute = (route: ConnectionRoute) =>
     Effect.succeed(options?.checkRoute?.(route) ?? "unchecked");
@@ -366,10 +332,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
       const session = yield* Effect.acquireRelease(
         Effect.succeed({
           client: {} as RpcSession.RpcSession["client"],
-          initialConfig:
-            options?.directEndpoints === undefined
-              ? Effect.die(new Error("Config is not used by registry tests."))
-              : Effect.succeed({ directEndpoints: options.directEndpoints } as ServerConfig),
+          initialConfig: Effect.die(new Error("Config is not used by registry tests.")),
           subscribeServerConfig: () =>
             Stream.die(new Error("Config is not used by registry tests.")),
           ready: Effect.void,
@@ -403,7 +366,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         Layer.succeed(Persistence.ConnectionRegistrationStore, registrationStore),
         Layer.succeed(ConnectionProfileStore.ConnectionProfileStore, profileStore),
         Layer.succeed(ConnectionCredentialStore.ConnectionCredentialStore, credentialStore),
-        Layer.succeed(ClientCapabilities.SshEnvironmentGateway, sshGateway),
         Layer.succeed(Connectivity.Connectivity, connectivity),
         Layer.succeed(
           ConnectionWakeups.ConnectionWakeups,
@@ -428,7 +390,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     profileReadCount,
     storedCredentials,
     storedDisabled,
-    disconnectedSshTargets,
     networkStatus,
     connectedRoutes,
   };
@@ -525,16 +486,18 @@ describe("EnvironmentRegistry", () => {
 
   it.effect("hydrates connection profiles into catalog entries", () =>
     Effect.gen(function* () {
-      const harness = yield* makeHarness([SSH_CONNECTION], [SSH_PROFILE]);
+      const harness = yield* makeHarness([REMOTE_TARGET]);
 
       yield* Effect.gen(function* () {
         const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
         const entry = (yield* SubscriptionRef.get(registry.entries)).get(
-          SSH_CONNECTION.environmentId,
+          REMOTE_TARGET.environmentId,
         );
 
-        expect(entry?.target).toEqual(SSH_CONNECTION);
-        expect(Option.getOrThrow(entry?.profile ?? Option.none())).toEqual(SSH_PROFILE);
+        expect(entry?.target).toEqual(REMOTE_TARGET);
+        expect(Option.getOrThrow(entry?.profile ?? Option.none())).toEqual(
+          remoteProfile(REMOTE_TARGET),
+        );
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );
@@ -1565,63 +1528,6 @@ describe("EnvironmentRegistry routes", () => {
     }),
   );
 
-  it.effect("a second SSH host for the same machine adds a route beside the first", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness([SSH_CONNECTION], [SSH_PROFILE]);
-      yield* Effect.gen(function* () {
-        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-        const other = new SshConnectionTarget({
-          ...SSH_CONNECTION,
-          connectionId: "ssh-connection-other-host",
-        });
-        yield* registry.register(
-          new SshConnectionRegistration({
-            target: other,
-            profile: new SshConnectionProfile({
-              ...SSH_PROFILE,
-              connectionId: other.connectionId,
-              target: { ...SSH_TARGET, alias: "other", hostname: "other.example.test" },
-            }),
-            credential: BEARER_CREDENTIAL,
-          }),
-        );
-
-        expect(
-          routesOf(yield* Ref.get(harness.storedTargets), SSH_CONNECTION.environmentId),
-        ).toEqual([SSH_CONNECTION, other]);
-      }).pipe(Effect.provide(harness.layer), Effect.scoped);
-    }),
-  );
-
-  it.effect(
-    "adding a saved SSH host again replaces its route, whatever id it was saved under",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness([SSH_CONNECTION], [SSH_PROFILE]);
-        yield* Effect.gen(function* () {
-          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-          const again = new SshConnectionTarget({
-            ...SSH_CONNECTION,
-            connectionId: "ssh-connection-new-id",
-          });
-          yield* registry.register(
-            new SshConnectionRegistration({
-              target: again,
-              profile: new SshConnectionProfile({
-                ...SSH_PROFILE,
-                connectionId: again.connectionId,
-              }),
-              credential: BEARER_CREDENTIAL,
-            }),
-          );
-
-          expect(
-            routesOf(yield* Ref.get(harness.storedTargets), SSH_CONNECTION.environmentId),
-          ).toEqual([again]);
-        }).pipe(Effect.provide(harness.layer), Effect.scoped);
-      }),
-  );
-
   it.effect("reorders routes and rejects an order that drops one", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness(
@@ -1724,47 +1630,6 @@ describe("EnvironmentRegistry routes", () => {
         expect(entries.get(LAN_TARGET.environmentId)?.alternateRoutes?.[0]?.target).toEqual(
           REMOTE_TARGET,
         );
-      }).pipe(Effect.provide(harness.layer), Effect.scoped);
-    }),
-  );
-
-  it.effect("saves the Tailscale mark when the server reports a learned address as tailnet", () =>
-    Effect.gen(function* () {
-      const httpBaseUrl = "http://100.101.102.103:3773/";
-      const learnedId = `learned:${LAN_TARGET.environmentId}:http://100.101.102.103:3773@${LAN_TARGET.connectionId}`;
-      const learned = new BearerConnectionTarget({ ...LAN_TARGET, connectionId: learnedId });
-      const learnedProfile = new BearerConnectionProfile({
-        connectionId: learnedId,
-        environmentId: LAN_TARGET.environmentId,
-        label: LAN_TARGET.label,
-        httpBaseUrl,
-        wsBaseUrl: "ws://100.101.102.103:3773/",
-        learned: true,
-      });
-      const harness = yield* makeHarness(
-        [LAN_TARGET, learned],
-        [LAN_PROFILE, learnedProfile],
-        [[LAN_TARGET.connectionId, BEARER_CREDENTIAL]],
-        {
-          directEndpoints: [
-            { kind: "lan", httpBaseUrl: LAN_PROFILE.httpBaseUrl },
-            { kind: "tailnet", httpBaseUrl },
-          ],
-        },
-      );
-      yield* Effect.gen(function* () {
-        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-        yield* registry.start;
-        yield* SubscriptionRef.changes(registry.entries).pipe(
-          Stream.map((entries) => entries.get(LAN_TARGET.environmentId)?.alternateRoutes?.[0]),
-          Stream.filter((route) => route !== undefined && connectionRouteKind(route) === "tailnet"),
-          Stream.runHead,
-        );
-        expect((yield* Ref.get(harness.storedProfiles)).get(learnedId)).toMatchObject({
-          network: "tailscale",
-          learned: true,
-          httpBaseUrl,
-        });
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );

@@ -64,10 +64,6 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.stateDir, "/tmp/kurambit/userdata");
       assert.equal(environment.desktopSettingsPath, "/tmp/kurambit/userdata/desktop-settings.json");
       assert.equal(environment.clientSettingsPath, "/tmp/kurambit/userdata/client-settings.json");
-      assert.equal(
-        environment.savedEnvironmentRegistryPath,
-        "/tmp/kurambit/userdata/saved-environments.json",
-      );
       assert.equal(environment.serverSettingsPath, "/tmp/kurambit/userdata/settings.json");
       assert.equal(environment.logDir, "/tmp/kurambit/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/kurambit/userdata/browser-artifacts");

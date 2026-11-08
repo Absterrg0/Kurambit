@@ -29,12 +29,7 @@ import * as RpcSession from "../rpc/session.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 
 import * as ConnectionWakeups from "./wakeups.ts";
-import {
-  connectionRouteId,
-  connectionRoutes,
-  entryWithRoutes,
-  type ReportedEndpoint,
-} from "./routes.ts";
+import { connectionRouteId, connectionRoutes, entryWithRoutes } from "./routes.ts";
 
 const RETRY_BASE_DELAY_MS = 1_000;
 const RETRY_MAX_DELAY_MS = 300_000;
@@ -116,10 +111,6 @@ function exitUnlessInterrupted<A, E, R>(
 
 export interface EnvironmentSupervisorOptions {
   readonly initiallyDesired?: boolean;
-  readonly learnRoutes?: (input: {
-    readonly activeRoute: ConnectionRoute;
-    readonly reported: ReadonlyArray<ReportedEndpoint>;
-  }) => Effect.Effect<Option.Option<ConnectionCatalogEntry>>;
 }
 
 export function retryDelayMs(failureCount: number, random: number): number {
@@ -283,25 +274,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     return route === undefined
       ? latest
       : entryWithRoutes(latest, [route, ...routes.filter((candidate) => candidate !== route)]);
-  });
-
-  const learnRoutesFrom = Effect.fnUntraced(function* (
-    learn: NonNullable<EnvironmentSupervisorOptions["learnRoutes"]>,
-    lease: ConnectionDriver.EnvironmentConnectionLease,
-  ) {
-    const config = yield* lease.session.initialConfig.pipe(Effect.option);
-    const reported = Option.getOrUndefined(config)?.directEndpoints;
-    if (reported === undefined) return;
-    const activeId = connectionRouteId(lease.prepared.target);
-    const activeRoute = (yield* currentRoutes).find(
-      (route) => connectionRouteId(route.target) === activeId,
-    );
-    if (activeRoute === undefined) return;
-    const updated = yield* learn({ activeRoute, reported });
-    if (Option.isSome(updated)) {
-      yield* Ref.set(currentEntry, updated.value);
-      yield* requestBetterRouteCheck(lease);
-    }
   });
 
   const routeIndex = (lease: ConnectionDriver.EnvironmentConnectionLease) =>
@@ -669,9 +641,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     const connectedAt = yield* Clock.currentTimeMillis;
     yield* SubscriptionRef.set(prepared, Option.some(active.lease.prepared));
     yield* SubscriptionRef.set(session, Option.some(active.lease.session));
-    if (options?.learnRoutes !== undefined) {
-      yield* learnRoutesFrom(options.learnRoutes, active.lease).pipe(Effect.forkScoped);
-    }
     yield* setState({
       desired: true,
       network: currentIntent.network,

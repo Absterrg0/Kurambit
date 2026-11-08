@@ -32,10 +32,6 @@ vi.mock(import("../state/session"), async (original) => {
     readEnvironmentScope: hasScope as never,
   };
 });
-vi.mock(import("../remoteOpen"), async (original) => ({
-  ...(await original()),
-  useRemoteOpenResolution: () => ({ state: { mode: "local-exec" }, isResolved: true }) as never,
-}));
 // A rendered diagram is an SVG; real Mermaid layout is not what these tests exercise.
 vi.mock(import("./chat/MermaidDiagram"), async (original) => ({
   ...(await original()),

@@ -174,14 +174,12 @@ const layerDesktopAssets = Layer.succeed(DesktopAssets.DesktopAssets, {
 } satisfies DesktopAssets.DesktopAssets["Service"]);
 
 const layerDesktopServerExposure = Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
-  getState: Effect.die("unexpected getState"),
   backendConfig: Effect.succeed({
     port: 3773,
     bindHost: "127.0.0.1",
     httpBaseUrl: new URL("http://127.0.0.1:3773"),
   }),
   configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
-  getAdvertisedEndpoints: Effect.die("unexpected getAdvertisedEndpoints"),
 } satisfies DesktopServerExposure.DesktopServerExposure["Service"]);
 
 const layerElectronMenu = Layer.succeed(ElectronMenu.ElectronMenu, {
@@ -254,7 +252,6 @@ function layerTest(input: {
         }
         return { settings: desktopSettings, changed };
       }),
-    setServerExposureMode: () => Effect.die("unexpected server exposure update"),
     setUpdateChannel: () => Effect.die("unexpected update channel change"),
 
     setLocalEnvironmentEnabled: () => Effect.die("unexpected local environment toggle"),

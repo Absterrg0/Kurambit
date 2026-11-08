@@ -22,7 +22,7 @@ import {
   KeybindingWhen,
   ResolvedKeybindingsConfig,
 } from "./keybindings.ts";
-import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
+import { EditorId, FileManagerRevealKind } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
@@ -569,19 +569,6 @@ export function environmentThemeFileHasColors(file: EnvironmentThemeFile): boole
   );
 }
 
-/**
- * "tailnet" when the address is on this machine's Tailscale interface, "lan"
- * for any other private address, including other VPNs in 100.64.0.0/10.
- */
-export const ServerDirectEndpointKind = Schema.Literals(["lan", "tailnet"]);
-export type ServerDirectEndpointKind = typeof ServerDirectEndpointKind.Type;
-
-export const ServerDirectEndpoint = Schema.Struct({
-  kind: ServerDirectEndpointKind,
-  httpBaseUrl: TrimmedNonEmptyString,
-});
-export type ServerDirectEndpoint = typeof ServerDirectEndpoint.Type;
-
 export const ServerConfig = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
   auth: ServerAuthDescriptor,
@@ -591,12 +578,6 @@ export const ServerConfig = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviders,
   availableEditors: ForwardCompatibleArray(EditorId),
-  remoteOpenTargets: Schema.optionalKey(ForwardCompatibleArray(RemoteOpenTarget)),
-  /**
-   * Hints only: the client checks each address answers as this environment
-   * before using it.
-   */
-  directEndpoints: Schema.optionalKey(ForwardCompatibleArray(ServerDirectEndpoint)),
   observability: ServerObservability,
   settings: ServerSettings,
   shellResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),

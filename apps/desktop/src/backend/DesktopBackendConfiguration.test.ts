@@ -43,14 +43,12 @@ const layerBackendConfiguration = (prepared = true) =>
   DesktopBackendConfiguration.layer.pipe(Layer.provide(layerShellEnvironment(prepared)));
 
 const layerServerExposure = Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
-  getState: Effect.die("unexpected getState"),
   backendConfig: Effect.succeed({
     port: 4888,
     bindHost: "0.0.0.0",
     httpBaseUrl: new URL("http://127.0.0.1:4888"),
   }),
   configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
-  getAdvertisedEndpoints: Effect.succeed([]),
 } satisfies DesktopServerExposure.DesktopServerExposure["Service"]);
 
 function layerEnvironment(

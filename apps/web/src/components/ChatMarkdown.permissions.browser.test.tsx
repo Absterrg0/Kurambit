@@ -79,10 +79,6 @@ vi.mock(import("../state/entities"), async (original) => ({
     { id: linkedPullRequest.projectId, environmentId: threadRef.environmentId },
   ]) as never,
 }));
-vi.mock(import("../remoteOpen"), async (original) => ({
-  ...(await original()),
-  useRemoteOpenResolution: () => ({ state: { mode: "local-exec" }, isResolved: true }) as never,
-}));
 vi.mock(import("../hooks/useLocalStorage"), async (original) => ({
   ...(await original()),
   useLocalStorage: (() => ["vscode", vi.fn()]) as never,

@@ -10,7 +10,6 @@ import {
   setConnectionCatalog,
 } from "./methods/connectionCatalog.ts";
 import { getLocalEnvironmentEnabled } from "./methods/localEnvironment.ts";
-import { getAdvertisedEndpoints, getServerExposureState } from "./methods/serverExposure.ts";
 import {
   checkForUpdate,
   downloadUpdate,
@@ -28,7 +27,6 @@ import {
   openSystemSettings,
   checkSystemPermission,
   pasteAsText,
-  probeRemoteEditors,
   pickFolder,
   pickProjectFavicon,
   pickThemeFiles,
@@ -98,9 +96,6 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setConnectionCatalog);
   yield* ipc.handle(clearConnectionCatalog);
 
-  yield* ipc.handle(getServerExposureState);
-  yield* ipc.handle(getAdvertisedEndpoints);
-
   yield* ipc.handle(pickFolder);
   yield* ipc.handle(pickProjectFavicon);
   yield* ipc.handle(pickThemeFiles);
@@ -112,7 +107,6 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(openSystemSettings);
   yield* ipc.handle(checkSystemPermission);
   yield* ipc.handle(pasteAsText);
-  yield* ipc.handle(probeRemoteEditors);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);
   yield* ipc.handle(downloadUpdate);

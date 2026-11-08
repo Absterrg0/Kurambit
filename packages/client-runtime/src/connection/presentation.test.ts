@@ -6,13 +6,11 @@ import {
   BearerConnectionProfile,
   type ConnectionCatalogEntry,
   type ConnectionRoute,
-  SshConnectionProfile,
 } from "./catalog.ts";
 import {
   BearerConnectionTarget,
   ConnectionBlockedError,
   ConnectionTransientError,
-  SshConnectionTarget,
   type SupervisorConnectionState,
 } from "./model.ts";
 import {
@@ -108,31 +106,6 @@ describe("connection presentation", () => {
       "http://100.115.1.44:3773/mcp",
     );
     expect(environmentMcpUrl({ entry })).toBe("http://192.168.4.53:3773/mcp");
-  });
-
-  it("passes over routes without an address of their own", () => {
-    const ssh = new SshConnectionTarget({
-      environmentId: TARGET.environmentId,
-      label: TARGET.label,
-      connectionId: "ssh:environment-1",
-    });
-    const entry: ConnectionCatalogEntry = {
-      ...ENTRY,
-      target: ssh,
-      profile: Option.some(
-        new SshConnectionProfile({
-          connectionId: ssh.connectionId,
-          environmentId: ssh.environmentId,
-          label: ssh.label,
-          target: { alias: "desk", hostname: "desk.local", username: null, port: null },
-        }),
-      ),
-      alternateRoutes: [{ target: ENTRY.target, profile: ENTRY.profile }],
-    };
-
-    expect(environmentMcpUrl({ entry, connectedTarget: ssh })).toBe(
-      "https://environment.example.test/mcp",
-    );
   });
 
   it("distinguishes initial connection, reconnect, and retry errors", () => {

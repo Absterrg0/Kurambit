@@ -20,7 +20,6 @@ import {
   type ConnectionRoute,
   type PlatformConnectionRegistration,
   type PrimaryConnectionRegistration,
-  SshConnectionProfile,
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
@@ -48,13 +47,9 @@ import {
   credentialConnectionId,
   entryWithRoutes,
   findRouteToSameAddress,
-  mergeLearnedRoutes,
   routesAfterRemoving,
   upsertRoute,
-  type ReportedEndpoint,
 } from "./routes.ts";
-
-const isSshConnectionProfile = Schema.is(SshConnectionProfile);
 
 function unsupportedState(
   entry: ConnectionCatalogEntry,
@@ -209,7 +204,7 @@ export const make = Effect.gen(function* () {
     target: ConnectionTarget,
   ) {
     const profile: Option.Option<ConnectionProfile> =
-      target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+      target._tag === "BearerConnectionTarget"
         ? yield* profiles.get(target.connectionId)
         : Option.none();
     return { target, profile } satisfies ConnectionRoute;
@@ -348,7 +343,6 @@ export const make = Effect.gen(function* () {
           const scope = yield* Scope.fork(registryScope);
           const supervisor = yield* EnvironmentSupervisor.make(entry, {
             initiallyDesired: false,
-            learnRoutes: (input) => learnRoutes({ environmentId, ...input }),
           }).pipe(
             Effect.provideService(Connectivity.Connectivity, connectivity),
             Effect.provideService(ConnectionDriver.ConnectionDriver, driver),
@@ -807,7 +801,7 @@ export const make = Effect.gen(function* () {
         environmentId,
       });
     }
-    const entry = yield* getEntry(environmentId);
+    yield* getEntry(environmentId);
 
     yield* githubRoutingPermissions.forget(environmentId);
     yield* registrations.remove(environmentId);
@@ -836,83 +830,10 @@ export const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded", discard: true },
     );
-
-    for (const route of connectionRoutes(entry)) {
-      const profile = Option.getOrNull(route.profile);
-      if (profile !== null && isSshConnectionProfile(profile)) {
-      }
-    }
   });
 
   const remove = Effect.fn("EnvironmentRegistry.remove")(function* (environmentId: EnvironmentId) {
     return yield* withLeaseLock(environmentId, removeLocked(environmentId));
-  });
-
-  // Plain HTTP routes are unusable from an HTTPS page, which blocks mixed content.
-  const allowInsecureRoutes =
-    typeof globalThis.location === "undefined" || globalThis.location.protocol !== "https:";
-
-  /**
-   * Learned routes reuse the active route's credential, so they do not revoke GitHub routing
-   * trust the way a newly paired address does.
-   */
-  const learnRoutes = Effect.fn("EnvironmentRegistry.learnRoutes")(function* (input: {
-    readonly environmentId: EnvironmentId;
-    readonly activeRoute: ConnectionRoute;
-    readonly reported: ReadonlyArray<ReportedEndpoint>;
-  }) {
-    return yield* withLeaseLock(
-      input.environmentId,
-      Effect.gen(function* () {
-        if ((yield* Ref.get(platformEnvironmentIds)).has(input.environmentId)) {
-          return Option.none<ConnectionCatalogEntry>();
-        }
-        const entry = (yield* SubscriptionRef.get(entries)).get(input.environmentId);
-        if (entry === undefined) return Option.none<ConnectionCatalogEntry>();
-        const routes = mergeLearnedRoutes({
-          entry,
-          activeRoute: input.activeRoute,
-          reported: input.reported,
-          allowInsecure: allowInsecureRoutes,
-        });
-        if (routes === null) return Option.none<ConnectionCatalogEntry>();
-        const next = entryWithRoutes(entry, routes);
-        const previousProfiles = new Map(
-          connectionRoutes(entry).map((route) => [
-            connectionRouteId(route.target),
-            Option.getOrNull(route.profile),
-          ]),
-        );
-        for (const route of routes) {
-          const profile = Option.getOrNull(route.profile);
-          if (
-            profile === null ||
-            previousProfiles.get(connectionRouteId(route.target)) === profile
-          ) {
-            continue;
-          }
-          yield* profiles.put(profile);
-        }
-        yield* registrations.setRoutes(input.environmentId, persistedRoutes(next));
-        const lease = (yield* SubscriptionRef.get(serviceScopes)).get(input.environmentId);
-        if (lease !== undefined) {
-          yield* SubscriptionRef.update(serviceScopes, (current) =>
-            new Map(current).set(input.environmentId, { ...lease, entry: next }),
-          );
-        }
-        yield* SubscriptionRef.update(entries, (current) =>
-          new Map(current).set(input.environmentId, next),
-        );
-        return Option.some(next);
-      }),
-    ).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("Could not save routes learned from the environment.", {
-          environmentId: input.environmentId,
-          error,
-        }).pipe(Effect.as(Option.none<ConnectionCatalogEntry>())),
-      ),
-    );
   });
 
   const removeRoute = Effect.fn("EnvironmentRegistry.removeRoute")(function* (
@@ -931,9 +852,6 @@ export const make = Effect.gen(function* () {
         const remaining = routesAfterRemoving(routes, routeId);
         if (remaining.length === 0) return yield* removeLocked(environmentId);
         yield* replaceRoutesLocked(entry, remaining);
-        const profile = Option.getOrNull(route.profile);
-        if (profile !== null && isSshConnectionProfile(profile)) {
-        }
       }),
     );
   });
@@ -1007,15 +925,6 @@ export const make = Effect.gen(function* () {
           yield* enabled ? lease.supervisor.connect : lease.supervisor.disconnect;
         } else if (enabled) {
           yield* createServiceScope(next);
-        }
-        // The supervisor only owns the RPC session. A managed SSH backend and
-        // its tunnel outlive it, so switching off tears those down as well.
-        if (!enabled) {
-          for (const route of connectionRoutes(entry)) {
-            const profile = Option.getOrNull(route.profile);
-            if (profile !== null && isSshConnectionProfile(profile)) {
-            }
-          }
         }
       }),
     );

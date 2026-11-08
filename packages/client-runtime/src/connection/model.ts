@@ -23,26 +23,11 @@ export class BearerConnectionTarget extends Schema.TaggedClass<BearerConnectionT
   },
 ) {}
 
-export class SshConnectionTarget extends Schema.TaggedClass<SshConnectionTarget>()(
-  "SshConnectionTarget",
-  {
-    ...ConnectionTargetBase,
-    connectionId: Schema.String,
-  },
-) {}
-
-export const ConnectionTarget = Schema.Union([
-  PrimaryConnectionTarget,
-  BearerConnectionTarget,
-  SshConnectionTarget,
-]);
+export const ConnectionTarget = Schema.Union([PrimaryConnectionTarget, BearerConnectionTarget]);
 export type ConnectionTarget = typeof ConnectionTarget.Type;
 
-export const PersistedConnectionTarget = Schema.Union([
-  BearerConnectionTarget,
-  SshConnectionTarget,
-]);
-export type PersistedConnectionTarget = typeof PersistedConnectionTarget.Type;
+export const PersistedConnectionTarget = BearerConnectionTarget;
+export type PersistedConnectionTarget = BearerConnectionTarget;
 
 export type ConnectionTargetKind = ConnectionTarget["_tag"];
 

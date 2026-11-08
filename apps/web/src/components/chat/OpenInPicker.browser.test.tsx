@@ -5,16 +5,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import type { RemoteOpenState } from "../../remoteOpen";
-
 const state = vi.hoisted(() => ({
   allowed: new Set<string>(),
-  remote: { mode: "local-exec" } as RemoteOpenState,
-  clientEditors: ["vscode"] as readonly EditorId[],
   run: vi.fn(),
-  openUrl: vi.fn(),
   setPreferred: vi.fn(),
-  markHintSeen: vi.fn(),
   listeners: new Set<() => void>(),
 }));
 
@@ -39,10 +33,6 @@ vi.mock(import("../../state/use-atom-command"), async (importOriginal) => ({
   ...(await importOriginal()),
   useAtomCommand: (() => state.run) as never,
 }));
-vi.mock(import("../../state/environments"), async (importOriginal) => ({
-  ...(await importOriginal()),
-  useEnvironment: (() => ({ label: "Test host" })) as never,
-}));
 vi.mock(import("../../editorPreferences"), async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -57,13 +47,6 @@ vi.mock(import("../../editorPreferences"), async (importOriginal) => {
     },
   };
 });
-vi.mock(import("../../remoteOpen"), async (importOriginal) => ({
-  ...(await importOriginal()),
-  useRemoteOpenState: () => state.remote,
-  useRemoteCapableEditors: () => state.clientEditors,
-  useRemoteOpenHint: () => [false, state.markHintSeen] as const,
-  openRemoteEditorUrl: state.openUrl,
-}));
 
 import { OpenInPicker } from "./OpenInPicker";
 
@@ -75,12 +58,8 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   state.allowed.clear();
-  state.remote = { mode: "local-exec" };
-  state.clientEditors = editors;
   state.run.mockReset().mockResolvedValue(AsyncResult.success(undefined));
-  state.openUrl.mockReset().mockResolvedValue(true);
   state.setPreferred.mockReset();
-  state.markHintSeen.mockReset();
   state.listeners.clear();
   window.localStorage.clear();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -139,35 +118,22 @@ async function pressOpenFavorite() {
   return event;
 }
 
-it.each(["local-exec", "remote-links"] as const)(
-  "selects the preferred editor without launching a %s workspace",
-  async (mode) => {
-    state.allowed.add(selected);
-    state.clientEditors = ["cursor", "vscode"];
-    state.remote =
-      mode === "local-exec" ? { mode } : { mode, host: { kind: "ssh-alias", host: "test-host" } };
-    await renderPicker(["cursor", "vscode"], true);
-    byLabel("Open in Cursor");
-    await click(byLabel("Choose editor"));
-    await click(menuItems().find((item) => item.textContent?.includes("VS Code"))!);
-    expect(window.localStorage.getItem("kurambit:last-editor")).toBe('"vscode"');
-    const openButton = byLabel("Open in VS Code");
-    expect(state.run).not.toHaveBeenCalled();
-    expect(state.openUrl).not.toHaveBeenCalled();
+it("selects the preferred editor without launching the workspace", async () => {
+  state.allowed.add(selected);
+  await renderPicker(["cursor", "vscode"], true);
+  byLabel("Open in Cursor");
+  await click(byLabel("Choose editor"));
+  await click(menuItems().find((item) => item.textContent?.includes("VS Code"))!);
+  expect(window.localStorage.getItem("kurambit:last-editor")).toBe('"vscode"');
+  const openButton = byLabel("Open in VS Code");
+  expect(state.run).not.toHaveBeenCalled();
 
-    await click(openButton);
-    if (mode === "local-exec") {
-      expect(state.run).toHaveBeenCalledExactlyOnceWith({
-        environmentId: selected,
-        input: { cwd: "/work/project", editor: "vscode" },
-      });
-    } else {
-      expect(state.openUrl).toHaveBeenCalledExactlyOnceWith(
-        "vscode://vscode-remote/ssh-remote+test-host/work/project",
-      );
-    }
-  },
-);
+  await click(openButton);
+  expect(state.run).toHaveBeenCalledExactlyOnceWith({
+    environmentId: selected,
+    input: { cwd: "/work/project", editor: "vscode" },
+  });
+});
 
 describe("host editor access", () => {
   it("uses the selected grant for both the button and a retained shortcut", async () => {
@@ -205,32 +171,5 @@ describe("host editor access", () => {
       environmentId: selected,
       input: { cwd: "/work/project", editor: "vscode" },
     });
-  });
-});
-
-describe("client editor links", () => {
-  it("opens an SSH editor URL without host operate permission", async () => {
-    state.remote = { mode: "remote-links", host: { kind: "ssh-alias", host: "test-host" } };
-    await renderPicker();
-    expect(primaryButton().disabled).toBe(false);
-    await click(primaryButton());
-    expect(state.openUrl).toHaveBeenCalledExactlyOnceWith(
-      "vscode://vscode-remote/ssh-remote+test-host/work/project",
-    );
-    expect(state.run).not.toHaveBeenCalled();
-    expect(state.markHintSeen).toHaveBeenCalledOnce();
-    expect(state.setPreferred).toHaveBeenCalledExactlyOnceWith("vscode");
-  });
-
-  it("does not change preferences when the client rejects the SSH URL", async () => {
-    state.remote = { mode: "remote-links", host: { kind: "ssh-alias", host: "test-host" } };
-    state.openUrl.mockResolvedValue(false);
-    await renderPicker();
-    const event = await pressOpenFavorite();
-    expect(state.openUrl).toHaveBeenCalledOnce();
-    expect(event.defaultPrevented).toBe(true);
-    expect(state.run).not.toHaveBeenCalled();
-    expect(state.setPreferred).not.toHaveBeenCalled();
-    expect(state.markHintSeen).not.toHaveBeenCalled();
   });
 });
