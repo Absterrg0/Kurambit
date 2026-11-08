@@ -26,6 +26,9 @@
 //   hero.play("attack", { restart: true });   // the next cut of a combo: from the start again
 //   hero.play("roll", { once: true, reverse: true }); // backwards, from the clip's end
 //   hero.play("attack", { from: 0.2 });       // start 0.2 s into the clip
+//   hero.play("Dodge_Roll", { once: true });  // a one-shot that travels (its sidecar rootDrift)
+//     // moves hero.root with it and ends there; rootMotion: false plays it in place, and a
+//     // game that sets the root's position itself adds hero.moved each frame
 //   if (hero.time > 0.32 && hero.time < 0.45) hit(); // the clip's own seconds now: hit windows
 //   hero.progress;                            // 0..1 through it; hero.duration, hero.clip (its name)
 // The shell ticks every animator on game time, so a Juice.hitPause holds the
@@ -58,6 +61,7 @@ import {
   makeFootIK,
   makeLean,
   makeReactions,
+  makeRootMotion,
   rotateWorld,
 } from "./motion-layer.js";
 
@@ -252,6 +256,10 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       .filter((clip) => typeof clip.groundSpeed === "number" && clip.groundSpeed > 0)
       .map((clip) => [clip.name, clip.groundSpeed]),
   );
+  const travel = makeRootMotion(root, asset, clips);
+  // Root motion and foot IK both move the pelvis after the mixer; one guard around all the layers
+  // starts each frame from the clip's pelvis, never from last frame's layered one.
+  const pelvisGuard = findBone(root, "pelvis") === null ? null : layered(findBone(root, "pelvis"));
   const springs = [];
   const addSpring = (names, options, name = null) => {
     const chain = makeSpring(root, names, { ...SPRING, ...options });
@@ -419,6 +427,7 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     )
       action.time = (previous.time / previous.getClip().duration) * duration;
     action.play();
+    travel.start(action, options.rootMotion !== false);
     if (previous !== null && previous !== action) action.crossFadeFrom(previous, f, false);
     current = { state, action, once, done: false };
   };
@@ -577,13 +586,23 @@ export function animate(gltf, { fade = 0.2 } = {}) {
       }
       return animator;
     },
-    /** After the mixer: springs, the lean, the gaze, the feet, then the blink. The shell calls it. */
+    /**
+     * The world move this frame's root motion gave hero.root (a one-shot that travels, such as a
+     * roll); a game that sets the root's position itself every frame adds this to its own.
+     */
+    get moved() {
+      return travel.moved;
+    },
+    /** After the mixer: root motion, springs, the lean, the gaze, the feet, then the blink. The shell calls it. */
     settle(dt) {
+      pelvisGuard?.begin();
+      travel.update();
       for (const chain of springs) chain.update(dt);
       if (layers.lean !== null) layers.lean.update(dt);
       settleGaze(dt);
       if (layers.feet !== null) layers.feet.update(dt, current?.action ?? null);
       settleBlink(dt);
+      pelvisGuard?.end();
     },
     /** Back to playing after die (a respawn). */
     revive() {

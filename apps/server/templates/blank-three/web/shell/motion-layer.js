@@ -31,8 +31,10 @@ export function rotateWorld(bone, axis, angle) {
 }
 
 /**
- * A bone a layer changes after the mixer: a clip that does not key it would leave the layer's
- * last change in place and compound it, so the layer starts from its own last base instead.
+ * A bone a layer changes after the mixer: the mixer writes a property only when its value changes
+ * (a clip that holds a pose, or does not key the bone), which would leave the layer's last change
+ * in place and compound it, so the layer starts from its own last base instead. Rotation and
+ * position are checked apart: a clip turning the pelvis while holding its place rewrites one only.
  */
 export function layered(bone) {
   return {
@@ -43,14 +45,8 @@ export function layered(bone) {
     wroteP: new THREE.Vector3(),
     written: false,
     begin() {
-      if (
-        this.written &&
-        bone.quaternion.equals(this.wroteQ) &&
-        bone.position.equals(this.wroteP)
-      ) {
-        bone.quaternion.copy(this.q);
-        bone.position.copy(this.p);
-      }
+      if (this.written && bone.quaternion.equals(this.wroteQ)) bone.quaternion.copy(this.q);
+      if (this.written && bone.position.equals(this.wroteP)) bone.position.copy(this.p);
       this.q.copy(bone.quaternion);
       this.p.copy(bone.position);
     },
@@ -65,6 +61,32 @@ export function layered(bone) {
 // The upper body by the standard skeleton's names: a reaction never moves the legs, so a flinch
 // layers onto a walk without its feet sliding.
 const UPPER = /^(spine|neck|head|clavicle|upperarm|lowerarm|hand|thumb|index|middle|ring|pinky)/i;
+
+// Seconds over which a reaction's change eases back to nothing at its end: a clip that does not
+// return to its first pose would otherwise snap back when its action stops.
+const TAPER = 0.15;
+const _id = new THREE.Quaternion();
+const _tq = new THREE.Quaternion();
+
+/** Ease an additive clip's last `seconds` back to no change (rotations and offsets). */
+function taper(clip, seconds) {
+  for (const track of clip.tracks) {
+    const size = track.getValueSize();
+    for (let k = 0; k < track.times.length; k++) {
+      const left = clip.duration - track.times[k];
+      if (left >= seconds) continue;
+      let f = Math.max(0, left / seconds);
+      f = f * f * (3 - 2 * f);
+      const v = track.values;
+      const i = k * size;
+      if (size === 4) {
+        _tq.fromArray(v, i);
+        _id.identity().slerp(_tq, f);
+        _id.toArray(v, i);
+      } else if (track.name.endsWith(".position")) for (let j = 0; j < size; j++) v[i + j] *= f;
+    }
+  }
+}
 
 /** Additive reactions: any clip's upper body, played once on top of whatever plays. */
 export function makeReactions(mixer, clips, find) {
@@ -87,6 +109,7 @@ export function makeReactions(mixer, clips, find) {
           );
           // Relative to its own first frame: only how the clip moves away from it is added.
           THREE.AnimationUtils.makeClipAdditive(upper, 0);
+          taper(upper, TAPER);
           action = mixer.clipAction(upper);
           action.blendMode = THREE.AdditiveAnimationBlendMode;
           action.setLoop(THREE.LoopOnce, 1);
@@ -332,4 +355,118 @@ export function makeFootIK(root, asset, options) {
       for (const leg of legs) for (const part of leg.parts) part.end();
     },
   };
+}
+
+// A one-shot that travels less than this (m) plays where it stands.
+const DRIFT = 0.05;
+
+/**
+ * Root motion for one-shots that travel (a dodge roll, a lunge, a stagger back): the sidecar's
+ * rootDrift says which. The clip keys its travel on the pelvis; this moves the model's root by
+ * that travel as the clip plays and takes it back off the pelvis, so the character ends where the
+ * move took it instead of sliding back when the next clip fades in. Loops stay in place (the game
+ * moves them at moveSpeed). `moved` is this frame's world move, for a game that keeps its own
+ * position and copies it onto the root every frame.
+ */
+export function makeRootMotion(root, asset, clips) {
+  const drift = new Map(
+    (asset?.clips ?? [])
+      .filter((clip) => !clip.loops && Math.abs(clip.rootDrift ?? 0) >= DRIFT)
+      .map((clip) => [clip.name, true]),
+  );
+  const pelvis = findBone(root, "pelvis");
+  const tracks = new Map();
+  if (pelvis !== null)
+    for (const clip of clips) {
+      if (!drift.has(clip.name)) continue;
+      const track = clip.tracks.find((t) => t.name === `${pelvis.name}.position`);
+      if (track !== undefined) tracks.set(clip, track.createInterpolant());
+    }
+  const live = new Map(); // action -> { at: Vector3 (the travel's last value), start: Vector3 }
+  // animate guards the pelvis around every layer (root motion and foot IK both move it).
+  const toRoot = new THREE.Matrix4();
+  const fromRoot = new THREE.Matrix4();
+  const p = new THREE.Vector3();
+  const d = new THREE.Vector3();
+  const off = new THREE.Vector3();
+  const sum = new THREE.Vector3();
+  const moved = new THREE.Vector3();
+  const sample = (interp, t, out) => {
+    const v = interp.evaluate(t);
+    return out.set(v[0], v[1], v[2]);
+  };
+  return {
+    moved,
+    /** Whether a clip travels and is moved by this. */
+    has: (clip) => tracks.has(clip),
+    /** A clip starting (again): its travel counts from where it starts. */
+    start(action, on = true) {
+      const interp = tracks.get(action.getClip());
+      if (interp === undefined) return;
+      if (!on) {
+        live.delete(action);
+        return;
+      }
+      const s = sample(interp, action.time, new THREE.Vector3());
+      live.set(action, { start: s, at: s.clone(), t: action.time });
+    },
+    update() {
+      moved.set(0, 0, 0);
+      if (live.size === 0 || pelvis === null) return;
+      // The pelvis's parent frame in the model root's frame: travel is horizontal there.
+      pelvis.parent.updateWorldMatrix(true, false);
+      root.updateWorldMatrix(true, false);
+      toRoot.copy(root.matrixWorld).invert().multiply(pelvis.parent.matrixWorld);
+      fromRoot.copy(toRoot).invert();
+      sum.set(0, 0, 0);
+      for (const [action, state] of live) {
+        const w = action.getEffectiveWeight();
+        if (!action.isScheduled() && w === 0) {
+          live.delete(action);
+          continue;
+        }
+        const interp = tracks.get(action.getClip());
+        sample(interp, action.time, p);
+        // A clip on repeat that wrapped carries on from its end: the travel to the end, then
+        // from the start again (and backwards for a reversed one).
+        const length = action.getClip().duration;
+        const forward = action.timeScale >= 0;
+        if (
+          action.loop === THREE.LoopRepeat &&
+          (forward ? action.time < state.t : action.time > state.t)
+        ) {
+          state.at
+            .sub(sample(interp, forward ? length : 0, _end))
+            .add(sample(interp, forward ? 0 : length, _begin));
+        }
+        state.t = action.time;
+        // This frame's travel, horizontal in the root's frame, moves the root by the clip's share.
+        d.copy(p).sub(state.at).applyMatrix4(toRootLinear(toRoot));
+        d.y = 0;
+        moved.addScaledVector(d, w);
+        state.at.copy(p);
+        // The travel so far comes off the pelvis, by the same share.
+        off.copy(p).sub(state.start).applyMatrix4(toRootLinear(toRoot));
+        off.y = 0;
+        sum.addScaledVector(off, w);
+      }
+      if (sum.lengthSq() > 0) {
+        pelvis.position.sub(sum.applyMatrix4(toRootLinear(fromRoot)));
+        pelvis.updateMatrixWorld(true);
+      }
+      if (moved.lengthSq() > 0) {
+        moved.applyQuaternion(root.quaternion).multiply(root.scale);
+        root.position.add(moved);
+        root.updateMatrixWorld(true);
+      }
+    },
+  };
+}
+
+const _lin = new THREE.Matrix4();
+const _end = new THREE.Vector3();
+const _begin = new THREE.Vector3();
+/** A matrix's rotation and scale alone: a direction or offset, not a point. */
+function toRootLinear(m) {
+  return _lin.copy(m).setPosition(0, 0, 0);
 }
