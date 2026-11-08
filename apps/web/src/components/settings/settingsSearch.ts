@@ -772,13 +772,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["commands scripts setup run dev server checkout worktree kurambit.json import"],
   },
   {
-    id: "environment-icon",
-    title: "Environment icon",
-    to: "/settings/connections",
-    targetId: "connections-environment",
-    searchTerms: ["machine glyph sidebar mac mini studio laptop desktop server cloud vm"],
-  },
-  {
     id: "local-environment",
     title: "Local environment",
     to: "/settings/connections",
