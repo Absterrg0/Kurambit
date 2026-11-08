@@ -68,11 +68,8 @@ function TaskRow({
 
   const run = async (action: string, fn: () => Promise<unknown>) => {
     setBusy(action);
-    try {
-      await fn();
-    } finally {
-      setBusy(null);
-    }
+    // A promise chain, not try/finally, which React Compiler cannot compile.
+    await fn().finally(() => setBusy(null));
   };
 
   return (
@@ -210,35 +207,34 @@ function DraftForm({
     }
     setSaving(true);
     setError(null);
-    try {
-      await upsert({
-        environmentId,
-        input: {
-          ...(draft.editingId === null
-            ? {}
-            : { id: ScheduledTaskId.make(draft.editingId), requireExisting: true }),
-          title:
-            draft.title.trim() ||
-            draft.prompt.split("\n")[0]?.trim().slice(0, 80) ||
-            "Scheduled task",
-          prompt: draft.prompt.trim(),
-          enabled: draft.enabled,
-          schedule,
-          projectId: resolvedProjectId as never,
-          threadId: null,
-          workspaceStrategy: { type: "worktree", baseRef: "main", startFromOrigin: true },
-          modelSelection,
-          runtimeMode: draft.runtimeMode,
-          interactionMode: draft.interactionMode,
-          creationSource: "web",
-        },
-      });
-      onDone();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the scheduled task.");
-    } finally {
-      setSaving(false);
-    }
+    // A promise chain, not try/finally, which React Compiler cannot compile.
+    await upsert({
+      environmentId,
+      input: {
+        ...(draft.editingId === null
+          ? {}
+          : { id: ScheduledTaskId.make(draft.editingId), requireExisting: true }),
+        title:
+          draft.title.trim() ||
+          draft.prompt.split("\n")[0]?.trim().slice(0, 80) ||
+          "Scheduled task",
+        prompt: draft.prompt.trim(),
+        enabled: draft.enabled,
+        schedule,
+        projectId: resolvedProjectId as never,
+        threadId: null,
+        workspaceStrategy: { type: "worktree", baseRef: "main", startFromOrigin: true },
+        modelSelection,
+        runtimeMode: draft.runtimeMode,
+        interactionMode: draft.interactionMode,
+        creationSource: "web",
+      },
+    })
+      .then(() => onDone())
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Could not save the scheduled task.");
+      })
+      .finally(() => setSaving(false));
   };
 
   return (
