@@ -59,7 +59,7 @@ export const ASSETS = {
   floor: LIB + "kaykit-dungeon-remastered/Assets/gltf/floor_tile_large.gltf.glb",
 };
 export const ACTIONS = { jump: null, alt: null };
-let hero, foe, cam, level;
+let hero, foe, cam, level, tuned;
 
 export function start(ctx) {
   // KayKit pieces are 4 m across, so the cells are too.
@@ -74,6 +74,9 @@ export function start(ctx) {
   hero.root.position.copy(level.spawns.P[0]);
   foe.root.position.copy(level.spawns.E[0]);
   ctx.scene.add(hero.root, foe.root);
+  ctx.thing(hero.root, { name: "Hero", kind: "character" }); // what the person points at (rule 9)
+  ctx.thing(foe.root, { name: "Foe", kind: "creature" });
+  tuned = ctx.tune("Hero", { speed: 5 }, { speed: [1, 12, 0.5] }); // read live, every frame
   ctx.player = hero.root;
   ctx.look.sun({ follow: hero.root, size: 30 });
   cam = followCamera3D(ctx, hero.root, { blockers: level.walls }); // framed by the hero's height
@@ -84,7 +87,7 @@ export function update(dt, ctx) {
   const s = Math.sin(cam.yaw),
     c = Math.cos(cam.yaw);
   const dir = new THREE.Vector3(x * c + y * s, 0, y * c - x * s); // the stick, turned to the view
-  const speed = 5 * Math.min(1, dir.length());
+  const speed = tuned.speed * Math.min(1, dir.length());
   if (speed > 0.1) {
     hero.root.rotation.y = Math.atan2(dir.x, dir.z);
     level.move(hero.root.position, dir.setLength(speed * dt), 0.5);
@@ -116,7 +119,7 @@ export const ASSETS = {
   floor: LIB + "floor.glb",
 };
 export const ACTIONS = { jump: null, alt: null };
-let hero, orc, level;
+let hero, orc, level, tuned;
 
 export function start(ctx) {
   level = buildLevel(
@@ -130,6 +133,9 @@ export function start(ctx) {
   hero.root.position.copy(level.spawns.P[0]);
   orc.root.position.copy(level.spawns.E[0]);
   ctx.scene.add(hero.root, orc.root);
+  ctx.thing(hero.root, { name: "Hero", kind: "character" });
+  ctx.thing(orc.root, { name: "Orc", kind: "creature" });
+  tuned = ctx.tune("Hero", { speed: 3 }, { speed: [1, 8, 0.25] });
   ctx.player = hero.root;
   ctx.look.sun({ follow: hero.root, size: 20 });
   ctx.camera.position.set(hero.root.position.x, 6, hero.root.position.z + 4); // tilted, looking down
@@ -138,7 +144,7 @@ export function start(ctx) {
 
 export function update(dt, ctx) {
   const { x, y } = ctx.input.vector(); // y is down the screen: +z, towards this camera
-  const speed = 3 * Math.min(1, Math.hypot(x, y));
+  const speed = tuned.speed * Math.min(1, Math.hypot(x, y));
   if (speed > 0.1) {
     hero.root.rotation.y = Math.atan2(x, y);
     level.move(hero.root.position, new THREE.Vector3(x, 0, y).setLength(speed * dt), 0.3);
@@ -165,7 +171,7 @@ export const ASSETS = {
 };
 export const LOOK = { environment: false, shadows: false };
 export const ACTIONS = { action: null, alt: null };
-let hero, frames, vy, clock;
+let hero, frames, vy, clock, tuned;
 const sprite = (ctx, name) => {
   const map = ctx.assets.texture(name);
   map.magFilter = THREE.NearestFilter; // pixel art stays crisp
@@ -185,6 +191,12 @@ export function start(ctx) {
   hero = sprite(ctx, "stand");
   hero.position.set(0, 0.5, 1);
   ctx.scene.add(hero);
+  ctx.thing(hero, { name: "Hero", kind: "character" });
+  tuned = ctx.tune(
+    "Hero",
+    { run: 6, jump: 12, gravity: 30 },
+    { run: [2, 12, 0.5], jump: [4, 24, 0.5], gravity: [10, 60, 1] },
+  );
   ctx.player = hero;
   ctx.camera.position.set(hero.position.x, hero.position.y, 10); // followCamera2D keeps this offset
   frames = [ctx.assets.texture("stand"), ctx.assets.texture("step")];
@@ -197,11 +209,11 @@ export function update(dt, ctx) {
   const run = ctx.input.axis("move_left", "move_right");
   const grounded = hero.position.y <= 0.5;
   if (grounded && ctx.input.pressed("jump")) {
-    vy = 12;
+    vy = tuned.jump;
     Juice.squash(hero);
   }
-  vy -= 30 * dt;
-  hero.position.x += run * 6 * dt;
+  vy -= tuned.gravity * dt;
+  hero.position.x += run * tuned.run * dt;
   hero.position.y = Math.max(0.5, hero.position.y + vy * dt);
   if (run !== 0) hero.scale.x = Math.sign(run); // face the run
   clock += dt;
