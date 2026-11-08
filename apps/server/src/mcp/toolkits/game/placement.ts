@@ -62,7 +62,8 @@ export const GAME_TOOL_PLACEMENTS = {
   game_bot_report: both(["play"], "to rebuild the player report across bot runs"),
   game_generate: both(["play"]),
   game_generate_wait: both(["play"]),
-  game_image_edit: both(["play"], "when the person asks to change an image the game has"),
+  // Listed: agents asked to change an image must find it by name (see game_generate).
+  game_image_edit: both(["play"]),
   game_assets_search: both(["play"]),
   game_assets_add: both(["play"]),
   game_blender_code: both(["blender"]),
@@ -108,13 +109,6 @@ export const listed = (placement: GameToolPlacement, scope: McpInvocationScope |
 /** The `McpSchema.EnabledWhen` of a game tool: listed for the calling thread now. */
 export const listedFor = (name: GameToolName) => () =>
   listed(GAME_TOOL_PLACEMENTS[name], currentInvocation());
-
-/** The tools a chat reaches only through game_more, with when to use each, for this caller. */
-export const askedTools = (scope: McpInvocationScope | undefined) =>
-  (Object.entries(GAME_TOOL_PLACEMENTS) as Array<[GameToolName, GameToolPlacement]>).filter(
-    ([, placement]) =>
-      placement.asked !== undefined && fits(placement, scope) && !listed(placement, scope),
-  );
 
 /** The tools game_more can reach for a chat on some active engine, with when to use each. */
 export const ASKABLE_TOOLS: ReadonlyArray<readonly [GameToolName, string]> = (

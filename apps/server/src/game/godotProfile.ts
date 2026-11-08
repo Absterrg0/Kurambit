@@ -47,7 +47,7 @@ Use the game_* tools to check, play, export and package the game; never run Godo
     check:
       "Godot games load every .gd, .tscn and .tres outside .gdignore folders and outside what every export preset excludes, run the main scene and the gameplay scene game.json declares for 120 physics frames each, and report parse, load and runtime errors with file:line, plus lint warnings for InputMap actions used but not defined and a player without a working CollisionShape.",
     export:
-      "Godot games take the Web, Windows or Linux release preset. Windows writes builds/windows/game.exe, a 64-bit x86_64 executable (the standard preset embeds the game data; a custom preset that does not also writes builds/windows/game.pck, so keep both files together; it has not been run on Windows). Linux writes builds/linux/game.x86_64. Missing export templates are an actionable error naming how the user adds them in Godot. Web uses Compatibility rendering and a single-threaded export.",
+      "Godot games take the Web, Windows or Linux release preset. Windows writes builds/windows/game.exe, a 64-bit x86_64 executable (the standard preset embeds the game data; a custom preset that does not also writes builds/windows/game.pck, so keep both files together; it has not been run on Windows). Linux writes builds/linux/game.x86_64. Missing export templates are an actionable error naming how the user adds them in Godot. Web uses Compatibility rendering and a single-threaded export, and becomes Play's build at once.",
     explore: "Godot games run natively with the game paused between acts.",
   },
   layout: {

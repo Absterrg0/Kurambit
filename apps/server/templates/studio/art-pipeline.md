@@ -183,6 +183,13 @@ through the review and the export is not finished.
    that hang from a joint (a robe's skirt, a sash, hair) as spring chains
    with their weights. In Blender a clip is the action `<name>|<clip>`;
    `key_pose` and the export use the clip's own name.
+   `fit` is yours to choose from the review's strips, and nothing fits a
+   clip unasked: `arms: true` swings the arms out of the torso wherever a
+   clip puts them through it (sized from this body's skin, at most 25°),
+   and `calm` (0..1) calms the hips' roll, yaw and sway with the spine,
+   neck and head turns (a waddle, or a head rolling on a wide or
+   big-headed body), keeping the feet where the clip put them. The result
+   says what each changed; `replace: true` with another `fit` rebuilds it.
 3. **Parts** with `game_blender_code`, in world space at the rest pose.
    `kurambit` is already imported:
    - `kurambit.material("#RRGGBB", glow=0)`: a colour by palette role;
@@ -211,7 +218,9 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
      shell: it reads as a helmet, and cones on it read as horns.
    - **Eyes** stand out of the face (about 60% of their depth), with an
      iris and a highlight lit from one side. Lids sit high: low lids read
-     grumpy. Cheeks sink into the skull rather than sit on it.
+     grumpy. Cheeks sink into the skull rather than sit on it. Eyes made
+     with `kurambit.eye_lid` (a round eye's lid) or `kurambit.eye_squash` (painted eyes)
+     blink in the game on their own.
    - **Face**: a small nose (it sticks out in profile sooner than you
      think); an open smile sunk into the skin.
    - **Hands**: a flatter palm with a thumb. Round mittens read as stumps.
@@ -499,7 +508,8 @@ delivered>"}` and the clips. It is conformed to the standard skeleton
 5. **Images and sound.** Sprites, UI art, backgrounds and textures: lane
    `image` or `texture` with the key art as reference. Effects and music:
    lanes `sfx` and `music` from the brief's mood (`options.seconds`,
-   `options.loop` for music). Add each file with `game_import`.
+   `options.loop` for music). Load each file in the game where it is
+   (`game_import` first where the engine has an import step).
 
    **Change, don't remake.** When the person wants a picked image changed
    ("make the cat orange"), or asks to "Change…" one from its card, use
@@ -561,8 +571,8 @@ Library pieces from the lock's packs come first. An organic hard prop with a
 three-view sheet is carved (Painted from a sheet). What no pack has, build in
 the live Blender: `game_blender_code` to model, `game_blender_scene` to
 measure, `game_blender_look` with `mode: "review"` to see exactly what will
-ship, `game_blender_export` for the GLB and its sidecar, then `game_import`
-and `game_check`. Match the family's look: its proportions, its bevel
+ship, `game_blender_export` for the GLB and its sidecar, then `game_check`
+(after `game_import` where the engine has an import step). Match the family's look: its proportions, its bevel
 (bevelled edges, never flat boxes), and colours by palette role
 (`kurambit.material("#RRGGBB")`; the style pass snaps them to the palette).
 Design set pieces for the camera: a third-person or top-down camera needs

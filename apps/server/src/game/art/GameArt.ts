@@ -1455,7 +1455,8 @@ const make = Effect.gen(function* () {
     const model =
       g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file) && !/\.model\.[a-z]+$/i.test(file)) ??
       g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file));
-    if (model === undefined) return " Next: add it to the game with game_import.";
+    if (model === undefined)
+      return " Next: load it in the game from where it is (game_import first where the engine has an import step).";
     return g.lane === "character"
       ? ` Next: game_blender_character with body {game: "${model}"}.`
       : ` Next: game_blender_assets_import with source "generated" and path "${model}".`;

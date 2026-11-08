@@ -179,6 +179,10 @@ export const PROFILES: ReadonlyArray<GameEngineProfile> = Object.values(BY_ID);
 
 export const engineProfile = (id: GameEngineId): GameEngineProfile => BY_ID[id];
 
+/** What an agent runs after it brought a file into the engine project. */
+export const afterAddingArt = (profile: GameEngineProfile) =>
+  profile.importStep ? "Run game_import, then game_check." : "Run game_check.";
+
 /**
  * What a game tool can need of its game's engine. `play` is every active
  * engine's: a parked engine has no capabilities, so its games' agents get

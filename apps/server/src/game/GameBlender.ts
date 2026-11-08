@@ -106,7 +106,7 @@ import {
   styleBudgets,
   styleHash,
 } from "./gameStyle.ts";
-import { engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
 import { gltfTriangles } from "./assetFacts.ts";
 import { glbJson } from "./gltfJson.ts";
 import { packGlb } from "./glbPack.ts";
@@ -1657,7 +1657,7 @@ const make = Effect.gen(function* () {
         );
       if (source.lane !== "model" && source.lane !== "creature")
         return yield* refuse(
-          `${path} came from the ${source.lane} lane, which Blender does not take: add it to the game with game_import.`,
+          `${path} came from the ${source.lane} lane, which Blender does not take: load it in the game from where it is (game_import first where the engine has an import step).`,
         );
       if (source.lane === "creature") {
         const refused = lockCharacterRouteRefusal(
@@ -2761,7 +2761,7 @@ const make = Effect.gen(function* () {
                 ...(decoderNote === null ? [] : [decoderNote]),
                 credited,
               ].join(" ") +
-              `\nSaved .blend source: ${blend}\n${profile.importStep ? "Run game_import after." : "Run game_check after."}${profile.sidecarLoad === null ? "" : ` ${profile.sidecarLoad(candidate.subject, sidecar.slice(engineDir.length + 1))}`}`,
+              `\nSaved .blend source: ${blend}\n${afterAddingArt(profile)}${profile.sidecarLoad === null ? "" : ` ${profile.sidecarLoad(candidate.subject, sidecar.slice(engineDir.length + 1))}`}`,
             blend,
             export: file,
             sidecar,
