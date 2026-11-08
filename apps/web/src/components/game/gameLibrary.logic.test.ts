@@ -38,11 +38,11 @@ describe("gameInitial", () => {
 });
 
 describe("gameTemplateAppearance", () => {
-  it("names the engine each starter uses", () => {
-    expect(gameTemplateAppearance("blank").label).toBe("Godot");
-    expect(gameTemplateAppearance(null).label).toBe("Godot");
+  it("names the engine each starter uses, and says when it is paused", () => {
+    expect(gameTemplateAppearance("blank").label).toBe("Godot · paused");
+    expect(gameTemplateAppearance(null).label).toBe("Godot · paused");
     expect(gameTemplateAppearance("blank-three").label).toBe("three.js");
-    expect(gameTemplateAppearance("blank-unity").label).toBe("Unity");
+    expect(gameTemplateAppearance("blank-unity").label).toBe("Unity · paused");
   });
 });
 

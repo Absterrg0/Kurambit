@@ -8,14 +8,17 @@ export interface GameTemplateAppearance {
 
 export const gameTemplateAppearance = (
   template: GameSummary["template"],
-): GameTemplateAppearance => ({
+): GameTemplateAppearance => {
   // Games from before templates were Godot games.
-  label:
-    Object.values(GAME_ENGINES).find((engine) => engine.template === template)?.name ??
-    GAME_ENGINES.godot.name,
-  initialClassName: "bg-foreground/8 text-foreground/80",
-  coverClassName: "from-foreground/10 via-foreground/5 to-transparent",
-});
+  const engine =
+    Object.values(GAME_ENGINES).find((entry) => entry.template === template) ?? GAME_ENGINES.godot;
+  return {
+    // A parked engine's game says so on its card, not only once it is opened.
+    label: engine.status === "parked" ? `${engine.name} · paused` : engine.name,
+    initialClassName: "bg-foreground/8 text-foreground/80",
+    coverClassName: "from-foreground/10 via-foreground/5 to-transparent",
+  };
+};
 
 /** Traditional ink pigments for game covers: indigo, moss, ochre, vermilion, wisteria, sumi. */
 const GAME_PIGMENTS = [

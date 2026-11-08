@@ -262,7 +262,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
           <DialogHeader>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {isCreate
-                ? "Describe the game; your agent builds it as a native Godot or Unity game, or a quick three.js browser game."
+                ? "Describe the game, and your agent builds it."
                 : "Continue a game that already lives on this machine."}
             </div>
             <DialogTitle>{isCreate ? "Name your game" : "Open game"}</DialogTitle>
