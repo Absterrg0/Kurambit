@@ -11,11 +11,11 @@ import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
+import * as GameEngine from "./GameEngine.ts";
 import * as GameFacts from "./GameFacts.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameTemplates from "./GameTemplates.ts";
-import * as GameService from "./GameService.ts";
 
 const ROOT = "/games/arena";
 const build = (n: number): GameFacts.ResolvedBuild => ({
@@ -44,7 +44,7 @@ describe("GameFacts supersede", () => {
               events: Stream.empty,
               changed: () => Effect.void,
             }),
-            Layer.mock(GameService.GameService)({}),
+            Layer.mock(GameEngine.GameEngine)({}),
             Layer.mock(PreviewBrowser.PreviewBrowser)({}),
             Layer.mock(GameProcesses.GameProcesses)({ list: () => [] }),
             GameTemplates.layerAt(`${import.meta.dirname}/../../templates`),

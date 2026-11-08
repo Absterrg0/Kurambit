@@ -22,7 +22,9 @@ import {
   parkedEngineMessage,
   GameOperationError,
   gameTemplateForEngine,
+  type GameCharacterRoute,
   type GameCreateInput,
+  type GameSetCharacterRouteResult,
   type GameListResult,
   type GameOpenInput,
   type GameProjectResult,
@@ -30,6 +32,7 @@ import {
   manifestProject,
 } from "@kurambit/contracts";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import * as GameOperations from "./GameOperations.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -117,6 +120,26 @@ export class GameProjectService extends Context.Service<
       options?: { readonly deleted?: "allowed" },
     ) => Effect.Effect<string, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
+    /**
+     * `work` on the thread's game folder as the game's one operation
+     * (GameOperations.exclusive), owned by the thread unless `owner` names
+     * another; `waitUntil` (epoch ms) queues behind another operation until
+     * then instead of failing busy.
+     */
+    readonly exclusive: <A, E>(
+      threadId: ThreadId,
+      name: string,
+      work: (root: string) => Effect.Effect<A, E>,
+      options?: { readonly owner?: string | undefined; readonly waitUntil?: number | undefined },
+    ) => Effect.Effect<A, E | GameOperationError>;
+    /**
+     * The person's choice of how this game's characters are made, written into game.json.
+     * Only the person makes it: the client's control, or the agent when they asked in chat.
+     */
+    readonly setCharacterRoute: (
+      threadId: ThreadId,
+      route: GameCharacterRoute,
+    ) => Effect.Effect<GameSetCharacterRouteResult, GameOperationError>;
     /** Between turns: the game's studio skills brought up to this server. */
     readonly refreshGuidance: (root: string) => Effect.Effect<void, GameOperationError>;
     /** The manifest and the resolution the game plays at. */
@@ -126,6 +149,10 @@ export class GameProjectService extends Context.Service<
   }
 >()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
+/** game.json as a plain object, so a write that sets one key keeps every other as it was. */
+const decodeManifestObject = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
 
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
@@ -588,6 +615,77 @@ const make = Effect.gen(function* () {
       }),
     resolve,
     read,
+    exclusive: (threadId, name, work, options) =>
+      Effect.flatMap(resolve(threadId), (root) =>
+        operations.exclusive(
+          root,
+          name,
+          work(root),
+          options?.owner ?? String(threadId),
+          options?.waitUntil === undefined ? undefined : { waitUntil: options.waitUntil },
+        ),
+      ),
+    setCharacterRoute: Effect.fn("GameProjectService.setCharacterRoute")(
+      function* (threadId, route) {
+        const root = yield* resolve(threadId);
+        const unavailable = GAME_CHARACTER_ROUTE_UNAVAILABLE[route];
+        if (unavailable !== undefined)
+          return yield* new GameOperationError({
+            operation: "set-characters",
+            path: NodePath.join(root, "game.json"),
+            reason: "invalid-input",
+            detail: `${route}: ${unavailable}`,
+          });
+        // A valid manifest first; the write keeps every key it holds, only characters changes.
+        yield* read(root);
+        const file = NodePath.join(root, "game.json");
+        const raw = yield* Effect.tryPromise({
+          try: () => NodeFSP.readFile(file, "utf8"),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "set-characters",
+              path: file,
+              reason: "io",
+              cause,
+            }),
+        }).pipe(
+          Effect.flatMap((text) =>
+            decodeManifestObject(text).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new GameOperationError({
+                    operation: "set-characters",
+                    path: file,
+                    reason: "invalid-project",
+                    cause,
+                  }),
+              ),
+            ),
+          ),
+        );
+        yield* writeFileStringAtomically({
+          filePath: file,
+          // @effect-diagnostics-next-line preferSchemaOverJson:off -- game.json keeps the indented form people read and diff.
+          contents: `${JSON.stringify({ ...raw, characters: route }, null, 2)}\n`,
+          followLink: false,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.mapError(
+            (cause) =>
+              new GameOperationError({
+                operation: "set-characters",
+                path: file,
+                reason: "io",
+                cause,
+              }),
+          ),
+        );
+        // Every client's status signal rereads on an operation push.
+        yield* operations.changed(root, "characters", `Make characters with ${route}`);
+        return { route };
+      },
+    ),
     refreshGuidance: (root) =>
       Effect.gen(function* () {
         const manifest = yield* read(root);

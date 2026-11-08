@@ -1,3 +1,4 @@
+import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -5,10 +6,20 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { Tool, type Toolkit } from "effect/ai";
 import { GameOperationError, type ThreadId } from "@kurambit/contracts";
+import * as GameArt from "../../../game/art/GameArt.ts";
+import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
+import * as GameBlender from "../../../game/GameBlender.ts";
+import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
 import { GameCaller } from "../../../game/GameCaller.ts";
+import * as GameEngine from "../../../game/GameEngine.ts";
+import * as GameExplore from "../../../game/GameExplore.ts";
+import * as GameExport from "../../../game/GameExport.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
-import * as GameService from "../../../game/GameService.ts";
+import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
+import * as GameStage from "../../../game/GameStage.ts";
+import * as GameStatusService from "../../../game/GameStatusService.ts";
+import * as GameUnity from "../../../game/GameUnity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
@@ -25,23 +36,14 @@ import { GAME_TOOL_PLACEMENTS, refusal } from "./placement.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
-/** One tool call: the calling thread's work on the game service, as an agent's. */
-const withGame = <A, E>(
-  work: (game: GameService.GameService["Service"], threadId: ThreadId) => Effect.Effect<A, E>,
+/** One tool call: the calling thread's work on the game service that owns it, as an agent's. */
+const withGame = <I, S, A, E>(
+  service: Context.Key<I, S>,
+  work: (owner: S, threadId: ThreadId) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
     const scope = yield* caller;
-    return yield* work(yield* GameService.GameService, scope.thread.threadId).pipe(
-      Effect.provideService(GameCaller, { kind: "agent" }),
-    );
-  });
-/** One tool call on the calling thread's game builds, as an agent's. */
-const withBuilds = <A, E>(
-  work: (builds: GameBuilds.GameBuilds["Service"], threadId: ThreadId) => Effect.Effect<A, E>,
-) =>
-  Effect.gen(function* () {
-    const scope = yield* caller;
-    return yield* work(yield* GameBuilds.GameBuilds, scope.thread.threadId).pipe(
+    return yield* work(yield* service, scope.thread.threadId).pipe(
       Effect.provideService(GameCaller, { kind: "agent" }),
     );
   });
@@ -65,108 +67,124 @@ const TOOL_RESTORE_WAIT = "30 seconds";
 
 const handlers = {
   game_status: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.status(threadId, { checkSources: input.checkSources })),
+    withGame(GameStatusService.GameStatusService, (statuses, threadId) =>
+      statuses.status(threadId, { checkSources: input.checkSources }),
+    ),
   ),
   game_blender_code: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderCode(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.code(threadId, input)),
   ),
   game_blender_scene: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderScene(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.scene(threadId, input)),
   ),
   game_blender_assets_search: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderAssetsSearch(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.assetsSearch(threadId, input)),
   ),
   game_assets_add: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.assetsAdd(threadId, input)),
+    withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
+      library.add(threadId, input),
+    ),
   ),
   game_blender_assets_import: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderAssetsImport(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.assetsImport(threadId, input)),
   ),
   game_blender_export: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderExport(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.exportGlb(threadId, input)),
   ),
   game_blender_character: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderCharacter(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.character(threadId, input)),
   ),
   game_blender_paint: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderPaint(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.paint(threadId, input)),
   ),
   game_blender_carve: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderCarve(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.carve(threadId, input)),
   ),
   game_generate: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.generate(threadId, input)),
+    withGame(GameArt.GameArt, (art, threadId) => art.generate(threadId, input)),
   ),
   game_image_edit: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.imageEdit(threadId, input)),
+    withGame(GameArt.GameArt, (art, threadId) => art.imageEdit(threadId, input)),
   ),
   game_generate_wait: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.generateWait(threadId, input)),
+    withGame(GameArt.GameArt, (art, threadId) => art.wait(threadId, input)),
   ),
   game_unity_tools: McpToolAccess.readsAsCaller(() =>
-    withGame((game, threadId) => game.unityTools(threadId)),
+    withGame(GameUnity.GameUnity, (unity, threadId) => unity.listTools(threadId)),
   ),
   game_unity_edit: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.unityEdit(threadId, input)),
+    withGame(GameUnity.GameUnity, (unity, threadId) => unity.edit(threadId, input)),
   ),
   game_unity_eval: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.unityEval(threadId, input)),
+    withGame(GameUnity.GameUnity, (unity, threadId) => unity.evaluate(threadId, input)),
   ),
   game_unity_recompile: McpToolAccess.actsAsCaller(() =>
-    withGame((game, threadId) => game.unityRecompile(threadId)),
+    withGame(GameEngine.GameEngine, (engines, threadId) => engines.recompile(threadId)),
   ),
   game_unity_play: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.unityPlay(threadId, input)),
+    withGame(GameUnity.GameUnity, (unity, threadId) => unity.play(threadId, input)),
   ),
   game_unity_console: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.unityConsole(threadId, input)),
+    withGame(GameUnity.GameUnity, (unity, threadId) => unity.console(threadId, input)),
   ),
   game_import: McpToolAccess.actsAsCaller(() =>
-    withGame((game, threadId) => game.import(threadId)),
+    withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)),
   ),
-  game_check: McpToolAccess.actsAsCaller(() => withGame((game, threadId) => game.check(threadId))),
+  game_check: McpToolAccess.actsAsCaller(() =>
+    withGame(GameEngine.GameEngine, (engines, threadId) => engines.check(threadId)),
+  ),
   game_export: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.export(threadId, input.target)),
+    withGame(GameExport.GameExport, (exporter, threadId) =>
+      exporter.export(threadId, input.target),
+    ),
   ),
   game_package_windows: McpToolAccess.actsAsCaller(() =>
-    withGame((game, threadId) => game.packageWindows(threadId)),
+    withGame(GameExport.GameExport, (exporter, threadId) => exporter.packageWindows(threadId)),
   ),
   game_package_web: McpToolAccess.actsAsCaller(() =>
-    withGame((game, threadId) => game.packageWeb(threadId)),
+    withGame(GameExport.GameExport, (exporter, threadId) => exporter.packageWeb(threadId)),
   ),
   game_media_save: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.saveMedia(threadId, input.source, input.label)),
+    withGame(GameSavedMediaService.GameSavedMediaService, (saved, threadId) =>
+      saved.save(threadId, input.source, input.label),
+    ),
   ),
   game_saved_list: McpToolAccess.readsAsCaller(() =>
-    withGame((game, threadId) => game.listSaved(threadId)),
+    withGame(GameSavedMediaService.GameSavedMediaService, (saved, threadId) =>
+      saved.list(threadId),
+    ),
   ),
   game_saved_delete: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.deleteSaved(threadId, input.name).pipe(Effect.as({}))),
+    withGame(GameSavedMediaService.GameSavedMediaService, (saved, threadId) =>
+      saved.delete(threadId, input.name).pipe(Effect.as({})),
+    ),
   ),
   game_preview: McpToolAccess.actsAsCaller(() =>
-    withGame((game, threadId) => game.preview(threadId)),
+    withGame(GameStage.GameStage, (stage, threadId) => stage.preview(threadId)),
   ),
-  game_stop: McpToolAccess.actsAsCaller(() => withGame((game, threadId) => game.stop(threadId))),
+  game_stop: McpToolAccess.actsAsCaller(() =>
+    withGame(GameStage.GameStage, (stage, threadId) => stage.stop(threadId)),
+  ),
   game_explore_start: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.exploreStart(threadId, input)),
+    withGame(GameExplore.GameExplore, (explore, threadId) => explore.start(threadId, input)),
   ),
   game_explore_act: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.exploreAct(threadId, input)),
+    withGame(GameExplore.GameExplore, (explore, threadId) => explore.act(threadId, input)),
   ),
   game_explore_close: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.exploreClose(threadId, input)),
+    withGame(GameExplore.GameExplore, (explore, threadId) => explore.close(threadId, input)),
   ),
   game_bot_run: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.botRun(threadId, input)),
+    withGame(GameBot.GameBot, (bots, threadId) => bots.run(threadId, input)),
   ),
   game_bot_view: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.botView(threadId, input)),
+    withGame(GameBot.GameBot, (bots, threadId) => bots.view(threadId, input)),
   ),
   game_bot_report: McpToolAccess.actsAsCaller(() =>
-    withGame((game, threadId) => game.botReport(threadId)),
+    withGame(GameBot.GameBot, (bots, threadId) => bots.report(threadId)),
   ),
   game_builds: McpToolAccess.readsAsCaller((input) =>
-    withBuilds((builds, threadId) =>
+    withGame(GameBuilds.GameBuilds, (builds, threadId) =>
       Effect.gen(function* () {
         if (input.compare === undefined)
           return yield* builds.list(threadId, { before: input.before, limit: input.limit });
@@ -179,7 +197,7 @@ const handlers = {
     ),
   ),
   game_facts: McpToolAccess.actsAsCaller((input) =>
-    withBuilds((builds, threadId) =>
+    withGame(GameBuilds.GameBuilds, (builds, threadId) =>
       Effect.gen(function* () {
         const build = input.build ?? (yield* builds.list(threadId, { limit: 1 })).builds[0]?.id;
         if (build === undefined)
@@ -198,14 +216,14 @@ const handlers = {
     ),
   ),
   game_build_restore: McpToolAccess.actsAsCaller((input) =>
-    withBuilds((builds, threadId) =>
+    withGame(GameBuilds.GameBuilds, (builds, threadId) =>
       builds.restore(threadId, { _tag: "build", build: input.build }, input.commandId, {
         waitFor: TOOL_RESTORE_WAIT,
       }),
     ),
   ),
   game_tune: McpToolAccess.actsAsCaller((input) =>
-    withBuilds((builds, threadId) =>
+    withGame(GameBuilds.GameBuilds, (builds, threadId) =>
       builds.keepValues(threadId, {
         things: input.things,
         ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
@@ -242,7 +260,7 @@ export const layer = McpToolAccess.toLayer(GameToolkit, handlers);
  */
 const blenderLookHandlers = {
   game_blender_look: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderLook(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.look(threadId, input)),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameBlenderLookToolkit.tools>;
 export const layerBlenderLook = McpToolAccess.toLayer(GameBlenderLookToolkit, blenderLookHandlers);
@@ -250,7 +268,7 @@ export const layerBlenderLook = McpToolAccess.toLayer(GameBlenderLookToolkit, bl
 /** Registered like the Blender look, so the move's pictures become real image content. */
 const animateHandlers = {
   game_animate: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.animate(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) => blender.animate(threadId, input)),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameAnimateToolkit.tools>;
 export const layerAnimate = McpToolAccess.toLayer(GameAnimateToolkit, animateHandlers);
@@ -258,7 +276,9 @@ export const layerAnimate = McpToolAccess.toLayer(GameAnimateToolkit, animateHan
 /** Registered like the Blender look, so the contact sheet becomes real image content. */
 const blenderRenderSpritesHandlers = {
   game_blender_render_sprites: McpToolAccess.actsAsCaller((input) =>
-    withGame((game, threadId) => game.blenderRenderSprites(threadId, input)),
+    withGame(GameBlender.GameBlender, (blender, threadId) =>
+      blender.renderSprites(threadId, input),
+    ),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameBlenderRenderSpritesToolkit.tools>;
 export const layerBlenderRenderSprites = McpToolAccess.toLayer(
@@ -269,7 +289,7 @@ export const layerBlenderRenderSprites = McpToolAccess.toLayer(
 /** Registered like the Blender look, so the capture becomes real image content. */
 const unityScreenshotHandlers = {
   game_unity_screenshot: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.unityScreenshot(threadId, input)),
+    withGame(GameUnity.GameUnity, (unity, threadId) => unity.screenshot(threadId, input)),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameUnityScreenshotToolkit.tools>;
 export const layerUnityScreenshot = McpToolAccess.toLayer(
@@ -280,7 +300,9 @@ export const layerUnityScreenshot = McpToolAccess.toLayer(
 /** Registered like the Blender look, so the contact sheet becomes real image content. */
 const assetsSearchHandlers = {
   game_assets_search: McpToolAccess.readsAsCaller((input) =>
-    withGame((game, threadId) => game.assetsSearch(threadId, input)),
+    withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
+      library.search(threadId, input),
+    ),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameAssetsSearchToolkit.tools>;
 export const layerAssetsSearch = McpToolAccess.toLayer(

@@ -42,6 +42,8 @@ import {
   type GameArtProvidersResult,
   type GameCharacterRoute,
   type GameGenerateInput,
+  type GameImageEditInput,
+  imageEditName,
   type GameGenerateResult,
   type GameGenerateWaitInput,
   type GameGenerationChangeResult,
@@ -69,7 +71,8 @@ import { motionClipName } from "../generatedSource.ts";
 import { glbJson, gltfMeshSize, readGltfJson } from "../gltfJson.ts";
 import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
-import { lockCharacterRouteRefusal } from "../gameStyle.ts";
+import { characterRoute, lockCharacterRouteRefusal } from "../gameStyle.ts";
+import * as GameProjectService from "../GameProjectService.ts";
 import { isPathInside } from "../gameNativeUserDir.ts";
 import {
   type ArtAdapter,
@@ -92,30 +95,33 @@ export class GameArt extends Context.Service<
   GameArt,
   {
     /**
-     * Starts a generation and answers at once with its record (state making). `route` is the
-     * game's character route: off the generated route, characters and creatures are refused
-     * before anything is asked or spent.
+     * Starts a generation and answers at once with its record (state making). Off the game's
+     * generated character route, characters and creatures are refused before anything is
+     * asked or spent. Never under the game's operation lock: a generation takes minutes.
      */
     readonly generate: (
-      root: string,
       threadId: ThreadId,
       input: GameGenerateInput,
-      route: GameCharacterRoute,
+    ) => Effect.Effect<GameGenerateResult, GameOperationError>;
+    /** A change to a game image, from words: generate's image lane with options.edit. */
+    readonly imageEdit: (
+      threadId: ThreadId,
+      input: GameImageEditInput,
     ) => Effect.Effect<GameGenerateResult, GameOperationError>;
     /** Until done, choosing (the person's pick), failed or cancelled, or `seconds` pass. */
     readonly wait: (
-      root: string,
+      threadId: ThreadId,
       input: GameGenerateWaitInput,
     ) => Effect.Effect<GameGenerateResult, GameOperationError>;
-    readonly list: (root: string) => Effect.Effect<GameGenerationsResult, GameOperationError>;
+    readonly list: (threadId: ThreadId) => Effect.Effect<GameGenerationsResult, GameOperationError>;
     /** The person's pick of a candidate; Keep going's autopilot takes the first on its own. */
     readonly choose: (
-      root: string,
+      threadId: ThreadId,
       id: string,
       candidate: number,
     ) => Effect.Effect<GameGenerationChangeResult, GameOperationError>;
     readonly cancel: (
-      root: string,
+      threadId: ThreadId,
       id: string,
     ) => Effect.Effect<GameGenerationChangeResult, GameOperationError>;
     /**
@@ -134,7 +140,7 @@ export class GameArt extends Context.Service<
     /**
      * Who renders the pictures on a card: a landed motion's strip, a model's views before its rig.
      * GameBlender reads this service's records, so it cannot be one of its dependencies;
-     * GameService, which holds both, hands them in at start.
+     * it hands them in when it starts.
      */
     readonly renderWith: (renderers: ArtRenderers) => Effect.Effect<void>;
   }
@@ -194,6 +200,12 @@ export class GameArtHost extends Context.Service<
     ) => Effect.Effect<{ readonly path: string; readonly file: string }, GameOperationError>;
     /** The standard armature's GLB in the library cache: the body a motion is made on by default. */
     readonly standardBody: Effect.Effect<string, GameOperationError>;
+    /** The game folder a thread works in. */
+    readonly gameRoot: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
+    /** How the person chose to make this game's characters, from its game.json. */
+    readonly characterRoute: (
+      root: string,
+    ) => Effect.Effect<GameCharacterRoute, GameOperationError>;
   }
 >()("kurambit/game/art/GameArt/GameArtHost") {}
 
@@ -1520,11 +1532,16 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const generate: GameArt["Service"]["generate"] = (root, threadId, input, characterRoute) =>
+  const generate = (
+    root: string,
+    threadId: ThreadId,
+    input: GameGenerateInput,
+    chosenRoute: GameCharacterRoute,
+  ): Effect.Effect<GameGenerateResult, GameOperationError> =>
     Effect.gen(function* () {
       // Before any provider is asked: the person's route decides who makes characters.
       if (input.lane === "character" || input.lane === "creature") {
-        const refused = lockCharacterRouteRefusal("generated-body", characterRoute);
+        const refused = lockCharacterRouteRefusal("generated-body", chosenRoute);
         if (refused !== null)
           return yield* opError(
             "art-generate",
@@ -1815,7 +1832,10 @@ const make = Effect.gen(function* () {
     );
 
   // ── wait, list, choose, cancel ─────────────────────────────────────────
-  const wait: GameArt["Service"]["wait"] = (root, input) =>
+  const wait = (
+    root: string,
+    input: GameGenerateWaitInput,
+  ): Effect.Effect<GameGenerateResult, GameOperationError> =>
     Effect.scoped(
       Effect.gen(function* () {
         const subscription = yield* PubSub.subscribe(changes);
@@ -1834,7 +1854,7 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const list: GameArt["Service"]["list"] = (root) =>
+  const list = (root: string): Effect.Effect<GameGenerationsResult, GameOperationError> =>
     Effect.gen(function* () {
       const rows = yield* sql<{
         readonly root: string;
@@ -1869,7 +1889,11 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const choose: GameArt["Service"]["choose"] = (root, id, candidate) =>
+  const choose = (
+    root: string,
+    id: string,
+    candidate: number,
+  ): Effect.Effect<GameGenerationChangeResult, GameOperationError> =>
     Effect.gen(function* () {
       const caller = yield* GameCaller;
       if (caller.kind === "agent")
@@ -1927,7 +1951,10 @@ const make = Effect.gen(function* () {
       return next.generation;
     });
 
-  const cancel: GameArt["Service"]["cancel"] = (root, id) =>
+  const cancel = (
+    root: string,
+    id: string,
+  ): Effect.Effect<GameGenerationChangeResult, GameOperationError> =>
     locks.withLock(
       id,
       Effect.gen(function* () {
@@ -2111,12 +2138,31 @@ const make = Effect.gen(function* () {
   // one the last server left behind. Each resumed driver is its own fiber.
   yield* recover;
 
+  const inGame = <A>(
+    threadId: ThreadId,
+    work: (root: string) => Effect.Effect<A, GameOperationError>,
+  ) => Effect.flatMap(host.gameRoot(threadId), work);
+  const generateIn = (threadId: ThreadId, input: GameGenerateInput) =>
+    inGame(threadId, (root) =>
+      Effect.flatMap(host.characterRoute(root), (route) => generate(root, threadId, input, route)),
+    );
   return GameArt.of({
-    generate,
-    wait,
-    list,
-    choose,
-    cancel,
+    generate: generateIn,
+    imageEdit: (threadId, input) =>
+      generateIn(threadId, {
+        lane: "image",
+        name: imageEditName(input.path),
+        prompt: input.change,
+        ...(input.references === undefined ? {} : { references: input.references }),
+        options: {
+          edit: input.path,
+          ...(input.transparent === true ? { transparent: true } : {}),
+        },
+      }),
+    wait: (threadId, input) => inGame(threadId, (root) => wait(root, input)),
+    list: (threadId) => inGame(threadId, list),
+    choose: (threadId, id, candidate) => inGame(threadId, (root) => choose(root, id, candidate)),
+    cancel: (threadId, id) => inGame(threadId, (root) => cancel(root, id)),
     delivered,
     providers,
     lanes,
@@ -2124,14 +2170,17 @@ const make = Effect.gen(function* () {
   });
 });
 
-/** The server's host: the provider registry's Codex and the run's in-flight step. */
+/** The server's host: the provider registry's Codex, the run's in-flight step and the thread's game. */
 const layerHost = Layer.effect(
   GameArtHost,
   Effect.gen(function* () {
     const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const library = yield* GameAssetLibrary.GameAssetLibrary;
+    const projects = yield* GameProjectService.GameProjectService;
     return GameArtHost.of({
+      gameRoot: (threadId) => projects.resolve(threadId),
+      characterRoute: (root) => projects.read(root).pipe(Effect.map(characterRoute)),
       packPicture: library.packPicture,
       standardBody: library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
       codex: Effect.gen(function* () {

@@ -9,7 +9,7 @@ import type * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import type * as GameOperations from "../GameOperations.ts";
-import type * as GameService from "../GameService.ts";
+import type * as GameStage from "../GameStage.ts";
 import { causeText } from "../runSetup.ts";
 import { restoredPaths } from "./buildNames.ts";
 
@@ -141,7 +141,7 @@ export const captureBuild = (
  */
 export const buildStep = (
   deps: {
-    readonly game: GameService.GameService["Service"];
+    readonly stage: Pick<GameStage.GameStage["Service"], "closeLiveEditors">;
     readonly checkpoints: Checkpoints;
     readonly lock: FolderLock;
   },
@@ -177,7 +177,7 @@ export const buildStep = (
         return outcome({ sha, ...change });
       }
       case "restore": {
-        yield* deps.game.closeLiveEditors(root);
+        yield* deps.stage.closeLiveEditors(root);
         const restored = yield* checkpoints.withWorkspaceLock(
           root,
           checkpoints.restoreCheckpoint({

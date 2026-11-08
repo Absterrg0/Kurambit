@@ -14,6 +14,7 @@ import {
   type GameStatus,
   type GameWebPackage,
   type GameWindowsPackage,
+  type ThreadId,
 } from "@kurambit/contracts";
 import { ArchivePublishError, publishStaged, sweepPublished } from "./archivePublication.ts";
 import { commandDetail } from "./commandDetail.ts";
@@ -188,9 +189,12 @@ export const publishFolder = (operation: string, staging: string, destination: s
 export class GameExport extends Context.Service<
   GameExport,
   {
-    /** success ⇒ `path` is the absolute published artifact; a build's own failure is success:false. */
+    /**
+     * Exports the thread's game for `target`, as the game's operation.
+     * success ⇒ `path` is the absolute published artifact; a build's own failure is success:false.
+     */
     readonly export: (
-      root: string,
+      threadId: ThreadId,
       target: GameExportTarget,
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /** Builds and publishes the current sources, then serves that build. */
@@ -218,13 +222,13 @@ export class GameExport extends Context.Service<
      * a missing or unusable release is an error and leaves earlier files alone.
      */
     readonly packageWindows: (
-      root: string,
+      threadId: ThreadId,
     ) => Effect.Effect<GameWindowsPackage, GameOperationError>;
     /**
      * Packages the exact immutable Web build Play currently serves as a
      * static-host ZIP. It never exports and never chooses another build.
      */
-    readonly packageWeb: (root: string) => Effect.Effect<GameWebPackage, GameOperationError>;
+    readonly packageWeb: (threadId: ThreadId) => Effect.Effect<GameWebPackage, GameOperationError>;
   }
 >()("kurambit/game/GameExport") {}
 
@@ -583,7 +587,8 @@ const make = Effect.gen(function* () {
     });
 
   return GameExport.of({
-    export: runExport,
+    export: (threadId, target) =>
+      projects.exclusive(threadId, `Export ${target}`, (root) => runExport(root, target)),
     publishWeb,
     serve: (root) =>
       Effect.gen(function* () {
@@ -617,122 +622,130 @@ const make = Effect.gen(function* () {
         targets: profile.exportTargets,
         displayName: profile.displayName,
       })),
-    packageWindows: (root) =>
-      Effect.gen(function* () {
-        // Packaging reads files only, so it never resolves the engine's executable.
-        yield* unpackaged(root, "Windows", "Package Windows build");
-        const packaged = yield* Effect.tryPromise({
-          try: (signal) => packageWindowsRelease({ root, signal }),
-          catch: (cause) =>
-            cause instanceof WindowsPackageError
-              ? new GameOperationError({
-                  operation: "Package Windows build",
-                  path: cause.path,
-                  reason:
-                    cause.kind === "missing" || cause.kind === "invalid" || cause.kind === "changed"
-                      ? "invalid-input"
-                      : "io",
-                  detail: cause.message,
-                  cause,
-                })
-              : new GameOperationError({
-                  operation: "Package Windows build",
-                  path: NodePath.join(root, "builds/windows/game.exe"),
-                  reason: "io",
-                  detail:
-                    cause instanceof Error
-                      ? cause.message
-                      : "The Windows package could not be created.",
-                  cause,
-                }),
-        });
-        const relative = NodePath.relative(root, packaged.archivePath)
-          .split(NodePath.sep)
-          .join("/");
-        return {
-          archivePath: packaged.archivePath,
-          fileName: packaged.fileName,
-          bytes: packaged.bytes,
-          sha256: packaged.sha256,
-          files: packaged.files.map((file) => ({
-            name: file.name,
-            bytes: file.bytes,
-            sha256: file.sha256,
-          })),
-          embeddedPck: packaged.embeddedPck,
-          executableBytes: packaged.executableBytes,
-          pckBytes: packaged.pckBytes,
-          pckFileCount: packaged.pckFileCount,
-          notes: [
-            ...packaged.notes,
-            `The ZIP contains the existing checked release files (${packaged.files.map((file) => file.name).join(" and ")}), not a new export. This machine did not run it on Windows.`,
-          ],
-          message: `Windows package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB).`,
-        };
-      }),
-    packageWeb: (root) =>
-      Effect.gen(function* () {
-        yield* unpackaged(root, "Web", "Package Web build");
-        const selected = yield* readSelectedBuild(root);
-        if (selected === null)
-          return yield* new GameOperationError({
-            operation: "Package Web build",
-            path: NodePath.join(root, WEB_BUILD_DIRECTORY),
-            reason: "invalid-input",
-            detail:
-              "No Web export is selected, so there is no build to package. Export Web first (Export… in the Stage's More menu); packaging never exports and never packages a draft, legacy or unselected build.",
+    packageWindows: (threadId) =>
+      projects.exclusive(threadId, "Package Windows build", (root) =>
+        Effect.gen(function* () {
+          // Packaging reads files only, so it never resolves the engine's executable.
+          yield* unpackaged(root, "Windows", "Package Windows build");
+          const packaged = yield* Effect.tryPromise({
+            try: (signal) => packageWindowsRelease({ root, signal }),
+            catch: (cause) =>
+              cause instanceof WindowsPackageError
+                ? new GameOperationError({
+                    operation: "Package Windows build",
+                    path: cause.path,
+                    reason:
+                      cause.kind === "missing" ||
+                      cause.kind === "invalid" ||
+                      cause.kind === "changed"
+                        ? "invalid-input"
+                        : "io",
+                    detail: cause.message,
+                    cause,
+                  })
+                : new GameOperationError({
+                    operation: "Package Windows build",
+                    path: NodePath.join(root, "builds/windows/game.exe"),
+                    reason: "io",
+                    detail:
+                      cause instanceof Error
+                        ? cause.message
+                        : "The Windows package could not be created.",
+                    cause,
+                  }),
           });
-        // Packaging is a byte operation on the selected artifact. Comparing
-        // editable sources would walk and hash up to a gigabyte of art for a
-        // note, and a download must not pay that cost, so the wording below
-        // never claims the sources are current.
-        const packaged = yield* Effect.tryPromise({
-          try: (signal) => packageWebRelease({ root, selected, signal }),
-          catch: (cause) =>
-            cause instanceof WebPackageError
-              ? new GameOperationError({
-                  operation: "Package Web build",
-                  path: cause.path,
-                  reason:
-                    cause.kind === "missing" || cause.kind === "invalid" || cause.kind === "changed"
-                      ? "invalid-input"
-                      : "io",
-                  detail: cause.message,
-                  cause,
-                })
-              : new GameOperationError({
-                  operation: "Package Web build",
-                  path: NodePath.join(root, WEB_PACKAGES_DIRECTORY),
-                  reason: "io",
-                  detail:
-                    cause instanceof Error
-                      ? cause.message
-                      : "The Web package could not be created.",
-                  cause,
-                }),
-        });
-        const relative = NodePath.relative(root, packaged.archivePath)
-          .split(NodePath.sep)
-          .join("/");
-        const build = selected.buildId.slice(0, 12);
-        const sourceNote = `The ZIP is the selected Web build Play serves (${build}); it contains those fixed bytes only, and later source edits are not included. Packaging does not compare them.`;
-        return {
-          archivePath: packaged.archivePath,
-          fileName: packaged.fileName,
-          buildId: packaged.buildId,
-          bytes: packaged.bytes,
-          sha256: packaged.sha256,
-          files: packaged.files,
-          entry: packaged.entry,
-          sourceEntry: packaged.sourceEntry,
-          notes: [
-            ...packaged.notes,
-            sourceNote,
-            "Serve the extracted files from an ordinary static HTTP host; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP.",
-          ],
-          message: `Web package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB) for selected build ${build}.`,
-        };
-      }),
+          const relative = NodePath.relative(root, packaged.archivePath)
+            .split(NodePath.sep)
+            .join("/");
+          return {
+            archivePath: packaged.archivePath,
+            fileName: packaged.fileName,
+            bytes: packaged.bytes,
+            sha256: packaged.sha256,
+            files: packaged.files.map((file) => ({
+              name: file.name,
+              bytes: file.bytes,
+              sha256: file.sha256,
+            })),
+            embeddedPck: packaged.embeddedPck,
+            executableBytes: packaged.executableBytes,
+            pckBytes: packaged.pckBytes,
+            pckFileCount: packaged.pckFileCount,
+            notes: [
+              ...packaged.notes,
+              `The ZIP contains the existing checked release files (${packaged.files.map((file) => file.name).join(" and ")}), not a new export. This machine did not run it on Windows.`,
+            ],
+            message: `Windows package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB).`,
+          };
+        }),
+      ),
+    packageWeb: (threadId) =>
+      projects.exclusive(threadId, "Package Web build", (root) =>
+        Effect.gen(function* () {
+          yield* unpackaged(root, "Web", "Package Web build");
+          const selected = yield* readSelectedBuild(root);
+          if (selected === null)
+            return yield* new GameOperationError({
+              operation: "Package Web build",
+              path: NodePath.join(root, WEB_BUILD_DIRECTORY),
+              reason: "invalid-input",
+              detail:
+                "No Web export is selected, so there is no build to package. Export Web first (Export… in the Stage's More menu); packaging never exports and never packages a draft, legacy or unselected build.",
+            });
+          // Packaging is a byte operation on the selected artifact. Comparing
+          // editable sources would walk and hash up to a gigabyte of art for a
+          // note, and a download must not pay that cost, so the wording below
+          // never claims the sources are current.
+          const packaged = yield* Effect.tryPromise({
+            try: (signal) => packageWebRelease({ root, selected, signal }),
+            catch: (cause) =>
+              cause instanceof WebPackageError
+                ? new GameOperationError({
+                    operation: "Package Web build",
+                    path: cause.path,
+                    reason:
+                      cause.kind === "missing" ||
+                      cause.kind === "invalid" ||
+                      cause.kind === "changed"
+                        ? "invalid-input"
+                        : "io",
+                    detail: cause.message,
+                    cause,
+                  })
+                : new GameOperationError({
+                    operation: "Package Web build",
+                    path: NodePath.join(root, WEB_PACKAGES_DIRECTORY),
+                    reason: "io",
+                    detail:
+                      cause instanceof Error
+                        ? cause.message
+                        : "The Web package could not be created.",
+                    cause,
+                  }),
+          });
+          const relative = NodePath.relative(root, packaged.archivePath)
+            .split(NodePath.sep)
+            .join("/");
+          const build = selected.buildId.slice(0, 12);
+          const sourceNote = `The ZIP is the selected Web build Play serves (${build}); it contains those fixed bytes only, and later source edits are not included. Packaging does not compare them.`;
+          return {
+            archivePath: packaged.archivePath,
+            fileName: packaged.fileName,
+            buildId: packaged.buildId,
+            bytes: packaged.bytes,
+            sha256: packaged.sha256,
+            files: packaged.files,
+            entry: packaged.entry,
+            sourceEntry: packaged.sourceEntry,
+            notes: [
+              ...packaged.notes,
+              sourceNote,
+              "Serve the extracted files from an ordinary static HTTP host; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP.",
+            ],
+            message: `Web package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB) for selected build ${build}.`,
+          };
+        }),
+      ),
   });
 });
 

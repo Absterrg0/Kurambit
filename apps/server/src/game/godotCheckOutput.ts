@@ -14,7 +14,7 @@ export const RawCheckResult = Schema.fromJsonString(
     gameplayScene: Schema.optionalKey(Schema.String),
     /**
      * Which entries the checker ran. Optional so a checker written by an older
-     * server still decodes; GameService treats a missing list as no entry run.
+     * server still decodes; the check treats a missing list as no entry run.
      */
     entries: Schema.optionalKey(Schema.Array(Schema.String)),
     errors: Schema.Array(RawIssue),

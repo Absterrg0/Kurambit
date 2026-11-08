@@ -54,7 +54,7 @@ import * as GameFacts from "./GameFacts.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
-import * as GameService from "./GameService.ts";
+import * as GameStage from "./GameStage.ts";
 import { BuildName } from "./run/buildNames.ts";
 import { engineCapabilities, engineProfile } from "./engineProfile.ts";
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
@@ -270,7 +270,7 @@ const make = Effect.gen(function* () {
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const facts = yield* GameFacts.GameFacts;
   const runs = yield* GameRunControl.GameRunControl;
-  const game = yield* GameService.GameService;
+  const stage = yield* GameStage.GameStage;
   const operations = yield* GameOperations.GameOperations;
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const scope = yield* Effect.scope;
@@ -909,7 +909,7 @@ const make = Effect.gen(function* () {
       const result = yield* Effect.scoped(
         Effect.flatMap(copies.lease(g.root, { oid: build.build, key: build.key }), (copy) =>
           copies
-            .exclusive(copy, game.playIn(copy, `game-builds:${threadId}`))
+            .exclusive(copy, stage.playIn(copy, `game-builds:${threadId}`))
             .pipe(
               Effect.tap((played) =>
                 played.url === null
@@ -1016,7 +1016,7 @@ const make = Effect.gen(function* () {
   const playRestored = (threadId: ThreadId, g: Game) =>
     engineProfile(g.engine).turnLoop && engineProfile(g.engine).stage === "export"
       ? Effect.forkIn(
-          game
+          stage
             .playCurrent(threadId)
             .pipe(
               Effect.catchCause((cause) =>
@@ -1036,7 +1036,7 @@ const make = Effect.gen(function* () {
   const moveWithoutRun = (root: string, lane: string, record: NoRunRestore, owner: string) =>
     Effect.gen(function* () {
       const moved = yield* withBuildInFolder(
-        { game, checkpoints, lock: { operations, owner, waitUntil: null } },
+        { stage, checkpoints, lock: { operations, owner, waitUntil: null } },
         { root, runId: NO_RUN, lane },
         {
           sha: record.target,

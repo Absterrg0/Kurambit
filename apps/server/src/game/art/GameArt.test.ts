@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import { HttpClient, HttpClientResponse } from "effect/http";
-import { ThreadId } from "@kurambit/contracts";
+import { ThreadId, type GameCharacterRoute } from "@kurambit/contracts";
 import * as ServerConfig from "../../config.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ServerSettings from "../../serverSettings.ts";
@@ -20,6 +20,8 @@ import * as GameOperations from "../GameOperations.ts";
 import * as GameArt from "./GameArt.ts";
 
 const THREAD = ThreadId.make("thread-art");
+/** The host below resolves a thread to the folder its id names, so each test's game is its own. */
+const inGame = (root: string) => ThreadId.make(root);
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const tempGame = () =>
@@ -48,6 +50,7 @@ const layer = (input: {
   readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly answer?: (url: string) => Response;
   readonly sql?: Layer.Layer<SqlClient.SqlClient>;
+  readonly route?: GameCharacterRoute;
 }) =>
   GameArt.layerWithHost.pipe(
     Layer.provide(
@@ -57,6 +60,8 @@ const layer = (input: {
           keepGoingStep: () => Effect.succeed(false),
           packPicture: () => Effect.die("no library in tests"),
           standardBody: Effect.die("no library in tests"),
+          gameRoot: (threadId) => Effect.succeed(threadId),
+          characterRoute: () => Effect.succeed(input.route ?? "library"),
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
@@ -94,16 +99,17 @@ describe("GameArt", () => {
       assert.strictEqual((yield* art.lanes).character, null);
       const before = seen.length;
       const refused = yield* art
-        .generate(root, THREAD, { lane: "character", prompt: "a cat", name: "cat" }, "generated")
+        .generate(inGame(root), { lane: "character", prompt: "a cat", name: "cat" })
         .pipe(Effect.flip);
       assert.match(refused.message, /Tripo key|refused/);
       assert.strictEqual(seen.length, before);
-      assert.deepStrictEqual((yield* art.list(root)).generations, []);
+      assert.deepStrictEqual((yield* art.list(inGame(root))).generations, []);
     }).pipe(
       Effect.provide(
         layer({
           base: NodePath.join(process.env.TMPDIR ?? NodeOS.tmpdir(), "art-test-refused"),
           settings: { gameTripoApiKey: "tcli_not_a_secret" },
+          route: "generated",
           answer: (url) => {
             seen.push(url);
             return Response.json(
@@ -123,20 +129,15 @@ describe("GameArt", () => {
       const root = NodePath.join(base, "game");
       const art = yield* GameArt.GameArt;
       const refused = yield* art
-        .generate(
-          root,
-          THREAD,
-          {
-            lane: "music",
-            prompt: "a calm loop",
-            name: "theme",
-            options: { seconds: 120 },
-          },
-          "library",
-        )
+        .generate(inGame(root), {
+          lane: "music",
+          prompt: "a calm loop",
+          name: "theme",
+          options: { seconds: 120 },
+        })
         .pipe(Effect.flip);
       assert.match(refused.message, /\$0\.00 spent today.*\$0\.30.*\$0\.10 limit/);
-      assert.deepStrictEqual((yield* art.list(root)).generations, []);
+      assert.deepStrictEqual((yield* art.list(inGame(root))).generations, []);
     }).pipe(
       Effect.provide(
         layer({
@@ -159,28 +160,23 @@ describe("GameArt", () => {
       yield* Effect.provide(
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
-          const started = yield* art.generate(
-            root,
-            THREAD,
-            {
-              lane: "image",
-              prompt: "a hero",
-              name: "hero",
-              directions: [
-                {
-                  label: "Warm toon",
-                  prompt: "chunky toon shading, warm palette",
-                  style: "look.png",
-                },
-                { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
-              ],
-            },
-            "library",
-          );
+          const started = yield* art.generate(inGame(root), {
+            lane: "image",
+            prompt: "a hero",
+            name: "hero",
+            directions: [
+              {
+                label: "Warm toon",
+                prompt: "chunky toon shading, warm palette",
+                style: "look.png",
+              },
+              { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
+            ],
+          });
           assert.strictEqual(started.generation.name, "hero_2");
           // The limit reserves the estimate before it is spent; the text must not call it spent.
           assert.match(started.text, /daily limit used today, counting this estimate\)/);
-          const ready = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
+          const ready = yield* art.wait(inGame(root), { id: started.generation.id, seconds: 30 });
           assert.strictEqual(ready.generation.state, "choosing");
           assert.deepStrictEqual(
             ready.generation.candidates.map((candidate) => candidate.preview),
@@ -193,7 +189,7 @@ describe("GameArt", () => {
             ready.generation.candidates.map((candidate) => candidate.label),
             ["Warm toon", "Cold low-poly"],
           );
-          const picked = yield* art.choose(root, started.generation.id, 1);
+          const picked = yield* art.choose(inGame(root), started.generation.id, 1);
           assert.strictEqual(picked.generation.chosenBy, "person");
           assert.deepStrictEqual(picked.generation.files, [
             "art/generated/image/hero_2/hero_2.c2.png",
@@ -232,12 +228,12 @@ describe("GameArt", () => {
           const art = yield* GameArt.GameArt;
           for (const lane of ["character", "creature"] as const) {
             const refused = yield* art
-              .generate(root, THREAD, { lane, prompt: "a knight", name: "knight" }, "library")
+              .generate(inGame(root), { lane, prompt: "a knight", name: "knight" })
               .pipe(Effect.flip);
             assert.match(refused.message, /Nothing was asked of a provider or spent/);
             assert.match(refused.message, /only the person changes how characters are made/);
           }
-          const listed = yield* art.list(root);
+          const listed = yield* art.list(inGame(root));
           assert.deepStrictEqual(listed.generations, []);
           assert.strictEqual(listed.spentTodayUsd, 0);
           assert.deepStrictEqual(asked, []);
@@ -262,21 +258,16 @@ describe("GameArt", () => {
       yield* Effect.provide(
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
-          const started = yield* art.generate(
-            root,
-            THREAD,
-            {
-              lane: "image",
-              prompt: "a hero",
-              name: "hero",
-              directions: [
-                { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
-                { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
-              ],
-            },
-            "library",
-          );
-          const ready = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
+          const started = yield* art.generate(inGame(root), {
+            lane: "image",
+            prompt: "a hero",
+            name: "hero",
+            directions: [
+              { label: "Warm toon", prompt: "chunky toon shading, warm palette" },
+              { label: "Cold low-poly", prompt: "flat low-poly, cold palette" },
+            ],
+          });
+          const ready = yield* art.wait(inGame(root), { id: started.generation.id, seconds: 30 });
           // One look is still the person's to take or leave: it waits on their pick.
           assert.strictEqual(ready.generation.state, "choosing");
           assert.strictEqual(ready.generation.candidates.length, 1);
@@ -292,14 +283,14 @@ describe("GameArt", () => {
           // The image that came back was paid for: it is counted, and it is on disk.
           const cost = ready.generation.costUsd ?? 0;
           assert.isAbove(cost, 0);
-          assert.strictEqual((yield* art.list(root)).spentTodayUsd, cost);
+          assert.strictEqual((yield* art.list(inGame(root))).spentTodayUsd, cost);
           const preview = ready.generation.candidates[0]!.preview;
           yield* Effect.promise(() => NodeFSP.access(NodePath.join(root, preview)));
-          const picked = yield* art.choose(root, started.generation.id, 0);
+          const picked = yield* art.choose(inGame(root), started.generation.id, 0);
           assert.strictEqual(picked.generation.state, "done");
           // An undo that takes its files away reads as undone, not as a broken record.
           yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, preview)));
-          const listed = (yield* art.list(root)).generations[0]!;
+          const listed = (yield* art.list(inGame(root))).generations[0]!;
           assert.strictEqual(listed.filesUndone, true);
         }),
         layer({
@@ -339,30 +330,20 @@ describe("GameArt", () => {
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
           const escaped = yield* art
-            .generate(
-              root,
-              THREAD,
-              {
-                lane: "image",
-                prompt: "x",
-                name: "x",
-                references: ["../secret.png"],
-              },
-              "library",
-            )
-            .pipe(Effect.flip);
-          assert.match(escaped.message, /inside the game/);
-          const started = yield* art.generate(
-            root,
-            THREAD,
-            {
+            .generate(inGame(root), {
               lane: "image",
               prompt: "x",
               name: "x",
-            },
-            "library",
-          );
-          const ended = yield* art.wait(root, { id: started.generation.id, seconds: 30 });
+              references: ["../secret.png"],
+            })
+            .pipe(Effect.flip);
+          assert.match(escaped.message, /inside the game/);
+          const started = yield* art.generate(inGame(root), {
+            lane: "image",
+            prompt: "x",
+            name: "x",
+          });
+          const ended = yield* art.wait(inGame(root), { id: started.generation.id, seconds: 30 });
           assert.strictEqual(ended.generation.state, "failed");
           assert.match(ended.generation.error ?? "", /outside the game folder/);
           assert.deepStrictEqual(yield* Effect.promise(() => NodeFSP.readdir(outside)), []);
@@ -427,7 +408,7 @@ describe("GameArt", () => {
         yield* Effect.provide(
           Effect.gen(function* () {
             const art = yield* GameArt.GameArt;
-            const ended = yield* art.wait(root, { id: generation.id, seconds: 30 });
+            const ended = yield* art.wait(inGame(root), { id: generation.id, seconds: 30 });
             assert.strictEqual(ended.generation.state, "done");
             assert.deepStrictEqual(ended.generation.files, ["art/generated/model/crate/crate.glb"]);
             assert.strictEqual(ended.generation.costUsd, 0.3);
@@ -508,7 +489,7 @@ describe("GameArt", () => {
       const ended = yield* Effect.provide(
         Effect.gen(function* () {
           const art = yield* GameArt.GameArt;
-          return yield* art.wait(root, { id: generation.id, seconds: 30 });
+          return yield* art.wait(inGame(root), { id: generation.id, seconds: 30 });
         }),
         layer({
           base,

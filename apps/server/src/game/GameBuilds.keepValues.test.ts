@@ -23,7 +23,7 @@ import * as GameFacts from "./GameFacts.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
-import * as GameService from "./GameService.ts";
+import * as GameStage from "./GameStage.ts";
 
 type GameBuildFactsShape = Effect.Success<ReturnType<GameFacts.GameFacts["Service"]["measure"]>>;
 const THREAD = ThreadId.make("chat");
@@ -89,7 +89,7 @@ const layerFor = (root: string) =>
         Layer.mock(GameRunControl.GameRunControl)({
           steps: () => Effect.succeed(new Map()),
         }),
-        Layer.mock(GameService.GameService)({ closeLiveEditors: () => Effect.void }),
+        Layer.mock(GameStage.GameStage)({ closeLiveEditors: () => Effect.void }),
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
         Layer.mock(Orchestrator.OrchestratorV2)({}),
       ),

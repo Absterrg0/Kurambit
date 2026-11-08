@@ -1,4 +1,5 @@
 import { McpSchema, Tool, Toolkit } from "effect/ai";
+import type * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import {
   GAME_EXPLORE_BOUNDS,
@@ -77,14 +78,25 @@ import {
 } from "@kurambit/contracts";
 import { PROFILES, type GameEngineProfile } from "../../../game/engineProfile.ts";
 import { isGameEngineActive } from "@kurambit/contracts";
+import * as GameArt from "../../../game/art/GameArt.ts";
+import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
+import * as GameBlender from "../../../game/GameBlender.ts";
+import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
+import * as GameEngine from "../../../game/GameEngine.ts";
+import * as GameExplore from "../../../game/GameExplore.ts";
+import * as GameExport from "../../../game/GameExport.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
-import * as GameService from "../../../game/GameService.ts";
+import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
+import * as GameStage from "../../../game/GameStage.ts";
+import * as GameStatusService from "../../../game/GameStatusService.ts";
+import * as GameUnity from "../../../game/GameUnity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { ASKABLE_TOOLS, listedFor } from "./placement.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
-const dependencies = [
-  GameService.GameService,
+/** A game tool's services: the one that owns its operation, and the caller's thread. */
+const on = <I, S>(owner: Context.Key<I, S>) => [
+  owner,
   McpInvocationContext.McpInvocationContext,
   ThreadManagementService.ThreadManagementService,
 ];
@@ -101,7 +113,7 @@ const GameStatusTool = Tool.make("game_status", {
   success: GameStatus,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameStatusService.GameStatusService),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -113,7 +125,7 @@ const BlenderCodeTool = Tool.make("game_blender_code", {
   success: GameBlenderCodeResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -125,7 +137,7 @@ export const GameBlenderLookTool = Tool.make("game_blender_look", {
   success: GameBlenderLookResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -137,7 +149,7 @@ const BlenderSceneTool = Tool.make("game_blender_scene", {
   success: GameBlenderSceneResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -149,7 +161,7 @@ const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   success: GameBlenderAssetsSearchResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -161,7 +173,7 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   success: GameBlenderAssetsImportResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -173,7 +185,7 @@ const GenerateTool = Tool.make("game_generate", {
   success: GameGenerateResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameArt.GameArt),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -185,7 +197,7 @@ const ImageEditTool = Tool.make("game_image_edit", {
   success: GameGenerateResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameArt.GameArt),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -197,7 +209,7 @@ const GenerateWaitTool = Tool.make("game_generate_wait", {
   success: GameGenerateResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameArt.GameArt),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -209,7 +221,7 @@ const BlenderCharacterTool = Tool.make("game_blender_character", {
   success: GameBlenderCharacterResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -221,7 +233,7 @@ const BlenderPaintTool = Tool.make("game_blender_paint", {
   success: GameBlenderPaintResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -233,7 +245,7 @@ const BlenderCarveTool = Tool.make("game_blender_carve", {
   success: GameBlenderCarveResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -245,7 +257,7 @@ const BlenderExportTool = Tool.make("game_blender_export", {
   success: GameBlenderExportResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -258,7 +270,7 @@ export const GameAnimateTool = Tool.make("game_animate", {
   success: GameAnimateResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -271,7 +283,7 @@ export const GameBlenderRenderSpritesTool = Tool.make("game_blender_render_sprit
   success: GameBlenderRenderSpritesResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBlender.GameBlender),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -284,7 +296,7 @@ export const GameAssetsSearchTool = Tool.make("game_assets_search", {
   success: GameAssetsSearchResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameAssetLibrary.GameAssetLibrary),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -297,7 +309,7 @@ const AssetsAddTool = Tool.make("game_assets_add", {
   success: GameAssetsAddResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameAssetLibrary.GameAssetLibrary),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -308,7 +320,7 @@ const UnityToolsTool = Tool.make("game_unity_tools", {
   success: GameUnityToolsResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameUnity.GameUnity),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -320,7 +332,7 @@ const UnityEditTool = Tool.make("game_unity_edit", {
   success: GameUnityTextResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameUnity.GameUnity),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -332,7 +344,7 @@ const UnityEvalTool = Tool.make("game_unity_eval", {
   success: GameUnityTextResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameUnity.GameUnity),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -343,7 +355,7 @@ const UnityRecompileTool = Tool.make("game_unity_recompile", {
   success: GameUnityRecompileResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameEngine.GameEngine),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -355,7 +367,7 @@ const UnityPlayTool = Tool.make("game_unity_play", {
   success: GameUnityTextResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameUnity.GameUnity),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -367,7 +379,7 @@ const UnityConsoleTool = Tool.make("game_unity_console", {
   success: GameUnityTextResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameUnity.GameUnity),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -379,7 +391,7 @@ export const GameUnityScreenshotTool = Tool.make("game_unity_screenshot", {
   success: GameUnityScreenshotResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameUnity.GameUnity),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -390,7 +402,7 @@ const ImportTool = Tool.make("game_import", {
   success: GameActionResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameEngine.GameEngine),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -400,7 +412,7 @@ const CheckTool = Tool.make("game_check", {
   success: GameCheckResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameEngine.GameEngine),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -411,7 +423,7 @@ const ExportTool = Tool.make("game_export", {
   success: GameActionResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameExport.GameExport),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -424,7 +436,7 @@ const PackageWindowsTool = Tool.make("game_package_windows", {
   success: GameWindowsPackage,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameExport.GameExport),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -436,7 +448,7 @@ const PackageWebTool = Tool.make("game_package_web", {
   success: GameWebPackage,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameExport.GameExport),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -448,7 +460,7 @@ const MediaSaveTool = Tool.make("game_media_save", {
   success: GameSavedMedia,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameSavedMediaService.GameSavedMediaService),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -459,7 +471,7 @@ const SavedListTool = Tool.make("game_saved_list", {
   success: GameSavedListResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameSavedMediaService.GameSavedMediaService),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -471,7 +483,7 @@ const SavedDeleteTool = Tool.make("game_saved_delete", {
   success: Schema.Struct({}),
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameSavedMediaService.GameSavedMediaService),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -483,7 +495,7 @@ const PreviewTool = Tool.make("game_preview", {
   success: GameActionResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameStage.GameStage),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -494,7 +506,7 @@ const StopTool = Tool.make("game_stop", {
   success: GameActionResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameStage.GameStage),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -510,7 +522,7 @@ const ExploreStartTool = Tool.make("game_explore_start", {
   success: GameExploreStartResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameExplore.GameExplore),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -521,7 +533,7 @@ const ExploreActTool = Tool.make("game_explore_act", {
   success: GameExploreActResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameExplore.GameExplore),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -533,7 +545,7 @@ const ExploreCloseTool = Tool.make("game_explore_close", {
   success: GameExploreCloseResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameExplore.GameExplore),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -545,7 +557,7 @@ const BotRunTool = Tool.make("game_bot_run", {
   success: GameBotRunResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBot.GameBot),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -556,7 +568,7 @@ const BotReportTool = Tool.make("game_bot_report", {
   success: GameBotReportResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBot.GameBot),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
@@ -568,7 +580,7 @@ const BotViewTool = Tool.make("game_bot_view", {
   success: GameBotViewResult,
   failure,
   failureMode: "return",
-  dependencies,
+  dependencies: on(GameBot.GameBot),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, true)
@@ -753,7 +765,24 @@ export const GameMoreTool = Tool.make("game_more", {
   // The tool's own failure as it would have returned it, under its message.
   failure: Schema.Struct({ message: Schema.String, failure: Schema.optionalKey(Schema.Unknown) }),
   failureMode: "return",
-  dependencies: [...dependencies, GameBuilds.GameBuilds, GameRunControl.GameRunControl],
+  // It runs any game tool, so it stands on every service they do.
+  dependencies: [
+    GameStatusService.GameStatusService,
+    GameBlender.GameBlender,
+    GameArt.GameArt,
+    GameAssetLibrary.GameAssetLibrary,
+    GameUnity.GameUnity,
+    GameEngine.GameEngine,
+    GameExport.GameExport,
+    GameSavedMediaService.GameSavedMediaService,
+    GameStage.GameStage,
+    GameExplore.GameExplore,
+    GameBot.GameBot,
+    GameBuilds.GameBuilds,
+    GameRunControl.GameRunControl,
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+  ],
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)

@@ -1,6 +1,16 @@
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameProjectService from "../../../game/GameProjectService.ts";
-import * as GameService from "../../../game/GameService.ts";
+import * as GameArt from "../../../game/art/GameArt.ts";
+import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
+import * as GameBlender from "../../../game/GameBlender.ts";
+import * as GameBot from "../../../game/GameBot.ts";
+import * as GameEngine from "../../../game/GameEngine.ts";
+import * as GameExplore from "../../../game/GameExplore.ts";
+import * as GameExport from "../../../game/GameExport.ts";
+import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
+import * as GameStage from "../../../game/GameStage.ts";
+import * as GameStatusService from "../../../game/GameStatusService.ts";
+import * as GameUnity from "../../../game/GameUnity.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
 import * as ServerConfig from "../../../config.ts";
@@ -42,7 +52,17 @@ const noGameThread = ThreadId.make("thread-no-game");
 const blenderThread = ThreadId.make("thread-blender-route");
 
 const layerStubServices = Layer.mergeAll(
-  Layer.mock(GameService.GameService)({}),
+  Layer.mock(GameStatusService.GameStatusService)({}),
+  Layer.mock(GameStage.GameStage)({}),
+  Layer.mock(GameBlender.GameBlender)({}),
+  Layer.mock(GameArt.GameArt)({}),
+  Layer.mock(GameAssetLibrary.GameAssetLibrary)({}),
+  Layer.mock(GameUnity.GameUnity)({ hold: () => (effect) => effect }),
+  Layer.mock(GameEngine.GameEngine)({}),
+  Layer.mock(GameExport.GameExport)({}),
+  Layer.mock(GameSavedMediaService.GameSavedMediaService)({}),
+  Layer.mock(GameExplore.GameExplore)({}),
+  Layer.mock(GameBot.GameBot)({}),
   // Every thread here works in a three.js game on the library route, except one that is no
   // game and one whose person chose to make characters in Blender.
   Layer.mock(GameProjectService.GameProjectService)({

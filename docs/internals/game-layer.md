@@ -310,7 +310,10 @@ from one per-OS/CPU table of official builds with their published SHA-256
 ## Tools
 
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
-over RPC. The `game_unity_*` tools
+over RPC. A tool and its RPC twin call the same method of the service that owns the operation
+(GameBlender, GameExport, GameStage, ...); there is no facade between them. Thread-keyed methods
+resolve the thread's game and take its operation lock themselves (`GameProjectService.exclusive`),
+so a new operation touches one service. The `game_unity_*` tools
 are a curated front for `unity mcp`: a fixed allowlist of editing tools behind one
 `game_unity_edit`, plus eval, recompile, play, screenshot and console; builds, tests, packages and
 editor lifecycle stay with Kurambit's own operations. The live editor runs with one asset import
@@ -333,7 +336,7 @@ outside their catalog.
   that changed files and measures the turn's build in the background. A live-staged engine's
   Stage already shows the folder (Play sessions, above), so nothing is built for it. An engine
   whose Stage plays a Web export also has the folder's Web build made current, as the chat's own
-  operation (`GameService.playCurrent`), which the Stage remounts on; a stopped or cancelled turn
+  operation (`GameStage.playCurrent`), which the Stage remounts on; a stopped or cancelled turn
   is measured but not played. Freshness is decided inside the game's lock, and a fresh build is
   left as it is, so a turn that changed nothing playable never restarts a game the person
   stopped. Each thread's turns run forked, in order, off the event

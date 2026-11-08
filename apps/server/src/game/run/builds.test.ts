@@ -14,7 +14,6 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as Fiber from "effect/Fiber";
 import * as GameOperations from "../GameOperations.ts";
-import type * as GameService from "../GameService.ts";
 import { BuildName } from "./buildNames.ts";
 import { buildStep, captureBuild, withBuildInFolder } from "./builds.ts";
 
@@ -46,9 +45,7 @@ const repo = () => {
   return { root, git };
 };
 
-const game = {
-  closeLiveEditors: () => Effect.void,
-} as unknown as GameService.GameService["Service"];
+const stage = { closeLiveEditors: () => Effect.void };
 // The run's own moves pass through the game's operation lock.
 const lockOf = Effect.map(GameOperations.GameOperations, (operations) => ({
   operations,
@@ -66,7 +63,7 @@ it.effect("keeps a restore's builds under names git can store, again and again",
     // Every kind of name a restore makes, as a real request id gives it.
     const before = yield* capture(BuildName.restoreBefore("8c1f-uuid:1"));
     const keep = buildStep(
-      { game, checkpoints, lock },
+      { stage, checkpoints, lock },
       { root, runId, lane: "godot" },
       { _tag: "keep", names: [BuildName.restoreAfter("8c1f-uuid:1")], sha: before },
     );
@@ -122,7 +119,7 @@ it.effect("an undo with expect moves nothing once the folder moved on, and undoe
     const step = yield* captureBuild({ checkpoints, lock }, root, runId, "t/step");
     const undo = (park: string) =>
       withBuildInFolder(
-        { game, checkpoints, lock },
+        { stage, checkpoints, lock },
         { root, runId, lane: "web" },
         { sha: base, park, expect: step },
         (current) => Effect.succeed({ value: current, putBack: false }),

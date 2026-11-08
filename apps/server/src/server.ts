@@ -1,4 +1,17 @@
-import * as GameService from "./game/GameService.ts";
+import * as GameArt from "./game/art/GameArt.ts";
+import * as GameAssetLibrary from "./game/GameAssetLibrary.ts";
+import * as GameBlender from "./game/GameBlender.ts";
+import * as GameBot from "./game/GameBot.ts";
+import * as GameBuildCopies from "./game/GameBuildCopies.ts";
+import * as GameEngine from "./game/GameEngine.ts";
+import * as GameExplore from "./game/GameExplore.ts";
+import * as GameExport from "./game/GameExport.ts";
+import * as GameMemoryGate from "./game/GameMemoryGate.ts";
+import * as GamePlayer from "./game/GamePlayer.ts";
+import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
+import * as GameStage from "./game/GameStage.ts";
+import * as GameStatusService from "./game/GameStatusService.ts";
+import * as GameUnity from "./game/GameUnity.ts";
 import * as GameOperations from "./game/GameOperations.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
@@ -510,13 +523,34 @@ const layerGameRunWork = GameRunStepRunner.layer.pipe(
   // Read only (is a step turn's checkpoint capture still owed), as recovery reads it.
   Layer.provide(EffectOutbox.layer),
 );
+// Each game operation lives in the service that owns it; tools and the Game
+// panel call those services directly. Each layer stands on the ones below it.
+const layerGameOperations = GameStage.layer.pipe(
+  Layer.provideMerge(GameStatusService.layer),
+  Layer.provideMerge(GameSavedMediaService.layer),
+  // Shared with the builds' facts, so Stop game and the facts reach the same bot runs.
+  Layer.provideMerge(GameBuildCopies.layer),
+  Layer.provideMerge(GameBot.layer),
+  Layer.provideMerge(GameExplore.layer),
+  Layer.provideMerge(GameExport.layer),
+  Layer.provide(GamePlayer.layer),
+  Layer.provideMerge(GameEngine.layer),
+  // After GameEngine, so the engine backend and the game_unity_* tools share one live editor.
+  Layer.provideMerge(GameUnity.layer),
+  Layer.provideMerge(GameBlender.layer),
+  Layer.provideMerge(GameArt.layer),
+  // After the editors, so every heavy start, editor opens included, shares one gate.
+  Layer.provide(GameMemoryGate.layer),
+  Layer.provideMerge(GameAssetLibrary.layer),
+  Layer.provideMerge(GameOperations.layer),
+);
 const layerGameServices = layerGameRunWork.pipe(
   Layer.provideMerge(GameBuilds.layer),
   Layer.provideMerge(GameFacts.layer),
   Layer.provideMerge(GameRunControl.layer),
   Layer.provide(ProjectionStoreV2.layer),
   // The art service reads whether a turn is a Keep going step from the run's records.
-  Layer.provideMerge(GameService.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
+  Layer.provideMerge(layerGameOperations.pipe(Layer.provide(ProjectionStoreV2.layer))),
   Layer.provideMerge(GameProjectService.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),

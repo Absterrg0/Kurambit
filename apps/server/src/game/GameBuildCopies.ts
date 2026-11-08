@@ -5,7 +5,7 @@
 // old build never touches the game folder. Copies are content-addressed by
 // the build's engine project, so builds with the same project share one. A
 // copy names its game folder in COPY_OF, so a Unity copy reuses that folder's
-// import cache. This service sits below GameService so Stop game reaches the
+// import cache. This service sits below GameStage so Stop game reaches the
 // work on a game's copies too.
 //
 // One owner at a time: Play and a measurement of the same build share one

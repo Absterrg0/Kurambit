@@ -4,7 +4,11 @@ import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as GameBuilds from "./game/GameBuilds.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
-import * as GameService from "./game/GameService.ts";
+import * as GameArt from "./game/art/GameArt.ts";
+import * as GameExport from "./game/GameExport.ts";
+import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
+import * as GameStage from "./game/GameStage.ts";
+import * as GameStatusService from "./game/GameStatusService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import { OrchestrationDispatchCommandError } from "@kurambit/contracts";
@@ -1180,7 +1184,11 @@ const layerWsRpc = (
 ) =>
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
-      const game = yield* GameService.GameService;
+      const gameStatuses = yield* GameStatusService.GameStatusService;
+      const gameStage = yield* GameStage.GameStage;
+      const gameExport = yield* GameExport.GameExport;
+      const gameSaved = yield* GameSavedMediaService.GameSavedMediaService;
+      const gameArt = yield* GameArt.GameArt;
       const gameRun = yield* GameRunControl.GameRunControl;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameBuilds = yield* GameBuilds.GameBuilds;
@@ -1764,7 +1772,7 @@ const layerWsRpc = (
 
       const handlers = ServerWsRpcGroup.of({
         [WS_METHODS.gameStatus]: ({ threadId, checkSources }) =>
-          game.status(threadId, { checkSources }),
+          gameStatuses.status(threadId, { checkSources }),
         [WS_METHODS.gameKeepGoing]: (input) =>
           gameRun
             .set(input.threadId, input)
@@ -1792,9 +1800,9 @@ const layerWsRpc = (
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
-        [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
+        [WS_METHODS.gameAction]: ({ threadId, action }) => gameStage.action(threadId, action),
         [WS_METHODS.gameWindowsPackage]: ({ threadId }) =>
-          game
+          gameExport
             .packageWindows(threadId)
             .pipe(
               Effect.flatMap((packaged) =>
@@ -1802,16 +1810,16 @@ const layerWsRpc = (
               ),
             ),
         [WS_METHODS.gameWebPackage]: ({ threadId }) =>
-          game
+          gameExport
             .packageWeb(threadId)
             .pipe(
               Effect.flatMap((packaged) => signPackage(threadId, "Package Web build", packaged)),
             ),
         [WS_METHODS.gameMediaSave]: ({ threadId, source, label }) =>
-          game.saveMedia(threadId, source, label),
-        [WS_METHODS.gameSavedList]: ({ threadId }) => game.listSaved(threadId),
+          gameSaved.save(threadId, source, label),
+        [WS_METHODS.gameSavedList]: ({ threadId }) => gameSaved.list(threadId),
         [WS_METHODS.gameSavedDelete]: ({ threadId, name }) =>
-          game.deleteSaved(threadId, name).pipe(Effect.as({})),
+          gameSaved.delete(threadId, name).pipe(Effect.as({})),
         [WS_METHODS.gameBuilds]: ({ threadId, before, limit }) =>
           gameBuilds.list(threadId, { before, limit }),
         [WS_METHODS.gameBuildCompare]: ({ threadId, a, b }) => gameBuilds.compare(threadId, a, b),
@@ -1830,18 +1838,19 @@ const layerWsRpc = (
           }),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
-          input.threadId === undefined ? game.libraryEvents : game.threadEvents(input.threadId),
-        [WS_METHODS.gameToolchainStatus]: ({ threadId }) => game.toolchain(threadId),
+          input.threadId === undefined
+            ? gameStatuses.libraryEvents
+            : gameStatuses.threadEvents(input.threadId),
+        [WS_METHODS.gameToolchainStatus]: ({ threadId }) => gameStatuses.toolchain(threadId),
         [WS_METHODS.gameToolchainInstall]: ({ tool }) => gameToolchain.install(tool),
         [WS_METHODS.gameToolchainRemove]: ({ tool }) => gameToolchain.remove(tool),
         [WS_METHODS.gameSetCharacterRoute]: ({ threadId, route }) =>
-          game.setCharacterRoute(threadId, route),
-        [WS_METHODS.gameGenerations]: ({ threadId }) => game.generations(threadId),
+          gameProjects.setCharacterRoute(threadId, route),
+        [WS_METHODS.gameGenerations]: ({ threadId }) => gameArt.list(threadId),
         [WS_METHODS.gameChooseGeneration]: ({ threadId, id, candidate }) =>
-          game.chooseGeneration(threadId, id, candidate),
-        [WS_METHODS.gameCancelGeneration]: ({ threadId, id }) =>
-          game.cancelGeneration(threadId, id),
-        [WS_METHODS.gameArtProviders]: () => game.artProviders,
+          gameArt.choose(threadId, id, candidate),
+        [WS_METHODS.gameCancelGeneration]: ({ threadId, id }) => gameArt.cancel(threadId, id),
+        [WS_METHODS.gameArtProviders]: () => gameArt.providers,
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,
@@ -2943,7 +2952,11 @@ export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
-    const game = yield* GameService.GameService;
+    const gameStatuses = yield* GameStatusService.GameStatusService;
+    const gameStage = yield* GameStage.GameStage;
+    const gameExport = yield* GameExport.GameExport;
+    const gameSaved = yield* GameSavedMediaService.GameSavedMediaService;
+    const gameArt = yield* GameArt.GameArt;
     const gameRun = yield* GameRunControl.GameRunControl;
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
@@ -3003,7 +3016,11 @@ export const layer = Layer.unwrap(
               previewAutomationBroker,
               serverBrowser,
             ).pipe(
-              Layer.provide(Layer.succeed(GameService.GameService, game)),
+              Layer.provide(Layer.succeed(GameStatusService.GameStatusService, gameStatuses)),
+              Layer.provide(Layer.succeed(GameStage.GameStage, gameStage)),
+              Layer.provide(Layer.succeed(GameExport.GameExport, gameExport)),
+              Layer.provide(Layer.succeed(GameSavedMediaService.GameSavedMediaService, gameSaved)),
+              Layer.provide(Layer.succeed(GameArt.GameArt, gameArt)),
               Layer.provide(Layer.succeed(GameRunControl.GameRunControl, gameRun)),
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),

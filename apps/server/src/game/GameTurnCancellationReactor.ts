@@ -1,4 +1,4 @@
-import type { OrchestrationV2DomainEvent } from "@kurambit/contracts";
+import type { OrchestrationV2DomainEvent, ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -7,7 +7,10 @@ import * as Stream from "effect/Stream";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { forkParked } from "../serverActivation.ts";
-import * as GameService from "./GameService.ts";
+import * as GameBot from "./GameBot.ts";
+import * as GameExplore from "./GameExplore.ts";
+import * as GameOperations from "./GameOperations.ts";
+import * as GameProjectService from "./GameProjectService.ts";
 
 const ENDED_WITHOUT_COMPLETING: ReadonlySet<string> = new Set([
   "interrupted",
@@ -26,7 +29,29 @@ export class GameTurnCancellationReactor extends Context.Service<
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
-  const game = yield* GameService.GameService;
+  const projects = yield* GameProjectService.GameProjectService;
+  const operations = yield* GameOperations.GameOperations;
+  const explore = yield* GameExplore.GameExplore;
+  const bots = yield* GameBot.GameBot;
+
+  const cancelThread = Effect.fn("GameTurnCancellationReactor.cancelThread")(function* (
+    threadId: ThreadId,
+  ) {
+    const root = yield* projects.resolve(threadId).pipe(
+      Effect.catchTags({
+        GameOperationError: (error) =>
+          error.reason === "project-not-found" || error.reason === "invalid-project"
+            ? Effect.succeed(null)
+            : Effect.fail(error),
+      }),
+    );
+    if (root !== null) {
+      yield* operations.cancel(root, String(threadId));
+      yield* explore.release(threadId, root);
+    }
+    // Bot runs are keyed by their own checkout, which may be another one.
+    yield* bots.stopOwned(threadId);
+  });
 
   // A turn that ended without completing (capped, cancelled, failed, rolled
   // back, its thread deleted or recovered) leaves no game work behind: its
@@ -36,7 +61,7 @@ const make = Effect.gen(function* () {
   const handle: GameTurnCancellationReactor["Service"]["handle"] = (event) => {
     if (event.type !== "run.updated" || !ENDED_WITHOUT_COMPLETING.has(event.payload.status))
       return Effect.void;
-    return game.cancelThread(event.threadId).pipe(
+    return cancelThread(event.threadId).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("cancelling an ended turn's game work failed", {
           threadId: event.threadId,

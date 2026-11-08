@@ -48,6 +48,7 @@ import {
   GAME_STYLE_FILE,
   manifestProject,
   manifestRuntime,
+  type ThreadId,
 } from "@kurambit/contracts";
 import * as GameArt from "./art/GameArt.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
@@ -620,24 +621,19 @@ const reapRecord = async (
 export class GameBlender extends Context.Service<
   GameBlender,
   {
+    /** Live Blender scene: run bpy code, auto-saving the .blend source; each call is the game's operation. */
     readonly code: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderCodeInput,
     ) => Effect.Effect<GameBlenderCodeResult, GameOperationError>;
+    /** Live Blender scene: see it as one image (viewport, camera, angles, frames). */
     readonly look: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderLookInput,
     ) => Effect.Effect<GameBlenderLookResult, GameOperationError>;
-    /**
-     * Strips of motion-lane clips, each on the body its GLB holds, written as one PNG; rendered in
-     * a throwaway scene like the review, so the live scene does not change.
-     */
-    readonly motionStrip: GameArt.MotionStripRender;
-    /** A model's front, side and back, textured and in clay, as one PNG; the live scene does not change. */
-    readonly modelViews: GameArt.ModelViewsRender;
     /** Live Blender scene: a rigged, animated character conformed to the standard skeleton. */
     readonly character: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderCharacterInput,
     ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
     /**
@@ -645,39 +641,39 @@ export class GameBlender extends Context.Service<
      * library clip and pictured (game_animate).
      */
     readonly animate: (
-      root: string,
+      threadId: ThreadId,
       input: GameAnimateInput,
     ) => Effect.Effect<GameAnimateResult, GameOperationError>;
     /** Live Blender scene: meshes painted from their turnaround sheet (UV atlases, normal, ORM). */
     readonly paint: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderPaintInput,
     ) => Effect.Effect<GameBlenderPaintResult, GameOperationError>;
     /** Live Blender scene: an organic hard prop carved from its three-view sheet, then painted. */
     readonly carve: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderCarveInput,
     ) => Effect.Effect<GameBlenderCarveResult, GameOperationError>;
     readonly scene: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderSceneInput,
     ) => Effect.Effect<GameBlenderSceneResult, GameOperationError>;
     readonly assetsSearch: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderAssetsSearchInput,
     ) => Effect.Effect<GameBlenderAssetsSearchResult, GameOperationError>;
     readonly assetsImport: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderAssetsImportInput,
     ) => Effect.Effect<GameBlenderAssetsImportResult, GameOperationError>;
     /** Live Blender scene: export named objects (or every mesh) as a GLB under the engine directory. */
     readonly exportGlb: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderExportInput,
     ) => Effect.Effect<GameBlenderExportResult, GameOperationError>;
     /** Live Blender scene: render named objects to a strip of sprite PNGs with a fitted camera. */
     readonly renderSprites: (
-      root: string,
+      threadId: ThreadId,
       input: GameBlenderRenderSpritesInput,
     ) => Effect.Effect<GameBlenderRenderSpritesResult, GameOperationError>;
     /** Stop one game's live session by root; game_stop calls this. */
@@ -2103,687 +2099,721 @@ const make = Effect.gen(function* () {
       return `This game's ${engineDir}/${MESHOPT_LOADER} has no meshopt decoder, so the geometry shipped quantized but not meshopt-compressed. To ship it smaller, ${present ? "" : `copy three.js 0.180's examples/jsm/libs/meshopt_decoder.module.js to ${engineDir}/${MESHOPT_DECODER}, `}add import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js"${present ? ` (now in ${engineDir}/${MESHOPT_DECODER})` : ""}, make the loader new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder), and export again.`;
     });
 
+  // Strips of motion-lane clips, each on the body its GLB holds, written as one PNG; rendered in
+  // a throwaway scene like the review, so the live scene does not change.
+  const motionStrip: GameArt.MotionStripRender = (root, clips, out) =>
+    holding(
+      root,
+      Effect.gen(function* () {
+        const realRoot = yield* realRootOf(root);
+        yield* kitCall(
+          root,
+          "blender-motion-strip",
+          decodeMotionStrip,
+          `kurambit.motion_strip(${pyJson({
+            clips: clips.map((clip) => ({
+              path: NodePath.join(realRoot, clip.path),
+              label: clip.label,
+            })),
+            out: NodePath.join(realRoot, out),
+          })})`,
+        );
+      }),
+    );
+  // A model's front, side and back, textured and in clay, as one PNG; the live scene does not change.
+  const modelViews: GameArt.ModelViewsRender = (root, model, out) =>
+    holding(
+      root,
+      Effect.gen(function* () {
+        const realRoot = yield* realRootOf(root);
+        yield* kitCall(
+          root,
+          "blender-model-views",
+          decodeMotionStrip,
+          `kurambit.model_views(${pyJson({
+            model: NodePath.join(realRoot, model),
+            out: NodePath.join(realRoot, out),
+          })})`,
+        );
+      }),
+    );
+  // A landed motion's strip and a model's views before its rig are rendered in the game's live
+  // Blender, which reads GameArt's records.
+  yield* art.renderWith({ motionStrip, modelViews });
+
   return GameBlender.of({
-    code: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          const text = yield* callText(root, "execute_blender_code", { code: input.code });
-          const blend = yield* saveBlend(root);
-          return { output: `${text}\nSaved .blend source: ${blend}` };
-        }),
+    code: (threadId, input) =>
+      projects.exclusive(threadId, "Blender code", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
+            const text = yield* callText(root, "execute_blender_code", { code: input.code });
+            const blend = yield* saveBlend(root);
+            return { output: `${text}\nSaved .blend source: ${blend}` };
+          }),
+        ),
       ),
-    look: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          if (input.mode === "review") return yield* review(root, input);
-          if (input.shading === "rendered") {
+    look: (threadId, input) =>
+      projects.exclusive(threadId, "Blender look", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
+            if (input.mode === "review") return yield* review(root, input);
+            if (input.shading === "rendered") {
+              const short = yield* memoryShortfall(
+                memory,
+                "rendered Blender look",
+                RENDER_NEEDED_MB,
+                "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
+              );
+              if (short !== null)
+                return yield* opError(
+                  "blender-look",
+                  root,
+                  "low-memory",
+                  `${short} A solid look (the default shading) needs far less and works now.`,
+                );
+            }
+            const result = yield* call(root, "look", {
+              ...(input.mode === undefined ? {} : { mode: input.mode }),
+              ...(input.target === undefined ? {} : { target: input.target }),
+              ...(input.views === undefined ? {} : { views: input.views }),
+              ...(input.distance === undefined ? {} : { distance: input.distance }),
+              ...(input.shading === undefined ? {} : { shading: input.shading }),
+              ...(input.frames === undefined ? {} : { frames: input.frames }),
+              ...(input.frameCount === undefined ? {} : { frame_count: input.frameCount }),
+              ...(input.view === undefined ? {} : { view: input.view }),
+              max_size: input.maxSize ?? 768,
+            });
+            const text = textOf(result);
+            const image = (result.content ?? []).find((entry) => entry.type === "image");
+            if (image?.data === undefined)
+              return { text: text === "" ? "Blender returned no image." : text };
+            const size = readImageDimensions(Buffer.from(image.data, "base64")) ?? {
+              width: input.maxSize ?? 768,
+              height: input.maxSize ?? 768,
+            };
+            return {
+              text: text === "" ? "See the attached viewport image." : text,
+              screenshot: {
+                mimeType: "image/png" as const,
+                data: image.data,
+                width: size.width,
+                height: size.height,
+              },
+            };
+          }),
+        ),
+      ),
+    animate: (threadId, input) =>
+      projects.exclusive(threadId, "Animate", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
+            const fail = (reason: GameOperationError["reason"], detail: string) =>
+              Effect.fail(opError("blender-animate", root, reason, detail));
+            const realRoot = yield* realRootOf(root);
+            const style = yield* readGameStyle(realRoot);
+            const packs = (style?.packs ?? []).filter((id) => {
+              const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
+              return pack?.rig === STANDARD_RIG && pack.kinds.includes("animation");
+            });
+            // The bar: the named library clip, or the one sharing the most words with the move's name.
+            let barName = input.bar ?? null;
+            if (barName === null && packs.length > 0) {
+              const wanted = new Set([
+                ...clipWords(input.clip),
+                ...(typeof input.spec["name"] === "string" ? clipWords(input.spec["name"]) : []),
+              ]);
+              let best: { name: string; score: number } | null = null;
+              for (const id of packs)
+                for (const entry of yield* library.packClips(id))
+                  for (const clip of entry.clips) {
+                    const score = clipWords(clip).filter((word) => wanted.has(word)).length;
+                    if (
+                      score > 0 &&
+                      (best === null ||
+                        score > best.score ||
+                        (score === best.score && clip.length < best.name.length))
+                    )
+                      best = { name: `${id}:${clip}`, score };
+                  }
+              barName = best?.name ?? null;
+            }
+            const bar =
+              barName === null
+                ? null
+                : (yield* resolveClips(root, [barName], packs).pipe(
+                    Effect.mapError((cause) =>
+                      opError(
+                        "blender-animate",
+                        root,
+                        "invalid-input",
+                        cause.detail ?? cause.message,
+                      ),
+                    ),
+                  ))[0]!;
+            const clipDir = `${ANIMATE_DIR}/${input.clip}`;
+            const passes = yield* Effect.promise(() =>
+              NodeFSP.readdir(NodePath.join(realRoot, clipDir)).catch(() => [] as string[]),
+            );
+            const pass = `${clipDir}/${1 + Math.max(0, ...passes.map(Number).filter(Number.isInteger))}`;
+            const out = yield* Effect.tryPromise({
+              try: () => ensureGameDir(realRoot, pass),
+              catch: (cause) => opError("blender-animate", pass, "invalid-path", undefined, cause),
+            });
+            yield* writeText(
+              NodePath.join(out, "spec.json"),
+              `${JSON.stringify(input.spec, null, 1)}\n`,
+              "blender-animate",
+            );
+            const made = yield* kitCall(
+              root,
+              "blender-animate",
+              decodeAnimated,
+              `kurambit.animate(${pyJson({
+                armature: input.character,
+                clip: input.clip,
+                spec: input.spec,
+                out,
+                bar: bar === null ? null : { path: bar.path, clip: bar.name, pack: bar.pack },
+              })})`,
+            );
+            const blend = yield* saveBlend(root);
+            const screenshots = yield* Effect.forEach(made.images, (image) =>
+              Effect.tryPromise({
+                try: () => NodeFSP.readFile(image.path),
+                catch: (cause) => opError("blender-animate", image.path, "io", undefined, cause),
+              }).pipe(
+                Effect.map((png) => ({
+                  mimeType: "image/png" as const,
+                  data: png.toString("base64"),
+                  width: image.width,
+                  height: image.height,
+                })),
+              ),
+            );
+            if (screenshots.length === 0)
+              return yield* fail("tool-failed", "The Blender kit drew no pictures of the move.");
+            return {
+              text: [
+                ...made.summary,
+                ...(bar === null
+                  ? [
+                      `No bar: no clip in ${packs.join(", ") || "the lock's animation packs"} shares a word with ${input.clip}; pass bar (a library clip name) to measure one beside it.`,
+                    ]
+                  : []),
+                `Pass ${pass}: spec.json, bundle.json (every number) and the pictures, in order: contact sheet (front, side, 3/4; beats marked), onion strip, footprint (top down) and curves. Saved .blend source: ${blend}.`,
+                `Read the pictures and the numbers, change the spec, and animate ${input.clip} again; stop when neither improves. The clip is ${made.action} in the scene and ships with the character: game_blender_look mode review, then game_blender_export.`,
+              ].join("\n"),
+              action: made.action,
+              pass,
+              images: made.images.map((image) => `${pass}/${NodePath.basename(image.path)}`),
+              warnings: made.warnings,
+              screenshots,
+            } satisfies GameAnimateResult;
+          }),
+        ),
+      ),
+    character: (threadId, input) =>
+      projects.exclusive(threadId, "Blender character", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
+            const fail = (reason: GameOperationError["reason"], detail: string) =>
+              Effect.fail(opError("blender-character", root, reason, detail));
+            const realRoot = yield* realRootOf(root);
+            const style = yield* readGameStyle(realRoot);
+            if (style?.rig === undefined || resolveRig(style.rig) !== STANDARD_RIG)
+              return yield* fail(
+                "invalid-input",
+                `game_blender_character puts characters on the standard skeleton, and ${GAME_STYLE_FILE}${style === null ? " does not exist yet" : style.rig === undefined ? " names no rig" : `'s rig is ${style.rig}`}. Set ${GAME_STYLE_FILE}'s rig to "${STANDARD_RIG}" (and list an animation pack on it, such as quaternius-universal-animation-library, in packs) first.`,
+              );
+            const standardPacks = style.packs.filter(
+              (id) => LIBRARY_CATALOG.find((pack) => pack.id === id)?.rig === STANDARD_RIG,
+            );
+            let body: Record<string, unknown>;
+            if ("library" in input.body) {
+              const { pack: id, file } = input.body.library;
+              const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
+              if (pack?.rig !== STANDARD_RIG)
+                return yield* fail(
+                  "invalid-input",
+                  `${id} is not on ${STANDARD_RIG}; library bodies come from ${STANDARD_BODY_PACKS.join(" or ")}.`,
+                );
+              const refused = lockPackRefusal(pack, style);
+              if (refused !== null) return yield* fail("invalid-input", refused);
+              body = {
+                library: yield* library.packFile(id, file),
+                pack: id,
+                licence: pack.licence,
+              };
+            } else if ("mpfb" in input.body) {
+              const refused = lockCharacterRouteRefusal(
+                "mpfb-body",
+                characterRoute(yield* projects.read(root)),
+              );
+              if (refused !== null) return yield* fail("invalid-input", refused);
+              if ((yield* tools.blenderExtension("mpfb")) === null)
+                return yield* fail("tool-missing", MPFB_MISSING);
+              // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
+              if (!(yield* ensure(root)).mpfb) {
+                yield* drop(root);
+                if (!(yield* ensure(root)).mpfb)
+                  return yield* fail(
+                    "tool-failed",
+                    "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library bodies work meanwhile.",
+                  );
+              }
+              body = { mpfb: input.body.mpfb };
+            } else if (input.body.game.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`)) {
+              // A generated humanoid: conformed like any body, credited to its provider.
+              const generated = yield* generatedSource(
+                realRoot,
+                input.body.game,
+                "blender-character",
+                (id, delivered) => art.delivered(root, id, delivered),
+              );
+              if (generated.source.lane !== "character")
+                return yield* fail(
+                  "invalid-input",
+                  `${input.body.game} came from the ${generated.source.lane} lane. ${generated.source.lane === "creature" ? "A creature keeps its own rig and clips: bring it in with game_blender_assets_import (source generated), then review and export it." : "Only a character-lane humanoid is put on the standard skeleton."}`,
+                );
+              const refused = lockCharacterRouteRefusal(
+                "generated-body",
+                characterRoute(yield* projects.read(root)),
+              );
+              if (refused !== null) return yield* fail("invalid-input", refused);
+              body = { game: generated.file, source: generated.source.stamp };
+            } else {
+              const relative = input.body.game;
+              const absolute = NodePath.resolve(realRoot, relative);
+              const real = yield* Effect.promise(() =>
+                NodeFSP.realpath(absolute).catch(() => null),
+              );
+              if (
+                real === null ||
+                !real.startsWith(realRoot + NodePath.sep) ||
+                !/\.(glb|gltf)$/i.test(real)
+              )
+                return yield* fail(
+                  "invalid-input",
+                  `${relative} is not a .glb or .gltf file in this game; a game body is a game-relative path to an earlier export.`,
+                );
+              body = { game: real };
+            }
+            // A clip is a library name, or the game path of a GLB the motion lane delivered: the
+            // generation that delivered it is checked, and its clip carries that generation's stamp.
+            const asked = input.clips ?? STANDARD_CLIPS;
+            const isMotion = (clip: string) =>
+              clip.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`);
+            const fromLibrary = yield* resolveClips(
+              root,
+              asked.filter((clip) => !isMotion(clip)),
+              standardPacks,
+            );
+            const fromMotion = yield* Effect.forEach(asked.filter(isMotion), (clip) =>
+              Effect.gen(function* () {
+                const generated = yield* generatedSource(
+                  realRoot,
+                  clip,
+                  "blender-character",
+                  (id, delivered) => art.delivered(root, id, delivered),
+                );
+                if (generated.source.lane !== "motion")
+                  return yield* fail(
+                    "invalid-input",
+                    `${clip} came from the ${generated.source.lane} lane; clips take a library clip name or a GLB the motion lane delivered.`,
+                  );
+                const delivered = generated.source.generation.path;
+                return {
+                  pack: generated.source.stamp.from,
+                  name: motionClipName(
+                    NodePath.posix.basename(NodePath.posix.dirname(delivered)),
+                    delivered,
+                  ),
+                  path: generated.file,
+                  licence: generated.source.stamp.licence,
+                  source: generated.source.stamp,
+                  motion: true,
+                };
+              }),
+            );
+            const clips = [...fromLibrary, ...fromMotion];
+            const made = yield* kitCall(
+              root,
+              "blender-character",
+              decodeCharacterMade,
+              `kurambit.character(${pyJson({
+                name: input.name,
+                body,
+                standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
+                clips,
+                chains: input.chains ?? [],
+                replace: input.replace ?? false,
+                fit: input.fit ?? null,
+              })})`,
+            );
+            const blend = yield* saveBlend(root);
+            const chains = Object.entries(made.chains);
+            return {
+              text: [
+                `${made.armature}: ${made.meshes.length === 0 ? "no mesh" : made.meshes.join(", ")} on ${STANDARD_RIG}, ${made.height.toFixed(2)} m tall, rest frames ${made.restDeviation.toFixed(1)}° off the standard skeleton at most.`,
+                `Clips: ${made.clips.join(", ") || "none"}.`,
+                ...(chains.length === 0
+                  ? []
+                  : [
+                      `Chains (no clip keys them; the game springs them): ${chains.map(([name, bones]) => `${name} ${bones.join(", ")}`).join("; ")}.`,
+                    ]),
+                ...made.notes,
+                `Saved .blend source: ${blend}. Model the rest with game_blender_code (import kurambit for the helpers), parented to its bones; then game_blender_look mode review, then game_blender_export.`,
+              ].join("\n"),
+              armature: made.armature,
+              meshes: made.meshes,
+              clips: made.clips,
+              chains: made.chains,
+              restDeviation: made.restDeviation,
+              height: made.height,
+            };
+          }),
+        ),
+      ),
+    scene: (threadId, input) =>
+      projects.exclusive(threadId, "Blender scene", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
+            const text = yield* callText(root, "get_scene_info", { ...input });
+            return { text };
+          }),
+        ),
+      ),
+    assetsSearch: (threadId, input) =>
+      projects.exclusive(threadId, "Blender assets search", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
+            const refused = lockImportRefusal(input.source, yield* styleOf(root));
+            const text = yield* callText(root, "search_assets", {
+              source: input.source,
+              ...(input.query === undefined ? {} : { query: input.query }),
+              ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
+              ...(input.category === undefined ? {} : { category: input.category }),
+              limit: input.limit ?? 10,
+            });
+            return {
+              text:
+                refused === null
+                  ? text
+                  : `${text}\n\nAn import from ${input.source} would be refused: ${refused}`,
+            };
+          }),
+        ),
+      ),
+    assetsImport: (threadId, input) =>
+      projects.exclusive(threadId, "Blender assets import", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
+            if (input.source === "generated") return yield* importGenerated(root, input.path);
+            const id = input.id;
+            if (id === undefined)
+              return yield* opError(
+                "blender-assets-import",
+                root,
+                "invalid-input",
+                `source ${input.source} takes id: the asset id game_blender_assets_search listed.`,
+              );
+            const source = input.source;
+            // Refused before the live scene changes.
+            const style = yield* styleOf(root);
+            const outside = lockImportRefusal(source, style);
+            if (outside !== null)
+              return yield* opError("blender-assets-import", root, "invalid-input", outside);
+            // The import adds to the live scene; only what it added is exported,
+            // never the rest of the scene under the asset's name.
+            const before = yield* callText(root, "execute_blender_code", {
+              code: "import bpy, json\nprint('STUDIO_NAMES ' + json.dumps([o.name for o in bpy.data.objects]))\nprint('STUDIO_ACTIONS ' + json.dumps([a.name for a in bpy.data.actions]))\n",
+            });
+            const known = /STUDIO_NAMES (\[.*\])/.exec(before)?.[1];
+            const knownActions = /STUDIO_ACTIONS (\[.*\])/.exec(before)?.[1];
+            if (known === undefined || knownActions === undefined)
+              return yield* opError(
+                "blender-assets-import",
+                root,
+                "tool-failed",
+                `Blender did not list the scene's objects before the import: ${before.slice(0, 500)}`,
+              );
+            const text = yield* callText(root, "import_asset", {
+              source,
+              id,
+              ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
+              ...(input.targetSize === undefined ? {} : { target_size: input.targetSize }),
+              ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+              ...(input.applyTo === undefined ? {} : { apply_to: input.applyTo }),
+            });
+            // A rigged import must be on the lock's rig; one that is not leaves the scene again.
+            const rigged = yield* callText(root, "execute_blender_code", {
+              code: [
+                "import bpy, json",
+                ARMATURES_OF,
+                `before = set(${known})`,
+                "studio_armatures([o for o in bpy.context.scene.objects if o.name not in before])",
+              ].join("\n"),
+            });
+            const armatures = armaturesIn(rigged);
+            if (armatures === null)
+              return yield* opError(
+                "blender-assets-import",
+                root,
+                "tool-failed",
+                `Blender did not list the import's armatures: ${rigged.slice(0, 500)}`,
+              );
+            const offRig = lockArmatureRefusal(armatures, style);
+            if (offRig !== null) {
+              yield* callText(root, "execute_blender_code", {
+                code: [
+                  "import bpy",
+                  `before = set(${known})`,
+                  `before_actions = set(${knownActions})`,
+                  "for o in [o for o in bpy.data.objects if o.name not in before]: bpy.data.objects.remove(o, do_unlink=True)",
+                  // Its clips go too, or they ride along with any armature whose bones they key.
+                  "for a in [a for a in bpy.data.actions if a.name not in before_actions]: bpy.data.actions.remove(a)",
+                ].join("\n"),
+              });
+              return yield* opError(
+                "blender-assets-import",
+                root,
+                "invalid-input",
+                `${offRig} The import was taken out of the live scene again.`,
+              );
+            }
+            // The import stays in the live scene, stamped with its source and licence: the
+            // export composes the ledger from the stamps, after a review like anything built here.
+            // Its clips are stamped too, so a rigged import's animations are credited to it, not
+            // called made here; a clip keyed later on its armature carries no stamp and is.
+            const licence = importLicence(source, id, text);
+            const stampOf = (what: "mesh" | "clips") =>
+              JSON.stringify(
+                JSON.stringify({
+                  what,
+                  from: source,
+                  licence: licence.slice(0, 200),
+                  ai: false,
+                  credits: null,
+                }),
+              );
+            const stamped = yield* callText(root, "execute_blender_code", {
+              code: [
+                "import bpy, json",
+                `before = set(${known})`,
+                `before_actions = set(${knownActions})`,
+                `stamp = ${stampOf("mesh")}`,
+                "added = [o for o in bpy.context.scene.objects if o.name not in before and o.type in ('MESH', 'ARMATURE')]",
+                "for o in added: o['kurambit_source'] = stamp",
+                `for a in [a for a in bpy.data.actions if a.name not in before_actions]: a['kurambit_source'] = ${stampOf("clips")}`,
+                "print(f'STUDIO_STAMPED {len(added)}')",
+              ].join("\n"),
+            });
+            const count = Number(/STUDIO_STAMPED (\d+)/.exec(stamped)?.[1] ?? 0);
+            const blend = yield* saveBlend(root);
+            return {
+              text: `${text}\nSaved .blend source: ${blend}\n${count === 0 ? "The import added no model to the scene (an HDRI or a texture)." : `The import stays in the live scene, marked with its source and licence (${licence}); review and export it like anything you build (game_blender_look mode review, then game_blender_export).`}`,
+              blend,
+            };
+          }),
+        ),
+      ),
+    paint: (threadId, input) =>
+      projects.exclusive(threadId, "Blender paint", (root) =>
+        holding(root, pipelineLocked(root)(paintModel(root, input))),
+      ),
+    carve: (threadId, input) =>
+      projects.exclusive(threadId, "Blender carve", (root) =>
+        holding(root, pipelineLocked(root)(carveProp(root, input))),
+      ),
+    exportGlb: (threadId, input) =>
+      projects.exclusive(threadId, "Blender export", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
+            // An export promotes the candidate its review left for these objects as they are now:
+            // nothing is passed, measured or refused again here, so it ships what was reviewed.
+            const manifest = yield* projects.read(root);
+            const engineDir = manifestProject(manifest);
+            const realRoot = yield* realRootOf(root);
+            const style = yield* readGameStyle(realRoot);
+            const digest = yield* liveDigest(root, input.objects ?? null);
+            const key = reviewKey(digest.perObject, styleHash(style), yield* kitVersionOf);
+            const out = NodePath.join(realRoot, PIPELINE_DIR, key);
+            const candidate = yield* Effect.promise(() => readCandidate(out));
+            if (candidate === null)
+              return yield* opError(
+                "blender-export",
+                root,
+                "invalid-input",
+                `No review of these objects as they are now (${digest.objects.join(", ")}): call game_blender_look with mode review first. A change to them, or to ${GAME_STYLE_FILE}, since a review needs a new one, and a review covers exactly the objects it named.`,
+              );
+            if (candidate.refusals.length > 0)
+              return yield* opError(
+                "blender-export",
+                root,
+                "invalid-input",
+                `The review measured what the lock refuses; fix it and review again:\n${candidate.refusals.map((refusal) => `- [${refusal.code}] ${refusal.text}`).join("\n")}`,
+              );
+            // The person's route is read now, not at the review: they may have changed it since.
+            const routeRefusal =
+              routeRefusalOf(candidate, characterRoute(manifest)) ??
+              (yield* creatureRefusal(root, candidate));
+            if (routeRefusal !== null)
+              return yield* opError("blender-export", root, "invalid-input", routeRefusal);
+            const file = input.file ?? `${assetDirOf(manifest)}/${candidate.subject}.glb`;
+            if (
+              !file.startsWith(`${engineDir}/`) ||
+              file.split("/").some((segment) => segment === ".." || segment === "") ||
+              !/^[A-Za-z0-9_.-]{1,120}\.glb$/.test(NodePath.posix.basename(file))
+            )
+              return yield* opError(
+                "blender-export",
+                file,
+                "invalid-input",
+                `The destination must be a game-relative path under ${engineDir}/ ending in a plain <name>.glb (letters, digits, _ . -).`,
+              );
+            const directory = yield* Effect.tryPromise({
+              try: () => ensureGameDir(realRoot, NodePath.posix.dirname(file)),
+              catch: (cause) => opError("blender-export", file, "invalid-path", undefined, cause),
+            });
+            const absolute = NodePath.join(directory, NodePath.posix.basename(file));
+            const profile = engineProfile(manifest.engine.name);
+            const compress = profile.compressedModels;
+            if (input.simplify !== undefined && !compress)
+              return yield* opError(
+                "blender-export",
+                root,
+                "invalid-input",
+                `simplify is for three.js games; ${manifest.engine.name} makes its own levels of detail when it imports the model.`,
+              );
+            const reviewedBytes = yield* Effect.tryPromise({
+              try: () => NodeFSP.readFile(NodePath.join(out, CANDIDATE_GLB)),
+              catch: (cause) => opError("blender-export", file, "io", undefined, cause),
+            });
+            // A game made before compressed exports has a loader with no meshopt decoder: its model
+            // ships quantized but not meshopt-compressed, and the decoder is put in its vendor folder.
+            // Kurambit's runtime decodes them.
+            const decodes =
+              compress &&
+              (manifestRuntime(manifest) !== null ||
+                (yield* Effect.promise(() =>
+                  NodeFSP.readFile(
+                    NodePath.join(realRoot, engineDir, MESHOPT_LOADER),
+                    "utf8",
+                  ).catch(() => ""),
+                )).includes("setMeshoptDecoder"));
+            const decoderNote =
+              compress && !decodes ? yield* offerMeshoptDecoder(realRoot, engineDir) : null;
+            const measuredTriangles = candidate.measured.triangles;
+            const simplify =
+              input.simplify !== undefined && input.simplify < measuredTriangles
+                ? { ratio: input.simplify / measuredTriangles }
+                : undefined;
+            // The browser downloads the model: its geometry and clips ship meshopt-compressed (its
+            // images are already WebP from the pass), so nothing needs compressing after the export.
+            const shippedBytes = compress
+              ? yield* packGlb(
+                  reviewedBytes,
+                  { meshopt: decodes, ...(simplify === undefined ? {} : { simplify }) },
+                  (detail, cause) =>
+                    opError(
+                      "blender-export",
+                      file,
+                      "tool-failed",
+                      `gltfpack could not compress the reviewed model: ${detail}`,
+                      cause,
+                    ),
+                )
+              : reviewedBytes;
+            const shippedDoc = glbJson(shippedBytes);
+            const shippedTriangles =
+              shippedDoc === null ? measuredTriangles : gltfTriangles(shippedDoc);
+            // Written beside the target and renamed over it, so a game never loads half a model.
+            const glb = yield* Effect.tryPromise({
+              try: async () => {
+                const staged = `${absolute}.${NodeCrypto.randomUUID()}.part`;
+                try {
+                  await NodeFSP.writeFile(staged, shippedBytes);
+                  const hashed = await fileSha256(staged);
+                  await NodeFSP.rename(staged, absolute);
+                  return hashed;
+                } finally {
+                  await NodeFSP.rm(staged, { force: true });
+                }
+              },
+              catch: (cause) => opError("blender-export", file, "io", undefined, cause),
+            });
+            const sidecar = sidecarPathOf(file);
+            yield* writeText(
+              NodePath.join(directory, NodePath.posix.basename(sidecar)),
+              sidecarText({
+                ...sidecarOf(
+                  candidate,
+                  {
+                    name: NodePath.posix.basename(file),
+                    sha256: glb.sha256,
+                    bytes: glb.bytes,
+                  },
+                  characterRoute(manifest),
+                ),
+                triangles: shippedTriangles,
+              }),
+              "blender-export",
+            );
+            const credited = yield* recordProvenance(
+              realRoot,
+              [{ first: file, line: ledgerLine(file, candidate) }],
+              EXPORT_TOOL,
+            );
+            const blend = yield* saveBlend(root);
+            return {
+              text:
+                [
+                  `Exported the review ${key.slice(0, 12)} of ${candidate.objects.join(", ")}: ${file} (${(glb.bytes / 1048576).toFixed(2)} MB${compress ? `, compressed from ${(reviewedBytes.byteLength / 1048576).toFixed(2)} MB: ${decodes ? "meshopt geometry and clips" : "quantized geometry"}, WebP images` : ""}) and its sidecar ${sidecar}.`,
+                  ...(input.simplify === undefined
+                    ? []
+                    : simplify === undefined
+                      ? [
+                          `simplify ${input.simplify} keeps all ${measuredTriangles} triangles: the model has no more.`,
+                        ]
+                      : [
+                          `Simplified from ${measuredTriangles} to ${shippedTriangles} triangles (asked for at most ${input.simplify}${shippedTriangles > input.simplify ? ": the simplifier stops before it moves the surface by more than 1% of the model's size" : ""}).`,
+                        ]),
+                  ...(decoderNote === null ? [] : [decoderNote]),
+                  credited,
+                ].join(" ") +
+                `\nSaved .blend source: ${blend}\n${afterAddingArt(profile)}${profile.sidecarLoad === null ? "" : ` ${profile.sidecarLoad(candidate.subject, sidecar.slice(engineDir.length + 1))}`}`,
+              blend,
+              export: file,
+              sidecar,
+            };
+          }).pipe(pipelineLocked(root)),
+        ),
+      ),
+    renderSprites: (threadId, input) =>
+      projects.exclusive(threadId, "Blender sprites", (root) =>
+        holding(
+          root,
+          Effect.gen(function* () {
             const short = yield* memoryShortfall(
               memory,
-              "rendered Blender look",
+              "sprite render",
               RENDER_NEEDED_MB,
               "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
             );
             if (short !== null)
-              return yield* opError(
-                "blender-look",
-                root,
-                "low-memory",
-                `${short} A solid look (the default shading) needs far less and works now.`,
-              );
-          }
-          const result = yield* call(root, "look", {
-            ...(input.mode === undefined ? {} : { mode: input.mode }),
-            ...(input.target === undefined ? {} : { target: input.target }),
-            ...(input.views === undefined ? {} : { views: input.views }),
-            ...(input.distance === undefined ? {} : { distance: input.distance }),
-            ...(input.shading === undefined ? {} : { shading: input.shading }),
-            ...(input.frames === undefined ? {} : { frames: input.frames }),
-            ...(input.frameCount === undefined ? {} : { frame_count: input.frameCount }),
-            ...(input.view === undefined ? {} : { view: input.view }),
-            max_size: input.maxSize ?? 768,
-          });
-          const text = textOf(result);
-          const image = (result.content ?? []).find((entry) => entry.type === "image");
-          if (image?.data === undefined)
-            return { text: text === "" ? "Blender returned no image." : text };
-          const size = readImageDimensions(Buffer.from(image.data, "base64")) ?? {
-            width: input.maxSize ?? 768,
-            height: input.maxSize ?? 768,
-          };
-          return {
-            text: text === "" ? "See the attached viewport image." : text,
-            screenshot: {
-              mimeType: "image/png" as const,
-              data: image.data,
-              width: size.width,
-              height: size.height,
-            },
-          };
-        }),
-      ),
-    motionStrip: (root, clips, out) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          const realRoot = yield* realRootOf(root);
-          yield* kitCall(
-            root,
-            "blender-motion-strip",
-            decodeMotionStrip,
-            `kurambit.motion_strip(${pyJson({
-              clips: clips.map((clip) => ({
-                path: NodePath.join(realRoot, clip.path),
-                label: clip.label,
-              })),
-              out: NodePath.join(realRoot, out),
-            })})`,
-          );
-        }),
-      ),
-    modelViews: (root, model, out) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          const realRoot = yield* realRootOf(root);
-          yield* kitCall(
-            root,
-            "blender-model-views",
-            decodeMotionStrip,
-            `kurambit.model_views(${pyJson({
-              model: NodePath.join(realRoot, model),
-              out: NodePath.join(realRoot, out),
-            })})`,
-          );
-        }),
-      ),
-    animate: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          const fail = (reason: GameOperationError["reason"], detail: string) =>
-            Effect.fail(opError("blender-animate", root, reason, detail));
-          const realRoot = yield* realRootOf(root);
-          const style = yield* readGameStyle(realRoot);
-          const packs = (style?.packs ?? []).filter((id) => {
-            const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
-            return pack?.rig === STANDARD_RIG && pack.kinds.includes("animation");
-          });
-          // The bar: the named library clip, or the one sharing the most words with the move's name.
-          let barName = input.bar ?? null;
-          if (barName === null && packs.length > 0) {
-            const wanted = new Set([
-              ...clipWords(input.clip),
-              ...(typeof input.spec["name"] === "string" ? clipWords(input.spec["name"]) : []),
-            ]);
-            let best: { name: string; score: number } | null = null;
-            for (const id of packs)
-              for (const entry of yield* library.packClips(id))
-                for (const clip of entry.clips) {
-                  const score = clipWords(clip).filter((word) => wanted.has(word)).length;
-                  if (
-                    score > 0 &&
-                    (best === null ||
-                      score > best.score ||
-                      (score === best.score && clip.length < best.name.length))
-                  )
-                    best = { name: `${id}:${clip}`, score };
-                }
-            barName = best?.name ?? null;
-          }
-          const bar =
-            barName === null
-              ? null
-              : (yield* resolveClips(root, [barName], packs).pipe(
-                  Effect.mapError((cause) =>
-                    opError(
-                      "blender-animate",
-                      root,
-                      "invalid-input",
-                      cause.detail ?? cause.message,
-                    ),
-                  ),
-                ))[0]!;
-          const clipDir = `${ANIMATE_DIR}/${input.clip}`;
-          const passes = yield* Effect.promise(() =>
-            NodeFSP.readdir(NodePath.join(realRoot, clipDir)).catch(() => [] as string[]),
-          );
-          const pass = `${clipDir}/${1 + Math.max(0, ...passes.map(Number).filter(Number.isInteger))}`;
-          const out = yield* Effect.tryPromise({
-            try: () => ensureGameDir(realRoot, pass),
-            catch: (cause) => opError("blender-animate", pass, "invalid-path", undefined, cause),
-          });
-          yield* writeText(
-            NodePath.join(out, "spec.json"),
-            `${JSON.stringify(input.spec, null, 1)}\n`,
-            "blender-animate",
-          );
-          const made = yield* kitCall(
-            root,
-            "blender-animate",
-            decodeAnimated,
-            `kurambit.animate(${pyJson({
-              armature: input.character,
-              clip: input.clip,
-              spec: input.spec,
-              out,
-              bar: bar === null ? null : { path: bar.path, clip: bar.name, pack: bar.pack },
-            })})`,
-          );
-          const blend = yield* saveBlend(root);
-          const screenshots = yield* Effect.forEach(made.images, (image) =>
-            Effect.tryPromise({
-              try: () => NodeFSP.readFile(image.path),
-              catch: (cause) => opError("blender-animate", image.path, "io", undefined, cause),
-            }).pipe(
-              Effect.map((png) => ({
-                mimeType: "image/png" as const,
-                data: png.toString("base64"),
-                width: image.width,
-                height: image.height,
-              })),
-            ),
-          );
-          if (screenshots.length === 0)
-            return yield* fail("tool-failed", "The Blender kit drew no pictures of the move.");
-          return {
-            text: [
-              ...made.summary,
-              ...(bar === null
-                ? [
-                    `No bar: no clip in ${packs.join(", ") || "the lock's animation packs"} shares a word with ${input.clip}; pass bar (a library clip name) to measure one beside it.`,
-                  ]
-                : []),
-              `Pass ${pass}: spec.json, bundle.json (every number) and the pictures, in order: contact sheet (front, side, 3/4; beats marked), onion strip, footprint (top down) and curves. Saved .blend source: ${blend}.`,
-              `Read the pictures and the numbers, change the spec, and animate ${input.clip} again; stop when neither improves. The clip is ${made.action} in the scene and ships with the character: game_blender_look mode review, then game_blender_export.`,
-            ].join("\n"),
-            action: made.action,
-            pass,
-            images: made.images.map((image) => `${pass}/${NodePath.basename(image.path)}`),
-            warnings: made.warnings,
-            screenshots,
-          } satisfies GameAnimateResult;
-        }),
-      ),
-    character: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          const fail = (reason: GameOperationError["reason"], detail: string) =>
-            Effect.fail(opError("blender-character", root, reason, detail));
-          const realRoot = yield* realRootOf(root);
-          const style = yield* readGameStyle(realRoot);
-          if (style?.rig === undefined || resolveRig(style.rig) !== STANDARD_RIG)
-            return yield* fail(
-              "invalid-input",
-              `game_blender_character puts characters on the standard skeleton, and ${GAME_STYLE_FILE}${style === null ? " does not exist yet" : style.rig === undefined ? " names no rig" : `'s rig is ${style.rig}`}. Set ${GAME_STYLE_FILE}'s rig to "${STANDARD_RIG}" (and list an animation pack on it, such as quaternius-universal-animation-library, in packs) first.`,
-            );
-          const standardPacks = style.packs.filter(
-            (id) => LIBRARY_CATALOG.find((pack) => pack.id === id)?.rig === STANDARD_RIG,
-          );
-          let body: Record<string, unknown>;
-          if ("library" in input.body) {
-            const { pack: id, file } = input.body.library;
-            const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
-            if (pack?.rig !== STANDARD_RIG)
-              return yield* fail(
-                "invalid-input",
-                `${id} is not on ${STANDARD_RIG}; library bodies come from ${STANDARD_BODY_PACKS.join(" or ")}.`,
-              );
-            const refused = lockPackRefusal(pack, style);
-            if (refused !== null) return yield* fail("invalid-input", refused);
-            body = {
-              library: yield* library.packFile(id, file),
-              pack: id,
-              licence: pack.licence,
-            };
-          } else if ("mpfb" in input.body) {
-            const refused = lockCharacterRouteRefusal(
-              "mpfb-body",
-              characterRoute(yield* projects.read(root)),
-            );
-            if (refused !== null) return yield* fail("invalid-input", refused);
-            if ((yield* tools.blenderExtension("mpfb")) === null)
-              return yield* fail("tool-missing", MPFB_MISSING);
-            // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
-            if (!(yield* ensure(root)).mpfb) {
-              yield* drop(root);
-              if (!(yield* ensure(root)).mpfb)
-                return yield* fail(
-                  "tool-failed",
-                  "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library bodies work meanwhile.",
-                );
-            }
-            body = { mpfb: input.body.mpfb };
-          } else if (input.body.game.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`)) {
-            // A generated humanoid: conformed like any body, credited to its provider.
-            const generated = yield* generatedSource(
-              realRoot,
-              input.body.game,
-              "blender-character",
-              (id, delivered) => art.delivered(root, id, delivered),
-            );
-            if (generated.source.lane !== "character")
-              return yield* fail(
-                "invalid-input",
-                `${input.body.game} came from the ${generated.source.lane} lane. ${generated.source.lane === "creature" ? "A creature keeps its own rig and clips: bring it in with game_blender_assets_import (source generated), then review and export it." : "Only a character-lane humanoid is put on the standard skeleton."}`,
-              );
-            const refused = lockCharacterRouteRefusal(
-              "generated-body",
-              characterRoute(yield* projects.read(root)),
-            );
-            if (refused !== null) return yield* fail("invalid-input", refused);
-            body = { game: generated.file, source: generated.source.stamp };
-          } else {
-            const relative = input.body.game;
-            const absolute = NodePath.resolve(realRoot, relative);
-            const real = yield* Effect.promise(() => NodeFSP.realpath(absolute).catch(() => null));
-            if (
-              real === null ||
-              !real.startsWith(realRoot + NodePath.sep) ||
-              !/\.(glb|gltf)$/i.test(real)
-            )
-              return yield* fail(
-                "invalid-input",
-                `${relative} is not a .glb or .gltf file in this game; a game body is a game-relative path to an earlier export.`,
-              );
-            body = { game: real };
-          }
-          // A clip is a library name, or the game path of a GLB the motion lane delivered: the
-          // generation that delivered it is checked, and its clip carries that generation's stamp.
-          const asked = input.clips ?? STANDARD_CLIPS;
-          const isMotion = (clip: string) =>
-            clip.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`);
-          const fromLibrary = yield* resolveClips(
-            root,
-            asked.filter((clip) => !isMotion(clip)),
-            standardPacks,
-          );
-          const fromMotion = yield* Effect.forEach(asked.filter(isMotion), (clip) =>
-            Effect.gen(function* () {
-              const generated = yield* generatedSource(
-                realRoot,
-                clip,
-                "blender-character",
-                (id, delivered) => art.delivered(root, id, delivered),
-              );
-              if (generated.source.lane !== "motion")
-                return yield* fail(
-                  "invalid-input",
-                  `${clip} came from the ${generated.source.lane} lane; clips take a library clip name or a GLB the motion lane delivered.`,
-                );
-              const delivered = generated.source.generation.path;
-              return {
-                pack: generated.source.stamp.from,
-                name: motionClipName(
-                  NodePath.posix.basename(NodePath.posix.dirname(delivered)),
-                  delivered,
-                ),
-                path: generated.file,
-                licence: generated.source.stamp.licence,
-                source: generated.source.stamp,
-                motion: true,
-              };
-            }),
-          );
-          const clips = [...fromLibrary, ...fromMotion];
-          const made = yield* kitCall(
-            root,
-            "blender-character",
-            decodeCharacterMade,
-            `kurambit.character(${pyJson({
-              name: input.name,
-              body,
-              standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
-              clips,
-              chains: input.chains ?? [],
-              replace: input.replace ?? false,
-              fit: input.fit ?? null,
-            })})`,
-          );
-          const blend = yield* saveBlend(root);
-          const chains = Object.entries(made.chains);
-          return {
-            text: [
-              `${made.armature}: ${made.meshes.length === 0 ? "no mesh" : made.meshes.join(", ")} on ${STANDARD_RIG}, ${made.height.toFixed(2)} m tall, rest frames ${made.restDeviation.toFixed(1)}° off the standard skeleton at most.`,
-              `Clips: ${made.clips.join(", ") || "none"}.`,
-              ...(chains.length === 0
-                ? []
-                : [
-                    `Chains (no clip keys them; the game springs them): ${chains.map(([name, bones]) => `${name} ${bones.join(", ")}`).join("; ")}.`,
-                  ]),
-              ...made.notes,
-              `Saved .blend source: ${blend}. Model the rest with game_blender_code (import kurambit for the helpers), parented to its bones; then game_blender_look mode review, then game_blender_export.`,
-            ].join("\n"),
-            armature: made.armature,
-            meshes: made.meshes,
-            clips: made.clips,
-            chains: made.chains,
-            restDeviation: made.restDeviation,
-            height: made.height,
-          };
-        }),
-      ),
-    scene: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          const text = yield* callText(root, "get_scene_info", { ...input });
-          return { text };
-        }),
-      ),
-    assetsSearch: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          const refused = lockImportRefusal(input.source, yield* styleOf(root));
-          const text = yield* callText(root, "search_assets", {
-            source: input.source,
-            ...(input.query === undefined ? {} : { query: input.query }),
-            ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
-            ...(input.category === undefined ? {} : { category: input.category }),
-            limit: input.limit ?? 10,
-          });
-          return {
-            text:
-              refused === null
-                ? text
-                : `${text}\n\nAn import from ${input.source} would be refused: ${refused}`,
-          };
-        }),
-      ),
-    assetsImport: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          if (input.source === "generated") return yield* importGenerated(root, input.path);
-          const id = input.id;
-          if (id === undefined)
-            return yield* opError(
-              "blender-assets-import",
-              root,
-              "invalid-input",
-              `source ${input.source} takes id: the asset id game_blender_assets_search listed.`,
-            );
-          const source = input.source;
-          // Refused before the live scene changes.
-          const style = yield* styleOf(root);
-          const outside = lockImportRefusal(source, style);
-          if (outside !== null)
-            return yield* opError("blender-assets-import", root, "invalid-input", outside);
-          // The import adds to the live scene; only what it added is exported,
-          // never the rest of the scene under the asset's name.
-          const before = yield* callText(root, "execute_blender_code", {
-            code: "import bpy, json\nprint('STUDIO_NAMES ' + json.dumps([o.name for o in bpy.data.objects]))\nprint('STUDIO_ACTIONS ' + json.dumps([a.name for a in bpy.data.actions]))\n",
-          });
-          const known = /STUDIO_NAMES (\[.*\])/.exec(before)?.[1];
-          const knownActions = /STUDIO_ACTIONS (\[.*\])/.exec(before)?.[1];
-          if (known === undefined || knownActions === undefined)
-            return yield* opError(
-              "blender-assets-import",
-              root,
-              "tool-failed",
-              `Blender did not list the scene's objects before the import: ${before.slice(0, 500)}`,
-            );
-          const text = yield* callText(root, "import_asset", {
-            source,
-            id,
-            ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
-            ...(input.targetSize === undefined ? {} : { target_size: input.targetSize }),
-            ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
-            ...(input.applyTo === undefined ? {} : { apply_to: input.applyTo }),
-          });
-          // A rigged import must be on the lock's rig; one that is not leaves the scene again.
-          const rigged = yield* callText(root, "execute_blender_code", {
-            code: [
-              "import bpy, json",
-              ARMATURES_OF,
-              `before = set(${known})`,
-              "studio_armatures([o for o in bpy.context.scene.objects if o.name not in before])",
-            ].join("\n"),
-          });
-          const armatures = armaturesIn(rigged);
-          if (armatures === null)
-            return yield* opError(
-              "blender-assets-import",
-              root,
-              "tool-failed",
-              `Blender did not list the import's armatures: ${rigged.slice(0, 500)}`,
-            );
-          const offRig = lockArmatureRefusal(armatures, style);
-          if (offRig !== null) {
-            yield* callText(root, "execute_blender_code", {
-              code: [
-                "import bpy",
-                `before = set(${known})`,
-                `before_actions = set(${knownActions})`,
-                "for o in [o for o in bpy.data.objects if o.name not in before]: bpy.data.objects.remove(o, do_unlink=True)",
-                // Its clips go too, or they ride along with any armature whose bones they key.
-                "for a in [a for a in bpy.data.actions if a.name not in before_actions]: bpy.data.actions.remove(a)",
-              ].join("\n"),
-            });
-            return yield* opError(
-              "blender-assets-import",
-              root,
-              "invalid-input",
-              `${offRig} The import was taken out of the live scene again.`,
-            );
-          }
-          // The import stays in the live scene, stamped with its source and licence: the
-          // export composes the ledger from the stamps, after a review like anything built here.
-          // Its clips are stamped too, so a rigged import's animations are credited to it, not
-          // called made here; a clip keyed later on its armature carries no stamp and is.
-          const licence = importLicence(source, id, text);
-          const stampOf = (what: "mesh" | "clips") =>
-            JSON.stringify(
-              JSON.stringify({
-                what,
-                from: source,
-                licence: licence.slice(0, 200),
-                ai: false,
-                credits: null,
-              }),
-            );
-          const stamped = yield* callText(root, "execute_blender_code", {
-            code: [
-              "import bpy, json",
-              `before = set(${known})`,
-              `before_actions = set(${knownActions})`,
-              `stamp = ${stampOf("mesh")}`,
-              "added = [o for o in bpy.context.scene.objects if o.name not in before and o.type in ('MESH', 'ARMATURE')]",
-              "for o in added: o['kurambit_source'] = stamp",
-              `for a in [a for a in bpy.data.actions if a.name not in before_actions]: a['kurambit_source'] = ${stampOf("clips")}`,
-              "print(f'STUDIO_STAMPED {len(added)}')",
-            ].join("\n"),
-          });
-          const count = Number(/STUDIO_STAMPED (\d+)/.exec(stamped)?.[1] ?? 0);
-          const blend = yield* saveBlend(root);
-          return {
-            text: `${text}\nSaved .blend source: ${blend}\n${count === 0 ? "The import added no model to the scene (an HDRI or a texture)." : `The import stays in the live scene, marked with its source and licence (${licence}); review and export it like anything you build (game_blender_look mode review, then game_blender_export).`}`,
-            blend,
-          };
-        }),
-      ),
-    paint: (root, input) => holding(root, pipelineLocked(root)(paintModel(root, input))),
-    carve: (root, input) => holding(root, pipelineLocked(root)(carveProp(root, input))),
-    exportGlb: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          // An export promotes the candidate its review left for these objects as they are now:
-          // nothing is passed, measured or refused again here, so it ships what was reviewed.
-          const manifest = yield* projects.read(root);
-          const engineDir = manifestProject(manifest);
-          const realRoot = yield* realRootOf(root);
-          const style = yield* readGameStyle(realRoot);
-          const digest = yield* liveDigest(root, input.objects ?? null);
-          const key = reviewKey(digest.perObject, styleHash(style), yield* kitVersionOf);
-          const out = NodePath.join(realRoot, PIPELINE_DIR, key);
-          const candidate = yield* Effect.promise(() => readCandidate(out));
-          if (candidate === null)
-            return yield* opError(
-              "blender-export",
-              root,
-              "invalid-input",
-              `No review of these objects as they are now (${digest.objects.join(", ")}): call game_blender_look with mode review first. A change to them, or to ${GAME_STYLE_FILE}, since a review needs a new one, and a review covers exactly the objects it named.`,
-            );
-          if (candidate.refusals.length > 0)
-            return yield* opError(
-              "blender-export",
-              root,
-              "invalid-input",
-              `The review measured what the lock refuses; fix it and review again:\n${candidate.refusals.map((refusal) => `- [${refusal.code}] ${refusal.text}`).join("\n")}`,
-            );
-          // The person's route is read now, not at the review: they may have changed it since.
-          const routeRefusal =
-            routeRefusalOf(candidate, characterRoute(manifest)) ??
-            (yield* creatureRefusal(root, candidate));
-          if (routeRefusal !== null)
-            return yield* opError("blender-export", root, "invalid-input", routeRefusal);
-          const file = input.file ?? `${assetDirOf(manifest)}/${candidate.subject}.glb`;
-          if (
-            !file.startsWith(`${engineDir}/`) ||
-            file.split("/").some((segment) => segment === ".." || segment === "") ||
-            !/^[A-Za-z0-9_.-]{1,120}\.glb$/.test(NodePath.posix.basename(file))
-          )
-            return yield* opError(
-              "blender-export",
-              file,
-              "invalid-input",
-              `The destination must be a game-relative path under ${engineDir}/ ending in a plain <name>.glb (letters, digits, _ . -).`,
-            );
-          const directory = yield* Effect.tryPromise({
-            try: () => ensureGameDir(realRoot, NodePath.posix.dirname(file)),
-            catch: (cause) => opError("blender-export", file, "invalid-path", undefined, cause),
-          });
-          const absolute = NodePath.join(directory, NodePath.posix.basename(file));
-          const profile = engineProfile(manifest.engine.name);
-          const compress = profile.compressedModels;
-          if (input.simplify !== undefined && !compress)
-            return yield* opError(
-              "blender-export",
-              root,
-              "invalid-input",
-              `simplify is for three.js games; ${manifest.engine.name} makes its own levels of detail when it imports the model.`,
-            );
-          const reviewedBytes = yield* Effect.tryPromise({
-            try: () => NodeFSP.readFile(NodePath.join(out, CANDIDATE_GLB)),
-            catch: (cause) => opError("blender-export", file, "io", undefined, cause),
-          });
-          // A game made before compressed exports has a loader with no meshopt decoder: its model
-          // ships quantized but not meshopt-compressed, and the decoder is put in its vendor folder.
-          // Kurambit's runtime decodes them.
-          const decodes =
-            compress &&
-            (manifestRuntime(manifest) !== null ||
-              (yield* Effect.promise(() =>
-                NodeFSP.readFile(NodePath.join(realRoot, engineDir, MESHOPT_LOADER), "utf8").catch(
-                  () => "",
-                ),
-              )).includes("setMeshoptDecoder"));
-          const decoderNote =
-            compress && !decodes ? yield* offerMeshoptDecoder(realRoot, engineDir) : null;
-          const measuredTriangles = candidate.measured.triangles;
-          const simplify =
-            input.simplify !== undefined && input.simplify < measuredTriangles
-              ? { ratio: input.simplify / measuredTriangles }
-              : undefined;
-          // The browser downloads the model: its geometry and clips ship meshopt-compressed (its
-          // images are already WebP from the pass), so nothing needs compressing after the export.
-          const shippedBytes = compress
-            ? yield* packGlb(
-                reviewedBytes,
-                { meshopt: decodes, ...(simplify === undefined ? {} : { simplify }) },
-                (detail, cause) =>
-                  opError(
-                    "blender-export",
-                    file,
-                    "tool-failed",
-                    `gltfpack could not compress the reviewed model: ${detail}`,
-                    cause,
-                  ),
-              )
-            : reviewedBytes;
-          const shippedDoc = glbJson(shippedBytes);
-          const shippedTriangles =
-            shippedDoc === null ? measuredTriangles : gltfTriangles(shippedDoc);
-          // Written beside the target and renamed over it, so a game never loads half a model.
-          const glb = yield* Effect.tryPromise({
-            try: async () => {
-              const staged = `${absolute}.${NodeCrypto.randomUUID()}.part`;
-              try {
-                await NodeFSP.writeFile(staged, shippedBytes);
-                const hashed = await fileSha256(staged);
-                await NodeFSP.rename(staged, absolute);
-                return hashed;
-              } finally {
-                await NodeFSP.rm(staged, { force: true });
-              }
-            },
-            catch: (cause) => opError("blender-export", file, "io", undefined, cause),
-          });
-          const sidecar = sidecarPathOf(file);
-          yield* writeText(
-            NodePath.join(directory, NodePath.posix.basename(sidecar)),
-            sidecarText({
-              ...sidecarOf(
-                candidate,
-                {
-                  name: NodePath.posix.basename(file),
-                  sha256: glb.sha256,
-                  bytes: glb.bytes,
-                },
-                characterRoute(manifest),
-              ),
-              triangles: shippedTriangles,
-            }),
-            "blender-export",
-          );
-          const credited = yield* recordProvenance(
-            realRoot,
-            [{ first: file, line: ledgerLine(file, candidate) }],
-            EXPORT_TOOL,
-          );
-          const blend = yield* saveBlend(root);
-          return {
-            text:
-              [
-                `Exported the review ${key.slice(0, 12)} of ${candidate.objects.join(", ")}: ${file} (${(glb.bytes / 1048576).toFixed(2)} MB${compress ? `, compressed from ${(reviewedBytes.byteLength / 1048576).toFixed(2)} MB: ${decodes ? "meshopt geometry and clips" : "quantized geometry"}, WebP images` : ""}) and its sidecar ${sidecar}.`,
-                ...(input.simplify === undefined
-                  ? []
-                  : simplify === undefined
-                    ? [
-                        `simplify ${input.simplify} keeps all ${measuredTriangles} triangles: the model has no more.`,
-                      ]
-                    : [
-                        `Simplified from ${measuredTriangles} to ${shippedTriangles} triangles (asked for at most ${input.simplify}${shippedTriangles > input.simplify ? ": the simplifier stops before it moves the surface by more than 1% of the model's size" : ""}).`,
-                      ]),
-                ...(decoderNote === null ? [] : [decoderNote]),
-                credited,
-              ].join(" ") +
-              `\nSaved .blend source: ${blend}\n${afterAddingArt(profile)}${profile.sidecarLoad === null ? "" : ` ${profile.sidecarLoad(candidate.subject, sidecar.slice(engineDir.length + 1))}`}`,
-            blend,
-            export: file,
-            sidecar,
-          };
-        }).pipe(pipelineLocked(root)),
-      ),
-    renderSprites: (root, input) =>
-      holding(
-        root,
-        Effect.gen(function* () {
-          const short = yield* memoryShortfall(
-            memory,
-            "sprite render",
-            RENDER_NEEDED_MB,
-            "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
-          );
-          if (short !== null)
-            return yield* opError("blender-render-sprites", root, "low-memory", short);
-          // Renders in a throwaway scene and changes nothing in the live one, so no .blend save.
-          return yield* renderSprites({ callText, manifest: projects.read }, root, input);
-        }),
+              return yield* opError("blender-render-sprites", root, "low-memory", short);
+            // Renders in a throwaway scene and changes nothing in the live one, so no .blend save.
+            return yield* renderSprites({ callText, manifest: projects.read }, root, input);
+          }),
+        ),
       ),
     stop: drop,
   });

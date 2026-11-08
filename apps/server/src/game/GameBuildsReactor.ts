@@ -14,7 +14,7 @@ import { engineProfile } from "./engineProfile.ts";
 import * as GameBuilds from "./GameBuilds.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import * as GameService from "./GameService.ts";
+import * as GameStage from "./GameStage.ts";
 
 /**
  * Keeps the Builds rail current without polling: a turn's checkpoint, a
@@ -45,7 +45,7 @@ const make = Effect.gen(function* () {
   const operations = yield* GameOperations.GameOperations;
   const projects = yield* GameProjectService.GameProjectService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
-  const game = yield* GameService.GameService;
+  const stage = yield* GameStage.GameStage;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const scope = yield* Effect.scope;
   const perThread = yield* KeyedLock.make<string>();
@@ -104,7 +104,7 @@ const make = Effect.gen(function* () {
           Effect.orElseSucceed(() => false),
         );
       if (!stopped)
-        yield* game
+        yield* stage
           .playCurrent(event.threadId)
           .pipe(
             Effect.catchCause((cause) =>

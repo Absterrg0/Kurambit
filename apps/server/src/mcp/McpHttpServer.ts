@@ -39,11 +39,8 @@ import {
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import { engineCapabilities } from "../game/engineProfile.ts";
-import * as GameBuilds from "../game/GameBuilds.ts";
 import * as GameProjectService from "../game/GameProjectService.ts";
-import * as GameRunControl from "../game/GameRunControl.ts";
 import * as GameToolchain from "../game/GameToolchain.ts";
-import * as GameService from "../game/GameService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -811,9 +808,15 @@ const registerImageTool = <T extends Tool.Any, E, R>(
 
 const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
 
+/**
+ * A tool's services, taken once when it is registered; the caller's invocation
+ * context arrives with each request.
+ */
+const registrationServices = <T extends Tool.Any>(_tool: T) =>
+  Effect.context<Exclude<Tool.HandlerServices<T>, McpInvocationContext.McpInvocationContext>>();
+
 const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook")(function* () {
-  const games = yield* GameService.GameService;
-  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const services = yield* registrationServices(GameBlenderLookTool);
   const built = yield* GameBlenderLookToolkit;
   yield* registerImageTool(
     GameBlenderLookTool,
@@ -821,11 +824,7 @@ const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook
       built
         .handle("game_blender_look", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) =>
-      effect.pipe(
-        Effect.provideService(GameService.GameService, games),
-        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-      ),
+    (effect) => effect.pipe(Effect.provideContext(services)),
     "blender-look",
     (error) => (error instanceof Error ? error.message : "Game blender look failed."),
   );
@@ -834,8 +833,7 @@ const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook
 const registerGameBlenderRenderSprites = Effect.fn(
   "McpHttpServer.registerGameBlenderRenderSprites",
 )(function* () {
-  const games = yield* GameService.GameService;
-  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const services = yield* registrationServices(GameBlenderRenderSpritesTool);
   const built = yield* GameBlenderRenderSpritesToolkit;
   yield* registerImageTool(
     GameBlenderRenderSpritesTool,
@@ -843,19 +841,14 @@ const registerGameBlenderRenderSprites = Effect.fn(
       built
         .handle("game_blender_render_sprites", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) =>
-      effect.pipe(
-        Effect.provideService(GameService.GameService, games),
-        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-      ),
+    (effect) => effect.pipe(Effect.provideContext(services)),
     "blender-render-sprites",
     (error) => (error instanceof Error ? error.message : "Game blender sprite render failed."),
   );
 });
 
 const registerGameAnimate = Effect.fn("McpHttpServer.registerGameAnimate")(function* () {
-  const games = yield* GameService.GameService;
-  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const services = yield* registrationServices(GameAnimateTool);
   const built = yield* GameAnimateToolkit;
   yield* registerImageTool(
     GameAnimateTool,
@@ -863,11 +856,7 @@ const registerGameAnimate = Effect.fn("McpHttpServer.registerGameAnimate")(funct
       built
         .handle("game_animate", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) =>
-      effect.pipe(
-        Effect.provideService(GameService.GameService, games),
-        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-      ),
+    (effect) => effect.pipe(Effect.provideContext(services)),
     "animate",
     (error) => (error instanceof Error ? error.message : "Game animate failed."),
   );
@@ -875,10 +864,7 @@ const registerGameAnimate = Effect.fn("McpHttpServer.registerGameAnimate")(funct
 
 /** game_more runs asked-for tools, the Blender look and game_animate among them, so it carries images too. */
 const registerGameMore = Effect.fn("McpHttpServer.registerGameMore")(function* () {
-  const games = yield* GameService.GameService;
-  const threads = yield* ThreadManagementService.ThreadManagementService;
-  const builds = yield* GameBuilds.GameBuilds;
-  const runs = yield* GameRunControl.GameRunControl;
+  const services = yield* registrationServices(GameMoreTool);
   const built = yield* GameMoreToolkit;
   yield* registerImageTool(
     GameMoreTool,
@@ -886,21 +872,14 @@ const registerGameMore = Effect.fn("McpHttpServer.registerGameMore")(function* (
       built
         .handle("game_more", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) =>
-      effect.pipe(
-        Effect.provideService(GameService.GameService, games),
-        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-        Effect.provideService(GameBuilds.GameBuilds, builds),
-        Effect.provideService(GameRunControl.GameRunControl, runs),
-      ),
+    (effect) => effect.pipe(Effect.provideContext(services)),
     "more",
     (error) => (error instanceof Error ? error.message : "game_more failed."),
   );
 });
 
 const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSearch")(function* () {
-  const games = yield* GameService.GameService;
-  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const services = yield* registrationServices(GameAssetsSearchTool);
   const built = yield* GameAssetsSearchToolkit;
   yield* registerImageTool(
     GameAssetsSearchTool,
@@ -908,11 +887,7 @@ const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSear
       built
         .handle("game_assets_search", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) =>
-      effect.pipe(
-        Effect.provideService(GameService.GameService, games),
-        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-      ),
+    (effect) => effect.pipe(Effect.provideContext(services)),
     "assets-search",
     (error) => (error instanceof Error ? error.message : "Game assets search failed."),
   );
@@ -920,8 +895,7 @@ const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSear
 
 const registerGameUnityScreenshot = Effect.fn("McpHttpServer.registerGameUnityScreenshot")(
   function* () {
-    const games = yield* GameService.GameService;
-    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const services = yield* registrationServices(GameUnityScreenshotTool);
     const built = yield* GameUnityScreenshotToolkit;
     yield* registerImageTool(
       GameUnityScreenshotTool,
@@ -929,11 +903,7 @@ const registerGameUnityScreenshot = Effect.fn("McpHttpServer.registerGameUnitySc
         built
           .handle("game_unity_screenshot", payload, undefined, options)
           .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-      (effect) =>
-        effect.pipe(
-          Effect.provideService(GameService.GameService, games),
-          Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-        ),
+      (effect) => effect.pipe(Effect.provideContext(services)),
       "unity-screenshot",
       (error) => (error instanceof Error ? error.message : "Game Unity screenshot failed."),
     );

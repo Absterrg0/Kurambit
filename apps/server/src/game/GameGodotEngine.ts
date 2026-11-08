@@ -77,7 +77,7 @@ const response = (
  * The Godot backend: every Godot process invocation this server makes for the
  * production import/check/export slice, plus the project-settings and output
  * parsing those invocations need. Source binding and stage order stay in
- * GameService; this module never reads game.json and never writes records.
+ * GameEngine and GameExport; this module never reads game.json and never writes records.
  */
 export const makeGodotBackend = (
   processes: GameProcesses.GameProcesses["Service"],

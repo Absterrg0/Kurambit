@@ -19,7 +19,7 @@ import * as GameBuilds from "./GameBuilds.ts";
 import * as GameBuildsReactor from "./GameBuildsReactor.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import * as GameService from "./GameService.ts";
+import * as GameStage from "./GameStage.ts";
 
 const ROOT = "/games/arena";
 const REF = CheckpointRef.make("refs/kurambit/orchestration-v2/checkpoints/scope/ordinal/1");
@@ -91,7 +91,7 @@ const run = (
                 runs: [{ id: "run-1", status: turnStatus }],
               })) as unknown as ProjectionStore.ProjectionStoreV2["Service"]["getThreadRecords"],
           }),
-          Layer.mock(GameService.GameService)({
+          Layer.mock(GameStage.GameStage)({
             playCurrent: (threadId) => Effect.sync(() => void played.push(threadId)),
           }),
           Layer.mock(CheckpointStore.CheckpointStore)({

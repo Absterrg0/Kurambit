@@ -23,6 +23,7 @@ import {
   type GameUnityScreenshotResult,
   type GameUnityTextResult,
   type GameUnityToolsResult,
+  type ThreadId,
 } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
@@ -576,26 +577,28 @@ export class GameUnity extends Context.Service<
      */
     readonly wedged: (root: string, why: string) => Effect.Effect<void>;
     /** `game_unity_tools`: the editing tools `game_unity_edit` may call. Refuses a game that is not Unity's. */
-    readonly listTools: (root: string) => Effect.Effect<GameUnityToolsResult, GameOperationError>;
+    readonly listTools: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameUnityToolsResult, GameOperationError>;
     /** `game_unity_edit`: one editing tool and the scene save, in one hold; fails when the save does not land. */
     readonly edit: (
-      root: string,
+      threadId: ThreadId,
       input: GameUnityEditInput,
     ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
     readonly evaluate: (
-      root: string,
+      threadId: ThreadId,
       input: GameUnityEvalInput,
     ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
     readonly play: (
-      root: string,
+      threadId: ThreadId,
       input: GameUnityPlayInput,
     ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
     readonly screenshot: (
-      root: string,
+      threadId: ThreadId,
       input: GameUnityScreenshotInput,
     ) => Effect.Effect<GameUnityScreenshotResult, GameOperationError>;
     readonly console: (
-      root: string,
+      threadId: ThreadId,
       input: GameUnityConsoleInput,
     ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
   }
@@ -1341,39 +1344,53 @@ const make = Effect.gen(function* () {
         const session = sessions.get(root);
         if (session !== undefined) breakSession(session, why);
       }),
-    listTools: (root) =>
-      Effect.andThen(unityGame(root, "Unity tools"), listTools(root)).pipe(
-        Effect.map((tools) => ({ tools })),
+    listTools: (threadId) =>
+      projects.exclusive(threadId, "Unity tools", (root) =>
+        Effect.andThen(unityGame(root, "Unity tools"), listTools(root)).pipe(
+          Effect.map((tools) => ({ tools })),
+        ),
       ),
-    edit,
-    evaluate: (root, input) =>
-      Effect.andThen(
-        unityGame(root, "Unity eval"),
-        call(root, "script_eval", { code: input.code, timeout: 60 }, 90_000),
-      ).pipe(Effect.map((result) => ({ text: textOf(result).slice(0, 8000) }))),
-    play: (root, input) =>
-      Effect.gen(function* () {
-        yield* unityGame(root, "Unity play");
-        // An unfocused editor freezes play mode at frame 1 without auto-tick.
-        if (input.action === "start") yield* call(root, "editor_set_auto_tick", {});
-        const result = yield* call(
-          root,
-          input.action === "start" ? "editor_playmode_start" : "editor_playmode_stop",
-          {},
-          120_000,
-        );
-        return { text: textOf(result) };
-      }),
-    screenshot: (root, input) =>
-      Effect.andThen(
-        unityGame(root, "Unity screenshot"),
-        call(root, "capture_game_view", { source: "camera", max_resolution: input.maxSize ?? 960 }),
-      ).pipe(Effect.map(screenshotOf)),
-    console: (root, input) =>
-      Effect.andThen(
-        unityGame(root, "Unity console"),
-        call(root, "console_get", { level: input.level ?? "log", tail: input.tail ?? 50 }),
-      ).pipe(Effect.map((result) => ({ text: textOf(result).slice(0, 12000) }))),
+    edit: (threadId, input) =>
+      projects.exclusive(threadId, "Unity edit", (root) => edit(root, input)),
+    evaluate: (threadId, input) =>
+      projects.exclusive(threadId, "Unity eval", (root) =>
+        Effect.andThen(
+          unityGame(root, "Unity eval"),
+          call(root, "script_eval", { code: input.code, timeout: 60 }, 90_000),
+        ).pipe(Effect.map((result) => ({ text: textOf(result).slice(0, 8000) }))),
+      ),
+    play: (threadId, input) =>
+      projects.exclusive(threadId, "Unity play", (root) =>
+        Effect.gen(function* () {
+          yield* unityGame(root, "Unity play");
+          // An unfocused editor freezes play mode at frame 1 without auto-tick.
+          if (input.action === "start") yield* call(root, "editor_set_auto_tick", {});
+          const result = yield* call(
+            root,
+            input.action === "start" ? "editor_playmode_start" : "editor_playmode_stop",
+            {},
+            120_000,
+          );
+          return { text: textOf(result) };
+        }),
+      ),
+    screenshot: (threadId, input) =>
+      projects.exclusive(threadId, "Unity screenshot", (root) =>
+        Effect.andThen(
+          unityGame(root, "Unity screenshot"),
+          call(root, "capture_game_view", {
+            source: "camera",
+            max_resolution: input.maxSize ?? 960,
+          }),
+        ).pipe(Effect.map(screenshotOf)),
+      ),
+    console: (threadId, input) =>
+      projects.exclusive(threadId, "Unity console", (root) =>
+        Effect.andThen(
+          unityGame(root, "Unity console"),
+          call(root, "console_get", { level: input.level ?? "log", tail: input.tail ?? 50 }),
+        ).pipe(Effect.map((result) => ({ text: textOf(result).slice(0, 12000) }))),
+      ),
     hold: (root) => (effect) => withSession(root, () => effect),
     cli: (root, args, options) =>
       withSession(root, (session) =>

@@ -17,6 +17,7 @@ import {
   GAME_STYLE_FILE,
   type GameLibraryKind,
   manifestProject,
+  type ThreadId,
 } from "@kurambit/contracts";
 import { LIBRARY_CATALOG, LIBRARY_FAMILIES } from "./assetLibraryCatalog.ts";
 import { parseEbur128 } from "./audioLoudness.ts";
@@ -98,12 +99,14 @@ const KIND_MEDIA: Record<GameLibraryKind, LibraryMedia> = {
 export class GameAssetLibrary extends Context.Service<
   GameAssetLibrary,
   {
+    /** The pinned CC0 library: packs, or files inside one pack with a contact sheet. */
     readonly search: (
-      root: string,
+      threadId: ThreadId,
       input: GameAssetsSearchInput,
     ) => Effect.Effect<GameAssetsSearchResult, GameOperationError>;
+    /** Copy library files into the engine's asset dir and credit them in ASSETS.md, as the game's operation. */
     readonly add: (
-      root: string,
+      threadId: ThreadId,
       input: GameAssetsAddInput,
     ) => Effect.Effect<GameAssetsAddResult, GameOperationError>;
     /** The absolute cached path of one pack file, fetching the pack once; refused outside the pack. */
@@ -1433,7 +1436,16 @@ const make = Effect.gen(function* () {
       return { path, file: yield* packFile(pack.id, path) };
     });
 
-  return GameAssetLibrary.of({ search, add, packFile, packClips, packPicture });
+  return GameAssetLibrary.of({
+    // Search only reads the game and writes its contact sheet under builds/, so it never waits on the game's lock.
+    search: (threadId, input) =>
+      Effect.flatMap(projects.resolve(threadId), (root) => search(root, input)),
+    add: (threadId, input) =>
+      projects.exclusive(threadId, "Library add", (root) => add(root, input)),
+    packFile,
+    packClips,
+    packPicture,
+  });
 });
 
 export const layer = Layer.effect(GameAssetLibrary, make);

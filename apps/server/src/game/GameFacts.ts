@@ -61,6 +61,7 @@ import {
   winnableOf,
 } from "./buildFacts.ts";
 import * as GameBot from "./GameBot.ts";
+import * as GameEngine from "./GameEngine.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import { engineProfile } from "./engineProfile.ts";
@@ -68,7 +69,6 @@ import { ensureGameDir } from "./gameKeptSaves.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { findExecutable } from "./GameProcesses.ts";
-import * as GameService from "./GameService.ts";
 import { HOST_OS } from "./processHost.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
@@ -333,7 +333,7 @@ export class GameFacts extends Context.Service<
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const game = yield* GameService.GameService;
+  const engines = yield* GameEngine.GameEngine;
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const bots = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
@@ -696,7 +696,7 @@ const make = Effect.gen(function* () {
           };
         }
         if (tiers.has("boots")) {
-          const boots = yield* step(game.checkIn(copy, OWNER)).pipe(
+          const boots = yield* step(engines.checkIn(copy, OWNER)).pipe(
             Effect.map(bootsFact),
             Effect.catchTags({
               GameOperationError: (error) =>
@@ -738,7 +738,7 @@ const make = Effect.gen(function* () {
         const runBot = (file: string, seconds: number, decider: "policy" | "jev") =>
           Effect.andThen(
             idleMachine,
-            withMachine(step(game.botRunIn(copy, { file, seconds, mode: "play", decider }))),
+            withMachine(step(bots.runIn(copy, { file, seconds, mode: "play", decider }))),
           ).pipe(
             Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
           );

@@ -20,6 +20,8 @@ import {
   type GameProcessResult,
   type GameToolStatus,
   type GameViewport,
+  type GameUnityRecompileResult,
+  type ThreadId,
 } from "@kurambit/contracts";
 import { commandDetail } from "./commandDetail.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -32,7 +34,8 @@ import * as GameTemplates from "./GameTemplates.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import * as GameUnity from "./GameUnity.ts";
 import { makeUnityBackend } from "./GameUnityEngine.ts";
-import type { GameEngineProfile, GameExportTarget } from "./engineProfile.ts";
+import { engineProfile, type GameEngineProfile, type GameExportTarget } from "./engineProfile.ts";
+import * as GameOperations from "./GameOperations.ts";
 import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
 import { comparedSource, snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
@@ -123,7 +126,7 @@ export interface PlayProcess {
  * One engine's driver. It owns everything engine-specific: the project and its
  * binary, its tool's status, import, check, the releases it makes and their
  * files, play, and its live editor's lifetime. The core (GameEngine,
- * GameExport, GameService) owns stage order, source identity, staging,
+ * GameExport, GameStage) owns stage order, source identity, staging,
  * publication and operation ownership, and asks this interface (or the
  * profile), never the engine's name, wherever engines differ.
  */
@@ -272,17 +275,33 @@ export class GameEngine extends Context.Service<
     >;
     /** The engine's import of the game's project, as an action result. */
     readonly importProject: (root: string) => Effect.Effect<GameActionResult, GameOperationError>;
+    /** `game_import`: the engine's import of the thread's game, as the game's operation. */
+    readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
-     * The game's boot check, holding the live editor itself. Everything the
-     * game did is in the result (a failed import, an entry that does not load,
-     * a freeze, compile errors); it fails only when the check could not be
-     * made: a tool or the machine. With `scene`, it also plays the gameplay entry briefly
-     * for the scene report (see GameEngineBackend.runCheck).
+     * The game's boot check, as the thread's game's operation (`owner` names
+     * whose work it is, the thread by default), holding the live editor itself.
+     * Everything the game did is in the result (a failed import, an entry that
+     * does not load, a freeze, compile errors); it fails only when the check
+     * could not be made: a tool or the machine. The agent's and the person's
+     * check also plays the gameplay entry briefly for the scene report (see
+     * GameEngineBackend.runCheck).
      */
     readonly check: (
-      root: string,
-      options?: { readonly scene?: boolean },
+      threadId: ThreadId,
+      owner?: string,
     ) => Effect.Effect<GameCheckResult, GameOperationError>;
+    /**
+     * The boot check of a checkout no thread owns (a build's copy), as its own
+     * operation; a build's facts read the scene from their own random-input play instead.
+     */
+    readonly checkIn: (
+      root: string,
+      owner: string,
+    ) => Effect.Effect<GameCheckResult, GameOperationError>;
+    /** `game_unity_recompile`: the live editor imports changed files and compiles, with C# errors at file:line. */
+    readonly recompile: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameUnityRecompileResult, GameOperationError>;
     /**
      * The one tool this game's engine needs, as the toolchain sees it for this
      * project. Asked on every status read, so an answer is kept briefly per game.
@@ -295,6 +314,7 @@ export class GameEngine extends Context.Service<
 
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
+  const operations = yield* GameOperations.GameOperations;
   const tools = yield* GameToolchain.GameToolchain;
   const processes = yield* GameProcesses.GameProcesses;
   const unity = yield* GameUnity.GameUnity;
@@ -470,7 +490,50 @@ const make = Effect.gen(function* () {
     return yield* backend.viewport(GameProjectService.insideGame(root, manifestProject(manifest)));
   });
 
-  return GameEngine.of({ backendFor, context, importProject, check, toolStatus, viewport });
+  const checkLabel = (root: string) =>
+    Effect.map(
+      projects.read(root),
+      (manifest) => `${engineProfile(manifest.engine.name).displayName} check`,
+    );
+  return GameEngine.of({
+    backendFor,
+    context,
+    importProject,
+    import: (threadId) => projects.exclusive(threadId, "Import", importProject),
+    check: (threadId, owner) =>
+      Effect.gen(function* () {
+        const label = yield* checkLabel(yield* projects.resolve(threadId));
+        return yield* projects.exclusive(threadId, label, (root) => check(root, { scene: true }), {
+          owner,
+        });
+      }),
+    checkIn: (root, owner) =>
+      Effect.flatMap(checkLabel(root), (label) =>
+        operations.exclusive(root, label, check(root), owner),
+      ),
+    recompile: (threadId) =>
+      projects.exclusive(threadId, "Unity recompile", (root) =>
+        Effect.gen(function* () {
+          const { backend, ctx } = yield* context(root);
+          if (backend.editor === null)
+            return yield* new GameOperationError({
+              operation: "Unity recompile",
+              path: root,
+              reason: "invalid-input",
+              detail: "The game_unity_* tools work on Unity games; this game runs another engine.",
+            });
+          const imported = yield* backend.importProject(ctx);
+          return {
+            ok: imported.result.success,
+            errors: imported.issues,
+            warnings: [],
+            text: imported.result.message.slice(0, 4000),
+          };
+        }),
+      ),
+    toolStatus,
+    viewport,
+  });
 });
 
 export const layer = Layer.effect(GameEngine, make);

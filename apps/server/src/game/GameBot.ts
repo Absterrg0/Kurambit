@@ -29,6 +29,7 @@ import {
   type GameBotViewResult,
   type ThreadId,
   manifestProject,
+  gameOperationFault,
 } from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -37,6 +38,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as BotEvidence from "./botEvidence.ts";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
+import * as GameExplore from "./GameExplore.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { insideGame } from "./GameProjectService.ts";
@@ -93,7 +95,7 @@ const STOP_WAIT_MS = 60_000;
 const STOP_WAIT = Duration.millis(STOP_WAIT_MS);
 const JEV_DEFAULT_BASE = "https://api.typesafe.ai";
 
-export interface RunOptions {
+interface RunOptions {
   /** Hears each start's wait for the operation lock and the memory gate, and why it was refused. */
   readonly onWaited?: (waitedMs: number, refused: "low-memory" | "busy" | null) => void;
 }
@@ -114,25 +116,38 @@ export class GameBot extends Context.Service<
   GameBot,
   {
     /**
-     * With `owner`, each run is recorded on that thread's bot evidence before
-     * the next starts; a run that cannot be recorded fails the call.
+     * `game_bot_run`: a model-written bot file against the thread's game in
+     * real time at normal speed on a private display. Holds and releases go
+     * out at 10 Hz, one continuous video is recorded, and detectors' findings
+     * carry time and position. Each run is recorded on the thread's bot
+     * evidence before the next starts; a run that cannot be recorded fails the
+     * call. The run itself takes minutes and holds no game lock: the game's
+     * operation lock and the memory gate are taken only around each run's
+     * import and boot, and a second call on the same checkout is refused as busy.
      */
     readonly run: (
+      threadId: ThreadId,
+      input: GameBotRunInput,
+    ) => Effect.Effect<GameBotRunResult, GameOperationError>;
+    /**
+     * The same bot run in a checkout of the game no thread owns, such as a
+     * build's copy for its facts; recorded on no thread.
+     */
+    readonly runIn: (
       root: string,
       input: GameBotRunInput,
-      owner?: ThreadId,
-      options?: RunOptions,
     ) => Effect.Effect<GameBotRunResult, GameOperationError>;
     /** The bot runs recorded on a thread; a run decides by these, never by a game file. */
     readonly runs: (
       threadId: ThreadId,
     ) => Effect.Effect<BotEvidence.ThreadBots, GameOperationError>;
+    /** A quick look at a finished bot run: summary, findings and evidence paths. */
     readonly view: (
-      root: string,
+      threadId: ThreadId,
       input: GameBotViewInput,
     ) => Effect.Effect<GameBotViewResult, GameOperationError>;
     /** Rebuild the facts-only player report across recorded runs. */
-    readonly report: (root: string) => Effect.Effect<GameBotReportResult, GameOperationError>;
+    readonly report: (threadId: ThreadId) => Effect.Effect<GameBotReportResult, GameOperationError>;
     /** The report of exactly these runs, read-only; null when none has a trace. */
     readonly reportText: (
       root: string,
@@ -485,6 +500,7 @@ const make = Effect.gen(function* () {
   const engines = yield* GameEngine.GameEngine;
   const players = yield* GamePlayer.GamePlayer;
   const projects = yield* GameProjectService.GameProjectService;
+  const explore = yield* GameExplore.GameExplore;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const settings = yield* ServerSettings.ServerSettingsService;
   const processes = yield* GameProcesses.GameProcesses;
@@ -1234,13 +1250,39 @@ const make = Effect.gen(function* () {
     );
 
   return GameBot.of({
-    run,
+    // Its video lands in the game folder; the run is recorded on the thread.
+    run: (threadId, input) =>
+      Effect.flatMap(projects.resolve(threadId), (root) =>
+        Effect.suspend(() => {
+          // A start refused for a cause not about the game (queued past its
+          // bound, memory short, a tool of ours) is marked with its wait, as
+          // an explore start's is.
+          const waited = { ms: 0, refused: null as "low-memory" | "busy" | null };
+          return run(root, input, threadId, {
+            onWaited: (ms, refused) => {
+              waited.ms += ms;
+              waited.refused = refused;
+            },
+          }).pipe(
+            Effect.tapError((error) => {
+              const fault = gameOperationFault(error.reason);
+              return error.reason === "cancelled" || (fault !== "machine" && fault !== "tool")
+                ? Effect.void
+                : explore
+                    .markRefused(threadId, root, waited.refused ?? error.reason, waited.ms)
+                    .pipe(Effect.ignore({ log: true }));
+            }),
+          );
+        }),
+      ),
+    runIn: (root, input) => run(root, input),
     runs: threadRuns,
     latestPlayBot,
-    view,
+    view: (threadId, input) =>
+      Effect.flatMap(projects.resolve(threadId), (root) => view(root, input)),
     stop: (root) => stopWhere((each) => each === root),
     stopOwned: (threadId) => stopWhere((_root, owner) => owner === threadId),
-    report,
+    report: (threadId) => Effect.flatMap(projects.resolve(threadId), report),
     reportText,
   });
 });
