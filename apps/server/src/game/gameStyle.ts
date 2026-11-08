@@ -8,6 +8,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import {
   GAME_STYLE_DEFAULT_BUDGET,
   GAME_STYLE_DEFAULT_CHARACTERS,
@@ -19,6 +20,7 @@ import {
   type GameManifest,
   GameOperationError,
   GameStyle,
+  type GameStyleLock,
 } from "@kurambit/contracts";
 import type { LibraryFile, LibraryPack } from "./assetLibraryFiles.ts";
 import { stableStringify } from "@kurambit/shared/stableJson";
@@ -37,6 +39,7 @@ const MAX_STYLE_BYTES = 64 * 1024;
 const decodeStyle = Schema.decodeUnknownResult(Schema.fromJsonString(GameStyle), {
   errors: "all",
 });
+const checkStyle = Schema.decodeUnknownResult(GameStyle, { errors: "all" });
 
 const fail = (reason: GameOperationError["reason"], detail: string, cause?: unknown) =>
   new GameOperationError({
@@ -249,6 +252,72 @@ export const lockRigRefusal = (pack: LibraryPack, style: GameStyle | null): stri
   const same = LIBRARY_CATALOG.filter((other) => other.rig === rig).map((other) => other.id);
   const from = same.length > 1 ? `${same.slice(0, -1).join(", ")} or ${same.at(-1)}` : same[0];
   return `${pack.id}'s characters are on the ${pack.rig} rig and ${GAME_STYLE_FILE}'s rig is ${style.rig}, so their clips would not fit the game's other characters. Take characters from ${from}; from this pack add only props known to have no clips (glTF without animations: an FBX's clips cannot be read, so it counts as a character); or, if its characters belong in the game on their own rig, add "${pack.id}" to ${GAME_STYLE_FILE}'s packs.`;
+};
+
+/** UI, icons, fonts and particles that sit with every look: every derived lock lists them. */
+const INTERFACE_FAMILY = "kenney-interface";
+
+/**
+ * STYLE.json for a chosen family, as game_assets_add writes it before adding `adding`:
+ * the family's visual packs (those on another rig left out), its rig (the added pack's,
+ * else the one its packs share), its pixel mode, tile and palette, and the interface packs.
+ * What else a lock already there holds (anchor, a key-art palette, audio, imports, budgets)
+ * is kept, so choosing the look again never drops the person's own settings.
+ */
+export const styleFromLock = (
+  lock: GameStyleLock,
+  adding: LibraryPack,
+  existing: GameStyle | null,
+): { readonly style: GameStyle } | { readonly refusal: string } => {
+  const family = LIBRARY_FAMILIES.find((candidate) => candidate.id === lock.family);
+  const members = LIBRARY_CATALOG.filter((pack) => pack.family === lock.family && !soundOnly(pack));
+  if (family === undefined || family.id === INTERFACE_FAMILY || members.length === 0) {
+    const looks = LIBRARY_FAMILIES.filter(
+      (candidate) =>
+        candidate.id !== INTERFACE_FAMILY &&
+        LIBRARY_CATALOG.some((pack) => pack.family === candidate.id && !soundOnly(pack)),
+    ).map((candidate) => candidate.id);
+    return {
+      refusal: `lock.family "${lock.family}" is not a look to lock; the families are ${looks.join(", ")} (game_assets_search with no words describes each).`,
+    };
+  }
+  const rigs = [...new Set(members.flatMap((pack) => (pack.rig === undefined ? [] : [pack.rig])))];
+  const lockedRig = existing?.rig === undefined ? undefined : resolveRig(existing.rig);
+  const rig =
+    adding.family === family.id && adding.rig !== undefined
+      ? adding.rig
+      : rigs.length === 1
+        ? rigs[0]
+        : lockedRig !== undefined && rigs.includes(lockedRig)
+          ? lockedRig
+          : undefined;
+  const packs = [
+    ...members.filter((pack) => pack.rig === undefined || pack.rig === rig),
+    ...LIBRARY_CATALOG.filter((pack) => pack.family === INTERFACE_FAMILY && !soundOnly(pack)),
+  ].map((pack) => pack.id);
+  const pixel = family.palette !== undefined;
+  // A pack palette and a rig belong to the family; what else a lock holds is the person's.
+  const kept = existing === null ? {} : Struct.omit(existing, ["tile", "palette", "rig"]);
+  const palette = existing?.palette;
+  const candidate = {
+    ...kept,
+    version: 1,
+    family: family.id,
+    mode: pixel ? "pixel" : "smooth",
+    ...(pixel ? { tile: family.tile ?? 16, palette: family.palette } : {}),
+    // A hex palette read from the key art outlives a change of family; a pack palette does not.
+    ...(!pixel && Array.isArray(palette) ? { palette } : {}),
+    view: lock.view,
+    ...(rig === undefined ? {} : { rig }),
+    packs,
+  };
+  const checked = checkStyle(candidate);
+  if (Result.isFailure(checked))
+    return { refusal: `The lock for ${family.id} is not valid: ${checked.failure.message}` };
+  const problem = styleProblem(checked.success);
+  return problem === null
+    ? { style: checked.success }
+    : { refusal: `The lock for ${family.id} is not valid: ${problem}` };
 };
 
 /** The loudness targets a lock sets, or the defaults without one. */

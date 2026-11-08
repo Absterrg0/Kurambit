@@ -29,6 +29,7 @@ import {
 
 import * as GameProjectService from "../game/GameProjectService.ts";
 import * as GameService from "../game/GameService.ts";
+import * as GameToolchain from "../game/GameToolchain.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
@@ -45,7 +46,8 @@ const alternateTabId = PreviewTabId.make("tab-mcp-alternate");
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 // Every caller here is a creator thread; only its record's thread is read.
 // No caller here works in a game, so no game tool is listed.
-const layerCreatorThreads = Layer.merge(
+const layerCreatorThreads = Layer.mergeAll(
+  Layer.mock(GameToolchain.GameToolchain)({ revision: () => 0 }),
   Layer.mock(ThreadManagementService.ThreadManagementService)({
     getThreadRecords: () => Effect.succeed({ thread: {} } as never),
   }),

@@ -279,7 +279,7 @@ export const GameBlenderRenderSpritesTool = Tool.make("game_blender_render_sprit
 export const GameBlenderRenderSpritesToolkit = Toolkit.make(GameBlenderRenderSpritesTool);
 export const GameAssetsSearchTool = Tool.make("game_assets_search", {
   description:
-    "Search Kurambit's pinned CC0 asset library (Kenney, KayKit, Quaternius, ambientCG and others): sprites, tilesets, UI, icons, fonts, sounds, music, animated characters, 3D kits and textures. No key, no attribution needed. Without pack it lists matching packs with their style, family and rig, or the whole library grouped by style family when you pass no query and no kind (choose one family and lock it in STYLE.json at the game root; with a lock, its packs come first); pass pack to look inside one: matching files come with a contact sheet image numbered like the list (models are shown by their pictures), or the pack's own preview pictures when you pass no query and no kind. Page through long lists with offset. Only formats this game's engine loads are listed. Look at the sheet before adding, and keep one family's look per game. Add files with game_assets_add by the exact paths listed.",
+    "Search Kurambit's pinned CC0 asset library (Kenney, KayKit, Quaternius, ambientCG and others): sprites, tilesets, UI, icons, fonts, sounds, music, animated characters, 3D kits and textures. No key, no attribution needed. Without pack it lists matching packs with their style, family and rig, or the whole library grouped by style family when you pass no query and no kind (choose one family and pass it as game_assets_add's lock; with a lock, its packs come first); pass pack to look inside one: matching files come with a contact sheet image numbered like the list (models are shown by their pictures), or the pack's own preview pictures when you pass no query and no kind. Page through long lists with offset. Only formats this game's engine loads are listed. Look at the sheet before adding, and keep one family's look per game. Add files with game_assets_add by the exact paths listed.",
   parameters: GameAssetsSearchInput,
   success: GameAssetsSearchResult,
   failure,
@@ -292,7 +292,7 @@ export const GameAssetsSearchTool = Tool.make("game_assets_search", {
 export const GameAssetsSearchToolkit = Toolkit.make(GameAssetsSearchTool);
 const AssetsAddTool = Tool.make("game_assets_add", {
   description:
-    "Copy files or whole folders from a library pack (paths as game_assets_search lists them) into this game's assets under library/<pack>/, with names made path-safe: use the paths the result reports. Models bring the textures they load; a folder add keeps one format per model, the one search shows. Never overwrites a file that differs; files already there are left alone. Appends each file's pack, source page and CC0 licence to ASSETS.md, and measures each added sound's loudness against STYLE.json's targets. With a STYLE.json, a pack outside its packs (or audio.packs) is refused, and so are animated characters on a rig other than its rig; the refusal says how to change the lock. Where the engine has an import step, run game_import after.",
+    "Copy files or whole folders from a library pack (paths as game_assets_search lists them) into this game's assets under library/<pack>/, with names made path-safe: use the paths the result reports. Models bring the textures they load; a folder add keeps one format per model, the one search shows. Never overwrites a file that differs; files already there are left alone. Appends each file's pack, source page and CC0 licence to ASSETS.md, and measures each added sound's loudness against STYLE.json's targets. lock (a style family and the view) writes STYLE.json at the game root first: the family's packs, rig, pixel palette and tile, keeping what else a lock there holds. Pass it with the first add, and again only to change the look. With a STYLE.json, a pack outside its packs (or audio.packs) is refused, and so are animated characters on a rig other than its rig; the refusal says how to change the lock. Where the engine has an import step, run game_import after.",
   parameters: GameAssetsAddInput,
   success: GameAssetsAddResult,
   failure,
@@ -735,8 +735,11 @@ export const GameToolkit = Toolkit.make(
  */
 export const GameMoreTool = Tool.make("game_more", {
   description: [
-    "Reach a game tool kept out of your list until it is needed. Pass tool alone to read its description and parameters, then tool and input to run it exactly as the tool itself runs. A tool this game's engine does not support is refused with why.",
-    ...ASKABLE_TOOLS.map(([name, asked]) => `- ${name}: ${asked}.`),
+    "Reach a game tool kept out of your list until it is needed. Pass tool alone to read its description and parameters, then tool and input to run it exactly as the tool itself runs. A tool this game or machine cannot run is refused with why.",
+    // Tools reached for the same reason share one line.
+    ...Object.entries(Object.groupBy(ASKABLE_TOOLS, ([, asked]) => asked)).map(
+      ([asked, tools = []]) => `- ${tools.map(([name]) => name).join(", ")}: ${asked}.`,
+    ),
   ].join("\n"),
   parameters: Schema.Struct({
     tool: Schema.Literals(ASKABLE_TOOLS.map(([name]) => name)),

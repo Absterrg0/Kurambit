@@ -194,8 +194,10 @@ const firstPlayableVerdict = (firstPlayableSeconds: number | null, booted: Verdi
  * Whether a turn's changed files include the game's own code. A new three.js game
  * is the template's playable starter, which boots and ends by itself: a turn that
  * only wrote STYLE.json or fetched art would score the starter as the brief's
- * game. `web/vendor/` (three.js) and `web/shell/` (the harness) come from the
- * template and `web/assets/` is art, so only the rest of `web/` is the game.
+ * game. three.js and the shell are Kurambit's runtime, served outside the game;
+ * a game made before the runtime carries copies in `web/vendor/` and `web/shell/`,
+ * which are not its code either. `web/assets/` is art, so only the rest of `web/`
+ * is the game.
  */
 export const changesGameCode = (files: ReadonlyArray<string>) =>
   files.some(

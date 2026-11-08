@@ -6,10 +6,6 @@ modeller for props; you have no local Blender, Godot or image tools.
 `<assets>` is your lane's asset folder: `web/assets/`, `godot/assets/`, or
 `unity/Assets/Art/` for Unity (capital A: Unity imports nothing else).
 
-The first turn takes only the STYLE.json lock from this skill (and, on the
-`generated` route, the key art). Key art, sprite renders and Blender props
-come in later turns, for what no pack has.
-
 1. Key art first: one image the finished game must live up to.
 2. Every in-game visual is a file: characters, objects, tiles, backgrounds, UI
    pieces, effects, animation frames. No code-drawn shapes, flat color
@@ -22,57 +18,28 @@ come in later turns, for what no pack has.
 
 ## Lock the look: STYLE.json
 
-`game_assets_search` with no words lists the library by style family: one
-look each (KayKit, Kenney low-poly, Kenney pixel, ...), its packs, each
-character pack's rig, and a pixel palette where the family has one. Look at
-a pack's contact sheet (pass `pack`) before choosing. Pick one family whose
-look fits the brief (and the key art, once there is one) and write
-`STYLE.json` at the game root:
+`game_assets_search` with no words lists the library by style family. Look
+at a pack's contact sheet (pass `pack`) before choosing, then pass the
+family and the view as `lock` with the first `game_assets_add`: it writes
+`STYLE.json` at the game root with the family's packs, rig and pixel
+palette. What you may add to it later, on purpose:
 
-```json
-{
-  "version": 1,
-  "family": "kaykit",
-  "mode": "smooth",
-  "view": "perspective",
-  "rig": "kaykit-1",
-  "packs": [
-    "kaykit-adventurers",
-    "kaykit-skeletons",
-    "kaykit-dungeon-remastered",
-    "kenney-ui-pack"
-  ],
-  "audio": {
-    "packs": ["kenney-rpg-audio", "juhani-chiptune-adventures"],
-    "musicLufs": -23,
-    "sfxPeakDbtp": -1
-  }
-}
-```
-
-- `mode`: `smooth`, or `pixel` with `tile` (source pixels per tile),
-  `palette` (a pack id, added with `game_assets_add` before the first render,
-  or a PNG or folder in the game) and `outline` (true or `#rrggbb`).
-- `view`: `side`, `top-down`, `isometric` or `perspective` (3D).
-- `rig`: the skeleton every character shares, so every clip fits every
-  character. Leave it out when nothing is rigged (a 2D game drawn from
-  sprite packs).
-- `packs`: where the game's visuals come from, UI, icons and fonts included.
-- `audio.packs`: one effects family and one music source. Sound is not
-  locked until the list exists; name it with the look.
-- `imports`: outside sources the live Blender may import from (`polyhaven`,
-  `sketchfab`, `polypizza`); none when left out.
 - `anchor`: the image the look answers to (`art/key-art.png`): its palette is
   the lock's, and every generation passes it as a reference.
-- 3D made models: `palette` may be a hex list (2 to 64 colours, from the
+- 3D made models: `palette` as a hex list (2 to 64 colours, from the
   family's own textures so made models sit with the packs), with `shading`,
   `scale.character` (metres; KayKit heroes are about 2.1) and `budget`
   (triangles and texture size). A made character's `rig` is
   `standard-humanoid`.
+- `audio.packs`: one effects family and one music source. Sound is not
+  locked until the list exists.
+- `imports`: outside sources the live Blender may import from (`polyhaven`,
+  `sketchfab`, `polypizza`); none when left out.
 
 The art tools refuse what breaks the lock and say what to change. Changing
-direction is an edit to STYLE.json made on purpose, never a drift: change the
-lock first, then the art. STYLE.json is the person's to read and edit too.
+direction is a change to STYLE.json made on purpose, never a drift: change
+the lock first (`lock` again for another family), then the art. STYLE.json
+is the person's to read and edit too.
 
 ## Characters
 

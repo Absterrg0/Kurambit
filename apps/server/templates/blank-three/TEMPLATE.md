@@ -8,9 +8,9 @@ demo needs, so build the game, not the menus.
 
 The first playable build, in this order (the game's AGENTS.md, "The first turn"):
 
-1. The look: `game_assets_search` lists the library by style family; write
-   `STYLE.json`, then `game_assets_add` the player and one or two threats or
-   props. They land under `web/assets/library/<pack>/`; name them in `ASSETS`
+1. The look: `game_assets_search` lists the library by style family;
+   `game_assets_add` the player and one or two threats or props, the first
+   call with `lock` (the family and view), which writes `STYLE.json`. They land under `web/assets/library/<pack>/`; name them in `ASSETS`
    by the path the add reports. The shell loads them and compiles their
    shaders behind the loading screen, so play never starts on a freeze; keep
    the default look (or name one preset; no lights besides `ctx.look.sun`).

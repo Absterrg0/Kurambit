@@ -1,6 +1,7 @@
 import {
   type AuthMcpClientAccess,
   type EnvironmentId,
+  type GameCharacterRoute,
   type GameEngineId,
   McpCapabilityUnavailableError,
   OrchestratorMcpFailure,
@@ -47,6 +48,10 @@ export interface McpInvocationScope {
   readonly gameRunRole?: "run" | null;
   /** The engine of the calling thread's game; null when the thread works in no game. */
   readonly gameEngine?: GameEngineId | null;
+  /** How the calling thread's game makes its characters (game.json `characters`); null outside a game. */
+  readonly gameCharacters?: GameCharacterRoute | null;
+  /** Why this machine has no Blender the game's tools can run, or null when it has one (or the engine uses none). */
+  readonly blenderMissing?: string | null;
   readonly capabilities: ReadonlySet<McpCapability>;
   readonly issuedAt: number;
   readonly requestNamespace: string;

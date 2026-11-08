@@ -18,6 +18,7 @@ import {
   characterRoute,
   lockCharacterRouteRefusal,
   styleBudgets,
+  styleFromLock,
   styleHash,
 } from "./gameStyle.ts";
 
@@ -201,4 +202,43 @@ it("refuses Blender-made characters off the Blender route, naming the setting", 
   expect(
     lockCharacterRouteRefusal("mpfb-body", characterRoute({ characters: "blender" })),
   ).toBeNull();
+});
+
+it("derives a lock from a family, and choosing again keeps what the person set", () => {
+  const pack = (id: string) => LIBRARY_CATALOG.find((candidate) => candidate.id === id)!;
+  const first = styleFromLock(
+    { family: "kenney-lowpoly", view: "perspective" },
+    pack("kenney-mini-dungeon"),
+    null,
+  );
+  if (!("style" in first)) throw new Error(first.refusal);
+  // The added pack's rig wins; the family's packs on other rigs stay out, so their clips never mix.
+  expect(first.style.rig).toBe("kenney-mini");
+  expect(first.style.packs).toContain("kenney-mini-characters");
+  expect(first.style.packs).not.toContain("kenney-blocky-characters");
+  expect(first.style.packs).toContain("kenney-ui-pack");
+  const edited: GameStyle = {
+    ...first.style,
+    anchor: "art/key-art.png",
+    palette: ["#112233", "#445566"],
+    audio: { packs: ["kenney-rpg-audio"] },
+  };
+  const again = styleFromLock(
+    { family: "kenney-pixel", view: "side" },
+    pack("kenney-pixel-platformer"),
+    edited,
+  );
+  if (!("style" in again)) throw new Error(again.refusal);
+  expect(again.style).toMatchObject({
+    family: "kenney-pixel",
+    mode: "pixel",
+    tile: 16,
+    palette: "kenney-tiny-dungeon",
+    anchor: "art/key-art.png",
+    audio: { packs: ["kenney-rpg-audio"] },
+  });
+  expect(again.style.rig).toBeUndefined();
+  expect(
+    styleFromLock({ family: "kenney-interface", view: "side" }, pack("kenney-ui-pack"), null),
+  ).toHaveProperty("refusal");
 });

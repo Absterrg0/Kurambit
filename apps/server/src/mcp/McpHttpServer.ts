@@ -1,5 +1,6 @@
 import {
   GameToolkit,
+  GameMoreTool,
   GameMoreToolkit,
   GameAssetsSearchTool,
   GameAssetsSearchToolkit,
@@ -29,11 +30,19 @@ import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { OrchestratorMcpFailure, PreviewAutomationError } from "@kurambit/contracts";
+import {
+  GAME_STYLE_DEFAULT_CHARACTERS,
+  OrchestratorMcpFailure,
+  PreviewAutomationError,
+} from "@kurambit/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
+import { engineCapabilities } from "../game/engineProfile.ts";
+import * as GameBuilds from "../game/GameBuilds.ts";
 import * as GameProjectService from "../game/GameProjectService.ts";
+import * as GameRunControl from "../game/GameRunControl.ts";
+import * as GameToolchain from "../game/GameToolchain.ts";
 import * as GameService from "../game/GameService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
@@ -153,6 +162,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
   const clients = yield* McpClientAuthenticator;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const gameProjects = yield* GameProjectService.GameProjectService;
+  const toolchain = yield* GameToolchain.GameToolchain;
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const authorization = request.headers.authorization;
@@ -182,20 +192,32 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
             Effect.map(({ thread }) => (thread.launchedBy === "game_run" ? "run" : null)),
             Effect.orElseSucceed(() => "run" as const),
           );
-    // Which game tools a thread sees follows its game's engine (toolkits/game/placement.ts).
-    const gameEngine =
+    // Which game tools a thread sees follows its game's engine, the person's character route
+    // and whether this machine has Blender (toolkits/game/placement.ts).
+    const manifest =
       invocation.thread === undefined
         ? null
         : yield* gameProjects.resolve(invocation.thread.threadId).pipe(
             Effect.flatMap(gameProjects.read),
-            Effect.map((manifest) => manifest.engine.name),
             Effect.orElseSucceed(() => null),
           );
+    const gameEngine = manifest?.engine.name ?? null;
+    // The toolchain keeps its probe while the binary is unchanged, so this costs a stat per request.
+    const blenderMissing =
+      gameEngine !== null && engineCapabilities(gameEngine).has("blender")
+        ? yield* toolchain.executable("blender").pipe(
+            Effect.as(null),
+            Effect.catch((error) => Effect.succeed(error.detail ?? error.message)),
+          )
+        : null;
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
         gameRunRole,
         gameEngine,
+        gameCharacters:
+          manifest === null ? null : (manifest.characters ?? GAME_STYLE_DEFAULT_CHARACTERS),
+        blenderMissing,
       }),
       Effect.map(normalizeMcpHttpResponse),
     );
@@ -862,6 +884,31 @@ const registerGameAnimate = Effect.fn("McpHttpServer.registerGameAnimate")(funct
   );
 });
 
+/** game_more runs asked-for tools, the Blender look and game_animate among them, so it carries images too. */
+const registerGameMore = Effect.fn("McpHttpServer.registerGameMore")(function* () {
+  const games = yield* GameService.GameService;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const builds = yield* GameBuilds.GameBuilds;
+  const runs = yield* GameRunControl.GameRunControl;
+  const built = yield* GameMoreToolkit;
+  yield* registerImageTool(
+    GameMoreTool,
+    (payload, options) =>
+      built
+        .handle("game_more", payload, undefined, options)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(GameService.GameService, games),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+        Effect.provideService(GameBuilds.GameBuilds, builds),
+        Effect.provideService(GameRunControl.GameRunControl, runs),
+      ),
+    "more",
+    (error) => (error instanceof Error ? error.message : "game_more failed."),
+  );
+});
+
 const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSearch")(function* () {
   const games = yield* GameService.GameService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -1049,7 +1096,7 @@ const layerGameToolkit = Layer.mergeAll(
   layerGameAssetsSearch,
   layerGameUnityScreenshot,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
-  toolkitRegistration(GameMoreToolkit, GameHandlers.layerMore),
+  imageToolRegistration(registerGameMore(), GameHandlers.layerMore),
 );
 
 export const layer = Layer.mergeAll(
