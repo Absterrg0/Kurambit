@@ -4,8 +4,8 @@ Citations carry the selected excerpt and source identity in ordinary message tex
 Drafts, clipboard copies, stashes, and sent messages keep that representation
 without a separate citation store. The saved quote remains usable when its source
 disappears or changes. The [shared format](../../packages/shared/src/assistantCitations.ts) uses
-stable environment IDs without a browser origin, so moving between local, remote,
-and tunnel connections does not change a citation's identity.
+stable environment IDs without a browser origin, so opening the same environment from the desktop
+app or a browser does not change a citation's identity.
 
 Source navigation is best effort. [Text selectors](../../apps/web/src/lib/assistantTextSelection.ts)
 refer to rendered text after whitespace normalization, measured in UTF-16 units.

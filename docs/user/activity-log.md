@@ -1,6 +1,6 @@
 # Activity log
 
-On web and desktop, consecutive tool calls appear as an expandable summary. Open it to inspect
+Consecutive tool calls appear as an expandable summary. Open it to inspect
 commands, tool inputs, status, and exit codes. Expand a tool call to see its output. A running
 command's output updates live, and long output shows only its most recent part. Use **Open diff** on
 a file change to review its contents.

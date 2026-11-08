@@ -103,10 +103,6 @@
       "types": "./src/providerUpdateRequiredModels.ts",
       "default": "./src/providerUpdateRequiredModels.ts"
     },
-    "./voice-input": {
-      "types": "./src/voice-input/index.ts",
-      "default": "./src/voice-input/index.ts"
-    },
     "./kurambitToolSummary": {
       "types": "./src/kurambitToolSummary.ts",
       "default": "./src/kurambitToolSummary.ts"

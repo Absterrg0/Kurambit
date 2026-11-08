@@ -106,9 +106,9 @@ the kind's chip; an unknown kind or a missing record renders the unresolved chip
 vanishing. Removing a chip removes only that occurrence; the composer's change handler compares
 the referenced ids against the draft array and drops records no chip points at.
 
-Version 1 deliberately keeps kind presentation explicit in each client instead of exposing a
-runtime handler registry. The contract and codecs are shared; web/desktop render rich chips and
-mobile renders the readable label. Add a registry only when a third-party or runtime-defined kind
+Version 1 deliberately keeps kind presentation explicit in the client instead of exposing a
+runtime handler registry. The contract and codecs are shared and the client renders rich chips.
+Add a registry only when a third-party or runtime-defined kind
 must provide behaviour that cannot ship with the client. Likewise, a durable occurrence id belongs
 in the canonical reference syntax only if a future feature needs to address one occurrence across
 serialization boundaries.
@@ -138,7 +138,7 @@ is, older messages are upgraded in memory. `ChatMarkdown` renders `kurambit-cont
 registry. The registry declares compact, details, and expanded capabilities for every known kind,
 rejects duplicate surface handlers, and provides the unresolved fallback. Terminal excerpts,
 elements, review comments, and preview annotations open structured details popovers; images and
-videos use the shared media modal. Mobile renders context links as their labels.
+videos use the shared media modal.
 
 Pull-request summaries currently travel as review-comment records with optional typed
 `pullRequest` metadata. The metadata is a snapshot of the number, title, URL, branches, state, and

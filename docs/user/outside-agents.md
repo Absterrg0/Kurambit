@@ -3,42 +3,29 @@
 Agents that Kurambit did not start can work with an environment through its MCP
 server. They can read projects and threads, start and message threads, and
 check which providers and models are available. This covers Claude Code or
-Codex in your own terminal, ChatGPT, and bots that support MCP. Each agent signs
+Codex in your own terminal and other local tools that support MCP. Each agent signs
 in once, and you choose what it may do.
 
 ## Get the MCP URL
 
-In **Settings → Connections**, open a saved environment's menu and choose
-**Copy MCP URL**. The URL is the environment's address followed by `/mcp`, for
-example:
+The MCP server is the local server's address followed by `/mcp`, for example:
 
 ```text
-https://<environment-address>/mcp
+http://localhost:3773/mcp
 ```
 
-The copied URL uses the route this device is connected over, so an agent on the
-same device can reach it.
-
-- **An agent on your own computers** can use any address that computer reaches
-  the environment at: a LAN or Tailscale address, or `localhost` on the host.
-- **A hosted agent**, such as ChatGPT or a bot running in the cloud, must reach
-  the environment from the internet. A LAN or Tailscale address only works
-  from your own network.
+Use the port your Kurambit server listens on. Agents on the same computer can
+reach it; agents hosted elsewhere, such as ChatGPT, cannot reach a local app.
 
 ## Approve a sign-in
 
 The first time an agent connects, it opens a sign-in page on the environment.
-The page names the agent and where its access goes:
-
-- For an agent on your computer, approval returns to a `localhost` address on
-  the computer that opened the page.
-- For a hosted agent, approval goes to that service, such as `chatgpt.com`.
-  Anyone who runs that service gets the access.
+The page names the agent, and approval returns to a `localhost` address on the
+computer that opened the page.
 
 Only approve a sign-in you just started. To approve, enter a pairing code from
-**Settings → Connections** or from `kurambit auth pairing create` on the host. A
-browser already signed in to the environment with permission to manage access
-can approve without a code.
+`kurambit auth pairing create`. A browser already signed in to the environment
+with permission to manage access can approve without a code.
 
 Then choose what the agent may do:
 
@@ -51,7 +38,7 @@ Then choose what the agent may do:
 ## Claude Code
 
 ```sh
-claude mcp add --transport http kurambit https://<environment-address>/mcp
+claude mcp add --transport http kurambit http://localhost:3773/mcp
 claude mcp login kurambit
 ```
 
@@ -63,32 +50,23 @@ once you approve.
 ## Codex
 
 ```sh
-codex mcp add kurambit --url https://<environment-address>/mcp
+codex mcp add kurambit --url http://localhost:3773/mcp
 codex mcp login kurambit
 ```
 
 `codex mcp login --no-browser` prints the sign-in URL instead of opening it.
 `codex mcp list` shows `kurambit` with OAuth once you approve.
 
-## ChatGPT
-
-Add the environment as a custom MCP app in ChatGPT's apps settings:
-
-1. Create a new app or plugin with a custom MCP server.
-2. Set the server URL to `https://<environment-address>/mcp`, using the Kurambit
-   Connect address.
-3. Choose **OAuth** for authentication. ChatGPT discovers the rest; you do not
-   need a client ID or secret.
-4. Create the app, then approve the sign-in page that opens.
-
 ## Other agents and bots
 
-Any agent that supports remote MCP servers over HTTP with OAuth can connect. Give
-it the MCP URL and choose OAuth, and the agent finds the sign-in settings itself.
+Any agent on this computer that supports MCP servers over HTTP with OAuth can
+connect. Give it the MCP URL and choose OAuth, and the agent finds the sign-in
+settings itself.
 Agents without OAuth support cannot connect.
 
 ## Remove an agent
 
-Approved agents appear under **Settings → Connections** like other clients.
-Revoke one there to cut off its access immediately. A sign-in lasts 30 days;
+Approved agents are sessions like other clients. Run `kurambit auth session list`
+to find one and `kurambit auth session revoke <id>` to cut off its access
+immediately. A sign-in lasts 30 days;
 after that the agent asks you to approve it again.

@@ -8,9 +8,7 @@ Kurambit has one server-side observability model:
 - completed spans go to a local NDJSON trace file
 - traces, metrics, and logs can also be exported over OTLP to a real backend like Grafana LGTM
 
-The local trace file is the persisted source of truth for normal local launches. Those launches do not
-write a separate server log file, but SSH-managed launches also persist the remote process's
-stdout/stderr at `~/.kurambit/ssh-launch/<state>/server.log`.
+The local trace file is the persisted source of truth. The server does not write a separate log file.
 
 ## Where To Find Things
 
@@ -20,8 +18,7 @@ Logs are human-facing:
 
 - destination: stdout
 - format: `Logger.consolePretty()`
-- normal local persistence: none
-- SSH-managed launch persistence: `~/.kurambit/ssh-launch/<state>/server.log`
+- persistence: none
 - remote export: OTLP only, when configured
 
 If you want a log message to show up in the trace file, emit it inside an active span with `Effect.log...`. `Logger.tracerLogger` will attach it as a span event.
@@ -29,8 +26,8 @@ If you want a log message to show up in the trace file, emit it inside an active
 Configuring a logs endpoint takes over that job. The server then exports log records, which cover
 every message instead of only the ones inside an active span and carry the trace and span ids so
 they still line up with the trace. `Logger.tracerLogger` is dropped in that mode, so the same
-message is not exported twice and the trace file stops carrying log messages. stdout output and
-SSH-managed launch persistence stay unchanged either way.
+message is not exported twice and the trace file stops carrying log messages. stdout output stays
+unchanged either way.
 
 ### Traces
 
@@ -651,8 +648,7 @@ Current high-value span and metric boundaries include:
 
 ### Current Constraints
 
-- logs outside spans are not persisted in the trace file; SSH-managed launch stdout/stderr is still
-  captured in its launcher log
+- logs outside spans are not persisted in the trace file
 - metrics are not snapshotted locally
 
 ## Heap Snapshots

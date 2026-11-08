@@ -5,12 +5,12 @@ The server owns PostHog delivery, opt-out, and identity for every connected clie
 provider account ID, falling back to an installation-scoped ID. This identity can
 span several clients; it does not identify a browser session. Clients do not load
 the PostHog browser SDK. Client-use events require an authenticated connection, so
-visiting the hosted app without connecting does not count as product use.
+loading the web UI without connecting does not count as product use.
 
 ## Attribution boundaries
 
 Client dimensions belong to the event's WebSocket connection. A server-global
-"current client" would misattribute simultaneous web, desktop, and mobile use.
+"current client" would misattribute simultaneous web and desktop use.
 Provider execution has its own events because a turn can outlive the requesting
 connection.
 

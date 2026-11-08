@@ -41,7 +41,7 @@ sharing a history directory count once.
 When your app and server support different providers, usage totals may cover only the providers
 your app understands. Update the app to include newly supported providers.
 
-On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
+Use the environment dropdown to filter costs, tokens, and limits. All
 environments are selected by default. The dropdown shows which environments are still scanning;
 results appear as each one responds, and figures still updating are dimmed. Cursor shows its last
 saved totals first, then updates them when Cursor's API responds.
@@ -51,7 +51,7 @@ update model pricing.
 
 ## Set custom model prices
 
-On web or desktop, open the environment dropdown on **Usage**, then choose **Model prices** to add,
+Open the environment dropdown on **Usage**, then choose **Model prices** to add,
 edit, or reset a model's estimated price. **Apply to** starts with your current Usage filter;
 choose all environments or select individual destinations. Enter the exact model ID and USD
 rates per million input and output tokens. You can enter any model ID, including models
@@ -133,16 +133,9 @@ This connection supplies usage information; configure
 the provider separately to send agent requests through the hub. Remove the hub from the same
 settings section when you no longer need it.
 
-## Subscription usage widget
-
-Add **Subscription usage** from your iOS or Android widget gallery to see remaining Codex and
-Claude quotas. Tap it to open **Usage → Limits**; on Android this works while Kurambit is running in
-the background, otherwise open the app from the launcher. On iOS, use **Edit Widget** to choose
-Session, Weekly, or both for each provider. Reopen Kurambit to refresh expired readings.
-
 ## Keyboard shortcuts
 
-On web and desktop, open Usage from the command palette. While on Usage,
+Open Usage from the command palette. While on Usage,
 press `C`, `T`, or `L` for Cost, Tokens, or Limits while not typing in a field.
 Use `Ctrl+Shift+1/2/3/4` (`Cmd+Shift+1/2/3/4` on macOS) for the past
 24 hours, 7 days, 30 days, or 90 days. Period shortcuts do nothing on Limits.

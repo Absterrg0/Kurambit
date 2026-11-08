@@ -109,7 +109,7 @@ A provider lives in its own `packages/provider-<name>` package, with
 
 - **Package exports.** `./settings` holds the instance settings schema, built with
   `makeProviderSettingsSchema` from contracts. `./client` exports a `ProviderClientDefinition`
-  (label, settings schema, plain-data icon, badge) and must stay browser- and React Native-safe.
+  (label, settings schema, plain-data icon, badge) and must stay browser-safe.
   `./server` exports the `ProviderDriver` and its adapter driver. `./testing` exposes internals
   the server's replay testkits drive; testkits that need the orchestrator stay in the server.
   Settings live in `providerInstances`; new providers are off by default.
@@ -122,7 +122,7 @@ A provider lives in its own `packages/provider-<name>` package, with
   Also its position in the [status order](../../apps/server/src/provider/providerStatusCache.ts), a
   compatibility policy in [`model-manifest.json`](../../apps/server/src/provider/model-manifest.json)
   (bump `updatedAt`; see [model manifest](./model-manifest.md)), and its default model in contracts.
-- **Client registration:** the client definition in the web and mobile provider registries, and
+- **Client registration:** the client definition in the web provider registry, and
   settings search terms. Clients draw the package icon; do not add a per-driver icon branch.
 - **Docs:** a `docs/user/providers-<name>.md` guide in the product's voice, a row in the
   [install](../user/install.md#providers) table, and any provider difference that changes the

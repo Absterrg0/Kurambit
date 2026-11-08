@@ -19,7 +19,6 @@ Prefer a container? See [Dev container](../internals/devcontainer.md) for VS Cod
 
 Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron client.
 `dev:server` and `dev:web` start those processes separately.
-See the [mobile README](../../apps/mobile/README.md) for native builds and Metro.
 
 Flags go directly after the task name, for example `vp run dev --home-dir /tmp/kurambit-dev`.
 Add `--browser` to open a browser automatically.
@@ -96,7 +95,7 @@ effect-tsgo version that tsc-rs ports (see the tsc-rs README), or the two disagr
 on rule names.
 Marketing keeps `astro check` for Astro files.
 
-Use `vp run lint:mobile` for native mobile changes. CI owns the full suite; see
+CI owns the full suite; see
 [ci.yml](../../.github/workflows/ci.yml) for its current jobs.
 The [manual Windows lane](../../.github/workflows/windows-tests.yml) is available for focused
 Windows investigation while that suite is not a required gate.

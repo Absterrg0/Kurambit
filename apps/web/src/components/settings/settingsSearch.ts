@@ -794,20 +794,6 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
 
   {
-    id: "load-balancing",
-    title: "Load balancing",
-    to: "/settings/connections",
-    searchTerms: [
-      "automatic machine environment resources cpu memory capacity preference weight shared projects",
-    ],
-  },
-  {
-    id: "github-routing",
-    title: "GitHub sharing",
-    to: "/settings/connections",
-    searchTerms: ["trusted environments shared credentials permissions read actions"],
-  },
-  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",

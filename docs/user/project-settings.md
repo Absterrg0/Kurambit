@@ -1,6 +1,6 @@
 # Settings and project overrides
 
-On web and desktop, the "Applying settings for …" sentence at the top of Settings pages picks
+The "Applying settings for …" sentence at the top of Settings pages picks
 the project and environment a change applies to. Pages that only hold device preferences, such as
 Appearance, don't show it. They start at **All projects** and **All environments**
 and stay selected as you move between categories or search for a setting.
@@ -34,17 +34,6 @@ and no new turn there can start on a provider it turned off, including queued me
 follow-ups from delegated tasks. A turn already running when the switch flips finishes. A delegated
 task's result still lands in its parent thread, which sees it on its next turn. Reset returns the project to the
 machine's setting. Every other provider setting stays per machine.
-
-On mobile, open **Settings** and use the filter in its header to choose connected environments
-and a project. The filter stays available in server-setting pages. With **All projects** selected,
-the **Server settings** categories and auto-settle controls in **Thread behavior** edit the
-selected environments' defaults. Choosing a project edits its overrides on the selected
-environments. Use **Use defaults** in a page to remove that page's project overrides.
-Open **Settings → Projects & threads → Overview** to rename the project across its selected
-connected checkouts and see where those checkouts live.
-Settings that are environment-wide stay read-only while a project is selected. When selected
-targets disagree, a control shows **Mixed** until you choose one value. Appearance, keyboard,
-and other phone-only settings ignore the filter.
 
 ## Worktree branch names
 
@@ -147,7 +136,6 @@ from the icon palette, derived from the saved project name. For example, `Nebula
 
 In Source Control, enable **Automatically pull** to keep the default-branch checkout up to date
 with its configured upstream. Choose an environment to set the default or a project to override it.
-On mobile, use **Settings → Source control** to change selected environment defaults or project overrides.
 
 Kurambit only pulls when it can fast-forward and the checkout has no changed files, untracked files,
 or local commits. It skips checkouts on another branch or without an upstream. If a checkout has

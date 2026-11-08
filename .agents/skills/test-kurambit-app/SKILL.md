@@ -1,14 +1,13 @@
 ---
 name: test-kurambit-app
-description: Test Kurambit's web and desktop UI through its built-in Browser panel against isolated development state. Use for browser verification, browser pairing recovery, and test fixtures. Use test-kurambit-mobile for native mobile verification.
+description: Test Kurambit's web and desktop UI through its built-in Browser panel against isolated development state. Use for browser verification, browser pairing recovery, and test fixtures.
 ---
 
 # Test Kurambit web and desktop
 
 Use Kurambit's built-in Browser panel for verification. If its tools are absent or
 the panel reports unavailable, explain the blocker and stop verification.
-Do not install or switch to another automation system. For native mobile
-testing, use [test-kurambit-mobile](../test-kurambit-mobile/SKILL.md).
+Do not install or switch to another automation system.
 
 ## Start the app
 

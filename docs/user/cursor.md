@@ -17,8 +17,7 @@ not expose yet.
 ## Sign in
 
 Choose **Sign in**, then open the sign-in page and complete it in your browser. Kurambit
-updates automatically when sign-in finishes. This works when connected to a remote environment too.
-On mobile, use **Settings > Provider accounts** for an already configured Cursor instance.
+updates automatically when sign-in finishes.
 
 Each provider instance keeps its own login on the environment that runs it. Your Cursor editor and
 CLI login are separate. A configured `CURSOR_API_KEY` overrides browser sign-in; remove that override

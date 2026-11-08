@@ -106,7 +106,7 @@ Codex async questions arrive as notifications and are answered with a new user m
 no pending RPC response to send. The
 [adapter](../../apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts) persists them as
 `user_input_request` turn items and runtime requests with `responseCapability: { type: "message" }`.
-Their execution nodes do not block the run. Web, desktop, and mobile use their normal question
+Their execution nodes do not block the run. The desktop app and web UI use their normal question
 panels, and requests remain pending after a turn finishes, a provider exits, or the server restarts.
 
 `runtime-request.respond` reads the persisted request and question item, validates required
