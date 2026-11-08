@@ -202,9 +202,11 @@ export const makeThreeBackend = (
             });
             if (session !== null) {
               const started = Date.now();
-              // A short random-input play the scene report watches; without one, one extra
-              // beat. Either way late module errors still land in the listeners above.
-              if (measure) await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
+              // A short random-input play the scene report watches; without one (or with a
+              // shell that has none, where nothing would watch it), one extra beat. Either
+              // way late module errors still land in the listeners above.
+              if (measure && session.scene() !== "no-shell")
+                await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
               else await new Promise((resolve) => setTimeout(resolve, 2000));
               await session.close();
               if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
