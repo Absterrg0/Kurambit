@@ -129,6 +129,11 @@ export interface CheckpointServiceV2Shape {
   readonly captureBaseline: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
     readonly ordinalWithinScope: number;
+    /**
+     * When the baseline was never captured, the ordinal whose checkpoint it
+     * takes instead of the workspace as it is now.
+     */
+    readonly fromOrdinalWithinScope?: number;
   }) => Effect.Effect<void, CheckpointServiceV2Error>;
   readonly materializeBaselineCheckpoint: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
@@ -282,6 +287,27 @@ export const layer: Layer.Layer<
           });
           if (exists) {
             return;
+          }
+
+          if (input.fromOrdinalWithinScope !== undefined) {
+            const fromRef = yield* checkpointRefFor({
+              scopeId: input.scope.id,
+              ordinalWithinScope: input.fromOrdinalWithinScope,
+            });
+            const from = (yield* checkpointStore.listCheckpointRefs({
+              cwd: input.scope.cwd,
+              prefix: fromRef,
+            })).find((entry) => entry.checkpointRef === fromRef);
+            if (
+              from !== undefined &&
+              (yield* checkpointStore.updateCheckpointRef({
+                cwd: input.scope.cwd,
+                checkpointRef,
+                oid: from.oid,
+              }))
+            ) {
+              return;
+            }
           }
 
           yield* checkpointStore.captureCheckpoint({

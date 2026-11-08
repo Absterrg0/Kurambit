@@ -65,6 +65,20 @@ export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStart
 
 const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
 
+/**
+ * A restart continuation carries on its source run's turn. The source was cut
+ * off before its checkpoint, so the continuation's baseline is what the source
+ * started from: taken from the workspace, it would hold the source's edits and
+ * the resumed turn would show no change.
+ */
+const restartContinuationBaseline = (
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  run: OrchestrationV2Run,
+): { readonly baselineFromOrdinal?: number } => {
+  const source = runs.find((candidate) => candidate.id === run.restartContinuationOfRunId);
+  return source === undefined ? {} : { baselineFromOrdinal: Math.max(0, source.ordinal - 1) };
+};
+
 /** Claude refuses to replace a process running background work before it reads the prompt. */
 const refusedBeforePrompt = (error: unknown): boolean =>
   Predicate.isTagged(error, "ClaudeBackgroundWorkBlocksQueryReplacementError") ||
@@ -1234,6 +1248,7 @@ export const layer: Layer.Layer<
         shouldStartProviderTurn: runControls.shouldStartProviderTurn,
         shouldFinalizeRun: runControls.shouldFinalizeRun,
         hasUnpairedRunInterruptRequest: runControls.hasUnpairedRunInterruptRequest,
+        ...restartContinuationBaseline(projection.runs, run),
         message: {
           messageId: message.id,
           text: userText,

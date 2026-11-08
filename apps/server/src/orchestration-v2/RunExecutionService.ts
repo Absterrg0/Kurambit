@@ -539,6 +539,8 @@ export interface RunExecutionServiceV2StartRootRunInput {
   readonly shouldStartProviderTurn?: () => Effect.Effect<boolean, ProjectionStoreV2Error>;
   readonly shouldFinalizeRun?: () => Effect.Effect<boolean, ProjectionStoreV2Error>;
   readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
+  /** The ordinal whose checkpoint stands in for this run's baseline when that was never captured. */
+  readonly baselineFromOrdinal?: number;
   readonly message: ProviderAdapter.ProviderAdapterV2TurnMessage;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
@@ -855,6 +857,9 @@ export const layer: Layer.Layer<
               .captureBaseline({
                 scope: input.checkpointScope,
                 ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+                ...(input.baselineFromOrdinal === undefined
+                  ? {}
+                  : { fromOrdinalWithinScope: input.baselineFromOrdinal }),
               })
               .pipe(
                 Effect.catchCause((cause) =>
