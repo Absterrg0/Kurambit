@@ -168,16 +168,23 @@ export function createStageBridge({ canvas, renderer, view, freeze, redraw, draw
     if (source === undefined || byObject.has(copy)) return;
     const path = `${LANE}${source.path}`;
     const label = humanName(name);
+    const asset = {
+      path,
+      ...(source.sidecar === undefined ? {} : { sidecar: `${LANE}${source.sidecar}` }),
+    };
+    // ctx.tune("Fox") before ASSETS.fox's copy: the copy is that thing, values and all.
+    if (things.get(label)?.placeholder === true) {
+      things.delete(label);
+      add({ id: label, name: label, kind: source.kind, object: copy, asset, auto: false });
+      return;
+    }
     const { id, n } = unique(path, "#");
     add({
       id,
       name: n === null ? label : `${label} ${n}`,
       kind: source.kind,
       object: copy,
-      asset: {
-        path,
-        ...(source.sidecar === undefined ? {} : { sidecar: `${LANE}${source.sidecar}` }),
-      },
+      asset,
       auto: true,
     });
   };
@@ -204,7 +211,23 @@ export function createStageBridge({ canvas, renderer, view, freeze, redraw, draw
         entry.live[name] = typeof start === "number" ? clamp(start, range) : start;
       }
     }
-    if (!things.has(key)) add(placeholder(key));
+    if (!things.has(key)) {
+      // ctx.tune("Fox") names ASSETS.fox's copy when the game never called ctx.thing: the
+      // values belong on the Fox a person clicks, keyed by the id tune.json is read by.
+      let copy;
+      for (const record of things.values())
+        if (record.auto && record.name === key) {
+          copy = record;
+          break;
+        }
+      if (copy === undefined) add(placeholder(key));
+      else {
+        things.delete(copy.id);
+        if (selected === copy) selected = null;
+        if (hovered === copy) hovered = null;
+        add({ ...copy, id: key, auto: false });
+      }
+    }
     changed = true;
     return entry.live;
   };
@@ -250,7 +273,9 @@ export function createStageBridge({ canvas, renderer, view, freeze, redraw, draw
   const rectOf = (record, seen) => {
     if (record?.object == null || seen === null || !attached(record.object, seen.scene))
       return undefined;
-    box.setFromObject(record.object);
+    // Precise: a skinned character's cached bounds are its bind pose, which can sit far from
+    // where it stands. Only selection and hover ask, never a frame.
+    box.setFromObject(record.object, true);
     if (box.isEmpty()) return undefined;
     const { w, h } = size();
     let x0 = Infinity;
