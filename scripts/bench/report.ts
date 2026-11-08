@@ -9,6 +9,52 @@ import {
 } from "../../packages/contracts/src/index.ts";
 import { CRITERIA, CRITERION_LABELS, THRESHOLDS, type GameScore, type Verdict } from "./score.ts";
 
+/** A watched or shown fact that moved between two builds, worded as the facts view words it. */
+export interface BenchFactMove {
+  readonly id: string;
+  readonly label: string;
+  readonly a: string | null;
+  readonly b: string | null;
+}
+
+/** One keep-going step as the run recorded it, and its facts against the build it started from. */
+export interface BenchStep {
+  readonly n: number;
+  readonly why: string;
+  readonly text: string;
+  /** kept, undone, kept-moved-on, no-change, not-measured or stopped. */
+  readonly verdict: string | null;
+  readonly reason: string;
+  readonly gain: boolean;
+  readonly minutes: number | null;
+  /** Input + output, as the provider reported them. */
+  readonly tokens: number | null;
+  readonly build: string | null;
+  readonly base: string | null;
+  readonly improved: ReadonlyArray<BenchFactMove>;
+  readonly regressed: ReadonlyArray<BenchFactMove>;
+  /** A frame of the step build's random-input play, for a person to look at; never scored. */
+  readonly frame: string | null;
+}
+
+/** Phase 2: keep going on the first turn's game. No score: what the steps did, and what it cost. */
+export interface BenchKeepGoing {
+  readonly asked: number;
+  /** Why the run ended before the bench stopped it; null when the bench stopped it. */
+  readonly ending: string | null;
+  readonly seconds: number;
+  readonly steps: ReadonlyArray<BenchStep>;
+  readonly first: string;
+  readonly final: string | null;
+  /** The game's last build against its first turn's. */
+  readonly net: {
+    readonly improved: ReadonlyArray<BenchFactMove>;
+    readonly regressed: ReadonlyArray<BenchFactMove>;
+  };
+  /** Phase 1's floor read on the last build, for comparison; not part of the run's score. */
+  readonly finalScore: GameScore | null;
+}
+
 export interface BenchGame {
   readonly id: string;
   readonly genre: string;
@@ -48,7 +94,11 @@ export interface BenchGame {
   };
   readonly shots: ReadonlyArray<string>;
   readonly shotsFrom: string | null;
+  /** How long the first build's facts took once seen measuring; absent in older runs. */
+  readonly factsSeconds?: number | null;
   readonly score: GameScore;
+  /** Absent in older runs; null when the run asked for no steps. */
+  readonly keepGoing?: BenchKeepGoing | { readonly skipped: string } | null;
   readonly error?: string;
 }
 
@@ -108,6 +158,74 @@ async function previousRun(outRoot: string, stamp: string): Promise<BenchRun | n
 }
 
 const signed = (n: number) => (n > 0 ? `+${n}` : n === 0 ? "±0" : String(n));
+
+const phase2 = (game: BenchGame): BenchKeepGoing | null =>
+  game.keepGoing === undefined || game.keepGoing === null || "skipped" in game.keepGoing
+    ? null
+    : game.keepGoing;
+
+/** Keep going across the run: how its steps ended, what they cost, and which facts they moved. */
+function keepGoingTotals(run: BenchRun) {
+  const runs = run.games.flatMap((game) => {
+    const kg = phase2(game);
+    return kg === null ? [] : [kg];
+  });
+  const steps = runs.flatMap((kg) => kg.steps);
+  const count = (verdict: string) => steps.filter((step) => step.verdict === verdict).length;
+  const kept = count("kept");
+  const tokensAll = steps.reduce((sum, step) => sum + (step.tokens ?? 0), 0);
+  const minutesAll = steps.reduce((sum, step) => sum + (step.minutes ?? 0), 0);
+  const tally = (moves: ReadonlyArray<BenchFactMove>) => {
+    const by = new Map<string, number>();
+    for (const move of moves) by.set(move.label, (by.get(move.label) ?? 0) + 1);
+    return [...by.entries()].toSorted((a, b) => b[1] - a[1]);
+  };
+  const keptSteps = steps.filter((step) => step.verdict === "kept");
+  return {
+    games: runs.length,
+    steps: steps.length,
+    kept,
+    undone: count("undone"),
+    noChange: count("no-change"),
+    notMeasured: count("not-measured"),
+    other: steps.length - kept - count("undone") - count("no-change") - count("not-measured"),
+    tokens: tokensAll,
+    minutes: minutesAll,
+    tokensPerKept: kept === 0 ? null : tokensAll / kept,
+    minutesPerKept: kept === 0 ? null : minutesAll / kept,
+    /** What kept steps made better and worse (kept-but-worse is a fact keep going does not guard). */
+    improved: tally(keptSteps.flatMap((step) => step.improved)),
+    regressed: tally(keptSteps.flatMap((step) => step.regressed)),
+    /** What the undone steps made worse: why they were undone. */
+    undoneFor: tally(
+      steps.filter((step) => step.verdict === "undone").flatMap((step) => step.regressed),
+    ),
+    netImproved: tally(runs.flatMap((kg) => kg.net.improved)),
+    netRegressed: tally(runs.flatMap((kg) => kg.net.regressed)),
+  };
+}
+
+const moveText = (move: BenchFactMove) => `${move.label} (${move.a ?? "?"} → ${move.b ?? "?"})`;
+const tallyText = (tally: ReadonlyArray<readonly [string, number]>) =>
+  tally.length === 0 ? "none" : tally.map(([label, n]) => `${label} ×${n}`).join(", ");
+const perKept = (value: number | null, unit: (n: number) => string) =>
+  value === null ? "no step kept" : unit(value);
+
+function keepGoingHtml(game: BenchGame): string {
+  if (game.keepGoing === undefined || game.keepGoing === null) return "";
+  if ("skipped" in game.keepGoing)
+    return `<h3>Keep going</h3><p class="meta">Not run: ${escape(game.keepGoing.skipped)}</p>`;
+  const kg = game.keepGoing;
+  const rows = kg.steps
+    .map(
+      (step) =>
+        `<tr><td>${step.n}</td><td>${step.frame === null ? "" : `<img src="${escape(step.frame)}" alt="" loading="lazy">`}</td><td><b>${escape(step.verdict ?? "in flight")}</b> · ${escape(step.why)}<br>${escape(step.text)}<br><span class="meta">${escape(step.reason)}</span></td><td>${step.improved.map((m) => `<div>↑ ${escape(moveText(m))}</div>`).join("")}${step.regressed.map((m) => `<div>↓ ${escape(moveText(m))}</div>`).join("")}</td><td>${step.minutes === null ? "–" : `${step.minutes} min`}<br>${step.tokens === null ? "–" : tokens(step.tokens)}</td></tr>`,
+    )
+    .join("");
+  return `<h3>Keep going: ${kg.steps.length} of ${kg.asked} step(s)${kg.ending === null ? "" : `, ended ${escape(kg.ending)}`}</h3>
+<p class="meta">${minutes(kg.seconds)} · first build → last: ${kg.net.improved.length === 0 ? "nothing better" : `better ${escape(kg.net.improved.map(moveText).join("; "))}`}; ${kg.net.regressed.length === 0 ? "nothing worse" : `worse ${escape(kg.net.regressed.map(moveText).join("; "))}`}${kg.finalScore === null ? "" : ` · floor on the last build ${kg.finalScore.passed} / ${kg.finalScore.total}`}</p>
+<table class="steps"><tbody>${rows}</tbody></table>`;
+}
 
 function checkLines(game: BenchGame): Array<string> {
   if (game.check.calls === 0) return ["The agent never ran game_check."];
@@ -178,8 +296,9 @@ function html(run: BenchRun, previous: BenchRun | null, note: string | null): st
 <p class="score">${game.score.passed} / ${game.score.total}${before === null ? "" : ` (${signed(game.score.passed - before.score.passed)} from the previous run)`}</p>
 ${shots}
 <ul class="criteria">${criteria}</ul>
-<p>Turn: ${escape(game.turn.status)}, ${minutes(game.turn.seconds)}${usage === null ? "" : `, ${tokens(usage.input)} input (${tokens(usage.cached)} cached), ${tokens(usage.output)} output${usage.partial > 0 ? `, ${usage.partial} turn(s) with partial usage` : ""}`}.${game.error ? ` Runner error: ${escape(game.error)}` : ""}</p>
+<p>Turn: ${escape(game.turn.status)}, ${minutes(game.turn.seconds)}${game.factsSeconds == null ? "" : `; facts ${Math.round(game.factsSeconds)} s`}${usage === null ? "" : `, ${tokens(usage.input)} input (${tokens(usage.cached)} cached), ${tokens(usage.output)} output${usage.partial > 0 ? `, ${usage.partial} turn(s) with partial usage` : ""}`}.${game.error ? ` Runner error: ${escape(game.error)}` : ""}</p>
 ${game.turn.lastMessage === null ? "" : `<blockquote>${escape(game.turn.lastMessage)}</blockquote>`}
+${keepGoingHtml(game)}
 <details><summary>Facts and check</summary>
 <ul>${factLines(game)
         .map((line) => `<li>${escape(line)}</li>`)
@@ -207,20 +326,61 @@ h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:0}h2 span{color:var(--
 p{margin:6px 0}.meta,.brief,.path{color:var(--muted)}.score{font-size:20px;font-variant-numeric:tabular-nums}
 section{border-top:1px solid var(--rule);padding:18px 0}
 .shots{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}.shots img{width:100%;height:auto;display:block}
+h3{font-size:15px;margin:14px 0 4px}.steps td{vertical-align:top;padding:6px 12px 6px 0;font-size:14px}.steps img{width:200px;height:auto;display:block}
 ul{margin:6px 0;padding-left:18px}.criteria{list-style:none;padding:0}
 table{border-collapse:collapse;margin:10px 0}td{padding:2px 14px 2px 0;font-variant-numeric:tabular-nums}
 details summary{cursor:pointer;color:var(--muted)}
 blockquote{margin:6px 0;padding-left:12px;border-left:2px solid var(--rule);color:var(--muted);white-space:pre-wrap}
-@media (max-width:560px){.shots{grid-template-columns:1fr}}
+@media (max-width:560px){.shots{grid-template-columns:1fr}.steps img{width:120px}}
 </style></head><body>
 <h1>First ten minutes: ${t.passed} / ${t.possible}</h1>
 <p class="meta">${escape(run.stamp)} · commit ${escape(run.commit)} · ${escape(run.model ? `${run.model.instanceId}/${run.model.model}` : "no model")} · briefs v${run.briefsVersion} · ${run.games.length} games · run ${minutes(run.seconds)} · turns ${minutes(t.turnSeconds)} · ${tokens(t.usage.input)} input (${tokens(t.usage.cached)} cached), ${tokens(t.usage.output)} output${t.usage.partial > 0 ? ` (${t.usage.partial} provider turns reported partial usage)` : ""}</p>
 <p class="meta">${previous === null ? escape(note ?? "") : `Previous run ${escape(previous.stamp)} (commit ${escape(previous.commit)}): ${p!.passed} / ${p!.possible}, ${signed(t.passed - p!.passed)}.`}</p>
 <table><tbody>${criteriaTotals}</tbody></table>
 <p class="meta">✓ pass · ✗ fail · – not measured. Thresholds: ends no sooner than ${THRESHOLDS.instantEndSeconds} s with no skill, ${THRESHOLDS.minFps} fps, playable within ${THRESHOLDS.firstPlayableSeconds} s of the brief.</p>
+${keepGoingSummaryHtml(run)}
 ${rows}
 </body></html>
 `;
+}
+
+function keepGoingSummaryHtml(run: BenchRun): string {
+  const k = keepGoingTotals(run);
+  if (k.games === 0) return "";
+  return `<h3>Keep going</h3>
+<p>${k.steps} step(s) on ${k.games} game(s): ${k.kept} kept, ${k.undone} undone, ${k.noChange} changed nothing, ${k.notMeasured} kept unjudged${k.other > 0 ? `, ${k.other} other` : ""}. ${perKept(k.tokensPerKept, tokens)} tokens and ${perKept(k.minutesPerKept, (n) => `${n.toFixed(1)} min`)} per kept step.</p>
+<p class="meta">Kept steps made better: ${escape(tallyText(k.improved))}; worse: ${escape(tallyText(k.regressed))}. Undone for: ${escape(tallyText(k.undoneFor))}. First build → last: better ${escape(tallyText(k.netImproved))}; worse ${escape(tallyText(k.netRegressed))}.</p>`;
+}
+
+function keepGoingMarkdown(run: BenchRun): Array<string> {
+  const k = keepGoingTotals(run);
+  if (k.games === 0) return [];
+  return [
+    "## Keep going",
+    "",
+    `${k.steps} step(s) on ${k.games} game(s): ${k.kept} kept, ${k.undone} undone, ${k.noChange} changed nothing, ${k.notMeasured} kept unjudged${k.other > 0 ? `, ${k.other} other` : ""}. ${perKept(k.tokensPerKept, tokens)} tokens and ${perKept(k.minutesPerKept, (n) => `${n.toFixed(1)} min`)} per kept step (all steps' cost over the kept ones).`,
+    "",
+    `- Kept steps made better: ${tallyText(k.improved)}; worse: ${tallyText(k.regressed)}`,
+    `- Undone for: ${tallyText(k.undoneFor)}`,
+    `- First build → last: better ${tallyText(k.netImproved)}; worse ${tallyText(k.netRegressed)}`,
+    "",
+    "| Game | Step | Verdict | Why | Better | Worse | Min | Tokens | Frame |",
+    "|---|---|---|---|---|---|---|---|---|",
+    ...run.games.flatMap((game) => {
+      const kg = phase2(game);
+      if (kg === null)
+        return game.keepGoing !== undefined &&
+          game.keepGoing !== null &&
+          "skipped" in game.keepGoing
+          ? [`| ${game.name} | – | not run | ${game.keepGoing.skipped} | | | | | |`]
+          : [];
+      return kg.steps.map(
+        (step) =>
+          `| ${game.name} | ${step.n} | ${step.verdict ?? "in flight"} | ${step.why}: ${step.text.replace(/\|/g, "/").slice(0, 90)} | ${step.improved.map((m) => m.label).join(", ")} | ${step.regressed.map((m) => m.label).join(", ")} | ${step.minutes ?? "–"} | ${step.tokens === null ? "–" : tokens(step.tokens)} | ${step.frame ?? ""} |`,
+      );
+    }),
+    "",
+  ];
 }
 
 function markdown(run: BenchRun, previous: BenchRun | null, note: string | null): string {
@@ -255,6 +415,7 @@ function markdown(run: BenchRun, previous: BenchRun | null, note: string | null)
           ];
     }),
     "",
+    ...keepGoingMarkdown(run),
   ];
   return lines.join("\n");
 }
