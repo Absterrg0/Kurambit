@@ -18,6 +18,7 @@ it("counts the game's own files as live changes, not Blender's or editors' tempo
     ".main.js.swp",
     "main.js~",
     "main.js.tmp",
+    "main.js.tmp.591487.4536b66886f8",
     ".#main.js",
     "sedwyBd9l",
     ".git/index",

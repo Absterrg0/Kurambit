@@ -26,9 +26,13 @@ export const isLiveChange = (path: string): boolean => {
   const segments = path.split(/[\\/]/).filter((segment) => segment !== "");
   const name = segments.at(-1);
   if (name === undefined || segments.some((segment) => segment.startsWith("."))) return false;
-  // `sed -i` writes a sibling `sedXXXXXX` and renames it over the file: agents
-  // edit that way all the time, and its name is not the game's.
-  return !/(\.blend1?|~|\.swp|\.tmp)$/i.test(name) && !/^sed[A-Za-z0-9]{6}$/.test(name);
+  // `sed -i` writes a sibling `sedXXXXXX`, and agents' atomic writes a sibling
+  // `main.js.tmp.<pid>.<hash>`, each renamed over the file: neither is the game's.
+  return (
+    !/(\.blend1?|~|\.swp)$/i.test(name) &&
+    !/\.tmp(\.|$)/i.test(name) &&
+    !/^sed[A-Za-z0-9]{6}$/.test(name)
+  );
 };
 
 export class GamePreview extends Context.Service<
