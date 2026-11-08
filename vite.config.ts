@@ -69,6 +69,9 @@ export default defineConfig({
       // Sample games on the site are shipped builds (vendored three.js among them), not source.
       "apps/marketing/site/hill-temple-three/**",
       "apps/marketing/site/hill-temple/**",
+      // Third-party three.js, its addons and postprocessing, vendored into the
+      // game template as published.
+      "apps/server/templates/blank-three/web/vendor/**",
     ],
     sortPackageJson: {},
     overrides: [
@@ -93,6 +96,9 @@ export default defineConfig({
       "**/*.graphql.ts",
       "apps/marketing/site/hill-temple-three/**",
       "apps/marketing/site/hill-temple/**",
+      // Third-party three.js, its addons and postprocessing, vendored into the
+      // game template as published.
+      "apps/server/templates/blank-three/web/vendor/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-kurambit/index.ts", "@shadcn/lint"],
@@ -305,11 +311,6 @@ export default defineConfig({
           "react/unsupported-syntax": "error",
           "kurambit/no-manual-memo": "error",
         },
-      },
-      {
-        // The sign-in masthead is Kurambit brand artwork: fixed gradients, not theme surfaces.
-        files: ["apps/web/src/components/auth/AuthSurfaceShell.tsx"],
-        rules: { "shadcn/no-arbitrary-values": "off" },
       },
     ],
     options: {
