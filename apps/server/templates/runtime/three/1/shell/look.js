@@ -31,12 +31,13 @@
 // gets the straight path. The
 // sky is drawn behind the scene and lights it (an environment probe), unless
 // the game sets scene.background (a texture there becomes the probe) or
-// scene.environment itself. The look's fog is set when the game sets none;
+// scene.environment itself; below the horizon it is distant ground in haze. The look's fog is set when the game sets none;
 // three.js's own Fog and FogExp2 still work as documented.
 //
 // Through an orthographic camera with no preset and no toneMapping named, the
 // frame draws straight and untouched, so a 2D or pixel-art game's sprites keep
-// their files' exact colours (with LOOK = { environment: false, shadows: false }).
+// their files' exact colours (with LOOK = { environment: false, shadows: false }),
+// over the sky's horizon colour unless the game sets scene.background.
 //
 // A sun whose soft shadows follow the player:
 //   const sun = ctx.look.sun({ follow: ctx.player, size: 30 }); // a DirectionalLight, in the scene
@@ -366,17 +367,24 @@ uniform vec3 ground;
 uniform vec3 sunDir;
 uniform vec3 sunColor;
 uniform float saturation;
+uniform float groundShare;
 varying vec3 vDir;
 void main() {
   vec3 d = normalize( vDir );
   vec3 c = d.y > 0.0
     ? mix( horizon, top, pow( smoothstep( 0.0, 1.0, d.y ), 0.55 ) )
-    : mix( horizon, ground, smoothstep( 0.0, 0.2, - d.y ) );
+    : mix( horizon, ground, smoothstep( 0.0, 0.2, - d.y ) * groundShare );
   float s = max( dot( d, sunDir ), 0.0 );
   c += sunColor * ( pow( s, 6.0 ) * 0.18 + pow( s, 90.0 ) * 0.5 + smoothstep( 0.9990, 0.9994, s ) * 3.0 );
   c = mix( vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ), c, saturation );
   gl_FragColor = vec4( c, 1.0 );
 }`;
+
+// How far the backdrop below the horizon goes from the horizon's haze toward the sky's ground
+// tone. The ground tones are dark so the light from below stays dim; drawn at full strength
+// behind a board seen from above, the tone mapping's toe and the grade's contrast crush them
+// to black, and the board floats in a void. Halfway reads as distant ground in haze.
+const BACKDROP_GROUND = 0.5;
 
 /**
  * The drawn sky and the light it gives, as two probes: the light's sky is
@@ -395,6 +403,7 @@ async function skyProbes(renderer, look, sunDir) {
       sunDir: { value: sunDir.clone() },
       sunColor: { value: new THREE.Color(look.sun.color) },
       saturation: { value: 1 },
+      groundShare: { value: BACKDROP_GROUND },
     },
     vertexShader: SKY_VERTEX,
     fragmentShader: SKY_FRAGMENT,
@@ -408,6 +417,7 @@ async function skyProbes(renderer, look, sunDir) {
     light = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   } else {
     material.uniforms.saturation.value = look.sky.light ?? 0.45;
+    material.uniforms.groundShare.value = 1;
     light = pmrem.fromScene(scene, 0, 0.1, 400).texture;
   }
   sphere.geometry.dispose();
@@ -490,7 +500,12 @@ export async function createLook(canvas, options = {}) {
   const dress = (scene, camera) => {
     if (prepared.has(scene)) return;
     prepared.add(scene);
-    if (exact(camera)) return;
+    // A 2D game's exact colours keep no sky probe; its backdrop is the preset's horizon, not
+    // the renderer's black.
+    if (exact(camera)) {
+      if (scene.background === null) scene.background = new THREE.Color(look.sky.horizon);
+      return;
+    }
     if (scene.background === null) scene.background = backgroundColor ?? sky.background;
     if (scene.environment === null && look.environment !== false) {
       const own = scene.background;

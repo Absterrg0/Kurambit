@@ -152,16 +152,6 @@ export interface GameEngineProfile {
   readonly run: {
     /** This engine's skill in the studio pack; a run keeps it and drops the other engines'. */
     readonly skill: string;
-    /**
-     * Files in the game the harness owns, under the engine directory: its
-     * in-game play runner. A fresh run copies them from the engine's starter
-     * template (`template`, a directory under the server templates), so games
-     * made before a protocol change play by the current one.
-     */
-    readonly harnessFiles: {
-      readonly template: string;
-      readonly files: ReadonlyArray<string>;
-    } | null;
     /** Whether a comparison's two samples may play at once. */
     readonly parallelSamples: boolean;
     /** Whether the project's first editor open is paid before the first root role's clock. */

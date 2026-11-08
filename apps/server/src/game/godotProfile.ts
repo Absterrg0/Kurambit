@@ -82,8 +82,6 @@ Use the game_* tools to check, play, export and package the game; never run Godo
   },
   run: {
     skill: "godot-game",
-    // The play runner lives in the server (Godot's runner script, the browser host).
-    harnessFiles: null,
     parallelSamples: true,
     warmEditor: false,
     sources: { extensions: [".gd"], under: "" },

@@ -79,6 +79,9 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
       ? {}
       : { gameplayScene: templateEntry.gameplayScene }),
     ...(templateEntry?.probe === true ? { probe: true } : {}),
+    ...(templateEntry?.runtime === undefined
+      ? {}
+      : { runtime: { [engine]: templateEntry.runtime } }),
     engine: { name: engine, version: engineProfile(engine).scaffold.version },
     project: engineProfile(engine).projectDirectory,
     // The same folder under its legacy key, for one release, so an older installed Kurambit still opens the game.

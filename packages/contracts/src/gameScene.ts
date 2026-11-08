@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import { NonNegativeInt } from "./baseSchemas.ts";
 
 // The scene report: what a person sees at a glance, measured inside the running game by the
-// three.js shell (templates/blank-three/web/shell/scene-report.js) during a measured play.
+// three.js shell (templates/runtime/three/1/shell/scene-report.js) during a measured play.
 // Its own module, so game.ts (game_check) and gameBuilds.ts (the build's facts) share it
 // without importing each other.
 
@@ -53,6 +53,8 @@ export const GameScenePlayer = Schema.Union([
     blocker: Schema.NullOr(Schema.String),
     /** Its median height on screen, in CSS pixels of a canvas `canvasHeight` tall. */
     heightPx: Schema.NullOr(Schema.Number),
+    /** Its median width on screen; absent from a shell that predates it. */
+    widthPx: Schema.optionalKey(Schema.NullOr(Schema.Number)),
     canvasHeight: Schema.Number,
     notVisible: Schema.Boolean,
     small: Schema.Boolean,
@@ -70,6 +72,25 @@ export const GameScenePlayer = Schema.Union([
 ]);
 export type GameScenePlayer = typeof GameScenePlayer.Type;
 
+/**
+ * How much of the frame shows nothing: a flat backdrop where the camera looks below the horizon
+ * and no drawn thing is in the way. Sky above the horizon, a 2D game's backdrop behind its plane
+ * and a picture the game set as its backdrop never count; a board floating over a colour does.
+ */
+export const GameSceneEmpty = Schema.Struct({
+  /** The share of the frame that empty, median over the play's looks, 0–1. */
+  share: Schema.Number,
+  /** The share of the play it was over the shell's limit. */
+  held: Schema.Number,
+  /** The backdrop that showed: its colour as #rrggbb, or `sky` for the look's drawn sky. */
+  colour: Schema.String,
+  /** Over the limit for most of the play: the shell's verdict, by its own thresholds. */
+  flagged: Schema.Boolean,
+  /** The frame with the empty part marked; null when it is not flagged. */
+  frame: Schema.NullOr(Schema.String),
+});
+export type GameSceneEmpty = typeof GameSceneEmpty.Type;
+
 export const GameSceneReport = Schema.Struct({
   /** Game seconds of play the shell looked at. */
   seconds: Schema.Number,
@@ -78,6 +99,8 @@ export const GameSceneReport = Schema.Struct({
   /** Registered things that were in the scene and shown but never came into view. */
   unseen: Schema.Array(Schema.String).check(Schema.isMaxLength(16)),
   unseenMore: NonNegativeInt,
+  /** Absent from a shell that predates it, or when no look was measured. */
+  empty: Schema.optionalKey(GameSceneEmpty),
   /** What one look cost the page, in milliseconds. */
   cost: Schema.Struct({ meanMs: Schema.Number, worstMs: Schema.Number }),
 });
@@ -117,15 +140,22 @@ export const scenePlayerText = (player: GameScenePlayer): string | null => {
       ? `${player.name} is hidden behind ${player.blocker ?? "solids"} for ${percent(player.hidden)} of play${player.offscreen > 0 ? ` and off screen for ${percent(player.offscreen)}` : ""}`
       : `${player.name} is off screen for ${percent(player.offscreen)} of play${player.hidden > 0 ? ` and hidden for ${percent(player.hidden)}` : ""}`;
   if (player.small && player.heightPx !== null)
-    return `${player.name} is only ${Math.round(player.heightPx)} px tall in a ${player.canvasHeight} px view, too small to read`;
+    return `${player.name} is only ${Math.round(player.heightPx)} px tall${player.widthPx == null ? "" : ` and ${Math.round(player.widthPx)} px wide`} in a ${player.canvasHeight} px view, too small to read`;
   return null;
 };
+
+/** PURE. The empty frame's line when it is flagged; null when the view is filled. */
+export const sceneEmptyText = (empty: GameSceneEmpty): string | null =>
+  empty.flagged
+    ? `${percent(empty.share)} of the view is empty: the camera looks down past everything drawn into the flat ${empty.colour} backdrop, for ${percent(empty.held)} of play`
+    : null;
 
 /** PURE. Every problem the report shows, worded, each with its frame. */
 export const sceneLines = (
   report: GameSceneReport,
 ): ReadonlyArray<{ readonly text: string; readonly frame: string | null }> => {
   const player = scenePlayerText(report.player);
+  const empty = report.empty === undefined ? null : sceneEmptyText(report.empty);
   return [
     ...(player === null || report.player.kind !== "body"
       ? []
@@ -135,6 +165,7 @@ export const sceneLines = (
             frame: report.player.notVisible ? report.player.frame : report.player.smallFrame,
           },
         ]),
+    ...(empty === null ? [] : [{ text: empty, frame: report.empty?.frame ?? null }]),
     ...report.findings.map((finding) => ({
       text: sceneFindingText(finding),
       frame: finding.frame,

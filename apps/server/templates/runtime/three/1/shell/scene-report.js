@@ -2,7 +2,7 @@
 // While the harness measures a play (game_check's short play, the facts'
 // random-input play), the shell looks at the scene a few times a second and
 // keeps only what a person would agree is broken: the player out of view or
-// too small to read, a body sunk into the ground or inside a solid, two bodies
+// too small to read, most of the view empty backdrop, a body sunk into the ground or inside a solid, two bodies
 // inside each other, a thing fallen out of the world, the camera inside a
 // wall, a skinned body sliding over the ground in idle or a frozen pose, and
 // things that never came on screen. Each comes with the time, the thing's name
@@ -32,8 +32,23 @@ export const LIMITS = {
   overlapShare: 0.5,
   // The player hidden or off screen for more of the play than this cannot be followed.
   hiddenShare: 0.25,
-  // A player drawn shorter than this share of the canvas height is too small to read.
-  smallShare: 0.025,
+  // A player whose larger side on screen (its height or its width) is under this share of the
+  // canvas height is too small to read: 50 px of 720. Calibrated on the first-ten-minutes
+  // benchmark's plays: the 29 px tank and the 44 px robot are specks a person cannot make out;
+  // the 54 px ship (54 wide, 41 tall) and the 54–63 px gardener read at a glance.
+  smallShare: 0.07,
+  // The empty view, on a grid of rays: a cell is empty when the camera looks there at least
+  // this far below the horizon (the sine of the angle, about 6°), no drawn thing's bounds lie
+  // on the ray and the backdrop behind is flat. Sky above the horizon and a 2D game's backdrop
+  // behind its plane (a camera looking level) are never empty: a void is where ground should be.
+  emptyCols: 24,
+  emptyRows: 14,
+  emptyBelow: 0.1,
+  // Empty over this share of the frame, for more than this share of the play, is "mostly empty".
+  // On the benchmark's shots the void boards leave 40–95% empty and the filled games none:
+  // a quarter of the view showing nothing is a void a person sees at a glance.
+  emptyShare: 0.25,
+  emptyHeld: 0.5,
   // This far below the level (metres, or the level's own height if more) and for a moment:
   // fell out of the world. A pit's fall ends sooner, and a lose screen stops the sampling.
   fallM: 20,
@@ -73,9 +88,10 @@ const round = (x, d = 2) => Number(x.toFixed(d));
 /**
  * The shell's side. `view()` is the scene and camera on screen (or null),
  * `player()` is ctx.player, `bridge` the Stage bridge (its things and kinds),
- * `animation(object)` the animate kit's state for a body ({ state, clip } or null).
+ * `animation(object)` the animate kit's state for a body ({ state, clip } or null), `gl` the
+ * renderer's WebGL context (the empty view reads its clear colour when nothing else is behind).
  */
-export function createSceneReport({ canvas, view, player, bridge, animation }) {
+export function createSceneReport({ canvas, gl, view, player, bridge, animation }) {
   let active = false;
   let clock = 0;
   let played = 0;
@@ -107,6 +123,7 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
   const notSolid = new Set();
   const bodies = [];
   const heights = new Float32Array(HEIGHTS);
+  const widths = new Float32Array(HEIGHTS);
   let heightCount = 0;
   // One column: the tops a ray from above enters and the bottoms one from below enters.
   const column = {
@@ -130,6 +147,10 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
   const trackers = new Map();
   const unseen = new Map();
   const frames = [];
+  // The empty view: per look, the share of the frame that showed nothing.
+  const empty = { measured: 0, held: 0, worst: -1, colour: null, frame: null };
+  const emptyShares = new Float32Array(HEIGHTS);
+  let emptyCount = 0;
   const playerView = {
     measured: 0,
     hidden: 0,
@@ -149,6 +170,12 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
     costMs = 0;
     worstMs = 0;
     heightCount = 0;
+    emptyCount = 0;
+    empty.measured = 0;
+    empty.held = 0;
+    empty.worst = -1;
+    empty.colour = null;
+    empty.frame = null;
     trackers.clear();
     unseen.clear();
     frames.length = 0;
@@ -166,7 +193,34 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
   // A skinned mesh's cached bounds are its bind pose, which can sit far from
   // where it stands: its posed vertices are read, a bounded number of them.
   let target = box;
+  // A sprite always faces the camera: its quad at its world scale, along the camera's right and up.
+  let facing = null;
+  const spriteAt = new THREE.Vector3();
+  const spriteScale = new THREE.Vector3();
+  const spriteTurn = new THREE.Quaternion();
+  const right = new THREE.Vector3();
+  const upward = new THREE.Vector3();
+  const expandSprite = (node) => {
+    node.matrixWorld.decompose(spriteAt, spriteTurn, spriteScale);
+    if (facing === null) {
+      right.set(1, 0, 0);
+      upward.set(0, 1, 0);
+    } else {
+      right.setFromMatrixColumn(facing.matrixWorld, 0).normalize();
+      upward.setFromMatrixColumn(facing.matrixWorld, 1).normalize();
+    }
+    const hx = Math.abs(spriteScale.x) / 2;
+    const hy = Math.abs(spriteScale.y) / 2;
+    for (let i = 0; i < 4; i += 1)
+      target.expandByPoint(
+        v
+          .copy(spriteAt)
+          .addScaledVector(right, i & 1 ? hx : -hx)
+          .addScaledVector(upward, i & 2 ? hy : -hy),
+      );
+  };
   const expand = (node) => {
+    if (node.isSprite) return expandSprite(node);
     if (!node.isMesh) return;
     const geometry = node.geometry;
     if (node.isSkinnedMesh) {
@@ -450,7 +504,7 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
   // ── Frames ────────────────────────────────────────────────────────────
   // The frame just drawn, copied while its buffer is still the canvas's, the problem's box
   // outlined. Encoded only when the report is read, after play.
-  const capture = (outline, label) => {
+  const capture = (outline, label, marks = null) => {
     if (frames.length >= LIMITS.frames || canvas.width === 0) return null;
     const seen = view();
     const w = LIMITS.frameWidth;
@@ -461,6 +515,20 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
     const g = copy.getContext("2d");
     if (g === null) return null;
     g.drawImage(canvas, 0, 0, w, h);
+    if (marks !== null) {
+      // The empty cells, tinted: where the frame showed nothing.
+      const cw = w / LIMITS.emptyCols;
+      const ch = h / LIMITS.emptyRows;
+      g.fillStyle = "rgba(255, 45, 85, 0.35)";
+      for (let i = 0; i < marks.length; i += 1)
+        if (marks[i] === 1)
+          g.fillRect(
+            (i % LIMITS.emptyCols) * cw,
+            Math.floor(i / LIMITS.emptyCols) * ch,
+            Math.ceil(cw),
+            Math.ceil(ch),
+          );
+    }
     if (outline !== null && seen !== null) {
       const rect = rectOf(outline, seen.camera, w, h);
       if (rect !== null) {
@@ -566,6 +634,7 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
     if (seen === null) return;
     const { scene, camera } = seen;
     samples += 1;
+    facing = camera;
     camera.getWorldPosition(cameraAt);
     projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     frustum.setFromProjectionMatrix(projection);
@@ -664,6 +733,7 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
     if (canCast) cameraInside(span, top, bottom);
     bridge.eachThing(checkProp);
     bridge.eachThing(sighting);
+    measureEmpty(scene, camera, span);
   };
 
   // A thing far under the level, or with no position at all, has left the world.
@@ -778,8 +848,12 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
       return;
     }
     const rect = rectOf(b, camera, canvas.clientWidth || 1, canvas.clientHeight || 1);
-    if (rect !== null && heightCount < HEIGHTS) heights[heightCount++] = rect.h;
-    if (rect !== null && rect.h < LIMITS.smallShare * (canvas.clientHeight || 1))
+    if (rect !== null && heightCount < HEIGHTS) {
+      heights[heightCount] = rect.h;
+      widths[heightCount] = rect.w;
+      heightCount += 1;
+    }
+    if (rect !== null && Math.max(rect.h, rect.w) < LIMITS.smallShare * (canvas.clientHeight || 1))
       playerView.smallFrame ??= capture(b, body.name);
     // Hidden: every ray from the camera to the player's middle, chest and knees stops at a solid.
     const height = b.max.y - b.min.y;
@@ -838,6 +912,91 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
     if (!otherBox.isEmpty() && frustum.intersectsBox(otherBox)) entry.seen = true;
   };
 
+  // ── The empty view ─────────────────────────────────────────────────────
+  // A grid of rays through the view: a cell is empty when its ray looks below the horizon and
+  // meets the bounds of nothing drawn, so the backdrop shows where ground should be. Only a flat
+  // backdrop counts (a colour, the clear colour, or the look's sky, which is one tone below the
+  // horizon); a picture the game set as its backdrop is something drawn, never empty. Bounds
+  // are generous, so a hole inside a big mesh's box is missed, never invented.
+  const cells = new Uint8Array(LIMITS.emptyCols * LIMITS.emptyRows);
+  const ndc = new THREE.Vector2();
+  const clear = new Float32Array(4);
+  const drawn = [];
+  let drawnCount = 0;
+  const reach = new THREE.Box3();
+  const gatherDrawn = (node) => {
+    if (!node.visible) return;
+    // An invisible material (a collider, a trigger) draws nothing.
+    if (
+      ((node.isMesh && !node.isSkinnedMesh) || node.isSprite) &&
+      node.material?.visible !== false
+    ) {
+      const bounds = (drawn[drawnCount] ??= new THREE.Box3()).makeEmpty();
+      target = bounds;
+      expand(node);
+      if (!bounds.isEmpty()) {
+        reach.union(bounds);
+        drawnCount += 1;
+      }
+    }
+    const children = node.children;
+    for (let i = 0; i < children.length; i += 1) gatherDrawn(children[i]);
+  };
+  const volume = (b) => (b.max.x - b.min.x) * (b.max.y - b.min.y) * (b.max.z - b.min.z);
+  const byVolume = (a, b) => volume(b) - volume(a);
+  // The backdrop's colour as a person reads it, or null when it is a picture.
+  const backdropOf = (scene) => {
+    const background = scene.background;
+    if (background?.isColor === true) return `#${background.getHexString()}`;
+    if (background?.isTexture === true)
+      return background.mapping === THREE.CubeUVReflectionMapping ? "sky" : null;
+    if (background != null) return null;
+    if (gl == null) return "clear";
+    const value = gl.getParameter(gl.COLOR_CLEAR_VALUE);
+    clear.set(value);
+    return `#${new THREE.Color().setRGB(clear[0], clear[1], clear[2]).getHexString()}`;
+  };
+  const measureEmpty = (scene, camera, span) => {
+    const cols = LIMITS.emptyCols;
+    const n = cols * LIMITS.emptyRows;
+    const backdrop = backdropOf(scene);
+    let count = 0;
+    cells.fill(0);
+    if (backdrop !== null) {
+      drawnCount = 0;
+      reach.makeEmpty();
+      gatherDrawn(scene);
+      // The biggest first: the ground answers most rays at once.
+      const sorted = drawn.slice(0, drawnCount).sort(byVolume);
+      const ray = raycaster.ray;
+      for (let i = 0; i < n; i += 1) {
+        ndc.set(
+          (((i % cols) + 0.5) / cols) * 2 - 1,
+          1 - ((Math.floor(i / cols) + 0.5) / LIMITS.emptyRows) * 2,
+        );
+        raycaster.setFromCamera(ndc, camera);
+        if (ray.direction.y > -LIMITS.emptyBelow) continue;
+        let hit = false;
+        if (!reach.isEmpty() && ray.intersectsBox(reach))
+          for (let k = 0; k < sorted.length && !hit; k += 1) hit = ray.intersectsBox(sorted[k]);
+        if (hit) continue;
+        cells[i] = 1;
+        count += 1;
+      }
+    }
+    const share = count / n;
+    empty.measured += span;
+    if (emptyCount < HEIGHTS) emptyShares[emptyCount++] = share;
+    if (share > empty.worst) {
+      empty.worst = share;
+      empty.colour = backdrop;
+    }
+    if (share > LIMITS.emptyShare) {
+      empty.held += span;
+      empty.frame ??= capture(null, null, cells);
+    }
+  };
+
   // ── The report ────────────────────────────────────────────────────────
   const read = () => {
     const findings = [];
@@ -868,15 +1027,21 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
     findings.sort((a, b) => b.share - a.share);
     let player = null;
     if (playerView.kind === "body" && playerView.measured > 0) {
-      const sorted = Array.from(heights.subarray(0, heightCount)).sort((a, b) => a - b);
-      const heightPx = sorted.length === 0 ? null : round(sorted[sorted.length >> 1], 0);
+      const median = (values) => {
+        const sorted = Array.from(values.subarray(0, heightCount)).sort((a, b) => a - b);
+        return sorted.length === 0 ? null : round(sorted[sorted.length >> 1], 0);
+      };
+      const heightPx = median(heights);
+      const widthPx = median(widths);
       let blocker = null;
       let most = 0;
       for (const [name, seconds] of playerView.blockerSeconds)
         if (seconds > most) [blocker, most] = [name, seconds];
       const hidden = playerView.hidden / playerView.measured;
       const offscreen = playerView.offscreen / playerView.measured;
-      const small = heightPx !== null && heightPx < LIMITS.smallShare * (canvas.clientHeight || 1);
+      const small =
+        heightPx !== null &&
+        Math.max(heightPx, widthPx) < LIMITS.smallShare * (canvas.clientHeight || 1);
       const unseenShare = hidden + offscreen;
       player = {
         kind: "body",
@@ -886,6 +1051,7 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
         offscreen: round(offscreen),
         blocker,
         heightPx,
+        widthPx,
         canvasHeight: canvas.clientHeight,
         notVisible: unseenShare > LIMITS.hiddenShare,
         small,
@@ -895,6 +1061,19 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
     } else player = { kind: playerView.kind ?? "none" };
     const never = [];
     for (const entry of unseen.values()) if (!entry.seen) never.push(entry.name);
+    let view;
+    if (empty.measured > 0 && emptyCount > 0) {
+      const sorted = Array.from(emptyShares.subarray(0, emptyCount)).sort((a, b) => a - b);
+      const held = empty.held / empty.measured;
+      const flagged = held > LIMITS.emptyHeld;
+      view = {
+        share: round(sorted[sorted.length >> 1]),
+        held: round(held),
+        colour: empty.colour ?? "#000000",
+        flagged,
+        frame: flagged ? keep(empty.frame) : null,
+      };
+    }
     return {
       version: 1,
       seconds: round(played, 1),
@@ -904,6 +1083,7 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
       player,
       unseen: never.slice(0, LIMITS.unseen),
       unseenMore: Math.max(0, never.length - LIMITS.unseen),
+      ...(view === undefined ? {} : { empty: view }),
       frames: frames
         .filter((frame) => used.has(frame.id))
         .map((frame) => ({ id: frame.id, png: frame.canvas.toDataURL("image/png") })),

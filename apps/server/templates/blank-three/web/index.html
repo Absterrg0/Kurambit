@@ -6,24 +6,30 @@
     <title>{{GAME_NAME}}</title>
     <link rel="icon" href="assets/ui/icon.png" />
     <link rel="stylesheet" href="./style.css" />
-    <!-- Vendored addons import the bare "three"; this maps it to the same file
-         the game imports, so every module shares one three.js instance. The
-         look's post chain (shell/look.js) imports postprocessing and n8ao. -->
+    <!-- Kurambit's three.js runtime, major 1: three.js, its addons, the look's
+         post chain and the demo shell (_kurambit/runtime/three/1/). Kurambit
+         serves it and copies it into every export; the game never edits it.
+         "./vendor/" and "./shell/" map the game's own imports there, so every
+         module shares one three.js and one shell. "#main" is how the shell
+         loads this game's main.js. -->
     <script type="importmap">
       {
         "imports": {
-          "three": "./vendor/three.module.js",
-          "three/addons/": "./vendor/addons/",
-          "three/examples/jsm/": "./vendor/addons/",
-          "postprocessing": "./vendor/postprocessing/index.js",
-          "n8ao": "./vendor/n8ao/N8AO.js"
+          "three": "./_kurambit/runtime/three/1/vendor/three.module.js",
+          "three/addons/": "./_kurambit/runtime/three/1/vendor/addons/",
+          "three/examples/jsm/": "./_kurambit/runtime/three/1/vendor/addons/",
+          "postprocessing": "./_kurambit/runtime/three/1/vendor/postprocessing/index.js",
+          "n8ao": "./_kurambit/runtime/three/1/vendor/n8ao/N8AO.js",
+          "./vendor/": "./_kurambit/runtime/three/1/vendor/",
+          "./shell/": "./_kurambit/runtime/three/1/shell/",
+          "#main": "./main.js"
         }
       }
     </script>
   </head>
   <body>
     <canvas id="game"></canvas>
-    <!-- The demo shell's screens (shell/shell.js). Restyle them in style.css;
+    <!-- The demo shell's screens (the runtime's shell/shell.js). Restyle them in style.css;
          keep the ids and data-action attributes the shell looks for. -->
     <div id="ui">
       <div id="hud" aria-live="polite"></div>
@@ -139,7 +145,7 @@
     </div>
     <!-- The studio bridge loads on its own first, so a main.js that does not
          parse or imports a missing module still reports the error. -->
-    <script type="module" src="./shell/studio.js"></script>
-    <script type="module" src="./shell/shell.js"></script>
+    <script type="module" src="./_kurambit/runtime/three/1/shell/studio.js"></script>
+    <script type="module" src="./_kurambit/runtime/three/1/shell/shell.js"></script>
   </body>
 </html>

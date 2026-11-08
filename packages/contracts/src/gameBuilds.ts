@@ -8,6 +8,7 @@ import {
   type GameSceneFinding,
   type GameSceneFindingKind,
   GameSceneReport,
+  sceneEmptyText,
   sceneFindingText,
   scenePlayerText,
 } from "./gameScene.ts";
@@ -130,6 +131,7 @@ export const GameFactId = Schema.Literals([
   "assets",
   "use",
   "player-view",
+  "empty",
   "buried",
   "clipping",
   "fell",
@@ -340,6 +342,11 @@ export const GameBuildFacts = Schema.Struct({
   measuredAt: Schema.NullOr(IsoDateTime),
   /** The renderer the plays drew with, when it differs from what the export ships ("Compatibility; native exports draw Forward+"). */
   renderer: Schema.NullOr(Schema.String),
+  /**
+   * The Kurambit runtime the plays loaded ("three 1.0.0+3f2a9c1d0b7e"), so a change a runtime
+   * update made reads apart from the game's own; absent for a game that carries its own copy.
+   */
+  runtime: Schema.optionalKey(Schema.String),
   boots: gameFact(Schema.Struct({ ok: Schema.Boolean, detail: Schema.String })),
   idle: gameFact(GameBotTier),
   masher: gameFact(GameBotTier),
@@ -454,6 +461,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   assets: "Assets",
   use: "Asset use",
   "player-view": "Player in view",
+  empty: "Empty view",
   buried: "Buried",
   clipping: "Clipping",
   fell: "Out of the world",
@@ -696,6 +704,23 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
           }
         }
       });
+    case "empty":
+      return fromScene(facts, (report): Read => {
+        const empty = report.empty;
+        if (empty === undefined)
+          return { _tag: "not-measured", why: "the game's shell predates the empty-view measure" };
+        const problem = sceneEmptyText(empty);
+        return measured({
+          text:
+            problem ??
+            (empty.share === 0
+              ? "Something is drawn across the view"
+              : `${Math.round(empty.share * 100)}% of the view is empty backdrop`),
+          value: Math.round(empty.share * 100),
+          tone: problem === null ? "good" : "bad",
+          kind: problem === null ? "clean" : "flagged",
+        });
+      });
     case "buried":
     case "clipping":
     case "fell":
@@ -768,6 +793,13 @@ const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["eviden
       const frame = player.notVisible ? player.frame : player.small ? player.smallFrame : null;
       const text = scenePlayerText(player);
       return frame === null || text === null ? [] : [{ kind: "frame", label: text, path: frame }];
+    }
+    case "empty": {
+      const empty = facts.scene.status === "measured" ? facts.scene.value.empty : undefined;
+      const text = empty === undefined ? null : sceneEmptyText(empty);
+      return empty?.frame == null || text === null
+        ? []
+        : [{ kind: "frame", label: text, path: empty.frame }];
     }
     case "buried":
     case "clipping":
@@ -885,6 +917,14 @@ export const diffBuildFacts = (
       return notComparable(
         id,
         `measured on different renderers (A: ${a.renderer ?? "not recorded"}; B: ${b.renderer ?? "not recorded"})`,
+        textA,
+        textB,
+      );
+    // A runtime update changes what every game of its major plays, not the game.
+    if (a.runtime !== b.runtime)
+      return notComparable(
+        id,
+        `measured with different Kurambit runtimes (A: ${a.runtime ?? "the game's own"}; B: ${b.runtime ?? "the game's own"})`,
         textA,
         textB,
       );

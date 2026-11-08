@@ -6,11 +6,20 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
-import { GameOperationError, type GameEngineId } from "@kurambit/contracts";
+import * as Schema from "effect/Schema";
+import {
+  GameManifest,
+  GameOperationError,
+  manifestRuntime,
+  type GameEngineId,
+} from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
 import { RUN_STATE_IGNORES, withEveryTurn, withKeepGoing } from "./scaffold.ts";
 import { failureText } from "./run/handBack.ts";
+import { runtimesDirectory } from "./gameRuntime.ts";
+
+const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones this turn needs)";
@@ -54,6 +63,19 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
       await Promise.all(
         others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
       );
+      // A game that loads Kurambit's runtime reads its kits' comment blocks here; the game
+      // never loads this copy, so an edit to it changes nothing.
+      const major = await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")
+        .then((text) => manifestRuntime(decodeManifest(text)))
+        .catch(() => null);
+      const kits = NodePath.join(skills, "runtime");
+      await NodeFSP.rm(kits, { recursive: true, force: true });
+      if (major !== null)
+        await NodeFSP.cp(
+          NodePath.join(runtimesDirectory(templates), engine, String(major), "shell"),
+          NodePath.join(kits, "shell"),
+          { recursive: true },
+        );
       const index = NodePath.join(skills, "AGENTS.md");
       const text = await NodeFSP.readFile(index, "utf8");
       const kept = text

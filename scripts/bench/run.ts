@@ -21,6 +21,7 @@ import * as Layer from "effect/Layer";
 import { RpcClient } from "effect/rpc";
 import {
   CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
   ORCHESTRATION_V2_WS_METHODS,
@@ -465,14 +466,21 @@ async function main() {
     // The app's default for a new game (GameEntry): the text-generation instance's own chat
     // default, its flagship, at the provider's default effort.
     const text = config.settings.textGenerationModelSelection;
-    const models =
-      config.providers.find((entry) => entry.instanceId === text.instanceId)?.models ?? [];
+    const entry = config.providers.find((provider) => provider.instanceId === text.instanceId);
+    const builtIn = entry === undefined ? undefined : DEFAULT_MODEL_BY_PROVIDER[entry.driver];
+    const models = entry?.models ?? [];
     const chat =
-      models.find((model) => model.isDefault === true && !model.isCustom) ??
-      models.find((model) => !model.isCustom);
+      models.find((model) => model.isDefault === true && !model.isCustom)?.slug ??
+      models.find((model) => !model.isCustom && model.slug === builtIn)?.slug ??
+      builtIn;
+    // Never the text-generation model: a run on it measures an agent that quits, not the harness.
+    if (args.model === undefined && (chat === undefined || chat === text.model))
+      throw new Error(
+        `No chat model found for ${text.instanceId} (only ${text.model}); pass --model <instance>/<model>.`,
+      );
     modelSelection =
       args.model === undefined
-        ? { instanceId: text.instanceId, model: chat?.slug ?? text.model }
+        ? { instanceId: text.instanceId, model: chat ?? text.model }
         : {
             instanceId: ProviderInstanceId.make(provider),
             model: modelParts.join("/"),

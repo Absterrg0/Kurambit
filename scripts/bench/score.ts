@@ -8,9 +8,13 @@ import {
  * Bump when a score stops meaning what it meant (a criterion or threshold
  * changes): runs scored by another version are listed, never diffed.
  */
-export const SCORE_VERSION = 1;
+export const SCORE_VERSION = 2;
 
-/** Every number the score judges against. Change one here, never at a use site. */
+/**
+ * Every number the score judges against. Change one here, never at a use site. What a person
+ * sees (the player too small, the view empty) is judged by the game's shell, by the limits in
+ * its scene report (templates/runtime/three/1/shell/scene-report.js); the score reads its verdicts.
+ */
 export const THRESHOLDS = {
   /**
    * A game that ends by itself (no input) or under random input sooner than this
@@ -31,13 +35,21 @@ export const THRESHOLDS = {
 } as const;
 
 /** The criteria a game is scored on, in report order. */
-export const CRITERIA = ["boots", "ending", "scene", "performance", "first-playable"] as const;
+export const CRITERIA = [
+  "boots",
+  "ending",
+  "scene",
+  "view",
+  "performance",
+  "first-playable",
+] as const;
 export type Criterion = (typeof CRITERIA)[number];
 
 export const CRITERION_LABELS: Readonly<Record<Criterion, string>> = {
   boots: "Boots",
   ending: "Can be won or lost, not instantly",
-  scene: "Player visible, nothing buried or clipping",
+  scene: "Player visible and big enough, nothing buried or clipping",
+  view: "View filled, no void",
   performance: `Holds ${THRESHOLDS.minFps} fps`,
   "first-playable": `Playable within ${THRESHOLDS.firstPlayableSeconds / 60} min`,
 };
@@ -54,10 +66,9 @@ export interface GameScore {
 }
 
 /**
- * The facts every server at this commit reports. Any other fact a newer server's
- * view adds is the scene report (builder F's player-visible, buried, clipping …):
- * the benchmark reads it without naming it, so it scores the scene the moment
- * the report lands and says "not measured" until then.
+ * The facts that are not the scene's. Any other fact the server's view has is the
+ * scene report's (player-visible, buried, clipping …), read without naming it, so a
+ * new scene row is scored the moment it lands. The empty view is a criterion of its own.
  */
 const FACTS_BEFORE_SCENE_REPORT: ReadonlySet<string> = new Set([
   "boots",
@@ -73,6 +84,7 @@ const FACTS_BEFORE_SCENE_REPORT: ReadonlySet<string> = new Set([
   "performance",
   "assets",
   "use",
+  "empty",
 ]);
 
 export const sceneFacts = (views: ReadonlyArray<GameFactView>) =>
@@ -147,6 +159,14 @@ const sceneVerdict = (views: ReadonlyArray<GameFactView>): Verdict => {
     : pass(measured.map(({ view, reading }) => `${view.label}: ${reading.text}`).join("; "));
 };
 
+const viewVerdict = (views: ReadonlyArray<GameFactView>): Verdict => {
+  const empty = views.find((view) => view.id === "empty");
+  if (empty === undefined) return notMeasured("this server has no empty-view measure");
+  if (empty.reading._tag === "not-measured") return notMeasured(empty.reading.why);
+  if (empty.reading._tag === "pending") return notMeasured("still measuring");
+  return empty.reading.tone === "bad" ? fail(empty.reading.text) : pass(empty.reading.text);
+};
+
 const performanceVerdict = (facts: GameBuildFacts): Verdict => {
   if (facts.performance.status !== "measured")
     return notMeasured(
@@ -206,15 +226,18 @@ export function scoreGame(input: {
           boots: fail(missing),
           ending: notMeasured(missing),
           scene: notMeasured(missing),
+          view: notMeasured(missing),
           performance: notMeasured(missing),
           "first-playable": fail(missing),
         }
       : (() => {
           const boots = bootsVerdict(facts);
+          const views = gameFactsView(facts);
           return {
             boots,
             ending: endingVerdict(facts),
-            scene: sceneVerdict(gameFactsView(facts)),
+            scene: sceneVerdict(views),
+            view: viewVerdict(views),
             performance: performanceVerdict(facts),
             "first-playable": firstPlayableVerdict(
               boots.result === "pass" ? input.turnSeconds : null,

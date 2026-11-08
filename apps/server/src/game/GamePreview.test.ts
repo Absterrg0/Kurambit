@@ -7,7 +7,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
-import { GamePreview, isLiveChange, layer } from "./GamePreview.ts";
+import { GamePreview, isLiveChange, layer as previewLayer } from "./GamePreview.ts";
+import * as GameTemplates from "./GameTemplates.ts";
+
+const layer = previewLayer.pipe(
+  Layer.provide(GameTemplates.layerAt(`${import.meta.dirname}/../../templates`)),
+);
 
 it("counts the game's own files as live changes, not Blender's or editors' temporaries", () => {
   for (const path of ["main.js", "shell/hud.js", "assets/library/kaykit/Knight.glb", "index.html"])

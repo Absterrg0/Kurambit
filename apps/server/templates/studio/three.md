@@ -29,7 +29,9 @@ the person the error until a save boots again.
 - Keep the default look on the first build (`day`), or name the one preset
   the brief calls for (`export const LOOK = { preset: "night" }`), with no
   lights besides `ctx.look.sun`. The look draws the sky, its light and the fog;
-  do not set `scene.background` or `scene.fog` over them. The shell loads every
+  do not set `scene.background` or `scene.fog` over them. Where the camera looks
+  down, ground fills the view to its edges (`buildLevel` lays it; a board built
+  by hand stands on a wide ground of its own). The shell loads every
   `ASSETS` model and compiles its shaders behind the loading screen, so play
   starts without a freeze. Glows and extra lights are a later turn.
 - No Blender, no key art, no plan, no `game_explore_*` to check your work:
@@ -224,8 +226,12 @@ export function update(dt, ctx) {
 
 ## Rules
 
-1. No install step, no bundler, no CDN. `web/vendor/three.module.js` is
-   pinned; import it with a relative path. Keep the pin and its LICENSE.
+1. No install step, no bundler, no CDN. three.js and the shell's kits
+   (`shell/*.js`) are pinned: in Kurambit's runtime when `game.json` names a
+   `runtime` (never copy or edit it; read the kits' comment blocks in
+   `studio-skills/runtime/shell/`), or in an older game's own `web/vendor/`
+   and `shell/` (keep the pin and its LICENSE). Either way, import them
+   as the recipes do: `./vendor/three.module.js`, `./shell/juice.js`.
 2. The file the browser loads is the file you edit: `web/index.html`,
    `web/main.js` (the gameplay), `web/style.css`, `web/assets/` for every
    visual and sound.
@@ -263,26 +269,26 @@ export function update(dt, ctx) {
    `export const KEEP_ACROSS_RUNS = [...]`; the shell saves those between
    visits (numbers, strings, arrays, plain objects) and Settings can reset them.
    Show the score, health, timer, objective, event toasts and control hints
-   through `ctx.ui` (`web/shell/hud.js`; TEMPLATE.md), never raw text, and
+   through `ctx.ui` (`shell/hud.js`; TEMPLATE.md), never raw text, and
    teach each control with a `hint` the first time it matters.
-   Answer every player action through `Juice` (`web/shell/juice.js`):
+   Answer every player action through `Juice` (`shell/juice.js`):
    `shake`, `hitPause`, `pop`, `squash`, `flash`, `flashScreen`, `burst`,
    `sfx`.
 5. Never hand-write clip switching or camera follow; the shell kits do it
    and the shell ticks them on game time. Character: `const hero =
-animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
+animate(ctx.assets.model("knight"))` (`shell/animate.js`), then every frame
    `hero.play(state, { speed })` with the state chosen from gameplay (on
    floor, speed, attacking) and `hero.play("attack")` on the event; it finds
    clips by name, crossfades, returns from one-shots, and the console line
    says which clip each state got. Library models face +z: face the move
    direction with `rotation.y = Math.atan2(dir.x, dir.z)`. Camera
-   (`web/shell/camera.js`): `followCamera2D(ctx, player, { bounds })` for a
+   (`shell/camera.js`): `followCamera2D(ctx, player, { bounds })` for a
    side or top-down view, `followCamera3D(ctx, player, { blockers: [level] })`
    for third person, moving the player relative to `cam.yaw`. Juice.shake
    applies on top. Each `ctx.assets.model` call is its own copy, so every
    character or enemy gets its own `animate`; call its `dispose()` when the
    enemy is gone for good. A character loaded from its sidecar moves with
-   `locomotion` (`web/shell/locomotion.js`) instead of a hand-picked state:
+   `locomotion` (`shell/locomotion.js`) instead of a hand-picked state:
 
    ```js
    import { locomotion } from "./shell/locomotion.js";
@@ -323,7 +329,7 @@ maxPitch: 0.5 })` turns neck and head within limits, and
    (TEMPLATE.md).
 
 6. Never write a renderer, post-processing or lighting rig; the shell's look
-   (`web/shell/look.js`; TEMPLATE.md) does it. Pick a preset in one line,
+   (`shell/look.js`; TEMPLATE.md) does it. Pick a preset in one line,
    `export const LOOK = { preset: "golden" }` (`day`, `golden`, `night`,
    `interior`, `flat`), and override parts of it there (`sun`, `sky`, `fog`,
    `ao`, `bloom`, `grade`, `exposure`). `day` and `flat` cost what a plain frame
@@ -341,7 +347,7 @@ maxPitch: 0.5 })` turns neck and head within limits, and
    sprites keep their files' colours; it also sets
    `LOOK = { environment: false, shadows: false }`.
 7. Write every top-down level (rows run along x/z on the ground) as a text map with `buildLevel(ctx, rows, legend, { floor })`
-   (`web/shell/level.js`), never pieces placed by coordinates: `#` walls,
+   (`shell/level.js`), never pieces placed by coordinates: `#` walls,
    `.` floor, a letter per spawn, the legend naming ASSETS models. Make more
    than one room, joined by corridors, when the brief allows. Put the player,
    enemies and pickups at `level.spawns.P[0]`, `level.spawns.E`, never at
@@ -352,7 +358,7 @@ maxPitch: 0.5 })` turns neck and head within limits, and
 8. Keep `window.__studio`: `ready` after the first frame, `getState()`
    returning `{gameState, player, hudText}`, page errors in `errors[]`,
    `setState(target, values)` for named late content (the starter refuses).
-   Extend `GameState`, not the bridge. Keep `web/shell/stage-bridge.js` and
+   Extend `GameState`, not the bridge. Keep the shell's stage bridge and
    `web/tune.json` too: they are how the person points at the running game.
 9. Name what a person would point at, and put every number they would tune
    in `ctx.tune`. On the Stage the person freezes the game, selects things,

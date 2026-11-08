@@ -8,7 +8,7 @@ import { GameBuildId } from "./gameBuildId.ts";
  * The game page runs on its own origin, so both ends decode every message and
  * ignore what does not decode.
  *
- * The three.js shell (templates/blank-three/web/shell/stage-bridge.js) is the
+ * The three.js shell (templates/runtime/three/1/shell/stage-bridge.js) is the
  * game end; Godot and Unity have none yet. A game says it has the bridge with
  * `studio-ready` carrying `bridge`. Shells from before the bridge post a bare
  * `{ type: "studio-ready" }` as their boot signal, which does not decode here:

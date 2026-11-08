@@ -28,7 +28,7 @@ export const THREE_PROFILE: GameEngineProfile = {
     version: THREE_PINNED_VERSION,
     directories: ["web/assets", "builds/web"],
     ignores: [],
-    agents: `Build BRIEF.md's game with three.js (vendored in web/vendor, no install step). web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound. A new game's first turn follows "The first turn" below.
+    agents: `Build BRIEF.md's game with three.js. web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound. three.js and the demo shell are Kurambit's runtime (game.json \`runtime\`), which Kurambit serves and copies into every export: no install step. Import them as the recipes do (\`./vendor/three.module.js\`, \`./shell/juice.js\`); the import map in web/index.html points those at the runtime. Never copy or edit the runtime: a variant is a module of the game's own beside main.js. Its kits' comment blocks are readable in studio-skills/runtime/shell/. A new game's first turn follows "The first turn" below.
 
 Use the game_* tools to check, play, export and package the game; never launch your own browser. Keep builds/ generated.
 `,
@@ -51,7 +51,7 @@ Use the game_* tools to check, play, export and package the game; never launch y
     check:
       "three.js games load the static page and then the gameplay entry in headless Chromium and report console and page errors; a page that crashes is the game's error, a browser that is lost is a tool failure. The gameplay entry then plays 6 s of random keys for the scene report, which the game's shell measures (a shell from before scene reports says so).",
     export:
-      "three.js games export Web only (a static copy of web/), as a release: Play keeps serving the folder live. Windows and Linux are refused.",
+      "three.js games export Web only (a static copy of web/, with the Kurambit runtime it loads), as a release: Play keeps serving the folder live. Windows and Linux are refused.",
     explore: "three.js games load the static folder in headless Chromium and play in real time.",
   },
   layout: {
@@ -72,8 +72,6 @@ Use the game_* tools to check, play, export and package the game; never launch y
   },
   run: {
     skill: "three",
-    // The play runner lives in the server (Godot's runner script, the browser host).
-    harnessFiles: { template: "blank-three", files: ["shell/studio.js"] },
     parallelSamples: true,
     warmEditor: false,
     sources: { extensions: [".js", ".mjs"], under: "" },

@@ -26,7 +26,8 @@ import {
   WebPageNotReady,
   type WebPageEvent,
 } from "./webPlaySession.ts";
-import type { GameEngineBackend } from "./GameEngine.ts";
+import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
+import { copyRuntimeInto, hasRuntime } from "./gameRuntime.ts";
 import { copyTree } from "./gameFiles.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
 import {
@@ -96,7 +97,27 @@ const response = (
  */
 export const makeThreeBackend = (
   gameBrowser: (operation: string, path: string) => Effect.Effect<GameBrowser, GameOperationError>,
+  /** The server's runtimes folder (gameRuntime.ts). */
+  runtimes: Effect.Effect<string, GameOperationError>,
 ): GameEngineBackend => {
+  /** The runtimes folder for a game that loads one, refused when this server lacks its major. */
+  const runtimeOf = (ctx: GameEngineContext, operation: string) => {
+    const major = ctx.runtime;
+    return major === null
+      ? Effect.succeed(null)
+      : Effect.gen(function* () {
+          const folder = yield* runtimes;
+          const shipped = yield* Effect.promise(() => hasRuntime(folder, "three", major));
+          if (!shipped)
+            return yield* new GameOperationError({
+              operation,
+              path: NodePath.join(ctx.root, "game.json"),
+              reason: "tool-missing",
+              detail: `This game loads Kurambit's three.js runtime ${major}, which this Kurambit does not ship. Update Kurambit to open it.`,
+            });
+          return folder;
+        });
+  };
   const runCheck: GameEngineBackend["runCheck"] = (ctx, input) =>
     Effect.gen(function* () {
       const temporary = NodePath.join(
@@ -121,9 +142,10 @@ export const makeThreeBackend = (
             cause,
           }),
       });
+      const runtimeFolder = yield* runtimeOf(ctx, "three-check");
       const browser = yield* gameBrowser("three-check", ctx.projectDir);
       const server = yield* Effect.tryPromise({
-        try: () => serveGameDirectory(ctx.root, ctx.projectName),
+        try: () => serveGameDirectory(ctx.root, ctx.projectName, { runtimes: runtimeFolder }),
         catch: (cause) =>
           new GameOperationError({
             operation: "three-check",
@@ -300,7 +322,7 @@ export const makeThreeBackend = (
         projectName: manifestProject(manifest),
         projectDir: insideGame(root, manifestProject(manifest)),
       })),
-    // three.js is vendored in the game: nothing to install.
+    // three.js is vendored in the game or loads from Kurambit's runtime: nothing to install.
     toolStatus: () => Effect.succeed(null),
     viewport: () => Effect.succeed({ ...THREE_VIEWPORT }),
     projectSettingsFile: "index.html",
@@ -324,11 +346,17 @@ export const makeThreeBackend = (
         issues: [],
       }),
     runCheck,
-    // The web release is a static copy of the project, which the core then hashes, moves and selects.
+    // The web release is a static copy of the project, with the runtime it loads beside it, which
+    // the core then hashes, moves and selects.
     release: (ctx, input) =>
       Effect.gen(function* () {
+        const runtimeFolder = yield* runtimeOf(ctx, input.operation);
         yield* Effect.tryPromise({
-          try: (signal) => copyTree(ctx.projectDir, input.staging, signal),
+          try: async (signal) => {
+            await copyTree(ctx.projectDir, input.staging, signal);
+            if (runtimeFolder !== null && ctx.runtime !== null)
+              await copyRuntimeInto(runtimeFolder, "three", ctx.runtime, input.staging, signal);
+          },
           catch: (cause) =>
             new GameOperationError({
               operation: input.operation,
@@ -343,7 +371,7 @@ export const makeThreeBackend = (
           exitCode: 0,
           signal: null,
           timedOut: false,
-          stdout: `Copied ${ctx.projectName}/ to the web staging directory.`,
+          stdout: `Copied ${ctx.projectName}/${ctx.runtime === null ? "" : ` and Kurambit's three.js runtime ${ctx.runtime}`} to the web staging directory.`,
           stderr: "",
           logPath: NodePath.join(ctx.root, "builds/logs"),
         };

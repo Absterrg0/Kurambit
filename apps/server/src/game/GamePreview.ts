@@ -13,6 +13,8 @@ import * as Stream from "effect/Stream";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { GameOperationError } from "@kurambit/contracts";
 import { serveGameDirectory } from "./gameWebServer.ts";
+import { runtimesDirectory } from "./gameRuntime.ts";
+import * as GameTemplates from "./GameTemplates.ts";
 
 /** A save settles before it is pushed: editors write a file in several events. */
 const LIVE_SETTLE = Duration.millis(400);
@@ -41,7 +43,7 @@ export class GamePreview extends Context.Service<
     /** Serves a build and makes it the one Play shows. */
     readonly select: (root: string, directory: string) => Effect.Effect<string, GameOperationError>;
     /**
-     * Serves the game's own folder, as its dev server: one server and one
+     * Serves the game's own folder, as its dev server, with Kurambit's runtime beside it: one server and one
      * recursive watch per game, kept until `stop`. Each settled change the
      * game's (`isLiveChange`) calls `onChange` with its path. A watch that
      * fails is logged and ends only the watch; the next `live` opens it again.
@@ -80,6 +82,7 @@ export class GamePreview extends Context.Service<
 >()("kurambit/game/GamePreview") {}
 const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
+  const templates = yield* GameTemplates.GameTemplates;
   // Kept apart from the builds' servers, so an export pruning its builds
   // (`retain`) or selecting one never closes the live folder's.
   const lives = new Map<string, { url: string; close: () => Promise<void> }>();
@@ -155,11 +158,23 @@ const make = Effect.gen(function* () {
     }),
   );
   const serveLive = (root: string, directory: string) =>
+    Effect.gen(function* () {
+      // Without templates a game that loads the runtime fails to load it, which its page reports.
+      const runtimes = yield* templates.directory.pipe(
+        Effect.map(runtimesDirectory),
+        Effect.tapError((error) =>
+          Effect.logWarning("The live game is served without Kurambit's runtime.", error),
+        ),
+        Effect.orElseSucceed(() => null),
+      );
+      return yield* serveLiveWith(root, directory, runtimes);
+    });
+  const serveLiveWith = (root: string, directory: string, runtimes: string | null) =>
     Effect.tryPromise({
       try: async () => {
         const existing = lives.get(root);
         if (existing) return existing.url;
-        const opened = await serveGameDirectory(root, directory);
+        const opened = await serveGameDirectory(root, directory, { runtimes });
         lives.set(root, opened);
         return opened.url;
       },

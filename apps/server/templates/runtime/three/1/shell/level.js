@@ -37,12 +37,17 @@
 // Rooms are just rows: concatenate arrays to stack them, add strings row by
 // row to put them side by side. Repeated pieces are instanced, so a 60x60 map
 // costs one draw per piece mesh, not one per cell.
+//
+// The map stands on a plain ground out to the horizon (level.ground), in the
+// floor's own tone a little darker, so a camera that sees past the map's edge
+// sees ground, not a board floating in the backdrop. `ground: 0x4a6b3a` names
+// its colour; `ground: false` leaves none, for a level over a drop.
 import * as THREE from "../vendor/three.module.js";
 
 const DEFAULTS = { " ": { void: true }, ".": {} };
 
 export function buildLevel(ctx, rows, legend = {}, options = {}) {
-  const { cell = 1, floor = null, scale = 1, origin = { x: 0, z: 0 } } = options;
+  const { cell = 1, floor = null, scale = 1, origin = { x: 0, z: 0 }, ground = true } = options;
   const entries = { ...DEFAULTS };
   for (const [char, raw] of Object.entries(legend)) entries[char] = entry(char, raw);
   const height = rows.length;
@@ -116,6 +121,8 @@ export function buildLevel(ctx, rows, legend = {}, options = {}) {
     group.add(mesh);
   }
   ctx.scene.add(group);
+  // Outside the group, so a bake's bounds and a camera's level bounds stay the map's own.
+  const surround = ground === false ? null : groundAround(ctx, bounds, ground, floor, scale, cell);
 
   const colOf = (x) => Math.floor((x - origin.x) / cell);
   const rowOf = (z) => Math.floor((z - origin.z) / cell);
@@ -160,6 +167,8 @@ export function buildLevel(ctx, rows, legend = {}, options = {}) {
 
   return {
     group,
+    /** The plain ground around the map (a Mesh), or null with ground: false. */
+    ground: surround,
     /** Spawn cells by letter, each an array of Vector3 at floor height. */
     spawns,
     /** The level's box (Box3); pass it to followCamera2D's bounds. */
@@ -252,4 +261,163 @@ function instanced(ctx, name, matrices) {
   });
   if (meshes.length === 0) throw new Error(`buildLevel: model "${name}" has no meshes.`);
   return meshes;
+}
+
+// The ground the map stands on, out to the horizon: a camera that sees past the map's edge
+// sees more ground fading into the fog, never the backdrop under a floating board. Just
+// under the floor pieces, in the floor's own tone a little darker so the map's edge reads,
+// or the colour `ground` names.
+const GROUND_RADIUS = 400;
+const GROUND_SHADE = 0.8;
+function groundAround(ctx, bounds, ground, floor, scale, cell) {
+  let bottom = 0;
+  let top = null;
+  if (floor !== null && floor !== false) {
+    const piece = ctx.assets.model(floor);
+    piece.scale.setScalar(scale);
+    piece.updateMatrixWorld(true);
+    bottom = Math.min(0, new THREE.Box3().setFromObject(piece).min.y);
+    top = topColour(piece);
+  }
+  // The floor's own material, so the ground takes the light the way the floor does; its maps
+  // are the piece's (an atlas, a normal map) and mean nothing stretched over the ground.
+  const material =
+    top?.material?.clone() ?? new THREE.MeshStandardMaterial({ color: PLAIN_TILE, roughness: 1 });
+  for (const key of Object.keys(material))
+    if (key.endsWith("Map") || key === "map") material[key] = null;
+  material.vertexColors = false;
+  material.emissive?.setRGB(0, 0, 0);
+  material.transparent = false;
+  material.opacity = 1;
+  material.side = THREE.FrontSide;
+  material.color =
+    typeof ground === "number" || typeof ground === "string"
+      ? new THREE.Color(ground)
+      : (top?.colour ?? new THREE.Color(PLAIN_TILE)).multiplyScalar(GROUND_SHADE);
+  const mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(GROUND_RADIUS, 64).rotateX(-Math.PI / 2),
+    material,
+  );
+  mesh.name = "ground";
+  const centre = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
+  mesh.position.set(centre.x, bottom - Math.max(0.02, cell * 0.01), centre.z);
+  mesh.receiveShadow = true;
+  ctx.scene.add(mesh);
+  return mesh;
+}
+
+const PLAIN_TILE = 0x55585e;
+const texels = new WeakMap();
+// A texture's pixels, small: what its top faces show is read from them once.
+function texelsOf(map) {
+  if (texels.has(map)) return texels.get(map);
+  let read = null;
+  const image = map.image;
+  const w = image?.width ?? 0;
+  const h = image?.height ?? 0;
+  if (w > 0 && h > 0) {
+    // Atlas swatches are a few pixels wide: read near full size, without smoothing across them.
+    const size = Math.min(1024, w);
+    const height = Math.max(1, Math.round((size * h) / w));
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = height;
+    const g = canvas.getContext("2d", { willReadFrequently: true });
+    g.imageSmoothingEnabled = false;
+    try {
+      g.drawImage(image, 0, 0, size, height);
+      read = { data: g.getImageData(0, 0, size, height).data, w: size, h: height };
+    } catch {
+      read = null;
+    }
+  }
+  texels.set(map, read);
+  return read;
+}
+
+// The colour most of the floor piece's top shows: its up-facing triangles by area, each its
+// material's colour times its texture at the triangle's middle (an atlas swatch is read where
+// the face uses it), grouped by colour so a rim or a trim never tints the whole ground; with
+// the material that colour wears. Null when the piece has no top.
+function topColour(piece) {
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  const uv = new THREE.Vector2();
+  const texel = new THREE.Color();
+  const sample = new THREE.Color();
+  const shades = new Map();
+  piece.traverse((mesh) => {
+    if (!mesh.isMesh) return;
+    const geometry = mesh.geometry;
+    const position = geometry.attributes.position;
+    const uvs = geometry.attributes.uv;
+    const colours = geometry.attributes.color;
+    const index = geometry.index;
+    const count = index === null ? position.count : index.count;
+    for (let t = 0; t + 2 < count; t += 3) {
+      const i0 = index === null ? t : index.getX(t);
+      const i1 = index === null ? t + 1 : index.getX(t + 1);
+      const i2 = index === null ? t + 2 : index.getX(t + 2);
+      a.fromBufferAttribute(position, i0).applyMatrix4(mesh.matrixWorld);
+      b.fromBufferAttribute(position, i1).applyMatrix4(mesh.matrixWorld);
+      c.fromBufferAttribute(position, i2).applyMatrix4(mesh.matrixWorld);
+      n.subVectors(b, a).cross(c.sub(a));
+      const length = n.length();
+      if (!(length > 0) || n.y / length < 0.7) continue;
+      const group = geometry.groups.find((g) => t >= g.start && t < g.start + g.count);
+      const material = Array.isArray(mesh.material)
+        ? mesh.material[group?.materialIndex ?? 0]
+        : mesh.material;
+      if (material == null || material.visible === false) continue;
+      texel.setRGB(1, 1, 1);
+      if (material.color) texel.copy(material.color);
+      const pixels = material.map && uvs ? texelsOf(material.map) : null;
+      if (pixels !== null) {
+        uv.set(
+          (uvs.getX(i0) + uvs.getX(i1) + uvs.getX(i2)) / 3,
+          (uvs.getY(i0) + uvs.getY(i1) + uvs.getY(i2)) / 3,
+        );
+        material.map.transformUv(uv);
+        const x = Math.min(pixels.w - 1, Math.max(0, Math.floor(uv.x * pixels.w)));
+        const y = Math.min(pixels.h - 1, Math.max(0, Math.floor(uv.y * pixels.h)));
+        const o = (y * pixels.w + x) * 4;
+        const d = pixels.data;
+        texel.multiply(
+          sample.setRGB(d[o] / 255, d[o + 1] / 255, d[o + 2] / 255, THREE.SRGBColorSpace),
+        );
+      }
+      if (material.vertexColors && colours !== undefined)
+        texel.multiply(
+          sample.setRGB(
+            (colours.getX(i0) + colours.getX(i1) + colours.getX(i2)) / 3,
+            (colours.getY(i0) + colours.getY(i1) + colours.getY(i2)) / 3,
+            (colours.getZ(i0) + colours.getZ(i1) + colours.getZ(i2)) / 3,
+          ),
+        );
+      const area = length / 2;
+      const hex = texel.getHex(THREE.SRGBColorSpace);
+      // Four bits a channel: one shade under a texture's grain.
+      const key = ((hex >> 4) & 0x0f0f0f) | 0;
+      let shade = shades.get(key);
+      if (shade === undefined) {
+        shade = { area: 0, colour: new THREE.Color(0, 0, 0), materials: new Map() };
+        shades.set(key, shade);
+      }
+      shade.area += area;
+      shade.colour.r += texel.r * area;
+      shade.colour.g += texel.g * area;
+      shade.colour.b += texel.b * area;
+      shade.materials.set(material, (shade.materials.get(material) ?? 0) + area);
+    }
+  });
+  let best = null;
+  for (const shade of shades.values()) if (best === null || shade.area > best.area) best = shade;
+  if (best === null) return null;
+  let material = null;
+  let most = 0;
+  for (const [candidate, area] of best.materials)
+    if (area > most) [material, most] = [candidate, area];
+  return { colour: best.colour.multiplyScalar(1 / best.area), material };
 }

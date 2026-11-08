@@ -1,6 +1,6 @@
 // The demo shell around the game: title, pause, settings, end and credits
-// screens, the render loop and the studio bridge. The game plugs in at
-// ../main.js and never builds these screens itself:
+// screens, the render loop and the studio bridge. The game plugs in at its
+// main.js (the import map's "#main") and never builds these screens itself:
 //
 //   export function start(ctx) {}   // build the run into ctx.scene; set ctx.camera, ctx.player
 //   export function update(dt, ctx) {} // every frame while playing (and the slow end beat)
@@ -11,6 +11,8 @@
 //   export const KEEP_ACROSS_RUNS = ["best"]; // GameState values a retry keeps
 //   export const ASSETS = { knight: "assets/models/knight.glb" }; // loaded before the title
 //   export const LOOK = { preset: "golden" }; // the light, sky, fog and post chain (shell/look.js)
+//   export const CLICK_SOUND = "assets/sfx/click.ogg"; // optional: the menu button sound
+//                                    // (default: a short synthesized tick)
 //   export async function prepare({ renderer, assets, look, progress }) {} // optional: behind the
 //                                    // loading bar, once (build a big world, bake, compile);
 //                                    // progress(0..1) fills the bar
@@ -71,12 +73,10 @@ import {
   setVolume,
   unlockAudio,
 } from "./audio.js";
-import * as game from "../main.js";
+import * as game from "#main";
 
-/** true boots straight into play, skipping the title (handy while building). `?play` in the URL does the same. */
-const BOOT_INTO_PLAY = false;
-/** Played on every shell button press; empty plays a short synthesized tick. */
-const CLICK_SOUND = "";
+/** Played on every shell button press (main.js's CLICK_SOUND); empty plays a short synthesized tick. */
+const CLICK_SOUND = typeof game.CLICK_SOUND === "string" ? game.CLICK_SOUND : "";
 const CREDITS_FILE = "./credits.txt";
 const SETTINGS_KEY = `settings:${location.pathname}`;
 const KEEP = Array.isArray(game.KEEP_ACROSS_RUNS) ? game.KEEP_ACROSS_RUNS : [];
@@ -808,6 +808,7 @@ onModelCopy(bridge.assetCopy);
 // Looks at the scene only once the harness starts a measured play (window.__studio.scene).
 const sceneReport = createSceneReport({
   canvas,
+  gl: renderer.getContext(),
   view: () => (run === null ? null : view()),
   player: () => run?.ctx.player ?? null,
   bridge,
@@ -882,13 +883,10 @@ if (game.title !== undefined) {
   };
   titleCtx.look = look.forRun(titleCtx);
 }
+// `?play` boots straight into play, skipping the title (handy while building).
 // The Stage reloads a live game with #kurambit-play once the person has
 // played it, so a save lands them back in play, as pressing Play would.
-if (
-  BOOT_INTO_PLAY ||
-  new URLSearchParams(location.search).has("play") ||
-  location.hash.includes("kurambit-play")
-)
+if (new URLSearchParams(location.search).has("play") || location.hash.includes("kurambit-play"))
   startRun();
 else showTitle();
 

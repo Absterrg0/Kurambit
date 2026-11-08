@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import * as Mime from "effect/http/Mime";
 import * as Option from "effect/Option";
 import { engineChildEnv } from "./GameProcesses.ts";
+import { runtimeRequestFile } from "./gameRuntime.ts";
 
 /** Text types carry their charset so a page without a meta tag still decodes as UTF-8. */
 const contentType = (path: string): string =>
@@ -26,7 +27,9 @@ export interface WebStaticServer {
  * check/explore/bot runs. It is its own origin on purpose: the game is
  * agent-written JS and must never run on the app origin beside the session
  * cookie. Requests resolve through realpath, so a symlink cannot reach outside
- * the directory.
+ * the directory. With `runtimes`, `/_kurambit/runtime/...` is answered from
+ * Kurambit's runtime (gameRuntime.ts) for a game that loads it; an export
+ * holds its own copy and is served without.
  */
 export const serveGameDirectory = async (
   root: string,
@@ -34,6 +37,8 @@ export const serveGameDirectory = async (
   options: {
     /** Each file a GET is answered with, by its path inside the directory ("assets/hero.glb"). */
     readonly onServed?: (path: string) => void;
+    /** The server's runtimes folder (gameRuntime's runtimesDirectory), for a folder that loads one. */
+    readonly runtimes?: string | null;
   } = {},
 ): Promise<WebStaticServer> => {
   const webRoot = await NodeFSP.realpath(NodePath.join(root, directory));
@@ -47,6 +52,12 @@ export const serveGameDirectory = async (
       const raw = decodeURIComponent((request.url ?? "/").split("?")[0] ?? "/");
       if (raw.includes("\0") || raw.includes("\\") || raw.split("/").includes("..")) {
         response.writeHead(403).end();
+        return;
+      }
+      const runtimeFile =
+        options.runtimes == null ? null : await runtimeRequestFile(options.runtimes, raw);
+      if (runtimeFile !== null) {
+        await serveRuntimeFile(request, response, runtimeFile);
         return;
       }
       const target = NodePath.resolve(webRoot, `.${raw === "/" ? "/index.html" : raw}`);
@@ -100,6 +111,40 @@ export const serveGameDirectory = async (
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
+};
+
+/**
+ * One runtime file. Its URL names only the major, so a minor update must reach the next load:
+ * the browser keeps it and asks again each time (no-cache), and an unchanged file answers 304
+ * from its stat alone, which keeps the compiled module in the browser's code cache across a
+ * live reload. Runtime files are Kurambit's, not the game's, so asset use never counts them.
+ */
+const serveRuntimeFile = async (
+  request: NodeHttp.IncomingMessage,
+  response: NodeHttp.ServerResponse,
+  file: string,
+) => {
+  const stat = await NodeFSP.stat(file);
+  if (!stat.isFile()) {
+    response.writeHead(404).end();
+    return;
+  }
+  const etag = `W/"${stat.size.toString(16)}-${Math.trunc(stat.mtimeMs).toString(16)}"`;
+  const headers = { ETag: etag, "Cache-Control": "no-cache" };
+  if (request.headers["if-none-match"] === etag) {
+    response.writeHead(304, headers).end();
+    return;
+  }
+  response.writeHead(200, {
+    ...headers,
+    "Content-Type": contentType(file),
+    "Content-Length": stat.size,
+  });
+  if (request.method === "HEAD") response.end();
+  else
+    NodeFS.createReadStream(file)
+      .on("error", () => response.destroy())
+      .pipe(response);
 };
 
 /**

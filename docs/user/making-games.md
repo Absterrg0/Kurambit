@@ -66,8 +66,8 @@ playing, with **Reload**. A hidden stage catches up when you show it. If a save 
 stage names the error: quietly while the turn runs, since the agent may be mid-change, and with
 **Ask agent to fix** once the turn has ended.
 
-A game is a static three.js browser game with three.js vendored (no install step), played in real
-time through the same tools, with a Web export.
+A game is a static three.js browser game (no install step), played in real time through the same
+tools, with a Web export.
 
 To continue an existing game, choose its card under **Your games** or its row in the sidebar, or use
 **Open game** and pick a folder that contains `game.json`. A game opens on its main chat: the first
@@ -372,8 +372,11 @@ you can open in that engine's own editor.
 Each game is a self-contained git repository you can move, back up, or open on another machine:
 
 - `game.json` and `BRIEF.md` describe the game.
-- `web/` is the game: a static three.js project with `index.html`, `main.js`, `style.css`,
-  `assets/` and vendored `vendor/three.*.js`. A new game starts inside a demo shell: a title
+- `web/` is the game: a static three.js project with `index.html`, `main.js`, `style.css` and
+  `assets/`. three.js and the demo shell come from Kurambit's runtime, the version `game.json`
+  names under `runtime`: Kurambit brings fixes to them without changing the game, and every Web
+  export carries its own copy, so a release plays from any web server. Games made before the
+  runtime keep their own copy in `web/shell/` and `web/vendor/`. A new game starts inside a demo shell: a title
   screen, pause (Esc or P), settings for volume and fullscreen, a Controls screen where players
   rebind keys (gamepads work too), a win or lose screen with Retry, and credits. Best scores and
   unlocks are saved between launches, and Settings can reset them. The game's icon
