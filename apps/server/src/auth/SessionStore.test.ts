@@ -54,12 +54,12 @@ const layerSessionStore = (
     Layer.provide(layerServerConfig(overrides)),
   );
 
-const relaySessionInput = {
-  subject: "managed-relay-bootstrap",
+const proofBoundSessionInput = {
+  subject: "proof-bound-bootstrap",
   method: "dpop-access-token",
-  proofKeyThumbprint: "relay-proof-key",
+  proofKeyThumbprint: "client-proof-key",
   ttl: Duration.hours(1),
-  client: { label: "Relay desktop", deviceType: "desktop" },
+  client: { label: "Proof-bound desktop", deviceType: "desktop" },
 } as const;
 
 const makeDiskSessionStoreLayer = Effect.fn("makeDiskSessionStoreLayer")(function* (
@@ -123,7 +123,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       Effect.gen(function* () {
         const sessions = yield* SessionStore.SessionStore;
         const owner = yield* sessions.issue({ subject: "owner" });
-        const client = yield* sessions.issue(relaySessionInput);
+        const client = yield* sessions.issue(proofBoundSessionInput);
         const ownerInvalidated = yield* Deferred.make<void>();
         yield* sessions
           .awaitInvalidation(owner.sessionId)
@@ -139,7 +139,8 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
           .pipe(Effect.forkScoped({ startImmediately: true }));
         if (operation === "revoke") yield* sessions.revoke(client.sessionId);
         else if (operation === "revokeAllExcept") yield* sessions.revokeAllExcept(owner.sessionId);
-        else yield* sessions.issue({ ...relaySessionInput, replaceSessionId: client.sessionId });
+        else
+          yield* sessions.issue({ ...proofBoundSessionInput, replaceSessionId: client.sessionId });
         yield* Fiber.join(first);
         yield* Fiber.join(second);
         expect(yield* Deferred.isDone(ownerInvalidated)).toBe(false);
@@ -150,7 +151,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
   it.effect("expires a connected session at its credential deadline", () =>
     Effect.gen(function* () {
       const sessions = yield* SessionStore.SessionStore;
-      const client = yield* sessions.issue(relaySessionInput);
+      const client = yield* sessions.issue(proofBoundSessionInput);
       yield* sessions.markConnected(client.sessionId);
       const invalidated = yield* Deferred.make<void>();
       const watcher = yield* sessions
@@ -714,10 +715,10 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
     }).pipe(Effect.provide(Layer.merge(layerSessionStore(), TestClock.layer()))),
   );
 
-  it.effect("keeps connected relay sessions visible through expiry and HTTP renewal", () =>
+  it.effect("keeps connected proof-bound sessions visible through expiry and HTTP renewal", () =>
     Effect.gen(function* () {
       const sessions = yield* SessionStore.SessionStore;
-      const original = yield* sessions.issue(relaySessionInput);
+      const original = yield* sessions.issue(proofBoundSessionInput);
       const websocket = yield* sessions.issueWebSocketToken(original.sessionId, {
         ttl: Duration.hours(2),
       });
@@ -737,7 +738,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
         _tag: "WebSocketSessionExpiredError",
       });
 
-      const renewed = yield* sessions.issue(relaySessionInput);
+      const renewed = yield* sessions.issue(proofBoundSessionInput);
       const afterRenewal = yield* sessions.listActive();
       expect(renewed.sessionId).not.toBe(original.sessionId);
       expect(afterRenewal).toHaveLength(2);
@@ -759,7 +760,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
     (socketCount) =>
       Effect.gen(function* () {
         const sessions = yield* SessionStore.SessionStore;
-        const issued = yield* sessions.issue(relaySessionInput);
+        const issued = yield* sessions.issue(proofBoundSessionInput);
         const changes = yield* Queue.unbounded<SessionStore.SessionCredentialChange>();
         yield* sessions.streamChanges.pipe(
           Stream.runForEach((change) => Queue.offer(changes, change)),
@@ -800,7 +801,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       Effect.gen(function* () {
         const sessions = yield* SessionStore.SessionStore;
         const administrative = yield* sessions.issue({ subject: "desktop-bootstrap" });
-        const client = yield* sessions.issue(relaySessionInput);
+        const client = yield* sessions.issue(proofBoundSessionInput);
         yield* sessions.markConnected(client.sessionId);
         yield* TestClock.adjust(Duration.minutes(61));
         const changes = yield* Queue.unbounded<SessionStore.SessionCredentialChange>();

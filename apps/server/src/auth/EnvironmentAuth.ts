@@ -315,15 +315,6 @@ export class ServerAuthCloudMintPublicKeyMissingError extends Schema.TaggedError
   }
 }
 
-export class ServerAuthCloudRelayIssuerMissingError extends Schema.TaggedError<ServerAuthCloudRelayIssuerMissingError>()(
-  "ServerAuthCloudRelayIssuerMissingError",
-  {},
-) {
-  override get message(): string {
-    return "Cloud relay issuer is not installed for this environment.";
-  }
-}
-
 export class ServerAuthCloudHealthJwtSigningError extends Schema.TaggedError<ServerAuthCloudHealthJwtSigningError>()(
   "ServerAuthCloudHealthJwtSigningError",
   {
@@ -366,7 +357,6 @@ export const ServerAuthInternalError = Schema.Union([
   ServerAuthLinkedCloudAccountMissingError,
   ServerAuthCloudLinkJwtSigningError,
   ServerAuthCloudMintPublicKeyMissingError,
-  ServerAuthCloudRelayIssuerMissingError,
   ServerAuthCloudHealthJwtSigningError,
   ServerAuthCloudMintJwtSigningError,
 ]);
@@ -564,7 +554,7 @@ export class EnvironmentAuth extends Context.Service<
     /**
      * Spends a one-time pairing code as approval for an MCP client with the
      * given access; the code must hold every scope that access grants.
-     * Proof-bound codes (the relay) are refused without being spent, and
+     * Proof-bound codes are refused without being spent, and
      * desktop bootstrap grants never qualify.
      */
     readonly consumeMcpApprovalCode: (

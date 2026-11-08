@@ -156,7 +156,7 @@ describe("kurambit pair", () => {
             "--scope",
             "orchestration:read",
             "--scope",
-            "relay:read",
+            "diagnostics:read",
             "--scope",
             "orchestration:read",
           ]),
@@ -168,7 +168,7 @@ describe("kurambit pair", () => {
           readonly scopes: ReadonlyArray<string>;
         }>;
         assert.lengthOf(credentials, 1);
-        assert.deepEqual(credentials[0]?.scopes, ["orchestration:read", "relay:read"]);
+        assert.deepEqual(credentials[0]?.scopes, ["orchestration:read", "diagnostics:read"]);
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
