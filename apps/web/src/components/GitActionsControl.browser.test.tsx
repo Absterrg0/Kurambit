@@ -25,6 +25,8 @@ const state = vi.hoisted(() => ({
   draft: null as (Branched & { worktreePath: null; envMode: "local" }) | null,
   branch: "main",
   isDefaultRef: false,
+  workingTreeChanges: true,
+  aheadCount: 0,
   actions: [] as { scope: { cwd: string | null }; input: GitActionInput }[],
   metadataRequests: [] as { environmentId: string; branch: string }[],
   toasts: [] as Toast[],
@@ -59,14 +61,14 @@ vi.mock(import("~/state/query"), async (original) => ({
       refName: state.branch,
       isDefaultRef: state.isDefaultRef,
       hasPrimaryRemote: true,
-      hasWorkingTreeChanges: true,
+      hasWorkingTreeChanges: state.workingTreeChanges,
       workingTree: {
         files: [{ path: "file.ts", insertions: 1, deletions: 0 }],
         insertions: 1,
         deletions: 0,
       },
       hasUpstream: true,
-      aheadCount: 0,
+      aheadCount: state.aheadCount,
       behindCount: 0,
       pr: null,
     },
@@ -105,11 +107,7 @@ vi.mock(import("~/lib/sourceControlActions"), async (original) => ({
           toast: {
             title: "Committed",
             description: "Committed",
-            cta: {
-              kind: "run_action",
-              label: "Push & create PR",
-              action: { kind: "commit_push_pr" },
-            },
+            cta: { kind: "run_action", label: "Push", action: { kind: "push" } },
           },
         },
       };
@@ -176,6 +174,8 @@ beforeEach(() => {
   state.draft = null;
   state.branch = "main";
   state.isDefaultRef = false;
+  state.workingTreeChanges = true;
+  state.aheadCount = 0;
   state.actions = [];
   state.metadataRequests = [];
   state.toasts = [];
@@ -312,32 +312,32 @@ describe("Git actions while thread details load", () => {
   });
 });
 
+// Committing runs on the current ref or a new one from the commit dialog; the
+// prompt guards a push of local commits to the default ref.
 describe("Default branch prompt", () => {
   beforeEach(() => {
     state.isDefaultRef = true;
+    state.workingTreeChanges = false;
+    state.aheadCount = 1;
     state.scopes.add(AuthOrchestrationOperateScope);
   });
 
-  it("moves the commit to a feature branch when asked", async () => {
+  it("moves the push to a feature branch when asked", async () => {
     await render();
-    await userEvent.click(button(/^Commit & push/));
-    await expect
-      .element(page.getByRole("dialog", { name: "Commit & push to default ref?" }))
-      .toBeVisible();
+    await userEvent.click(button(/^Push/));
+    await expect.element(page.getByRole("dialog", { name: "Push to default ref?" })).toBeVisible();
     expect(commits()).toBe(0);
 
     await userEvent.click(button("Check out feature branch & continue"));
 
     await vi.waitFor(() => expect(state.shell?.branch).toBe("feature"));
-    expect(state.actions[0]?.input).toMatchObject({ action: "commit_push", featureBranch: true });
+    expect(state.actions[0]?.input).toMatchObject({ action: "push", featureBranch: true });
   });
 
   it("checks the task grant again when the feature branch is chosen", async () => {
     await render();
-    await userEvent.click(button(/^Commit & push/));
-    await expect
-      .element(page.getByRole("dialog", { name: "Commit & push to default ref?" }))
-      .toBeVisible();
+    await userEvent.click(button(/^Push/));
+    await expect.element(page.getByRole("dialog", { name: "Push to default ref?" })).toBeVisible();
     state.scopes.delete(AuthOrchestrationOperateScope);
 
     await userEvent.click(button("Check out feature branch & continue"));
@@ -348,9 +348,9 @@ describe("Default branch prompt", () => {
 });
 
 describe("Git action targets across thread navigation", () => {
-  const quickAction = () => button(/^Commit, push & /);
+  const quickAction = () => button("Commit");
 
-  it("runs a retained PR toast in the thread that produced it", async () => {
+  it("runs a retained push toast in the thread that produced it", async () => {
     await render("first", "/first");
     await userEvent.click(quickAction());
     await vi.waitFor(() => expect(state.toasts.some((toast) => toast.actionProps)).toBe(true));
@@ -361,7 +361,7 @@ describe("Git action targets across thread navigation", () => {
 
     expect(state.actions.at(-1)).toMatchObject({
       scope: { cwd: "/first" },
-      input: { threadId: "first", action: "commit_push_pr" },
+      input: { threadId: "first", action: "push" },
     });
   });
 

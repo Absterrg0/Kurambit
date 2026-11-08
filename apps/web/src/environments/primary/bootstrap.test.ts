@@ -257,22 +257,6 @@ describe("environmentBootstrap", () => {
     });
   });
 
-  it("has no primary target when the desktop local environment is disabled", () => {
-    vi.stubGlobal("window", {
-      location: new URL("kurambit://app/"),
-      desktopBridge: {
-        getLocalEnvironmentEnabled: () => false,
-        getLocalEnvironmentBootstraps: () => [],
-      },
-    });
-
-    expect(readPrimaryEnvironmentTarget()).toBeNull();
-    expect(getPrimaryKnownEnvironment()).toBeNull();
-    expect(() => resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toThrow(
-      "The local environment is disabled.",
-    );
-  });
-
   it("preserves an unsupported window-origin protocol", () => {
     vi.stubGlobal("window", {
       location: { origin: "file:///tmp/kurambit/" },

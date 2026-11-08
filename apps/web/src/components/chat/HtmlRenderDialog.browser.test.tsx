@@ -11,20 +11,18 @@ import "~/index.css";
 import { HtmlRenderDialog } from "./HtmlRenderDialog";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 
-const { cachedUrl, refresh, showError, openLink, openChangeRequestLink } = vi.hoisted(() => ({
+const { cachedUrl, refresh, showError, openLink } = vi.hoisted(() => ({
   cachedUrl: { lifeMs: 60 * 60_000 },
   refresh: vi.fn(),
   showError: vi.fn(),
   openLink: vi.fn(),
-  openChangeRequestLink: vi.fn(),
 }));
 vi.mock(import("~/browser/useOpenLink"), async (original) => ({
   ...(await original()),
-  useOpenLink: () => openLink,
-}));
-vi.mock(import("~/lib/openContextLink"), async (original) => ({
-  ...(await original()),
-  useOpenChangeRequestLink: () => openChangeRequestLink,
+  // Records the thread each open is routed through.
+  useOpenLink: ((threadRef: { readonly environmentId: string } | null | undefined) =>
+    (url: string, options?: unknown) =>
+      openLink(url, options, threadRef?.environmentId)) as never,
 }));
 vi.mock(import("~/assets/assetUrls"), async (original) => ({
   ...(await original()),
@@ -53,7 +51,6 @@ beforeEach(async () => {
   refresh.mockReset();
   cachedUrl.lifeMs = 60 * 60_000;
   openLink.mockReset().mockResolvedValue(undefined);
-  openChangeRequestLink.mockReset().mockReturnValue(false);
   showError.mockClear();
   onClose.mockClear();
   container = document.createElement("div");
@@ -164,7 +161,6 @@ it("opens full screen with a fresh URL when the inline one is near expiry", asyn
 
 it("routes links from the expanded page through its thread", async () => {
   await renderInline();
-  openChangeRequestLink.mockReturnValue(true);
   await click("Open full screen");
   const frame = document.querySelector<HTMLIFrameElement>('[role="dialog"] iframe')!;
   frame.focus();
@@ -177,13 +173,11 @@ it("routes links from the expanded page through its thread", async () => {
       }),
     );
   });
-  expect(openChangeRequestLink).toHaveBeenCalledWith(
-    expect.objectContaining({ metaKey: false, ctrlKey: false }),
+  expect(openLink).toHaveBeenCalledWith(
     url,
-    undefined,
+    { event: expect.objectContaining({ metaKey: false, ctrlKey: false }) },
     EnvironmentId.make("environment"),
   );
-  expect(openLink).not.toHaveBeenCalled();
 });
 
 it.each([null, new Error("Disconnected")])(
