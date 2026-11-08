@@ -220,9 +220,13 @@ export function getDefaultProviderInstanceModel(
   const preferred = (PREFERRED_MODEL_PREFIXES[entry.driverKind] ?? []).flatMap((prefix) =>
     entry.models.filter((model) => !model.isCustom && model.slug.startsWith(prefix)),
   );
+  // The driver's own default (its flagship) before whatever the catalog lists first: a catalog
+  // read before the provider flags its default can list the cheap model first.
+  const builtIn = DEFAULT_MODEL_BY_PROVIDER[entry.driverKind];
   return (
     entry.models.find((model) => model.isDefault && !model.isCustom)?.slug ??
     preferred[0]?.slug ??
+    entry.models.find((model) => !model.isCustom && model.slug === builtIn)?.slug ??
     entry.models.find((model) => !model.isCustom)?.slug ??
     entry.models[0]?.slug ??
     DEFAULT_MODEL_BY_PROVIDER[entry.driverKind]
