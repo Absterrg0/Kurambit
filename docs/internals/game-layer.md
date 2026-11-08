@@ -118,9 +118,14 @@ matters.
   each pass's spec, numbers and pictures under `builds/logs/animate/<clip>/<n>`. Its clips follow
   the library's conventions so every consumer treats them alike: travel rides the pelvis (the
   root bone stays at rest; `rootDrift` measures it), and spring chains stay unkeyed because the
-  engine springs them. The measurement it shares with the sidecar gives every clip on the standard
+  engine springs them. A loop is keyed in place, so the export measures its ground speed; a
+  one-shot keeps its travel, and the three.js shell moves the root by it (root motion), or the
+  next clip's crossfade would slide the body back. The measurement it shares with the sidecar gives every clip on the standard
   skeleton its stances and strike windows, which the shell's foot IK and `striking` read; a foot
-  IK that guesses contacts per frame floats at step edges.
+  IK that guesses contacts per frame floats at step edges. Smoothness is judged on what a game
+  draws between the 30 fps keys: a bone turning past about 90° against its parent in one frame
+  shows as a spin there and nowhere in Blender, so the kit unwraps twists, smooths the prop's
+  roll, and reports spins and pops instead of trusting the keyed frames.
   MPFB2 is GPL code with CC0 output, so it is downloaded into Kurambit's own Blender folder on the
   person's request and never bundled.
 - An engine is two modules, and nothing above them names an engine. Its profile

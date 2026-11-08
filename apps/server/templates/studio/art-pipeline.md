@@ -235,7 +235,21 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
    clip on the same body. Read both, change one thing in the spec, call again
    with the same clip, and stop when neither improves; a warning (hip drop,
    reach, clearance) means the spec asked for what this body cannot do, so
-   move the feet in, the grip closer or the hips down. One move, as a spec:
+   move the feet in, the grip closer or the hips down. Leave `ease` out:
+   the default curve carries the motion on through a beat and settles only
+   where a value holds or turns back, while a named ease stops or whips the
+   motion at its beat. A pop (a bone one frame out of line) or a spin (a
+   bone turning 90° or more in one frame) looks worse in the game than in
+   the pictures, because the game draws frames between the keys: give that
+   change more frames or bring the goal within reach. A walk or run cycle
+   takes `"loop": true`, with its last beat written as its first one cycle
+   on; it is keyed in place, and the game plays it with `moveSpeed`. A
+   one-shot that travels (a roll, a lunge) moves the character with it in
+   the three.js shell. Start a move from the idle the game plays and end it
+   there: a pose may name any clip the character has (`"start":
+"Sword_Idle"`, the last beat `{"pose": "Sword_Idle", "root": [...]}`),
+   and its first frame is the pose, so the crossfade into the move does not
+   slide the feet. One move, as a spec:
 
    ```json
    {
@@ -268,12 +282,11 @@ material=m)`: a band hugging the measured cross-section (cuffs, belts,
        {
          "at": 7,
          "note": "stagger",
-         "ease": "out",
          "root": [0, -0.28, -8],
          "foot_r": { "at": [0.18, -0.58, 0], "yaw": -30 },
          "foot_l": { "at": [-0.12, 0.12, 0], "heel": 25 }
        },
-       { "at": 19, "note": "gather", "ease": "inout", "chest": [0, 22, 0], "hand_l": "grip" },
+       { "at": 19, "note": "gather", "chest": [0, 22, 0], "hand_l": "grip" },
        { "at": 36, "note": "guard", "pose": "guard", "root": [0, -0.52, 0] },
        { "at": 42, "note": "hold" }
      ]
