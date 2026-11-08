@@ -21,7 +21,7 @@ import {
   roundUsd,
 } from "./adapter.ts";
 
-export const GOOGLE_IMAGE_MODEL = "gemini-nano-banana-2.1";
+const GOOGLE_IMAGE_MODEL = "gemini-nano-banana-2.1";
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 /** USD per 1K image (Nano Banana 2.1, paid tier, 2026-11); input tokens are a rounding error. */
 const PER_IMAGE_1K = 0.0336;

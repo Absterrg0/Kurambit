@@ -13,7 +13,7 @@ import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
 import type { DeviceHubAccess } from "../device/hubAccess.ts";
 
-export { type DeviceHubAccess, withDeviceHubQuery } from "../device/hubAccess.ts";
+export { type DeviceHubAccess } from "../device/hubAccess.ts";
 
 const TICKET_TIMEOUT_MS = 8_000;
 

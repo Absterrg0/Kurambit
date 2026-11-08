@@ -54,7 +54,7 @@ import {
 } from "./webhookTemplate.ts";
 import { constantTimeEquals, verifyWebhookSignature } from "./webhookVerification.ts";
 
-export const WEBHOOK_ROUTE_PREFIX = "/api/hooks";
+const WEBHOOK_ROUTE_PREFIX = "/api/hooks";
 const WEBHOOK_DELIVERY_RETENTION = 50;
 const WEBHOOK_DELIVERY_LOG_BODY_LIMIT = 64 * 1024;
 const WEBHOOK_DELIVERY_LOG_PROMPT_LIMIT = 64 * 1024;
@@ -66,21 +66,7 @@ interface WebhookOrigin {
   readonly relayHookBaseUrl: string | null;
 }
 
-const ENDPOINT_KEY = /^[0-9a-f]{16}$/;
-
-export function relayHookBaseUrl(input: {
-  readonly relayUrl: string;
-  readonly tunnelName: string | undefined;
-}): string | null {
-  const endpointKey = input.tunnelName?.split("-").at(-1);
-  const relayUrl = input.relayUrl.replace(/\/+$/, "");
-  if (relayUrl === "" || endpointKey === undefined || !ENDPOINT_KEY.test(endpointKey)) {
-    return null;
-  }
-  return `${relayUrl}/v1/hooks/${endpointKey}`;
-}
-
-export class ScheduledTaskWebhookOrigin extends Context.Reference<Effect.Effect<WebhookOrigin>>(
+class ScheduledTaskWebhookOrigin extends Context.Reference<Effect.Effect<WebhookOrigin>>(
   "kurambit/scheduledTasks/ScheduledTaskWebhookOrigin",
   {
     defaultValue: () => Effect.succeed({ relayHookBaseUrl: null }),
@@ -319,7 +305,7 @@ const decodeRow = (row: ScheduledTaskRow, origin: WebhookOrigin | null = null) =
     }),
   );
 
-export const listDueTasks = Effect.fn("ScheduledTaskService.listDueTasks")(function* (
+const listDueTasks = Effect.fn("ScheduledTaskService.listDueTasks")(function* (
   now: DateTime.DateTime,
 ) {
   const sql = yield* SqlClient.SqlClient;

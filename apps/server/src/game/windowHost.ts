@@ -69,9 +69,9 @@ export const findXvfb = (): Promise<string | null> =>
  * did: the host's fault, which a game that then exits with an X error must not
  * be taken for.
  */
-export const DISPLAY_LOST_EXIT = 71;
+const DISPLAY_LOST_EXIT = 71;
 /** The exit a hosted command reports when its private display never started. */
-export const DISPLAY_FAILED_EXIT = 70;
+const DISPLAY_FAILED_EXIT = 70;
 /** Whether a hosted command's exit says its display, not the game, failed: our side. */
 export const isHostExit = (exitCode: number): boolean =>
   exitCode === DISPLAY_FAILED_EXIT || exitCode === DISPLAY_LOST_EXIT;

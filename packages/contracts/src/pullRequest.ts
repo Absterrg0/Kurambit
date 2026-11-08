@@ -926,22 +926,6 @@ export function resolvePullRequestAuthorFilter(
   return viewer === null || viewer === undefined || viewer.trim().length === 0 ? trimmed : viewer;
 }
 
-export function pullRequestProviderRequirement(
-  provider: SourceControlProviderKind,
-  reason: PullRequestUnavailableReason,
-): string | null {
-  const requirement = PROVIDER_REQUIREMENT.get(provider);
-  if (requirement === undefined) return null;
-  switch (reason) {
-    case "cli-missing":
-      return requirement.missing;
-    case "cli-unauthenticated":
-      return requirement.unauthenticated;
-    case "provider-unsupported":
-      return null;
-  }
-}
-
 export class PullRequestUnavailableError extends Schema.TaggedError<PullRequestUnavailableError>()(
   "PullRequestUnavailableError",
   {

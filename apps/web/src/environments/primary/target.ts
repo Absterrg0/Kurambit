@@ -148,7 +148,7 @@ function normalizeHostname(hostname: string): string {
     .replace(/^\[(.*)\]$/, "$1");
 }
 
-export function isLoopbackHostname(hostname: string): boolean {
+function isLoopbackHostname(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(normalizeHostname(hostname));
 }
 

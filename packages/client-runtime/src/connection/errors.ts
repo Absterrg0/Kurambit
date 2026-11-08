@@ -7,20 +7,6 @@ import {
   ConnectionTransientError,
 } from "./model.ts";
 
-export function profileMissingError(connectionId: string): ConnectionBlockedError {
-  return new ConnectionBlockedError({
-    reason: "configuration",
-    detail: `Connection profile ${connectionId} is unavailable.`,
-  });
-}
-
-export function credentialMissingError(connectionId: string): ConnectionBlockedError {
-  return new ConnectionBlockedError({
-    reason: "authentication",
-    detail: `Connection credential ${connectionId} is unavailable.`,
-  });
-}
-
 export function environmentMismatchError(input: {
   readonly expected: EnvironmentId;
   readonly actual: EnvironmentId;

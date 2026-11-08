@@ -1,8 +1,8 @@
 export const BUILT_IN_THEME_IDS = ["sakura", "grove", "ocean", "ember", "iris"] as const;
 
-export const MOBILE_DEFAULT_THEME_ID = "kurambit";
+const MOBILE_DEFAULT_THEME_ID = "kurambit";
 
-export const MOBILE_THEME_IDS = [MOBILE_DEFAULT_THEME_ID, ...BUILT_IN_THEME_IDS] as const;
+const MOBILE_THEME_IDS = [MOBILE_DEFAULT_THEME_ID, ...BUILT_IN_THEME_IDS] as const;
 
 /**
  * Ids a theme may not take: the appearance keywords a stored preference uses,
@@ -925,11 +925,3 @@ export const BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [
   EMBER_THEME,
   IRIS_THEME,
 ];
-
-export function getThemeColorsForAppearance(
-  theme: ThemeDefinition,
-  appearance: ThemeAppearance,
-): ThemeColors | null {
-  if (theme.appearance === appearance) return theme.colors;
-  return theme.variants?.[appearance] ?? null;
-}

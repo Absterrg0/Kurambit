@@ -157,29 +157,6 @@ export function resolveSourceControlWriterModelSelection(
     : settings.textGenerationModelSelection;
 }
 
-export function resolveReviewGuideModelSelection(
-  settings: ServerSettings,
-  providers: ReadonlyArray<ServerProvider> | undefined,
-  projectId: ProjectId | null,
-): ModelSelection {
-  const selection = settings.reviewGuideModelSelection;
-  if (
-    selection &&
-    resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId)
-  ) {
-    const provider = providers?.find((candidate) => candidate.instanceId === selection.instanceId);
-    if (
-      providers === undefined ||
-      (provider?.enabled === true &&
-        isProviderAvailable(provider) &&
-        isProviderTextGenerationCapable(provider))
-    ) {
-      return selection;
-    }
-  }
-  return resolveSourceControlWriterModelSelection(settings, providers, projectId);
-}
-
 export interface PersistedServerObservabilitySettings {
   readonly otlpTracesUrl: string | undefined;
   readonly otlpMetricsUrl: string | undefined;

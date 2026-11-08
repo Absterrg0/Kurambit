@@ -26,10 +26,6 @@ const readText = (path: string): Promise<string | null> =>
     throw error;
   });
 
-/** A run's line for people, in the server log: the run's step records are its history. */
-export const logLine = (root: string, line: string): Effect.Effect<void> =>
-  Effect.logInfo(line).pipe(Effect.annotateLogs({ game: root }));
-
 const ioError = (operation: string, path: string, cause: unknown) =>
   new GameOperationError({
     operation,
@@ -38,37 +34,6 @@ const ioError = (operation: string, path: string, cause: unknown) =>
     detail: cause instanceof Error ? cause.message.slice(0, 500) : "the write failed",
     cause,
   });
-
-/**
- * The engine's in-game play runner speaks this server's protocol, so a new
- * run brings it up to date before its base build captures the folder: the
- * base carries it, and no role's work does. A runner that cannot be copied
- * fails the capture: a build with a stale runner would be played wrong.
- */
-export const refreshHarnessFiles = (
-  templates: string,
-  root: string,
-  engine: GameEngineId,
-  project: string,
-  log: (line: string) => Effect.Effect<void>,
-) =>
-  Effect.gen(function* () {
-    const owned = engineProfile(engine).run.harnessFiles;
-    if (owned === null) return;
-    const paths = owned.files.map((file) => NodePath.join(project, file));
-    yield* Effect.tryPromise({
-      try: async () => {
-        for (const file of owned.files) {
-          const to = NodePath.join(root, project, file);
-          await NodeFSP.mkdir(NodePath.dirname(to), { recursive: true });
-          await NodeFSP.copyFile(NodePath.join(templates, owned.template, project, file), to);
-        }
-      },
-      catch: (cause) => ioError("Refresh harness files", paths.join(", "), cause),
-    });
-    // The run's base build carries them; the run never commits them.
-    yield* log(`harness files refreshed: ${paths.join(", ")}`);
-  }).pipe(Effect.uninterruptible);
 
 /**
  * The studio skills as this server ships them, for the game's engine only (a role told to read

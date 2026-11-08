@@ -40,32 +40,3 @@ export function parseRemoteRefWithRemoteNames(
 
   return null;
 }
-
-export function extractBranchNameFromRemoteRef(
-  ref: string,
-  options?: {
-    remoteName?: string | null;
-    remoteNames?: ReadonlyArray<string>;
-  },
-): string {
-  const normalized = ref.trim();
-  if (normalized.length === 0) {
-    return "";
-  }
-
-  if (normalized.startsWith("refs/remotes/")) {
-    return extractBranchNameFromRemoteRef(normalized.slice("refs/remotes/".length), options);
-  }
-
-  const remoteNames = options?.remoteName ? [options.remoteName] : (options?.remoteNames ?? []);
-  const parsedRemoteRef = parseRemoteRefWithRemoteNames(normalized, remoteNames);
-  if (parsedRemoteRef) {
-    return parsedRemoteRef.branchName;
-  }
-
-  const firstSlash = normalized.indexOf("/");
-  if (firstSlash === -1) {
-    return normalized;
-  }
-  return normalized.slice(firstSlash + 1).trim();
-}

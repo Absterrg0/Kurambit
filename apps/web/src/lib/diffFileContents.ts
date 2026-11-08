@@ -97,25 +97,3 @@ export function createGitDiffFileContentsLoader<E>(
     return result.value;
   }, source.cacheKey);
 }
-
-export function createPullRequestDiffFileContentsLoader<E>(
-  getDiffFileContents: GetPullRequestDiffFileContents<E>,
-  source: PullRequestDiffFileContentsSource,
-): FileDiffContentsLoader {
-  return createDiffFileContentsLoader(async ({ changeType, oldPath, newPath }) => {
-    const result = await getDiffFileContents({
-      environmentId: source.environmentId,
-      input: {
-        ...source.reference,
-        ...(source.commit === null ? {} : { commit: source.commit }),
-        changeType,
-        oldPath,
-        newPath,
-      },
-    });
-    if (result._tag !== "Success") {
-      throw squashAtomCommandFailure(result);
-    }
-    return result.value;
-  }, source.cacheKey);
-}

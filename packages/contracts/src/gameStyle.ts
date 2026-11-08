@@ -128,6 +128,5 @@ export type GameStyle = typeof GameStyle.Type;
 
 export const GAME_STYLE_DEFAULT_MUSIC_LUFS = -23;
 export const GAME_STYLE_DEFAULT_SFX_PEAK_DBTP = -1;
-export const GAME_STYLE_DEFAULT_SHADING = { gradient: 0.16, roughness: 0.62, glow: 2.5 } as const;
 export const GAME_STYLE_DEFAULT_CHARACTERS: GameCharacterRoute = "library";
 export const GAME_STYLE_DEFAULT_BUDGET = { character: 20_000, prop: 8_000, texture: 1024 } as const;

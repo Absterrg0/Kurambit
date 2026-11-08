@@ -241,7 +241,7 @@ const editOf = (meta: Meta): string | null =>
  * An edit as every image provider is asked it: the image to change goes first, the change is
  * one instruction, and everything it does not name stays as it was.
  */
-export const editPrompt = (change: string, transparent: boolean, styled: boolean): string =>
+const editPrompt = (change: string, transparent: boolean, styled: boolean): string =>
   [
     "Change image 1 as asked below, and keep everything else in it exactly as it is: its subject, composition, framing, art style, palette, lighting and level of detail.",
     ...(styled
@@ -332,7 +332,7 @@ const localMidnightIso = (nowMs: number): string => {
 };
 
 /** The name's folder, numbered past every one already used (on disk or by a live generation). */
-export const freeName = async (
+const freeName = async (
   root: string,
   lane: GameArtLane,
   name: string,
@@ -356,7 +356,7 @@ export const freeName = async (
  * exclusively, so a planted link there is refused) and renamed over it (a link at the target
  * is replaced, never followed).
  */
-export const writeGameFile = async (root: string, relative: string, bytes: Uint8Array) => {
+const writeGameFile = async (root: string, relative: string, bytes: Uint8Array) => {
   const dir = await ensureGameDir(root, NodePath.dirname(relative));
   const target = NodePath.join(dir, NodePath.basename(relative));
   const realRoot = await NodeFSP.realpath(root);
@@ -431,7 +431,7 @@ interface DirectionsSettled {
 }
 
 /** One result per direction, in order, into candidates, refusals and what is counted. */
-export const settleDirections = (
+const settleDirections = (
   results: ReadonlyArray<Result.Result<ArtStep, ArtProviderError>>,
   estimates: ReadonlyArray<number | null>,
   labels: ReadonlyArray<string>,
@@ -2125,7 +2125,7 @@ const make = Effect.gen(function* () {
 });
 
 /** The server's host: the provider registry's Codex and the run's in-flight step. */
-export const layerHost = Layer.effect(
+const layerHost = Layer.effect(
   GameArtHost,
   Effect.gen(function* () {
     const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;

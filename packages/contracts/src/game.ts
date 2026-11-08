@@ -21,32 +21,6 @@ export const GameBlenderInputSource = Schema.Struct({
 });
 export type GameBlenderInputSource = typeof GameBlenderInputSource.Type;
 
-/**
- * Bounded reference inputs for one Blender run. At most a few local models
- * and images, each small enough to stage beside the run. Supplying a source
- * only records it on the asset; it never claims the script used it or that
- * the result looks a certain way.
- */
-export const GAME_BLENDER_INPUT_BOUNDS = {
-  maxInputs: 4,
-  maxFileBytes: 12_000_000,
-  maxTotalBytes: 25_000_000,
-  maxImageDimension: 8192,
-  /**
-   * Decoded pixels one staged image may hold (16 MP, e.g. 4096x4096). The
-   * 8192px dimension bound alone permits 64 MP, whose single RGBA buffer is
-   * 256 MB, so the header area rejects oversized images before any decode.
-   */
-  maxImagePixels: 16_777_216,
-  /**
-   * Decoded pixels all images in one run's named inputs may hold together
-   * (direct images, glTF dependencies/data URIs and embedded GLB textures).
-   */
-  maxTotalImagePixels: 33_554_432,
-  /** Extra files one .gltf may pull in (.bin, images); the rest is rejected. */
-  maxDependencies: 16,
-} as const;
-
 export const GameAsset = Schema.Struct({
   id: Schema.String,
   kind: Schema.Literal("model"),

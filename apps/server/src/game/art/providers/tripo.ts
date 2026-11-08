@@ -28,7 +28,7 @@ import {
 } from "./adapter.ts";
 
 const BASE = "https://openapi.tripo3d.ai/v3";
-export const TRIPO_MODEL = "v3.1-20260211";
+const TRIPO_MODEL = "v3.1-20260211";
 const RIG_BIPED = "v3.0-20260909";
 const RIG_CREATURE = "v2.5-20260210";
 /** The texture model the docs recommend for v3.x geometry (docs/models-texture). */

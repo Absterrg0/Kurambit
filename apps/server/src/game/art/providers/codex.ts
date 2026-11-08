@@ -11,7 +11,7 @@ import { type ArtAdapter, type ArtContext, type ArtRequest, ArtProviderError } f
 
 const TIMEOUT_MS = 8 * 60_000;
 
-export const codexPrompt = (request: ArtRequest): string => {
+const codexPrompt = (request: ArtRequest): string => {
   const count = request.candidates;
   const edited = request.options.edit === undefined ? undefined : request.references[0];
   // An edit: the image tool edits the images it is given by path, the first one being changed.
@@ -60,7 +60,7 @@ export const codexPrompt = (request: ArtRequest): string => {
 };
 
 /** The image format by its first bytes; null when it is none of PNG, JPEG, WebP. */
-export const imageKind = (bytes: Uint8Array): "png" | "jpg" | "webp" | null => {
+const imageKind = (bytes: Uint8Array): "png" | "jpg" | "webp" | null => {
   if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47)
     return "png";
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpg";

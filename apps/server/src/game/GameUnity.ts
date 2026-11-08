@@ -105,7 +105,7 @@ const GATE_HOLD_S = 60;
  * eval, play mode, capture and console. Builds, tests, packages, jobs and
  * editor lifecycle stay hidden: they belong to Kurambit's own operations.
  */
-export const UNITY_MCP_TOOLS = [
+const UNITY_MCP_TOOLS = [
   "scene_*",
   "gameobject_*",
   "component_*",
@@ -133,7 +133,7 @@ export const UNITY_MCP_TOOLS = [
   "console_clear",
 ] as const;
 /** Of those, what `game_unity_edit` may call: the editing surface, by name prefix. */
-export const UNITY_EDIT_TOOL =
+const UNITY_EDIT_TOOL =
   /^(scene_|gameobject_|component_|prefab_|material_|asset_find$|asset_create_folder$|script_attach$|settings_|lighting_|editor_save_all$|editor_status$|capture_scene_view$)/;
 
 interface Session extends LiveHealth {
@@ -278,7 +278,7 @@ const recordedOwners = (
  * one worker, the lowest the editor allows; no standby workers are kept.
  * Answers the settings text to write, or null when it already says so.
  */
-export const importWorkerSettings = (existing: string | null): string | null => {
+const importWorkerSettings = (existing: string | null): string | null => {
   const wanted: Record<string, string> = {
     m_DesiredImportWorkerCount: "0",
     m_StandbyImportWorkerCount: "0",
@@ -403,7 +403,7 @@ const withCliFlags = (args: ReadonlyArray<string>, flags: ReadonlyArray<string>)
 };
 
 /** The CLI prints one JSON envelope; editor log lines may precede it. */
-export const parseCliEnvelope = (
+const parseCliEnvelope = (
   stdout: string,
 ): {
   success: boolean;

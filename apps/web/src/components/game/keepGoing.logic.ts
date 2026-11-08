@@ -8,7 +8,7 @@ import type {
 } from "@kurambit/contracts";
 
 /** A clock time in the reader's locale: nothing on the client counts down (K15). */
-export const clockTime = (at: string): string => {
+const clockTime = (at: string): string => {
   const date = new Date(at);
   return Number.isNaN(date.getTime())
     ? ""
@@ -59,13 +59,13 @@ const WHY_LABEL: Record<GameRunStepWhy, string> = {
   fact: "a failing fact",
   next: "your agent's next step",
 };
-export const stepWhyLabel = (why: GameRunStepWhy): string => WHY_LABEL[why];
+const stepWhyLabel = (why: GameRunStepWhy): string => WHY_LABEL[why];
 
 /** The status with the run's last mode, which a paused run resumes in (null: never ran). */
 type KeepGoingStatus = GameKeepGoingStatus & { readonly profile?: GameRunProfile | null };
 
 /** The mode a paused run resumes in; Guided when unknown, since it waits for the person. */
-export const resumeMode = (status: KeepGoingStatus): GameRunProfile => status.profile ?? "guided";
+const resumeMode = (status: KeepGoingStatus): GameRunProfile => status.profile ?? "guided";
 
 const liveHere = (status: GameKeepGoingStatus, threadId: string) =>
   status.mode !== "off" && status.chat === threadId;

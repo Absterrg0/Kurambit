@@ -1,5 +1,1 @@
-export {
-  getPairingTokenFromUrl,
-  setPairingTokenOnUrl,
-  stripPairingTokenFromUrl,
-} from "@kurambit/shared/remote";
+export { getPairingTokenFromUrl, stripPairingTokenFromUrl } from "@kurambit/shared/remote";

@@ -91,7 +91,7 @@ const walkBuild = async (
 };
 
 /** SHA-256 over the artifact's sorted path/content lines. */
-export const webBuildId = (files: readonly WebBuildFile[]): string => {
+const webBuildId = (files: readonly WebBuildFile[]): string => {
   const hash = NodeCrypto.createHash("sha256");
   for (const file of files) hash.update(`${file.path}\0${file.size}\0${file.sha256}\n`);
   return hash.digest("hex");

@@ -49,7 +49,7 @@ const SelectedWebBuild = Schema.Struct({
 });
 export interface SelectedWebBuild extends Schema.Schema.Type<typeof SelectedWebBuild> {}
 /** The selection record's codec, for readers outside this service (the run's finish). */
-export const decodeSelectedBuild = Schema.decodeUnknownSync(
+const decodeSelectedBuild = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.NullOr(SelectedWebBuild)),
 );
 const encodeSelectedBuild = Schema.encodeSync(Schema.fromJsonString(SelectedWebBuild));

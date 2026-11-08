@@ -117,7 +117,7 @@ type BinaryTool = "blender" | "godot" | "uv";
 type Platform = "linux" | "darwin" | "win32";
 const hostPlatform = (platform: NodeJS.Platform): Platform =>
   platform === "darwin" || platform === "win32" ? platform : "linux";
-export const validToolVersion = (tool: BinaryTool, version: string) => {
+const validToolVersion = (tool: BinaryTool, version: string) => {
   const match = version.match(/(?:Blender\s+)?(\d+)\.(\d+)(?:\.(\d+))?/);
   if (!match) return false;
   const major = Number(match[1]),

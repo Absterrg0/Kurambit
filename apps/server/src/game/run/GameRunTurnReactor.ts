@@ -64,7 +64,7 @@ const millis = (value: DateTime.Utc | null | undefined) =>
   value == null ? null : DateTime.toEpochMillis(value);
 
 /** The step a run is, through the restart continuations that carried it on; null for any other run. */
-export const stepTurnOf = (
+const stepTurnOf = (
   run: OrchestrationV2Run,
   runs: ReadonlyArray<OrchestrationV2Run>,
 ): StepTurn | null => {

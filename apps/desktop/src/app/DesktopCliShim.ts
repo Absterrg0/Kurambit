@@ -10,7 +10,7 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // AppImage itself instead of pointing into it.
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
-export const MARKER = "Written by Kurambit: runs the desktop app's bundled kurambit CLI.";
+const MARKER = "Written by Kurambit: runs the desktop app's bundled kurambit CLI.";
 
 const SERVER_ENTRY = "apps/server/dist/bin.mjs";
 
@@ -121,7 +121,7 @@ export const renderCliShim = (input: {
   ].join("\n");
 };
 
-export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment["Service"]) =>
+const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment["Service"]) =>
   environment.path.join(
     environment.baseDir,
     "bin",

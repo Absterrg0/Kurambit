@@ -65,7 +65,7 @@ export const createEngine = (input: GameCreateInput): GameEngineId =>
   input.engine ?? DEFAULT_GAME_ENGINE;
 
 /** The manifest a new game starts from; the template names the gameplay scene. */
-export function scaffoldManifest(input: GameCreateInput): GameManifest {
+function scaffoldManifest(input: GameCreateInput): GameManifest {
   const engine = createEngine(input);
   const template = gameTemplateForEngine(engine);
   const templateEntry = GAME_TEMPLATES.find((entry) => entry.id === template);
@@ -92,7 +92,7 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
  * Keep going, for the agent of a game whose turns Kurambit plays (engineProfile
  * turnLoop): what a step message is and what the run does with its build.
  */
-export const KEEP_GOING_HEADING = "## Keep going";
+const KEEP_GOING_HEADING = "## Keep going";
 export const KEEP_GOING_SECTION = `${KEEP_GOING_HEADING}
 
 - The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Do that one step, like any turn: one change, \`game_check\` clean, end with your \`Next:\` line.

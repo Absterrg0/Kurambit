@@ -250,18 +250,6 @@ export const snapshotBuildSource = async (
   return { kind: "known", sourceId: hash.digest("hex"), entries: lines.length, files };
 };
 
-/** Paths (relative to the engine directory) added, removed or changed between two reads. */
-export const changedFiles = (
-  before: Extract<SourceSnapshot, { kind: "known" }>,
-  after: Extract<SourceSnapshot, { kind: "known" }>,
-): string[] => {
-  const changed = new Set<string>();
-  for (const [path, content] of before.files)
-    if (after.files.get(path) !== content) changed.add(path);
-  for (const path of after.files.keys()) if (!before.files.has(path)) changed.add(path);
-  return [...changed].sort();
-};
-
 export type SourceComparison =
   | { readonly kind: "current"; readonly sourceId: string }
   | { readonly kind: "changed"; readonly detail: string }

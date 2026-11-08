@@ -57,10 +57,7 @@ import {
   TOP_LEVEL_SETTINGS_SECRETS,
 } from "./settingsSecrets.ts";
 
-export {
-  resolveReviewGuideModelSelection,
-  resolveSourceControlWriterModelSelection,
-} from "@kurambit/shared/serverSettings";
+export { resolveSourceControlWriterModelSelection } from "@kurambit/shared/serverSettings";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));

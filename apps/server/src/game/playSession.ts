@@ -207,7 +207,7 @@ export const sanitizeProbe = (raw: unknown): GamePlaytestProbe | null => {
  * runner is trusted for play values, but text, control lists and error lines
  * are capped so one run cannot bloat the trace. Malformed entries are dropped.
  */
-export const sanitizeObservation = (
+const sanitizeObservation = (
   raw: unknown,
 ): Required<Omit<PlayActObservation, "consoleMessages" | "consoleTruncated">> => {
   const record = asRecord(raw);

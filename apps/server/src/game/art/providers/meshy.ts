@@ -26,9 +26,9 @@ const BASE = "https://api.meshy.ai/openapi/v1";
 /** Text to 3D is the one task on v2 (its preview and refine, and its GET). */
 const urlOf = (kind: Kind | "rigging" | "animations") =>
   kind === "text-to-3d" ? "https://api.meshy.ai/openapi/v2/text-to-3d" : `${BASE}/${kind}`;
-export const MESHY_MODEL = "meshy-7.1";
+const MESHY_MODEL = "meshy-7.1";
 /** The Smart Topology model the docs name for game characters and low-poly assets. */
-export const MESHY_LOW_POLY_MODEL = "meshy-t2.5";
+const MESHY_LOW_POLY_MODEL = "meshy-t2.5";
 /** meshy-t2.5's target_polycount range (docs/api/image-to-3d). */
 const LOW_POLY_FACES = { min: 100, max: 30_000 } as const;
 /** USD per credit at the Pro plan's rate (1,000 credits for $20), 2026-11. */

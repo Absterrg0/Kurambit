@@ -11,7 +11,7 @@ export class GameRunWorkBroke extends Data.TaggedError("GameRunWorkBroke")<{
 }> {}
 
 /** Tries after the first, about 2, 4 and 8 seconds apart. */
-export const RETRIES = 3;
+const RETRIES = 3;
 
 export const retrying = <A, E, R>(
   work: Effect.Effect<A, E, R>,

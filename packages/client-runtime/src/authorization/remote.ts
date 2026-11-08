@@ -18,7 +18,6 @@ import {
 export {
   RemoteEnvironmentAuthInvalidJsonError,
   RemoteEnvironmentAuthTimeoutError,
-  RemoteEnvironmentAuthUndeclaredStatusError,
 } from "../rpc/http.ts";
 export type RemoteEnvironmentAuthError = RemoteEnvironmentRequestError;
 
@@ -212,32 +211,6 @@ export const resolveRemoteWebSocketConnectionUrl = Effect.fn(
     ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
   });
 
-  const url = new URL(input.wsBaseUrl);
-  if (url.pathname === "" || url.pathname === "/") {
-    url.pathname = "/ws";
-  }
-  url.searchParams.set("wsTicket", issued.ticket);
-  appendClientConnectionParams(url, input.clientMetadata, input.connectionMethod);
-  return url.toString();
-});
-
-export const resolveRemoteDpopWebSocketConnectionUrl = Effect.fn(
-  "clientRuntime.authorization.resolveRemoteDpopWebSocketConnectionUrl",
-)(function* (input: {
-  readonly wsBaseUrl: string;
-  readonly httpBaseUrl: string;
-  readonly accessToken: string;
-  readonly dpopProof: string;
-  readonly clientMetadata?: AuthClientPresentationMetadata;
-  readonly connectionMethod?: ClientConnectionMethod;
-  readonly timeoutMs?: number;
-}) {
-  const issued = yield* issueRemoteDpopWebSocketTicket({
-    httpBaseUrl: input.httpBaseUrl,
-    accessToken: input.accessToken,
-    dpopProof: input.dpopProof,
-    ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
-  });
   const url = new URL(input.wsBaseUrl);
   if (url.pathname === "" || url.pathname === "/") {
     url.pathname = "/ws";

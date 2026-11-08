@@ -40,7 +40,7 @@ import type { WindowHost } from "./windowHost.ts";
  * project that declares anything else fails here — before any engine
  * lookup or process launch — instead of being silently routed elsewhere.
  */
-export const SUPPORTED_GAME_ENGINE_IDS = ["godot", "three", "unity"] as const;
+const SUPPORTED_GAME_ENGINE_IDS = ["godot", "three", "unity"] as const;
 export type SupportedGameEngineId = (typeof SUPPORTED_GAME_ENGINE_IDS)[number];
 
 export interface GameEngineBinary {

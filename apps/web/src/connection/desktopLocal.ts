@@ -105,10 +105,6 @@ const desktopSecondaryBootstrapsReader = createDesktopSecondaryBootstrapsReader(
   () => window.desktopBridge,
 );
 
-export function readDesktopSecondaryBootstrapsResult(): DesktopSecondaryBootstrapsRead {
-  return desktopSecondaryBootstrapsReader.readResult();
-}
-
 export function readDesktopSecondaryBootstraps(): ReadonlyArray<DesktopEnvironmentBootstrap> {
   return desktopSecondaryBootstrapsReader.readSnapshot();
 }

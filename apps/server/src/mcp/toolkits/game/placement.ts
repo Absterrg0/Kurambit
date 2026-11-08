@@ -103,7 +103,7 @@ export const fits = (placement: GameToolPlacement, scope: McpInvocationScope | u
 };
 
 /** Whether it is in the listing: it fits, and a chat asks for it first when it waits to be asked. */
-export const listed = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
+const listed = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
   fits(placement, scope) && (placement.asked === undefined || scope?.gameRunRole === "run");
 
 /** The `McpSchema.EnabledWhen` of a game tool: listed for the calling thread now. */
