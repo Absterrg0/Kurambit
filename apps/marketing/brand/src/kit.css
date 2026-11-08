@@ -1,0 +1,154 @@
+/* Shared by the brand templates. Tokens, type and paper match the site's
+   washi theme in ../../site/styles.css; keep the two in step. */
+
+@font-face {
+  font-family: "Geist";
+  font-weight: 100 900;
+  src: url("../../site/fonts/geist.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 100 900;
+  src: url("../../site/fonts/geist-mono.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Redaction";
+  font-weight: 400;
+  src: url("../../site/fonts/redaction.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Redaction";
+  font-style: italic;
+  font-weight: 400;
+  src: url("../../site/fonts/redaction-italic.woff2") format("woff2");
+}
+
+:root {
+  --paper: #ede6d7;
+  --sheet: #f9f5ec;
+  --print: #fffdf8;
+  --ink: #171511;
+  --ink-2: #36322b;
+  --pencil: #6c665b;
+  --shu: #e2582a;
+  --shu-deep: #c9461b;
+  --night: #161411;
+  --moonlit: #efe7d6;
+  --display: "Redaction", "Times New Roman", serif;
+  --sans: "Geist", system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, monospace;
+  /* The page's ground and its text: paper, or ink for dark grounds. */
+  --ground: var(--paper);
+  --text: var(--ink);
+  --text-2: var(--ink-2);
+  --quiet: var(--pencil);
+}
+
+[data-t="dark"] {
+  --ground: var(--night);
+  --text: var(--moonlit);
+  --text-2: #cfc5b2;
+  --quiet: #9d9483;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html,
+body {
+  width: var(--w);
+  height: var(--h);
+  overflow: hidden;
+}
+
+body {
+  position: relative;
+  background:
+    url("../../site/washi.svg") 0 0 / 420px 420px,
+    var(--ground);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The washi grain is drawn for paper; on ink it reads as fibres in lacquer. */
+[data-t="dark"] body {
+  background-blend-mode: soft-light;
+}
+
+[data-clear] body {
+  background: none;
+}
+
+canvas,
+svg {
+  display: block;
+}
+
+h1 {
+  font-family: var(--display);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.sub {
+  font-family: var(--display);
+  font-style: italic;
+  line-height: 1.28;
+  color: var(--text-2);
+  text-wrap: pretty;
+}
+
+/* A short stroke of the brush under a headline, as on the site. */
+.stroke {
+  display: block;
+  height: 0.26em;
+  background: var(--text);
+  -webkit-mask: url("../../site/brush-line.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("../../site/brush-line.svg") 0 0 / 100% 100% no-repeat;
+}
+
+.ground-line {
+  position: absolute;
+  height: 8px;
+  background: var(--text);
+  opacity: 0.7;
+  -webkit-mask: url("../../site/brush-rule.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("../../site/brush-rule.svg") 0 0 / 100% 100% no-repeat;
+}
+
+.enso {
+  position: absolute;
+  background: var(--text);
+  opacity: 0.16;
+  -webkit-mask: url("../../site/enso.svg") center / contain no-repeat;
+  mask: url("../../site/enso.svg") center / contain no-repeat;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-family: var(--display);
+  letter-spacing: -0.01em;
+}
+
+.brand i {
+  width: 1.15em;
+  height: 1.15em;
+  background: var(--text);
+  -webkit-mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
+  mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
+}
+
+.mono {
+  font-family: var(--mono);
+  color: var(--quiet);
+}

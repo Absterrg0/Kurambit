@@ -1,0 +1,6 @@
+# Search engines and AI assistants are all welcome to read and cite this site.
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://kurambit.com/sitemap.xml

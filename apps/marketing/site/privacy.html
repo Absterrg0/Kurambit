@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ede6d7" />
+    <meta name="color-scheme" content="light" />
+    <title>Privacy · Kurambit</title>
+    <meta name="description" content="How Kurambit handles the details you give the waitlist." />
+    <link rel="canonical" href="https://kurambit.com/privacy" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+    <link rel="icon" href="favicon.ico?v=2" sizes="any" />
+    <link rel="icon" href="favicon-32x32.png?v=2" type="image/png" sizes="32x32" />
+    <link rel="icon" href="favicon-48x48.png?v=2" type="image/png" sizes="48x48" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2" />
+    <link rel="manifest" href="site.webmanifest" />
+  </head>
+  <body>
+    <canvas class="margin-ink" data-margin aria-hidden="true"></canvas>
+    <div class="edge-progress" data-edge-progress aria-hidden="true"><i></i><i></i></div>
+    <header class="bar">
+      <a class="brand" href="/" aria-label="Kurambit home">
+        <span class="brand-mark">
+          <img src="fox-head-ink.webp" alt="" width="30" height="30" />
+        </span>
+        <span class="brand-name">Kurambit</span>
+      </a>
+      <nav class="bar-nav" aria-label="Sections">
+        <a href="/#run">How it works</a>
+        <a href="/#studio">You direct</a>
+        <a href="/#overnight">Overnight</a>
+        <a href="/#faq">FAQ</a>
+      </nav>
+      <div class="bar-end">
+        <a class="btn btn-primary btn-small" href="/#join">Join the waitlist</a>
+      </div>
+    </header>
+    <div class="page">
+      <main class="prose">
+        <h1>Your details stay with us.</h1>
+        <p>
+          This note covers the waitlist on kurambit.com. The Kurambit app itself runs on your own
+          machine and keeps its data there.
+        </p>
+
+        <h2>What we collect</h2>
+        <p>Your email address. We also keep the time you signed up and which form you used.</p>
+        <p>
+          To stop abuse we keep a one-way, keyed hash of your IP address for a short rate-limit
+          window. We never store the address itself, and the hash cannot be turned back into it.
+        </p>
+
+        <h2>Why</h2>
+        <p>
+          Only to contact you about Kurambit: a note confirming you joined, your invite, and the
+          occasional launch update. We do not sell, rent or share your details, and we do not add
+          you to anyone else's list.
+        </p>
+
+        <h2>Where it lives</h2>
+        <p>
+          In a private Postgres database that only the Kurambit server can reach, over encrypted
+          connections. The list is never published, and no page on this site can read it. Our emails
+          are delivered by Resend, which receives your address only to send them.
+        </p>
+
+        <h2>Leaving the list</h2>
+        <p>
+          Reply to any email from us, or write to us through
+          <a href="https://github.com/Absterrg0/Kurambit">GitHub</a>, and we will delete your
+          details.
+        </p>
+
+        <h2>Cookies and tracking</h2>
+        <p>This site sets no cookies and runs no third-party trackers or analytics scripts.</p>
+      </main>
+      <footer class="foot foot-plain">
+        <div class="foot-row">
+          <a class="brand brand-small" href="/" aria-label="Kurambit home">
+            <img src="fox-head-ink.webp" alt="" width="20" height="20" />
+            <span>Kurambit</span>
+          </a>
+          <nav aria-label="Footer">
+            <a href="https://x.com/kurambit_gg" rel="me">X</a>
+            <a href="https://github.com/Absterrg0/Kurambit" rel="me">GitHub</a>
+            <a href="/#join">Waitlist</a>
+          </nav>
+          <p class="foot-legal">Open source under MIT, <span data-year>2026</span></p>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>

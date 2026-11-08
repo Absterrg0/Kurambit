@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0b0a" />
+    <meta name="color-scheme" content="dark" />
+    <title>Join the waitlist · Kurambit</title>
+    <meta
+      name="description"
+      content="Kurambit turns the coding agent you already use into a game studio. Join the waitlist and we will email you when your invite is ready."
+    />
+    <link rel="canonical" href="https://kurambit.com/waitlist" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Kurambit" />
+    <meta property="og:title" content="Join the Kurambit waitlist" />
+    <meta
+      property="og:description"
+      content="Nobody made the game you want. So make it. Join the waitlist for Kurambit."
+    />
+    <meta property="og:image" content="https://kurambit.com/og.png?v=8" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content="https://kurambit.com/waitlist" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@kurambit_gg" />
+    <link rel="icon" href="/favicon.ico?v=2" sizes="any" />
+    <link rel="icon" href="/favicon-32x32.png?v=2" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/favicon-48x48.png?v=2" type="image/png" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="preload" href="/fox-ink.webp" as="image" />
+    <link
+      rel="preload"
+      href="/fonts/redaction-italic.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/waitlist.css" />
+    <script src="/waitlist.js" defer></script>
+  </head>
+  <body>
+    <a class="home" href="/" aria-label="Kurambit home">
+      <img src="/fox-head-light.webp" alt="" width="30" height="30" />
+      <span>Kurambit</span>
+    </a>
+
+    <main class="stage">
+      <div class="fox">
+        <canvas
+          id="fox"
+          role="img"
+          aria-label="Kurambit's fox, drawn in pixels of ink that part around your cursor"
+        ></canvas>
+      </div>
+
+      <form class="join" data-waitlist data-source="waitlist-page" novalidate>
+        <h1 class="line">Nobody made the game you want. So make it.</h1>
+        <label class="sr-only" for="email">Email address</label>
+        <div class="field">
+          <input
+            id="email"
+            type="email"
+            name="email"
+            placeholder="you@yourstudio.com"
+            autocomplete="email"
+            maxlength="254"
+            required
+          />
+          <div class="hp" aria-hidden="true">
+            <label
+              >Website <input type="text" name="website" tabindex="-1" autocomplete="off"
+            /></label>
+          </div>
+          <button class="go" type="submit">
+            <span data-label>Join<span class="wide"> the waitlist</span></span>
+          </button>
+        </div>
+        <p class="note" data-status role="status" aria-live="polite">
+          A confirmation now, one more when you're in. Never shared.
+          <a href="/privacy">Privacy</a>
+        </p>
+      </form>
+    </main>
+  </body>
+</html>

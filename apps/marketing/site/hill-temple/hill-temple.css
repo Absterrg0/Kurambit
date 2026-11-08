@@ -1,0 +1,323 @@
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/fonts/geist.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Redaction";
+  font-style: italic;
+  font-display: swap;
+  font-weight: 400;
+  src: url("/fonts/redaction-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Redaction";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("/fonts/redaction.woff2") format("woff2");
+}
+
+:root {
+  --night: #0b0b0a;
+  --paper: #f2efe8;
+  --paper-2: rgb(242 239 232 / 66%);
+  --paper-3: rgb(242 239 232 / 40%);
+  --shu: #e2582a;
+  --shu-deep: #c9461b;
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Redaction", "Times New Roman", Times, serif;
+  --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  color: var(--paper);
+  background: var(--night);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  touch-action: none;
+}
+
+a {
+  color: inherit;
+}
+
+#canvas {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100vw;
+  height: 100svh;
+  outline: none;
+  background: var(--night);
+}
+
+.home {
+  position: fixed;
+  top: max(18px, env(safe-area-inset-top));
+  left: max(22px, env(safe-area-inset-left));
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--paper-2);
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 19px;
+  text-decoration: none;
+  transition: color 200ms var(--ease), opacity 400ms var(--ease);
+}
+
+.home:hover {
+  color: var(--paper);
+}
+
+.home img {
+  width: 28px;
+  height: 28px;
+}
+
+/* Once the game runs, the page steps back: the brand fades until the pointer finds it. */
+/* Once the game runs, the page steps back: the brand moves clear of the game's health bar and fades
+   until the pointer finds it, and the controls line gives way to the game's own. */
+body.running .home {
+  left: auto;
+  right: max(22px, env(safe-area-inset-right));
+  opacity: 0.28;
+}
+
+body.running .home:hover {
+  opacity: 1;
+}
+
+body.running .foot {
+  display: none;
+}
+
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  padding: 0 max(28px, 8vw);
+  background:
+    radial-gradient(70% 60% at 30% 45%, rgb(242 239 232 / 5%), transparent 70%),
+    radial-gradient(120% 90% at 40% 40%, #171614 0%, var(--night) 60%, #050504 100%);
+  transition: opacity 700ms var(--ease);
+}
+
+.gate.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The painted far range from the game, as a horizon under the words. */
+.still {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46svh;
+  background: url("/hill-temple/far.webp") center bottom / cover no-repeat;
+  opacity: 0.5;
+  mask-image: linear-gradient(to bottom, transparent, #000 45%, #000 70%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 45%, #000 70%, transparent);
+  pointer-events: none;
+}
+
+.gate-copy {
+  position: relative;
+  max-width: 560px;
+}
+
+.kicker {
+  margin: 0 0 14px;
+  color: var(--paper-3);
+  font-size: 14px;
+}
+
+h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(48px, 7vw, 92px);
+  letter-spacing: -0.02em;
+  line-height: 0.98;
+}
+
+.lede {
+  margin: 18px 0 30px;
+  color: var(--paper-2);
+  font-family: var(--display);
+  font-style: italic;
+  font-size: clamp(19px, 1.7vw, 23px);
+  line-height: 1.35;
+}
+
+/* The site's brush-stroke button, in vermilion. */
+.play {
+  appearance: none;
+  height: 52px;
+  border: 0;
+  padding: 0 46px;
+  background: var(--shu);
+  color: #fff;
+  font: 500 17px/1 var(--sans);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  -webkit-mask: url("/brush-swash.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("/brush-swash.svg") 0 0 / 100% 100% no-repeat;
+  transition: background 200ms var(--ease), transform 200ms var(--ease);
+}
+
+.play:hover {
+  background: var(--shu-deep);
+}
+
+.play:active {
+  transform: translateY(1px);
+}
+
+.play:focus-visible {
+  background: #f2794b;
+}
+
+.play[disabled] {
+  cursor: default;
+  background: rgb(226 88 42 / 45%);
+}
+
+.fine {
+  margin: 16px 0 0;
+  max-width: 440px;
+  color: var(--paper-3);
+  font-size: 14px;
+}
+
+.fine.error {
+  color: #f0a184;
+}
+
+.bar {
+  position: relative;
+  width: min(360px, 80vw);
+  height: 2px;
+  margin-top: 18px;
+  background: rgb(242 239 232 / 14%);
+  overflow: hidden;
+}
+
+.bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: var(--shu);
+  transition: width 200ms linear;
+}
+
+.foot {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px max(22px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-bottom));
+  color: var(--paper-3);
+  font-size: 13px;
+  transition: opacity 400ms var(--ease);
+}
+
+.keys {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 18px;
+}
+
+.credits-open,
+.credits-close {
+  appearance: none;
+  border: 0;
+  padding: 4px 0;
+  background: none;
+  color: var(--paper-2);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.credits-open:hover,
+.credits-close:hover {
+  color: var(--paper);
+}
+
+.credits {
+  max-width: 620px;
+  max-height: 82svh;
+  border: 1px solid rgb(242 239 232 / 14%);
+  border-radius: 14px;
+  padding: 26px 30px;
+  background: #121110;
+  color: var(--paper-2);
+  font-size: 15px;
+}
+
+.credits::backdrop {
+  background: rgb(5 5 4 / 70%);
+}
+
+.credits h2 {
+  margin: 0 0 12px;
+  color: var(--paper);
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 34px;
+}
+
+.credits h3 {
+  margin: 20px 0 6px;
+  color: var(--paper);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.credits ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.credits p {
+  margin: 0;
+}
+
+.credits-close {
+  margin-top: 20px;
+}
+
+@media (max-width: 720px) {
+  .keys {
+    display: none;
+  }
+}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Kurambit avatar</title>
+    <link rel="stylesheet" href="kit.css" />
+    <style>
+      /* Profile pictures are cropped to a circle. The bust (cut from the full
+         fox in kurambit-mark.png) fades out into the chest instead of ending
+         in a hard edge, and sits in the middle clear of the rim. */
+      .head {
+        position: absolute;
+        left: 50%;
+        top: 57%;
+        width: var(--size, 94%);
+        height: var(--size, 94%);
+        transform: translate(-50%, -50%);
+        background: var(--fox);
+        -webkit-mask: url("fox-bust.png") center / contain no-repeat;
+        mask: url("fox-bust.png") center / contain no-repeat;
+      }
+
+      :root {
+        --fox: var(--ink);
+      }
+
+      /* Seal: a vermilion stamp with the paper's fibres pressed into it. */
+      [data-v="seal"] body {
+        background: var(--shu);
+      }
+
+      [data-v="seal"] body::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: url("../../site/washi.svg") 0 0 / 420px 420px;
+        mix-blend-mode: multiply;
+      }
+
+      [data-v="seal"] {
+        --fox: var(--sheet);
+      }
+
+      [data-v="dark"] {
+        --fox: var(--moonlit);
+      }
+    </style>
+  </head>
+  <body>
+    <i class="head"></i>
+    <script src="kit.js"></script>
+    <script>
+      // v: seal (paper fox on a vermilion stamp), paper (ink fox on washi),
+      // dark (light fox on ink).
+      const { params } = sizePage(800, 800);
+      const variant = params.get("v") ?? "seal";
+      const root = document.documentElement;
+      root.dataset.v = variant;
+      if (variant === "dark") root.dataset.t = "dark";
+      // The mask image loads with the stylesheet; give it a frame to paint.
+      whenDrawn(new Promise((done) => setTimeout(done, 300)));
+    </script>
+  </body>
+</html>
