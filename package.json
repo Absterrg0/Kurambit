@@ -8,6 +8,7 @@
     "dev:server": "node scripts/dev-runner.ts dev:server",
     "dev:web": "node scripts/dev-runner.ts dev:web",
     "dev:desktop": "node scripts/dev-runner.ts dev:desktop",
+    "bench": "node scripts/bench/run.ts",
     "migrate-dev-db": "node apps/server/scripts/migrate-dev-db.ts",
     "start": "vp run --filter kurambit start",
     "start:desktop": "vp run --filter @kurambit/desktop start",

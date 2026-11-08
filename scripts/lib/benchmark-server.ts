@@ -58,6 +58,8 @@ export function benchmarkServerSpawn(input: {
 
 export interface BenchmarkServer {
   readonly url: string;
+  /** The one-time pairing credential the server printed; never log it. */
+  readonly credential: string;
   readonly pid: number;
   stop: () => Promise<void>;
 }
@@ -202,7 +204,7 @@ export async function startBenchmarkServer(input: {
   let output = "";
   let pendingLine = "";
   const startTimeoutMs = input.startTimeoutMs ?? START_TIMEOUT_MS;
-  const started = new Promise<string>((resolve, reject) => {
+  const started = new Promise<URL>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
         new Error(
@@ -222,7 +224,7 @@ export async function startBenchmarkServer(input: {
       const match = output.match(PAIRING_LINE);
       if (match?.[1] === undefined) return;
       clearTimeout(timer);
-      resolve(new URL(match[1]).origin);
+      resolve(new URL(match[1]));
     };
     child.stdout?.on("data", consume);
     child.stderr?.on("data", consume);
@@ -239,9 +241,9 @@ export async function startBenchmarkServer(input: {
       );
     });
   });
-  let url: string;
+  let pairing: URL;
   try {
-    url = await started;
+    pairing = await started;
   } catch (cause) {
     await stopServer(child.pid, pidPath);
     log.end();
@@ -250,7 +252,8 @@ export async function startBenchmarkServer(input: {
   const pid = child.pid;
   if (pid === undefined) throw new Error("The benchmark server spawned without a PID.");
   return {
-    url,
+    url: pairing.origin,
+    credential: new URLSearchParams(pairing.hash.slice(1)).get("token") ?? "",
     pid,
     stop: async () => {
       await stopServer(pid, pidPath);
