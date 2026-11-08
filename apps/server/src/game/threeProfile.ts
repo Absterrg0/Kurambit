@@ -8,6 +8,8 @@ import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const THREE_PROFILE: GameEngineProfile = {
   id: "three",
+  status: GAME_ENGINES.three.status,
+  editors: ["blender"],
   turnLoop: GAME_ENGINES.three.turnLoop,
   stage: GAME_ENGINES.three.stage,
   tuneFile: "tune.json",
@@ -22,9 +24,17 @@ export const THREE_PROFILE: GameEngineProfile = {
     rootOutputFiles: null,
     derivedAssets: false,
   },
-  scaffold: { version: THREE_PINNED_VERSION, directories: ["web/assets", "builds/web"] },
+  scaffold: {
+    version: THREE_PINNED_VERSION,
+    directories: ["web/assets", "builds/web"],
+    agents: `Build BRIEF.md's game with three.js (vendored in web/vendor, no install step). web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound. A new game's first turn follows "The first turn" below.
+
+Use the game_* tools to check, play, export and package the game; never launch your own browser. Keep builds/ generated.
+`,
+  },
   resourcePath: (projectRelative) => `./${projectRelative}`,
   importRoot: null,
+  sharedEditor: false,
   importStep: false,
   compressedModels: true,
   groundHint: (_width, height, ground) => {
@@ -32,6 +42,8 @@ export const THREE_PROFILE: GameEngineProfile = {
     return `three.js: sprite.center.set(0.5, ${up}) on a THREE.Sprite, or geometry.translate(0, ${Number((0.5 - up).toFixed(4))} * planeHeight, 0) on a plane, puts the object's position on the ground line.`;
   },
   stripLoad: null,
+  sidecarLoad: (key, sidecar) =>
+    `three.js games load the sidecar: ASSETS = { ${key}: "${sidecar}" }.`,
   tools: {
     import: "three.js games have no import step: the static folder is the game.",
     check:

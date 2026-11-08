@@ -19,6 +19,7 @@ import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import {
   GAME_BOT_BOUNDS,
   GameOperationError,
+  isGameEngineActive,
   type GameBotMode,
   type GameBotPerf,
   type GameBotReportResult,
@@ -659,6 +660,8 @@ const make = Effect.gen(function* () {
       // The engine says how its game plays: a browser page, its runner on the
       // sources, or a prepared player. Everything else here is the same run.
       const manifest = yield* projects.read(root);
+      if (!isGameEngineActive(manifest.engine.name))
+        return yield* GameEngine.parkedEngine(manifest.engine.name);
       const backend = yield* engines.backendFor(manifest.engine.name);
       const profile = backend.profile;
       const projectDir = insideGame(root, manifestProject(manifest));

@@ -1,6 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import type { EnvironmentId, GameToolchainChangeInput, GameToolStatus } from "@kurambit/contracts";
+import {
+  isEngineToolActive,
+  type EnvironmentId,
+  type GameToolchainChangeInput,
+  type GameToolStatus,
+} from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { gameEnvironment } from "../../state/game";
@@ -42,10 +47,11 @@ const INSTALLABLE: ReadonlySet<GameToolStatus["tool"]> = new Set<GameToolchainCh
   "mpfb",
 ]);
 
+// A parked engine's tool is not looked for, so its path is not asked for.
 const PATH_ROWS = [
-  { key: "gameGodotPath", title: "Godot executable" },
-  { key: "gameUnityPath", title: "Unity editor" },
-  { key: "gameBlenderPath", title: "Blender executable" },
+  { key: "gameGodotPath", title: "Godot executable", shown: isEngineToolActive("godot") },
+  { key: "gameUnityPath", title: "Unity editor", shown: isEngineToolActive("unity") },
+  { key: "gameBlenderPath", title: "Blender executable", shown: true },
 ] as const;
 type PathKey = (typeof PATH_ROWS)[number]["key"];
 
@@ -135,7 +141,7 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           <p role="alert">{query.error}</p>
         ) : null}
       </div>
-      {PATH_ROWS.map((row) => (
+      {PATH_ROWS.filter((row) => row.shown).map((row) => (
         <SettingsRow
           key={row.key}
           title={row.title}

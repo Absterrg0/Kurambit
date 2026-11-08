@@ -2659,7 +2659,8 @@ const make = Effect.gen(function* () {
             catch: (cause) => opError("blender-export", file, "invalid-path", undefined, cause),
           });
           const absolute = NodePath.join(directory, NodePath.posix.basename(file));
-          const compress = engineProfile(manifest.engine.name).compressedModels;
+          const profile = engineProfile(manifest.engine.name);
+          const compress = profile.compressedModels;
           if (input.simplify !== undefined && !compress)
             return yield* opError(
               "blender-export",
@@ -2760,7 +2761,7 @@ const make = Effect.gen(function* () {
                 ...(decoderNote === null ? [] : [decoderNote]),
                 credited,
               ].join(" ") +
-              `\nSaved .blend source: ${blend}\nRun game_import after.${manifest.engine.name === "three" ? ` three.js games load the sidecar: ASSETS = { ${candidate.subject}: "${sidecar.slice(engineDir.length + 1)}" }.` : ""}`,
+              `\nSaved .blend source: ${blend}\n${profile.importStep ? "Run game_import after." : "Run game_check after."}${profile.sidecarLoad === null ? "" : ` ${profile.sidecarLoad(candidate.subject, sidecar.slice(engineDir.length + 1))}`}`,
             blend,
             export: file,
             sidecar,

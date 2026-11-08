@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
+  isEngineToolActive,
   UNITY_MIN_VERSION,
   type GameToolSource,
   type GameToolStatus,
@@ -925,12 +926,13 @@ const make = Effect.gen(function* () {
       downloadUrl: null,
     } satisfies GameToolStatus;
   });
+  // A parked engine's tool is never looked for (GAME_ENGINES status).
   const status: GameToolchain["Service"]["status"] = (options) =>
     Effect.all([
       binaryStatus("blender"),
-      binaryStatus("godot"),
+      ...(isEngineToolActive("godot") ? [binaryStatus("godot")] : []),
       binaryStatus("uv"),
-      unityStatus(options?.unityProject),
+      ...(isEngineToolActive("unity") ? [unityStatus(options?.unityProject)] : []),
       mpfbStatus,
     ]).pipe(Effect.map((tools) => ({ tools })));
   /** Fetched into a private stage and verified against its pin before it is moved into place. */

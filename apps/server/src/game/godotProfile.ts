@@ -3,6 +3,8 @@ import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const GODOT_PROFILE: GameEngineProfile = {
   id: "godot",
+  status: GAME_ENGINES.godot.status,
+  editors: ["blender"],
   turnLoop: GAME_ENGINES.godot.turnLoop,
   stage: GAME_ENGINES.godot.stage,
   tuneFile: null,
@@ -25,13 +27,19 @@ export const GODOT_PROFILE: GameEngineProfile = {
   scaffold: {
     version: "4.7.2",
     directories: ["godot/assets/models", "godot/scripts", "builds/web"],
+    agents: `Build BRIEF.md's game in Godot 4.7 (GDScript; Forward+ natively, Compatibility on Web). godot/ is the project.
+
+Use the game_* tools to check, play, export and package the game; never run Godot yourself. Keep builds/ and godot/.godot/ generated.
+`,
   },
   resourcePath: (projectRelative) => `res://${projectRelative}`,
   importRoot: null,
+  sharedEditor: false,
   importStep: true,
   compressedModels: false,
   groundHint: (width, height, ground) =>
     `Godot: Sprite2D offset (0, ${height / 2 - ground}) puts the node origin on the ground line (x=${width / 2} is already the origin).`,
+  sidecarLoad: null,
   stripLoad: (key, resource, view) =>
     `SpriteStrips.apply($AnimatedSprite2D, {${JSON.stringify(key)}: "${resource}"}, "${view}") loads it`,
   tools: {

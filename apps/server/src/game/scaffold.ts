@@ -1,4 +1,5 @@
 import {
+  DEFAULT_GAME_ENGINE,
   GAME_TEMPLATES,
   gameTemplateForEngine,
   type GameCreateInput,
@@ -66,8 +67,9 @@ const GENERATED_IGNORES = [
   "studio-skills/",
 ];
 
-/** The engine a create request builds for. Omitted means the Godot native lane. */
-export const createEngine = (input: GameCreateInput): GameEngineId => input.engine ?? "godot";
+/** The engine a create request builds for. Omitted means the first active engine. */
+export const createEngine = (input: GameCreateInput): GameEngineId =>
+  input.engine ?? DEFAULT_GAME_ENGINE;
 
 /** The manifest a new game starts from; the template names the gameplay scene. */
 export function scaffoldManifest(input: GameCreateInput): GameManifest {
@@ -242,32 +244,11 @@ export const firstTurnMessage = (manifest: GameManifest): string => {
 export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   const manifest = scaffoldManifest(input);
   const engine = createEngine(input);
-  const projectLine =
-    engine === "unity"
-      ? `# Kurambit project
-
-Build BRIEF.md's game in Unity 6 (C#, Input System). unity/ is the project inside a demo shell (TEMPLATE.md): gameplay goes in unity/Assets/Scenes/Game.unity, built by unity/Assets/Editor/BuildGame.cs, game code in unity/Assets/Scripts; unity/Assets/Kurambit stays as shipped.
-
-Use the game_* tools to check, play, export and package the game, and the game_unity_* tools to edit scenes in the live editor; never run Unity yourself. Keep builds/ and unity/Library, Temp, Logs, UserSettings generated.
-`
-      : engine === "three"
-        ? `# Kurambit project
-
-Build BRIEF.md's game with three.js (vendored in web/vendor, no install step). web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound. A new game's first turn follows "The first turn" below.
-
-Use the game_* tools to check, play, export and package the game; never launch your own browser. Keep builds/ generated.
-`
-        : `# Kurambit project
-
-Build BRIEF.md's game in Godot 4.7 (GDScript; Forward+ natively, Compatibility on Web). godot/ is the project.
-
-Use the game_* tools to check, play, export and package the game; never run Godot yourself. Keep builds/ and godot/.godot/ generated.
-`;
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,
     "AGENTS.md": [
-      projectLine,
+      `# Kurambit project\n\n${engineProfile(engine).scaffold.agents}`,
       everyTurnSection(engine),
       firstTurnSection(manifest),
       engineProfile(engine).turnLoop ? KEEP_GOING_SECTION : undefined,

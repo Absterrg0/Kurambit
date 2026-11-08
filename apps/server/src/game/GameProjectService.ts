@@ -18,6 +18,8 @@ import {
   ThreadId,
   GameManifest,
   GAME_CHARACTER_ROUTE_UNAVAILABLE,
+  isGameEngineActive,
+  parkedEngineMessage,
   GameOperationError,
   gameTemplateForEngine,
   type GameCreateInput,
@@ -368,6 +370,14 @@ const make = Effect.gen(function* () {
           path: input.name,
           reason: "invalid-path",
           detail: "A game needs a name.",
+        });
+      const engine = createEngine(input);
+      if (!isGameEngineActive(engine))
+        return yield* new GameOperationError({
+          operation: "create-game",
+          path: input.name,
+          reason: "invalid-input",
+          detail: parkedEngineMessage(engine),
         });
       const unavailable =
         input.characters === undefined

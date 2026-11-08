@@ -9,7 +9,13 @@ import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useThreadShells } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
-import { isNestedUnderLiveParent, type EnvironmentId, type GameSummary } from "@kurambit/contracts";
+import {
+  ACTIVE_GAME_ENGINES,
+  GAME_ENGINES,
+  isNestedUnderLiveParent,
+  type EnvironmentId,
+  type GameSummary,
+} from "@kurambit/contracts";
 import { KurambitMark } from "../brand/KurambitBrand";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -191,23 +197,24 @@ function BriefComposer({
           className="w-full resize-none bg-transparent px-2 pt-1.5 text-base leading-relaxed outline-none placeholder:text-placeholder"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <ToggleGroup
-            aria-label="Engine"
-            variant="segmented"
-            value={[engine]}
-            onValueChange={(value) => {
-              const next = value[0];
-              if (next === "godot" || next === "three" || next === "unity") setEngine(next);
-            }}
-          >
-            <Toggle value="godot" disabled={!engineReady("godot")}>
-              Godot · native
-            </Toggle>
-            <Toggle value="three">three.js · browser</Toggle>
-            <Toggle value="unity" disabled={!engineReady("unity")}>
-              Unity · native
-            </Toggle>
-          </ToggleGroup>
+          {/* One active engine is no choice, so no picker shows. */}
+          {ACTIVE_GAME_ENGINES.length > 1 ? (
+            <ToggleGroup
+              aria-label="Engine"
+              variant="segmented"
+              value={[engine]}
+              onValueChange={(value) => {
+                const next = ACTIVE_GAME_ENGINES.find((id) => id === value[0]);
+                if (next !== undefined) setEngine(next);
+              }}
+            >
+              {ACTIVE_GAME_ENGINES.map((id) => (
+                <Toggle key={id} value={id} disabled={!engineReady(id)}>
+                  {GAME_ENGINES[id].picker.short}
+                </Toggle>
+              ))}
+            </ToggleGroup>
+          ) : null}
           <Button type="button" variant="ghost" size="sm" onClick={onOpenFolder}>
             <FolderOpenIcon aria-hidden />
             Open a game

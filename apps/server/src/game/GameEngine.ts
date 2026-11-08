@@ -7,6 +7,9 @@ import * as Layer from "effect/Layer";
 import {
   GameOperationError,
   gameOperationFault,
+  isGameEngineActive,
+  parkedEngineMessage,
+  type GameEngineId,
   manifestProject,
   type GameManifest,
   type GameActionResult,
@@ -225,6 +228,15 @@ const unsupportedEngine = (engineName: string) =>
       `The project was not imported, checked or exported; no engine process started.`,
   });
 
+/** Engine work (import, check, export, play) never starts on a parked engine's game. */
+export const parkedEngine = (engine: GameEngineId) =>
+  new GameOperationError({
+    operation: "resolve-engine",
+    path: engine,
+    reason: "engine-parked",
+    detail: parkedEngineMessage(engine),
+  });
+
 export class GameEngine extends Context.Service<
   GameEngine,
   {
@@ -283,9 +295,14 @@ const make = Effect.gen(function* () {
       ? Effect.fail(unsupportedEngine(engineName))
       : Effect.succeed(backend);
   };
+  /** The backend that runs a game's engine work; a parked engine's is refused. */
+  const runner = (manifest: GameManifest) =>
+    isGameEngineActive(manifest.engine.name)
+      ? backendFor(manifest.engine.name)
+      : Effect.fail(parkedEngine(manifest.engine.name));
   const context = Effect.fn("GameEngine.context")(function* (root: string) {
     const manifest = yield* projects.read(root);
-    const backend = yield* backendFor(manifest.engine.name);
+    const backend = yield* runner(manifest);
     const project = yield* backend.resolveProject(root, manifest);
     return { backend, ctx: { root, ...project } };
   });
@@ -392,7 +409,7 @@ const make = Effect.gen(function* () {
           }));
     return yield* Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const backend = yield* backendFor(manifest.engine.name);
+      const backend = yield* runner(manifest);
       const project = yield* backend.resolveProject(root, manifest);
       const ctx = { root, ...project };
       const work = checkSources(root, backend, ctx, manifest, startedAt);
@@ -406,6 +423,8 @@ const make = Effect.gen(function* () {
     lookup: (root: string) =>
       Effect.gen(function* () {
         const manifest = yield* projects.read(root);
+        // A parked engine's tool is not looked for, not even for its own games.
+        if (!isGameEngineActive(manifest.engine.name)) return null;
         const backend = yield* backendFor(manifest.engine.name);
         return yield* backend.toolStatus(root, manifest);
       }),

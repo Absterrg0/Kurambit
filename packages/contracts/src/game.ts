@@ -66,8 +66,8 @@ export const GameAsset = Schema.Struct({
 export const GameTemplateId = Schema.Literals(["blank", "blank-three", "blank-unity"]);
 export type GameTemplateId = typeof GameTemplateId.Type;
 /**
- * The engine every game build runs on. Godot is the native lane; three.js is
- * the quick browser lane; Unity is the native lane on Unity 6.
+ * The engine every game build runs on. Which ones a new game may use is
+ * `GAME_ENGINES[id].status`.
  */
 export const GameEngineId = Schema.Literals(["godot", "three", "unity"]);
 export type GameEngineId = typeof GameEngineId.Type;
@@ -140,10 +140,19 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     probe: true,
   },
 ];
-export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "blank";
 /** How this game's engine shows the game on the Stage: its folder served live, a Web export, or its own window. */
 export const GameStageKind = Schema.Literals(["live", "export", "window"]);
 export type GameStageKind = typeof GameStageKind.Type;
+
+/**
+ * Whether Kurambit works on an engine now. An active engine is offered for new
+ * games, its tool is detected and its games' agents get its tools. A parked one
+ * stays in the code and compiles; its existing games still open, with their
+ * chat, builds and history, but nothing new is made in it, its tool is not
+ * looked for and its agents get no engine tools. Re-enable one by flipping its
+ * `status` below: the server and every client read it from here.
+ */
+export type GameEngineStatus = "active" | "parked";
 
 /** What a client says about each engine: keyed by every engine id, so a new engine does not compile without its entry. */
 export const GAME_ENGINES: Readonly<
@@ -152,6 +161,7 @@ export const GAME_ENGINES: Readonly<
     {
       /** Short human name ("Godot", "three.js", "Unity"). */
       readonly name: string;
+      readonly status: GameEngineStatus;
       readonly template: GameTemplateId;
       /** The installed tool its games build and play with; null when it needs none. */
       readonly tool: "godot" | "unity" | null;
@@ -165,12 +175,18 @@ export const GAME_ENGINES: Readonly<
       readonly stage: GameStageKind;
       /** Its template's shell speaks the Stage bridge (gameStageBridge.ts): Freeze, select and live values. */
       readonly stageBridge: boolean;
-      readonly picker: { readonly title: string; readonly description: string };
+      readonly picker: {
+        readonly title: string;
+        /** The engine's label where a form offers the active engines side by side. */
+        readonly short: string;
+        readonly description: string;
+      };
     }
   >
 > = {
   godot: {
     name: "Godot",
+    status: "parked",
     template: "blank",
     tool: "godot",
     turnLoop: false,
@@ -178,12 +194,14 @@ export const GAME_ENGINES: Readonly<
     stageBridge: false,
     picker: {
       title: "Godot native",
+      short: "Godot · native",
       description:
         "A real Godot 4.7 project with Blender-made art. The full lane: native play, Windows and Linux exports.",
     },
   },
   three: {
     name: "three.js",
+    status: "active",
     template: "blank-three",
     tool: null,
     turnLoop: true,
@@ -191,11 +209,13 @@ export const GAME_ENGINES: Readonly<
     stageBridge: true,
     picker: {
       title: "three.js browser",
+      short: "three.js · browser",
       description: "A quick static browser game, nothing to install. Web export only.",
     },
   },
   unity: {
     name: "Unity",
+    status: "parked",
     template: "blank-unity",
     tool: "unity",
     turnLoop: false,
@@ -203,11 +223,26 @@ export const GAME_ENGINES: Readonly<
     stageBridge: false,
     picker: {
       title: "Unity native",
+      short: "Unity · native",
       description:
         "A Unity 6 project in C#. Linux and Windows builds. Needs a Unity 6 editor from Unity Hub and a Unity Personal licence.",
     },
   },
 };
+/** The engines a new game may use, in GAME_ENGINES order. */
+export const ACTIVE_GAME_ENGINES: ReadonlyArray<GameEngineId> = (
+  Object.keys(GAME_ENGINES) as GameEngineId[]
+).filter((id) => GAME_ENGINES[id].status === "active");
+export const isGameEngineActive = (engine: GameEngineId): boolean =>
+  GAME_ENGINES[engine].status === "active";
+/** Whether an engine's own tool is looked for: only an active engine's is. */
+export const isEngineToolActive = (tool: "godot" | "unity"): boolean =>
+  ACTIVE_GAME_ENGINES.some((id) => GAME_ENGINES[id].tool === tool);
+/** The engine a create request without one builds for: the first active engine. */
+export const DEFAULT_GAME_ENGINE: GameEngineId = ACTIVE_GAME_ENGINES[0] ?? "three";
+/** What a parked engine's game and a refused create say, naming the engines Kurambit works on now. */
+export const parkedEngineMessage = (engine: GameEngineId): string =>
+  `${GAME_ENGINES[engine].name} games are paused while Kurambit focuses on ${ACTIVE_GAME_ENGINES.map((id) => GAME_ENGINES[id].name).join(" and ")}.`;
 /** The starter template a create request's engine maps to. */
 export const gameTemplateForEngine = (engine: GameEngineId): GameTemplateId =>
   GAME_ENGINES[engine].template;
@@ -292,6 +327,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "cancelled",
       /** A program Kurambit runs failed on its own; it says nothing about the game. */
       "tool-failed",
+      /** The game's engine is parked (GAME_ENGINES status): nothing builds or plays it. */
+      "engine-parked",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     /** A production run's own reason, when the failure was the run's. */
@@ -343,6 +380,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The operation was cancelled before it finished (a turn ended, a stop, or a newer request). Retry it if it is still wanted.",
       "tool-failed":
         "A program Kurambit runs (the browser, the engine's editor or its CLI, an MCP server, the private display, ffmpeg) failed on its own. This says nothing about the game. Retry once; if it fails the same way, tell the user what the detail says.",
+      "engine-parked":
+        "Kurambit does not build, check or play games in this engine for now; its chat, builds and history still work. Tell the person what the detail says; do not build or run the game another way.",
     };
     // A run holding the game is not cleared by Stop game, which stops only the caller's work.
     const fix =
@@ -380,6 +419,7 @@ const FAULTS: Readonly<Record<GameOperationReason, GameOperationFault>> = {
   "invalid-input": "request",
   "invalid-path": "request",
   "unknown-template": "request",
+  "engine-parked": "request",
   io: "tool",
   "tool-missing": "tool",
   "wrong-version": "tool",
@@ -661,7 +701,7 @@ export const GameCreateInput = Schema.Struct({
   parentDirectory: Schema.String,
   brief: Schema.String.check(Schema.isMinLength(1)),
   artDirection: Schema.optionalKey(Schema.String),
-  /** Which lane to build in. Omitted means the Godot native lane. */
+  /** Which engine to build in; a parked one is refused. Omitted means DEFAULT_GAME_ENGINE. */
   engine: Schema.optionalKey(GameEngineId),
   /** How the person chose to make its characters, before the first turn builds them. Omitted: library. */
   characters: Schema.optionalKey(GameCharacterRoute),

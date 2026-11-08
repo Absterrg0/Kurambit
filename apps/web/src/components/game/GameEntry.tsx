@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import { useNavigate } from "@tanstack/react-router";
 import {
   GAME_CHARACTER_ROUTE_UNAVAILABLE,
+  ACTIVE_GAME_ENGINES,
   GAME_ENGINES,
   ModelSelection,
   type EnvironmentId,
@@ -290,20 +291,23 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                     disabled={busy}
                   />
                 </label>
-                <fieldset className="flex flex-col gap-2 text-sm">
-                  <legend className="font-medium">Engine</legend>
-                  {ENGINE_OPTIONS.map((option) => (
-                    <EngineOption
-                      key={option.id}
-                      {...option}
-                      tool={toolchain === null ? null : engineToolFor(toolchain, option.id)}
-                      ready={engineReady(option.id)}
-                      checked={engine === option.id}
-                      onPick={() => setEngine(option.id)}
-                      disabled={busy}
-                    />
-                  ))}
-                </fieldset>
+                {/* One active engine is no choice, so no picker shows. */}
+                {ENGINE_OPTIONS.length > 1 ? (
+                  <fieldset className="flex flex-col gap-2 text-sm">
+                    <legend className="font-medium">Engine</legend>
+                    {ENGINE_OPTIONS.map((option) => (
+                      <EngineOption
+                        key={option.id}
+                        {...option}
+                        tool={toolchain === null ? null : engineToolFor(toolchain, option.id)}
+                        ready={engineReady(option.id)}
+                        checked={engine === option.id}
+                        onPick={() => setEngine(option.id)}
+                        disabled={busy}
+                      />
+                    ))}
+                  </fieldset>
+                ) : null}
                 <fieldset className="flex flex-col gap-2 text-sm">
                   <legend className="font-medium">Make characters with</legend>
                   <div className="grid grid-cols-3 gap-2">
@@ -503,7 +507,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   );
 }
 
-const ENGINE_OPTIONS = (Object.keys(GAME_ENGINES) as GameEngineId[]).map((id) => ({
+const ENGINE_OPTIONS = ACTIVE_GAME_ENGINES.map((id) => ({
   id,
   ...GAME_ENGINES[id].picker,
 }));
