@@ -8,6 +8,7 @@
  *   vp run bench [--briefs N] [--only <id>] [--out <dir>] [--home <dir>] [--model <instance>/<model>]
  */
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -19,6 +20,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { RpcClient } from "effect/rpc";
 import {
+  CommandId,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
   ORCHESTRATION_V2_WS_METHODS,
@@ -325,6 +327,25 @@ async function runBrief(
     if (Date.now() > turnDeadline) break;
     await sleep(WAIT.pollSeconds);
     projection = await projectionOf();
+  }
+  const overdue = projection.runs[0];
+  if (overdue !== undefined && !TERMINAL_RUN.has(overdue.status)) {
+    // A turn left running would load the machine while later games are measured.
+    log(`${brief.id}: turn still ${overdue.status} after ${WAIT.turnMinutes} min; stopping it`);
+    await call(server, cookie, (client) =>
+      client[ORCHESTRATION_V2_WS_METHODS.dispatchCommand]({
+        type: "run.interrupt",
+        commandId: CommandId.make(`bench:${NodeCrypto.randomUUID()}`),
+        threadId: game.threadId,
+        runId: overdue.id,
+        reason: `the benchmark waits ${WAIT.turnMinutes} min for a first turn`,
+      }),
+    );
+    const settleDeadline = Date.now() + 120_000;
+    while (!TERMINAL_RUN.has(projection.runs[0]?.status ?? "") && Date.now() < settleDeadline) {
+      await sleep(WAIT.pollSeconds);
+      projection = await projectionOf();
+    }
   }
   const run = projection.runs[0];
   const turnEnded = run !== undefined && TERMINAL_RUN.has(run.status);
