@@ -110,7 +110,7 @@ export class GameProjectService extends Context.Service<
     readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
     /**
      * The game folder a thread works in. `deleted: "allowed"` resolves a deleted
-     * chat's too, for a run's finish and restore, which outlive the chat.
+     * chat's too, so a keep-going run stopped by the deletion still tells the game's clients.
      */
     readonly resolve: (
       threadId: ThreadId,
