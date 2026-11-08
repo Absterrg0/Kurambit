@@ -118,7 +118,7 @@ function useSelectNotice(threadRef: ScopedThreadRef): string | null {
   if (engine !== null && !GAME_ENGINES[engine].stageBridge)
     return `Selecting things in the running game is not in ${GAME_ENGINES[engine].name} yet.`;
   if (status === "none")
-    return "Selecting needs the newer game shell. Your agent can update it: ask it to update the three.js shell.";
+    return "Selecting needs the newer game shell, which games made from now on have. Freeze still pauses this one.";
   if (status === null) return "Play the game on the Stage to see its things.";
   return null;
 }

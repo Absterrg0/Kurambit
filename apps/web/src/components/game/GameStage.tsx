@@ -829,7 +829,7 @@ function ThreadGameStage({
                     ? selectedId === null
                       ? "Frozen · click a thing to inspect it · Tab plays on"
                       : "Frozen · Esc clears the selection · Tab plays on"
-                    : "Frozen · selecting needs the newer game shell; your agent can update it"}
+                    : "Frozen · selecting needs the newer game shell, which new games have"}
                 </span>
               </span>
             ) : building && stageKind !== "live" ? (
