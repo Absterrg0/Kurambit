@@ -721,7 +721,13 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const limit = Math.min(50, Math.max(1, input.limit ?? 30));
-      const { entries, kept, more } = yield* allEntries(g, limit, input.before);
+      // The first page reads as far as the timeline's own, whatever its size: the folder's
+      // current build is the newest turn build, and a short read can find none behind turns
+      // that changed only notes, then take an old restore's target for the folder.
+      const scan = input.before === undefined ? Math.max(limit, 30) : limit;
+      const scanned = yield* allEntries(g, scan, input.before);
+      const { entries, kept } = scanned;
+      const more = scanned.more || entries.length > limit;
       const page = entries.slice(0, limit);
       const { builds, measured } = yield* rowsOf(g, page, kept);
       // The generation cards read the newest build whose asset use was measured.
