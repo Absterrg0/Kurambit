@@ -31,6 +31,7 @@ roll search, pivots, foot locking, hip drop where a leg cannot reach, root motio
 follow-through on springs, and the body's clearance. Root motion rides the pelvis (the root bone
 stays at rest), as the library clips' travel does; the clip's rootDrift says how far it goes. Spring
 chains are left unkeyed: the game springs them."""
+import copy
 import json
 import math
 import os
@@ -52,6 +53,7 @@ _BASE = {
     "out": lambda t: 1 - (1 - t) ** 3,
     "out2": lambda t: 1 - (1 - t) ** 2,
     "inout": lambda t: t * t * (3 - 2 * t),
+    "smooth": lambda t: t * t * (3 - 2 * t),  # what a channel off the curve through the beats uses
 }
 SPACES = (("prop", "grip", "root"), ("foot_l", "at", "ground"), ("foot_r", "at", "ground"), ("hand_l", "at", "root"),
           ("hand_r", "at", "root"))
@@ -59,6 +61,7 @@ CHANNELS = ("root", "hips", "chest", "head", "look", "prop", "hand_l", "hand_r",
             "knee_l", "knee_r")
 META = ("ease", "antic", "over", "pivot", "lift", "note")
 MAX_FRAMES = 600
+EASE_LOCK = 4  # frames a foot eases into and out of its lock
 
 
 def ease(kind, t, antic=0.0, over=0.0):
@@ -96,7 +99,7 @@ def _check(spec, library, body):
         last = b["at"]
         pose = b.get("pose")
         if pose is not None and isinstance(pose, str) and pose not in library:
-            raise Refused("invalid-input", f"beat {i} names pose {pose!r}; the named poses are {', '.join(sorted(library))}")
+            raise Refused("invalid-input", f"beat {i} names pose {pose!r}; the named poses are {', '.join(sorted(library))}, and any clip this character has (its first frame)")
         unknown = [k for k in b if k not in CHANNELS and k not in META and k not in ("at", "pose")]
         if unknown:
             raise Refused("invalid-input", f"beat {i} has unknown keys {', '.join(unknown)}; pose keys are {', '.join(CHANNELS)} and beat keys {', '.join(META)}")
@@ -239,34 +242,170 @@ def _foot_world_of(f, Rp_w, hips_w, ball_h):
     return B2W @ np.asarray(f["at"], float) + np.array([0, 0, ball_h]), _heel_rot(f["yaw"], f["heel"])
 
 
-def sample(beats, craft, body):
-    """Per-frame channels from the beats."""
+def _wrapd(d):
+    return (d + 180.0) % 360.0 - 180.0
+
+
+def _slopes(T, vals, keys=None, shift=None):
+    """Monotone cubic (Fritsch-Carlson) slopes per beat, per component, in change per frame: zero
+    where the value holds or turns back (so a held foot never creeps and a pose that reverses
+    settles), carried through where it keeps going. A beat with no value (None), or a neighbour
+    of another kind (keys differ), gets zero. shift: a loop's change over one cycle (the slopes
+    wrap round the seam), or None (a one-shot starts and ends at rest)."""
+    n = len(T)
+    out = [None] * n
+    span = T[-1] - T[0]
+    for k in range(n):
+        if vals[k] is None:
+            continue
+        y = np.asarray(vals[k], float)
+        out[k] = np.zeros_like(y)
+        if shift is None:
+            if k == 0 or k == n - 1:
+                continue
+            (p, tp, sp), (q, tq, sq) = (k - 1, T[k - 1], 0), (k + 1, T[k + 1], 0)
+        else:
+            (p, tp, sp) = (k - 1, T[k - 1], 0) if k > 0 else (n - 2, T[n - 2] - span, -1)
+            (q, tq, sq) = (k + 1, T[k + 1], 0) if k < n - 1 else (1, T[1] + span, 1)
+        if vals[p] is None or vals[q] is None or (keys is not None and not (keys[p] == keys[k] == keys[q])):
+            continue
+        yp = np.asarray(vals[p], float) + (0 if shift is None else sp * shift)
+        yq = np.asarray(vals[q], float) + (0 if shift is None else sq * shift)
+        h0, h1 = T[k] - tp, tq - T[k]
+        d0, d1 = (y - yp) / h0, (yq - y) / h1
+        w1, w2 = 2 * h1 + h0, h1 + 2 * h0
+        ok = d0 * d1 > 1e-12
+        out[k] = np.where(ok, (w1 + w2) / (w1 / np.where(ok, d0, 1.0) + w2 / np.where(ok, d1, 1.0)), 0.0)
+    return out
+
+
+def _herm(a, b, ma, mb, h, t):
+    t2, t3 = t * t, t * t * t
+    return (2 * t3 - 3 * t2 + 1) * np.asarray(a, float) + (t3 - 2 * t2 + t) * h * ma + (3 * t2 - 2 * t3) * np.asarray(b, float) + (t3 - t2) * h * mb
+
+
+def _tracks(beats, body, loop):
+    """Each splined channel's value at every beat and its slope there. Angles are unwrapped beat to
+    beat, so a curve through them turns the short way (or the way a prop beat names)."""
+    T = [b["at"] for b in beats]
+    P = [b["pose"] for b in beats]
+    zero3 = np.zeros(3)
+    tr = {}
+    move = None if loop is None else np.array([loop[0], loop[1], 0.0])
+
+    def add(name, vals, keys=None, shift=None):
+        if loop is not None and shift is None:
+            shift = np.zeros_like(next((np.asarray(v, float) for v in vals if v is not None), zero3))
+        tr[name] = (vals, _slopes(T, vals, keys, None if loop is None else shift))
+
+    add("root", [np.asarray(p["root"], float) for p in P], shift=move)
+    for name, get in (("hips_at", lambda p: p["hips"]["at"]), ("hips_turn", lambda p: p["hips"]["turn"]),
+                      ("chest", lambda p: p["chest"]), ("head", lambda p: p["head"])):
+        add(name, [np.asarray(get(p), float) for p in P])
+    add("look", [None if p.get("look") is None else np.asarray(p["look"], float) for p in P])
+    for s in "lr":
+        vals, keys = [], []
+        for p in P:
+            f = _ground_foot(p["foot_" + s], np.asarray(p["root"], float))
+            keys.append(f["space"])
+            vals.append(None if f["space"] == "hips" else np.array([*np.asarray(f["at"], float), f["yaw"], f["heel"]]))
+        add("foot_" + s, vals, keys, None if move is None else np.array([loop[0], loop[1], 0, 0, 0.0]))
+        hv, hk = [], []
+        for p in P:
+            h = p["hand_" + s]
+            hk.append("grip" if h == "grip" else h.get("space", "root"))
+            hv.append(None if h == "grip" else np.asarray(h["at"], float))
+        add("hand_" + s, hv, hk)
+    if body.prop is not None:
+        gv, tv, keys = [], [], []
+        a_prev = az_prev = None
+        for p in P:
+            pr = p["prop"]
+            keys.append(pr.get("space", "root"))
+            if pr.get("space", "root") == "chest":
+                gv.append(None)
+                tv.append(None)
+                a_prev = az_prev = None
+                continue
+            c = np.asarray(p["hips"]["at"], float)
+            a, r_, z = _cyl(np.asarray(pr["grip"], float) - np.array([c[0], c[1], 0.0]))
+            a = math.degrees(a)
+            if a_prev is not None:
+                a = a_prev + _wrapd(a - a_prev)
+            az, el = (math.degrees(x) for x in _sph(pr["tip"]))
+            if az_prev is not None:
+                d = _wrapd(az - az_prev)
+                if pr.get("way") == "cw" and d > 0:
+                    d -= 360
+                if pr.get("way") == "ccw" and d < 0:
+                    d += 360
+                az = az_prev + d
+            gv.append(np.array([a, r_, z]))
+            tv.append(np.array([az, el]))
+            a_prev, az_prev = a, az
+        add("grip", gv, keys)
+        add("tip", tv, keys)
+    return tr
+
+
+def sample(beats, craft, body, loop=None):
+    """Per-frame channels from the beats. A beat with no ease (the default, "smooth") runs on a
+    monotone cubic through the beats, which keeps moving through a beat the motion carries on
+    through and settles only where a value holds or turns back; a named ease (inout, in, out,
+    linear...) shapes that one beat's change on its own, as a deliberate break."""
     ball_h = body.ball_h
+    tracks = _tracks(beats, body, loop)
     frames = []
     for f in range(beats[0]["at"], beats[-1]["at"] + 1):
         i = max(k for k in range(len(beats)) if beats[k]["at"] <= f)
+        smooth = False
         if i == len(beats) - 1:
             A = B = beats[i]
             t = te = 0.0
+            extra = 0.0
+            h = 1.0
         else:
             A, B = beats[i], beats[i + 1]
-            t = (f - A["at"]) / (B["at"] - A["at"])
-            te = ease(B.get("ease", craft.get("ease", "inout")), t, B.get("antic", craft.get("antic", 0.0)), B.get("over", craft.get("over", 0.0)))
+            h = float(B["at"] - A["at"])
+            t = (f - A["at"]) / h
+            kind = B.get("ease", craft.get("ease", "smooth"))
+            antic, over = B.get("antic", craft.get("antic", 0.0)), B.get("over", craft.get("over", 0.0))
+            smooth = kind == "smooth"
+            te = ease(kind, t, antic, over)
+            extra = ease("linear", t, antic, over) - t  # the anticipation and overshoot bumps alone
+
+        def spl(name, fallback):
+            """The channel on the curve through the beats, or fallback where it cannot run."""
+            vals, slopes = tracks[name]
+            if not smooth or vals[i] is None or vals[i + 1] is None or slopes[i] is None or slopes[i + 1] is None:
+                return fallback()
+            a, b = vals[i], vals[i + 1]
+            return _herm(a, b, slopes[i], slopes[i + 1], h, t) + (b - a) * extra
+
         pa, pb = A["pose"], B["pose"]
         ch = {"frame": f, "t": t, "seg": i, "pivot": B.get("pivot") if A is not B else None}
         ra, rb = np.array(pa["root"], float), np.array(pb["root"], float)
-        ch["root"] = _lerp(ra, rb, te)
-        ch["hips_at"] = _lerp(pa["hips"]["at"], pb["hips"]["at"], te)
-        ch["hips_turn"] = _lerp(pa["hips"]["turn"], pb["hips"]["turn"], te)
-        ch["chest"] = _lerp(pa["chest"], pb["chest"], te)
-        ch["head"] = _lerp(pa["head"], pb["head"], te)
+        ch["root"] = spl("root", lambda: _lerp(ra, rb, te))
+        ch["hips_at"] = spl("hips_at", lambda: _lerp(pa["hips"]["at"], pb["hips"]["at"], te))
+        ch["hips_turn"] = spl("hips_turn", lambda: _lerp(pa["hips"]["turn"], pb["hips"]["turn"], te))
+        ch["chest"] = spl("chest", lambda: _lerp(pa["chest"], pb["chest"], te))
+        ch["head"] = spl("head", lambda: _lerp(pa["head"], pb["head"], te))
         la, lb = pa.get("look"), pb.get("look")
-        ch["look"] = None if la is None or lb is None else _lerp(la, lb, te)
+        ch["look"] = None if la is None or lb is None else spl("look", lambda: _lerp(la, lb, te))
         if body.prop is not None:
             sa, sb = _root_prop(pa["prop"], ch, body), _root_prop(pb["prop"], ch, body)
             if craft.get("arcs", True):
                 ch["grip"] = _arc_point(sa["grip"], sb["grip"], te, ch["hips_at"])
                 ch["tip"] = _arc_dir(sa["tip"], sb["tip"], te, pb["prop"].get("way"))
+                g = spl("grip", lambda: None)
+                if g is not None:
+                    c = ch["hips_at"]
+                    ch["grip"] = np.array([c[0], c[1], 0.0]) + _from_cyl(math.radians(g[0]), g[1], g[2])
+                _, ela = _sph(sa["tip"])
+                _, elb = _sph(sb["tip"])
+                d = spl("tip", lambda: None)
+                if d is not None and abs(ela) <= 1.45 and abs(elb) <= 1.45:
+                    ch["tip"] = _from_sph(math.radians(d[0]), math.radians(d[1]))
             else:
                 ch["grip"] = _lerp(sa["grip"], sb["grip"], te)
                 ch["tip"] = unit(_lerp(sa["tip"], sb["tip"], te))
@@ -275,7 +414,13 @@ def sample(beats, craft, body):
         for s in "lr":
             ha, hb = pa["hand_" + s], pb["hand_" + s]
             # A free hand blended with a grip: its goal runs from the grip's place.
-            ch["hand_" + s] = "grip" if ha == "grip" and hb == "grip" else {"a": ha, "b": hb, "t": te}
+            if ha == "grip" and hb == "grip":
+                ch["hand_" + s] = "grip"
+            else:
+                ch["hand_" + s] = {"a": ha, "b": hb, "t": te}
+                at = spl("hand_" + s, lambda: None) if ha != "grip" and hb != "grip" and ha.get("space", "root") == hb.get("space", "root") else None
+                if at is not None:  # one place on the curve; the turn still blends
+                    ch["hand_" + s] = {"a": {**ha, "at": at}, "b": {**hb, "at": at}, "t": te}
         Rp_w = rz(ch["root"][2]) @ body_rot(*ch["hips_turn"])
         hips_w = rz(ch["root"][2]) @ B2W @ np.asarray(ch["hips_at"]) + _rootpos(ch["root"])
         for side in ("l", "r"):
@@ -285,15 +430,21 @@ def sample(beats, craft, body):
                 if fb.get("orbit") and A is not B:
                     c0 = _lerp(ra[:2], rb[:2], te)
                     at = _arc_point(fa["at"], fb["at"], te, (c0[0], c0[1]))
+                    yaw = fa["yaw"] + (fb["yaw"] - fa["yaw"]) * te
+                    heel = fa["heel"] + (fb["heel"] - fa["heel"]) * te
                 else:
-                    at = _lerp(fa["at"], fb["at"], te)
+                    v = spl("foot_" + side, lambda: np.array([*_lerp(fa["at"], fb["at"], te), fa["yaw"] + (fb["yaw"] - fa["yaw"]) * te,
+                                                              fa["heel"] + (fb["heel"] - fa["heel"]) * te]))
+                    at, yaw, heel = v[:3], float(v[3]), float(v[4])
                 dist = np.linalg.norm(np.asarray(fb["at"][:2], float) - np.asarray(fa["at"][:2], float))
-                lift = B.get("lift", craft.get("lift", 0.045 * body.height)) if (A is not B and dist > 0.03) else 0.0
+                # A step from the floor to the floor clears it; a foot the beats already lift (z above
+                # the floor at either end) keeps the heights it was given.
+                grounded = abs(float(fa["at"][2])) < 1e-3 and abs(float(fb["at"][2])) < 1e-3
+                lift = B.get("lift", craft.get("lift", 0.045 * body.height)) if (A is not B and dist > 0.03 and grounded) else 0.0
                 tl = min(max(t, 0), 1)
-                # any real step clears the floor: a short shuffle still lifts half the lift
-                at = at + np.array([0, 0, lift * min(1.0, max(0.5, dist / 0.3)) * math.sin(math.pi * tl)])
-                yaw = fa["yaw"] + (fb["yaw"] - fa["yaw"]) * te
-                heel = fa["heel"] + (fb["heel"] - fa["heel"]) * te
+                # any real step clears the floor: a short shuffle still lifts half the lift; sin² so
+                # the foot leaves and meets the floor without a jolt
+                at = at + np.array([0, 0, lift * min(1.0, max(0.5, dist / 0.3)) * math.sin(math.pi * tl) ** 2])
                 world = B2W @ at + np.array([0, 0, ball_h])
                 R = _heel_rot(yaw, heel)
             else:
@@ -303,9 +454,19 @@ def sample(beats, craft, body):
                 at = B2W.T @ (world - np.array([0, 0, ball_h]))
                 yaw = fa["yaw"] + (fb["yaw"] - fa["yaw"]) * te
                 heel = 0.0
-            both = fa["space"] == "hips" and fb["space"] == "hips"
+            # A tucked foot (hips space) carries on from its shin; going to or from one, the foot
+            # turns from the given orientation over to that one through the beat, never at once.
+            ha_, hb_ = fa["space"] == "hips", fb["space"] == "hips"
+            tc = min(max(te, 0), 1)
+            shin = None
+            if ha_ and hb_:
+                shin = (fa.get("heel", 0) + (fb.get("heel", 0) - fa.get("heel", 0)) * te, 1.0)
+            elif ha_:
+                shin = (fa.get("heel", 0), 1.0 - tc)
+            elif hb_:
+                shin = (fb.get("heel", 0), tc)
             ch["foot_" + side] = {"at": at, "yaw": yaw, "heel": heel, "space": "ground", "air": air, "world": world, "R": R,
-                                  "air_heel": (fa.get("heel", 0) + (fb.get("heel", 0) - fa.get("heel", 0)) * te) if both else None}
+                                  "air_heel": shin}
 
             def kp(f, pole):
                 return (Rp_w @ B2W @ np.asarray(pole, float)) if f["space"] == "hips" else (rz(ch["root"][2]) @ B2W @ np.asarray(pole, float))
@@ -316,9 +477,15 @@ def sample(beats, craft, body):
     return frames
 
 
-def spring(xs, f_hz, zeta, fps, sub=8):
-    """A second-order follower of a track: lag, then overshoot."""
+def spring(xs, f_hz, zeta, fps, sub=8, loop=False, shift=None):
+    """A second-order follower of a track: lag, then overshoot. A loop's (loop, or shift: the
+    track's change over one cycle) runs three cycles and keeps the last, so it starts as it ends."""
     xs = np.asarray(xs, float)
+    if (loop or shift is not None) and len(xs) > 2:
+        cyc = xs[:-1]
+        d = np.zeros_like(xs[0]) if shift is None else np.asarray(shift, float)
+        out = spring(np.concatenate([cyc - d, cyc, cyc + d, xs[:1] + 2 * d]), f_hz, zeta, fps, sub)
+        return out[len(cyc):] - d
     w = 2 * math.pi * f_hz
     x, v = xs[0].copy(), np.zeros_like(xs[0])
     out = []
@@ -447,15 +614,29 @@ def solve_frame(body, ch):
         # The roll: a search over the prop's turn about its own axis, scoring folded wrists, an
         # edge that does not lead the swing, and a roll that jumps from the last frame.
         e0 = unit(np.cross(blade, [0, 0, 1.0]) if abs(blade[2]) < 0.95 else np.cross(blade, [1.0, 0, 0]))
+        ch["blade"] = blade
+        # The off hand letting go of the handle (or taking it) still counts as much as it holds,
+        # so the roll does not jump the moment it starts to leave.
+        ho = ch["hand_" + o]
+        hold_o = 0.0
+        if isinstance(ho, dict):
+            hold_o = (1 - min(max(ho["t"], 0), 1)) if ho["a"] == "grip" else (min(max(ho["t"], 0), 1) if ho["b"] == "grip" else 0.0)
         best = None
-        for k in range(36):
+        forced = ch.get("edge_force")
+        if forced is not None:  # the roll chosen frame by frame, then smoothed over the clip
+            e = unit(forced - np.dot(forced, blade) * blade)
+            best = (0.0, e, hands_for(e))
+        for k in range(0 if forced is not None else 36):
             e = axis_angle(blade, 10.0 * k) @ e0
             cand = hands_for(e)
             cost = 0.0
-            for s in ((m, o) if two else (m,)):
+            for s in (m, o):
+                share = 1.0 if (s == m or two) else hold_o
+                if share <= 0:
+                    continue
                 w, H = cand[s]
                 b = bend(s, w, H, wrist_pole(s, w, H))
-                cost += 0.02 * b + max(0.0, b - 40.0) ** 2 / 50.0
+                cost += share * (0.02 * b + max(0.0, b - 40.0) ** 2 / 50.0)
             cost += pref_w * (1 - abs(float(np.dot(e, pref)))) * 20.0  # either edge may lead
             if prev is not None:
                 pv = unit(prev - np.dot(prev, blade) * blade)
@@ -506,6 +687,42 @@ def solve_frame(body, ch):
     return P
 
 
+def _body_dir(ch, v):
+    """A direction in the pelvis's frame at this frame (x right, y forward, z up)."""
+    return rz(ch["root"][2]) @ body_rot(*ch["hips_turn"]) @ B2W @ np.asarray(v, float)
+
+
+def _steady_pole(pole, S, G, fallback):
+    """A pole that still names a side when it lines up with the limb: the part of the pole across
+    the limb decides where the joint goes, and as that part shrinks its direction swings from
+    frame to frame, so a body-relative fallback (elbows out and back, knees forward) takes over."""
+    pole = unit(pole)
+    u = unit(np.asarray(G, float) - np.asarray(S, float))
+    across = float(np.linalg.norm(pole - np.dot(pole, u) * u))
+    k = min(1.0, across / 0.5)
+    return pole if k >= 1.0 else unit(pole * k + unit(fallback) * (1 - k))
+
+
+def _hinge_normal(d1, d2, pole):
+    """The plane a two-bone limb bends in. Bent, it is the bones' own plane; nearly straight that
+    plane is noise, so it eases over to the plane two_bone bent it in (the pole's part across the
+    limb), and a limb reaching full stretch never twists round in one frame."""
+    u1, u2 = unit(d1), unit(d2)
+    bent = np.cross(u1, u2)
+    u = unit(np.asarray(d1, float) + np.asarray(d2, float))
+    p = np.asarray(pole, float) - np.dot(pole, u) * u
+    if np.linalg.norm(p) < 1e-6:
+        return unit(bent) if np.linalg.norm(bent) > 1e-9 else unit(np.cross(u, [0, 0, 1.0]))
+    by_pole = unit(np.cross(p, u))  # two_bone puts the middle joint toward p: the bones' plane, this way round
+    w = min(1.0, float(np.linalg.norm(bent)) / math.sin(math.radians(12.0)))
+    if w == 0:
+        return by_pole
+    bent = unit(bent)
+    if np.dot(bent, by_pole) < 0:
+        bent = -bent
+    return unit(w * bent + (1 - w) * by_pole)
+
+
 def _limb_rot(r, n, d, nrm):
     """The turn taking bone n's rest (direction, hinge) onto (d, nrm)."""
     return map_pair(r.L[n][:3, 1], rest_hinge(r.L, n), d, nrm)
@@ -515,12 +732,10 @@ def _arm(body, s, wrist, Hw, pole, P, ch):
     r = body.rig
     ua, la, h = "upperarm_" + s, "lowerarm_" + s, "hand_" + s
     S = r.head_under(ua, P)
+    pole = _steady_pole(pole, S, wrist, _body_dir(ch, (1.0 if s == "r" else -1.0, -0.7, -0.3)))
     M, G, need = two_bone(S, wrist, body.upper, body.fore, pole)
     d1, d2 = M - S, G - M
-    nrm = np.cross(d1, d2)
-    if np.linalg.norm(nrm) < 1e-6:
-        nrm = np.cross(d1, -np.asarray(pole))
-    nrm = unit(nrm)
+    nrm = _hinge_normal(d1, d2, pole)
     r.posed(ua, _limb_rot(r, ua, d1, nrm), P)
     R2 = _limb_rot(r, la, d2, nrm)
     if isinstance(Hw, tuple):  # a free hand: neutral from its forearm, turned, or blended with a grip
@@ -532,6 +747,12 @@ def _arm(body, s, wrist, Hw, pole, P, ch):
     # the forearm takes half the hand's twist about it, so the wrist does not candy-wrap
     rel = (R2 @ r.L[la][:3, :3]).T @ Hw @ np.linalg.inv(r.L[h][:3, :3]) @ r.L[la][:3, :3]
     tw = swing_twist(rel, np.array([0, 1.0, 0]))
+    # Unwrapped against the frame before: the twist crossing 180 degrees would turn the forearm a
+    # half turn between two keys, and a game playing between them shows the hand spun round.
+    prev = body.twist.get(s)
+    if prev is not None:
+        tw = prev + _wrapd(tw - prev)
+    body.twist[s] = tw
     R2 = axis_angle(unit(d2), tw * 0.5) @ R2
     r.posed(la, R2, P)
     P[h] = M4(Hw, r.head_under(h, P))
@@ -544,18 +765,19 @@ def _leg(body, s, ball_world, Rf, flat_yaw, pole, P, air_heel, ch):
     r = body.rig
     th, ca, ft, bl = "thigh_" + s, "calf_" + s, "foot_" + s, "ball_" + s
     S = r.head_under(th, P)
+    given = Rf
     for _ in range(2 if air_heel is not None else 1):
         ankle = ball_world - Rf @ body.ball_off[s]
+        pole = _steady_pole(pole, S, ankle, _body_dir(ch, (0.15 if s == "r" else -0.15, 1.0, 0.0)))
         M, G, need = two_bone(S, ankle, body.thigh, body.calf, pole)
         d1, d2 = M - S, G - M
-        nrm = np.cross(d1, d2)
-        if np.linalg.norm(nrm) < 1e-6:
-            nrm = np.cross(d1, np.asarray(pole))
-        nrm = unit(nrm)
+        nrm = _hinge_normal(d1, d2, pole)
         Rc_ = _limb_rot(r, ca, d2, nrm)
         if air_heel is not None:
             # a foot off the ground carries on from its shin, pointed by its heel value
-            Rf = axis_angle(Rc_ @ rest_hinge(r.L, th), air_heel) @ Rc_
+            heel, w = air_heel
+            shin = axis_angle(Rc_ @ rest_hinge(r.L, th), heel) @ Rc_
+            Rf = shin if w >= 1 else slerp_rot(given, shin, w)
     r.posed(th, _limb_rot(r, th, d1, nrm), P)
     r.posed(ca, Rc_, P)
     r.posed(ft, Rf, P)
@@ -610,43 +832,71 @@ def _pivots(frames):
         c["root"] = root
 
 
-def _feet_world(frames, body, craft, fps):
-    """Each foot's ball goal, locked to the ground through each stance and eased out of the lock."""
+def _cycle(n, loop):
+    """A loop's frames 0..N (frame N is frame 0 one cycle on): (N, the world shift per cycle)."""
+    return n - 1, B2W @ np.array([loop[0], loop[1], 0.0])
+
+
+def _feet_world(frames, body, craft, fps, loop=None):
+    """Each foot's ball goal, locked to the ground through each stance and eased out of the lock.
+    In a loop the stances run round the seam: a foot planted at the end is the same stance as the
+    one planted at the start, one cycle on."""
     info = {"stances": {"l": 0, "r": 0}, "lockedFrames": {"l": 0, "r": 0}}
+    n = len(frames)
+    if loop is not None:
+        N, S = _cycle(n, loop)
+        ext = list(range(-N, 2 * N + 1))  # three cycles round the one keyed
+    else:
+        N, S = n, np.zeros(3)
+        ext = list(range(n))
+
+    def at(arr, q):
+        k, r = divmod(q, N) if loop is not None else (0, q)
+        return arr[r] + k * S if arr.ndim == 2 else arr[r]
+
     for s in "lr":
         pts = np.array([c["foot_" + s]["world"] for c in frames])
         if craft.get("lock_feet", True):
             # planted: low and slow (a foot gliding through a lunge is not locked)
             spd = np.r_[0.0, np.linalg.norm(np.diff(pts[:, :2], axis=0), axis=1) * fps]
             spd = np.minimum(spd, np.r_[spd[1:], spd[-1]])
-            down = [(not c["foot_" + s]["air"]) and (p[2] - body.ball_h) < 0.02 and v < craft.get("lock_speed", 0.5)
-                    for c, p, v in zip(frames, pts, spd)]
-            n = len(pts)
-            locked, weight = pts.copy(), np.zeros(n)
+            down = np.array([(not c["foot_" + s]["air"]) and (p[2] - body.ball_h) < 0.02 and v < craft.get("lock_speed", 0.5)
+                             for c, p, v in zip(frames, pts, spd)])
+            if loop is not None:
+                spd[0] = spd[N] = min(spd[0], spd[N]) if N > 0 else spd[0]
+            P = np.array([at(pts, q) for q in ext])
+            D = np.array([bool(at(down, q)) for q in ext])
+            m = len(ext)
+            locked, weight = P.copy(), np.zeros(m)
             k = 0
-            while k < n:
-                if not down[k]:
+            while k < m:
+                if not D[k]:
                     k += 1
                     continue
                 j = k
-                while j + 1 < n and down[j + 1]:
+                while j + 1 < m and D[j + 1]:
                     j += 1
-                anchor = np.median(pts[k:j + 1], axis=0)
+                anchor = np.median(P[k:j + 1], axis=0)
                 anchor[2] = body.ball_h
                 locked[k:j + 1] = anchor
                 weight[k:j + 1] = 1.0
-                info["stances"][s] += 1
-                info["lockedFrames"][s] += j - k + 1
+                q0 = ext[k]
+                if loop is None or 0 <= q0 < N:  # a stance round the seam counts once
+                    info["stances"][s] += 1
+                info["lockedFrames"][s] += sum(1 for q in range(k, j + 1) if 0 <= ext[q] < (N if loop is not None else n))
                 k = j + 1
-            out = pts.copy()
             on = np.where(weight == 1)[0]
+            out = pts.copy()
+            off = ext.index(0)
             for q in range(n):
-                if weight[q] == 1:
-                    out[q] = locked[q]
+                e = q + off
+                if weight[e] == 1:
+                    out[q] = locked[e]
                 elif len(on):
-                    z = on[np.argmin(np.abs(on - q))]
-                    if abs(z - q) <= 3:  # eased in and out over 3 frames, so a lift never pops
-                        b = 1 - abs(z - q) / 4
+                    z = on[np.argmin(np.abs(on - e))]
+                    if abs(z - e) <= EASE_LOCK:  # eased in and out of the lock on a smoothstep, so a lift never pops
+                        b = 1 - abs(z - e) / (EASE_LOCK + 1)
+                        b = b * b * (3 - 2 * b)
                         out[q] = pts[q] * (1 - b) + locked[z] * b
             pts = out
         for c, p in zip(frames, pts):
@@ -654,7 +904,7 @@ def _feet_world(frames, body, craft, fps):
     return info
 
 
-def _hip_drop(frames, body):
+def _hip_drop(frames, body, loop=None):
     """Lowers the pelvis, smoothed, wherever a leg cannot reach its goal. Returns (max m, frames)."""
     r = body.rig
     drops = []
@@ -674,20 +924,33 @@ def _hip_drop(frames, body):
                 need = max(need, hip[2] - (ankle[2] + math.sqrt(reach * reach - dxy * dxy)))
         drops.append(max(0.0, need))
     drops = np.array(drops)
-    sm = np.array([drops[max(0, i - 2):i + 3].max() for i in range(len(drops))])
-    sm2 = np.array([sm[max(0, i - 1):i + 2].mean() for i in range(len(sm))])
+    # The most any leg needs within four frames, then a smoothing no wider than that: the drop is
+    # whole wherever it is needed, starts before and eases off after, never stepping the pelvis.
+    kern = np.exp(-0.5 * (np.arange(-4, 5) / 1.6) ** 2)
+    kern /= kern.sum()
+    if loop is not None and len(drops) > 2:  # the smoothing wraps round the seam
+        cyc = drops[:-1]
+        pad = np.r_[cyc[-4:], cyc, cyc[:4]]
+        sm = np.array([pad[i:i + 9].max() for i in range(len(cyc))])
+        pad = np.r_[sm[-4:], sm, sm[:4]]
+        sm2 = np.convolve(pad, kern, mode="valid")
+        sm2 = np.r_[sm2, sm2[:1]]
+    else:
+        sm = np.array([drops[max(0, i - 4):i + 5].max() for i in range(len(drops))])
+        pad = np.r_[np.full(4, sm[0]), sm, np.full(4, sm[-1])]
+        sm2 = np.maximum(np.convolve(pad, kern, mode="valid"), 0)
     for c, d in zip(frames, sm2):
         c["hips_at"] = np.asarray(c["hips_at"]) - np.array([0, 0, d])
     worst = int(np.argmax(drops)) if len(drops) else 0
     return float(drops.max()) if len(drops) else 0.0, int((drops > 1e-4).sum()), frames[worst]["frame"] if len(drops) else 0
 
 
-def _overlap(frames, craft, fps):
+def _overlap(frames, craft, fps, loop=False):
     ov = craft.get("overlap", {})
     if "chest" in ov:  # the chest trails the hips: its yaw in the world, pitch and roll relative, clamped
         f, z, clamp = ov["chest"]
-        wy = spring(np.array([[c["root"][2] + c["hips_turn"][0] + c["chest"][0]] for c in frames]), f, z, fps)
-        pr = spring(np.array([[c["chest"][1], c["chest"][2]] for c in frames]), f, z, fps)
+        wy = spring(np.array([[c["root"][2] + c["hips_turn"][0] + c["chest"][0]] for c in frames]), f, z, fps, loop=loop)
+        pr = spring(np.array([[c["chest"][1], c["chest"][2]] for c in frames]), f, z, fps, loop=loop)
         for c, y, p in zip(frames, wy, pr):
             lag = max(-clamp, min(clamp, y[0] - (c["root"][2] + c["hips_turn"][0] + c["chest"][0])))
             c["chest"] = np.array([c["chest"][0] + lag, p[0], p[1]])
@@ -697,7 +960,7 @@ def _overlap(frames, craft, fps):
         def want(c):
             return np.array([c["root"][2] + c["hips_turn"][0] + c["chest"][0] + c["head"][0], c["chest"][1] + c["head"][1]])
 
-        sm = spring(np.array([want(c) for c in frames]), f, z, fps)
+        sm = spring(np.array([want(c) for c in frames]), f, z, fps, loop=loop)
         for c, s in zip(frames, sm):
             lag = np.clip(s - want(c), -clamp, clamp)
             c["head"] = np.array([c["head"][0] + lag[0], c["head"][1] + lag[1], c["head"][2]])
@@ -717,7 +980,7 @@ def _look(frames, body):
         c["head"] = np.array([max(-60, min(60, yaw + c["head"][0])), max(-45, min(45, pitch + c["head"][1])), c["head"][2]])
 
 
-def _free_hand_overlap(frames, body, craft, fps):
+def _free_hand_overlap(frames, body, craft, fps, loop=None):
     ov = craft.get("overlap", {}).get("hand")
     if ov is None:
         return
@@ -726,19 +989,162 @@ def _free_hand_overlap(frames, body, craft, fps):
         if len(idx) < 3:
             continue
         pos = np.array([solve_frame(body, frames[i])["hand_" + s][:3, 3] for i in idx])
-        for i, p in zip(idx, spring(pos, ov[0], ov[1], fps)):
+        body.twist = {}
+        periodic = loop is not None and len(idx) == len(frames)
+        shift = _cycle(len(frames), loop)[1] if periodic else None
+        for i, p in zip(idx, spring(pos, ov[0], ov[1], fps, shift=shift)):
             frames[i]["free_" + s] = p
 
 
+def _smooth_roll(frames):
+    """The held prop's roll as the search chose it each frame, measured against a reference carried
+    along the blade from frame to frame, unwrapped, then cleaned of one- and two-frame flips (a
+    near tie in the search) and smoothed, so the prop never spins between two keys."""
+    runs, cur = [], []
+    for i, c in enumerate(frames):
+        if c.get("edge_final") is not None and c.get("blade") is not None:
+            cur.append(i)
+        elif cur:
+            runs.append(cur)
+            cur = []
+    if cur:
+        runs.append(cur)
+    for run in runs:
+        ref = np.asarray(frames[run[0]]["edge_final"], float)
+        refs, phis = [], []
+        for i in run:
+            b = frames[i]["blade"]
+            r_ = ref - np.dot(ref, b) * b
+            ref = unit(r_) if np.linalg.norm(r_) > 1e-6 else unit(frames[i]["edge_final"])
+            e = frames[i]["edge_final"]
+            phis.append(math.atan2(float(np.dot(np.cross(ref, e), b)), float(np.dot(ref, e))))
+            refs.append(ref)
+        phi = np.unwrap(np.array(phis))
+        if len(phi) >= 5:
+            pad = np.r_[phi[:1], phi[:1], phi, phi[-1:], phi[-1:]]
+            phi = np.array([np.median(pad[k:k + 5]) for k in range(len(phi))])
+            for _ in range(2):
+                pad = np.r_[phi[:1], phi, phi[-1:]]
+                phi = 0.25 * pad[:-2] + 0.5 * pad[1:-1] + 0.25 * pad[2:]
+        for i, ref, a in zip(run, refs, phi):
+            frames[i]["edge_force"] = axis_angle(frames[i]["blade"], math.degrees(a)) @ ref
+
+
+def _close_loop(spec, beats):
+    """A loop's last beat is its first one cycle on: the same pose, the root (and the feet planted
+    on the ground) moved by the cycle's travel. Returns the travel (x, y), or None for a one-shot."""
+    if not spec.get("loop"):
+        return None
+    first, last = beats[0]["pose"], beats[-1]["pose"]
+    r0, r1 = np.asarray(first["root"], float), np.asarray(last["root"], float)
+    if abs(_wrapd(r1[2] - r0[2])) > 1e-6:
+        raise Refused("invalid-input", "a loop ends facing the way it starts: give the last beat's root the first beat's yaw")
+    travel = r1[:2] - r0[:2]
+    closing = copy.deepcopy(first)
+    closing["root"] = (float(r1[0]), float(r1[1]), float(r0[2]))
+    for s in "lr":
+        f = _ground_foot(first["foot_" + s], r0)
+        if f["space"] == "ground":
+            f["at"] = np.asarray(f["at"], float) + np.array([travel[0], travel[1], 0.0])
+        closing["foot_" + s] = f
+    beats[-1] = {**beats[-1], "pose": closing}
+    return float(travel[0]), float(travel[1])
+
+
+def _ypr(R):
+    """(yaw, pitch, roll) degrees with body_rot(yaw, pitch, roll) == R."""
+    pitch = math.degrees(math.asin(max(-1.0, min(1.0, float(R[2, 1])))))
+    c = math.degrees(math.atan2(-float(R[2, 0]), float(R[2, 2])))
+    yaw = math.degrees(math.atan2(-float(R[0, 1]), float(R[1, 1])))
+    return (round(yaw, 2), round(pitch, 2), round(-c, 2))
+
+
+def _pole(S, M, G):
+    """The direction a middle joint points, off the line from S to G, in body space."""
+    u = unit(G - S)
+    d = (M - S) - np.dot(M - S, u) * u
+    return tuple(round(float(x), 3) for x in unit(B2W.T @ d)) if np.linalg.norm(d) > 1e-5 else None
+
+
+def _clip_pose(body, name):
+    """A clip's first frame on this character as a named pose, so a move starts (or ends) where the
+    game's idle or guard is and the crossfade between them has nothing to slide: the hips, chest
+    and head, each foot where it stands, the knees and elbows, and the hands (on the held prop's
+    handle when they hold it). None when the character has no such clip."""
+    arm, r = body.arm, body.rig
+    act = helpers.clip_of(arm, name)
+    if act is None or "kurambit_spec" in act:
+        return None
+    P = _track(arm, act)[0]
+    skeleton.assign_action(arm, None)
+    for pb in arm.pose.bones:
+        pb.matrix_basis = Matrix()
+    bpy.context.view_layer.update()
+
+    def delta(n):
+        return P[n][:3, :3] @ r.L[n][:3, :3].T
+
+    Rp = delta("pelvis")
+    hips = {"at": tuple(round(float(x), 4) for x in B2W.T @ P["pelvis"][:3, 3]), "turn": _ypr(Rp)}
+    Rc_ = Rp.T @ delta("spine_03")
+    chest = _ypr(Rc_)
+    Rc = Rp @ body_rot(*chest)
+    # No root, and the feet relative to it: a closing beat naming the pose ends where the move went.
+    pose = {"hips": hips, "chest": chest, "head": _ypr(Rc.T @ delta("Head")), "look": None}
+    for s in "lr":
+        ball = B2W.T @ P["ball_" + s][:3, 3]
+        Rf = delta("foot_" + s)
+        fb = B2W.T @ (Rf @ B2W @ np.array([0, 1.0, 0]))
+        yaw = math.degrees(math.atan2(-fb[0], fb[1]))
+        tilt = math.degrees(math.asin(max(-1.0, min(1.0, float(fb[2])))))
+        heel = min((tilt, -tilt), key=lambda h: np.linalg.norm(_heel_rot(yaw, h) - Rf))
+        z = float(ball[2] - body.ball_h)
+        pose["foot_" + s] = {"at": (round(float(ball[0]), 4), round(float(ball[1]), 4), 0.0 if z < 0.02 else round(z, 4)),
+                             "yaw": round(yaw, 2), "heel": round(heel, 2), "space": "root"}
+        knee = _pole(P["thigh_" + s][:3, 3], P["calf_" + s][:3, 3], P["foot_" + s][:3, 3])
+        elbow = _pole(P["upperarm_" + s][:3, 3], P["lowerarm_" + s][:3, 3], P["hand_" + s][:3, 3])
+        stand = body.stand()
+        pose["knee_" + s] = knee or stand["knee_" + s]
+        pose["elbow_" + s] = elbow or stand["elbow_" + s]
+        R2 = delta("lowerarm_" + s) @ r.L["lowerarm_" + s][:3, :3]
+        turn = _ypr(R2.T @ P["hand_" + s][:3, :3] @ r.L["hand_" + s][:3, :3].T)
+        pose["hand_" + s] = {"at": tuple(round(float(x), 4) for x in B2W.T @ P["hand_" + s][:3, 3]), "space": "root", "turn": turn}
+    if body.prop is not None:
+        m, o, pr = body.main, body.off, body.prop
+        Hm = P["hand_" + m][:3, :3]
+        grip = P["hand_" + m][:3, 3] + Hm @ pr["grip"]
+        blade = unit(Hm @ pr["axis"])
+        pose["prop"] = {"grip": tuple(round(float(x), 4) for x in B2W.T @ grip), "tip": tuple(round(float(x), 4) for x in B2W.T @ blade),
+                        "edge": None, "space": "root"}
+        pose["hand_" + m] = "grip"
+        Ho = P["hand_" + o][:3, :3]
+        held = (grip - blade * body.second) - Ho @ pr["grip_off"]
+        if np.linalg.norm(held - P["hand_" + o][:3, 3]) < 0.04:
+            pose["hand_" + o] = "grip"
+    return pose
+
+
 def compile_move(body, spec, fps):
-    """(frames, armature-space poses, compile report) for a spec on a body."""
+    """(frames, armature-space poses, compile report) for a spec on a body. A loop is keyed in place:
+    its travel comes off the pelvis, so frame N is frame 0 and the game moves the character at the
+    clip's measured ground speed."""
     craft = dict(spec.get("craft", {}))
     library = {"stand": body.stand(), **(spec.get("poses") or {})}
+    # A pose named for one of the character's clips (its idle, its guard) is that clip's first frame.
+    for name in [spec.get("start")] + [b.get("pose") for b in spec.get("beats") or [] if isinstance(b, dict)]:
+        if isinstance(name, str) and name not in library:
+            got = _clip_pose(body, name)
+            if got is not None:
+                library[name] = got
     _check(spec, library, body)
     beats = resolve_beats(spec, library)
-    frames = sample(beats, craft, body)
+    loop = _close_loop(spec, beats)
+    t0 = beats[0]["at"]
+    report_eased = {b["at"] - t0: b["ease"] for b in beats[1:] if b.get("ease", craft.get("ease", "smooth")) != "smooth" and "ease" in b}
+    frames = sample(beats, craft, body, loop)
     body.stretch = {}
-    report = {"frames": len(frames)}
+    body.twist = {}
+    report = {"frames": len(frames), "eased": report_eased}
     for c in frames:
         c["clearance"] = craft.get("clearance", body.clearance)
     if craft.get("pivot", True):
@@ -746,18 +1152,38 @@ def compile_move(body, spec, fps):
     if body.prop is not None:
         _edge_auto(frames, fps)
     _look(frames, body)
-    _overlap(frames, craft, fps)
-    report["footLock"] = _feet_world(frames, body, craft, fps)
+    _overlap(frames, craft, fps, loop is not None)
+    report["footLock"] = _feet_world(frames, body, craft, fps, loop)
     if craft.get("hip_drop", True):
-        mx, n, at = _hip_drop(frames, body)
+        mx, n, at = _hip_drop(frames, body, loop)
         report["hipDrop"] = {"maxCm": round(mx * 100, 1), "frames": n, "worstFrame": at - frames[0]["frame"]}
-    _free_hand_overlap(frames, body, craft, fps)
-    poses = []
-    prev = None
-    for c in frames:
-        c["edge_prev"] = prev
-        poses.append(solve_frame(body, c))
-        prev = c.get("edge_final")
+    _free_hand_overlap(frames, body, craft, fps, loop)
+
+    def solve_all():
+        body.twist = {}
+        out, prev = [], None
+        for c in frames:
+            c["edge_prev"] = prev
+            out.append(solve_frame(body, c))
+            prev = c.get("edge_final")
+        return out
+
+    poses = solve_all()
+    if body.prop is not None:  # the roll, chosen per frame above, smoothed over the clip and solved again
+        _smooth_roll(frames)
+        body.stretch = {}
+        poses = solve_all()
+    if loop is not None:
+        N, S = _cycle(len(poses), loop)
+        for i, P in enumerate(poses):
+            d = S * (i / N)
+            for n in P:
+                if n != "root":
+                    P[n] = P[n].copy()
+                    P[n][:3, 3] -= d
+        poses[-1] = poses[0]
+        report["loop"] = {"travel": [round(loop[0], 4), round(loop[1], 4)], "travelM": round(float(np.linalg.norm(loop)), 3),
+                          "groundSpeed": round(float(np.linalg.norm(loop)) * fps / N, 3)}
     report["reach"] = {k: {"share": round(v[0], 3), "frame": v[1] - frames[0]["frame"]} for k, v in body.stretch.items()}
     report["clearedFrames"] = sum(1 for c in frames if c.get("cleared"))
     return frames, poses, report
@@ -843,6 +1269,12 @@ def _bar(arm, body, bar, fps, out):
         bpy.data.actions.remove(keep)
 
 
+def _moved(m, d):
+    m = np.array(m)
+    m[:3, 3] += d
+    return m
+
+
 def _track(arm, act):
     sc = bpy.context.scene
     skeleton.assign_action(arm, act)
@@ -875,6 +1307,12 @@ def _skin_fn(arm, body, act):
     return run
 
 
+def _beat_at(report, frame):
+    eased = report.get("eased", {})
+    near = [b for b in eased if abs(b - frame) <= 1]
+    return f" (beat {near[0]}, ease {eased[near[0]]})" if near else ""
+
+
 def _warnings(report, res, body, fps):
     out = []
     hd = report.get("hipDrop") or {}
@@ -895,6 +1333,12 @@ def _warnings(report, res, body, fps):
     tb = res.get("throughBody") or {}
     if (tb.get("propMeanMm2") or 0) > 0:
         out.append(f"the prop passes through the body: {tb['propMeanMm2']} mm² a frame on average")
+    sm = (res.get("smoothness") or {}).get("pops") or {}
+    for p in sm.get("fastTurns", [])[:2]:
+        out.append(f"spin: {p['bone']} turns {p['deg']}° against its parent from frame {p['frame'] - 1} to {p['frame']}; a game draws frames between keys and shows that as a spin. Give that change more frames")
+    if sm.get("count"):
+        out.append("pop: " + "; ".join(f"{p['bone']} jumps {p['deg']}° for one frame at frame {p['frame']}{_beat_at(report, p['frame'])}" for p in sm["worst"][:3])
+                   + f" ({sm['count']} in all). Two beats too close for the change between them, or a named ease (in, out, linear) meeting another, break the motion there")
     if res.get("belowFloor", 0) > 0:
         out.append(f"below the floor: {res['belowFloor']} frame-bone pairs (hands, head, knees or pelvis under 3 cm)")
     return out
@@ -941,6 +1385,10 @@ def animate(params):
         write_action(body, poses, act)
         played = _track(arm, act)
         stand = compile_move(body, {"beats": [{"at": 0, "pose": spec.get("start", "stand")}, {"at": 1}], "poses": spec.get("poses") or {}}, fps)[1][0]
+        if report.get("loop"):  # measured travelling, as the game shows it moving at the ground speed
+            N, S = _cycle(len(played), report["loop"]["travel"])
+            played = [{n: (m if n == "root" else _moved(m, S * (i / N))) for n, m in P.items()} for i, P in enumerate(played)]
+            stand = None
         motion = measure.Motion(body, fps)
         res, curves = motion.run(played, _skin_fn(arm, body, act), stand=stand)
         bar = _bar(arm, body, params["bar"], fps, params["out"]) if params.get("bar") else None
@@ -1011,7 +1459,10 @@ def _summary(r, owner):
         "- joint limits: " + _pair(m, b, rom),
         "- through the body, mean per frame: " + _pair(m, b, thr),
         "- jerk spikes: " + _pair(m, b, lambda x: str(x["smoothness"]["jerkSpikes"])),
-        "- start/end against the start pose: " + seam(m),
+        "- pops (a bone one frame out of line) and spins (a bone turning 90° or more against its parent in one frame): "
+        + _pair(m, b, lambda x: f"{x['smoothness'].get('pops', {}).get('count', 0)} pops, {x['smoothness'].get('pops', {}).get('fastCount', 0)} spins"),
+        ("- loop: keyed in place, {travelM} m a cycle at {groundSpeed} m/s; the export measures that ground speed, so play it with moveSpeed".format(**r["compile"]["loop"])
+         if r["compile"].get("loop") else "- start/end against the start pose: " + seam(m)),
         "- strikes: " + _pair(m, b, strikes),
         "- travel: " + _pair(m, b, lambda x: f"{x['root']['travelM']} m"),
     ]

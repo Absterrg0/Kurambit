@@ -311,6 +311,49 @@ CONTACT_V = 1.0  # m/s: a foot skimming the floor faster than this is stepping, 
 PROP_STRIKE = 5.0  # m/s at a held prop's tip
 LIMB_STRIKE = 3.5  # m/s at a free hand or a foot, held out from the body
 TRACKED = ("hand_r", "hand_l", "foot_l", "foot_r", "Head", "pelvis")
+# Snaps a game shows between keys, per bone, on its turn against its parent. A spin is a turn of
+# SPIN_DEG or more in one frame: a game draws frames between keys, and that half turn could go
+# either way, so it shows a spin Blender never draws. A pop is one frame out of line: the turn per
+# frame jumps by POP_DEG or more and jumps back on the next frame (a hard hit that stays changed is
+# not one; mocap has those).
+POP_BONES = ("pelvis", "spine_03", "neck_01", "Head", "clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r", "lowerarm_l",
+             "lowerarm_r", "hand_l", "hand_r", "thigh_l", "thigh_r", "calf_l", "calf_r", "foot_l", "foot_r")
+POP_DEG = 15.0
+SPIN_DEG = 90.0
+
+
+def _rotvecs(R):
+    """Rotation vectors (degrees) of a stack of 3x3 rotations."""
+    w = np.sqrt(np.maximum(0.0, 1 + R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2])) / 2
+    v = np.stack([R[:, 2, 1] - R[:, 1, 2], R[:, 0, 2] - R[:, 2, 0], R[:, 1, 0] - R[:, 0, 1]], 1) / 2
+    s = np.linalg.norm(v, axis=1)
+    ang = np.degrees(2 * np.arctan2(s, w))
+    return v / np.maximum(s, 1e-12)[:, None] * ang[:, None]
+
+
+def pops(Ps, parents, names=POP_BONES):
+    """Per bone, on its turn against its parent (armature-space poses, parents: name -> parent):
+    the spins (frames it turns SPIN_DEG or more) and the pops (frames out of line)."""
+    found, fast = [], []
+    for n in names:
+        if n not in Ps[0] or len(Ps) < 3:
+            continue
+        R = np.array([P[n][:3, :3] for P in Ps])
+        par = parents.get(n)
+        if par in Ps[0]:
+            R = np.einsum("nji,njk->nik", np.array([P[par][:3, :3] for P in Ps]), R)
+        step = _rotvecs(np.einsum("nji,njk->nik", R[:-1], R[1:]))
+        ang = np.linalg.norm(step, axis=1)
+        for f in np.where(ang >= SPIN_DEG)[0]:
+            fast.append({"bone": n, "frame": int(f + 1), "deg": round(float(ang[f]), 1)})
+        d = np.diff(step, axis=0)
+        m = np.linalg.norm(d, axis=1)
+        for f in range(len(d) - 1):
+            if m[f] >= POP_DEG and m[f + 1] >= POP_DEG and np.dot(d[f], d[f + 1]) < -0.5 * m[f] * m[f + 1]:
+                found.append({"bone": n, "frame": int(f + 1), "deg": round(float(min(m[f], m[f + 1])), 1)})
+    found.sort(key=lambda x: -x["deg"])
+    fast.sort(key=lambda x: -x["deg"])
+    return {"count": len(found), "worst": found[:4], "fastTurns": fast[:4], "fastCount": len(fast)}
 
 
 def _hull(pts):
@@ -578,7 +621,8 @@ class Motion:
             med = float(np.median(jm)) + 1e-6
             smooth[key] = {"peakSpeed": round(vpk, 2), "ldlj": ldlj, "jerkSpikes": int(((jm > 6 * med) & (jm > 400)).sum())}
             curves[key] = {"speed": sp.tolist(), "jerk": jm.tolist()}
-        res["smoothness"] = {"jerkSpikes": int(sum(v["jerkSpikes"] for v in smooth.values())), "points": smooth}
+        res["smoothness"] = {"jerkSpikes": int(sum(v["jerkSpikes"] for v in smooth.values())), "points": smooth,
+                             "pops": pops(Ps, {b.name: b.parent.name for b in self.body.arm.data.bones if b.parent is not None})}
         if stand is not None:
             L = self.rig.L["pelvis"][:3, :3]
             keys = ("pelvis", "spine_03", "Head", "hand_l", "hand_r", "lowerarm_l", "lowerarm_r", "calf_l", "calf_r", "foot_l", "foot_r")
