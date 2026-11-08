@@ -122,6 +122,8 @@ const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.r
 
 function totals(run: BenchRun) {
   const passed = run.games.reduce((sum, game) => sum + game.score.passed, 0);
+  const failed = run.games.reduce((sum, game) => sum + game.score.failed, 0);
+  const measured = run.games.reduce((sum, game) => sum + game.score.measured, 0);
   const possible = run.games.reduce((sum, game) => sum + game.score.total, 0);
   const byCriterion = Object.fromEntries(
     CRITERIA.map((criterion) => [
@@ -139,7 +141,7 @@ function totals(run: BenchRun) {
     { input: 0, cached: 0, output: 0, partial: 0 },
   );
   const turnSeconds = run.games.reduce((sum, game) => sum + (game.turn.seconds ?? 0), 0);
-  return { passed, possible, byCriterion, usage, turnSeconds };
+  return { passed, failed, measured, possible, byCriterion, usage, turnSeconds };
 }
 
 /** The newest earlier run in the same folder, by its date-stamped name. */
@@ -158,6 +160,11 @@ async function previousRun(outRoot: string, stamp: string): Promise<BenchRun | n
 }
 
 const signed = (n: number) => (n > 0 ? `+${n}` : n === 0 ? "±0" : String(n));
+/** A floor as "passed / measured", with what could not be measured beside it. */
+const floor = (score: { passed: number; measured: number; possible: number }) =>
+  `${score.passed} / ${score.measured} measured${score.possible > score.measured ? ` (${score.possible - score.measured} not measured)` : ""}`;
+const gameFloor = (score: GameScore) =>
+  floor({ passed: score.passed, measured: score.measured, possible: score.total });
 
 const phase2 = (game: BenchGame): BenchKeepGoing | null =>
   game.keepGoing === undefined || game.keepGoing === null || "skipped" in game.keepGoing
@@ -223,7 +230,7 @@ function keepGoingHtml(game: BenchGame): string {
     )
     .join("");
   return `<h3>Keep going: ${kg.steps.length} of ${kg.asked} step(s)${kg.ending === null ? "" : `, ended ${escape(kg.ending)}`}</h3>
-<p class="meta">${minutes(kg.seconds)} · first build → last: ${kg.net.improved.length === 0 ? "nothing better" : `better ${escape(kg.net.improved.map(moveText).join("; "))}`}; ${kg.net.regressed.length === 0 ? "nothing worse" : `worse ${escape(kg.net.regressed.map(moveText).join("; "))}`}${kg.finalScore === null ? "" : ` · floor on the last build ${kg.finalScore.passed} / ${kg.finalScore.total}`}</p>
+<p class="meta">${minutes(kg.seconds)} · first build → last: ${kg.net.improved.length === 0 ? "nothing better" : `better ${escape(kg.net.improved.map(moveText).join("; "))}`}; ${kg.net.regressed.length === 0 ? "nothing worse" : `worse ${escape(kg.net.regressed.map(moveText).join("; "))}`}${kg.finalScore === null ? "" : ` · floor on the last build ${gameFloor(kg.finalScore)}`}</p>
 <table class="steps"><tbody>${rows}</tbody></table>`;
 }
 
@@ -293,7 +300,7 @@ function html(run: BenchRun, previous: BenchRun | null, note: string | null): st
       return `<section>
 <h2>${escape(game.name)} <span>${escape(game.genre)}</span></h2>
 <p class="brief">${escape(game.brief)}</p>
-<p class="score">${game.score.passed} / ${game.score.total}${before === null ? "" : ` (${signed(game.score.passed - before.score.passed)} from the previous run)`}</p>
+<p class="score">${gameFloor(game.score)}${before === null ? "" : ` (${signed(game.score.passed - before.score.passed)} passed, ${signed(game.score.failed - before.score.failed)} failed from the previous run)`}</p>
 ${shots}
 <ul class="criteria">${criteria}</ul>
 <p>Turn: ${escape(game.turn.status)}, ${minutes(game.turn.seconds)}${game.factsSeconds == null ? "" : `; facts ${Math.round(game.factsSeconds)} s`}${usage === null ? "" : `, ${tokens(usage.input)} input (${tokens(usage.cached)} cached), ${tokens(usage.output)} output${usage.partial > 0 ? `, ${usage.partial} turn(s) with partial usage` : ""}`}.${game.error ? ` Runner error: ${escape(game.error)}` : ""}</p>
@@ -333,9 +340,9 @@ details summary{cursor:pointer;color:var(--muted)}
 blockquote{margin:6px 0;padding-left:12px;border-left:2px solid var(--rule);color:var(--muted);white-space:pre-wrap}
 @media (max-width:560px){.shots{grid-template-columns:1fr}.steps img{width:120px}}
 </style></head><body>
-<h1>First ten minutes: ${t.passed} / ${t.possible}</h1>
+<h1>First ten minutes: ${floor(t)}</h1>
 <p class="meta">${escape(run.stamp)} · commit ${escape(run.commit)} · ${escape(run.model ? `${run.model.instanceId}/${run.model.model}` : "no model")} · briefs v${run.briefsVersion} · ${run.games.length} games · run ${minutes(run.seconds)} · turns ${minutes(t.turnSeconds)} · ${tokens(t.usage.input)} input (${tokens(t.usage.cached)} cached), ${tokens(t.usage.output)} output${t.usage.partial > 0 ? ` (${t.usage.partial} provider turns reported partial usage)` : ""}</p>
-<p class="meta">${previous === null ? escape(note ?? "") : `Previous run ${escape(previous.stamp)} (commit ${escape(previous.commit)}): ${p!.passed} / ${p!.possible}, ${signed(t.passed - p!.passed)}.`}</p>
+<p class="meta">${previous === null ? escape(note ?? "") : `Previous run ${escape(previous.stamp)} (commit ${escape(previous.commit)}): ${floor(p!)}; ${signed(t.passed - p!.passed)} passed, ${signed(t.failed - p!.failed)} failed.`}</p>
 <table><tbody>${criteriaTotals}</tbody></table>
 <p class="meta">✓ pass · ✗ fail · – not measured. Thresholds: ends no sooner than ${THRESHOLDS.instantEndSeconds} s with no skill, ${THRESHOLDS.minFps} fps, playable within ${THRESHOLDS.firstPlayableSeconds} s of the brief.</p>
 ${keepGoingSummaryHtml(run)}
@@ -387,20 +394,20 @@ function markdown(run: BenchRun, previous: BenchRun | null, note: string | null)
   const t = totals(run);
   const p = previous === null ? null : totals(previous);
   const lines = [
-    `# Bench ${run.stamp}: ${t.passed} / ${t.possible}`,
+    `# Bench ${run.stamp}: ${floor(t)}`,
     "",
     `Commit ${run.commit}, ${run.model ? `${run.model.instanceId}/${run.model.model}` : "no model"}, ${run.games.length} games, run ${minutes(run.seconds)}, turns ${minutes(t.turnSeconds)}, ${tokens(t.usage.input)} input (${tokens(t.usage.cached)} cached), ${tokens(t.usage.output)} output.`,
     previous === null
       ? (note ?? "")
-      : `Previous run ${previous.stamp} (${previous.commit}): ${p!.passed} / ${p!.possible}, ${signed(t.passed - p!.passed)}.`,
+      : `Previous run ${previous.stamp} (${previous.commit}): ${floor(p!)}; ${signed(t.passed - p!.passed)} passed, ${signed(t.failed - p!.failed)} failed.`,
     "",
     `| Game | Score | ${CRITERIA.map((c) => CRITERION_LABELS[c]).join(" | ")} | Turn |`,
     `|---|---|${CRITERIA.map(() => "---").join("|")}|---|`,
     ...run.games.map(
       (game) =>
-        `| ${game.name} | ${game.score.passed}/${game.score.total} | ${CRITERIA.map((c) => mark(game.score.verdicts[c])).join(" | ")} | ${minutes(game.turn.seconds)} |`,
+        `| ${game.name} | ${game.score.passed}/${game.score.measured} | ${CRITERIA.map((c) => mark(game.score.verdicts[c])).join(" | ")} | ${minutes(game.turn.seconds)} |`,
     ),
-    `| Total | ${t.passed}/${t.possible} | ${CRITERIA.map((c) => `${t.byCriterion[c]}${p === null ? "" : ` (${signed(t.byCriterion[c] - p.byCriterion[c])})`}`).join(" | ")} | ${minutes(t.turnSeconds)} |`,
+    `| Total | ${t.passed}/${t.measured} | ${CRITERIA.map((c) => `${t.byCriterion[c]}${p === null ? "" : ` (${signed(t.byCriterion[c] - p.byCriterion[c])})`}`).join(" | ")} | ${minutes(t.turnSeconds)} |`,
     "",
     "## What failed",
     "",
