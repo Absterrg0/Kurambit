@@ -682,6 +682,19 @@ export function createStageBridge({ canvas, renderer, view, freeze, redraw, draw
     thing,
     tune,
     assetCopy,
+    /** Every registered thing ({ id, name, kind, object }), for the scene report; read only. */
+    eachThing(fn) {
+      for (const record of things.values()) fn(record);
+    },
+    /** The thing an object is (`exact`) or belongs to (its nearest registered parent). */
+    thingOf(object, exact) {
+      if (exact) return byObject.get(object);
+      for (let node = object; node != null; node = node.parent) {
+        const record = byObject.get(node);
+        if (record !== undefined) return record;
+      }
+      return undefined;
+    },
     tick,
     overlay,
     reset,

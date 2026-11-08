@@ -28,6 +28,7 @@ import {
 } from "./webPlaySession.ts";
 import { isHostExit, type WindowHost } from "./windowHost.ts";
 import { type PlayUse, resolvePlayUse } from "./assetUse.ts";
+import type { PageScene } from "./sceneReport.ts";
 
 export interface PlayLaunch {
   readonly play: PlaySession;
@@ -47,6 +48,8 @@ export interface PlayLaunch {
     readonly use: PlayUse | null;
     /** How a page's play ran, as its shell measured it (`__studio.perf()`); null elsewhere. */
     readonly perf: unknown;
+    /** A page's scene report, when the launch asked for one (`sceneReport`); null elsewhere. */
+    readonly scene: PageScene;
   }>;
   readonly bootMs: number;
   /** Folders the runner writes that go with the session. */
@@ -222,7 +225,7 @@ export const openRunnerPlay = (
               // writing its saves before it is stopped.
               if (input.saves !== null) await bounded(started.exited, PLAY_BOUNDS.keptSavesMs);
               await end();
-              return { keptStorage: null, use: null, perf: null };
+              return { keptStorage: null, use: null, perf: null, scene: null };
             }),
             bootMs,
             scratch: spec.scratch,
@@ -244,6 +247,8 @@ export const openPagePlay = (input: {
   readonly keptStorage: string | null;
   /** Record which files the page loads and which sounds start playing (asset use). */
   readonly recordUse?: boolean;
+  /** Start the shell's scene report as the page is ready; `stop` returns it. */
+  readonly sceneReport?: boolean;
 }): Effect.Effect<PlayLaunch, GameOperationError | PlayDidNotBoot> =>
   Effect.gen(function* () {
     const { operation, root } = input;
@@ -277,6 +282,7 @@ export const openPagePlay = (input: {
                 keptStorage: input.keptStorage,
                 onSoundStarted:
                   input.recordUse === true ? (sound) => void sounds.add(sound) : undefined,
+                sceneReport: input.sceneReport === true,
               }),
             // The page not booting or crashing is the game's; the browser is ours.
             catch: (cause) =>
@@ -298,6 +304,7 @@ export const openPagePlay = (input: {
             return {
               keptStorage: play.keptStorage(),
               perf: play.perf(),
+              scene: play.scene(),
               use:
                 input.recordUse === true
                   ? await resolvePlayUse({

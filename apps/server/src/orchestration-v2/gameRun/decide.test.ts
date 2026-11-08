@@ -166,6 +166,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   assets: { status: "measured", value: { models: [], more: 0, libraryFiles: 0 } },
   use: { status: "not-measured", why: "not played", retry: false },
   performance: { status: "not-measured", why: "not played", retry: false },
+  scene: { status: "not-measured", why: "not played", retry: false },
   message: "",
   ...patch,
 });

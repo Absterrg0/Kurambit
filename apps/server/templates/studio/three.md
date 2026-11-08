@@ -33,7 +33,8 @@ the person the error until a save boots again.
   `ASSETS` model and compiles its shaders behind the loading screen, so play
   starts without a freeze. Glows and extra lights are a later turn.
 - No Blender, no key art, no plan, no `game_explore_*` to check your work:
-  `game_check` clean is the check, and Kurambit plays and measures the build
+  `game_check` clean, with each line its scene report lists fixed (open the
+  frame it names), is the check, and Kurambit plays and measures the build
   when the turn ends. On the `generated` route the one exception is the key
   art `game_generate` starts; you build on library stand-ins while it renders.
 - Start from the recipe for your view below and grow it into the brief's

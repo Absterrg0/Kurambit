@@ -7,6 +7,7 @@ import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason } from "./gameRunReasons.ts";
 import { GameCharacterRoute } from "./gameStyle.ts";
 import { GameArtLanes } from "./gameArt.ts";
+import { GameSceneReport } from "./gameScene.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -839,6 +840,25 @@ export const GameCheckIssue = Schema.Struct({
   message: Schema.String,
 });
 export type GameCheckIssue = typeof GameCheckIssue.Type;
+/**
+ * What a person would see is wrong, from a short random-input play of the gameplay entry
+ * (three.js): each line worded, with the frame that shows it. Not part of `ok`, which is the
+ * boot check's; a check that made no play says why.
+ */
+export const GameCheckScene = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("measured"),
+    /** One line per problem, its frame path appended; empty when the play showed none. */
+    lines: Schema.Array(Schema.String),
+    report: GameSceneReport,
+    /** Milliseconds the play and its reading took. */
+    ms: Schema.Number,
+    /** How the play was drawn, when that matters for reading it. */
+    note: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
+]);
+export type GameCheckScene = typeof GameCheckScene.Type;
 export const GameCheckResult = Schema.Struct({
   ok: Schema.Boolean,
   errors: Schema.Array(GameCheckIssue),
@@ -846,5 +866,6 @@ export const GameCheckResult = Schema.Struct({
   /** Which entry scenes the checker actually ran, in order: `main`, then `gameplay`. */
   entries: Schema.Array(Schema.String),
   durationMs: Schema.Number,
+  scene: Schema.optionalKey(GameCheckScene),
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
