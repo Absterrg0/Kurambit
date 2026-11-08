@@ -932,6 +932,36 @@ function deriveActiveVisualResponseRunIds(input: {
   return runIds;
 }
 
+/**
+ * Why each run was stopped, when something other than the person stopped it (keep going's
+ * time cap, an agent's tool): the request item carries the reason, and its message is its
+ * title when none was given. The request row is hidden behind the result row.
+ */
+function interruptReasonByRunId(entries: ReadonlyArray<TimelineEntry>): ReadonlyMap<RunId, string> {
+  return new Map(
+    entries.flatMap((entry) => {
+      if (entry.kind !== "event") return [];
+      const item = entry.projectedItem.item;
+      return item.type === "run_interrupt_request" &&
+        item.runId !== null &&
+        item.message !== item.title
+        ? [[item.runId, item.message] as const]
+        : [];
+    }),
+  );
+}
+
+/** The result row says "by user" on its own; a run stopped for a reason shows that reason. */
+function withInterruptReason(
+  projected: OrchestrationV2ProjectedTurnItem,
+  reasons: ReadonlyMap<RunId, string>,
+): OrchestrationV2ProjectedTurnItem {
+  const item = projected.item;
+  if (item.type !== "run_interrupt_result" || item.runId === null) return projected;
+  const reason = reasons.get(item.runId);
+  return reason === undefined ? projected : { ...projected, item: { ...item, message: reason } };
+}
+
 function timelineEntryFailedItem(entry: TimelineEntry) {
   const item =
     entry.kind === "event"
@@ -1358,6 +1388,7 @@ export function deriveMessagesTimelineRows(input: {
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineEntries);
   const unsettledRunId = deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null);
   const failedRunIds = failedTimelineRunIds(timelineEntries, input.latestRun ?? null);
+  const interruptReasons = interruptReasonByRunId(timelineEntries);
   const liveSubagentEntryIds = liveSubagentCardEntryIds(timelineEntries);
   const completeSupersededReplyIds = completeSupersededReplyEntryIds(timelineEntries);
   const supersededFoldsByAnchorEntryId = deriveSupersededAttemptFolds(
@@ -1796,7 +1827,7 @@ export function deriveMessagesTimelineRows(input: {
         kind: "event",
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
-        projectedItem: timelineEntry.projectedItem,
+        projectedItem: withInterruptReason(timelineEntry.projectedItem, interruptReasons),
       });
       continue;
     }
