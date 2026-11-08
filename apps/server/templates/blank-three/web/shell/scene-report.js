@@ -927,10 +927,10 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
      * (its pixels are still the canvas's then). Nothing at all unless started.
      */
     tick(dt, drew) {
-      if (!active || dt <= 0 || GameState.state !== "playing") return;
+      if (!active || dt <= 0 || GameState.state !== "playing") return 0;
       played += dt;
       clock += dt;
-      if (clock < 1 / LIMITS.hz || !drew) return;
+      if (clock < 1 / LIMITS.hz || !drew) return 0;
       const span = clock;
       clock = 0;
       const from = performance.now();
@@ -938,6 +938,7 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
       const ms = performance.now() - from;
       costMs += ms;
       worstMs = Math.max(worstMs, ms);
+      return ms;
     },
   };
 }

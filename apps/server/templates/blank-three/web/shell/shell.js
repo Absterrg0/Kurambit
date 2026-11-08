@@ -894,9 +894,14 @@ else showTitle();
 
 let last = performance.now();
 let titleError = false;
+// The scene report's last sample, which ran after the previous draw: the measuring's own time
+// stays out of the frame times the performance fact and the render scale judge the game by.
+let measuredMs = 0;
 renderer.setAnimationLoop((now) => {
-  const realMs = Math.max(now - last, 0);
-  const real = Math.min(realMs / 1000, 0.1);
+  const elapsedMs = Math.max(now - last, 0);
+  const realMs = Math.max(elapsedMs - measuredMs, 0);
+  measuredMs = 0;
+  const real = Math.min(elapsedMs / 1000, 0.1);
   last = now;
   pollGamepad(now);
   // Only unpaused, unheld time moves the run, the end beat included.
@@ -932,6 +937,6 @@ renderer.setAnimationLoop((now) => {
     redraw = false;
   }
   bridge.tick(dt);
-  sceneReport.tick(dt, drawing);
+  measuredMs = sceneReport.tick(dt, drawing);
   studio.ready = true;
 });
