@@ -46,6 +46,7 @@ describe("V2 preview upgrade", () => {
         [64, "GameRunProjections"],
         [65, "GameRunProjectIndex"],
         [66, "GameBuildFacts"],
+        [67, "GameArtGenerations"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -135,6 +136,7 @@ describe("V2 preview upgrade", () => {
         [64, "GameRunProjections"],
         [65, "GameRunProjectIndex"],
         [66, "GameBuildFacts"],
+        [67, "GameArtGenerations"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
