@@ -752,6 +752,7 @@ export const GameMoreTool = Tool.make("game_more", {
   failureMode: "return",
   dependencies: [...dependencies, GameBuilds.GameBuilds, GameRunControl.GameRunControl],
 })
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_more"));
 export const GameMoreToolkit = Toolkit.make(GameMoreTool);

@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { Tool } from "effect/ai";
@@ -317,6 +318,12 @@ export const layerMore = McpToolAccess.toLayer(
               description: tool.description,
               parameters: Tool.getJsonSchema(tool),
             };
+          // Every game tool is strict (a misplaced key is refused, never dropped); the toolkit's
+          // own decode ignores excess keys, so the same rule is applied here first.
+          yield* Schema.decodeUnknownEffect(tool.parametersSchema)(input.input, {
+            onExcessProperty: "error",
+            errors: "all",
+          }).pipe(Effect.catch((error) => refuse(`${name}: ${String(error)}`)));
           const outcome = yield* built.handle(name, input.input as never).pipe(
             Effect.flatMap((results) => Stream.run(results, Sink.last())),
             Effect.flatMap(Effect.fromOption),
