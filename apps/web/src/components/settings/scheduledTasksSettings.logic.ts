@@ -9,7 +9,6 @@ import {
   type ProviderInteractionMode,
   type ServerSettings,
 } from "@kurambit/contracts";
-import { parseMaxDeliveryAge } from "@kurambit/client-runtime/scheduled-task-webhook";
 
 import {
   resolveProjectSettings,
@@ -62,7 +61,6 @@ export interface DraftState {
   readonly signaturePrefix: string;
   /** Write-only: empty keeps the secret already stored on the server. */
   readonly signatureSecret: string;
-  readonly maxDeliveryAgeMinutes: string;
 }
 
 const WEBHOOK_SIGNATURE_DEFAULTS = {
@@ -71,10 +69,8 @@ const WEBHOOK_SIGNATURE_DEFAULTS = {
   signaturePrefix: "sha256=",
 } as const;
 
-export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedule | null {
+export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedule {
   if (draft.scheduleMode === "webhook") {
-    const maxDeliveryAgeMinutes = parseMaxDeliveryAge(draft.maxDeliveryAgeMinutes);
-    if (maxDeliveryAgeMinutes === undefined) return null;
     const secret = draft.signatureSecret.trim();
     return {
       type: "webhook",
@@ -86,7 +82,6 @@ export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedul
             ...(secret ? { secret } : {}),
           }
         : null,
-      maxDeliveryAgeMinutes,
     };
   }
   if (draft.scheduleMode === "interval") {
@@ -143,10 +138,6 @@ export function taskToDraft(task: ScheduledTask): DraftState {
         }
       : { signatureEnabled: false, ...WEBHOOK_SIGNATURE_DEFAULTS }),
     signatureSecret: "",
-    maxDeliveryAgeMinutes:
-      schedule.type === "webhook" && schedule.maxDeliveryAgeMinutes != null
-        ? String(schedule.maxDeliveryAgeMinutes)
-        : "",
   };
 }
 

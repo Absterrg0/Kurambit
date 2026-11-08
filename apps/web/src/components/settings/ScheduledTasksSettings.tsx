@@ -168,7 +168,6 @@ function DraftForm({
         signatureEncoding: "hex",
         signaturePrefix: "sha256=",
         signatureSecret: "",
-        maxDeliveryAgeMinutes: "",
       },
   );
   const [error, setError] = useState<string | null>(null);
@@ -176,10 +175,6 @@ function DraftForm({
 
   const save = async () => {
     const schedule = scheduleFromDraft(draft);
-    if (schedule === null) {
-      setError("Pick a valid interval (minutes ≥ 1) or fixed time (HH:MM).");
-      return;
-    }
     const resolvedProjectId = draft.projectId || projectId;
     if (resolvedProjectId.trim().length === 0) {
       setError("No project available. Create a project first.");

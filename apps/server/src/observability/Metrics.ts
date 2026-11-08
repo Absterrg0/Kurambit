@@ -59,16 +59,11 @@ export const terminalRestartsTotal = Metric.counter("kurambit_terminal_restarts_
 });
 
 export const webhookDeliveriesTotal = Metric.counter("kurambit_webhook_deliveries_total", {
-  description: "Webhook requests handled, by outcome and source.",
+  description: "Webhook requests handled, by outcome.",
 });
 
 export const webhookDeliveryDuration = Metric.timer("kurambit_webhook_delivery_duration", {
   description: "Time to verify, log, and enqueue one webhook request.",
-});
-
-export const webhookHeldDelay = Metric.timer("kurambit_webhook_held_delay", {
-  description:
-    "Time between the relay receiving a webhook request and the environment handling it.",
 });
 
 export const webhookRunsTotal = Metric.counter("kurambit_webhook_runs_total", {
