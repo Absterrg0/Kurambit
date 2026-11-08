@@ -71,7 +71,7 @@ export default defineConfig({
       "apps/marketing/site/hill-temple/**",
       // Third-party three.js, its addons and postprocessing, vendored into the
       // game template as published.
-      "apps/server/templates/blank-three/web/vendor/**",
+      "apps/server/templates/runtime/*/*/vendor/**",
     ],
     sortPackageJson: {},
     overrides: [
@@ -98,7 +98,7 @@ export default defineConfig({
       "apps/marketing/site/hill-temple/**",
       // Third-party three.js, its addons and postprocessing, vendored into the
       // game template as published.
-      "apps/server/templates/blank-three/web/vendor/**",
+      "apps/server/templates/runtime/*/*/vendor/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-kurambit/index.ts", "@shadcn/lint"],
