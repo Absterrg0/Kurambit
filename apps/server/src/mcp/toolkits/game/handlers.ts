@@ -1,4 +1,8 @@
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import { Tool } from "effect/ai";
 import { GameOperationError, type ThreadId } from "@kurambit/contracts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
 import { GameCaller } from "../../../game/GameCaller.ts";
@@ -13,7 +17,11 @@ import {
   GameBlenderLookToolkit,
   GameBlenderRenderSpritesToolkit,
   GameUnityScreenshotToolkit,
+  GameMoreTool,
+  GameMoreToolkit,
 } from "./tools.ts";
+import { GAME_TOOL_PLACEMENTS, fits, type GameToolName } from "./placement.ts";
+import { engineProfile } from "../../../game/engineProfile.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
@@ -282,4 +290,55 @@ const assetsSearchHandlers = {
 export const layerAssetsSearch = McpToolAccess.toLayer(
   GameAssetsSearchToolkit,
   assetsSearchHandlers,
+);
+
+/**
+ * game_more: an asked-for tool, described, or run by GameToolkit's own handler
+ * with its own access check, so it behaves exactly as a listed call would.
+ */
+export const layerMore = McpToolAccess.toLayer(
+  GameMoreToolkit,
+  Effect.gen(function* () {
+    const built = yield* GameToolkit;
+    const refuse = (message: string, failure?: unknown) =>
+      Effect.fail(failure === undefined ? { message } : { message, failure });
+    return {
+      game_more: McpToolAccess.readsAsCaller((input: Tool.Parameters<typeof GameMoreTool>) =>
+        Effect.gen(function* () {
+          const name = input.tool as GameToolName & keyof typeof GameToolkit.tools;
+          const scope = yield* McpInvocationContext.McpInvocationContext;
+          if (!fits(GAME_TOOL_PLACEMENTS[name], scope) || !(name in GameToolkit.tools))
+            return yield* refuse(
+              `${name} is not available in this chat: ${scope.gameEngine == null ? "it works in no game" : `this ${engineProfile(scope.gameEngine).displayName} game's engine does not support it`}.`,
+            );
+          const tool = GameToolkit.tools[name];
+          if (input.input === undefined)
+            return {
+              tool: name,
+              description: tool.description,
+              parameters: Tool.getJsonSchema(tool),
+            };
+          // Every game tool is strict (a misplaced key is refused, never dropped); the toolkit's
+          // own decode ignores excess keys, so the same rule is applied here first.
+          yield* Schema.decodeUnknownEffect(tool.parametersSchema)(input.input, {
+            onExcessProperty: "error",
+            errors: "all",
+          }).pipe(Effect.catch((error) => refuse(`${name}: ${String(error)}`)));
+          const outcome = yield* built.handle(name, input.input as never).pipe(
+            Effect.flatMap((results) => Stream.run(results, Sink.last())),
+            Effect.flatMap(Effect.fromOption),
+            Effect.catch((error) =>
+              refuse(error instanceof Error ? error.message : `${name} failed.`),
+            ),
+          );
+          if (!outcome.isFailure) return outcome.encodedResult;
+          const encoded = outcome.encodedResult as { readonly message?: unknown } | null;
+          return yield* refuse(
+            typeof encoded?.message === "string" ? encoded.message : `${name} failed.`,
+            outcome.encodedResult,
+          );
+        }),
+      ),
+    };
+  }).pipe(Effect.provide(McpToolAccess.HandlersLayer.layer(layer))),
 );

@@ -38,6 +38,7 @@ import {
   type GameKeepValuesResult,
   GameOperationError,
   manifestProject,
+  parkedEngineMessage,
   RESTORE_BEFORE_LABEL,
   type RunId,
   type ThreadId,
@@ -56,7 +57,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import * as GameService from "./GameService.ts";
 import { BuildName } from "./run/buildNames.ts";
-import { engineProfile } from "./engineProfile.ts";
+import { engineCapabilities, engineProfile } from "./engineProfile.ts";
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 import { isFirstTurnLead } from "./scaffold.ts";
@@ -87,8 +88,20 @@ const EPOCH = "1970-01-01T00:00:00.000Z";
 const isoOfSeconds = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe(seconds * 1000));
 const TURN_REFS = "refs/kurambit/orchestration-v2/checkpoints/";
 const MAX_FILES = 8;
-const UNITY_NO_PLAY =
-  "Unity builds play as a Linux player for facts and bots; the Game panel has no Unity Play yet.";
+/** Why the Game panel cannot play a build of this engine's game, or null when it can. */
+const noPlayReason = (engine: GameEngineId) =>
+  !engineCapabilities(engine).has("play")
+    ? parkedEngineMessage(engine)
+    : engineProfile(engine).stage === "window"
+      ? `${engineProfile(engine).displayName} builds play as a native player for facts and bots; the Game panel has no ${engineProfile(engine).displayName} Play yet.`
+      : null;
+/**
+ * Whether a build of this engine's game is measured: never for a parked
+ * engine, and not while a run holds an engine whose measurement takes the
+ * server's one live editor.
+ */
+const measurable = (engine: GameEngineId, runLive: boolean) =>
+  engineCapabilities(engine).has("play") && !(runLive && engineProfile(engine).sharedEditor);
 const isGameBuildId = Schema.is(GameBuildId);
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
@@ -750,11 +763,7 @@ const make = Effect.gen(function* () {
           files: entry.files,
           fileCount: entry.fileCount,
           available,
-          noPlay: !available
-            ? "This build is no longer kept."
-            : g.engine === "unity"
-              ? UNITY_NO_PLAY
-              : null,
+          noPlay: !available ? "This build is no longer kept." : noPlayReason(g.engine),
           noRestore: !available ? "This build is no longer kept." : null,
           facts:
             read === undefined ? { state: "never", chips: [], notMeasured: 0 } : summaryOf(read),
@@ -944,16 +953,17 @@ const make = Effect.gen(function* () {
       return yield* facts.read(yield* resolve(g, ref));
     });
 
-  // A Unity measurement would take the server's one editor from a live run's roles.
-  const unityHeld = (g: Game) => g.engine === "unity" && g.run?.live === true;
-  const UNITY_HELD =
-    "The production run holds the Unity editor; this build is measured once the run stops.";
+  const notMeasuredWhy = (g: Game) =>
+    engineCapabilities(g.engine).has("play")
+      ? `The production run holds the ${engineProfile(g.engine).displayName} editor; this build is measured once the run stops.`
+      : parkedEngineMessage(g.engine);
 
   const measure: GameBuilds["Service"]["measure"] = (threadId, ref, options = {}) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
-      if (unityHeld(g)) return { ...(yield* facts.read(build)), message: UNITY_HELD };
+      if (!measurable(g.engine, g.run?.live === true))
+        return { ...(yield* facts.read(build)), message: notMeasuredWhy(g) };
       return yield* facts.measure(build, options);
     });
 
@@ -962,8 +972,8 @@ const make = Effect.gen(function* () {
       if (!isGameBuildId(build)) return;
       const manifest = yield* projects.read(root);
       const engine = manifest.engine.name as GameEngineId;
-      // A run's own builds: a Unity one would take the editor from the run's roles.
-      if (engine === "unity") return;
+      // A run's own builds: one that takes the server's one editor would take it from the run's roles.
+      if (!measurable(engine, true)) return;
       const lane = manifestProject(manifest);
       const [tree] = yield* checkpoints.resolveTrees({ cwd: root, revisions: [build], path: lane });
       if (tree === null || tree === undefined) return;
@@ -999,8 +1009,10 @@ const make = Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
       // Playing a build measures it if it never was.
-      if (!unityHeld(g)) yield* facts.measure(build, { queue: "background" });
-      if (g.engine === "unity") return { _tag: "window", message: UNITY_NO_PLAY } as const;
+      if (measurable(g.engine, g.run?.live === true))
+        yield* facts.measure(build, { queue: "background" });
+      const noPlay = noPlayReason(g.engine);
+      if (noPlay !== null) return { _tag: "window", message: noPlay } as const;
       // The copy's one engine step at a time: a measurement's bot run and this
       // export take turns, so neither fails "busy" nor imports into the other.
       const result = yield* Effect.scoped(
@@ -1456,11 +1468,12 @@ const make = Effect.gen(function* () {
 
   // Measures owed from data, after a restart or between startup and the
   // reactor's subscription: every row that still owes a tier, and every live
-  // run's rounds (a cache hit is free). Unity waits for an open.
+  // run's rounds (a cache hit is free). An engine with one shared editor waits
+  // for an open, and a parked engine's builds are not measured.
   const reconcile: GameBuilds["Service"]["reconcile"] = Effect.gen(function* () {
     yield* settleRestores;
     for (const build of yield* facts.owed)
-      if (build.engine !== "unity") yield* facts.measure(build, { queue: "background" });
+      if (measurable(build.engine, true)) yield* facts.measure(build, { queue: "background" });
     const threads = yield* projections
       .listGameRunThreadsToRecover()
       .pipe(Effect.orElseSucceed(() => []));

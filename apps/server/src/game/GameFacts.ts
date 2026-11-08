@@ -36,6 +36,7 @@ import {
   GameFactNotMeasured,
   GameFactPending,
   GamePerformance,
+  GameSceneReport,
   type GameBotRunResult,
   GameEngineId,
   GameManifest,
@@ -72,6 +73,7 @@ import * as GameTemplates from "./GameTemplates.ts";
 import { measureAssets } from "./assetFacts.ts";
 import { assetUseOf, generationsShipped, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
 import { performanceOf, readPlayPerf } from "./playPerf.ts";
+import { readSceneFile, SCENE_OLD_SHELL, sceneNotInEngine } from "./sceneReport.ts";
 import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 
 /**
@@ -129,6 +131,14 @@ const idleMachine = Effect.gen(function* () {
   }
 });
 
+/** The random-input play's scene record as the scene fact. */
+const sceneOf = (record: GameSceneReport | "no-shell" | null): Fact<"scene"> =>
+  record === "no-shell"
+    ? notMeasured(SCENE_OLD_SHELL, false)
+    : record === null
+      ? notMeasured("the random-input play's scene report could not be read", true)
+      : { status: "measured", value: record };
+
 /** A build GameBuilds resolved: its game, its commit and its content key. */
 export interface ResolvedBuild {
   readonly root: string;
@@ -168,6 +178,13 @@ const Stored = Schema.Struct({
   performance: Schema.optionalKey(
     Schema.Union([
       Schema.Struct({ status: Schema.Literal("measured"), value: GamePerformance }),
+      GameFactNotMeasured,
+      GameFactPending,
+    ]),
+  ),
+  scene: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ status: Schema.Literal("measured"), value: GameSceneReport }),
       GameFactNotMeasured,
       GameFactPending,
     ]),
@@ -216,29 +233,32 @@ type FactName =
   | "liveness"
   | "firstResponse"
   | "use"
-  | "performance";
+  | "performance"
+  | "scene";
 const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
   assets: ["assets"],
   boots: ["boots"],
   idle: ["idle", "use"],
-  masher: ["masher", "liveness", "firstResponse", "performance", "use"],
+  masher: ["masher", "liveness", "firstResponse", "performance", "scene", "use"],
   skilled: ["skilled", "use"],
 };
 const TIERS: ReadonlyArray<Tier> = ["assets", "boots", "idle", "masher", "skilled"];
 const FACT_NAMES: ReadonlyArray<FactName> = [...new Set(TIERS.flatMap((tier) => TIER_FACTS[tier]))];
 /**
- * Asset use is read from a browser page's requests, performance from its shell's
- * frame stats; an engine whose game plays in its own process says why it has
- * neither, and never owes them.
+ * Asset use is read from a browser page's requests, performance and the scene
+ * report from its shell; an engine whose game plays in its own process says
+ * why it has none of them, and never owes them.
  */
-const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance"]);
-const browserOnly = (engine: GameEngineId, fact: "use" | "performance") =>
+const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "scene"]);
+const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "scene") =>
   engineProfile(engine).play === "browser"
     ? null
     : notMeasured(
         fact === "use"
-          ? `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for three.js games`
-          : `${engineProfile(engine).displayName} games play in the engine's own process, which does not report its frame times to Kurambit yet; performance is measured for three.js games`,
+          ? `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for games that play in a browser`
+          : fact === "performance"
+            ? `${engineProfile(engine).displayName} games play in the engine's own process, which does not report its frame times to Kurambit yet; performance is measured for games that play in a browser`
+            : sceneNotInEngine(engine),
         false,
       );
 const useNotMeasured = (engine: GameEngineId) => browserOnly(engine, "use");
@@ -394,6 +414,7 @@ const make = Effect.gen(function* () {
       assets: get("assets"),
       use: useNotMeasured(build.engine) ?? get("use"),
       performance: browserOnly(build.engine, "performance") ?? get("performance"),
+      scene: browserOnly(build.engine, "scene") ?? get("scene"),
     };
     // An engine with no asset use or performance is not an incomplete measurement.
     const counted =
@@ -577,21 +598,22 @@ const make = Effect.gen(function* () {
       }
     });
 
-  // On Linux a bot plays on Xvfb, where the engine is forced to Compatibility
-  // (GameGodotEngine); elsewhere it draws with the project's own renderer.
-  const rendererOf = (copy: string, engine: GameEngineId) =>
-    engine !== "godot" || HOST_OS !== "linux"
+  // On Linux a bot plays on Xvfb, where an engine may draw another way than
+  // the game does (the profile's xvfbRenderer); elsewhere it draws as the game does.
+  const rendererOf = (copy: string, engine: GameEngineId) => {
+    const profile = engineProfile(engine);
+    const renderer = profile.xvfbRenderer;
+    return renderer === null || HOST_OS !== "linux"
       ? Effect.succeed(null)
-      : Effect.promise(async () => {
-          const text = await NodeFSP.readFile(
-            NodePath.join(copy, "godot", "project.godot"),
-            "utf8",
-          ).catch(() => "");
-          const method = /^renderer\/rendering_method="([^"]+)"/m.exec(text)?.[1] ?? "forward_plus";
-          return method === "gl_compatibility"
-            ? null
-            : `Compatibility; native exports draw ${method === "mobile" ? "Mobile" : "Forward+"}`;
-        });
+      : Effect.promise(async () =>
+          renderer.note(
+            await NodeFSP.readFile(
+              NodePath.join(copy, profile.projectDirectory, renderer.settings),
+              "utf8",
+            ).catch(() => ""),
+          ),
+        );
+  };
 
   // The build's own game.json names its engine folder; a copy that cannot say keeps the engine's default.
   const projectOf = (copy: string, engine: GameEngineId) =>
@@ -794,7 +816,7 @@ const make = Effect.gen(function* () {
               liveness: blocked,
               firstResponse: blocked,
               ...(browserOnly(build.engine, "performance") === null
-                ? { performance: blocked }
+                ? { performance: blocked, scene: blocked }
                 : {}),
               ...(yield* useAfter("masher", null, blocked)),
             });
@@ -840,11 +862,22 @@ const make = Effect.gen(function* () {
                               run.machine,
                             ),
                   };
+            // The scene report is the page's own, from the same play, on a browser engine.
+            const scene =
+              browserOnly(build.engine, "scene") !== null
+                ? {}
+                : {
+                    scene:
+                      !measuredRun || run.evidence === null
+                        ? notFromRun("the random-input run was not measured")
+                        : sceneOf(yield* Effect.promise(() => readSceneFile(root, run.evidence!))),
+                  };
             yield* write({
               masher: run.fact,
               liveness,
               firstResponse,
               ...performance,
+              ...scene,
               ...(yield* useAfter("masher", run.evidence, noRecord(run.fact))),
             });
           }

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   AppWindowIcon,
+  PauseIcon,
   HammerIcon,
   PlayIcon,
   RefreshCwIcon,
@@ -372,6 +373,17 @@ function StageStateCard({
         <h2 className="font-display text-5xl leading-none text-washi text-balance @[40rem]:text-6xl">
           {gameName}
         </h2>
+        {phase.kind === "parked" ? (
+          <>
+            <StageIcon tone="quiet">
+              <PauseIcon className="size-5" aria-hidden="true" />
+            </StageIcon>
+            <StageCopy
+              title={phase.message}
+              body="Its chat, builds and history stay here; Kurambit does not build or play it for now."
+            />
+          </>
+        ) : null}
         {phase.kind === "tools-missing" ? (
           <>
             <StageIcon tone="quiet">

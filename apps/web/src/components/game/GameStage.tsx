@@ -30,7 +30,7 @@ import type {
   GameBuildsResult,
   ScopedThreadRef,
 } from "@kurambit/contracts";
-import { GAME_ENGINES, GAME_TEMPLATES } from "@kurambit/contracts";
+import { GAME_ENGINES, GAME_TEMPLATES, parkedEngineMessage } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
@@ -514,6 +514,7 @@ function ThreadGameStage({
     data.operation !== null && turnEndedAt !== null && Date.parse(data.operation.at) >= turnEndedAt;
   const phase = deriveGameStagePhase({
     stage: stageKind,
+    parked: engine.status === "parked" ? parkedEngineMessage(data.manifest.engine.name) : null,
     // The game's own engine tool, as the server resolved it for this project.
     toolchainReady: data.engineTool === null || data.engineTool.status !== "error",
     // A failure becomes the stage's own only when this chat's work failed: a
@@ -552,7 +553,8 @@ function ThreadGameStage({
   const awaitingTurnBuild = phase.kind === "first-build";
   const building = busy !== null || operationState === "running";
   // Play of a build that exists only reads, so a run's role thread may play it.
-  const webPlay = data.exportTargets.includes("Web");
+  // A parked engine's game builds and plays nothing here.
+  const webPlay = engine.status === "active" && data.exportTargets.includes("Web");
   const playEnabled =
     !awaitingTurnBuild &&
     webPlay &&
@@ -654,9 +656,11 @@ function ThreadGameStage({
                 ? "Build failed"
                 : phase.kind === "tools-missing"
                   ? "Engine not ready"
-                  : phase.kind === "window"
-                    ? "Plays in its own window"
-                    : null;
+                  : phase.kind === "parked"
+                    ? "Paused"
+                    : phase.kind === "window"
+                      ? "Plays in its own window"
+                      : null;
   const runningSomething =
     busy !== null ||
     operationState === "running" ||
@@ -986,7 +990,7 @@ function ThreadGameStage({
                 <MoreHorizontalIcon className="size-4" aria-hidden="true" />
               </MenuTrigger>
               <MenuPopup align="end">
-                <MenuItem onClick={() => setExportOpen(true)}>
+                <MenuItem disabled={engine.status === "parked"} onClick={() => setExportOpen(true)}>
                   <DownloadIcon />
                   Export…
                 </MenuItem>

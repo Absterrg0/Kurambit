@@ -6,7 +6,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
-import { GameOperationError } from "@kurambit/contracts";
+import { GameOperationError, isGameEngineActive } from "@kurambit/contracts";
 import { sweepPublished } from "./archivePublication.ts";
 import * as GameEngine from "./GameEngine.ts";
 import { publishFolder, releaseTo } from "./GameExport.ts";
@@ -213,7 +213,11 @@ ${built.result.message}`.slice(0, 3000),
   // Both read the manifest's engine first: a game whose engine has no player
   // or editor is answered without resolving its executable.
   const backendOf = (root: string) =>
-    Effect.flatMap(projects.read(root), (manifest) => engines.backendFor(manifest.engine.name));
+    Effect.flatMap(projects.read(root), (manifest) =>
+      isGameEngineActive(manifest.engine.name)
+        ? engines.backendFor(manifest.engine.name)
+        : Effect.fail(GameEngine.parkedEngine(manifest.engine.name)),
+    );
 
   const prepare = Effect.fn("GamePlayer.prepare")(function* (root: string) {
     const backend = yield* backendOf(root);

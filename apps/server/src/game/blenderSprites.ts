@@ -13,7 +13,7 @@ import {
   type GameManifest,
   manifestProject,
 } from "@kurambit/contracts";
-import { engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
 import { decodePng, measure, type Rgba } from "./run/spriteFacts.ts";
 import { walkFiles } from "./walkFiles.ts";
 import { lockSpriteInput, readGameStyle } from "./gameStyle.ts";
@@ -722,7 +722,7 @@ export const renderSprites = (
         ? "Measured: every frame is empty (nothing visible was rendered); check the objects, the camera views and the frames before using them."
         : `Measured: ${colours} colours over the strip; mean luminance of visible pixels ${Math.round(Math.min(...lumas))}-${Math.round(Math.max(...lumas))} (0-255)${empty > 0 ? `; ${empty} frames are empty` : ""}.`,
       `Contact sheet: ${contactRel} (attached; frames at ${contact.zoom}x). Look at it before you use the frames.`,
-      `${provenance} Add what the frames depict and where the game loads them. Run game_import after.`,
+      `${provenance} Add what the frames depict and where the game loads them. ${afterAddingArt(profile)}`,
     ].join("\n");
     return {
       text,

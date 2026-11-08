@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import { useNavigate } from "@tanstack/react-router";
 import {
   GAME_CHARACTER_ROUTE_UNAVAILABLE,
+  ACTIVE_GAME_ENGINES,
   GAME_ENGINES,
   ModelSelection,
   type EnvironmentId,
@@ -110,12 +111,19 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const entries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, null),
   );
-  const defaultSelection = resolveAppModelSelectionState(settings, providers);
+  // A game's first turn builds the whole game, so it gets the provider's own chat default (its
+  // flagship) at the provider's default effort: never the cheap model and low effort the app
+  // summarises text with, which gave up on every brief of the first-ten-minutes benchmark.
+  const textDefault = resolveAppModelSelectionState(settings, providers);
+  const defaultSelection: ModelSelection = {
+    instanceId: textDefault.instanceId,
+    model: getDefaultProviderInstanceModel(providers, textDefault.instanceId) ?? textDefault.model,
+  };
   const [selection, setSelection] = useState<ModelSelection | null>(null);
-  // The model the last game was made or opened with, while its provider is usable;
-  // otherwise the app default (the text-generation model).
+  // The model the person last picked for a game, while its provider is usable; otherwise the
+  // default above. The key moved once: the old one also kept an untouched cheap default.
   const [lastGameModel, setLastGameModel] = useLocalStorage(
-    `game-entry-model:${environmentId}`,
+    `game-entry-picked-model:${environmentId}`,
     null,
     lastGameModelSchema,
   );
@@ -224,7 +232,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
       setError(String(squashAtomCommandFailure(result)));
       return;
     }
-    setLastGameModel(model);
+    if (selection !== null) setLastGameModel(selection);
     refreshLibrary();
     setDialog(null);
     // The thread route sends a thread this client has not received yet back
@@ -290,20 +298,23 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                     disabled={busy}
                   />
                 </label>
-                <fieldset className="flex flex-col gap-2 text-sm">
-                  <legend className="font-medium">Engine</legend>
-                  {ENGINE_OPTIONS.map((option) => (
-                    <EngineOption
-                      key={option.id}
-                      {...option}
-                      tool={toolchain === null ? null : engineToolFor(toolchain, option.id)}
-                      ready={engineReady(option.id)}
-                      checked={engine === option.id}
-                      onPick={() => setEngine(option.id)}
-                      disabled={busy}
-                    />
-                  ))}
-                </fieldset>
+                {/* One active engine is no choice, so no picker shows. */}
+                {ENGINE_OPTIONS.length > 1 ? (
+                  <fieldset className="flex flex-col gap-2 text-sm">
+                    <legend className="font-medium">Engine</legend>
+                    {ENGINE_OPTIONS.map((option) => (
+                      <EngineOption
+                        key={option.id}
+                        {...option}
+                        tool={toolchain === null ? null : engineToolFor(toolchain, option.id)}
+                        ready={engineReady(option.id)}
+                        checked={engine === option.id}
+                        onPick={() => setEngine(option.id)}
+                        disabled={busy}
+                      />
+                    ))}
+                  </fieldset>
+                ) : null}
                 <fieldset className="flex flex-col gap-2 text-sm">
                   <legend className="font-medium">Make characters with</legend>
                   <div className="grid grid-cols-3 gap-2">
@@ -503,7 +514,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   );
 }
 
-const ENGINE_OPTIONS = (Object.keys(GAME_ENGINES) as GameEngineId[]).map((id) => ({
+const ENGINE_OPTIONS = ACTIVE_GAME_ENGINES.map((id) => ({
   id,
   ...GAME_ENGINES[id].picker,
 }));

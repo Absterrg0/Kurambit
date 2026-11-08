@@ -40,7 +40,7 @@ const scriptedLaunch = (
   const ended = new Promise<PlayEnd>((resolve) => (settle = resolve));
   return {
     ended,
-    stop: async () => ({ keptStorage: null, use: null, perf: null }),
+    stop: async () => ({ keptStorage: null, use: null, perf: null, scene: null }),
     play: {
       protocol: 2,
       capabilities: new Set(["realtime"]),

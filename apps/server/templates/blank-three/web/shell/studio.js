@@ -102,8 +102,9 @@ function position(player) {
  * `perf()` reads the look's play stats. `bridge`, when the shell has one
  * (shell/stage-bridge.js), is announced in studio-ready: a shell without it
  * posts the bare boot signal, and the Stage then offers no selecting.
+ * `scene`, when the shell has one, is the scene report the harness reads.
  */
-export function installStudio({ ui, player, setState, hold, perf, bridge }) {
+export function installStudio({ ui, player, setState, hold, perf, bridge, scene }) {
   let ready = false;
   const studio = {
     engine: "three",
@@ -122,6 +123,16 @@ export function installStudio({ ui, player, setState, hold, perf, bridge }) {
     perf() {
       return typeof perf === "function" ? perf() : null;
     },
+    // The scene report (shell/scene-report.js): the harness starts it as a measured play
+    // begins and reads it at the end. A shell without one has no `scene`.
+    ...(scene === undefined
+      ? {}
+      : {
+          scene: {
+            start: () => scene.start(),
+            read: () => scene.read(),
+          },
+        }),
     getState() {
       // innerText skips hidden screens, so this is the text on screen now.
       const text = typeof ui?.innerText === "string" ? ui.innerText : "";

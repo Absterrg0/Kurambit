@@ -1,0 +1,347 @@
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("fonts/geist.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Redaction";
+  font-style: italic;
+  font-display: swap;
+  font-weight: 400;
+  src: url("fonts/redaction-italic.woff2") format("woff2");
+}
+
+:root {
+  --night: #0b0b0a;
+  --paper: #f2efe8;
+  --paper-2: rgb(242 239 232 / 62%);
+  --paper-3: rgb(242 239 232 / 38%);
+  --shu: #e2582a;
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Redaction", "Times New Roman", Times, serif;
+  --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  overflow-x: hidden;
+  color: var(--paper);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(60% 46% at 50% 40%, rgb(242 239 232 / 6%), transparent 70%),
+    radial-gradient(120% 90% at 50% 38%, #171614 0%, var(--night) 58%, #050504 100%);
+  background-color: var(--night);
+}
+
+/* Paper grain over the whole sheet, so the black reads as ink rather than a screen. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.4 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.home {
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  left: max(22px, env(safe-area-inset-left));
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--paper-2);
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 21px;
+  text-decoration: none;
+  transition: color 200ms var(--ease);
+}
+
+.home:hover {
+  color: var(--paper);
+}
+
+.home img {
+  display: block;
+  width: 30px;
+  height: 30px;
+}
+
+.stage {
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 2.4svh, 26px);
+  padding: 72px 16px max(36px, env(safe-area-inset-bottom));
+}
+
+.fox {
+  position: relative;
+  width: min(92vw, 640px);
+  height: min(60svh, 660px);
+}
+
+/* The tail's warmth. It is still. */
+.fox::before {
+  content: "";
+  position: absolute;
+  left: 54%;
+  top: 40%;
+  width: 46%;
+  height: 40%;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgb(226 88 42 / 17%), transparent);
+  filter: blur(18px);
+}
+
+/* The canvas spills past the fox's box so ink in flight is never cut by an
+   edge; it fades out toward its own rim instead. */
+.fox canvas {
+  position: absolute;
+  z-index: 1;
+  inset: -18% -45%;
+  width: 190%;
+  height: 136%;
+  display: block;
+  touch-action: pan-y;
+  pointer-events: none;
+  mask-image: radial-gradient(farthest-side, #000 76%, transparent 100%);
+}
+
+.join {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 440px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  opacity: 0;
+  transform: translateY(10px);
+  animation: rise 900ms var(--ease) 650ms forwards;
+}
+
+@keyframes rise {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.line {
+  margin: 0;
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(22px, 2.6vw, 30px);
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  text-align: center;
+  color: rgb(242 239 232 / 88%);
+  text-wrap: balance;
+}
+
+.field {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 52px;
+  border-bottom: 1px solid rgb(242 239 232 / 22%);
+  transition: border-color 240ms var(--ease);
+}
+
+.field:hover,
+.field:focus-within {
+  border-bottom-color: rgb(242 239 232 / 45%);
+}
+
+/* A vermilion line drawn over the hairline while you type, kept once you join. */
+.field::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--shu);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 600ms var(--ease);
+}
+
+.field:focus-within::after,
+.join[data-done] .field::after {
+  transform: scaleX(1);
+}
+
+.field[data-shake] {
+  animation: shake 420ms var(--ease);
+}
+
+@keyframes shake {
+  20% {
+    transform: translateX(-7px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--paper);
+  font: 400 18px/1 var(--sans);
+  letter-spacing: 0.005em;
+  caret-color: var(--shu);
+}
+
+.field input::placeholder {
+  color: rgb(242 239 232 / 32%);
+}
+
+.field input:-webkit-autofill {
+  -webkit-text-fill-color: var(--paper);
+  transition: background-color 9999s;
+}
+
+.hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.go {
+  flex: none;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--paper);
+  font: 500 15px/1 var(--sans);
+  letter-spacing: 0.01em;
+  transition: color 200ms var(--ease);
+}
+
+.go:hover {
+  color: var(--shu);
+}
+
+.go:focus-visible {
+  outline: 0;
+  color: var(--shu);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+
+.go:disabled {
+  cursor: progress;
+  color: var(--paper-3);
+}
+
+.join[data-done] .go {
+  cursor: default;
+  color: var(--shu);
+}
+
+.note {
+  margin: 0;
+  min-height: 1.5em;
+  font-size: 13.5px;
+  color: var(--paper-3);
+  text-align: center;
+  text-wrap: balance;
+}
+
+.note a {
+  color: var(--paper-2);
+  text-underline-offset: 3px;
+  text-decoration-color: var(--paper-3);
+}
+
+.note[data-tone="ok"] {
+  color: var(--paper);
+}
+
+.note[data-tone="error"] {
+  color: #f59473;
+}
+
+@media (max-width: 460px) {
+  .field input {
+    font-size: 16px;
+  }
+
+  .go .wide {
+    display: none;
+  }
+}
+
+@media (max-height: 560px) {
+  .fox {
+    height: 46svh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .join {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .field[data-shake] {
+    animation: none;
+  }
+}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" data-clear>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Kurambit site icon</title>
+    <link rel="stylesheet" href="kit.css" />
+    <style>
+      /* The site's icon: the cream fox head on a vermilion seal, like the
+         profile pictures. The head is cut flat at the neck, so it stands on
+         the seal's bottom edge, where the cut reads as the frame. It is
+         drawn big because browsers show it at 16 pixels. r rounds the
+         corners (tabs); r=0 is square (phones round it themselves). */
+      .seal {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        border-radius: var(--r, 18%);
+        background:
+          url("../../site/washi.svg") 0 0 / 260px 260px,
+          var(--shu);
+        background-blend-mode: multiply;
+      }
+
+      .seal i {
+        position: absolute;
+        left: 50%;
+        bottom: -1%;
+        width: 88%;
+        height: 88%;
+        transform: translateX(-50%);
+        background: var(--sheet);
+        -webkit-mask: url("../../../../assets/brand/kurambit-head.png") center bottom / contain
+          no-repeat;
+        mask: url("../../../../assets/brand/kurambit-head.png") center bottom / contain no-repeat;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="seal"><i></i></div>
+    <script src="kit.js"></script>
+    <script>
+      const { params } = sizePage(512, 512);
+      document.documentElement.style.setProperty("--r", `${params.get("r") ?? 18}%`);
+      whenDrawn(new Promise((done) => setTimeout(done, 300)));
+    </script>
+  </body>
+</html>

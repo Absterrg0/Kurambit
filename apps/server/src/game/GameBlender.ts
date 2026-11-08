@@ -106,7 +106,7 @@ import {
   styleBudgets,
   styleHash,
 } from "./gameStyle.ts";
-import { engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
 import { gltfTriangles } from "./assetFacts.ts";
 import { glbJson } from "./gltfJson.ts";
 import { packGlb } from "./glbPack.ts";
@@ -1657,7 +1657,7 @@ const make = Effect.gen(function* () {
         );
       if (source.lane !== "model" && source.lane !== "creature")
         return yield* refuse(
-          `${path} came from the ${source.lane} lane, which Blender does not take: add it to the game with game_import.`,
+          `${path} came from the ${source.lane} lane, which Blender does not take: load it in the game from where it is (game_import first where the engine has an import step).`,
         );
       if (source.lane === "creature") {
         const refused = lockCharacterRouteRefusal(
@@ -2659,7 +2659,8 @@ const make = Effect.gen(function* () {
             catch: (cause) => opError("blender-export", file, "invalid-path", undefined, cause),
           });
           const absolute = NodePath.join(directory, NodePath.posix.basename(file));
-          const compress = engineProfile(manifest.engine.name).compressedModels;
+          const profile = engineProfile(manifest.engine.name);
+          const compress = profile.compressedModels;
           if (input.simplify !== undefined && !compress)
             return yield* opError(
               "blender-export",
@@ -2760,7 +2761,7 @@ const make = Effect.gen(function* () {
                 ...(decoderNote === null ? [] : [decoderNote]),
                 credited,
               ].join(" ") +
-              `\nSaved .blend source: ${blend}\nRun game_import after.${manifest.engine.name === "three" ? ` three.js games load the sidecar: ASSETS = { ${candidate.subject}: "${sidecar.slice(engineDir.length + 1)}" }.` : ""}`,
+              `\nSaved .blend source: ${blend}\n${afterAddingArt(profile)}${profile.sidecarLoad === null ? "" : ` ${profile.sidecarLoad(candidate.subject, sidecar.slice(engineDir.length + 1))}`}`,
             blend,
             export: file,
             sidecar,

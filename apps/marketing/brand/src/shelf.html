@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Kurambit shelf</title>
+    <link rel="stylesheet" href="kit.css" />
+    <style>
+      /* A wall of games as crisp pixel art, edge to edge, with one empty slot
+         where the fox stands. For headers and banners, where the profile's
+         name and bio already sit underneath. copy=1 adds the headline above a
+         single shelf. */
+      #wall {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+      }
+
+      .copy {
+        position: absolute;
+        z-index: 1;
+        left: var(--left, 7%);
+        top: var(--top, 13%);
+      }
+
+      h1 {
+        font-size: var(--size, 64px);
+      }
+
+      .stroke {
+        width: 2.6em;
+        margin-top: 0.22em;
+        font-size: var(--size, 64px);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="wall"></canvas>
+    <div class="copy" hidden>
+      <h1>Nobody made the game<br />you want. So make it.</h1>
+      <i class="stroke"></i>
+    </div>
+    <script src="kit.js"></script>
+    <script>
+      const { width, height, params } = sizePage(1500, 500);
+      const root = document.documentElement;
+      root.dataset.t ??= "paper";
+      const dark = root.dataset.t === "dark";
+      const withCopy = params.get("copy") === "1";
+
+      // Pixel pictures for the labels, 12 by 9.
+      const LABELS = [
+        [
+          "............",
+          "........##..",
+          ".......####.",
+          "........##..",
+          "............",
+          "...#........",
+          "..###...#...",
+          ".#####.###..",
+          "############",
+        ],
+        [
+          "............",
+          ".#.#....#.#.",
+          ".###....###.",
+          ".##########.",
+          ".###.##.###.",
+          ".###.##.###.",
+          ".##########.",
+          ".####..####.",
+          "############",
+        ],
+        [
+          ".....##.....",
+          "...######...",
+          "..########..",
+          "...######...",
+          "..########..",
+          ".....##.....",
+          ".....##.....",
+          "....####....",
+          "############",
+        ],
+        [
+          "......#.....",
+          "......##....",
+          "......###...",
+          "......####..",
+          "......#.....",
+          ".##########.",
+          "..########..",
+          "............",
+          "#.#.#.#.#.#.",
+        ],
+        [
+          "............",
+          "..##...##...",
+          ".####.####..",
+          ".#########..",
+          "..#######...",
+          "...#####....",
+          "....###.....",
+          ".....#......",
+          "............",
+        ],
+        [
+          "...######...",
+          "..########..",
+          "..#..##..#..",
+          "..#..##..#..",
+          "..########..",
+          "...##..##...",
+          "...######...",
+          "....#.#.....",
+          "............",
+        ],
+        [
+          "....####....",
+          "...######...",
+          "..##.##.##..",
+          "..##.##.##..",
+          "..########..",
+          "..########..",
+          "..########..",
+          "..#.#..#.#..",
+          "............",
+        ],
+        [
+          "..........#.",
+          ".........##.",
+          "........##..",
+          ".......##...",
+          "..#...##....",
+          "...#.##.....",
+          "....##......",
+          "...#..#.....",
+          "..#.........",
+        ],
+        [
+          "############",
+          "#....#.....#",
+          "#.##.#.###.#",
+          "#.#....#...#",
+          "#.#.####.#.#",
+          "#.#......#.#",
+          "#.######.#.#",
+          "#........#..",
+          "############",
+        ],
+      ];
+
+      // One pixel is `px` screen pixels; everything is laid out in pixels.
+      const rowsWanted = withCopy ? 1 : Number(params.get("rows") ?? 3);
+      const cartW = 20;
+      const cartH = 26;
+      const rowH = cartH + 6;
+      const headroom = withCopy ? 70 : 8;
+      const px = Math.max(2, Math.floor(height / (rowsWanted * rowH + headroom)));
+      const cols = Math.ceil(width / px);
+      const lines = Math.ceil(height / px);
+      const canvas = document.getElementById("wall");
+      canvas.width = cols;
+      canvas.height = lines;
+      const c = canvas.getContext("2d");
+
+      const ink = dark ? MOONLIT : INK;
+      const paper = dark ? "#161411" : "#fffdf8";
+      const slot = VERMILION;
+      const quiet = dark ? "#9d9483" : "#6c665b";
+      const bodies = dark ? [MOONLIT, "#cfc5b2", "#9d9483"] : [INK, "#36322b", "#6c665b"];
+      const dot = (x, y, colour) => {
+        c.fillStyle = colour;
+        c.fillRect(x, y, 1, 1);
+      };
+      const box = (x, y, w, h, colour) => {
+        c.fillStyle = colour;
+        c.fillRect(x, y, w, h);
+      };
+
+      function cartridge(x, floor, seed) {
+        const h = cartH - (hash(seed, 1) < 0.35 ? 2 : 0);
+        const y = floor - h;
+        const body = bodies[Math.floor(hash(seed, 2) * 2.4)];
+        box(x, y, cartW, h, body);
+        // Bevelled top corners and the contact notch at the foot.
+        c.clearRect(x, y, 1, 1);
+        c.clearRect(x + cartW - 1, y, 1, 1);
+        c.clearRect(x + 6, floor - 1, 8, 1);
+        box(x + 3, y + 3, 14, 13, paper);
+        const art = LABELS[Math.floor(hash(seed, 3) * LABELS.length)];
+        art.forEach((line, row) => {
+          for (let k = 0; k < 12; k += 1) if (line[k] === "#") dot(x + 4 + k, y + 4 + row, body);
+        });
+        box(x + 5, y + 14, 4 + Math.floor(hash(seed, 4) * 7), 1, body);
+        for (let k = 0; k < 3; k += 1) box(x + 4, y + 18 + k * 2, 12, 1, paper);
+      }
+
+      function emptySlot(x, floor) {
+        const y = floor - cartH;
+        for (let k = 0; k < cartW; k += 1) {
+          if (k % 3 !== 2) {
+            dot(x + k, y, slot);
+          }
+        }
+        for (let k = 0; k < cartH; k += 1) {
+          if (k % 3 !== 2) {
+            dot(x, y + k, slot);
+            dot(x + cartW - 1, y + k, slot);
+          }
+        }
+        // The fox, twice its sprite size, standing on the shelf.
+        PLAYER.forEach((line, row) => {
+          for (let k = 0; k < line.length; k += 1) {
+            if (line[k] === "x") box(x + k * 2, floor - (PLAYER.length - row) * 2, 2, 2, slot);
+          }
+        });
+      }
+
+      const pitch = cartW + 3;
+      const perRow = Math.ceil(cols / pitch) + 1;
+      const offset = Math.round((cols - perRow * pitch) / 2);
+      const bottom = lines - (withCopy ? 5 : Math.round((lines - rowsWanted * rowH) / 2) + 1);
+      // The empty slot sits right of centre on the middle shelf, clear of the
+      // profile picture at the bottom left and of the edge crop.
+      const emptyRow = Math.floor((rowsWanted - 1) / 2);
+      const emptyCol = Math.round(perRow * 0.62);
+      for (let row = 0; row < rowsWanted; row += 1) {
+        const floor = bottom - (rowsWanted - 1 - row) * rowH;
+        box(0, floor, cols, 2, ink);
+        box(0, floor + 2, cols, 1, quiet);
+        for (let i = 0; i < perRow; i += 1) {
+          const x = offset + i * pitch;
+          if (row === emptyRow && i === emptyCol) emptySlot(x, floor);
+          else cartridge(x, floor, row * 97 + i * 13 + 5);
+        }
+      }
+
+      if (withCopy) {
+        const copy = document.querySelector(".copy");
+        copy.hidden = false;
+        root.style.setProperty("--size", `${Math.round(height * 0.13)}px`);
+        root.style.setProperty("--top", `${Math.round(height * 0.12)}px`);
+      }
+      whenDrawn(document.fonts.load('400 100px "Redaction"'));
+    </script>
+  </body>
+</html>

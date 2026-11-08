@@ -8,6 +8,8 @@ import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const UNITY_PROFILE: GameEngineProfile = {
   id: "unity",
+  status: GAME_ENGINES.unity.status,
+  editors: ["blender", "unity"],
   turnLoop: GAME_ENGINES.unity.turnLoop,
   stage: GAME_ENGINES.unity.stage,
   tuneFile: null,
@@ -28,9 +30,26 @@ export const UNITY_PROFILE: GameEngineProfile = {
     rootOutputFiles: /(?:\.csproj|\.sln)$|^mono_crash\./,
     derivedAssets: true,
   },
-  scaffold: { version: UNITY_MIN_VERSION, directories: [] },
+  scaffold: {
+    version: UNITY_MIN_VERSION,
+    directories: [],
+    ignores: [
+      "unity/[Ll]ibrary/",
+      "unity/[Tt]emp/",
+      "unity/[Ll]ogs/",
+      "unity/[Uu]ser[Ss]ettings/",
+      "unity/[Oo]bj/",
+      "unity/*.csproj",
+      "unity/*.sln",
+    ],
+    agents: `Build BRIEF.md's game in Unity 6 (C#, Input System). unity/ is the project inside a demo shell (TEMPLATE.md): gameplay goes in unity/Assets/Scenes/Game.unity, built by unity/Assets/Editor/BuildGame.cs, game code in unity/Assets/Scripts; unity/Assets/Kurambit stays as shipped.
+
+Use the game_* tools to check, play, export and package the game, and the game_unity_* tools to edit scenes in the live editor; never run Unity yourself. Keep builds/ and unity/Library, Temp, Logs, UserSettings generated.
+`,
+  },
   resourcePath: (projectRelative) => projectRelative,
   importRoot: "Assets",
+  sharedEditor: true,
   importStep: true,
   compressedModels: false,
   groundHint: (_width, height, ground) => {
@@ -38,6 +57,8 @@ export const UNITY_PROFILE: GameEngineProfile = {
     return `Unity: set the sprite's Pivot to Custom (0.5, ${up}) in its import settings (Pixels Per Unit is yours to match the tiles) to put the transform on the ground line.`;
   },
   stripLoad: null,
+  xvfbRenderer: null,
+  sidecarLoad: null,
   tools: {
     import: "Unity games refresh assets and recompile scripts in the game's live Unity editor.",
     check:

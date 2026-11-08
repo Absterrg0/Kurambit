@@ -1,36 +1,27 @@
 # Making games
 
-Kurambit turns a written brief into a playable game. Your coding agent does the work with
-Blender and Godot or Unity for native games, or three.js for browser games; you direct it, play the result, and ask for changes.
+Kurambit turns a written brief into a playable game. Your coding agent builds it as a three.js
+browser game, with Blender for its art; you direct it, play the result, and ask for changes.
+
+three.js is the one engine for now. Godot and Unity games are paused while Kurambit focuses on
+three.js: see [Godot and Unity games](#godot-and-unity-games).
 
 ## Game tools
 
-three.js browser games need nothing installed. Native games use engines you install yourself,
-the same way you install your coding agents: Kurambit finds them, checks their versions, and
+three.js games need nothing installed. Art tools are programs you install yourself, the same
+way you install your coding agents: Kurambit finds them, checks their versions, and
 **Settings → General → Game tools** shows each one's status, where it was found, and a **Get**
 link to the vendor's download page when it is missing or the wrong version. After installing
 something, press **Check again**.
 
-- **Godot** builds and plays Godot games. Use Godot 4.7.x from
-  [godotengine.org/download](https://godotengine.org/download), plus its export templates: in the
-  Godot editor choose **Editor → Manage Export Templates** and download them. Without templates a
-  Godot game cannot be built for play; without the Windows ones, only Windows exports are refused.
-- **Unity** builds Unity games. Install [Unity Hub](https://unity.com/download) and add a Unity 6
-  editor, 6000.6.7f1 or later, with **Windows Build Support (Mono)**. When several are installed,
-  a new game uses the newest; a game already made keeps the version its project names when that
-  editor is installed, and Game tools warns you when only a newer one is, because opening the
-  project there upgrades it. Unity also needs a licence: in Unity Hub, sign in and add a free
-  Unity Personal licence under **Preferences → Licenses**. Kurambit only reads that the licence is
-  active; it never asks for or stores your Unity account. Unity games run on Linux only for now.
-- **Blender** makes game art for every engine. Use Blender 4.2 or later from
+- **Blender** makes game art. Use Blender 4.2 or later from
   [blender.org/download](https://www.blender.org/download/).
 - **MPFB2** is optional: it gives characters built in Blender a human body. See
   [Characters](#characters).
 
-Kurambit looks for each tool in this order: the path you enter in **Game tools**, the
-`KURAMBIT_GODOT`, `KURAMBIT_UNITY_EDITOR` or `KURAMBIT_BLENDER` environment variable, known install
-locations (Unity Hub's editors folder and its secondary install folder, and copies an earlier
-Kurambit installed), then your PATH (`godot`, `godot4`, `blender`). A path you enter is the only
+Kurambit looks for Blender in this order: the path you enter in **Game tools**, the
+`KURAMBIT_BLENDER` environment variable, a copy an earlier Kurambit installed, then your PATH
+(`blender`). A path you enter is the only
 place it looks, so a wrong one shows as an error instead of being skipped.
 
 ffmpeg records bot runs' videos, so bot runs need it; the asset library also uses it to draw
@@ -38,29 +29,20 @@ contact sheets of a pack's pictures, and without it lists the pack's files with 
 Kurambit finds it on your PATH or at `KURAMBIT_FFMPEG`.
 
 The live Blender view's helper runs through uv; Kurambit uses yours if it is on PATH and otherwise
-fetches it once by itself. Playing native games and the live Blender and Unity editors also need
-the system Xvfb package (`xorg-x11-server-Xvfb` on Fedora, `xvfb` on Debian and Ubuntu): everything
+fetches it once by itself. The live Blender view also needs the system Xvfb package (`xorg-x11-server-Xvfb` on Fedora, `xvfb` on Debian and Ubuntu): everything
 runs on a private virtual display, so nothing opens on your desktop.
 
-A Unity editor uses 2-3 GB of memory, so Kurambit keeps at most one open at a time and closes it
-after ten idle minutes; while one Unity game is checking, playing or exporting, another Unity
-game's request reports the editor busy instead of closing it.
-
-Kurambit refuses to open a live editor when the machine is short of memory: about 4 GB free for
-Unity, whose builds bring their own tools, and 1.5 GB for the live Blender view, plus about 2 GB
-more for a rendered look. Play sessions and bot runs check too, after waiting up to about a minute
-for memory to free: about 1.3 GB for a Godot session, 1 GB for a browser session and 1.5 GB for a
-bot run. Work started with less tends to be killed by the system midway, or to make the whole
+Kurambit refuses to open the live Blender view when the machine is short of memory: about 1.5 GB
+free, plus about 2 GB more for a rendered look. Play sessions and bot runs check too, after waiting
+up to about a minute for memory to free: about 1 GB for a browser session and 1.5 GB for a bot run. Work started with less tends to be killed by the system midway, or to make the whole
 machine hang on swap. The refusal says how much is needed and how much is free; close other apps or
 wait a few minutes, then ask again. Starts also take turns across the machine, so a start can wait
 behind another game's. If Kurambit cannot measure two keep-going steps in a row (the browser, an
 engine editor or a copy of the game kept failing), keep going pauses with what failed; it never
 judges or undoes a step on it, and **Resume** goes on once the cause is fixed. Kurambit never closes
 your other apps to make room. If free memory falls under about 1 GB while an editor sits idle,
-Kurambit closes it and reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB`,
-`KURAMBIT_BLENDER_MEMORY_MB`, `KURAMBIT_EXPLORE_NATIVE_MEMORY_MB`,
-`KURAMBIT_EXPLORE_WEB_MEMORY_MB`, `KURAMBIT_EXPLORE_UNITY_MEMORY_MB` (1 GB for a Unity session),
-`KURAMBIT_BLENDER_RENDER_MEMORY_MB` (sprite renders and rendered looks) and
+Kurambit closes it and reopens it on the next request; it never closes one mid-task. `KURAMBIT_BLENDER_MEMORY_MB`,
+`KURAMBIT_EXPLORE_WEB_MEMORY_MB`, `KURAMBIT_BLENDER_RENDER_MEMORY_MB` (sprite renders and rendered looks) and
 `KURAMBIT_BOT_MEMORY_MB` change the requirement, and 0 turns the check off.
 
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
@@ -69,7 +51,7 @@ You also need a signed-in agent. Codex and Claude are enabled by default; enable
 ## Making a game
 
 Choose **New game** on the home screen or in the sidebar. Name the game, write a brief and optional
-art direction, choose the engine and where to save it (`~/Games/<slug>` by default), pick the agent
+art direction, choose where to save it (`~/Games/<slug>` by default), pick the agent
 and model, then choose **Create game**. Kurambit creates the project folder and opens the game's
 chat with your brief already sent as its first message, so you see exactly what the agent was told.
 Your agent builds a first playable version in a few minutes; every message after that makes it
@@ -82,18 +64,10 @@ runs, at most every ten seconds and once more when the turn ends. If you are pla
 the game), it is not reloaded under you: the stage says your agent changed the game while you were
 playing, with **Reload**. A hidden stage catches up when you show it. If a save breaks the game, the
 stage names the error: quietly while the turn runs, since the agent may be mid-change, and with
-**Ask agent to fix** once the turn has ended. Godot and Unity games are not live: a Godot game plays
-its latest Web build, with **Play** and **Rebuild**, and a Unity game plays in its own window.
+**Ask agent to fix** once the turn has ended.
 
-Engine: three.js browser (default), Godot native or Unity native. Godot is the full native lane: a real Godot 4.7 project
-with Blender-made art, native play, and Web, Windows and Linux exports. Its Windows and Linux builds
-draw with Forward+; its Web build, Play and the agent's play sessions draw with the simpler
-Compatibility renderer, so a few effects only the native builds draw are left out of the default look. three.js is the quick
-browser lane: a static browser game with three.js vendored (no install step), played in real time
-through the same tools, with a Web export only. Play, preview and web packaging work the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
-editor on a private display, plays real Linux builds of it, and exports Linux and Windows builds.
-Unity games have no Web export, so Play and web packaging are not available for them; explore
-sessions and bot runs play a Linux player of the current sources, built once per change.
+A game is a static three.js browser game with three.js vendored (no install step), played in real
+time through the same tools, with a Web export.
 
 To continue an existing game, choose its card under **Your games** or its row in the sidebar, or use
 **Open game** and pick a folder that contains `game.json`. A game opens on its main chat: the first
@@ -259,30 +233,14 @@ it, and the chat is docked to its right.
   it now, at its title screen. Click the picture once so the keyboard reaches it, and use **Fullscreen** to give it the
   whole screen. A game made from the starter opens on its title screen: choose Play there, or press
   Enter. The game pauses and mutes while the stage is hidden and resumes when you come back.
-- **A Godot game** plays its latest Web build. **Play** serves it, building one first if none
-  exists, and **Rebuild** exports a fresh one; when the game's files changed after the last build,
-  the stage says so and offers to rebuild. **A Unity game** plays in its own window.
 - **Stop game**, in the stage's **More** menu, ends only the processes Kurambit started for this
   game and closes its preview server. A stopped game stays stopped, in every window and for your
   agent, until **Play** starts it again.
 - **Export…**, in the stage's **More** menu or the command palette, lists the targets the game's
   engine makes, each with its time, folder, logs and a freshness check against the current sources.
-  three.js games export Web only.
-- **Export Windows** writes a 64-bit build to `builds/windows/` (Godot and Unity games). A Godot
-  build is `game.exe`: the standard preset embeds the game data, so you can copy that one file to a
-  Windows PC; a preset that does not embed it also writes `game.pck`, and both files must be copied
-  together. A Unity build is the whole `builds/windows/` folder (`game.exe` with its `game_Data/`
-  and runtime files); ship the folder. **Download package** on the same card zips a Godot release
-  Kurambit already exported — `game.exe` alone, or `game.exe` and `game.pck` — without
-  exporting again; a Unity folder is not packaged. If the game sources changed since that export,
-  export Windows again before packaging. **Export Linux** writes a standalone build to
-  `builds/linux/` (for Unity, the whole folder ships). A release replaces the previous one only once
-  it is complete and checked, so a failed or interrupted export leaves the last good build in place.
-  Kurambit checks the Windows executable it produced but does not run it, so try it on Windows
-  before sharing it. If Godot's Windows export templates are missing, add them in the Godot editor
-  under **Editor → Manage Export Templates**.
-- **Download package** on the Web card zips the latest Web export (for a Godot game, the build Play
-  serves) without exporting again. Kurambit keeps the latest web export and the one before it; older
+  A release replaces the previous one only once it is complete and checked, so a failed or
+  interrupted export leaves the last good build in place.
+- **Download package** on the Web card zips the latest Web export without exporting again. Kurambit keeps the latest web export and the one before it; older
   ones are removed as new ones land. Later source edits are not included; only a new export changes
   what a new package contains. Upload the extracted files to an ordinary static HTTP host and serve
   them over HTTP; opening `index.html` directly from disk (`file://`) is not a supported way to play
@@ -299,7 +257,7 @@ keep their references. A game's agent ends its reply with the one change it woul
 it does, the composer shows it as **Next:**. **Ask for it** puts that change in the composer for you
 to edit or send, and dismissing it hides it until the next reply.
 
-Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
+Stopping the agent's turn stops its Blender commands, but a game that is already running
 keeps running; use **Stop game** to close it.
 
 ## Builds and undo
@@ -318,7 +276,7 @@ three facts, with:
 
 - **Play**, which plays it from a copy on the stage, even an old one; the game folder is never
   touched. **Back to the current game** returns to the live game, and **Stop game** ends the copies
-  too. Unity builds cannot be played this way yet; the build says so.
+  too.
 - **Undo** on the latest turn, which puts back the build the turn started from. After an undo,
   **Redo** puts the turn's change back.
 - **Go back** on an older build, which puts it in the game folder: the engine project, `art/` and
@@ -360,7 +318,13 @@ and how soon the game answers the first input. For a three.js game it also lists
 its assets folder those plays loaded and which sounds started playing, so art that was made but never
 wired in shows up as unused, and how smoothly the random-input play ran: frames per second, the
 slowest 1% of frames, the GPU's time per frame and the share of the resolution the game drew at.
-On a machine where Kurambit's browser cannot use the GPU, performance says so instead of guessing. Opening or playing a build that was never measured
+On a machine where Kurambit's browser cannot use the GPU, performance says so instead of guessing.
+The same play also looks at the scene the way you would: whether the player stays in view and big
+enough to read, whether a character stands in the ground instead of on it or sits inside another
+one, whether something falls out of the world, whether the camera ends up inside a wall, whether a
+character slides along in its idle pose, and which named things never came on screen. Each problem
+comes with a frame that outlines it, and your agent's `game_check` shows the same lines before it
+ends its turn. Opening or playing a build that was never measured
 measures it, one build at a time; a run measures its builds itself, and a three.js game measures
 each turn's build in the background when the turn ends. A fact Kurambit could not
 measure says **Not measured** and why, and never counts as a result: if a tool failed, **Measure
@@ -386,7 +350,7 @@ can ship and sell games that use it without credit. No account or API key is nee
 Agents use it when a game needs art or sound, and you can ask for it too, for example "use library
 characters and UI". The agent looks at a contact
 sheet of the files before it picks, copies them into the game under
-`assets/library/<pack>/` (`unity/Assets/Library/<pack>/` for Unity), and lists each file, its pack
+`assets/library/<pack>/`, and lists each file, its pack
 and source page in `ASSETS.md`. It never replaces a file already in the game.
 
 Each pack downloads once, the first time an agent looks inside it, into
@@ -394,25 +358,27 @@ Each pack downloads once, the first time an agent looks inside it, into
 checked against the copy Kurambit was released with; if a source site has changed the file, that pack
 is refused rather than used.
 
+## Godot and Unity games
+
+Godot and Unity games are paused while Kurambit focuses on three.js, and a new game is always a
+three.js game. A Godot or Unity game you made earlier still opens with its chats, builds and
+history, and its stage says the engine is paused; Kurambit does not build, check, play or export
+it, and its agent gets no engine tools. Kurambit no longer looks for Godot or Unity, so
+**Game tools** does not list them. The game's `godot/` or `unity/` folder is a normal project
+you can open in that engine's own editor.
+
 ## What is in a game folder
 
 Each game is a self-contained git repository you can move, back up, or open on another machine:
 
 - `game.json` and `BRIEF.md` describe the game.
-- `godot/` is a normal Godot 4.7 project you can open in the Godot editor (three.js games hold
-  `web/` instead: a static three.js project with `index.html`, `main.js`, `style.css`, `assets/`
-  and vendored `vendor/three.*.js`). A new game, on any engine, starts inside a demo shell: a
-  title screen, pause (Esc or P), settings for volume and fullscreen, a Controls screen where
-  players rebind keys (gamepads work too), a win or lose screen with Retry, and credits. Best
-  scores and unlocks are saved between launches, and Settings can reset them. The game's icon
-  (`assets/ui/icon.png`, cut from the key art) shows on the window, the browser tab and the
-  Windows `.exe`. The gameplay lives in `godot/scenes/game.tscn` (`web/main.js` for
-  three.js), and the credits screen shows `godot/credits.txt` (`web/credits.txt`).
-- Unity games hold `unity/` instead: a normal Unity project you can open in Unity Hub with
-  the Unity version its `ProjectSettings/ProjectVersion.txt` names. The gameplay lives in `unity/Assets/Scenes/Game.unity`, the icon is
-  `unity/Assets/UI/icon.png` and the credits are `unity/Assets/credits.txt`. Its `Library/`,
-  `Temp/` and `Logs/` folders are Unity's caches and are not committed. A Unity export is a folder: copy all of `builds/linux/` or `builds/windows/`, not just
-  the executable.
+- `web/` is the game: a static three.js project with `index.html`, `main.js`, `style.css`,
+  `assets/` and vendored `vendor/three.*.js`. A new game starts inside a demo shell: a title
+  screen, pause (Esc or P), settings for volume and fullscreen, a Controls screen where players
+  rebind keys (gamepads work too), a win or lose screen with Retry, and credits. Best scores and
+  unlocks are saved between launches, and Settings can reset them. The game's icon
+  (`web/assets/ui/icon.png`, cut from the key art) shows on the browser tab. The gameplay lives in
+  `web/main.js`, and the credits screen shows `web/credits.txt`.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
 - `.studio/` holds the game's bots, notes and videos, and a past production run's rounds.

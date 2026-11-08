@@ -1,4 +1,5 @@
 import * as GameRunControl from "../../../game/GameRunControl.ts";
+import * as GameProjectService from "../../../game/GameProjectService.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
@@ -6,7 +7,7 @@ import * as ServerConfig from "../../../config.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderInstanceId, ThreadId } from "@kurambit/contracts";
+import { GameOperationError, ProviderInstanceId, ThreadId } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -38,9 +39,24 @@ import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const roleThread = ThreadId.make("thread-role");
 const unreadableThread = ThreadId.make("thread-unreadable");
+const noGameThread = ThreadId.make("thread-no-game");
 
 const layerStubServices = Layer.mergeAll(
   Layer.mock(GameService.GameService)({}),
+  // Every thread here works in a three.js game, except one that is no game.
+  Layer.mock(GameProjectService.GameProjectService)({
+    resolve: (threadId) =>
+      threadId === noGameThread
+        ? Effect.fail(
+            new GameOperationError({
+              operation: "resolve-thread",
+              path: threadId,
+              reason: "project-not-found",
+            }),
+          )
+        : Effect.succeed("/games/test"),
+    read: () => Effect.succeed({ engine: { name: "three", version: "0" } } as never),
+  }),
   Layer.mock(GameRunControl.GameRunControl)({}),
   Layer.mock(GameBuilds.GameBuilds)({}),
   Layer.mock(McpHttpServer.McpClientAuthenticator)({
@@ -173,22 +189,21 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("kurambit_worktree_status");
       expect(toolNames).toContain("preview_status");
       expect(toolNames).toContain("delegate_task");
-      for (const name of [
-        "game_status",
-        "game_check",
-        "game_import",
-        "game_export",
-        "game_preview",
-        "game_stop",
-      ]) {
+      // A three.js chat: its engine's tools, and the asked-for ones only through game_more.
+      for (const name of ["game_status", "game_check", "game_export", "game_more"]) {
         expect(toolNames).toContain(name);
       }
-      for (const name of ["game_status", "game_bot_view", "game_blender_look"]) {
+      for (const name of ["game_import", "game_preview", "game_bot_run", "game_unity_edit"]) {
+        expect(toolNames).not.toContain(name);
+      }
+      for (const name of ["game_status", "game_blender_look"]) {
         expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(true);
       }
-      for (const name of ["game_check", "game_export", "game_preview", "game_stop"]) {
+      for (const name of ["game_check", "game_export"]) {
         expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(false);
       }
+      const noGame = (yield* listTools(noGameThread)).map((tool) => tool.name);
+      expect(noGame.filter((name) => name.startsWith("game_"))).toEqual([]);
 
       const handoff = tools.find((tool) => tool.name === "kurambit_worktree_handoff");
       expect(handoff?.annotations?.readOnlyHint).toBe(false);
@@ -231,6 +246,9 @@ it.effect("a production run's role thread gets no thread, worktree or project to
       const role = yield* names(roleThread);
       for (const name of hidden) expect(role).not.toContain(name);
       expect(role).toContain("game_status");
+      // A role plays the game itself: what a chat must ask for is listed for it.
+      expect(role).toContain("game_explore_start");
+      expect(role).not.toContain("game_more");
 
       // A record that cannot be read fails closed.
       const unreadable = yield* names(unreadableThread);

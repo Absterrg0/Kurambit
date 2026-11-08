@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Kurambit card</title>
+    <link rel="stylesheet" href="kit.css" />
+    <style>
+      /* One card, laid out by its shape: landscape (link cards, posts),
+         portrait (Instagram), story (9:16) and banner (profile headers).
+         --u scales every size from a reference frame of that layout. */
+
+      .frame {
+        position: absolute;
+        inset: 0;
+        display: grid;
+      }
+
+      /* A banner with a safe area (YouTube) keeps its content in the middle. */
+      [data-safe] .frame {
+        inset: auto;
+        left: 50%;
+        top: 50%;
+        width: var(--safe-w);
+        height: var(--safe-h);
+        transform: translate(-50%, -50%);
+      }
+
+      .copy {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .brand {
+        font-size: calc(30 * var(--u));
+      }
+
+      h1 {
+        font-size: calc(86 * var(--u));
+      }
+
+      .stroke {
+        width: calc(210 * var(--u));
+        margin-top: calc(20 * var(--u));
+        font-size: calc(86 * var(--u));
+      }
+
+      [data-t="paper"] .stroke {
+        background: var(--ink);
+      }
+
+      .sub {
+        max-width: 21em;
+        margin-top: calc(24 * var(--u));
+        font-size: calc(28 * var(--u));
+      }
+
+      .url {
+        font-size: calc(19 * var(--u));
+      }
+
+      .art {
+        position: relative;
+        min-height: 0;
+        container-type: size;
+      }
+
+      .art > * {
+        position: absolute;
+      }
+
+      /* Landscape: copy left, picture right. */
+      [data-layout="landscape"] .frame {
+        grid-template-columns: 1fr 42%;
+        column-gap: calc(28 * var(--u));
+        padding: calc(58 * var(--u)) calc(60 * var(--u)) 0 calc(76 * var(--u));
+      }
+
+      [data-layout="landscape"] .copy {
+        padding-bottom: calc(54 * var(--u));
+      }
+
+      [data-layout="landscape"] .words {
+        margin-top: auto;
+      }
+
+      [data-layout="landscape"] .url {
+        margin-top: calc(34 * var(--u));
+      }
+
+      /* Portrait and story: the picture on top, the words under it. */
+      :is([data-layout="portrait"], [data-layout="story"]) .frame {
+        grid-template-rows: auto 1fr auto;
+        padding: calc(72 * var(--u)) calc(80 * var(--u)) calc(80 * var(--u));
+      }
+
+      [data-layout="story"] .frame {
+        /* Instagram covers the top 250 and bottom 340 pixels with its own UI. */
+        padding: calc(270 * var(--u)) calc(84 * var(--u)) calc(360 * var(--u));
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .brand {
+        grid-row: 1;
+        font-size: calc(40 * var(--u));
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .art {
+        grid-row: 2;
+        margin: calc(30 * var(--u)) 0;
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .copy {
+        display: contents;
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .words {
+        grid-row: 3;
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) h1 {
+        font-size: calc(116 * var(--u));
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .stroke {
+        width: calc(250 * var(--u));
+        font-size: calc(116 * var(--u));
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .sub {
+        font-size: calc(38 * var(--u));
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .url {
+        margin-top: calc(40 * var(--u));
+        font-size: calc(26 * var(--u));
+      }
+
+      [data-layout="story"] h1 {
+        font-size: calc(128 * var(--u));
+      }
+
+      /* Banner: a profile header. The profile picture covers the bottom-left
+         corner, so the words keep to the upper left and the picture sits right. */
+      [data-layout="banner"] .frame {
+        grid-template-columns: 1fr 34%;
+        padding: calc(84 * var(--u)) calc(110 * var(--u)) 0 calc(112 * var(--u));
+      }
+
+      [data-layout="banner"] :is(.brand, .sub, .url) {
+        display: none;
+      }
+
+      [data-layout="banner"] h1 {
+        font-size: calc(92 * var(--u));
+      }
+
+      [data-layout="banner"] .art {
+        margin-top: calc(-84 * var(--u));
+      }
+
+      [data-layout="banner"] .stroke {
+        width: calc(250 * var(--u));
+        font-size: calc(92 * var(--u));
+      }
+
+      /* A strip too thin for two lines (LinkedIn's company banner): one line
+         of words clear of the logo at the bottom left, the fox at the end. */
+      [data-thin] .frame {
+        grid-template-columns: 1fr 18%;
+        padding: 0 calc(110 * var(--u)) 0 28%;
+      }
+
+      [data-thin] .copy {
+        justify-content: center;
+      }
+
+      [data-thin] h1 {
+        font-size: calc(96 * var(--u));
+      }
+
+      [data-thin] .stroke {
+        display: none;
+      }
+
+      [data-thin] .art {
+        margin-top: 0;
+      }
+
+      /* Pictures. */
+      #art {
+        inset: 0 0 calc(40 * var(--u));
+        width: 100%;
+        height: calc(100% - 40 * var(--u));
+      }
+
+      .art .ground-line {
+        left: -4%;
+        right: -6%;
+        bottom: calc(34 * var(--u));
+        height: calc(8 * var(--u));
+      }
+
+      [data-layout="banner"] .art .ground-line {
+        left: -400%;
+        right: -40%;
+      }
+
+      .art .enso {
+        inset: 6% -6% 16%;
+      }
+
+      /* Prints: a build laid on the desk, the one before it thrown under it. */
+      .print {
+        width: min(78cqw, 62cqh * 1.36);
+        aspect-ratio: 1.36;
+        padding: 3.2% 3.2% 0;
+        border-radius: 3px;
+        background: var(--print);
+        box-shadow:
+          0 1px 0 rgb(23 21 17 / 8%),
+          0 calc(18 * var(--u)) calc(34 * var(--u)) calc(-14 * var(--u)) rgb(23 21 17 / 45%);
+      }
+
+      .print canvas {
+        width: 100%;
+        aspect-ratio: 1.5;
+      }
+
+      .print p {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 2.6%;
+        font-family: var(--mono);
+        font-size: calc(15 * var(--u));
+        color: var(--pencil);
+      }
+
+      .print.under {
+        left: 0;
+        top: 21%;
+        transform: rotate(-5deg);
+      }
+
+      .print.over {
+        right: 2%;
+        top: 41%;
+        transform: rotate(2.5deg);
+      }
+
+      .print .cross {
+        position: absolute;
+        inset: 3.2% 3.2% auto;
+        aspect-ratio: 1.5;
+        width: auto;
+      }
+
+      .stamp {
+        right: -2%;
+        top: 32%;
+        display: grid;
+        place-items: center;
+        width: 24%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: var(--shu);
+        color: var(--sheet);
+        transform: rotate(-8deg);
+        -webkit-mask: url("../../site/seal-mask.svg") center / 100% 100% no-repeat;
+        mask: url("../../site/seal-mask.svg") center / 100% 100% no-repeat;
+      }
+
+      .stamp svg {
+        width: 46%;
+      }
+
+      /* Agents: the logos a run can use. */
+      .agents {
+        inset: 0 0 calc(30 * var(--u));
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        align-content: center;
+        gap: calc(30 * var(--u)) calc(18 * var(--u));
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .agents {
+        --grow: 1.9;
+        gap: calc(48 * var(--u)) calc(24 * var(--u));
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .agents li {
+        font-size: calc(26 * var(--u));
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .agents li.any {
+        font-size: calc(34 * var(--u));
+      }
+
+      .agents li {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: calc(12 * var(--u));
+        list-style: none;
+        font-size: calc(17 * var(--u));
+        color: var(--text-2);
+        text-align: center;
+      }
+
+      .agents svg {
+        width: min(calc(54 * var(--u) * var(--grow, 1)), 12cqh);
+        height: min(calc(54 * var(--u) * var(--grow, 1)), 12cqh);
+        color: var(--text);
+      }
+
+      .agents li.any {
+        justify-content: center;
+        font-family: var(--display);
+        font-style: italic;
+        font-size: calc(22 * var(--u));
+        line-height: 1.15;
+      }
+      /* A level that runs off the card's edge. */
+      .stage {
+        left: 0;
+        right: calc(-60 * var(--u));
+        bottom: 0;
+        aspect-ratio: 1.42;
+      }
+
+      [data-art="trail"] .stage {
+        aspect-ratio: 1.15;
+      }
+
+      /* Over the words, the picture fills its row instead of running off. */
+      :is([data-layout="portrait"], [data-layout="story"]) .stage {
+        inset: 0;
+        aspect-ratio: auto;
+      }
+
+      :is([data-layout="portrait"], [data-layout="story"]) .slip {
+        left: 0;
+      }
+
+      .stage canvas {
+        width: 100%;
+        height: 100%;
+      }
+
+      .stage .tally {
+        position: absolute;
+        top: 4%;
+        left: 3%;
+        font-family: var(--mono);
+        font-size: calc(17 * var(--u));
+        line-height: 1.6;
+        color: var(--quiet);
+      }
+
+      .stage .tally b {
+        font-weight: 400;
+        color: var(--shu-deep);
+      }
+
+      /* An idea on a slip of paper, laid over the level it became. */
+      .slip {
+        left: -6%;
+        top: 4%;
+        z-index: 1;
+        white-space: nowrap;
+        padding: calc(22 * var(--u)) calc(30 * var(--u)) calc(26 * var(--u));
+        border-radius: 2px;
+        background: var(--print);
+        font-family: var(--display);
+        font-style: italic;
+        font-size: calc(31 * var(--u));
+        line-height: 1.22;
+        color: var(--ink);
+        transform: rotate(-3deg);
+        box-shadow:
+          0 1px 0 rgb(23 21 17 / 8%),
+          0 calc(14 * var(--u)) calc(28 * var(--u)) calc(-12 * var(--u)) rgb(23 21 17 / 40%);
+      }
+
+      /* The shelf: a row of games, and the gap where yours goes. */
+      [data-art="shelf"] #art {
+        inset: 4% 0 calc(40 * var(--u));
+        height: calc(96% - 40 * var(--u));
+      }
+
+      :is([data-layout="landscape"], [data-layout="banner"]) [data-art="shelf"] #art {
+        width: calc(100% + 30 * var(--u));
+      }
+    </style>
+  </head>
+  <body>
+    <main class="frame">
+      <div class="copy">
+        <div class="brand"><i></i>Kurambit</div>
+        <div class="words">
+          <h1 data-headline></h1>
+          <i class="stroke"></i>
+          <p class="sub" data-subline></p>
+          <p class="url mono">kurambit.com</p>
+        </div>
+      </div>
+      <div class="art" data-art></div>
+    </main>
+    <script src="kit.js"></script>
+    <script>
+      const MESSAGES = {
+        make: {
+          h: "Nobody made the game<br />you want. So make it.",
+          s: "Describe it in plain words. Your coding agent builds it, Kurambit plays every build, and only the better ones are kept.",
+          art: "shelf",
+        },
+        tell: {
+          h: "Describe it like you'd<br />tell a friend.",
+          s: "No engine to learn and no code to write. One sentence is enough to start.",
+          art: "slip",
+        },
+        played: {
+          h: "It plays every build<br />before you do.",
+          s: "A separate tester plays each build, so a broken jump never reaches you.",
+          art: "trail",
+        },
+        better: {
+          h: "A worse build<br />never lands.",
+          s: "Each build is judged blind against the last one, and only the better one is kept.",
+          art: "prints",
+        },
+        agents: {
+          h: "Runs on the agent<br />you already pay for.",
+          s: "One signed-in coding agent is enough for the whole loop.",
+          art: "agents",
+        },
+        join: {
+          h: "Join the waitlist.",
+          s: "We let people in a few at a time, so everyone's first game gets made properly.",
+          art: "fox",
+        },
+      };
+
+      const { width, height, params } = sizePage(1200, 630);
+      const root = document.documentElement;
+      root.dataset.t ??= "paper";
+      const dark = root.dataset.t === "dark";
+      const [safeW, safeH] = (params.get("safe") ?? `${width}x${height}`).split("x").map(Number);
+      const ratio = safeW / safeH;
+      const layout =
+        params.get("layout") ??
+        (ratio >= 2.6
+          ? "banner"
+          : ratio >= 1.15
+            ? "landscape"
+            : ratio >= 0.7
+              ? "portrait"
+              : "story");
+      root.dataset.layout = layout;
+      if (ratio >= 4.6) root.dataset.thin = "";
+      // A safe area ("1546x423") is the box the content must stay inside.
+      root.style.setProperty("--safe-w", `${safeW}px`);
+      root.style.setProperty("--safe-h", `${safeH}px`);
+      const reference = { landscape: 630, banner: 500, portrait: 1080, story: 1080 }[layout];
+      const unit = (layout === "portrait" || layout === "story" ? safeW : safeH) / reference;
+      root.style.setProperty("--u", `${unit}px`);
+
+      const message = MESSAGES[params.get("m") ?? "make"];
+      document.querySelector("[data-headline]").innerHTML =
+        root.dataset.thin === undefined ? message.h : message.h.replace("<br />", " ");
+      document.querySelector("[data-subline]").textContent = message.s;
+
+      const art = document.querySelector("[data-art]");
+      art.dataset.art = message.art;
+      const ink = dark ? MOONLIT : INK;
+      const cell = Math.max(3, Math.round(5 * unit * (layout === "banner" ? 1.2 : 1)));
+
+      async function drawFox() {
+        art.insertAdjacentHTML(
+          "beforeend",
+          '<i class="enso"></i><canvas id="art"></canvas><i class="ground-line"></i>',
+        );
+        const canvas = document.getElementById("art");
+        layers(canvas, [await fox(canvas, cell, { ink })]);
+      }
+
+      // A shelf of games and the empty slot between them, dashed in
+      // vermilion, with the fox standing in it.
+      function drawShelf() {
+        art.innerHTML = '<canvas id="art"></canvas><i class="ground-line"></i>';
+        const canvas = document.getElementById("art");
+        const games = shape(
+          canvas,
+          cell,
+          (context, w, h) => {
+            // As many games as fit the shape at a cartridge's proportions,
+            // so the shelf reads at every size.
+            const slots = Math.min(7, Math.max(3, Math.round((w / h) * 2.2) | 1));
+            const empty = Math.floor(slots / 2);
+            const pitch = w / slots;
+            const width = Math.round(pitch * 0.8);
+            const floor = h - 1;
+            for (let i = 0; i < slots; i += 1) {
+              const height = Math.round(
+                Math.min(h * 0.86, width * 1.55) * (0.92 + hash(i, 7) * 0.08),
+              );
+              const x = Math.round(i * pitch + (pitch - width) / 2);
+              const y = floor - height;
+              if (i === empty) {
+                context.fillStyle = "rgb(255, 0, 0)";
+                const dash = (px, py, k) => {
+                  if ((k >> 1) % 2 === 0) context.fillRect(px, py, 1, 1);
+                };
+                for (let k = 0; k < width; k += 1) dash(x + k, y, k);
+                for (let k = 0; k < height; k += 1) {
+                  dash(x, y + k, k);
+                  dash(x + width - 1, y + k, k);
+                }
+                const unit = Math.max(1, Math.round(width / 13));
+                sprite(context, x + (width - 10 * unit) / 2, floor - unit, unit);
+                continue;
+              }
+              context.fillStyle = "#000";
+              context.fillRect(x, y, width, height);
+              const inset = Math.max(1, Math.round(width * 0.12));
+              const label = {
+                x: x + inset,
+                y: y + Math.round(height * 0.14),
+                w: width - inset * 2,
+              };
+              label.h = Math.round(label.w * 0.95);
+              context.fillStyle = "#fff";
+              context.fillRect(label.x, label.y, label.w, label.h);
+              // A different little picture on each label.
+              context.fillStyle = "#000";
+              const cx = label.x + label.w / 2;
+              const cy = label.y + label.h * 0.45;
+              const r = label.w * 0.24;
+              context.beginPath();
+              const kind = i % 3;
+              if (kind === 0) context.arc(cx, cy, r, 0, Math.PI * 2);
+              if (kind === 1) {
+                context.moveTo(cx - r * 1.3, cy + r);
+                context.lineTo(cx, cy - r * 1.1);
+                context.lineTo(cx + r * 1.3, cy + r);
+              }
+              if (kind === 2) {
+                context.rect(cx - r * 1.2, cy, r * 1.1, r);
+                context.rect(cx + r * 0.1, cy - r, r * 1.1, r * 2);
+              }
+              context.fill();
+              context.fillRect(
+                label.x + inset,
+                label.y + label.h - inset * 1.4,
+                label.w * 0.6,
+                Math.max(1, inset * 0.5),
+              );
+              context.fillStyle = "#fff";
+              for (let k = 0; k < 3; k += 1) {
+                context.fillRect(x + inset, floor - inset * (1.2 + k * 0.9), width - inset * 2, 1);
+              }
+            }
+          },
+          { ink },
+        );
+        layers(canvas, [games]);
+      }
+
+      function drawPrints() {
+        art.innerHTML = `
+          <div class="print under"><canvas data-level="0.3"></canvas>
+            <svg class="cross" viewBox="0 0 150 100" preserveAspectRatio="none"><path d="M18 14 L132 88 M132 12 L20 86" stroke="${VERMILION}" stroke-width="3.2" stroke-linecap="round" fill="none"/></svg>
+            <p><span>Build 6</span><span>thrown away</span></p></div>
+          <div class="print over"><canvas data-level="0.74"></canvas>
+            <p><span>Build 7</span><span>kept</span></p></div>
+          <div class="stamp"><svg viewBox="0 0 40 40"><path d="M9 21 L17 29 L32 11" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>`;
+        for (const canvas of art.querySelectorAll("[data-level]")) {
+          const sunAt = Number(canvas.dataset.level);
+          const c = Math.max(2, Math.round(cell * 0.55));
+          layers(canvas, [shape(canvas, c, (context, w, h) => level(context, w, h, { sunAt }))]);
+        }
+      }
+
+      function drawAgents() {
+        const AGENTS = [
+          ["claude-code", "Claude Code"],
+          ["codex", "Codex"],
+          ["cursor", "Cursor"],
+          ["gemini", "Gemini CLI"],
+          ["opencode", "OpenCode"],
+          ["github-copilot-cli", "GitHub Copilot"],
+          ["grok-build", "Grok Build"],
+          ["antigravity", "Antigravity"],
+        ];
+        art.innerHTML =
+          `<ul class="agents">` +
+          AGENTS.map(
+            ([id, name]) =>
+              `<li><svg aria-hidden="true"><use href="../../site/agents.svg#${id}"/></svg><span>${name}</span></li>`,
+          ).join("") +
+          `<li class="any">and any<br />ACP agent</li></ul>`;
+      }
+
+      // The tester's tries over a level: two falls into the gap in ink, the
+      // run that made it in vermilion.
+      function drawTrail() {
+        art.innerHTML = `<div class="stage"><canvas></canvas>
+          <p class="tally">Build 12<br />40 plays<br /><b>kept</b></p></div>`;
+        const canvas = art.querySelector("canvas");
+        const c = Math.max(3, Math.round(cell * 0.8));
+        const scene = shape(canvas, c, (context, w, h) =>
+          level(context, w, h, { sunAt: null, sky: 0, hills: 0.2, player: false }),
+        );
+        const tries = shape(canvas, c, (context, w, h) => {
+          const arc = (x0, y0, x1, y1, lift, t) => [
+            x0 + (x1 - x0) * t,
+            y0 + (y1 - y0) * t - 4 * lift * t * (1 - t),
+          ];
+          // Two tries that fell into the gap, dotted in ink.
+          context.fillStyle = "#000";
+          for (const [x1, lift] of [
+            [0.37, 0.1],
+            [0.41, 0.22],
+          ]) {
+            for (let i = 1; i < 16; i += 1) {
+              const [x, y] = arc(0.24, 0.76, x1, 1.04, lift, i / 16);
+              context.fillRect(Math.round(x * w), Math.round(y * h), 2, 2);
+            }
+          }
+          // The run that made it, as onion-skinned frames that firm up.
+          const unit = Math.max(1, Math.round(h / 58));
+          const frames = [
+            ...[0, 0.3, 0.6, 1].map((t) => arc(0.18, 0.8, 0.49, 0.72, 0.26, t)),
+            ...[0.4, 1].map((t) => arc(0.49, 0.72, 0.74, 0.66, 0.2, t)),
+          ];
+          frames.forEach(([x, y], i) => {
+            const share = i / (frames.length - 1);
+            sprite(context, x * w, y * h, unit, 0.22 + 0.78 * share ** 1.6);
+          });
+        });
+        layers(canvas, [scene, tries]);
+      }
+
+      // Rooftops in the rain, the fox in the air between two of them.
+      function drawSlip() {
+        art.innerHTML = `<p class="slip">A fox who can only jump<br />when it rains.</p>
+          <div class="stage"><canvas></canvas></div>`;
+        const canvas = art.querySelector("canvas");
+        const c = Math.max(3, Math.round(cell * 0.8));
+        const town = shape(canvas, c, (context, w, h) => {
+          context.fillStyle = "#fff";
+          context.fillRect(0, 0, w, h);
+          // Rain: short diagonal streaks.
+          context.fillStyle = "#000";
+          for (let i = 0; i < 46; i += 1) {
+            const x = hash(i, 21) * w * 1.15;
+            const y = hash(i, 41) * h * 0.92;
+            for (let k = 0; k < 5; k += 1)
+              context.fillRect(Math.round(x - k * 0.5), Math.round(y + k), 1, 1);
+          }
+          const roofs = [
+            [-0.02, 0.3, 0.64, 0],
+            [0.47, 0.75, 0.54, 0.09],
+            [0.83, 1.04, 0.7, 0],
+          ];
+          for (const [a, b, top, peak] of roofs) {
+            context.fillStyle = "#fff";
+            context.fillRect(a * w - 3, (top - peak) * h - 3, (b - a) * w + 6, h);
+            context.fillStyle = "#000";
+            context.beginPath();
+            context.moveTo(a * w, top * h);
+            context.lineTo(((a + b) / 2) * w, (top - peak) * h);
+            context.lineTo(b * w, top * h);
+            context.lineTo(b * w, h);
+            context.lineTo(a * w, h);
+            context.fill();
+          }
+          context.fillRect(w * 0.05, h * 0.55, w * 0.04, h * 0.1);
+          context.fillRect(w * 0.93, h * 0.6, w * 0.012, h * 0.1);
+          context.fillStyle = "#fff";
+          for (const [a, b, top] of roofs) {
+            for (let row = 0; row < 3; row += 1) {
+              for (let k = 0; k < 3; k += 1) {
+                const x = a + (b - a) * (0.16 + k * 0.27);
+                context.fillRect(x * w, (top + 0.07 + row * 0.11) * h, w * 0.04, h * 0.05);
+              }
+            }
+          }
+          const unit = Math.max(1, Math.round(h / 34));
+          sprite(context, w * 0.3, h * 0.36 + PLAYER.length * unit, unit);
+        });
+        layers(canvas, [town]);
+      }
+
+      const jobs = {
+        shelf: drawShelf,
+        fox: drawFox,
+        prints: drawPrints,
+        trail: drawTrail,
+        slip: drawSlip,
+        agents: drawAgents,
+      };
+      async function fitHeadline() {
+        await document.fonts.load('400 100px "Redaction"');
+        const h1 = document.querySelector("h1");
+        const stroke = document.querySelector(".stroke");
+        const most = root.dataset.thin !== undefined ? 1 : 2;
+        let size = parseFloat(getComputedStyle(h1).fontSize);
+        const lines = () => Math.round(h1.getBoundingClientRect().height / (size * 0.98));
+        while (lines() > most && size > 12) {
+          size *= 0.96;
+          h1.style.fontSize = `${size}px`;
+          stroke.style.fontSize = `${size}px`;
+        }
+      }
+
+      whenDrawn(fitHeadline().then(() => jobs[message.art]()));
+    </script>
+  </body>
+</html>

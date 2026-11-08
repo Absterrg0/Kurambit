@@ -180,7 +180,7 @@ export const fakeGameEngine = (
       ),
     check: (root) =>
       Effect.flatMap(context(root), ({ backend, ctx }) =>
-        Effect.map(backend.runCheck(ctx, { gameplayScene: "" }), (report) => ({
+        Effect.map(backend.runCheck(ctx, { gameplayScene: "", scene: false }), (report) => ({
           ok: (report.reported?.errors.length ?? 1) === 0,
           errors: [...(report.reported?.errors ?? [])],
           warnings: [...(report.reported?.warnings ?? [])],

@@ -836,3 +836,35 @@ it.layer(layer)("capture index lifetime", (it) => {
     }),
   );
 });
+
+it.layer(layer)("checkpoints from before the rename", (it) => {
+  it.effect("are listed under the new name, never overwriting a ref already there", () =>
+    Effect.gen(function* () {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-legacy-refs-"));
+      try {
+        baseGame(root);
+        const driver = yield* GitVcsDriver.makeVcsDriverShape();
+        const head = git(root, ["rev-parse", "HEAD"]).trim();
+        const kept = yield* driver.checkpoints.captureCheckpoint({
+          cwd: root,
+          checkpointRef: CheckpointRef.make("refs/kurambit/checkpoints/t/kept"),
+        });
+        git(root, ["update-ref", "refs/t3/checkpoints/t/old", head]);
+        git(root, ["update-ref", "refs/t3/checkpoints/t/kept", head]);
+        const listed = yield* driver.checkpoints.listCheckpointRefs({
+          cwd: root,
+          prefix: "refs/kurambit/checkpoints/t/",
+        });
+        const byName = new Map(listed.map((entry) => [entry.checkpointRef, entry.oid]));
+        assert.strictEqual(byName.get(CheckpointRef.make("refs/kurambit/checkpoints/t/old")), head);
+        assert.strictEqual(
+          byName.get(CheckpointRef.make("refs/kurambit/checkpoints/t/kept")),
+          kept,
+        );
+        assert.strictEqual(git(root, ["rev-parse", "refs/t3/checkpoints/t/old"]).trim(), head);
+      } finally {
+        NodeFS.rmSync(root, { recursive: true, force: true });
+      }
+    }),
+  );
+});

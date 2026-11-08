@@ -49,7 +49,7 @@ import {
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { toolsDirectory } from "./GameToolchain.ts";
-import { engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 
 /** Beside the pinned tools, shared by every game on this machine. */
@@ -1321,7 +1321,7 @@ const make = Effect.gen(function* () {
           filesDir,
           style,
         )),
-        profile.importStep ? "Run game_import, then game_check." : "Run game_check.",
+        afterAddingArt(profile),
       ].join("\n");
       return { text, directory: directoryRel, added: added.length };
     });
