@@ -22,6 +22,8 @@ export interface BenchGame {
     readonly seconds: number | null;
     /** From sending the brief to the turn's end. */
     readonly sinceBriefSeconds: number | null;
+    /** The agent's closing message, cut to a paragraph. */
+    readonly lastMessage: string | null;
     readonly usage: {
       readonly input: number;
       readonly cached: number;
@@ -31,7 +33,11 @@ export interface BenchGame {
       readonly partial: number;
     } | null;
   };
-  readonly build: { readonly id: string; readonly summary: string } | null;
+  readonly build: {
+    readonly id: string;
+    readonly summary: string;
+    readonly files: ReadonlyArray<string>;
+  } | null;
   readonly facts: GameBuildFacts | null;
   readonly check: {
     readonly calls: number;
@@ -52,6 +58,8 @@ export interface BenchRun {
   readonly seconds: number;
   readonly commit: string;
   readonly briefsVersion: number;
+  /** Absent in runs from before the score had a version. */
+  readonly scoreVersion?: number;
   readonly model: ModelSelection | null;
   readonly games: ReadonlyArray<BenchGame>;
 }
@@ -134,7 +142,7 @@ function factLines(game: BenchGame): Array<string> {
 const escape = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-function html(run: BenchRun, previous: BenchRun | null): string {
+function html(run: BenchRun, previous: BenchRun | null, note: string | null): string {
   const t = totals(run);
   const p = previous === null ? null : totals(previous);
   const prevGame = (id: string) => previous?.games.find((game) => game.id === id) ?? null;
@@ -157,6 +165,7 @@ function html(run: BenchRun, previous: BenchRun | null): string {
 ${shots}
 <ul class="criteria">${criteria}</ul>
 <p>Turn: ${escape(game.turn.status)}, ${minutes(game.turn.seconds)}${usage === null ? "" : `, ${tokens(usage.input)} input (${tokens(usage.cached)} cached), ${tokens(usage.output)} output${usage.partial > 0 ? `, ${usage.partial} turn(s) with partial usage` : ""}`}.${game.error ? ` Runner error: ${escape(game.error)}` : ""}</p>
+${game.turn.lastMessage === null ? "" : `<blockquote>${escape(game.turn.lastMessage)}</blockquote>`}
 <details><summary>Facts and check</summary>
 <ul>${factLines(game)
         .map((line) => `<li>${escape(line)}</li>`)
@@ -187,11 +196,12 @@ section{border-top:1px solid var(--rule);padding:18px 0}
 ul{margin:6px 0;padding-left:18px}.criteria{list-style:none;padding:0}
 table{border-collapse:collapse;margin:10px 0}td{padding:2px 14px 2px 0;font-variant-numeric:tabular-nums}
 details summary{cursor:pointer;color:var(--muted)}
+blockquote{margin:6px 0;padding-left:12px;border-left:2px solid var(--rule);color:var(--muted);white-space:pre-wrap}
 @media (max-width:560px){.shots{grid-template-columns:1fr}}
 </style></head><body>
 <h1>First ten minutes: ${t.passed} / ${t.possible}</h1>
 <p class="meta">${escape(run.stamp)} · commit ${escape(run.commit)} · ${escape(run.model ? `${run.model.instanceId}/${run.model.model}` : "no model")} · briefs v${run.briefsVersion} · ${run.games.length} games · run ${minutes(run.seconds)} · turns ${minutes(t.turnSeconds)} · ${tokens(t.usage.input)} input (${tokens(t.usage.cached)} cached), ${tokens(t.usage.output)} output${t.usage.partial > 0 ? ` (${t.usage.partial} provider turns reported partial usage)` : ""}</p>
-<p class="meta">${previous === null ? "No earlier run to compare with." : `Previous run ${escape(previous.stamp)} (commit ${escape(previous.commit)}): ${p!.passed} / ${p!.possible}, ${signed(t.passed - p!.passed)}.`}</p>
+<p class="meta">${previous === null ? escape(note ?? "") : `Previous run ${escape(previous.stamp)} (commit ${escape(previous.commit)}): ${p!.passed} / ${p!.possible}, ${signed(t.passed - p!.passed)}.`}</p>
 <table><tbody>${criteriaTotals}</tbody></table>
 <p class="meta">✓ pass · ✗ fail · – not measured. Thresholds: ends no sooner than ${THRESHOLDS.instantEndSeconds} s with no skill, ${THRESHOLDS.minFps} fps, playable within ${THRESHOLDS.firstPlayableSeconds} s of the brief.</p>
 ${rows}
@@ -199,7 +209,7 @@ ${rows}
 `;
 }
 
-function markdown(run: BenchRun, previous: BenchRun | null): string {
+function markdown(run: BenchRun, previous: BenchRun | null, note: string | null): string {
   const t = totals(run);
   const p = previous === null ? null : totals(previous);
   const lines = [
@@ -207,7 +217,7 @@ function markdown(run: BenchRun, previous: BenchRun | null): string {
     "",
     `Commit ${run.commit}, ${run.model ? `${run.model.instanceId}/${run.model.model}` : "no model"}, ${run.games.length} games, run ${minutes(run.seconds)}, turns ${minutes(t.turnSeconds)}, ${tokens(t.usage.input)} input (${tokens(t.usage.cached)} cached), ${tokens(t.usage.output)} output.`,
     previous === null
-      ? "No earlier run to compare with."
+      ? (note ?? "")
       : `Previous run ${previous.stamp} (${previous.commit}): ${p!.passed} / ${p!.possible}, ${signed(t.passed - p!.passed)}.`,
     "",
     `| Game | Score | ${CRITERIA.map((c) => CRITERION_LABELS[c]).join(" | ")} | Turn |`,
@@ -233,11 +243,27 @@ function markdown(run: BenchRun, previous: BenchRun | null): string {
   return lines.join("\n");
 }
 
+/** Why the run before cannot be diffed with this one, or null when it can. */
+const incomparable = (run: BenchRun, earlier: BenchRun) =>
+  earlier.scoreVersion !== run.scoreVersion
+    ? `it was scored by score version ${earlier.scoreVersion ?? 0}, this run by ${run.scoreVersion}`
+    : earlier.briefsVersion !== run.briefsVersion
+      ? `it ran briefs v${earlier.briefsVersion}, this run v${run.briefsVersion}`
+      : null;
+
 export async function writeReport(outRoot: string, runDir: string, run: BenchRun) {
-  const previous = await previousRun(outRoot, run.stamp);
+  const earlier = await previousRun(outRoot, run.stamp);
+  const why = earlier === null ? null : incomparable(run, earlier);
+  const previous = why === null ? earlier : null;
+  const note =
+    earlier === null
+      ? "No earlier run to compare with."
+      : why !== null
+        ? `Previous run ${earlier.stamp} is not compared: ${why}.`
+        : null;
   const htmlPath = NodePath.join(runDir, "report.html");
   const markdownPath = NodePath.join(runDir, "summary.md");
-  await NodeFSP.writeFile(htmlPath, html(run, previous));
-  await NodeFSP.writeFile(markdownPath, markdown(run, previous));
+  await NodeFSP.writeFile(htmlPath, html(run, previous, note));
+  await NodeFSP.writeFile(markdownPath, markdown(run, previous, note));
   return { html: htmlPath, markdown: markdownPath };
 }

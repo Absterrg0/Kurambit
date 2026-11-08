@@ -35,7 +35,7 @@ import { startBenchmarkServer, type BenchmarkServer } from "../lib/benchmark-ser
 import { prepareDisplaySandbox } from "../lib/display-sandbox.ts";
 import { observationProtocolLayer } from "../lib/observation-transport.ts";
 import { writeReport, type BenchGame, type BenchRun } from "./report.ts";
-import { scoreGame } from "./score.ts";
+import { SCORE_VERSION, scoreGame } from "./score.ts";
 
 const checkout = NodePath.resolve(
   NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
@@ -167,6 +167,12 @@ function usageOf(projection: OrchestrationV2ThreadProjection) {
     output += usage?.outputTokens ?? 0;
   }
   return { input, cached, output, providerTurns: projection.providerTurns.length, partial };
+}
+
+/** How the agent closed its turn: the plainest account of a turn that built nothing. */
+function lastMessageOf(projection: OrchestrationV2ThreadProjection): string | null {
+  const last = projection.turnItems.findLast((item) => item.type === "assistant_message");
+  return last?.type === "assistant_message" ? last.text.slice(0, 1200) : null;
 }
 
 /** The last `game_check` the agent ran in its turn, as the agent saw it. */
@@ -396,13 +402,23 @@ async function runBrief(
       seconds: turnSeconds,
       sinceBriefSeconds: sinceBrief,
       usage: usageOf(projection),
+      lastMessage: lastMessageOf(projection),
     },
-    build: build === undefined ? null : { id: build.id, summary: build.summary },
+    build:
+      build === undefined
+        ? null
+        : { id: build.id, summary: build.summary, files: build.files.map((file) => file.path) },
     facts,
     check: { calls: check.calls, ...readCheck(check.result), raw: check.result },
     shots: pictures.shots,
     shotsFrom: pictures.from,
-    score: scoreGame({ facts, turnSeconds: sinceBrief, missing }),
+    score: scoreGame({
+      facts,
+      files: build === undefined ? null : build.files.map((file) => file.path),
+      complete: build === undefined || build.files.length === build.fileCount,
+      turnSeconds: sinceBrief,
+      missing,
+    }),
   };
 }
 
@@ -447,13 +463,25 @@ async function main() {
           brief: brief.brief,
           root: null,
           threadId: null,
-          turn: { status: "error", seconds: null, sinceBriefSeconds: null, usage: null },
+          turn: {
+            status: "error",
+            seconds: null,
+            sinceBriefSeconds: null,
+            usage: null,
+            lastMessage: null,
+          },
           build: null,
           facts: null,
           check: { calls: 0, result: null, refused: null, raw: null },
           shots: [],
           shotsFrom: null,
-          score: scoreGame({ facts: null, turnSeconds: null, missing: `runner error: ${why}` }),
+          score: scoreGame({
+            facts: null,
+            files: null,
+            complete: true,
+            turnSeconds: null,
+            missing: `runner error: ${why}`,
+          }),
           error: why,
         });
       }
@@ -473,6 +501,7 @@ async function main() {
     seconds: seconds(startedAt, new Date()),
     commit: (await runFile("git", ["-C", checkout, "rev-parse", "--short=9", "HEAD"])).trim(),
     briefsVersion: briefFile.version,
+    scoreVersion: SCORE_VERSION,
     model: modelSelection,
     games,
   };

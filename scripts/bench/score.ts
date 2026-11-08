@@ -4,6 +4,12 @@ import {
   type GameFactView,
 } from "../../packages/contracts/src/index.ts";
 
+/**
+ * Bump when a score stops meaning what it meant (a criterion or threshold
+ * changes): runs scored by another version are listed, never diffed.
+ */
+export const SCORE_VERSION = 1;
+
 /** Every number the score judges against. Change one here, never at a use site. */
 export const THRESHOLDS = {
   /**
@@ -164,21 +170,44 @@ const firstPlayableVerdict = (firstPlayableSeconds: number | null, booted: Verdi
   return firstPlayableSeconds <= THRESHOLDS.firstPlayableSeconds ? pass(text) : fail(text);
 };
 
+/**
+ * Whether a turn's changed files include the game's own code. A new three.js game
+ * is the template's playable starter, which boots and ends by itself: a turn that
+ * only wrote STYLE.json or fetched art would score the starter as the brief's
+ * game. `web/vendor/` (three.js) and `web/shell/` (the harness) come from the
+ * template and `web/assets/` is art, so only the rest of `web/` is the game.
+ */
+export const changesGameCode = (files: ReadonlyArray<string>) =>
+  files.some(
+    (path) =>
+      path.startsWith("web/") &&
+      !["web/vendor/", "web/shell/", "web/assets/"].some((prefix) => path.startsWith(prefix)),
+  );
+
 export function scoreGame(input: {
   readonly facts: GameBuildFacts | null;
+  /** The build's changed files (the most changed, when `complete` is false); null without a build. */
+  readonly files: ReadonlyArray<string> | null;
+  /** Whether `files` lists every changed file. */
+  readonly complete: boolean;
   readonly turnSeconds: number | null;
   /** Why there are no facts, when there are none. */
   readonly missing: string;
 }): GameScore {
-  const facts = input.facts;
+  const starter =
+    input.files !== null && input.complete && !changesGameCode(input.files)
+      ? `the turn changed no game code (${input.files.join(", ") || "no files"}): what plays is the template's starter`
+      : null;
+  const facts = starter === null ? input.facts : null;
+  const missing = starter ?? input.missing;
   const verdicts: Record<Criterion, Verdict> =
     facts === null
       ? {
-          boots: fail(input.missing),
-          ending: notMeasured(input.missing),
-          scene: notMeasured(input.missing),
-          performance: notMeasured(input.missing),
-          "first-playable": fail(input.missing),
+          boots: fail(missing),
+          ending: notMeasured(missing),
+          scene: notMeasured(missing),
+          performance: notMeasured(missing),
+          "first-playable": fail(missing),
         }
       : (() => {
           const boots = bootsVerdict(facts);
