@@ -116,7 +116,7 @@ export const refusal = (
 };
 
 /** Whether the calling thread's game, moment and machine allow the tool at all. */
-export const fits = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
+const fits = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
   refusal(placement, scope) === null;
 
 /**
@@ -135,7 +135,7 @@ const askedIn = (placement: GameToolPlacement, scope: McpInvocationScope | undef
     : undefined);
 
 /** Whether it is in the listing: it fits, and a chat asks for it first when it waits to be asked. */
-export const listed = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
+const listed = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
   fits(placement, scope) &&
   (scope?.gameRunRole === "run" || askedIn(placement, scope) === undefined);
 
