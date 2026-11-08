@@ -98,6 +98,7 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
   const box = new THREE.Box3();
   const meshBox = new THREE.Box3();
   const otherBox = new THREE.Box3();
+  const nameBox = new THREE.Box3();
   const levelBox = new THREE.Box3();
   const allBox = new THREE.Box3();
   const frustum = new THREE.Frustum();
@@ -396,7 +397,15 @@ export function createSceneReport({ canvas, view, player, bridge, animation }) {
       if (typeof node.name === "string" && node.name !== "" && !node.isScene)
         // The shell's level names its pieces "model:mesh"; the model is the name people know.
         return humanName(node.name.split(":")[0]);
-    return "level geometry";
+    // Nothing named: its shape and size are how the game's code can be searched for it.
+    boundsOf(object, nameBox);
+    const shape = String(object.geometry?.type ?? "")
+      .replace(/(Buffer)?Geometry$/, "")
+      .toLowerCase();
+    const size = nameBox.isEmpty()
+      ? ""
+      : ` ${round(nameBox.max.x - nameBox.min.x, 1)} × ${round(nameBox.max.y - nameBox.min.y, 1)} × ${round(nameBox.max.z - nameBox.min.z, 1)} m`;
+    return `an unnamed ${shape === "" ? "" : `${shape} `}mesh${size}`;
   };
 
   // ── Trackers ──────────────────────────────────────────────────────────
