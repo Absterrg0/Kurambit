@@ -183,7 +183,7 @@ NSIS is downloaded by electron-builder.
 
 ### Signing and passkeys
 
-Add `--signed` after configuring the platform credentials in the
+Add `--signed` after configuring the platform credentials listed in the
 [release runbook](./release.md). Browser passkeys on macOS require a signed,
 provisioned app. Set `KURAMBIT_PASSKEY_RP_DOMAINS` to the relying-party domains
 covered by the provisioning profile.
