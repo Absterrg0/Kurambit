@@ -268,9 +268,6 @@ function scheduledTaskSummary(task: ScheduledTask): OrchestratorMcpScheduledTask
     schedule: task.schedule,
     nextRunAt: task.nextRunAt,
     lastRunStatus: task.lastRunStatus,
-    ...(task.webhook === undefined
-      ? {}
-      : { webhookSignature: task.webhook.hasSecret ? "set" : "none" }),
   };
 }
 
@@ -1667,12 +1664,19 @@ const make = Effect.gen(function* () {
           input.bindToCurrentThread === undefined
             ? existing.workspaceStrategy
             : scheduledTaskWorkspaceStrategy(input.bindToCurrentThread);
+        const schedule = input.schedule ?? existing.schedule;
+        if (schedule.type === "webhook") {
+          return yield* failure(
+            "invalid_request",
+            "Webhook triggers are no longer supported. Pass a schedule to give this task a time.",
+          );
+        }
         const upsertInput: ScheduledTaskUpsertInput = {
           id: existing.id,
           title: input.title ?? existing.title,
           prompt: input.prompt ?? existing.prompt,
           enabled: input.enabled ?? existing.enabled,
-          schedule: input.schedule ?? existing.schedule,
+          schedule,
           projectId: existing.projectId,
           threadId,
           workspaceStrategy,

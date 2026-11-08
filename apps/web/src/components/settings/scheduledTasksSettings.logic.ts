@@ -29,7 +29,7 @@ export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
   };
 }
 
-export type ScheduleMode = "fixed" | "interval" | "webhook";
+export type ScheduleMode = "fixed" | "interval";
 export type WorkspaceMode = "root" | "worktree" | "existing_worktree";
 
 export interface DraftState {
@@ -55,35 +55,9 @@ export interface DraftState {
    * options (reasoning, temperature, …) when the model itself is left unchanged.
    */
   readonly baseModelSelection: ModelSelection | null;
-  readonly signatureEnabled: boolean;
-  readonly signatureHeader: string;
-  readonly signatureEncoding: "hex" | "base64";
-  readonly signaturePrefix: string;
-  /** Write-only: empty keeps the secret already stored on the server. */
-  readonly signatureSecret: string;
 }
 
-const WEBHOOK_SIGNATURE_DEFAULTS = {
-  signatureHeader: "x-hub-signature-256",
-  signatureEncoding: "hex",
-  signaturePrefix: "sha256=",
-} as const;
-
 export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedule {
-  if (draft.scheduleMode === "webhook") {
-    const secret = draft.signatureSecret.trim();
-    return {
-      type: "webhook",
-      signature: draft.signatureEnabled
-        ? {
-            header: draft.signatureHeader.trim(),
-            encoding: draft.signatureEncoding,
-            prefix: draft.signaturePrefix,
-            ...(secret ? { secret } : {}),
-          }
-        : null,
-    };
-  }
   if (draft.scheduleMode === "interval") {
     const everyMs = Math.round(Number(draft.intervalMinutes) * 60_000);
     return { type: "interval", everyMs };
@@ -107,8 +81,8 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     title: task.title,
     prompt: task.prompt,
     enabled: task.enabled,
-    scheduleMode:
-      schedule.type === "interval" ? "interval" : schedule.type === "webhook" ? "webhook" : "fixed",
+    // A legacy webhook task opens as a fixed time, so saving gives it a schedule that runs.
+    scheduleMode: schedule.type === "interval" ? "interval" : "fixed",
     intervalMinutes:
       schedule.type === "interval" ? String(Math.max(1, schedule.everyMs / 60_000)) : "15",
     timeOfDay: schedule.type === "fixed_time" ? schedule.timeOfDay : "09:00",
@@ -129,15 +103,6 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     runtimeMode: task.runtimeMode,
     interactionMode: task.interactionMode,
     baseModelSelection: task.modelSelection,
-    ...(schedule.type === "webhook" && schedule.signature !== null
-      ? {
-          signatureEnabled: true,
-          signatureHeader: schedule.signature.header,
-          signatureEncoding: schedule.signature.encoding,
-          signaturePrefix: schedule.signature.prefix,
-        }
-      : { signatureEnabled: false, ...WEBHOOK_SIGNATURE_DEFAULTS }),
-    signatureSecret: "",
   };
 }
 

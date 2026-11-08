@@ -58,18 +58,6 @@ export const terminalRestartsTotal = Metric.counter("kurambit_terminal_restarts_
   description: "Total terminal restart requests handled.",
 });
 
-export const webhookDeliveriesTotal = Metric.counter("kurambit_webhook_deliveries_total", {
-  description: "Webhook requests handled, by outcome.",
-});
-
-export const webhookDeliveryDuration = Metric.timer("kurambit_webhook_delivery_duration", {
-  description: "Time to verify, log, and enqueue one webhook request.",
-});
-
-export const webhookRunsTotal = Metric.counter("kurambit_webhook_runs_total", {
-  description: "Runs started from webhook deliveries, by outcome.",
-});
-
 export const secretRequestsTotal = Metric.counter("kurambit_secret_requests_total", {
   description: "Secrets agents asked users for, by how each request ended.",
 });

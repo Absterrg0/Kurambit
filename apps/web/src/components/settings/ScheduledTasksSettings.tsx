@@ -46,7 +46,7 @@ function describeSchedule(schedule: ScheduledTask["schedule"]): string {
           : "selected day";
     return `At ${schedule.timeOfDay} every ${days}`;
   }
-  return "On webhook (not available locally)";
+  return "Webhook (no longer supported; edit to give it a time)";
 }
 
 function TaskRow({
@@ -100,7 +100,7 @@ function TaskRow({
           <Button
             size="xs"
             variant="outline"
-            disabled={disabled}
+            disabled={disabled || task.schedule.type === "webhook"}
             onClick={() => void run("run", () => runNow({ environmentId, input: { id: task.id } }))}
           >
             Run now
@@ -163,11 +163,6 @@ function DraftForm({
         runtimeMode: "full-access",
         interactionMode: "default",
         baseModelSelection: null,
-        signatureEnabled: false,
-        signatureHeader: "x-hub-signature-256",
-        signatureEncoding: "hex",
-        signaturePrefix: "sha256=",
-        signatureSecret: "",
       },
   );
   const [error, setError] = useState<string | null>(null);
@@ -284,10 +279,6 @@ function DraftForm({
           onChange={(event) => setDraft({ ...draft, timeOfDay: event.target.value })}
         />
       )}
-      <p className="text-xs text-muted-foreground">
-        Local schedules only. Webhook schedules have no public URL on this desktop build; use an
-        interval or fixed time.
-      </p>
       {error !== null ? <p className="text-xs text-destructive">{error}</p> : null}
       <div className="flex gap-2">
         <Button size="xs" disabled={saving || !canOperate} onClick={() => void save()}>
