@@ -992,8 +992,16 @@ const make = Effect.gen(function* () {
       const base = known ?? fallback;
       const counted = base === null ? null : (yield* changeOf(root, lane, base, id)).count;
       // A turn that changed no game files records no base; the fallback then
-      // holds exactly what the turn started from, in the paths that count.
-      const startBuild = known ?? (counted === 0 ? fallback : null);
+      // holds exactly what the turn started from, in the paths that count. A
+      // recorded base with the fallback's game files is the fallback too: a
+      // turn between them that changed only notes or a bot is no build, so the
+      // look that planned the step read the older build.
+      const sameAsFallback =
+        known !== null &&
+        fallback !== null &&
+        known !== fallback &&
+        (yield* changeOf(root, lane, fallback, known)).count === 0;
+      const startBuild = sameAsFallback ? fallback : (known ?? (counted === 0 ? fallback : null));
       if (counted !== null) return { build: id, startBuild, files: counted };
       // No base to diff against: T3's own change list for the turn.
       const inGame = yield* gamePaths(root);
