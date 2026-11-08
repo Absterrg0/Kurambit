@@ -43,8 +43,14 @@ export const AuthFilesystemWriteScope = "filesystem:write" as const;
 const AuthReviewWriteScope = "review:write" as const;
 export const AuthAccessReadScope = "access:read" as const;
 export const AuthAccessWriteScope = "access:write" as const;
+/** Granted to every standard client while the relay existed; kept so those credentials decode. */
 const AuthRelayReadScope = "relay:read" as const;
 const AuthRelayWriteScope = "relay:write" as const;
+const decodeOnlyScopes = new Set<string>([
+  AuthReviewWriteScope,
+  AuthRelayReadScope,
+  AuthRelayWriteScope,
+]);
 export const AuthEnvironmentScope = Schema.Literals([
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
@@ -69,7 +75,7 @@ export const AuthEnvironmentScopes = Schema.Array(AuthEnvironmentScope);
 export type AuthEnvironmentScopes = typeof AuthEnvironmentScopes.Type;
 
 export const AuthGrantScope = Schema.Literals(
-  AuthEnvironmentScope.literals.filter((scope) => scope !== AuthReviewWriteScope),
+  AuthEnvironmentScope.literals.filter((scope) => !decodeOnlyScopes.has(scope)),
 );
 export type AuthGrantScope = typeof AuthGrantScope.Type;
 export const AuthGrantScopes = Schema.Array(AuthGrantScope);
@@ -146,7 +152,7 @@ export function sessionHasLegacyPermissions(session: SessionGrantInput): boolean
   );
 }
 
-// Access and relay management are included because terminal:operate and
+// Access management is included because terminal:operate and
 // orchestration:operate already reach that authority through a shell or a
 // full-access agent. Narrowing a grant means choosing explicit scopes.
 export const AuthStandardClientScopes = [
@@ -162,10 +168,8 @@ export const AuthStandardClientScopes = [
   AuthSourceControlWriteScope,
   AuthFilesystemReadScope,
   AuthFilesystemWriteScope,
-  AuthRelayReadScope,
   AuthAccessReadScope,
   AuthAccessWriteScope,
-  AuthRelayWriteScope,
 ] as const;
 
 export const AuthTokenExchangeGrantType =

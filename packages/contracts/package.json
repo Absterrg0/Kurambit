@@ -15,10 +15,6 @@
       "types": "./src/settings.ts",
       "import": "./src/settings.ts"
     },
-    "./relay": {
-      "types": "./src/relay.ts",
-      "import": "./src/relay.ts"
-    },
     "./legacyGameVisual": {
       "types": "./src/legacyGameVisual.ts",
       "import": "./src/legacyGameVisual.ts"

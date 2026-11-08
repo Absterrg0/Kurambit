@@ -13,14 +13,18 @@ import {
   sessionHasLegacyPermissions,
 } from "./auth.ts";
 
+const decodeEnvironmentScopes = Schema.decodeUnknownSync(AuthEnvironmentScopes);
+const decodeGrantScopes = Schema.decodeUnknownSync(AuthGrantScopes);
+
 describe("authorization grants", () => {
-  it("decodes legacy review credentials without offering them in new grants", () => {
-    expect(Schema.decodeUnknownSync(AuthEnvironmentScopes)(["review:write"])).toEqual([
-      "review:write",
-    ]);
-    expect(() => Schema.decodeUnknownSync(AuthGrantScopes)(["review:write"])).toThrow();
-    expect(AuthStandardClientScopes).not.toContain("review:write");
-  });
+  it.each(["review:write", "relay:read", "relay:write"])(
+    "decodes legacy %s credentials without offering the scope in new grants",
+    (scope) => {
+      expect(decodeEnvironmentScopes([scope])).toEqual([scope]);
+      expect(() => decodeGrantScopes([scope])).toThrow();
+      expect(AuthStandardClientScopes).not.toContain(scope);
+    },
+  );
 
   // Frozen vocabulary from the client before granular scopes shipped. Do not
   // derive it from the current enum: that would hide compatibility regressions.
