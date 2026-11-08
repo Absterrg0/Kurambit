@@ -71,7 +71,7 @@ export const GAME_TOOL_PLACEMENTS = {
   game_blender_scene: both(["blender"]),
   game_blender_export: both(["blender"]),
   game_blender_character: both(["blender"]),
-  game_blender_paint: both(["blender"]),
+  game_blender_paint: both(["blender"], "to paint a model from its turnaround sheet"),
   game_blender_carve: both(["blender"], "for an organic hard prop carved from a three-view sheet"),
   game_blender_assets_search: both(
     ["blender"],
