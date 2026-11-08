@@ -1,13 +1,11 @@
 # Environment authentication
 
-The environment issues its own sessions and enforces their capabilities. Cloud
-identity and relay credentials belong to a separate trust boundary, described in
-the relay. A relay token is never an environment login.
+The environment issues its own sessions and enforces their capabilities.
 
 ## Authority survives transport changes
 
 Pairing delegates a set of scopes. Exchanging a bootstrap credential can narrow
-that grant but cannot widen it. The default grant includes access and relay
+that grant but cannot widen it. The default grant includes access
 management: `terminal:operate` is a shell as the server's user and
 `orchestration:operate` can start a full-access agent, and either can mint a
 session with every scope through `kurambit auth session issue`, so withholding
@@ -38,7 +36,7 @@ approval page names the host access goes to and approving stays the owner's
 call. Every client is public and proves itself with PKCE; a client that asks
 for a secret is registered without one. Client registration is stateless, so an unauthenticated caller cannot grow server
 state. Approval spends a one-time pairing code, or uses a browser session with
-`access:write`; proof-bound the relay codes are refused without being spent.
+`access:write`; proof-bound codes are refused without being spent.
 
 The user grants either read-only access or a runtime-mode ceiling, not a
 scope list: MCP tools are all orchestration, and `orchestration:operate`
@@ -54,9 +52,8 @@ parameters only pick targets; see
 [threadAccess](../../apps/server/src/mcp/threadAccess.ts).
 
 Issuer and resource URLs come from the request's Host and
-`X-Forwarded-Proto`, so one server answers over loopback, Tailscale Serve and a
-Relay tunnel. A proxy that rewrites Host or drops the protocol header
-breaks sign-in.
+`X-Forwarded-Proto`, so one server answers over loopback and Tailscale Serve. A
+proxy that rewrites Host or drops the protocol header breaks sign-in.
 
 Bearer and DPoP clients obtain short-lived WebSocket tickets through authenticated
 HTTP so long-lived tokens stay out of socket URLs. Browser sessions can

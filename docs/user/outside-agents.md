@@ -20,11 +20,10 @@ The copied URL uses the route this device is connected over, so an agent on the
 same device can reach it.
 
 - **An agent on your own computers** can use any address that computer reaches
-  the environment at: a LAN or Tailscale address, the relay, or `localhost` on
-  the host.
+  the environment at: a LAN or Tailscale address, or `localhost` on the host.
 - **A hosted agent**, such as ChatGPT or a bot running in the cloud, must reach
-  the environment from the internet. Use the relay address. A Tailscale
-  address only works from your own tailnet.
+  the environment from the internet. A LAN or Tailscale address only works
+  from your own network.
 
 ## Approve a sign-in
 
