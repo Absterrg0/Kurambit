@@ -407,18 +407,22 @@ function nextRunOrdinal(projection: Pick<OrchestrationV2ThreadProjection, "runs"
 
 /**
  * Stamp it when the wake run starts, not when it queues: a queued prompt ahead
- * of it has no start yet, and delegated results jump the queue.
+ * of it has no start yet, and delegated results jump the queue. A keep-going
+ * step arrives as a notification but is new work, often minutes after the
+ * last turn ended, so it keeps its own start.
  */
 function wakeWorkStartedAt(
   runs: ReadonlyArray<OrchestrationV2Run>,
   trigger: {
-    readonly notification?: unknown;
+    readonly notification?: { readonly source: { readonly kind: string } } | undefined;
     readonly delegatedCompletion?: unknown;
     readonly restartContinuationOfRunId?: RunId | undefined;
   },
 ): Pick<OrchestrationV2Run, "workStartedAt"> {
+  const wakes =
+    trigger.notification !== undefined && trigger.notification.source.kind !== "game_run";
   if (
-    trigger.notification === undefined &&
+    !wakes &&
     trigger.delegatedCompletion === undefined &&
     trigger.restartContinuationOfRunId === undefined
   ) {
