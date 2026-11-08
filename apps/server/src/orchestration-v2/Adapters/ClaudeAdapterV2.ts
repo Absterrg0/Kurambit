@@ -10,6 +10,7 @@ import {
   initialWorkflowAgentTranscriptCursor,
   readWorkflowAgentTranscript,
   type WorkflowAgentTranscriptCursor,
+  WorkflowMemberFlushWait,
 } from "../workflowAgentTranscript.ts";
 import {
   CLAUDE_WORKFLOW_TASK_TYPE,
@@ -4783,7 +4784,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 member.result !== undefined &&
                 waitLeft > 0
               ) {
-                yield* Effect.sleep(waitLeft);
+                yield* (yield* WorkflowMemberFlushWait)({ agentId, millis: waitLeft });
                 if (!(yield* drain())) return;
               }
             }

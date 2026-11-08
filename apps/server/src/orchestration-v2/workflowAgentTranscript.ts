@@ -46,6 +46,16 @@ export const WorkflowAgentTranscriptReadObserver = Context.Reference<
 });
 
 /**
+ * A settled member's wait for its transcript's last lines. Tests replace it to see the wait asked
+ * for and end it at once, since a test clock cannot tell when the sleep has started.
+ */
+export const WorkflowMemberFlushWait = Context.Reference<
+  (wait: { readonly agentId: string; readonly millis: number }) => Effect.Effect<void>
+>("kurambit/orchestration/WorkflowMemberFlushWait", {
+  defaultValue: () => (wait) => Effect.sleep(wait.millis),
+});
+
+/**
  * Conversation lines only: `attachment` lines and `isMeta` user lines are
  * harness bookkeeping (hook output, skill listings, injected context), and a
  * line without a uuid cannot be projected idempotently.

@@ -70,7 +70,10 @@ import { getModelSelectionStringOptionValue } from "@kurambit/shared/model";
 import { SpawnExecutableResolution } from "@kurambit/shared/shell";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
-import { WorkflowAgentTranscriptReadObserver } from "../workflowAgentTranscript.ts";
+import {
+  WorkflowAgentTranscriptReadObserver,
+  WorkflowMemberFlushWait,
+} from "../workflowAgentTranscript.ts";
 import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "@kurambit/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
@@ -14077,7 +14080,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           // Claude Code flushes transcript lines every 100 ms, so a member's reply
           // can land after the frame that settles it (seen with CLI 2.1.301).
           let appendLateReply: (() => void) | undefined;
-          const lateReplyWritten = yield* Deferred.make<void>();
+          const flushWait = yield* Deferred.make<number>();
           yield* Effect.gen(function* () {
             const harness = yield* makeWorkflowHarness;
             const transcriptPath = (agentId: string) =>
@@ -14176,24 +14179,19 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 }),
               )
               .pipe(Effect.forkScoped);
-            yield* Deferred.await(lateReplyWritten);
-            for (let tick = 0; tick < 20 && texts(2).at(-1) !== "a2 found README.md"; tick += 1) {
-              // A macrotask turn first, so the adapter reaches its flush-window
-              // sleep before time moves; ticks alone can all run before it does.
-              yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
-              yield* TestClock.adjust("100 millis");
-            }
             yield* Fiber.join(notified);
+            assert.isAbove(yield* Deferred.await(flushWait), 0, "waits out the flush window");
+            yield* Queue.offer(
+              harness.sdkMessages,
+              makeResultFrame({ uuid: "00000000-0000-4000-8000-000000001399", result: "Done." }),
+            );
+            // Events arrive in order, so the reply is in by the turn's end.
+            yield* Queue.take(harness.terminalReceipts);
             assert.deepEqual(texts(2), [
               "Reply with exactly: A2",
               ...early("a2"),
               "a2 found README.md",
             ]);
-            yield* Queue.offer(
-              harness.sdkMessages,
-              makeResultFrame({ uuid: "00000000-0000-4000-8000-000000001399", result: "Done." }),
-            );
-            yield* Queue.take(harness.terminalReceipts);
           }).pipe(
             Effect.provideService(WorkflowAgentTranscriptReadObserver, (read) => {
               // Lands just after the read that would have settled the member.
@@ -14201,8 +14199,13 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               const append = appendLateReply;
               appendLateReply = undefined;
               append();
-              return Deferred.succeed(lateReplyWritten, undefined).pipe(Effect.asVoid);
+              return Effect.void;
             }),
+            Effect.provideService(WorkflowMemberFlushWait, (wait) =>
+              wait.agentId === "a2"
+                ? Deferred.succeed(flushWait, wait.millis).pipe(Effect.asVoid)
+                : Effect.void,
+            ),
           );
         }).pipe(
           Effect.provide(
