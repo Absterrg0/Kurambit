@@ -60,7 +60,7 @@ class TestQueryError extends Schema.TaggedError<TestQueryError>()("TestQueryErro
 
 const OFFLINE_QUERY_FAILURE = new ConnectionTransientError({
   reason: "transport",
-  detail: "Relay is unavailable.",
+  detail: "The environment is unavailable.",
 });
 
 const BLOCKED_QUERY_FAILURE = new ConnectionBlockedError({
@@ -496,7 +496,7 @@ describe("environment query lifecycle", () => {
               stage: null,
               lastFailure: new ConnectionTransientError({
                 reason: "transport",
-                detail: "Relay session is reconnecting.",
+                detail: "The session is reconnecting.",
               }),
               retryAt: 1,
             }),

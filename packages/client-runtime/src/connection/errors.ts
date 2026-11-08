@@ -1,6 +1,5 @@
-import type { ClientConnectionMethod, EnvironmentId } from "@kurambit/contracts";
+import type { EnvironmentId } from "@kurambit/contracts";
 import type { RemoteEnvironmentAuthError } from "../authorization/remote.ts";
-import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 import {
   ConnectionBlockedError,
   type ConnectionAttemptError,
@@ -19,9 +18,7 @@ export function environmentMismatchError(input: {
 
 export function mapRemoteEnvironmentError(
   error: RemoteEnvironmentAuthError,
-  connectionMethod: ClientConnectionMethod = "direct",
 ): ConnectionAttemptError {
-  const networkHint = connectionMethod === "relay" ? ` ${NETWORK_BLOCKING_HINT}` : "";
   switch (error._tag) {
     case "EnvironmentAuthInvalidError":
       return new ConnectionBlockedError({
@@ -51,12 +48,12 @@ export function mapRemoteEnvironmentError(
     case "RemoteEnvironmentAuthTimeoutError":
       return new ConnectionTransientError({
         reason: "timeout",
-        detail: `${error.message}${networkHint}`,
+        detail: error.message,
       });
     case "RemoteEnvironmentAuthFetchError":
       return new ConnectionTransientError({
         reason: "network",
-        detail: `${error.message}${networkHint}`,
+        detail: error.message,
       });
     case "EnvironmentInternalError":
       return new ConnectionTransientError({
@@ -72,9 +69,3 @@ export function mapRemoteEnvironmentError(
       });
   }
 }
-
-/**
- * An older environment server reports a DPoP clock failure as the same generic
- * invalid-credential response as other failures, so keep the compatibility hint
- * cautious when the server omits the category.
- */

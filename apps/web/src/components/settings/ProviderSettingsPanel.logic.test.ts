@@ -18,12 +18,12 @@ import {
 } from "./ProviderSettingsPanel.logic";
 
 const primaryId = EnvironmentId.make("primary");
-const relayId = EnvironmentId.make("relay");
+const remoteId = EnvironmentId.make("remote");
 const sshId = EnvironmentId.make("ssh");
 
 const environments = [
   { environmentId: sshId, label: "Zulu SSH" },
-  { environmentId: relayId, label: "Alpha Relay" },
+  { environmentId: remoteId, label: "Alpha Remote" },
   { environmentId: primaryId, label: "This device" },
 ] as const;
 
@@ -54,7 +54,7 @@ describe("provider environment selection", () => {
       buildProviderEnvironmentOptions(environments, primaryId).map(
         (environment) => environment.environmentId,
       ),
-    ).toEqual([primaryId, relayId, sshId]);
+    ).toEqual([primaryId, remoteId, sshId]);
   });
 
   it("keeps a valid selection, then falls back to primary or the first environment", () => {
@@ -69,7 +69,7 @@ describe("provider environment selection", () => {
       ),
     ).toBe(primaryId);
     expect(resolveSelectedProviderEnvironmentId(options.slice(1), primaryId, primaryId)).toBe(
-      relayId,
+      remoteId,
     );
     expect(resolveSelectedProviderEnvironmentId([], null, primaryId)).toBeNull();
   });

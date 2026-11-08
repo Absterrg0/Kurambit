@@ -9,12 +9,10 @@ import {
   executeEnvironmentHttpRequest,
   makeEnvironmentHttpApiGroupClient,
   makeEnvironmentHttpApiUrlBuilder,
-  RemoteEnvironmentAuthFetchError,
 } from "../rpc/http.ts";
 
 export interface EnvironmentHttpAuthHeaders {
   readonly authorization?: string;
-  readonly dpop?: string;
 }
 
 export function withOrchestrationProtocolHeader(
@@ -46,12 +44,6 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fnUntraced(func
   readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
 }) {
   const authorization = input.prepared.httpAuthorization;
-  if (authorization?._tag === "Dpop") {
-    return yield* new RemoteEnvironmentAuthFetchError({
-      message: "Remote connections are unavailable.",
-      cause: authorization._tag,
-    });
-  }
   const httpBaseUrl = input.prepared.httpBaseUrl;
   const url = input.url(makeEnvironmentHttpApiUrlBuilder(httpBaseUrl)[input.group]);
   const client = yield* makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group);

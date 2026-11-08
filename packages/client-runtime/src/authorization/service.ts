@@ -44,10 +44,9 @@ export class RemoteEnvironmentAuthorization extends Context.Service<
 
 const fetchDescriptor = Effect.fn("clientRuntime.connection.remote.fetchDescriptor")(function* (
   httpBaseUrl: string,
-  connectionMethod: ClientConnectionMethod,
 ) {
   return yield* fetchRemoteEnvironmentDescriptor({ httpBaseUrl }).pipe(
-    Effect.mapError((error) => mapRemoteEnvironmentError(error, connectionMethod)),
+    Effect.mapError(mapRemoteEnvironmentError),
   );
 });
 
@@ -72,7 +71,6 @@ const make = Effect.gen(function* () {
     function* (input: {
       readonly expectedEnvironmentId: EnvironmentId;
       readonly httpBaseUrl: string;
-      readonly connectionMethod: ClientConnectionMethod;
     }) {
       const now = yield* Clock.currentTimeMillis;
       const cachedDescriptor = (yield* Ref.get(bearerDescriptors)).get(input.expectedEnvironmentId);
@@ -81,7 +79,7 @@ const make = Effect.gen(function* () {
         cachedDescriptor.validatedAtEpochMs + 10_000 > now;
       const descriptor = canReuseDescriptor
         ? cachedDescriptor.descriptor
-        : yield* fetchDescriptor(input.httpBaseUrl, input.connectionMethod).pipe(
+        : yield* fetchDescriptor(input.httpBaseUrl).pipe(
             Effect.provideService(HttpClient.HttpClient, httpClient),
           );
       if (descriptor.environmentId !== input.expectedEnvironmentId) {

@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   connectionCatalogDisplayUrl,
-  hasRelayRoute,
   type EnvironmentPresentation as BaseEnvironmentPresentation,
 } from "@kurambit/client-runtime/connection";
 import type { EnvironmentId } from "@kurambit/contracts";
@@ -20,7 +19,6 @@ export interface EnvironmentPresentation extends BaseEnvironmentPresentation {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly displayUrl: string | null;
-  readonly relayManaged: boolean;
 }
 
 function projectEnvironmentPresentation(
@@ -32,7 +30,6 @@ function projectEnvironmentPresentation(
     environmentId,
     label: presentation.entry.target.label,
     displayUrl: connectionCatalogDisplayUrl(presentation.entry),
-    relayManaged: hasRelayRoute(presentation.entry),
   };
 }
 

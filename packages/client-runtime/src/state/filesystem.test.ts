@@ -74,11 +74,11 @@ describe("filesystem read access", () => {
     expect(
       resolveFilesystemReadAccess({
         isCatalogReady: true,
-        connection: { phase: "error", error: "The relay is unavailable." },
+        connection: { phase: "error", error: "The environment is unavailable." },
         session: null,
         sessionError: null,
       }),
-    ).toEqual({ canReadFiles: false, isPending: false, error: "The relay is unavailable." });
+    ).toEqual({ canReadFiles: false, isPending: false, error: "The environment is unavailable." });
   });
 
   it.each([false, true])(

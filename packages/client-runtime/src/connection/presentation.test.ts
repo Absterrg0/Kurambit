@@ -6,12 +6,13 @@ import {
   BearerConnectionProfile,
   type ConnectionCatalogEntry,
   type ConnectionRoute,
+  SshConnectionProfile,
 } from "./catalog.ts";
 import {
   BearerConnectionTarget,
   ConnectionBlockedError,
   ConnectionTransientError,
-  RelayConnectionTarget,
+  SshConnectionTarget,
   type SupervisorConnectionState,
 } from "./model.ts";
 import {
@@ -110,27 +111,28 @@ describe("connection presentation", () => {
   });
 
   it("passes over routes without an address of their own", () => {
-    const relay = new RelayConnectionTarget({
+    const ssh = new SshConnectionTarget({
       environmentId: TARGET.environmentId,
       label: TARGET.label,
+      connectionId: "ssh:environment-1",
     });
     const entry: ConnectionCatalogEntry = {
       ...ENTRY,
-      target: relay,
-      profile: Option.none(),
+      target: ssh,
+      profile: Option.some(
+        new SshConnectionProfile({
+          connectionId: ssh.connectionId,
+          environmentId: ssh.environmentId,
+          label: ssh.label,
+          target: { alias: "desk", hostname: "desk.local", username: null, port: null },
+        }),
+      ),
       alternateRoutes: [{ target: ENTRY.target, profile: ENTRY.profile }],
     };
 
-    expect(environmentMcpUrl({ entry, connectedTarget: relay })).toBe(
+    expect(environmentMcpUrl({ entry, connectedTarget: ssh })).toBe(
       "https://environment.example.test/mcp",
     );
-    expect(
-      environmentMcpUrl({
-        entry,
-        connectedTarget: relay,
-        relayHttpBaseUrl: "https://tunnel.example.test",
-      }),
-    ).toBe("https://tunnel.example.test/mcp");
   });
 
   it("distinguishes initial connection, reconnect, and retry errors", () => {
@@ -185,14 +187,14 @@ describe("connection presentation", () => {
           attempt: 2,
           lastFailure: new ConnectionTransientError({
             reason: "transport",
-            detail: "Relay connection timed out.",
+            detail: "Connection timed out.",
             traceId: "trace-retry",
           }),
         }),
       ),
     ).toEqual({
       phase: "reconnecting",
-      error: "Relay connection timed out.",
+      error: "Connection timed out.",
       traceId: "trace-retry",
     });
   });
@@ -200,11 +202,11 @@ describe("connection presentation", () => {
   it("combines reconnect progress with the latest failure", () => {
     const connection = {
       phase: "reconnecting",
-      error: "Relay request timed out.",
+      error: "Request timed out.",
       traceId: "trace-retry",
     } as const;
     expect(connectionStatusText(connection)).toBe(
-      "Failed to connect. Reconnecting... Reason: Relay request timed out.",
+      "Failed to connect. Reconnecting... Reason: Request timed out.",
     );
     expect(connectionStatusTitle(connection)).toBe("Failed to connect. Reconnecting...");
   });

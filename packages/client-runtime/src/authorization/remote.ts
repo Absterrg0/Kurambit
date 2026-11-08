@@ -80,35 +80,6 @@ export const appendClientConnectionParams = (
   }
 };
 
-export const exchangeRemoteDpopAccessToken = Effect.fn(
-  "clientRuntime.authorization.exchangeRemoteDpopAccessToken",
-)(function* (input: {
-  readonly httpBaseUrl: string;
-  readonly credential: string;
-  readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
-  readonly clientMetadata?: AuthClientPresentationMetadata;
-  readonly dpopProof: string;
-  readonly timeoutMs?: number;
-}) {
-  const client = yield* makeEnvironmentHttpApiGroupClient(input.httpBaseUrl, "auth");
-  const response = yield* executeEnvironmentHttpRequest(
-    environmentEndpointUrl(input.httpBaseUrl, "/oauth/token"),
-    input.timeoutMs ?? DEFAULT_REMOTE_REQUEST_TIMEOUT_MS,
-    client.token({
-      headers: { dpop: input.dpopProof },
-      payload: {
-        grant_type: AuthTokenExchangeGrantType,
-        subject_token: input.credential,
-        subject_token_type: AuthEnvironmentBootstrapTokenType,
-        requested_token_type: AuthAccessTokenType,
-        ...(input.scopes ? { scope: encodeOAuthScope(input.scopes) } : {}),
-        ...clientMetadataTokenExchangeFields(input.clientMetadata),
-      },
-    }),
-  );
-  return response;
-});
-
 export const bootstrapRemoteBearerSession = Effect.fn(
   "clientRuntime.authorization.bootstrapRemoteBearerSession",
 )(function* (input: {
@@ -169,27 +140,6 @@ export const issueRemoteWebSocketTicket = Effect.fn(
     client.webSocketTicket({
       headers: {
         authorization: `Bearer ${input.bearerToken}`,
-      },
-    }),
-  );
-});
-
-export const issueRemoteDpopWebSocketTicket = Effect.fn(
-  "clientRuntime.authorization.issueRemoteDpopWebSocketTicket",
-)(function* (input: {
-  readonly httpBaseUrl: string;
-  readonly accessToken: string;
-  readonly dpopProof: string;
-  readonly timeoutMs?: number;
-}) {
-  const client = yield* makeEnvironmentHttpApiGroupClient(input.httpBaseUrl, "auth");
-  return yield* executeEnvironmentHttpRequest(
-    environmentEndpointUrl(input.httpBaseUrl, "/api/auth/websocket-ticket"),
-    input.timeoutMs ?? DEFAULT_REMOTE_REQUEST_TIMEOUT_MS,
-    client.webSocketTicket({
-      headers: {
-        authorization: `DPoP ${input.accessToken}`,
-        dpop: input.dpopProof,
       },
     }),
   );

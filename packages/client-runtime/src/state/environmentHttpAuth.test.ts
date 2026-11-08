@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema";
 
 import type { HttpClient } from "effect/http";
 
-import { RelayConnectionTarget, type PreparedConnection } from "../connection/model.ts";
+import { BearerConnectionTarget, type PreparedConnection } from "../connection/model.ts";
 
 import { type RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import * as RpcHttp from "../rpc/http.ts";
@@ -33,9 +33,10 @@ const encodeThreadSnapshot = Schema.encodeSync(OrchestrationV2ThreadDetailSnapsh
 const encodeBoundedSnapshot = Schema.encodeSync(OrchestrationV2ThreadBoundedSnapshot);
 const encodeThreadTranscript = Schema.encodeSync(OrchestrationV2ThreadTranscript);
 
-const TARGET = new RelayConnectionTarget({
+const TARGET = new BearerConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
   label: "Remote environment",
+  connectionId: "bearer:environment-1",
 });
 const PREPARED: PreparedConnection = {
   environmentId: TARGET.environmentId,
