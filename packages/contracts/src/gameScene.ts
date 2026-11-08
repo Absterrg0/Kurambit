@@ -73,16 +73,16 @@ export const GameScenePlayer = Schema.Union([
 export type GameScenePlayer = typeof GameScenePlayer.Type;
 
 /**
- * How much of the frame shows nothing: the backdrop, one flat colour, where the camera looks
- * below the horizon and no drawn thing is in the way. Sky above the horizon and a 2D game's
- * backdrop behind its plane never count; a board floating over the backdrop does.
+ * How much of the frame shows nothing: a flat backdrop where the camera looks below the horizon
+ * and no drawn thing is in the way. Sky above the horizon, a 2D game's backdrop behind its plane
+ * and a picture the game set as its backdrop never count; a board floating over a colour does.
  */
 export const GameSceneEmpty = Schema.Struct({
   /** The share of the frame that empty, median over the play's looks, 0–1. */
   share: Schema.Number,
   /** The share of the play it was over the shell's limit. */
   held: Schema.Number,
-  /** The flat colour, as #rrggbb. */
+  /** The backdrop that showed: its colour as #rrggbb, or `sky` for the look's drawn sky. */
   colour: Schema.String,
   /** Over the limit for most of the play: the shell's verdict, by its own thresholds. */
   flagged: Schema.Boolean,
@@ -147,7 +147,7 @@ export const scenePlayerText = (player: GameScenePlayer): string | null => {
 /** PURE. The empty frame's line when it is flagged; null when the view is filled. */
 export const sceneEmptyText = (empty: GameSceneEmpty): string | null =>
   empty.flagged
-    ? `${percent(empty.share)} of the view is empty: a flat ${empty.colour} backdrop under the horizon with nothing drawn on it, for ${percent(empty.held)} of play`
+    ? `${percent(empty.share)} of the view is empty: the camera looks down past everything drawn into the flat ${empty.colour} backdrop, for ${percent(empty.held)} of play`
     : null;
 
 /** PURE. Every problem the report shows, worded, each with its frame. */

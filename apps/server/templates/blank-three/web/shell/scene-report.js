@@ -37,14 +37,12 @@ export const LIMITS = {
   // benchmark's plays: the 29 px tank and the 44 px robot are specks a person cannot make out;
   // the 54 px ship (54 wide, 41 tall) and the 54–63 px gardener read at a glance.
   smallShare: 0.07,
-  // The empty view: the frame is read on a grid, and a cell is empty when it shows the frame's
-  // one flat colour (each channel within the tolerance of it), the camera looks there at least
-  // this far below the horizon (the sine of the angle, about 6°), and no drawn thing's bounds
-  // lie on the ray. Sky above the horizon and a 2D game's backdrop behind its plane (a camera
-  // looking level) are never empty: a void is where the ground should be.
-  emptyCols: 32,
-  emptyRows: 18,
-  emptyTolerance: 14,
+  // The empty view, on a grid of rays: a cell is empty when the camera looks there at least
+  // this far below the horizon (the sine of the angle, about 6°), no drawn thing's bounds lie
+  // on the ray and the backdrop behind is flat. Sky above the horizon and a 2D game's backdrop
+  // behind its plane (a camera looking level) are never empty: a void is where ground should be.
+  emptyCols: 24,
+  emptyRows: 14,
   emptyBelow: 0.1,
   // Empty over this share of the frame, for more than this share of the play, is "mostly empty".
   // On the benchmark's shots the void boards leave 40–95% empty and the filled games none:
@@ -91,7 +89,7 @@ const round = (x, d = 2) => Number(x.toFixed(d));
  * The shell's side. `view()` is the scene and camera on screen (or null),
  * `player()` is ctx.player, `bridge` the Stage bridge (its things and kinds),
  * `animation(object)` the animate kit's state for a body ({ state, clip } or null), `gl` the
- * renderer's WebGL2 context (the empty view reads the frame through it).
+ * renderer's WebGL context (the empty view reads its clear colour when nothing else is behind).
  */
 export function createSceneReport({ canvas, gl, view, player, bridge, animation }) {
   let active = false;
@@ -526,7 +524,7 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
         if (marks[i] === 1)
           g.fillRect(
             (i % LIMITS.emptyCols) * cw,
-            (LIMITS.emptyRows - 1 - Math.floor(i / LIMITS.emptyCols)) * ch,
+            Math.floor(i / LIMITS.emptyCols) * ch,
             Math.ceil(cw),
             Math.ceil(ch),
           );
@@ -735,7 +733,7 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
     if (canCast) cameraInside(span, top, bottom);
     bridge.eachThing(checkProp);
     bridge.eachThing(sighting);
-    if (canvas.width > 0 && gl?.fenceSync !== undefined) readFrame(span);
+    measureEmpty(scene, camera, span);
   };
 
   // A thing far under the level, or with no position at all, has left the world.
@@ -915,141 +913,75 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
   };
 
   // ── The empty view ─────────────────────────────────────────────────────
-  // The frame just drawn, read small, and the cells that show its one flat colour; only when
-  // those fill more than the limit are their rays cast, against the bounds of everything drawn.
-  // The GPU shrinks the frame (a resolve of the canvas's MSAA at its own size, then a blit to
-  // the grid) into a buffer the page reads a frame or two later, once a fence says it is
-  // there: waiting for it at once would stall the page for the whole frame's GPU work.
-  let small = null;
-  let pending = null;
-  const pixels = new Uint8Array(LIMITS.emptyCols * LIMITS.emptyRows * 4);
-  const target2d = (width, height) => {
-    const rb = gl.createRenderbuffer();
-    gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, width, height);
-    const fb = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, rb);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-    return { rb, fb };
-  };
-  const readFrame = (span) => {
-    if (pending !== null) return;
-    const w = gl.drawingBufferWidth;
-    const h = gl.drawingBufferHeight;
-    const [cols, rows] = [LIMITS.emptyCols, LIMITS.emptyRows];
-    if (small === null) {
-      const pack = gl.createBuffer();
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack);
-      gl.bufferData(gl.PIXEL_PACK_BUFFER, pixels.byteLength, gl.STREAM_READ);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-      small = { w: 0, h: 0, full: null, grid: target2d(cols, rows), pack };
-    }
-    if (small.w !== w || small.h !== h) {
-      if (small.full !== null) {
-        gl.deleteFramebuffer(small.full.fb);
-        gl.deleteRenderbuffer(small.full.rb);
-      }
-      small.full = target2d(w, h);
-      small.w = w;
-      small.h = h;
-    }
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, small.full.fb);
-    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, small.full.fb);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, small.grid.fb);
-    gl.blitFramebuffer(0, 0, w, h, 0, 0, cols, rows, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, small.grid.fb);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, small.pack);
-    gl.readPixels(0, 0, cols, rows, gl.RGBA, gl.UNSIGNED_BYTE, 0);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    // three caches the bound framebuffer; after the frame's draw that is the canvas's.
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    pending = { sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0), span };
-    gl.flush();
-  };
-  // The read, once the GPU has done it: the frame then is a frame or two on from the one read.
-  const finishRead = () => {
-    if (gl.getSyncParameter(pending.sync, gl.SYNC_STATUS) !== gl.SIGNALED) return;
-    gl.deleteSync(pending.sync);
-    const { span } = pending;
-    pending = null;
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, small.pack);
-    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, pixels);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    const seen = view();
-    if (seen !== null) measureEmpty(seen.scene, seen.camera, span);
-  };
-  const buckets = new Uint16Array(4096);
+  // A grid of rays through the view: a cell is empty when its ray looks below the horizon and
+  // meets the bounds of nothing drawn, so the backdrop shows where ground should be. Only a flat
+  // backdrop counts (a colour, the clear colour, or the look's sky, which is one tone below the
+  // horizon); a picture the game set as its backdrop is something drawn, never empty. Bounds
+  // are generous, so a hole inside a big mesh's box is missed, never invented.
   const cells = new Uint8Array(LIMITS.emptyCols * LIMITS.emptyRows);
   const ndc = new THREE.Vector2();
+  const clear = new Float32Array(4);
   const drawn = [];
   let drawnCount = 0;
+  const reach = new THREE.Box3();
   const gatherDrawn = (node) => {
     if (!node.visible) return;
-    if ((node.isMesh && !node.isSkinnedMesh) || node.isSprite) {
+    // An invisible material (a collider, a trigger) draws nothing.
+    if (
+      ((node.isMesh && !node.isSkinnedMesh) || node.isSprite) &&
+      node.material?.visible !== false
+    ) {
       const bounds = (drawn[drawnCount] ??= new THREE.Box3()).makeEmpty();
       target = bounds;
       expand(node);
-      if (!bounds.isEmpty()) drawnCount += 1;
+      if (!bounds.isEmpty()) {
+        reach.union(bounds);
+        drawnCount += 1;
+      }
     }
     const children = node.children;
     for (let i = 0; i < children.length; i += 1) gatherDrawn(children[i]);
   };
-  const hex = (x) => Math.round(x).toString(16).padStart(2, "0");
+  const volume = (b) => (b.max.x - b.min.x) * (b.max.y - b.min.y) * (b.max.z - b.min.z);
+  const byVolume = (a, b) => volume(b) - volume(a);
+  // The backdrop's colour as a person reads it, or null when it is a picture.
+  const backdropOf = (scene) => {
+    const background = scene.background;
+    if (background?.isColor === true) return `#${background.getHexString()}`;
+    if (background?.isTexture === true)
+      return background.mapping === THREE.CubeUVReflectionMapping ? "sky" : null;
+    if (background != null) return null;
+    if (gl == null) return "clear";
+    const value = gl.getParameter(gl.COLOR_CLEAR_VALUE);
+    clear.set(value);
+    return `#${new THREE.Color().setRGB(clear[0], clear[1], clear[2]).getHexString()}`;
+  };
   const measureEmpty = (scene, camera, span) => {
     const cols = LIMITS.emptyCols;
     const n = cols * LIMITS.emptyRows;
-    const data = pixels;
-    buckets.fill(0);
-    let top = 0;
-    let topKey = 0;
-    for (let i = 0; i < n; i += 1) {
-      const o = i * 4;
-      const key = ((data[o] >> 4) << 8) | ((data[o + 1] >> 4) << 4) | (data[o + 2] >> 4);
-      buckets[key] += 1;
-      if (buckets[key] > top) [top, topKey] = [buckets[key], key];
-    }
-    let r = 0;
-    let g = 0;
-    let b = 0;
-    for (let i = 0; i < n; i += 1) {
-      const o = i * 4;
-      if ((((data[o] >> 4) << 8) | ((data[o + 1] >> 4) << 4) | (data[o + 2] >> 4)) !== topKey)
-        continue;
-      r += data[o];
-      g += data[o + 1];
-      b += data[o + 2];
-    }
-    [r, g, b] = [r / top, g / top, b / top];
-    let flat = 0;
-    for (let i = 0; i < n; i += 1) {
-      const o = i * 4;
-      const near =
-        Math.abs(data[o] - r) <= LIMITS.emptyTolerance &&
-        Math.abs(data[o + 1] - g) <= LIMITS.emptyTolerance &&
-        Math.abs(data[o + 2] - b) <= LIMITS.emptyTolerance;
-      cells[i] = near ? 1 : 0;
-      if (near) flat += 1;
-    }
+    const backdrop = backdropOf(scene);
     let count = 0;
-    if (flat / n > LIMITS.emptyShare) {
+    cells.fill(0);
+    if (backdrop !== null) {
       drawnCount = 0;
+      reach.makeEmpty();
       gatherDrawn(scene);
+      // The biggest first: the ground answers most rays at once.
+      const sorted = drawn.slice(0, drawnCount).sort(byVolume);
       const ray = raycaster.ray;
       for (let i = 0; i < n; i += 1) {
-        if (cells[i] === 0) continue;
-        // readPixels rows run bottom-up, as normalised device y does.
         ndc.set(
           (((i % cols) + 0.5) / cols) * 2 - 1,
-          ((Math.floor(i / cols) + 0.5) / LIMITS.emptyRows) * 2 - 1,
+          1 - ((Math.floor(i / cols) + 0.5) / LIMITS.emptyRows) * 2,
         );
         raycaster.setFromCamera(ndc, camera);
-        let hit = ray.direction.y > -LIMITS.emptyBelow;
-        for (let k = 0; k < drawnCount && !hit; k += 1) hit = ray.intersectsBox(drawn[k]);
-        if (hit) cells[i] = 0;
-        else count += 1;
+        if (ray.direction.y > -LIMITS.emptyBelow) continue;
+        let hit = false;
+        if (!reach.isEmpty() && ray.intersectsBox(reach))
+          for (let k = 0; k < sorted.length && !hit; k += 1) hit = ray.intersectsBox(sorted[k]);
+        if (hit) continue;
+        cells[i] = 1;
+        count += 1;
       }
     }
     const share = count / n;
@@ -1057,7 +989,7 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
     if (emptyCount < HEIGHTS) emptyShares[emptyCount++] = share;
     if (share > empty.worst) {
       empty.worst = share;
-      empty.colour = `#${hex(r)}${hex(g)}${hex(b)}`;
+      empty.colour = backdrop;
     }
     if (share > LIMITS.emptyShare) {
       empty.held += span;
@@ -1176,16 +1108,9 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
      */
     tick(dt, drew) {
       if (!active || dt <= 0 || GameState.state !== "playing") return 0;
-      let finished = 0;
-      if (pending !== null) {
-        const from = performance.now();
-        finishRead();
-        finished = performance.now() - from;
-        costMs += finished;
-      }
       played += dt;
       clock += dt;
-      if (clock < 1 / LIMITS.hz || !drew) return finished;
+      if (clock < 1 / LIMITS.hz || !drew) return 0;
       const span = clock;
       clock = 0;
       const from = performance.now();
@@ -1193,7 +1118,7 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
       const ms = performance.now() - from;
       costMs += ms;
       worstMs = Math.max(worstMs, ms);
-      return ms + finished;
+      return ms;
     },
   };
 }
