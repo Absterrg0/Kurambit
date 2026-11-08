@@ -61,6 +61,9 @@ const GENERATED_IGNORES = [
   "unity/*.csproj",
   "unity/*.sln",
   "*.blend1",
+  // Kurambit writes and refreshes these from its own templates (server start, every turn):
+  // tracked, a refresh would read as the agent's change and Undo would roll the skills back.
+  "studio-skills/",
 ];
 
 /** The engine a create request builds for. Omitted means the Godot native lane. */
