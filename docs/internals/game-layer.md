@@ -75,7 +75,8 @@ check that matters.
   skeleton, so every standard clip plays on every made or library body on it.
 - `STYLE.json` at the game root is the style lock (`packages/contracts/src/gameStyle.ts`), read
   by `gameStyle.ts` on every call of every tool that brings art in, and never cached, so an edit
-  takes effect at once. The tools refuse what drifts rather than warn: a library add outside its
+  takes effect at once. `game_assets_add`'s `lock` writes it from a style family
+  (`styleFromLock`), keeping what else the lock holds, so agents never hand-write its shape. The tools refuse what drifts rather than warn: a library add outside its
   packs (checked before the pack is fetched) or of a possible character on another rig (any model
   whose clips cannot be read counts), a sprite render in another palette or mode, a Blender
   import from a source it does not list, and an import or export carrying an armature whose
@@ -150,11 +151,15 @@ check that matters.
   The game tools an agent is listed follow from the same data: each declares in
   [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) what it needs of the
   engine (`engineCapabilities`, derived from the profile, empty for a parked engine) and whether a
-  chat lists it only when asked; the MCP auth middleware puts the thread's engine in the
-  invocation and `McpSchema.EnabledWhen` decides, which Effect's MCP core also applies to calls. A
-  provider reads the list once per session, so nothing waits for a request to appear: what a chat
-  uses only when the person asks stays reachable through `game_more`, which runs it through its own
-  handler.
+  chat lists it only when asked; the MCP auth middleware puts the thread's engine, its character
+  route and whether this machine has Blender in the invocation, and `McpSchema.EnabledWhen` decides,
+  which Effect's MCP core also applies to calls. A provider reads the list once per session, so
+  nothing waits for a request to appear: what a chat uses only when the person asks stays reachable
+  through `game_more`, which runs it through its own handler. The Blender tools are listed only
+  where the person's route makes characters through Blender (`blender`, or `generated`, whose
+  humanoids are conformed there); on the library route they are asked for, so most chats never pay
+  for their descriptions. `game_more` is an image tool, so an asked-for look or move still arrives
+  as pictures.
 - Every release takes one path (`GameExport.releaseTo`): staged beside its destination, written and
   checked by the driver, compared with the sources before and after (an unidentifiable tree is
   refused before the engine runs), then published by `publishStaged`, which moves the incumbent

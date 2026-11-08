@@ -4,6 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Layer from "effect/Layer";
 import { GameOperationError } from "@kurambit/contracts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
@@ -26,6 +27,7 @@ afterAll(async () => {
 
 // packFile never reaches processes or games; a refusal must come before any fetch.
 const layer = GameAssetLibrary.layer.pipe(
+  Layer.provide(NodeServices.layer),
   Layer.provide(
     Layer.succeed(GameProcesses.GameProcesses, {} as GameProcesses.GameProcesses["Service"]),
   ),

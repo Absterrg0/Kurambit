@@ -14,6 +14,7 @@ import {
   type GameAssetsAddResult,
   type GameAssetsSearchInput,
   type GameAssetsSearchResult,
+  GAME_STYLE_FILE,
   type GameLibraryKind,
   manifestProject,
 } from "@kurambit/contracts";
@@ -25,7 +26,9 @@ import {
   loudnessTargets,
   mayBeCharacter,
   readGameStyle,
+  styleFromLock,
 } from "./gameStyle.ts";
+import { makeAtomicWriter } from "./gameFiles.ts";
 import { hashFile } from "./sourceSnapshot.ts";
 import { readGltfJson } from "./gltfJson.ts";
 import {
@@ -246,6 +249,7 @@ const make = Effect.gen(function* () {
   const directory = libraryDirectory();
   const scratch = NodePath.join(directory, "tmp");
   const locks = yield* KeyedLock.make<string>();
+  const writeAtomic = yield* makeAtomicWriter;
   const indexes = new Map<string, LibraryIndex>();
   const fontDirectory = yield* labelFontDirectory(yield* GameTemplates.GameTemplates);
   if (fontDirectory === undefined)
@@ -697,7 +701,7 @@ const make = Effect.gen(function* () {
         return {
           text: [
             style === null
-              ? "No STYLE.json yet: choose one family's look, write STYLE.json (studio-skills/art-pipeline.md), then take the game's art from its packs."
+              ? "No STYLE.json yet: choose one family's look and pass it as lock (family and view) with your first game_assets_add, which writes STYLE.json; then take the game's art from its packs."
               : `STYLE.json locks this game to ${style.family === undefined ? "" : `the ${style.family} family, `}packs ${style.packs.join(", ")}${style.rig === undefined ? "" : `, rig ${style.rig}`}.`,
             `The library's ${ranked.length} CC0 packs this ${engine} game loads, by style family (id: style; kinds; rig):`,
             ...LIBRARY_FAMILIES.flatMap((family) => {
@@ -1023,10 +1027,22 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const engine = manifest.engine.name;
       const pack = yield* packOf(input.pack);
-      // The lock is read before the pack is fetched, so a refused pack costs no download.
-      const style = yield* readGameStyle(yield* realRootOf(root, "Library add"));
+      // The lock is read (and a chosen one derived) before the pack is fetched, so a refused
+      // pack costs no download and writes no lock.
+      const gameRoot = yield* realRootOf(root, "Library add");
+      const lockBefore = yield* readGameStyle(gameRoot);
+      const locked = input.lock === undefined ? null : styleFromLock(input.lock, pack, lockBefore);
+      if (locked !== null && "refusal" in locked)
+        return yield* fail("Library add", GAME_STYLE_FILE, "invalid-input", locked.refusal);
+      const style = locked?.style ?? lockBefore;
       const outside = lockPackRefusal(pack, style);
       if (outside !== null) return yield* fail("Library add", pack.id, "invalid-input", outside);
+      if (locked !== null)
+        yield* writeAtomic(
+          NodePath.join(gameRoot, GAME_STYLE_FILE),
+          `${JSON.stringify(locked.style, null, 2)}\n`,
+          "Library add",
+        );
       const index = yield* ensure(pack);
       const byPath = new Map(index.files.map((file) => [file.path, file]));
       const folderNames = new Set<string>();
@@ -1304,7 +1320,14 @@ const make = Effect.gen(function* () {
             : assetsStat === null
               ? "No ASSETS.md, and nothing here to credit."
               : "Nothing here to credit in ASSETS.md.";
+      const lockLine =
+        locked === null
+          ? []
+          : [
+              `${lockBefore === null ? "Wrote" : "Rewrote"} ${GAME_STYLE_FILE}: the ${locked.style.family} family, ${locked.style.mode}, ${locked.style.view} view${locked.style.rig === undefined ? "" : `, rig ${locked.style.rig}`}; packs ${locked.style.packs.join(", ")}. The person may edit it; to change the look, pass lock again.`,
+            ];
       const text = [
+        ...lockLine,
         `Added ${added.length} file${added.length === 1 ? "" : "s"} from ${pack.id} under ${directoryRel}${present.length > 0 ? ` (${present.length} already there, unchanged)` : ""}. The game loads them as ${loadPath}.`,
         ...(added.length > 0 && added.length <= 20 ? added.map((path) => `- ${path}`) : []),
         ...notes,

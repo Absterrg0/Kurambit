@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { GameLibraryPackId } from "./gameLibrary.ts";
+import { GameLibraryPackId } from "./gameLibraryPackId.ts";
 
 /** The style lock's file, at the game root beside BRIEF.md and ASSETS.md. */
 export const GAME_STYLE_FILE = "STYLE.json";
@@ -18,9 +18,10 @@ export const GameStyleView = Schema.Literals(["side", "top-down", "isometric", "
 export type GameStyleView = typeof GameStyleView.Type;
 
 /**
- * STYLE.json: the look a game is held to. The agent writes it when it chooses
- * the look, the person may edit it, and the art tools read it on every call:
- * they fill their defaults from it and refuse what drifts from it.
+ * STYLE.json: the look a game is held to. game_assets_add writes it from the
+ * style family the agent chooses (GameStyleLock), the person may edit it, and
+ * the art tools read it on every call: they fill their defaults from it and
+ * refuse what drifts from it.
  */
 export const GameStyle = Schema.Struct({
   version: Schema.Literal(1),
@@ -125,6 +126,14 @@ export const GameStyle = Schema.Struct({
   }),
 );
 export type GameStyle = typeof GameStyle.Type;
+
+/** A choice of look: game_assets_add derives STYLE.json's family fields from it. */
+export const GameStyleLock = Schema.Struct({
+  /** A style family from the library (game_assets_search lists them). */
+  family: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  view: GameStyleView,
+});
+export type GameStyleLock = typeof GameStyleLock.Type;
 
 export const GAME_STYLE_DEFAULT_MUSIC_LUFS = -23;
 export const GAME_STYLE_DEFAULT_SFX_PEAK_DBTP = -1;

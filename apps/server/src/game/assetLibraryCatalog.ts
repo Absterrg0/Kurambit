@@ -202,12 +202,14 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
     title: "Kenney pixel art",
     look: "16-18 px pixel-art tiles, characters and UI: platformer, dungeon, town and roguelike",
     palette: "kenney-tiny-dungeon",
+    tile: 16,
   },
   {
     id: "kenney-1bit",
     title: "Kenney 1-bit",
     look: "monochrome 16 px pixel art",
     palette: "kenney-1-bit-platformer",
+    tile: 16,
   },
   {
     id: "kenney-vector",

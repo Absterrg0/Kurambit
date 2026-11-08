@@ -1,9 +1,14 @@
 // Which game tools a thread's agent is offered. Each tool says what it needs
-// of its game's engine and whether it waits to be asked for; the thread's game
-// and engine come from the MCP invocation (McpHttpServer's auth middleware). A
-// tool the listing hides is also refused when called by name, by Effect's MCP core.
-import { ACTIVE_GAME_ENGINES } from "@kurambit/contracts";
-import { engineCapabilities, type GameEngineCapability } from "../../../game/engineProfile.ts";
+// of its game's engine and whether it waits to be asked for; the thread's game,
+// engine, character route and Blender come from the MCP invocation
+// (McpHttpServer's auth middleware). A tool the listing hides is also refused
+// when called by name, by Effect's MCP core.
+import { ACTIVE_GAME_ENGINES, type GameCharacterRoute } from "@kurambit/contracts";
+import {
+  engineCapabilities,
+  engineProfile,
+  type GameEngineCapability,
+} from "../../../game/engineProfile.ts";
 import { currentInvocation, type McpInvocationScope } from "../../McpInvocationContext.ts";
 
 export interface GameToolPlacement {
@@ -84,30 +89,60 @@ export const GAME_TOOL_PLACEMENTS = {
 } satisfies Record<`game_${string}`, GameToolPlacement>;
 export type GameToolName = keyof typeof GAME_TOOL_PLACEMENTS;
 
-/** Whether the calling thread's game allows the tool at all. */
-export const fits = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) => {
+/** Why the calling thread's game or machine refuses the tool, or null when it may use it. */
+export const refusal = (
+  placement: GameToolPlacement,
+  scope: McpInvocationScope | undefined,
+): string | null => {
   const engine = scope?.gameEngine;
-  if (scope === undefined || engine == null) return false;
+  if (scope === undefined || engine == null) return "it works in no game";
   const capabilities = engineCapabilities(engine);
-  return placement.needs.every((need) => capabilities.has(need));
+  if (!placement.needs.every((need) => capabilities.has(need)))
+    return `this ${engineProfile(engine).displayName} game's engine does not support it`;
+  if (placement.needs.includes("blender") && scope.blenderMissing != null)
+    return `it runs in Blender, which Kurambit cannot use on this machine. ${scope.blenderMissing}`;
+  return null;
 };
+
+/** Whether the calling thread's game and machine allow the tool at all. */
+const fits = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
+  refusal(placement, scope) === null;
+
+/**
+ * Routes whose characters go through Blender: built there, or generated and conformed to the
+ * standard skeleton there. On the library route a chat asks for the Blender tools first.
+ */
+const BLENDER_ROUTES: ReadonlySet<GameCharacterRoute> = new Set(["blender", "generated"]);
+const BLENDER_ASKED =
+  "when the person asks for a model, sprite render or animation made in Blender rather than taken from the library";
+
+/** The line game_more names it with, or undefined when it is listed. */
+const askedIn = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
+  placement.asked ??
+  (placement.needs.includes("blender") && !BLENDER_ROUTES.has(scope?.gameCharacters ?? "library")
+    ? BLENDER_ASKED
+    : undefined);
 
 /** Whether it is in the listing: it fits, and is not waiting to be asked for. */
 const listed = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
-  fits(placement, scope) && placement.asked === undefined;
+  fits(placement, scope) && askedIn(placement, scope) === undefined;
 
 /** The `McpSchema.EnabledWhen` of a game tool: listed for the calling thread now. */
 export const listedFor = (name: GameToolName) => () =>
   listed(GAME_TOOL_PLACEMENTS[name], currentInvocation());
 
-/** The tools game_more can reach for a chat on some active engine, with when to use each. */
+/**
+ * The tools game_more can reach on some active engine, with when to use each: those always
+ * asked for, and the Blender tools on a route that makes no characters there.
+ */
 export const ASKABLE_TOOLS: ReadonlyArray<readonly [GameToolName, string]> = (
   Object.entries(GAME_TOOL_PLACEMENTS) as Array<[GameToolName, GameToolPlacement]>
-).flatMap(([name, placement]) =>
-  placement.asked !== undefined &&
-  ACTIVE_GAME_ENGINES.some((engine) =>
-    placement.needs.every((need) => engineCapabilities(engine).has(need)),
-  )
-    ? [[name, placement.asked] as const]
-    : [],
-);
+).flatMap(([name, placement]) => {
+  const asked = askedIn(placement, undefined);
+  return asked !== undefined &&
+    ACTIVE_GAME_ENGINES.some((engine) =>
+      placement.needs.every((need) => engineCapabilities(engine).has(need)),
+    )
+    ? [[name, asked] as const]
+    : [];
+});

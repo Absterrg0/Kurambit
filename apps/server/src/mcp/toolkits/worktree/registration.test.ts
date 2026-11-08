@@ -29,6 +29,7 @@ import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as ThreadLaunchService from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
+import * as GameToolchain from "../../../game/GameToolchain.ts";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as PreviewManager from "../../../preview/Manager.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
@@ -38,10 +39,12 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const noGameThread = ThreadId.make("thread-no-game");
+const blenderThread = ThreadId.make("thread-blender-route");
 
 const layerStubServices = Layer.mergeAll(
   Layer.mock(GameService.GameService)({}),
-  // Every thread here works in a three.js game, except one that is no game.
+  // Every thread here works in a three.js game on the library route, except one that is no
+  // game and one whose person chose to make characters in Blender.
   Layer.mock(GameProjectService.GameProjectService)({
     resolve: (threadId) =>
       threadId === noGameThread
@@ -52,8 +55,17 @@ const layerStubServices = Layer.mergeAll(
               reason: "project-not-found",
             }),
           )
-        : Effect.succeed("/games/test"),
-    read: () => Effect.succeed({ engine: { name: "three", version: "0" } } as never),
+        : Effect.succeed(threadId === blenderThread ? "/games/blender" : "/games/test"),
+    read: (root) =>
+      Effect.succeed({
+        engine: { name: "three", version: "0" },
+        ...(root === "/games/blender" ? { characters: "blender" } : {}),
+      } as never),
+  }),
+  // This machine has a Blender.
+  Layer.mock(GameToolchain.GameToolchain)({
+    executable: () => Effect.succeed({ path: "/usr/bin/blender" } as never),
+    revision: () => 0,
   }),
   Layer.mock(GameRunControl.GameRunControl)({}),
   Layer.mock(GameBuilds.GameBuilds)({}),
@@ -184,8 +196,20 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       for (const name of ["game_import", "game_preview", "game_bot_run", "game_unity_edit"]) {
         expect(toolNames).not.toContain(name);
       }
-      for (const name of ["game_status", "game_blender_look"]) {
-        expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(true);
+      // The library route asks for the Blender tools through game_more; the Blender route lists them.
+      for (const name of ["game_blender_look", "game_blender_code", "game_animate"]) {
+        expect(toolNames).not.toContain(name);
+      }
+      const blender = yield* listTools(blenderThread);
+      for (const name of ["game_blender_look", "game_blender_code", "game_animate"]) {
+        expect(blender.map((tool) => tool.name)).toContain(name);
+      }
+      expect(blender.map((tool) => tool.name)).not.toContain("game_blender_paint");
+      for (const tool of [
+        tools.find((tool) => tool.name === "game_status"),
+        blender.find((tool) => tool.name === "game_blender_look"),
+      ]) {
+        expect(tool?.annotations?.readOnlyHint).toBe(true);
       }
       for (const name of ["game_check", "game_export"]) {
         expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(false);

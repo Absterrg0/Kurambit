@@ -41,8 +41,10 @@ export interface LibraryFamily {
   readonly title: string;
   /** One line a person can picture. */
   readonly look: string;
-  /** A pack of the family whose colours suit a pixel-art STYLE.json palette. */
+  /** A pixel family: the pack whose colours suit a pixel-art STYLE.json palette. */
   readonly palette?: string;
+  /** A pixel family: source pixels per tile, STYLE.json's tile. */
+  readonly tile?: number;
 }
 
 export type LibraryMedia = "image" | "model" | "audio" | "font" | "data";

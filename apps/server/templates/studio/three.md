@@ -133,7 +133,7 @@ export function update(dt, ctx) {
 ```
 
 Side view (an orthographic camera and pixel sprites from
-`kenney-pixel-platformer`; a pixel lock needs `palette` in STYLE.json). Each
+`kenney-pixel-platformer`, the `kenney-pixel` family's lock). Each
 `ctx.assets.texture` is shared, so swap frames by changing the material's map.
 
 ```js
