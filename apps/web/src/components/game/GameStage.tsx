@@ -30,7 +30,7 @@ import type {
   GameBuildsResult,
   ScopedThreadRef,
 } from "@kurambit/contracts";
-import { GAME_ENGINES, GAME_TEMPLATES, parkedEngineMessage } from "@kurambit/contracts";
+import { GAME_ENGINES, parkedEngineMessage } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
@@ -672,7 +672,6 @@ function ThreadGameStage({
     operationState === "running" && data.operation !== null
       ? data.operation.message
       : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
-  const template = GAME_TEMPLATES.find((entry) => entry.id === data.manifest.template);
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void stageRef.current?.requestFullscreen();
@@ -695,15 +694,9 @@ function ThreadGameStage({
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const templateName = template?.name ?? `${engine.name} ${data.manifest.engine.version}`;
+  // The engine names a game to a person; a starter template's name ("Blank") does not.
   const stageSubtitle =
-    stagePhaseLabel === null
-      ? templateName
-      : stageKind === "live"
-        ? `${engine.name} · ${stagePhaseLabel}`
-        : template === undefined
-          ? stagePhaseLabel
-          : `${templateName} · ${stagePhaseLabel}`;
+    stagePhaseLabel === null ? engine.name : `${engine.name} · ${stagePhaseLabel}`;
   const statusBanner =
     failureVisible !== null ? (
       <div className="flex items-center gap-2 border-t border-destructive/20 bg-destructive/8 px-3 py-1.5 text-xs text-destructive-foreground">
@@ -898,33 +891,38 @@ function ThreadGameStage({
                 </TooltipPopup>
               </Tooltip>
             ) : null}
-            <Menu>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <MenuTrigger
-                      render={
-                        <Button
-                          size="sm"
-                          variant={keepGoingView.pressed ? "secondary" : "ghost"}
-                          aria-label="Keep going"
-                          aria-pressed={keepGoingView.pressed}
-                        />
-                      }
-                    />
-                  }
-                >
-                  <FastForwardIcon className="size-3.5" aria-hidden="true" />
-                  <span className="hidden @[52rem]/stage-header:inline">{keepGoingView.label}</span>
-                </TooltipTrigger>
-                <TooltipPopup side="bottom">{keepGoingView.tooltip}</TooltipPopup>
-              </Tooltip>
-              <MenuPopup align="end">
-                <GameKeepGoingMenuContent threadRef={threadRef} />
-              </MenuPopup>
-            </Menu>
+            {/* A parked engine's game builds and plays nothing, so it offers neither. */}
+            {engine.status === "active" ? (
+              <Menu>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <MenuTrigger
+                        render={
+                          <Button
+                            size="sm"
+                            variant={keepGoingView.pressed ? "secondary" : "ghost"}
+                            aria-label="Keep going"
+                            aria-pressed={keepGoingView.pressed}
+                          />
+                        }
+                      />
+                    }
+                  >
+                    <FastForwardIcon className="size-3.5" aria-hidden="true" />
+                    <span className="hidden @[52rem]/stage-header:inline">
+                      {keepGoingView.label}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipPopup side="bottom">{keepGoingView.tooltip}</TooltipPopup>
+                </Tooltip>
+                <MenuPopup align="end">
+                  <GameKeepGoingMenuContent threadRef={threadRef} />
+                </MenuPopup>
+              </Menu>
+            ) : null}
             <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
-            {stageKind === "export" ? (
+            {stageKind === "export" && engine.status === "active" ? (
               <>
                 <Button
                   size="sm"
