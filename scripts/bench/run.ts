@@ -462,10 +462,17 @@ async function main() {
   try {
     const cookie = await openSession(server);
     const config = await call(server, cookie, (client) => client[WS_METHODS.serverGetConfig]({}));
-    // The app's default for a new game: the configured text-generation model.
+    // The app's default for a new game (GameEntry): the text-generation instance's own chat
+    // default, its flagship, at the provider's default effort.
+    const text = config.settings.textGenerationModelSelection;
+    const models =
+      config.providers.find((entry) => entry.instanceId === text.instanceId)?.models ?? [];
+    const chat =
+      models.find((model) => model.isDefault === true && !model.isCustom) ??
+      models.find((model) => !model.isCustom);
     modelSelection =
       args.model === undefined
-        ? config.settings.textGenerationModelSelection
+        ? { instanceId: text.instanceId, model: chat?.slug ?? text.model }
         : {
             instanceId: ProviderInstanceId.make(provider),
             model: modelParts.join("/"),
