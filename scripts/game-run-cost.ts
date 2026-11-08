@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- A maintainer report that reads a state database read-only.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off -- A maintainer report that reads a state database read-only.
 // What a game's threads cost: tokens, tool calls and wall time per role, read
 // from the turns the server already persisted. Point it at a copy or a stopped
 // server's database; it opens read-only either way.
