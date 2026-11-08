@@ -90,7 +90,17 @@ const make = Effect.gen(function* () {
       const build = yield* checkpoints
         .listCheckpointRefs({ cwd: root, prefix: ref })
         .pipe(Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid));
-      if (build !== undefined) yield* builds.measureIn(root, build, { supersede: true });
+      // The tester's bot plays a chat turn's build only while keep going, which judges by it, is on.
+      const keepGoing = yield* projections.getThreadShell(event.threadId).pipe(
+        Effect.flatMap((shell) =>
+          shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
+        ),
+        Effect.map((run) => run !== null && run.status !== "ended"),
+        // Unknown leaves it to keep going's own judge, which asks for the bot.
+        Effect.orElseSucceed(() => false),
+      );
+      if (build !== undefined)
+        yield* builds.measureIn(root, build, { supersede: true, skilled: keepGoing });
       if (profile.stage !== "export") return;
       const stopped = yield* projections
         .getThreadRecords(event.threadId, ["runs"], { runIds: [runId] })

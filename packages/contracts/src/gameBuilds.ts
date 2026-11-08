@@ -25,6 +25,13 @@ export const GAME_FACTS_BOUNDS = {
   startSeconds: 10,
 } as const;
 
+/**
+ * Why a build's skilled fact was not measured while its game has a play bot: the
+ * tester's bot plays only for keep going's judgment and a person's measure.
+ */
+export const GAME_FACTS_SKILLED_DEFERRED =
+  "the tester's bot plays a build when keep going judges it or when you measure it; this build was not asked for yet";
+
 /** Push names on the game's operation stream: the list changed, or a build's facts did. */
 export const GAME_BUILDS_EVENT = "builds";
 export const GAME_FACTS_EVENT = "facts";

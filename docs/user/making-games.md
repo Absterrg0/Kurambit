@@ -316,7 +316,8 @@ character slides along in its idle pose, and which named things never came on sc
 comes with a frame that outlines it, and your agent's `game_check` shows the same lines before it
 ends its turn. Opening or playing a build that was never measured
 measures it, one build at a time; a run measures its builds itself, and a three.js game measures
-each turn's build in the background when the turn ends. A fact Kurambit could not
+each turn's build in the background when the turn ends. The game's own bot plays a turn's build
+while keep going is on, or when you measure it. A fact Kurambit could not
 measure says **Not measured** and why, and never counts as a result: if a tool failed, **Measure
 again** tries once more. Your agent sees the same builds and facts.
 

@@ -5,7 +5,16 @@
  * through the same WebSocket RPC the client uses. One private server per run, on
  * a dev home (never an installed one); runs are kept by date so two compare.
  *
- *   vp run bench [--briefs N] [--only <id>] [--out <dir>] [--home <dir>] [--model <instance>/<model>]
+ *   vp run bench [--briefs N] [--only <id>] [--out <dir>] [--home <dir>] [--model <instance>/<model>] [--steps N]
+ *   vp run bench --remeasure <stamp> [--home <dir>] [--out <dir>]
+ *
+ * Phase 1 scores each brief's first turn. Phase 2 then runs keep going on the
+ * game for `--steps` steps (default 3; 0 skips it) and records what each step
+ * did to the measured facts, its cost, and a frame to look at: no score.
+ * `--remeasure` measures an earlier run's first-turn builds again on this
+ * checkout's server (a new harness measures them from nothing) and scores
+ * them as phase 1 did, to compare harnesses on the same builds. It rewrites
+ * those builds' facts in the home, so point it at a copy you can spare.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -22,6 +31,7 @@ import { RpcClient } from "effect/rpc";
 import {
   CommandId,
   DEFAULT_MODEL_BY_PROVIDER,
+  GAME_FACTS_SKILLED_DEFERRED,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
   ORCHESTRATION_V2_WS_METHODS,
@@ -30,6 +40,8 @@ import {
   WsRpcGroup,
   type GameBuildFacts,
   type GameCheckResult,
+  type GameFactDelta,
+  gameFactsView,
   type ModelSelection,
   type OrchestrationV2ThreadProjection,
   type ThreadId,
@@ -37,8 +49,14 @@ import {
 import { startBenchmarkServer, type BenchmarkServer } from "../lib/benchmark-server.ts";
 import { prepareDisplaySandbox } from "../lib/display-sandbox.ts";
 import { observationProtocolLayer } from "../lib/observation-transport.ts";
-import { writeReport, type BenchGame, type BenchRun } from "./report.ts";
-import { SCORE_VERSION, scoreGame } from "./score.ts";
+import {
+  writeReport,
+  type BenchGame,
+  type BenchKeepGoing,
+  type BenchRun,
+  type BenchStep,
+} from "./report.ts";
+import { CRITERIA, SCORE_VERSION, scoreGame } from "./score.ts";
 
 const checkout = NodePath.resolve(
   NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
@@ -54,6 +72,12 @@ const WAIT = {
   /** Facts a turn build owes start by themselves; past this the runner asks for them. */
   factsStartSeconds: 120,
   pollSeconds: 10,
+  /** Facts are timed from the moment they are seen measuring, so they are polled closely. */
+  factsPollSeconds: 2,
+  /** A keep-going step is a turn and its measure; past this per step the bench stops the run. */
+  stepMinutes: 30,
+  /** After the bench turns keep going off, the step turn it interrupted settles within this. */
+  settleSeconds: 300,
 } as const;
 
 interface Brief {
@@ -70,8 +94,13 @@ const { values: args } = NodeUtil.parseArgs({
     out: { type: "string" },
     home: { type: "string" },
     model: { type: "string" },
+    steps: { type: "string" },
+    remeasure: { type: "string" },
   },
 });
+const STEPS = args.steps === undefined ? 3 : Number(args.steps);
+if (!Number.isInteger(STEPS) || STEPS < 0 || STEPS > 10)
+  throw new Error(`--steps takes 0 to 10 (keep going reports its last ten), not ${args.steps}.`);
 
 const home = NodePath.resolve(args.home ?? NodePath.join(checkout, ".kurambit"));
 if (home === NodePath.join(NodeOS.homedir(), ".kurambit"))
@@ -87,7 +116,7 @@ if (briefs.length === 0) throw new Error(`No brief matches --only ${args.only}.`
 
 const outRoot = NodePath.resolve(args.out ?? NodePath.join(home, "bench"));
 const startedAt = new Date();
-const stamp = startedAt.toISOString().slice(0, 16).replace(":", "-");
+const stamp = args.remeasure ?? startedAt.toISOString().slice(0, 16).replace(":", "-");
 const runDir = NodePath.join(outRoot, stamp);
 const gamesDir = NodePath.join(runDir, "games");
 
@@ -248,54 +277,264 @@ const runFile = (command: string, argv: ReadonlyArray<string>) =>
     ),
   );
 
+/** The run video of a measured play, when its evidence is still on disk. */
+function videoOf(root: string, tier: GameBuildFacts["idle"]): string | null {
+  if (tier.status !== "measured" || tier.value.evidence === null) return null;
+  const video = NodePath.join(root, tier.value.evidence, "run.mp4");
+  return NodeFS.existsSync(video) ? video : null;
+}
+
+/** Frames of a video at the given shares of its length, as `shots/<name>-<n>.jpg`. */
+async function frames(video: string, shares: ReadonlyArray<number>, name: string) {
+  const shotsDir = NodePath.join(runDir, "shots");
+  await NodeFSP.mkdir(shotsDir, { recursive: true });
+  const duration = Number(
+    await runFile("ffprobe", [
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "csv=p=0",
+      video,
+    ]).catch(() => "0"),
+  );
+  if (!(duration > 0)) return [];
+  const shots: Array<string> = [];
+  for (const [index, share] of shares.entries()) {
+    const file = `${name}-${index + 1}.jpg`;
+    await runFile("ffmpeg", [
+      "-v",
+      "error",
+      "-y",
+      "-ss",
+      (duration * share).toFixed(2),
+      "-i",
+      video,
+      "-frames:v",
+      "1",
+      "-vf",
+      "scale=480:-2",
+      NodePath.join(shotsDir, file),
+    ]).then(
+      () => shots.push(`shots/${file}`),
+      () => undefined,
+    );
+  }
+  return shots;
+}
+
 /**
  * Three pictures of play from the facts' own plays: the random-input run first
  * (it moves), then no input, then the tester's bot. Early, middle and late.
  */
 async function screenshots(root: string, facts: GameBuildFacts, id: string) {
-  const tiers = [facts.masher, facts.idle, facts.skilled];
-  const shotsDir = NodePath.join(runDir, "shots");
-  await NodeFSP.mkdir(shotsDir, { recursive: true });
-  for (const tier of tiers) {
-    if (tier.status !== "measured" || tier.value.evidence === null) continue;
-    const video = NodePath.join(root, tier.value.evidence, "run.mp4");
-    if (!NodeFS.existsSync(video)) continue;
-    const duration = Number(
-      await runFile("ffprobe", [
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "csv=p=0",
-        video,
-      ]).catch(() => "0"),
-    );
-    if (!(duration > 0)) continue;
-    const shots: Array<string> = [];
-    for (const [index, share] of [0.2, 0.55, 0.92].entries()) {
-      const file = `${id}-${index + 1}.jpg`;
-      await runFile("ffmpeg", [
-        "-v",
-        "error",
-        "-y",
-        "-ss",
-        (duration * share).toFixed(2),
-        "-i",
-        video,
-        "-frames:v",
-        "1",
-        "-vf",
-        "scale=480:-2",
-        NodePath.join(shotsDir, file),
-      ]).then(
-        () => shots.push(`shots/${file}`),
-        () => undefined,
-      );
-    }
+  for (const tier of [facts.masher, facts.idle, facts.skilled]) {
+    const video = videoOf(root, tier);
+    if (video === null || tier.status !== "measured") continue;
+    const shots = await frames(video, [0.2, 0.55, 0.92], id);
     if (shots.length > 0) return { shots, from: tier.value.evidence };
   }
   return { shots: [], from: null };
+}
+
+/**
+ * A build's facts once they settle, and how long they took from the moment the
+ * server was seen measuring them (null when they were never seen measuring:
+ * already measured, or measured between two polls). A person's measure is
+ * asked for when the server never starts one, and when the tester's bot was
+ * left for keep going: the floor reads all three plays, as it always has.
+ */
+async function settledFacts(
+  server: BenchmarkServer,
+  cookie: string,
+  threadId: ThreadId,
+  build: string,
+  id: string,
+  options: { readonly ask?: boolean } = {},
+): Promise<{ readonly facts: GameBuildFacts | null; readonly seconds: number | null }> {
+  const ref = { threadId, build: { _tag: "build" as const, build: build as never } };
+  const deadline = Date.now() + WAIT.factsMinutes * 60_000;
+  const since = Date.now();
+  let measuringSince: number | null = null;
+  let asked = false;
+  let askedSkilled = false;
+  if (options.ask === true) {
+    asked = true;
+    await call(server, cookie, (client) => client[WS_METHODS.gameBuildMeasure](ref));
+  }
+  while (true) {
+    const facts = await call(server, cookie, (client) => client[WS_METHODS.gameBuildFacts](ref));
+    if (facts.state === "measuring" && measuringSince === null) measuringSince = Date.now();
+    const settled = FACTS_SETTLED.has(facts.state);
+    if (
+      settled &&
+      !askedSkilled &&
+      facts.skilled.status === "not-measured" &&
+      facts.skilled.why === GAME_FACTS_SKILLED_DEFERRED
+    ) {
+      askedSkilled = true;
+      log(`${id}: the tester's bot was left for keep going; asking for it`);
+      await call(server, cookie, (client) => client[WS_METHODS.gameBuildMeasure](ref));
+    } else if (settled || Date.now() > deadline) {
+      const seconds = measuringSince === null ? null : (Date.now() - measuringSince) / 1000;
+      log(`${id}: facts ${facts.state}${seconds === null ? "" : ` in ${Math.round(seconds)} s`}`);
+      return { facts: settled ? facts : null, seconds };
+    } else if (
+      !asked &&
+      facts.state === "never" &&
+      Date.now() - since > WAIT.factsStartSeconds * 1000
+    ) {
+      asked = true;
+      log(`${id}: facts never started; asking for them`);
+      await call(server, cookie, (client) => client[WS_METHODS.gameBuildMeasure](ref));
+    }
+    await sleep(WAIT.factsPollSeconds);
+  }
+}
+
+const brokeOrBetter = (deltas: ReadonlyArray<GameFactDelta>, tone: "better" | "worse") =>
+  deltas
+    .filter((delta) => delta.change !== "not-comparable" && delta.tone === tone)
+    .map((delta) => ({ id: delta.id, label: delta.label, a: delta.a, b: delta.b }));
+
+/**
+ * Phase 2: keep going on the game, on Autopilot, until `STEPS` steps have a
+ * verdict or the run ends by itself; then the bench turns it off. Each step's
+ * facts are compared with the build it started from, the way keep going
+ * judged it, and the game's last build with its first.
+ */
+async function keepGoing(
+  server: BenchmarkServer,
+  cookie: string,
+  game: { readonly threadId: ThreadId; readonly root: string },
+  first: { readonly build: string; readonly turnSeconds: number | null },
+  id: string,
+): Promise<BenchKeepGoing> {
+  const started = Date.now();
+  const status = () =>
+    call(server, cookie, (client) =>
+      client[WS_METHODS.gameKeepGoingStatus]({ threadId: game.threadId }),
+    );
+  log(`${id}: keep going for ${STEPS} step(s)`);
+  let now = await call(server, cookie, (client) =>
+    client[WS_METHODS.gameKeepGoing]({
+      threadId: game.threadId,
+      commandId: `bench:${NodeCrypto.randomUUID()}`,
+      mode: "autopilot",
+      budgetMinutes: null,
+    }),
+  );
+  const deadline = started + STEPS * WAIT.stepMinutes * 60_000;
+  const settledSteps = () =>
+    now.steps.filter((step) => step.verdict !== null && step.n <= STEPS).length;
+  let seen = 0;
+  while (now.mode !== "off" && settledSteps() < STEPS && Date.now() < deadline) {
+    await sleep(5);
+    now = await status();
+    if (settledSteps() > seen) {
+      seen = settledSteps();
+      const step = now.steps.find((each) => each.n === seen);
+      log(`${id}: step ${seen} ${step?.verdict ?? "?"}: ${step?.reason ?? ""}`);
+    }
+  }
+  // Why the run ended before the bench stopped it, if it did.
+  const ending = now.mode === "off" ? now.ending : null;
+  if (now.mode !== "off") {
+    await call(server, cookie, (client) =>
+      client[WS_METHODS.gameKeepGoing]({
+        threadId: game.threadId,
+        commandId: `bench:${NodeCrypto.randomUUID()}`,
+        mode: "off",
+      }),
+    );
+    if (settledSteps() < STEPS)
+      log(
+        `${id}: keep going had ${settledSteps()} of ${STEPS} step(s) after ${WAIT.stepMinutes * STEPS} min; stopped`,
+      );
+  }
+  // The step turn the stop interrupted settles before the builds are read.
+  const settleBy = Date.now() + WAIT.settleSeconds * 1000;
+  while (Date.now() < settleBy) {
+    const projection = await call(server, cookie, (client) =>
+      client[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId: game.threadId }),
+    );
+    if (projection.runs.every((run) => TERMINAL_RUN.has(run.status))) break;
+    await sleep(WAIT.pollSeconds);
+  }
+  const seconds = (Date.now() - started) / 1000;
+  now = await status();
+  const listed = await call(server, cookie, (client) =>
+    client[WS_METHODS.gameBuilds]({ threadId: game.threadId, limit: 50 }),
+  );
+  const compare = (a: string, b: string) =>
+    call(server, cookie, (client) =>
+      client[WS_METHODS.gameBuildCompare]({
+        threadId: game.threadId,
+        a: { _tag: "build", build: a as never },
+        b: { _tag: "build", build: b as never },
+      }),
+    ).catch(() => null);
+  const steps: Array<BenchStep> = [];
+  for (const step of now.steps.filter((each) => each.n <= STEPS).toSorted((a, b) => a.n - b.n)) {
+    const base =
+      step.build === null
+        ? null
+        : (listed.builds.find((build) => build.id === step.build)?.base ?? null);
+    const comparison =
+      step.build === null || base === null ? null : await compare(base, step.build);
+    const video = comparison === null ? null : videoOf(game.root, comparison.factsB.masher);
+    const shot = video === null ? [] : await frames(video, [0.55], `${id}-step${step.n}`);
+    steps.push({
+      n: step.n,
+      why: step.why,
+      text: step.text,
+      verdict: step.verdict,
+      reason: step.reason,
+      gain: step.gain,
+      minutes: step.minutes,
+      tokens: step.tokens,
+      build: step.build,
+      base,
+      improved: comparison === null ? [] : brokeOrBetter(comparison.deltas, "better"),
+      regressed: comparison === null ? [] : brokeOrBetter(comparison.deltas, "worse"),
+      frame: shot[0] ?? null,
+    });
+  }
+  const final = listed.current;
+  const net = final === null || final === first.build ? null : await compare(first.build, final);
+  const finalFacts =
+    final === null
+      ? null
+      : (net?.factsB ??
+        (await call(server, cookie, (client) =>
+          client[WS_METHODS.gameBuildFacts]({
+            threadId: game.threadId,
+            build: { _tag: "build", build: final },
+          }),
+        )));
+  return {
+    asked: STEPS,
+    ending,
+    seconds,
+    steps,
+    first: first.build,
+    final,
+    net: {
+      improved: net === null ? [] : brokeOrBetter(net.deltas, "better"),
+      regressed: net === null ? [] : brokeOrBetter(net.deltas, "worse"),
+    },
+    finalScore:
+      finalFacts === null
+        ? null
+        : scoreGame({
+            facts: finalFacts,
+            files: null,
+            complete: true,
+            turnSeconds: first.turnSeconds,
+            missing: "",
+          }),
+  };
 }
 
 async function runBrief(
@@ -375,31 +614,13 @@ async function runBrief(
   }
 
   let facts: GameBuildFacts | null = null;
+  let factsSeconds: number | null = null;
   let missing = turnEnded ? "the turn made no build" : "the turn did not end";
   if (build !== undefined) {
-    const ref = { threadId: game.threadId, build: { _tag: "build" as const, build: build.id } };
-    const factsDeadline = Date.now() + WAIT.factsMinutes * 60_000;
-    const askedAt = Date.now();
-    let asked = false;
-    while (true) {
-      facts = await call(server, cookie, (client) => client[WS_METHODS.gameBuildFacts](ref));
-      if (FACTS_SETTLED.has(facts.state) || Date.now() > factsDeadline) break;
-      if (
-        !asked &&
-        facts.state === "never" &&
-        Date.now() - askedAt > WAIT.factsStartSeconds * 1000
-      ) {
-        asked = true;
-        log(`${brief.id}: facts never started; asking for them`);
-        await call(server, cookie, (client) => client[WS_METHODS.gameBuildMeasure](ref));
-      }
-      await sleep(WAIT.pollSeconds);
-    }
-    log(`${brief.id}: facts ${facts.state}`);
-    if (!FACTS_SETTLED.has(facts.state)) {
-      missing = `facts still ${facts.state} after ${WAIT.factsMinutes} min`;
-      facts = null;
-    }
+    const settled = await settledFacts(server, cookie, game.threadId, build.id, brief.id);
+    facts = settled.facts;
+    factsSeconds = settled.seconds;
+    if (facts === null) missing = `facts not settled after ${WAIT.factsMinutes} min`;
   }
 
   const pictures =
@@ -412,6 +633,32 @@ async function runBrief(
   const turnSeconds =
     run?.startedAt && run.completedAt ? seconds(run.startedAt, run.completedAt) : null;
   const sinceBrief = turnEndedAt === null ? null : seconds(sentAt, turnEndedAt);
+  const score = scoreGame({
+    facts,
+    files: build === undefined ? null : build.files.map((file) => file.path),
+    complete: build === undefined || build.files.length === build.fileCount,
+    turnSeconds: sinceBrief,
+    missing,
+  });
+  // Keep going needs a game that boots: a build that does not is phase 1's finding, not phase 2's.
+  const phase2 =
+    STEPS === 0
+      ? null
+      : build === undefined || score.verdicts.boots.result !== "pass"
+        ? { skipped: `no booting first build (${score.verdicts.boots.detail})` }
+        : await keepGoing(
+            server,
+            cookie,
+            game,
+            { build: build.id, turnSeconds: sinceBrief },
+            brief.id,
+          ).catch((cause: unknown) => ({
+            skipped: `runner error: ${cause instanceof Error ? cause.message : String(cause)}`,
+          }));
+  if (phase2 !== null)
+    await call(server, cookie, (client) =>
+      client[WS_METHODS.gameAction]({ threadId: game.threadId, action: "stop" }),
+    ).catch(() => undefined);
   return {
     id: brief.id,
     genre: brief.genre,
@@ -434,13 +681,9 @@ async function runBrief(
     check: { calls: check.calls, ...readCheck(check.result), raw: check.result },
     shots: pictures.shots,
     shotsFrom: pictures.from,
-    score: scoreGame({
-      facts,
-      files: build === undefined ? null : build.files.map((file) => file.path),
-      complete: build === undefined || build.files.length === build.fileCount,
-      turnSeconds: sinceBrief,
-      missing,
-    }),
+    factsSeconds,
+    score,
+    keepGoing: phase2,
   };
 }
 
@@ -511,6 +754,7 @@ async function main() {
           check: { calls: 0, result: null, refused: null, raw: null },
           shots: [],
           shotsFrom: null,
+          factsSeconds: null,
           score: scoreGame({
             facts: null,
             files: null,
@@ -518,6 +762,7 @@ async function main() {
             turnSeconds: null,
             missing: `runner error: ${why}`,
           }),
+          keepGoing: null,
           error: why,
         });
       }
@@ -551,4 +796,107 @@ async function main() {
   log(`summary ${report.markdown}`);
 }
 
-await main();
+/** One earlier game measured again: its floor then and now, and how long its facts took each time. */
+interface Remeasured {
+  readonly id: string;
+  readonly harness: string | null;
+  readonly before: { readonly score: number; readonly factsSeconds: number | null };
+  readonly after: { readonly score: number; readonly factsSeconds: number | null };
+  readonly criteria: ReadonlyArray<{
+    readonly criterion: string;
+    readonly before: string;
+    readonly after: string;
+  }>;
+  /** Facts whose reading moved between the two measurements. */
+  readonly moved: ReadonlyArray<{
+    readonly fact: string;
+    readonly before: string;
+    readonly after: string;
+  }>;
+  readonly facts: GameBuildFacts | null;
+}
+
+const readingOf = (facts: GameBuildFacts | null) =>
+  new Map(
+    (facts === null ? [] : gameFactsView(facts)).map((view) => [
+      view.id,
+      view.reading._tag === "measured"
+        ? `${view.reading.tone}: ${view.reading.text}`
+        : view.reading._tag === "pending"
+          ? "pending"
+          : `not measured: ${view.reading.why}`,
+    ]),
+  );
+
+async function remeasure() {
+  const earlier = JSON.parse(
+    await NodeFSP.readFile(NodePath.join(runDir, "results.json"), "utf8"),
+  ) as BenchRun;
+  const when = new Date().toISOString().slice(0, 16).replace(":", "-");
+  log(`remeasuring run ${stamp} (${earlier.games.length} games) on commit of ${checkout}`);
+  const sandbox = await prepareDisplaySandbox(runDir);
+  const server = await startBenchmarkServer({
+    checkout,
+    homeDir: home,
+    sandbox,
+    logPath: NodePath.join(runDir, `remeasure-${when}-server.log`),
+    provider: earlier.model?.instanceId ?? "codex",
+  });
+  const out: Array<Remeasured> = [];
+  try {
+    const cookie = await openSession(server);
+    for (const game of earlier.games) {
+      if (game.threadId === null || game.build === null || game.root === null) continue;
+      const files = game.build.files;
+      const settled = await settledFacts(
+        server,
+        cookie,
+        game.threadId as ThreadId,
+        game.build.id,
+        game.id,
+        { ask: true },
+      );
+      const score = scoreGame({
+        facts: settled.facts,
+        files,
+        // A build's list holds its eight most changed files: fewer is all of them.
+        complete: files.length < 8,
+        turnSeconds: game.turn.sinceBriefSeconds,
+        missing: `facts not settled after ${WAIT.factsMinutes} min`,
+      });
+      const before = readingOf(game.facts);
+      const after = readingOf(settled.facts);
+      out.push({
+        id: game.id,
+        harness: settled.facts?.harness ?? null,
+        before: { score: game.score.passed, factsSeconds: game.factsSeconds ?? null },
+        after: { score: score.passed, factsSeconds: settled.seconds },
+        criteria: CRITERIA.map((criterion) => ({
+          criterion,
+          before: `${game.score.verdicts[criterion].result}: ${game.score.verdicts[criterion].detail}`,
+          after: `${score.verdicts[criterion].result}: ${score.verdicts[criterion].detail}`,
+        })),
+        moved: [...after.entries()].flatMap(([fact, reading]) =>
+          before.get(fact) === reading
+            ? []
+            : [{ fact, before: before.get(fact) ?? "absent", after: reading }],
+        ),
+        facts: settled.facts,
+      });
+      await NodeFSP.writeFile(
+        NodePath.join(runDir, `remeasure-${when}.json`),
+        `${JSON.stringify(out, null, 2)}\n`,
+      );
+    }
+  } finally {
+    await server.stop();
+    log("server stopped");
+  }
+  for (const game of out)
+    log(
+      `${game.id}: floor ${game.before.score} -> ${game.after.score}, facts ${game.before.factsSeconds ?? "?"} s -> ${game.after.factsSeconds ?? "?"} s, ${game.moved.length} fact(s) read differently`,
+    );
+  log(`written ${NodePath.join(runDir, `remeasure-${when}.json`)}`);
+}
+
+await (args.remeasure === undefined ? main() : remeasure());

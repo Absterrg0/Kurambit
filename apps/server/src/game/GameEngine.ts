@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The check reads the source tree around the engine's run.
+import * as NodePath from "node:path";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -38,7 +39,12 @@ import { engineProfile, type GameEngineProfile, type GameExportTarget } from "./
 import * as GameOperations from "./GameOperations.ts";
 import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
-import { comparedSource, snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
+import {
+  comparedSource,
+  hashFile,
+  snapshotBuildSource,
+  sourceIdentityError,
+} from "./sourceSnapshot.ts";
 import type { WindowHost } from "./windowHost.ts";
 
 /**
@@ -47,6 +53,8 @@ import type { WindowHost } from "./windowHost.ts";
  * lookup or process launch — instead of being silently routed elsewhere.
  */
 const SUPPORTED_GAME_ENGINE_IDS = ["godot", "three", "unity"] as const;
+/** Clean checks kept for builds' facts: a turn's last few checks are the ones its build may match. */
+const CLEAN_CHECKS = 32;
 export type SupportedGameEngineId = (typeof SUPPORTED_GAME_ENGINE_IDS)[number];
 
 export interface GameEngineBinary {
@@ -298,6 +306,13 @@ export class GameEngine extends Context.Service<
       root: string,
       owner: string,
     ) => Effect.Effect<GameCheckResult, GameOperationError>;
+    /**
+     * A clean `check` this server made of the very files `root` holds (its
+     * engine project and game.json, byte for byte), or null. That check booted
+     * the same entries and played the gameplay entry longer, so it stands for
+     * the copy's boot check.
+     */
+    readonly cleanCheckOf: (root: string) => Effect.Effect<GameCheckResult | null>;
     /** `game_unity_recompile`: the live editor imports changed files and compiles, with C# errors at file:line. */
     readonly recompile: (
       threadId: ThreadId,
@@ -490,6 +505,39 @@ const make = Effect.gen(function* () {
     return yield* backend.viewport(GameProjectService.insideGame(root, manifestProject(manifest)));
   });
 
+  // Clean checks by the identity of what they checked. Memory only: one lost costs a boot check.
+  const cleanChecks = new Map<string, GameCheckResult>();
+  /** The engine project's files and game.json, by content; null when they cannot be read whole. */
+  const checkedIdentity = (root: string) =>
+    Effect.gen(function* () {
+      const manifest = yield* projects.read(root);
+      const snapshot = yield* Effect.promise((signal) =>
+        snapshotBuildSource(root, manifestProject(manifest), {
+          signal,
+          rules: engineProfile(manifest.engine.name).buildInputs,
+        }),
+      );
+      if (snapshot.kind !== "known") return null;
+      const manifestHash = yield* Effect.promise(() =>
+        hashFile(NodePath.join(root, "game.json"), { noFollow: true }),
+      );
+      return `${manifest.engine.name}:${snapshot.sourceId}:${manifestHash.sha256}`;
+    }).pipe(Effect.orElseSucceed(() => null));
+  /** The thread's check, remembered when it is clean and its files held still throughout. */
+  const checkRemembered = (root: string) =>
+    Effect.gen(function* () {
+      const before = yield* checkedIdentity(root);
+      const result = yield* check(root, { scene: true });
+      if (result.ok && before !== null && before === (yield* checkedIdentity(root))) {
+        cleanChecks.delete(before);
+        cleanChecks.set(before, result);
+        if (cleanChecks.size > CLEAN_CHECKS) {
+          const oldest = cleanChecks.keys().next().value;
+          if (oldest !== undefined) cleanChecks.delete(oldest);
+        }
+      }
+      return result;
+    });
   const checkLabel = (root: string) =>
     Effect.map(
       projects.read(root),
@@ -503,13 +551,15 @@ const make = Effect.gen(function* () {
     check: (threadId, owner) =>
       Effect.gen(function* () {
         const label = yield* checkLabel(yield* projects.resolve(threadId));
-        return yield* projects.exclusive(threadId, label, (root) => check(root, { scene: true }), {
-          owner,
-        });
+        return yield* projects.exclusive(threadId, label, checkRemembered, { owner });
       }),
     checkIn: (root, owner) =>
       Effect.flatMap(checkLabel(root), (label) =>
         operations.exclusive(root, label, check(root), owner),
+      ),
+    cleanCheckOf: (root) =>
+      Effect.map(checkedIdentity(root), (identity) =>
+        identity === null ? null : (cleanChecks.get(identity) ?? null),
       ),
     recompile: (threadId) =>
       projects.exclusive(threadId, "Unity recompile", (root) =>
