@@ -139,6 +139,18 @@ function factLines(game: BenchGame): Array<string> {
   );
 }
 
+/** A game's verdicts grouped by their reason, so one missing build reads once, not five times. */
+function byReason(game: BenchGame) {
+  const groups: Array<{ detail: string; criteria: Array<(typeof CRITERIA)[number]> }> = [];
+  for (const criterion of CRITERIA) {
+    const detail = game.score.verdicts[criterion].detail;
+    const group = groups.find((candidate) => candidate.detail === detail);
+    if (group) group.criteria.push(criterion);
+    else groups.push({ detail, criteria: [criterion] });
+  }
+  return groups;
+}
+
 const escape = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -149,10 +161,12 @@ function html(run: BenchRun, previous: BenchRun | null, note: string | null): st
   const rows = run.games
     .map((game) => {
       const before = prevGame(game.id);
-      const criteria = CRITERIA.map((criterion) => {
-        const verdict = game.score.verdicts[criterion];
-        return `<li>${mark(verdict)} ${escape(CRITERION_LABELS[criterion])}: ${escape(verdict.detail)}</li>`;
-      }).join("");
+      const criteria = byReason(game)
+        .map(
+          (group) =>
+            `<li>${group.criteria.map((c) => `${mark(game.score.verdicts[c])} ${escape(CRITERION_LABELS[c])}`).join(", ")}: ${escape(group.detail)}</li>`,
+        )
+        .join("");
       const shots =
         game.shots.length === 0
           ? "<p>No screenshots.</p>"
@@ -231,11 +245,13 @@ function markdown(run: BenchRun, previous: BenchRun | null, note: string | null)
     "## What failed",
     "",
     ...run.games.flatMap((game) => {
-      const failed = CRITERIA.filter((c) => game.score.verdicts[c].result !== "pass");
+      const failed = byReason(game).filter((group) =>
+        group.criteria.some((c) => game.score.verdicts[c].result !== "pass"),
+      );
       return failed.length === 0
         ? []
         : [
-            `- **${game.name}**: ${failed.map((c) => `${CRITERION_LABELS[c]} ${mark(game.score.verdicts[c])} ${game.score.verdicts[c].detail}`).join("; ")}`,
+            `- **${game.name}**: ${failed.map((group) => `${group.criteria.map((c) => `${CRITERION_LABELS[c]} ${mark(game.score.verdicts[c])}`).join(", ")}: ${group.detail}`).join("; ")}`,
           ];
     }),
     "",

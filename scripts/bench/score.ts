@@ -196,7 +196,7 @@ export function scoreGame(input: {
 }): GameScore {
   const starter =
     input.files !== null && input.complete && !changesGameCode(input.files)
-      ? `the turn changed no game code (${input.files.join(", ") || "no files"}): what plays is the template's starter`
+      ? `the turn changed no game code (${input.files.slice(0, 3).join(", ") || "no files"}${input.files.length > 3 ? ` and ${input.files.length - 3} more` : ""}): what plays is the template's starter`
       : null;
   const facts = starter === null ? input.facts : null;
   const missing = starter ?? input.missing;
