@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "engine": "three",
+  "briefs": [
+    {
+      "id": "knight-ruins",
+      "genre": "third-person action",
+      "name": "Knight Ruins",
+      "brief": "A third-person action game where a knight fights skeletons in crumbling castle ruins. Swing the sword, dodge their attacks, and clear every room to win."
+    },
+    {
+      "id": "neon-arena",
+      "genre": "top-down arena",
+      "name": "Neon Arena",
+      "brief": "Top-down arena: you're a little hover tank in a glowing pit and waves of drones keep coming at you. Survive five waves."
+    },
+    {
+      "id": "fox-cliffs",
+      "genre": "side-scroller",
+      "name": "Fox Cliffs",
+      "brief": "A side-scrolling platformer where a fox runs and jumps across cliffs, collects berries and avoids hedgehogs, and reaches the den at the end of the level."
+    },
+    {
+      "id": "crate-lab",
+      "genre": "puzzle",
+      "name": "Crate Lab",
+      "brief": "A puzzle game where a small robot pushes crates onto glowing pads in a lab. Three levels that get harder, with undo and restart."
+    },
+    {
+      "id": "desert-kart",
+      "genre": "racing",
+      "name": "Desert Kart",
+      "brief": "A kart racing game on a desert track against three AI racers. Three laps, a boost pad or two, and you win by finishing first."
+    },
+    {
+      "id": "seed-garden",
+      "genre": "cosy sim",
+      "name": "Seed Garden",
+      "brief": "A cosy gardening game: plant seeds, water them, and harvest vegetables before the day ends. Sell the harvest to fill an order of ten vegetables."
+    },
+    {
+      "id": "asteroid-gunner",
+      "genre": "shooter",
+      "name": "Asteroid Gunner",
+      "brief": "A space shooter where your ship flies through an asteroid field shooting rocks and alien fighters. Lose all three lives and it's over; beat the boss to win."
+    },
+    {
+      "id": "drum-temple",
+      "genre": "rhythm",
+      "name": "Drum Temple",
+      "brief": "A rhythm game where notes slide down four lanes toward a temple drum and you hit the right key on the beat. Finish the song with enough hits to win, miss too many and you lose."
+    },
+    {
+      "id": "tower-grove",
+      "genre": "tower defense",
+      "name": "Tower Grove",
+      "brief": "A tower defense game in a forest: goblins walk a winding path toward your village and you place archer towers to stop them. Survive ten waves."
+    },
+    {
+      "id": "sky-runner",
+      "genre": "endless runner",
+      "name": "Sky Runner",
+      "brief": "An endless runner on floating sky islands: the runner switches between three lanes and jumps gaps and barriers. Reach 1000 metres to win, fall or hit a barrier and you lose."
+    }
+  ]
+}

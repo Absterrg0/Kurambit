@@ -1221,7 +1221,14 @@ const make = Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         const manifest = yield* projects.read(root);
         const label = `${engineProfile(manifest.engine.name).displayName} check`;
-        return yield* withRoot(threadId, label, engines.check, owner);
+        // The agent's and the person's check also looks at the scene; a build's facts read it
+        // from their own random-input play instead.
+        return yield* withRoot(
+          threadId,
+          label,
+          (root) => engines.check(root, { scene: true }),
+          owner,
+        );
       }),
     unityTools: (threadId) => withRoot(threadId, "Unity tools", liveUnity.listTools),
     unityEdit: (threadId, input) =>

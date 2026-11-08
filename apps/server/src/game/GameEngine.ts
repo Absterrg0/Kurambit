@@ -15,6 +15,7 @@ import {
   type GameActionResult,
   type GameCheckIssue,
   type GameCheckResult,
+  type GameCheckScene,
   type GameProcessResult,
   type GameToolStatus,
   type GameViewport,
@@ -66,6 +67,8 @@ export interface GameEngineCheckReport {
   /** Issues parsed from the check run's own stdout/stderr. */
   readonly issues: ReadonlyArray<GameCheckIssue>;
   readonly run: GameProcessResult;
+  /** The scene report of a check that asked for one, from an engine that measures it. */
+  readonly scene?: GameCheckScene;
 }
 
 /** One release the engine wrote into a staging folder. */
@@ -144,10 +147,14 @@ export interface GameEngineBackend {
     { readonly result: GameActionResult; readonly issues: ReadonlyArray<GameCheckIssue> },
     GameOperationError
   >;
-  /** Boot check of the entries the engine boots: what the player opens first, then the gameplay entry. */
+  /**
+   * Boot check of the entries the engine boots: what the player opens first, then the
+   * gameplay entry. With `scene`, an engine that has a scene report plays the gameplay entry
+   * briefly with random input and returns it.
+   */
   readonly runCheck: (
     ctx: GameEngineContext,
-    input: { readonly gameplayScene: string },
+    input: { readonly gameplayScene: string; readonly scene: boolean },
   ) => Effect.Effect<GameEngineCheckReport, GameOperationError>;
   /** Refuses an export the installed engine cannot make (missing export templates), before any import. */
   readonly exportReady: (
@@ -264,9 +271,13 @@ export class GameEngine extends Context.Service<
      * The game's boot check, holding the live editor itself. Everything the
      * game did is in the result (a failed import, an entry that does not load,
      * a freeze, compile errors); it fails only when the check could not be
-     * made: a tool or the machine.
+     * made: a tool or the machine. With `scene`, it also plays the gameplay entry briefly
+     * for the scene report (see GameEngineBackend.runCheck).
      */
-    readonly check: (root: string) => Effect.Effect<GameCheckResult, GameOperationError>;
+    readonly check: (
+      root: string,
+      options?: { readonly scene?: boolean },
+    ) => Effect.Effect<GameCheckResult, GameOperationError>;
     /**
      * The one tool this game's engine needs, as the toolchain sees it for this
      * project. Asked on every status read, so an answer is kept briefly per game.
@@ -328,6 +339,7 @@ const make = Effect.gen(function* () {
     ctx: GameEngineContext,
     manifest: GameManifest,
     startedAt: number,
+    scene: boolean,
   ) =>
     Effect.gen(function* () {
       const { profile } = backend;
@@ -340,6 +352,7 @@ const make = Effect.gen(function* () {
         return yield* sourceIdentityError(`${profile.displayName} check`, root, project, before);
       const executed = yield* backend.runCheck(ctx, {
         gameplayScene: manifest.gameplayScene ?? "",
+        scene,
       });
       const { run, reported } = executed;
       const errors = mergeCheckIssues(reported?.errors ?? [], [
@@ -386,10 +399,21 @@ const make = Effect.gen(function* () {
         warnings: limitIssues(warnings),
         entries: reported?.entries ?? [],
         durationMs: (yield* Clock.currentTimeMillis) - startedAt,
+        ...(scene
+          ? {
+              scene: executed.scene ?? {
+                status: "not-measured" as const,
+                why: `${profile.displayName} games have no scene report yet; it is measured for three.js games`,
+              },
+            }
+          : {}),
       } satisfies GameCheckResult;
     });
 
-  const check = Effect.fn("GameEngine.check")(function* (root: string) {
+  const check = Effect.fn("GameEngine.check")(function* (
+    root: string,
+    options?: { readonly scene?: boolean },
+  ) {
     const startedAt = yield* Clock.currentTimeMillis;
     // A failure the game's own files cause (an unreadable game.json, an editor
     // that will not open the project for its compile errors) is a check
@@ -412,7 +436,7 @@ const make = Effect.gen(function* () {
       const backend = yield* runner(manifest);
       const project = yield* backend.resolveProject(root, manifest);
       const ctx = { root, ...project };
-      const work = checkSources(root, backend, ctx, manifest, startedAt);
+      const work = checkSources(root, backend, ctx, manifest, startedAt, options?.scene === true);
       // With a live editor, import and check share one hold, as export does:
       // another game cannot take the editor between them.
       return yield* backend.editor === null ? work : backend.editor.hold(root)(work);

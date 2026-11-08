@@ -49,6 +49,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import { PlayDidNotBoot, openPagePlay, openRunnerPlay } from "./playLaunch.ts";
 import { encodePlayUse, PLAY_USE_FILE } from "./assetUse.ts";
 import { PLAY_PERF_FILE } from "./playPerf.ts";
+import { encodeSceneFile, keepSceneReport, SCENE_FILE } from "./sceneReport.ts";
 import {
   appendNoFollow,
   ensureGameDir,
@@ -818,6 +819,7 @@ const make = Effect.gen(function* () {
                       bootTimeoutMs: PLAY_BOUNDS.bootMs,
                       keptStorage: keptWebStorage(saves),
                       recordUse: true,
+                      sceneReport: true,
                     })
                   : openRunnerPlay(processes, {
                       operation: "Bot run",
@@ -957,6 +959,20 @@ const make = Effect.gen(function* () {
                           `${JSON.stringify(perf)}\n`,
                         ).catch(() => undefined),
                       );
+                    // The scene report's frames go beside it, named from the run folder.
+                    const scene = stopped.scene;
+                    if (scene !== null)
+                      yield* Effect.promise(async () => {
+                        const kept =
+                          scene === "no-shell"
+                            ? scene
+                            : await keepSceneReport(scene.raw, runDir, "");
+                        if (kept !== null)
+                          await NodeFSP.writeFile(
+                            NodePath.join(runDir, SCENE_FILE),
+                            encodeSceneFile(kept),
+                          ).catch(() => undefined);
+                      });
                   }),
               ).pipe(
                 // The game never booted: measured, and a run on the record.

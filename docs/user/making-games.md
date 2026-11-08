@@ -318,7 +318,13 @@ and how soon the game answers the first input. For a three.js game it also lists
 its assets folder those plays loaded and which sounds started playing, so art that was made but never
 wired in shows up as unused, and how smoothly the random-input play ran: frames per second, the
 slowest 1% of frames, the GPU's time per frame and the share of the resolution the game drew at.
-On a machine where Kurambit's browser cannot use the GPU, performance says so instead of guessing. Opening or playing a build that was never measured
+On a machine where Kurambit's browser cannot use the GPU, performance says so instead of guessing.
+The same play also looks at the scene the way you would: whether the player stays in view and big
+enough to read, whether a character stands in the ground instead of on it or sits inside another
+one, whether something falls out of the world, whether the camera ends up inside a wall, whether a
+character slides along in its idle pose, and which named things never came on screen. Each problem
+comes with a frame that outlines it, and your agent's `game_check` shows the same lines before it
+ends its turn. Opening or playing a build that was never measured
 measures it, one build at a time; a run measures its builds itself, and a three.js game measures
 each turn's build in the background when the turn ends. A fact Kurambit could not
 measure says **Not measured** and why, and never counts as a result: if a tool failed, **Measure

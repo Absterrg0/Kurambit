@@ -119,7 +119,7 @@ const EVERY_TURN_SECTIONS: Partial<Record<GameStageKind, string>> = {
   // The Stage serves the folder and reloads it on every save (GamePreview.live).
   live: `## Every turn
 
-- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it each time you save. A turn is one change they can see when they play, about five minutes of work, \`game_check\` clean, then end the turn. If the request needs more, do the first visible part and put the rest in \`Next:\`.
+- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it each time you save. A turn is one change they can see when they play, about five minutes of work, \`game_check\` clean with nothing left in its scene report, then end the turn. If the request needs more, do the first visible part and put the rest in \`Next:\`.
 - **Keep the game booting between saves.** Every save reloads the person's game. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save. A save that breaks the page shows the person the error.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
@@ -128,7 +128,7 @@ ${UNDO_LINE}
   // The Stage plays a Web export the turn loop rebuilds when the turn ends.
   export: `## Every turn
 
-- A turn that changes the game becomes a build. When your turn ends, Kurambit plays it on the person's Stage and measures its facts: whether it boots, an idle, a random and a skilled bot, frozen frames, input response. Ending the turn is how the person sees your work, so keep turns short: one visible improvement, \`game_check\` clean, then end. Do not export to show it; the build is made for you.
+- A turn that changes the game becomes a build. When your turn ends, Kurambit plays it on the person's Stage and measures its facts: whether it boots, an idle, a random and a skilled bot, frozen frames, input response. Ending the turn is how the person sees your work, so keep turns short: one visible improvement, \`game_check\` clean with nothing left in its scene report, then end. Do not export to show it; the build is made for you.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
 - End every reply with one line: \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done.
@@ -144,7 +144,7 @@ const everyTurnSection = (engine: GameEngineId): string | undefined => {
  * it renders, and ends on the person's pick: the look is theirs, and art never blocks the playable.
  */
 const GENERATED_FIRST_STEP = `1. Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ (rendering, palette, shape language), each one this game can reach in its engine, drawn as an in-game screenshot, each grounded with a \`style\`: a library pack id that ships a picture of its look (a Kenney low-poly kit, Quaternius Monsters; KayKit ships none), or the person's own reference image, so the key art never promises a look the game cannot reach (\`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it. If it is refused (no key, or over the person's daily limit), say so in your reply and go on with library art. Then read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.`;
-const GENERATED_LAST_STEP = `4. Run \`game_check\` and fix until it is clean, then \`game_generate_wait\` for the key art and end the turn: say what the person can do now, ask them to pick one of the key art's candidates in the chat, or say it is still rendering (the library models are stand-ins until art made from it arrives), say what it cost, and add your \`Next:\` line.`;
+const GENERATED_LAST_STEP = `4. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names), then \`game_generate_wait\` for the key art and end the turn: say what the person can do now, ask them to pick one of the key art's candidates in the chat, or say it is still rendering (the library models are stand-ins until art made from it arrives), say what it cost, and add your \`Next:\` line.`;
 
 /** A new game's first turn, per engine; an engine without one gets the brief alone. */
 const FIRST_TURN_SECTIONS: Partial<Record<GameEngineId, string>> = {
@@ -155,7 +155,7 @@ Goal: the person plays the brief's core loop on the Stage within ten minutes, wi
 1. Read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, make no key art, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.
 2. Choose the look: \`game_assets_search\` with no words lists the library by style family. Pick one that fits the brief and write \`STYLE.json\` (family, view, packs, rig; \`studio-skills/art-pipeline.md\`). Add the player character and one or two threats or props with \`game_assets_add\`, and name them in \`ASSETS\`: the shell loads them, and compiles what draws them, behind its loading screen. Keep the default look (\`LOOK\` as it is, or the one preset the brief calls for, no lights besides \`ctx.look.sun\`): the first build then starts at once and reads clearly; extra lights and glows cost every frame. Glows are a later turn. When no pack has the brief's exact subject, take the closest character and say so in your reply; a model of its own is a later turn.
 3. Replace the starter's gameplay in \`web/main.js\` (its sphere and beacon are placeholders) with the brief's core loop: the player moves (the recipe), the one main verb, the threat, a win and a lose through \`GameState.win\` and \`lose\`, the HUD through \`ctx.ui\`, and \`Juice\` on every action. As the recipes do, name the player and each threat with \`ctx.thing\` and read their speeds, timers and counts from \`ctx.tune\`: that is how the person selects them and drags their values live.
-4. Run \`game_check\` and fix until it is clean. The person has watched the starter turn into your game; end the turn as soon as the core loop plays. End it with what the person can do now, plus your \`Next:\` line.
+4. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names). The person has watched the starter turn into your game; end the turn as soon as the core loop plays. End it with what the person can do now, plus your \`Next:\` line.
 
 More waves and levels, menu art, music and polish are later turns.
 `,
