@@ -82,19 +82,5 @@ Use the game_* tools to check, play, export and package the game, and the game_u
     timedOut: "The Unity check timed out before finishing its physics frames.",
     withoutGameplayScene: null,
   },
-  run: {
-    skill: "unity",
-    // One editor per server builds every sample's player, so a second sample would wait on it.
-    parallelSamples: false,
-    // The project's first editor open imports everything (minutes; later opens take seconds).
-    warmEditor: true,
-    // A Unity project's own files live under Assets/; everything beside it is generated.
-    sources: { extensions: [".cs"], under: "Assets" },
-    prompts: {
-      shell: "",
-      // The Unity lane imports models from Assets/; its line otherwise matches the Godot one.
-      art: "A 3D game needs real 3D models as GLB, from the library or made with the game_blender_* tools and exported under unity/Assets/Blender with their armature and clips (glTFast imports both, clips included), textures and sprites as PNG under unity/Assets/Art, then game_import and game_check; code-built primitives are placeholders, same as 2D. Unity imports only what sits under unity/Assets/ (capital A). ",
-      titleArt: "",
-    },
-  },
+  skill: "unity",
 };

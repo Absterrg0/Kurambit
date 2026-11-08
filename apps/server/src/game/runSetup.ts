@@ -15,7 +15,7 @@ import {
 } from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
-import { RUN_STATE_IGNORES, withEveryTurn, withKeepGoing } from "./scaffold.ts";
+import { RUN_STATE_IGNORES } from "./scaffold.ts";
 import { failureText } from "./run/handBack.ts";
 import { runtimesDirectory } from "./gameRuntime.ts";
 
@@ -23,11 +23,7 @@ const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManife
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones this turn needs)";
-// A game made before chat turns carries this heading; it is renamed, never added twice.
-const ROLE_SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
 const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md.\n`;
-const STALE_SKILLS =
-  /\n*## Studio skills \(read the ones your role needs\)\n\nSkill pack in \.\/studio-skills, one line each:[^\n]*\n/;
 
 const readText = (path: string): Promise<string | null> =>
   NodeFSP.readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
@@ -45,12 +41,6 @@ const ioError = (operation: string, path: string, cause: unknown) =>
   });
 
 /**
- * Skills an earlier Kurambit shipped whose readers are gone (the stage-era run's roles). A refresh
- * removes these by name, and only these, so a file the person or agent put in studio-skills stays.
- */
-const RETIRED_SKILLS = ["planning", "art-director", "stranger", "game-foundations"];
-
-/**
  * The studio skills as this server ships them, for the game's engine only (a role told to read
  * every skill must not get another engine's rules). Files whose text did not change stay as they
  * are, so a refresh with nothing new leaves the game's diff empty.
@@ -59,8 +49,8 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
   Effect.tryPromise({
     try: async () => {
       const skills = NodePath.join(root, "studio-skills");
-      const own = engineProfile(engine).run.skill;
-      const others = [...ENGINE_SKILLS.filter((name) => name !== own), ...RETIRED_SKILLS];
+      const own = engineProfile(engine).skill;
+      const others = ENGINE_SKILLS.filter((name) => name !== own);
       await NodeFSP.cp(NodePath.join(templates, "studio"), skills, {
         recursive: true,
         force: true,
@@ -151,13 +141,10 @@ export const ensureScaffold = (
         (yield* io("Run scaffold", "AGENTS.md", () =>
           readText(NodePath.join(root, "AGENTS.md")),
         )) ?? "";
-      let agents = before.replace(STALE_SKILLS, "").replace(ROLE_SKILLS_HEADING, SKILLS_HEADING);
-      if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;
-      agents = withEveryTurn(withKeepGoing(agents, engine), engine);
-      if (agents !== before)
+      if (!before.includes(SKILLS_HEADING))
         yield* writeFileStringAtomically({
           filePath: NodePath.join(root, "AGENTS.md"),
-          contents: agents,
+          contents: `${before}${SKILLS_LINE}`,
         });
     }).pipe(
       Effect.catchCause((cause) =>
@@ -167,34 +154,18 @@ export const ensureScaffold = (
   });
 
 /**
- * A game made before the turn loop gets its engine's "Every turn" section in
- * AGENTS.md, once, so its agent knows its turns are played and can be undone.
- * Called whenever the game is opened; a write that fails is logged, never the
- * open's failure.
+ * The studio skills brought up to this server's: a chat game has no run start
+ * to refresh them, and guidance written after a game was made would otherwise
+ * never reach it. A write that fails is logged, never the caller's failure.
  */
-export const ensureTurnSections = (
+export const refreshSkills = (
   root: string,
   engine: GameEngineId,
-  /**
-   * The server's templates: the studio skills are brought up to this server's between turns too,
-   * since a chat game has no run start to refresh them, and guidance written after a game was
-   * made would otherwise never reach it.
-   */
-  templates: string | null = null,
+  templates: string,
 ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function* () {
-    const path = NodePath.join(root, "AGENTS.md");
-    const before = yield* Effect.tryPromise(() => readText(path));
-    if (before === null) return;
-    const agents = withEveryTurn(before, engine);
-    if (agents !== before) yield* writeFileStringAtomically({ filePath: path, contents: agents });
-    if (templates !== null) yield* writeSkills(templates, root, engine);
-  }).pipe(
+  writeSkills(templates, root, engine).pipe(
     Effect.catchCause((cause) =>
-      Effect.logWarning("the game's AGENTS.md or studio skills could not be updated", {
-        game: root,
-        cause,
-      }),
+      Effect.logWarning("the game's studio skills could not be updated", { game: root, cause }),
     ),
   );
 

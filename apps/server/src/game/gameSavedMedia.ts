@@ -17,13 +17,8 @@ export const SAVED_DIR = "saved";
 /** The game event a save or delete pushes; clients reread the Saved list on it. */
 export const SAVED_EVENT = GAME_SAVED_MEDIA_EVENT;
 
-/**
- * Where Kurambit writes the media it generates: bot runs, explore sessions and
- * sprite renders under builds/logs, the blind players' frame sheets under
- * .studio/comparisons, and the prototype sheets and final run video directly in .studio.
- */
-const GENERATED_DIRS = ["builds/logs", ".studio/comparisons"] as const;
-const GENERATED_STUDIO_FILE = /^(?:final\.mp4|proto-\d+-frames\.jpg)$/;
+/** Where Kurambit writes the media it generates: bot runs, explore sessions and sprite renders. */
+const GENERATED_DIR = "builds/logs";
 const TEMP_PREFIX = ".saving-";
 const TEMP_STALE_MS = 60 * 60 * 1000;
 const MEDIA = /\.(?:mp4|webm|png|jpe?g|webp|gif)$/i;
@@ -78,27 +73,19 @@ const generatedSource = async (
   source: string,
 ): Promise<{ readonly real: string; readonly dev: number; readonly ino: number }> => {
   const realRoot = await NodeFSP.realpath(root);
-  // Relative to the root as the transports know it, which round evidence paths are relative to.
+  // Relative to the root as the transports know it, which evidence paths are relative to.
   const given = NodePath.resolve(root, source);
   const real = await NodeFSP.realpath(given).catch(() => null);
   if (real === null) throw new SavedMediaError("invalid-path", `${source} does not exist.`);
   if (!MEDIA.test(real))
     throw new SavedMediaError("invalid-path", `${source} is not a video or image Kurambit makes.`);
-  const inDir = await Promise.all(
-    GENERATED_DIRS.map(async (dir) => {
-      const base = NodePath.join(realRoot, dir);
-      // A generated folder that is itself a link leads out of the game.
-      const realBase = await NodeFSP.realpath(base).catch(() => null);
-      return realBase === base && isPathInside(real, base) && real !== base;
-    }),
-  );
-  const inStudio =
-    NodePath.dirname(real) === NodePath.join(realRoot, ".studio") &&
-    GENERATED_STUDIO_FILE.test(NodePath.basename(real));
-  if (!inDir.some(Boolean) && !inStudio)
+  const base = NodePath.join(realRoot, GENERATED_DIR);
+  // A generated folder that is itself a link leads out of the game.
+  const realBase = await NodeFSP.realpath(base).catch(() => null);
+  if (realBase !== base || !isPathInside(real, base) || real === base)
     throw new SavedMediaError(
       "invalid-path",
-      `${source} is not in this game's generated media (${GENERATED_DIRS.join(", ")}, .studio); only those can be saved.`,
+      `${source} is not in this game's generated media (${GENERATED_DIR}); only those can be saved.`,
     );
   const info = await NodeFSP.stat(real);
   if (!info.isFile()) throw new SavedMediaError("invalid-path", `${source} is not a file.`);
@@ -149,9 +136,7 @@ const defaultLabel = (root: string, real: string) => {
     ? "bot "
     : parts.some((p) => p.startsWith("game-explore-"))
       ? "explore "
-      : parts.includes("comparisons")
-        ? "comparison "
-        : "";
+      : "";
   return `${kind}${NodePath.basename(real, NodePath.extname(real))}`;
 };
 

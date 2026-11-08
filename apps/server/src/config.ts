@@ -147,8 +147,6 @@ export const deriveServerPaths = Effect.fn(function* (
   };
 });
 
-/** Where a production run's plain copies of builds live, below the worktrees folder. */
-export const GAME_RUN_COPIES = "game-runs";
 /** Where a game's builds are copied to be played and measured, below the worktrees folder. */
 export const GAME_BUILD_COPIES = "game-builds";
 
@@ -173,7 +171,7 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
     { concurrency: "unbounded" },
   );
 
-  // A run's copies, and the copies a build is played and measured in, have no git of their own. If the home sits inside a
+  // The copies a build is played and measured in have no git of their own. If the home sits inside a
   // repository (a versioned home folder, a dev checkout's .kurambit), git started
   // in a copy would find that one: T3 would checkpoint and roll back the copy's
   // threads into it, and a blind player could read its history. A ceiling here
@@ -184,7 +182,7 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
   const separator = (yield* HostProcess.Platform) === "win32" ? ";" : ":";
   const ceilings = env.GIT_CEILING_DIRECTORIES;
   const entries = ceilings === undefined || ceilings === "" ? [] : ceilings.split(separator);
-  const copies = [GAME_RUN_COPIES, GAME_BUILD_COPIES]
+  const copies = [GAME_BUILD_COPIES]
     .map((folder) => path.join(derivedPaths.worktreesDir, folder))
     .filter((folder) => !entries.includes(folder));
   if (copies.length > 0) env.GIT_CEILING_DIRECTORIES = [...entries, ...copies].join(separator);

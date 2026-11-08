@@ -84,7 +84,7 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const profile = engineProfile(manifest.engine.name);
       if (!profile.turnLoop) return;
-      // A game made before the turn loop learns of it, and of skills written since, by its next turn.
+      // Skills written since the game was made reach it by its next turn.
       yield* projects.refreshGuidance(root).pipe(Effect.ignore);
       // Measured first: the measure registers at once, the play may wait on the game.
       const build = yield* checkpoints

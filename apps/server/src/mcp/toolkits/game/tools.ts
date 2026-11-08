@@ -443,7 +443,7 @@ const PackageWebTool = Tool.make("game_package_web", {
   .annotate(McpSchema.EnabledWhen, listedFor("game_package_web"));
 const MediaSaveTool = Tool.make("game_media_save", {
   description:
-    "Keep a video or image Kurambit generated when the creator wants it: a bot run's run.mp4 or frames, an explore session's screenshots, a comparison frame sheet, the run's final video. The storage cleanup deletes game logs after a while; this copies the file into the game's saved/ folder (ignored by git) under a readable dated name, and the original keeps working until the cleanup removes it. source is the game-relative or absolute path a game tool returned, inside builds/logs, .studio/comparisons or .studio; label gives the words after the date (\"round 2 bot run\"). Nothing in saved/ is overwritten: a taken name gets a number.",
+    "Keep a video or image Kurambit generated when the creator wants it: a bot run's run.mp4 or frames, an explore session's screenshots, a sprite render. The storage cleanup deletes game logs after a while; this copies the file into the game's saved/ folder (ignored by git) under a readable dated name, and the original keeps working until the cleanup removes it. source is the game-relative or absolute path a game tool returned, inside builds/logs; label gives the words after the date (\"level 2 bot run\"). Nothing in saved/ is overwritten: a taken name gets a number.",
   parameters: Schema.Struct(GameMediaSaveFields),
   success: GameSavedMedia,
   failure,

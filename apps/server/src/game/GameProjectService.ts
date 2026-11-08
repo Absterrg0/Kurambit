@@ -43,7 +43,7 @@ import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
-import { ensureScaffold, ensureTurnSections } from "./runSetup.ts";
+import { ensureScaffold, refreshSkills } from "./runSetup.ts";
 import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame } from "./templates.ts";
 import * as GameTemplates from "./GameTemplates.ts";
@@ -117,7 +117,7 @@ export class GameProjectService extends Context.Service<
       options?: { readonly deleted?: "allowed" },
     ) => Effect.Effect<string, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
-    /** Between turns: the game's AGENTS.md sections and studio skills brought up to this server. */
+    /** Between turns: the game's studio skills brought up to this server. */
     readonly refreshGuidance: (root: string) => Effect.Effect<void, GameOperationError>;
     /** The manifest and the resolution the game plays at. */
     readonly inventory: (
@@ -213,11 +213,7 @@ const make = Effect.gen(function* () {
     const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
     const manifest = yield* read(canonicalRoot);
     if (options.resume === true)
-      yield* ensureTurnSections(
-        canonicalRoot,
-        manifest.engine.name,
-        yield* templates.directory,
-      ).pipe(
+      yield* refreshSkills(canonicalRoot, manifest.engine.name, yield* templates.directory).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
       );
@@ -544,12 +540,7 @@ const make = Effect.gen(function* () {
             const latestThread = newestThreadByProject.get(project.id) ?? null;
             const currentOperation = operations.current(root);
             const keyArt = yield* Effect.promise(() =>
-              findKeyArt(
-                root,
-                manifestProject(manifest.value),
-                "title",
-                manifest.value.engine.name,
-              ),
+              findKeyArt(root, manifestProject(manifest.value), manifest.value.engine.name),
             );
             const summary: GameSummary = {
               projectId: project.id,
@@ -602,7 +593,7 @@ const make = Effect.gen(function* () {
         const manifest = yield* read(root);
         // A parked engine's game takes no new work, so a new server leaves its folder as it is.
         if (!isGameEngineActive(manifest.engine.name)) return;
-        yield* ensureTurnSections(root, manifest.engine.name, yield* templates.directory).pipe(
+        yield* refreshSkills(root, manifest.engine.name, yield* templates.directory).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         );

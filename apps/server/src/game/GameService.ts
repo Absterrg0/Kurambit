@@ -246,12 +246,6 @@ export class GameService extends Context.Service<
       },
       GameOperationError
     >;
-    /**
-     * Opens the game's live editor (Unity's) once and closes it, so its
-     * first full import is paid outside any role's clock. A no-op when the
-     * engine has no live editor or the project already has an import cache.
-     */
-    readonly warmEditor: (root: string) => Effect.Effect<boolean, GameOperationError>;
     /** Live Blender scene: run bpy code, auto-saving the .blend source. */
     readonly blenderCode: (
       threadId: ThreadId,
@@ -1289,7 +1283,6 @@ const make = Effect.gen(function* () {
       }),
     preparePlayer: players.prepare,
     playIn,
-    warmEditor: players.warmEditor,
     action: (threadId, action) =>
       action === "stop"
         ? stop(threadId)

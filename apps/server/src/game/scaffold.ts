@@ -9,48 +9,17 @@ import {
 } from "@kurambit/contracts";
 import { engineProfile, PROFILES } from "./engineProfile.ts";
 
-// Where stage-era runs kept their ladder's state-check bots; old games still ignore it.
-const CHECK_BOT_DIR = ".studio/bot/checks";
-
-// Run notes and reports are harness output, never game content: ignoring them
-// keeps the tree clean so build swaps never need a stash (T28 wedged on a
-// half-applied stash pop). The list keeps the files earlier runs wrote
-// (run.json, rounds.jsonl, stop, steer, profile, run.log), so an older game's leftovers
-// never ride in a commit.
+// Harness output, never game content: the bot runs' log and report, kept play
+// saves and the person's saved media stay out of every build and checkpoint.
 export const RUN_STATE_IGNORES = [
-  ".studio/run.json",
-  ".studio/rounds.jsonl",
-  ".studio/stop",
-  ".studio/steer.jsonl",
-  ".studio/profile",
-  ".studio/run.log",
   ".studio/bot-results.jsonl",
   ".studio/player-report.md",
-  ".studio/pick.txt",
-  ".studio/next.md",
-  ".studio/ship.md",
-  ".studio/art-review.md",
-  ".studio/ladder.json",
-  `${CHECK_BOT_DIR}/`,
-  ".studio/rung-change.json",
-  ".studio/exports.json",
-  ".studio/final-video.json",
-  ".studio/tester-*.md",
-  ".studio/reviewer-*.md",
-  ".studio/worktrees/",
-  ".studio/comparisons/",
   ".studio/saves/",
   // The creator's saved videos and images (gameSavedMedia.ts).
   "saved/",
-  ".studio/play-*.md",
-  ".studio/proto-*.md",
-  ".studio/proto-*-frames.jpg",
-  ".studio/round-state.json",
-  "PICK-NOTES.md",
-  "JUDGE-NOTES.md",
 ] as const;
 
-/** What every engine generates in the game folder, beside the run's own files. */
+/** What every engine generates in the game folder. */
 const GENERATED_IGNORES = [
   "builds/",
   ...PROFILES.flatMap((profile) => profile.scaffold.ignores),
@@ -95,19 +64,13 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
  * Keep going, for the agent of a game whose turns Kurambit plays (engineProfile
  * turnLoop): what a step message is and what the run does with its build.
  */
-const KEEP_GOING_HEADING = "## Keep going";
-export const KEEP_GOING_SECTION = `${KEEP_GOING_HEADING}
+const KEEP_GOING_SECTION = `## Keep going
 
 - The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Do that one step, like any turn: one change, \`game_check\` clean, end with your \`Next:\` line.
 - Kurambit measures the step's build, and undoes the step itself when it makes a fact worse; the person can redo it. Do not put an undone change back unless they ask.
 - A step that asks you to fix a measured fact may be wrong for this game: then change nothing and say why in one line. Kurambit sets that step aside.
 - The person's own messages always come first. Turn keep going on or off (\`game_keep_going\`) only when they ask.
 `;
-/** The section an earlier Kurambit wrote for its production run, whose tools are gone. */
-export const STAGE_ERA_HEADING = "## The creator's session and the production run";
-
-const EVERY_TURN_HEADING = "## Every turn";
-
 const PLAYTEST_LINE =
   "- Do not play-test with `game_explore_*` or bots to see whether the game works: the harness measures every build. Explore only when the person asks or a fact says something you cannot see in the code. Read `game_facts` when the person reports a problem.";
 const UNDO_LINE =
@@ -178,38 +141,6 @@ const firstTurnSection = (manifest: GameManifest): string | undefined => {
     GENERATED_LAST_STEP,
     ...lines.slice(last + 1),
   ].join("\n");
-};
-
-/**
- * An existing game's AGENTS.md with its engine's "Every turn" section, added
- * once before the keep-going section, so a game made before the turn loop
- * learns that its turns are played and can be undone. Pure; unchanged when present.
- */
-export const withEveryTurn = (agents: string, engine: GameEngineId): string => {
-  const section = everyTurnSection(engine);
-  if (section === undefined || agents.includes(EVERY_TURN_HEADING)) return agents;
-  const keepGoing = agents.indexOf(KEEP_GOING_HEADING);
-  const at = keepGoing >= 0 ? keepGoing : agents.indexOf(STAGE_ERA_HEADING);
-  if (at < 0) return `${agents.trimEnd()}\n\n${section}`;
-  return `${agents.slice(0, at)}${section}\n${agents.slice(at)}`;
-};
-
-/**
- * The game's keep-going section, in place of the production run's section an
- * earlier Kurambit wrote (its tools no longer exist), or added once. An engine
- * keep going cannot run on only loses the stale section. Pure.
- */
-export const withKeepGoing = (agents: string, engine: GameEngineId): string => {
-  const section = engineProfile(engine).turnLoop ? KEEP_GOING_SECTION : "";
-  const at = agents.indexOf(STAGE_ERA_HEADING);
-  if (at >= 0) {
-    const after = agents.indexOf("\n## ", at + STAGE_ERA_HEADING.length);
-    const rest = after < 0 ? "" : agents.slice(after + 1);
-    const kept = agents.includes(KEEP_GOING_HEADING) ? "" : section;
-    return `${agents.slice(0, at)}${kept}${kept !== "" && rest !== "" ? "\n" : ""}${rest}`;
-  }
-  if (section === "" || agents.includes(KEEP_GOING_HEADING)) return agents;
-  return `${agents.trimEnd()}\n\n${section}`;
 };
 
 /**

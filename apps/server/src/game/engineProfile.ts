@@ -144,25 +144,8 @@ export interface GameEngineProfile {
     /** The warning a check without a gameplay scene carries, when it then covers less. */
     readonly withoutGameplayScene: string | null;
   };
-  readonly run: {
-    /** This engine's skill in the studio pack; a run keeps it and drops the other engines'. */
-    readonly skill: string;
-    /** Whether a comparison's two samples may play at once. */
-    readonly parallelSamples: boolean;
-    /** Whether the project's first editor open is paid before the first root role's clock. */
-    readonly warmEditor: boolean;
-    /** Where reviewer code facts count source files: extensions, and the folder under the lane. */
-    readonly sources: { readonly extensions: ReadonlyArray<string>; readonly under: string };
-    /** Engine lines inside role prompts, written for the engine's standard directory. */
-    readonly prompts: {
-      /** How to build on the starter's demo shell; empty when the starter has none to follow. */
-      readonly shell: string;
-      /** The art stage's line on models and engine import. */
-      readonly art: string;
-      /** Appended to the art stage's title-art sentence. */
-      readonly titleArt: string;
-    };
-  };
+  /** This engine's skill in the studio pack; a game keeps it and drops the other engines'. */
+  readonly skill: string;
 }
 
 // Keyed by every engine id, so a new engine in the contracts does not compile without its profile.
@@ -230,13 +213,5 @@ export const gamePaths = (engine: GameEngineId, project: string) => {
   };
 };
 
-/**
- * The engine a project folder belongs to, for run records written before the
- * engine was kept beside it. A folder no engine names is a hand-renamed
- * project directory; it reads as Godot, the engine whose directory was
- * free-form before engines had their own.
- */
-export const legacyLaneEngine = (lane: string): GameEngineId =>
-  (PROFILES.find((profile) => profile.projectDirectory === lane) ?? GODOT_PROFILE).id;
 /** Every engine's skill name, for dropping the ones a lane does not use. */
-export const ENGINE_SKILLS: ReadonlyArray<string> = PROFILES.map((profile) => profile.run.skill);
+export const ENGINE_SKILLS: ReadonlyArray<string> = PROFILES.map((profile) => profile.skill);

@@ -62,12 +62,6 @@ export class GamePlayer extends Context.Service<
       },
       GameOperationError
     >;
-    /**
-     * Opens the game's live editor once and closes it, so its first full
-     * import is paid outside any role's clock. False when the engine has no
-     * live editor or the project already had its import.
-     */
-    readonly warmEditor: (root: string) => Effect.Effect<boolean, GameOperationError>;
   }
 >()("kurambit/game/GamePlayer") {}
 
@@ -233,23 +227,7 @@ ${built.result.message}`.slice(0, 3000),
     };
   });
 
-  const warmEditor = Effect.fn("GamePlayer.warmEditor")(function* (root: string) {
-    const backend = yield* backendOf(root);
-    const editor = backend.editor;
-    if (editor === null) return false;
-    const { ctx } = yield* engines.context(root);
-    if (yield* editor.warm(ctx)) return false;
-    yield* operations.exclusive(
-      root,
-      `${backend.profile.displayName} warm-up`,
-      editor.open(ctx),
-      "game run warm-up",
-    );
-    yield* editor.close(root);
-    return true;
-  });
-
-  return GamePlayer.of({ playerFor, prepare, warmEditor });
+  return GamePlayer.of({ playerFor, prepare });
 });
 
 export const layer = Layer.effect(GamePlayer, make);
