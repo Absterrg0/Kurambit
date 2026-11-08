@@ -1,6 +1,4 @@
-import * as Schema from "effect/Schema";
 import {
-  GameBuildId,
   type GameAssetFacts,
   type GameAssetUse,
   type GameBuild,
@@ -10,10 +8,7 @@ import {
   type GameFactDelta,
   type GameFactTone,
   type GameFactView,
-  type GameRunRoundRef,
 } from "@kurambit/contracts";
-
-const isBuildId = Schema.is(GameBuildId);
 
 /** The game's latest restore, as the Builds list carries it. */
 export type GameBuildRestore = NonNullable<GameBuildsResult["restore"]>;
@@ -23,27 +18,17 @@ export const buildSourceLabel = (source: GameBuildSource): string => {
   switch (source._tag) {
     case "turn":
       return `Turn ${source.turn} · ${source.threadTitle}`;
-    case "round":
-      return `Round ${source.round} · ${
-        source.outcome === "kept"
-          ? "kept"
-          : source.outcome === "not-kept"
-            ? "not kept"
-            : "abandoned"
-      }${source.best ? " · best" : ""}`;
     case "saved":
       return source.label;
   }
 };
 
-/** A build named in a sentence: "Turn 5's build", "Round 3's build", a saved build's label. */
+/** A build named in a sentence: "Turn 5's build", "Step 2's build", a saved build's label. */
 export const buildName = (build: Pick<GameBuild, "source">): string => {
   const source = build.source;
   switch (source._tag) {
     case "turn":
       return source.step === null ? `Turn ${source.turn}'s build` : `Step ${source.step.n}'s build`;
-    case "round":
-      return `Round ${source.round}'s build`;
     case "saved":
       return source.label;
   }
@@ -160,36 +145,4 @@ export const deltaLine = (delta: GameFactDelta): DeltaLine => {
       why: `Not comparable: ${delta.why ?? "a side has no reading"}`,
     };
   return { label: delta.label, a, b, mark: MARK[delta.change], tone: delta.tone, why: null };
-};
-
-export interface RoundCardAction {
-  readonly kind: "revert";
-  /** The build the restore puts in the folder. */
-  readonly target: GameBuildId;
-  readonly label: string;
-  /** Why it cannot be pressed now, or null. */
-  readonly blocked: string | null;
-}
-
-/**
- * What a stage-era round card offers: a kept round that is still the best can
- * revert to the best it was judged against. It waits for a stopped run and an
- * idle chat: while the run is live it decides, and a turn may be writing the folder.
- */
-export const roundCardAction = (
-  round: Pick<GameRunRoundRef, "outcome" | "build" | "base">,
-  run: { readonly active: boolean; readonly best: string | null },
-  turnRunning = false,
-): RoundCardAction | null => {
-  const build = round.build ?? null;
-  const base = round.base ?? null;
-  if (build === null || !isBuildId(build)) return null;
-  const blocked = run.active
-    ? "Stop the run to revert a round; while it is live, the run decides."
-    : turnRunning
-      ? "Wait for the agent's turn to end to revert a round."
-      : null;
-  if (round.outcome !== "kept") return null;
-  if (run.best !== build || base === null || !isBuildId(base) || base === build) return null;
-  return { kind: "revert", target: base, label: "Revert to the build before it", blocked };
 };

@@ -80,12 +80,8 @@ import {
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import {
   CommandPolicyV2,
-  GAME_RUN_HOLDS_FOLDER_MESSAGE,
-  gameRunHold,
   isNativeMaintenanceCommand,
   resolveMessageDispatchIntent,
-  threadCheckpointsOwnedByRun,
-  threadTurnsOwnedByRun,
 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
@@ -605,11 +601,9 @@ function nextQueuedRun(
 function latestStableRun(
   projection: Pick<OrchestrationV2ThreadProjection, "thread" | "runs">,
 ): OrchestrationV2Run | null {
-  // A role thread's turns keep no checkpoint, so its completed runs are stable as they are.
-  const uncheckpointed = threadCheckpointsOwnedByRun(projection.thread);
   return (
     projection.runs
-      .filter((run) => run.status === "completed" && (uncheckpointed || run.checkpointId !== null))
+      .filter((run) => run.status === "completed" && run.checkpointId !== null)
       .toSorted((left, right) => right.ordinal - left.ordinal)[0] ?? null
   );
 }
@@ -2216,27 +2210,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
-    const parentThreadId = command.parentThreadId;
-    const parent =
-      parentThreadId === undefined
-        ? null
-        : yield* projectionStore.getThread(parentThreadId).pipe(
-            Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
-            Effect.mapError(
-              (cause) => new OrchestratorProjectionError({ threadId: parentThreadId, cause }),
-            ),
-          );
-    // A role parent only groups the thread. A missing or deleted parent loses
-    // the grouping instead of rejecting: a rejected receipt under a stable
-    // command id would block that launch on every retry.
-    const roleParent = parent !== null && parent.deletedAt === null ? parent : null;
-    if (roleParent !== null && roleParent.projectId !== command.projectId) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: `Parent thread ${parentThreadId} is not a live thread in project ${command.projectId}.`,
-      });
-    }
     const thread: OrchestrationV2AppThread = {
       createdBy: command.createdBy,
       creationSource: command.creationSource,
@@ -2250,15 +2223,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       branch: command.branch,
       worktreePath: command.worktreePath,
       activeProviderThreadId: null,
-      ...(command.launchedBy === undefined ? {} : { launchedBy: command.launchedBy }),
-      lineage:
-        roleParent === null
-          ? { parentThreadId: null, relationshipToParent: null, rootThreadId: command.threadId }
-          : {
-              parentThreadId: roleParent.id,
-              relationshipToParent: "role",
-              rootThreadId: roleParent.lineage.rootThreadId,
-            },
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: command.threadId },
       forkedFrom: null,
       createdAt: now,
       updatedAt: now,
@@ -2620,14 +2585,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           commandId: command.commandId,
           commandType: command.type,
           cause: "The reset time has passed. Retry the thread manually.",
-        });
-      }
-      if (threadTurnsOwnedByRun(thread)) {
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause:
-            "This thread is one of a production run's roles. The run continues it when you resume the run from the game's chat.",
         });
       }
       if (
@@ -4200,28 +4157,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             cause: "This thread can no longer be resumed from that run.",
           });
         }
-        // A role's cut-off turn is its run's to continue while the run holds the game.
-        if (threadTurnsOwnedByRun(projection.thread)) {
-          const gameRun = yield* projectionStore
-            .getProjectGameRun(projection.thread.projectId)
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestratorDispatchError({
-                    commandId: command.commandId,
-                    commandType: command.type,
-                    cause,
-                  }),
-              ),
-            );
-          if (gameRunHold(gameRun) !== null)
-            return yield* new OrchestratorDispatchError({
-              commandId: command.commandId,
-              commandType: command.type,
-              cause:
-                "This thread is one of a production run's roles, and the run is still working on the game: the run continues its roles itself. Steer it from the game's chat, or stop the run and wait for it to finish before resuming this thread.",
-            });
-        }
       }
       if (command.usageLimitContinuationOfRunId !== undefined) {
         const run = usageLimitBlockedRun(projection.runs, projection.turnItems, null);
@@ -4229,7 +4164,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const recovery = projection.thread.limitRecovery;
         const now = yield* DateTime.now;
         if (
-          threadTurnsOwnedByRun(projection.thread) ||
           run?.id !== command.usageLimitContinuationOfRunId ||
           failure?.class !== "usage_limit" ||
           threadShellFromProjection(projection).lastErrorClass !== "usage_limit" ||
@@ -4272,7 +4206,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const source = projection.runs.find((run) => run.id === command.restartContinuationOfRunId);
         if (
           !source ||
-          threadTurnsOwnedByRun(projection.thread) ||
           !isRestartContinuationSource(source, projection.providerTurns) ||
           projection.thread.archivedAt !== null ||
           projection.thread.deletedAt !== null ||
@@ -9473,23 +9406,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             commandId: command.commandId,
             commandType: command.type,
             cause: SHARED_WORKSPACE_RESTORE_MESSAGE,
-          });
-        // The run's own builds are its checkpoints; a T3 file restore beside them rewrites its folder.
-        const gameRun = yield* projectionStore.getProjectGameRun(projection.thread.projectId).pipe(
-          Effect.mapError(
-            (cause) =>
-              new OrchestratorDispatchError({
-                commandId: command.commandId,
-                commandType: command.type,
-                cause,
-              }),
-          ),
-        );
-        if (gameRunHold(gameRun) !== null)
-          return yield* new OrchestratorDispatchError({
-            commandId: command.commandId,
-            commandType: command.type,
-            cause: GAME_RUN_HOLDS_FOLDER_MESSAGE,
           });
       }
 

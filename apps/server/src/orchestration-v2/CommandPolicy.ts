@@ -1,9 +1,7 @@
 import {
   type ChatAttachment,
   CommandId,
-  type GameRun,
   ModelSelection,
-  type OrchestrationV2AppThread,
   type OrchestrationV2Command,
   OrchestrationV2ProviderCapabilities,
   type OrchestrationV2Run,
@@ -118,43 +116,6 @@ type MessageDispatchMode = Extract<
   OrchestrationV2Command,
   { readonly type: "message.dispatch" }
 >["dispatchMode"];
-
-/**
- * A production run's role thread takes turns only from its run, which sends
- * each with the step's prompt and cap. A server-made "continue" would run
- * uncapped, possibly after the run ended, and the run would read that work as
- * the role's. Every automatic continuation honours this.
- */
-export function threadTurnsOwnedByRun(thread: {
-  readonly launchedBy?: OrchestrationV2AppThread["launchedBy"];
-}): boolean {
-  return thread.launchedBy === "game_run";
-}
-
-/**
- * A role thread's turns keep no checkpoints of their own: the run captures each
- * role's work as one of its builds, and between turns it moves the folder
- * (restoring the base or the best build). A second capture queued on the effect
- * lane could land after that move and record the run's restore as the role's
- * work. The turn's run still settles; it just has no diff or rollback point.
- */
-export function threadCheckpointsOwnedByRun(thread: {
-  readonly launchedBy?: OrchestrationV2AppThread["launchedBy"];
-}): boolean {
-  return threadTurnsOwnedByRun(thread);
-}
-
-/**
- * Whether a run holds its game's folder: only a stage-era run while it is
- * live, until recovery stops it at startup. A keep-going run never holds the
- * folder: its writer is its chat, whose turns are ordinary turns.
- */
-export function gameRunHold(run: Pick<GameRun, "status" | "loop"> | null): "live" | null {
-  return run !== null && run.loop !== "turns" && run.status !== "ended" ? "live" : null;
-}
-
-export const GAME_RUN_HOLDS_FOLDER_MESSAGE =
-  "A production run is working on this game's folder, so files cannot be restored now. Steer it from the game's chat, or stop the run and wait for it to finish, then restore. Rewinding the conversation without restoring files still works.";
 
 export function isNativeMaintenanceCommand(message: {
   readonly text: string;

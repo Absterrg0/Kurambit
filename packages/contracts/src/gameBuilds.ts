@@ -69,20 +69,8 @@ export const GameBuildSource = Schema.Union([
       }),
     ),
   }),
-  Schema.TaggedStruct("round", {
-    runId: Schema.String,
-    round: PositiveInt,
-    rung: Schema.NullOr(Schema.String),
-    move: Schema.String,
-    outcome: Schema.Literals(["kept", "not-kept", "abandoned"]),
-    /** The run's best is this build now. */
-    best: Schema.Boolean,
-    durationMs: Schema.Number,
-    linesChanged: Schema.Number,
-  }),
-  /** A run's prototype, stage, ending, unfinished work, or the folder before a restore or resume. */
+  /** The folder before a restore, or a person's kept edit. */
   Schema.TaggedStruct("saved", {
-    runId: Schema.NullOr(Schema.String),
     label: Schema.String,
     /** A person's edit kept as a build outside a turn: what it kept ("values": the Stage's Keep as a build). */
     edit: Schema.optionalKey(Schema.Literals(["values"])),
@@ -166,13 +154,13 @@ export const GameBuild = Schema.Struct({
   available: Schema.Boolean,
   /** Why it cannot be played here (an engine with no Web build), else null. */
   noPlay: Schema.NullOr(Schema.String),
-  /** Why it cannot be restored (a live run, a role thread), else null. */
+  /** Why it cannot be restored, else null. */
   noRestore: Schema.NullOr(Schema.String),
   facts: GameBuildFactsSummary,
   /**
    * The build this one was made from: restoring it undoes this build. A turn's is
    * the build the folder held when the turn started (turn 1's: the thread's start
-   * checkpoint, ordinal 0); a round's is its base; null when unknown.
+   * checkpoint, ordinal 0); null when unknown.
    */
   base: Schema.NullOr(GameBuildId),
 });
@@ -888,8 +876,8 @@ const sideWhy = (side: "A" | "B", read: Read) =>
       : "";
 
 /**
- * PURE. The one diff of two builds' facts, shared by the compare view, the
- * round card and game_builds. A fact not measured on either side is
+ * PURE. The one diff of two builds' facts, shared by the compare view and
+ * game_builds. A fact not measured on either side is
  * not-comparable with its reason, never "same".
  */
 export const diffBuildFacts = (
@@ -976,7 +964,7 @@ export type GameBuildRef = typeof GameBuildRef.Type;
 export const GameBuildRestoreRef = Schema.Struct({
   requestId: Schema.String,
   target: GameBuildId,
-  /** "Turn 5's build", "Round 3", "Before restore of round 2". */
+  /** "Turn 5's build", "Build 1a2b3c4d". */
   label: Schema.String,
   requestedAt: IsoDateTime,
   /** The folder-before build an undo restores; null once anything changed since. */

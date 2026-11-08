@@ -139,7 +139,6 @@ import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { gameEnvironment, stageAfterGameAction } from "../state/game";
 import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
-import { useGameStageAccess } from "../hooks/useGameStageAccess";
 import { useIsGameThread, useIsGameThreadStatus } from "../hooks/useIsGameThread";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { sourceControlEnvironment } from "../state/sourceControl";
@@ -758,14 +757,12 @@ function OpenCommandPaletteDialog(props: {
       ? NO_PERMISSION
       : gameEnvironment.buildRestore.permissionAtom(activeThreadRef.environmentId),
   );
-  // Each game command shows only where its own command is permitted, and a
-  // run's role thread is never offered writes beside the run.
+  // Each game command shows only where its own command is permitted.
   const canGameAction = useAtomValue(
     activeThreadRef === null
       ? NO_PERMISSION
       : gameEnvironment.action.permissionAtom(activeThreadRef.environmentId),
   );
-  const gameAccess = useGameStageAccess(activeThreadRef);
   // The game's latest turn build: the palette offers the Undo or Redo its strip does.
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
@@ -1548,7 +1545,7 @@ function OpenCommandPaletteDialog(props: {
         icon: <PlayIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("preview"),
       });
-    if (canGameAction && gameAccess === "writer" && gameWebBuild && gameStageKind === "export")
+    if (canGameAction && gameWebBuild && gameStageKind === "export")
       actionItems.push({
         kind: "action",
         value: "action:game-rebuild",
@@ -1557,7 +1554,7 @@ function OpenCommandPaletteDialog(props: {
         icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("rebuild"),
       });
-    if (canGameAction && gameAccess === "writer")
+    if (canGameAction)
       actionItems.push({
         kind: "action",
         value: "action:game-stop",
@@ -1637,7 +1634,7 @@ function OpenCommandPaletteDialog(props: {
       });
     }
     // The latest build's detail, where Go back picks any build on the timeline.
-    if (canRestore && gameAccess === "writer" && latestBuild !== null)
+    if (canRestore && latestBuild !== null)
       actionItems.push({
         kind: "action",
         value: "action:game-build-restore",
@@ -1652,7 +1649,6 @@ function OpenCommandPaletteDialog(props: {
       turnRestore.kind !== "go-back" &&
       turnRestore.blocked === null &&
       turnUndo.canRestore &&
-      turnUndo.writer &&
       !turnUndo.pending
     )
       actionItems.push({
@@ -1712,10 +1708,10 @@ function OpenCommandPaletteDialog(props: {
           },
         ],
       });
-    // Keep going (design §7.6): on, off and resume, and the Guided proposal's
-    // answers. A pause's reason rides on the items that resume it.
+    // Keep going: on, off and resume, and the Guided proposal's answers. A
+    // pause's reason rides on the items that resume it.
     const keepGoingStatus = keepGoing.status;
-    if (keepGoingStatus !== null && gameAccess === "writer") {
+    if (keepGoingStatus !== null) {
       const control = keepGoingControlView({
         status: keepGoingStatus,
         error: keepGoing.error,
@@ -1773,7 +1769,7 @@ function OpenCommandPaletteDialog(props: {
         });
       }
     }
-    if (canGameAction && gameAccess === "writer" && gameEngineActive)
+    if (canGameAction && gameEngineActive)
       actionItems.push({
         kind: "action",
         value: "action:game-export",

@@ -23,7 +23,6 @@ import {
 } from "@kurambit/client-runtime/state/runtime";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
-import { useGameStageAccess } from "../../hooks/useGameStageAccess";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn, newMessageId } from "../../lib/utils";
 import type { TimelineAnchoredCard } from "../../session-logic";
@@ -149,8 +148,6 @@ export function useGenerationActions(threadRef: ScopedThreadRef) {
   const canCancel = useAtomValue(
     gameEnvironment.cancelGeneration.permissionAtom(threadRef.environmentId),
   );
-  // A run's role thread never writes beside the run.
-  const writer = useGameStageAccess(threadRef) === "writer";
   const generations = useGameGenerations(threadRef);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<{ readonly id: string; readonly text: string } | null>(null);
@@ -191,9 +188,8 @@ export function useGenerationActions(threadRef: ScopedThreadRef) {
       : `${done}The message to the agent was not sent (${failure}). Tell it: ${text}`;
   };
   return {
-    canChoose: canChoose && writer,
-    canCancel: canCancel && writer,
-    canChange: writer,
+    canChoose,
+    canCancel,
     pending,
     errorFor: (id: string) => (error?.id === id ? error.text : null),
     choose: (generation: GameGeneration, candidate: number) =>
@@ -590,7 +586,7 @@ export function GameGenerationBody({
     generation.state === "choosing" || generation.state === "done"
       ? (generation.refused ?? [])
       : [];
-  const changeable = actions.canChange ? changeableImage(generation) : null;
+  const changeable = changeableImage(generation);
   const meta = [
     settled ? `Made with ${providerLabel(generation.provider)}` : null,
     cost,

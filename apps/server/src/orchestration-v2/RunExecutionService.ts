@@ -39,7 +39,6 @@ import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
-import { threadCheckpointsOwnedByRun } from "./CommandPolicy.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
@@ -852,22 +851,21 @@ export const layer: Layer.Layer<
                     .responseStreamingMode,
               ),
             );
-            if (!threadCheckpointsOwnedByRun(input.appThread))
-              yield* checkpointService
-                .captureBaseline({
-                  scope: input.checkpointScope,
-                  ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
-                })
-                .pipe(
-                  Effect.catchCause((cause) =>
-                    Cause.hasInterruptsOnly(cause)
-                      ? Effect.failCause(cause)
-                      : Effect.logWarning(
-                          "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
-                          { runId: input.run.id },
-                        ),
-                  ),
-                );
+            yield* checkpointService
+              .captureBaseline({
+                scope: input.checkpointScope,
+                ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : Effect.logWarning(
+                        "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
+                        { runId: input.run.id },
+                      ),
+                ),
+              );
             if (
               input.shouldStartProviderTurn !== undefined &&
               !(yield* input.shouldStartProviderTurn())

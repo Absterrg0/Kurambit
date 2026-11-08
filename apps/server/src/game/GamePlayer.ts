@@ -42,18 +42,15 @@ export class GamePlayer extends Context.Service<
      * The Linux player of the game's current sources: the one it has, a copy
      * of its main checkout's of identical sources, or a build that runs as
      * the game's exclusive operation (so it never races game_export or
-     * game_check for the editor), outside any explore start lock. A build
-     * imports into the folder, so it runs only once `beforeBuild` admits it.
+     * game_check for the editor), outside any explore start lock.
      */
     readonly playerFor: (
       owner: string,
       root: string,
-      beforeBuild?: Effect.Effect<void, GameOperationError>,
     ) => Effect.Effect<PreparedPlayer, GameOperationError>;
     /**
      * Gives a game folder a complete player of its current sources.
-     * Idempotent. A blind sample's worktree gets this before its thread
-     * exists, so no sample spends its play time on a build.
+     * Idempotent.
      */
     readonly prepare: (root: string) => Effect.Effect<
       {
@@ -79,15 +76,11 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const operations = yield* GameOperations.GameOperations;
   const checkoutOf = yield* makeCheckoutOf;
-  // Both samples of a pair prepare at once and one live editor runs at a
-  // time: the second waits for the first's build instead of failing busy.
+  // One live editor runs at a time: a second prepare waits for the first's
+  // build instead of failing busy.
   const prepareLock = Semaphore.makeUnsafe(1);
 
-  const playerFor = (
-    owner: string,
-    root: string,
-    beforeBuild: Effect.Effect<void, GameOperationError> = Effect.void,
-  ) =>
+  const playerFor = (owner: string, root: string) =>
     Effect.gen(function* () {
       const { backend, ctx } = yield* engines.context(root);
       const engine = backend.profile.displayName;
@@ -146,7 +139,6 @@ const make = Effect.gen(function* () {
       const before = yield* known(`${engine} play build`);
       const early = yield* ready(before);
       if (early !== null) return early;
-      yield* beforeBuild;
       return yield* operations.exclusive(
         root,
         `${engine} play build`,
@@ -210,8 +202,8 @@ ${built.result.message}`.slice(0, 3000),
       );
     });
 
-  // Both read the manifest's engine first: a game whose engine has no player
-  // or editor is answered without resolving its executable.
+  // Reads the manifest's engine first: a game whose engine has no player or
+  // editor is answered without resolving its executable.
   const backendOf = (root: string) =>
     Effect.flatMap(projects.read(root), (manifest) =>
       isGameEngineActive(manifest.engine.name)
@@ -226,9 +218,9 @@ ${built.result.message}`.slice(0, 3000),
     const editor = backend.editor;
     const prepared = yield* prepareLock.withPermits(1)(
       Effect.gen(function* () {
-        const ready = yield* playerFor("game run player preparation", root);
-        // The sample plays only its player; an idle editor beside it would
-        // take the memory the player runs in.
+        const ready = yield* playerFor("player preparation", root);
+        // Only the player plays; an idle editor beside it would take the
+        // memory the player runs in.
         if (ready.origin === "built") yield* editor.close(root);
         return ready;
       }),

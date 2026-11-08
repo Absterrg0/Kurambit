@@ -180,25 +180,6 @@ export const isGameGenerationTool = (toolName: string | null | undefined): boole
   toolName != null &&
   /(?:^|[_.:/\s-])game_(?:generate(?:_wait)?|image_edit)$/i.test(toolName.trim());
 
-// The timeline compares anchored cards by identity, so one merged array per pair of inputs.
-let lastMerge: {
-  readonly a: ReadonlyArray<unknown>;
-  readonly b: ReadonlyArray<unknown>;
-  readonly merged: ReadonlyArray<unknown>;
-} | null = null;
-/** Two card lists as one, the same array while neither changed. */
-export const mergeAnchoredCards = <T>(
-  a: ReadonlyArray<T>,
-  b: ReadonlyArray<T>,
-): ReadonlyArray<T> => {
-  if (a.length === 0) return b;
-  if (b.length === 0) return a;
-  if (lastMerge?.a === a && lastMerge.b === b) return lastMerge.merged as ReadonlyArray<T>;
-  const merged = [...a, ...b];
-  lastMerge = { a, b, merged };
-  return merged;
-};
-
 /** The person's pick, as the message the agent goes on from. */
 export const pickMessage = (generation: GameGeneration, candidate: number): string =>
   awaitsModelLook(generation)

@@ -176,7 +176,6 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { ChangedFilesCard, type ChangedFileContextMenuHandler } from "./ChangedFilesTree";
-import { GameRoundCard } from "../game/GameRoundCard";
 import { GameGenerationCard } from "../game/GameGenerationCard";
 import { GameTurnBuild } from "../game/GameTurnBuild";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
@@ -1928,7 +1927,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                 row.kind === "attempt-fold" ||
                 row.kind === "html-render" ||
                 row.kind === "mcp-app" ||
-                row.kind === "game-round" ||
                 row.kind === "game-generation"
               ? "pb-2"
               : "pb-4",
@@ -1979,7 +1977,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
-      {row.kind === "game-round" ? <GameRoundTimelineRow row={row} /> : null}
       {row.kind === "game-generation" ? <GameGenerationTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
@@ -2814,16 +2811,6 @@ function ProposedPlanTimelineRow({
         workspaceRoot={ctx.workspaceRoot}
         findActive={ctx.findActive}
       />
-    </div>
-  );
-}
-
-function GameRoundTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "game-round" }> }) {
-  const ctx = use(TimelineRowCtx);
-  if (ctx.threadRef === null) return null;
-  return (
-    <div className="min-w-0 px-1">
-      <GameRoundCard threadRef={ctx.threadRef} runId={row.runId} round={row.round} />
     </div>
   );
 }

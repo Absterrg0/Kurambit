@@ -593,25 +593,7 @@ const make = Effect.gen(function* () {
     ),
     Effect.forkScoped,
   );
-  // A busy game while a run holds it is the run's own work: the refusal says
-  // so, rather than suggesting Stop game, which stops only the caller's work.
-  const heldBusy = (threadId: ThreadId) => (error: GameOperationError) =>
-    error.reason !== "busy" || error.runReason !== undefined
-      ? Effect.fail(error)
-      : Effect.flatMap(projects.runHold(threadId), (hold) =>
-          Effect.fail(
-            hold === null
-              ? error
-              : new GameOperationError({
-                  operation: error.operation,
-                  path: error.path,
-                  reason: "busy",
-                  runReason: "run-live",
-                  ...(error.detail === undefined ? {} : { detail: error.detail }),
-                }),
-          ),
-        );
-  // An operation that may write the game: refused to other owners while a production run holds it.
+  // An operation that may write the game.
   const withRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
     name: string,
@@ -620,10 +602,13 @@ const make = Effect.gen(function* () {
     waitUntil?: number,
   ) {
     const root = yield* projects.resolve(threadId);
-    yield* projects.admitWrite(threadId, root, name, owner);
-    return yield* operations
-      .exclusive(root, name, work(root), owner, waitUntil === undefined ? undefined : { waitUntil })
-      .pipe(Effect.catchTags({ GameOperationError: heldBusy(threadId) }));
+    return yield* operations.exclusive(
+      root,
+      name,
+      work(root),
+      owner,
+      waitUntil === undefined ? undefined : { waitUntil },
+    );
   });
   // Reads only, so a production run never refuses it.
   const readRoot = Effect.fnUntraced(function* <A>(
@@ -849,12 +834,6 @@ const make = Effect.gen(function* () {
       return yield* rebuild(threadId);
     }
     if (profile.play === "player") {
-      yield* projects.admitWrite(
-        threadId,
-        root,
-        `${profile.displayName} play build`,
-        String(threadId),
-      );
       const prepared = yield* players.prepare(root);
       return {
         success: true,
@@ -868,30 +847,6 @@ const make = Effect.gen(function* () {
   });
   const stop = Effect.fn("GameService.stop")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
-    // The production run's builds, bots and editors are its own: while a
-    // run holds the game, Stop game ends only what is the caller's: its
-    // operation (an export for Play), its explore session, and Play's
-    // preview server, which no step of a run plays (the run's players
-    // serve their own folders).
-    const hold = yield* projects.runHold(threadId);
-    if (hold !== null) {
-      yield* operations.cancel(root, String(threadId));
-      yield* explore.release(threadId, root);
-      yield* preview.stop(root, { markStopped: true });
-      yield* copies.stopFor(root);
-      return {
-        success: true,
-        message:
-          hold === "finishing"
-            ? "Stopped your work and your Play of this game. The production run is finishing; its exports end on their own."
-            : hold === "restoring"
-              ? "Stopped your work and your Play of this game. A build of the production run is being restored; the restore ends on its own."
-              : "Stopped your work and your Play of this game. The production run's builds, bots and editors keep running; stop the run to stop them.",
-        path: null,
-        url: null,
-        process: null,
-      };
-    }
     yield* operations.cancel(root);
     yield* processes.stop(root);
     // Plays and measurements of the game's builds run in copies of their own.
@@ -1155,33 +1110,29 @@ const make = Effect.gen(function* () {
     // Its video lands in the game folder; the run is recorded on the thread.
     botRun: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) =>
-        Effect.andThen(
-          projects.admitWrite(threadId, root, "Bot run", String(threadId)),
-          Effect.suspend(() => {
-            // A start refused for a cause not about the game (queued past its
-            // bound, memory short, a tool of ours) is marked with its wait, as
-            // an explore start's is, so a run's play turn that played nothing
-            // is replayed; the admission's own refusal is no such start.
-            const waited = { ms: 0, refused: null as "low-memory" | "busy" | null };
-            return gameBot
-              .run(root, input, threadId, {
-                onWaited: (ms, refused) => {
-                  waited.ms += ms;
-                  waited.refused = refused;
-                },
-              })
-              .pipe(
-                Effect.tapError((error) => {
-                  const fault = gameOperationFault(error.reason);
-                  return error.reason === "cancelled" || (fault !== "machine" && fault !== "tool")
-                    ? Effect.void
-                    : explore
-                        .markRefused(threadId, root, waited.refused ?? error.reason, waited.ms)
-                        .pipe(Effect.ignore({ log: true }));
-                }),
-              );
-          }),
-        ),
+        Effect.suspend(() => {
+          // A start refused for a cause not about the game (queued past its
+          // bound, memory short, a tool of ours) is marked with its wait, as
+          // an explore start's is.
+          const waited = { ms: 0, refused: null as "low-memory" | "busy" | null };
+          return gameBot
+            .run(root, input, threadId, {
+              onWaited: (ms, refused) => {
+                waited.ms += ms;
+                waited.refused = refused;
+              },
+            })
+            .pipe(
+              Effect.tapError((error) => {
+                const fault = gameOperationFault(error.reason);
+                return error.reason === "cancelled" || (fault !== "machine" && fault !== "tool")
+                  ? Effect.void
+                  : explore
+                      .markRefused(threadId, root, waited.refused ?? error.reason, waited.ms)
+                      .pipe(Effect.ignore({ log: true }));
+              }),
+            );
+        }),
       ),
     // The run itself takes minutes and holds no game lock: GameBot takes the
     // game's operation lock and the memory gate only around each run's import
@@ -1276,7 +1227,6 @@ const make = Effect.gen(function* () {
     generate: (threadId, input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
-        yield* projects.admitWrite(threadId, root, "Generate art", String(threadId));
         return yield* art.generate(
           root,
           threadId,
@@ -1287,7 +1237,6 @@ const make = Effect.gen(function* () {
     imageEdit: (threadId, input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
-        yield* projects.admitWrite(threadId, root, "Edit art", String(threadId));
         return yield* art.generate(
           root,
           threadId,
@@ -1310,13 +1259,11 @@ const make = Effect.gen(function* () {
     chooseGeneration: (threadId, id, candidate) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
-        yield* projects.admitWrite(threadId, root, "Pick art", String(threadId));
         return yield* art.choose(root, id, candidate);
       }),
     cancelGeneration: (threadId, id) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
-        yield* projects.admitWrite(threadId, root, "Cancel art", String(threadId));
         return yield* art.cancel(root, id);
       }),
     artProviders: art.providers,

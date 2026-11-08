@@ -117,7 +117,6 @@ const world = Effect.gen(function* () {
           readMany: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameRunControl.GameRunControl)({
-          runBuilds: () => Effect.succeed(null),
           steps: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameService.GameService)({}),

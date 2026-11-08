@@ -35,7 +35,6 @@ Use the game_* tools to check, play, export and package the game; never run Godo
   },
   resourcePath: (projectRelative) => `res://${projectRelative}`,
   importRoot: null,
-  sharedEditor: false,
   importStep: true,
   compressedModels: false,
   groundHint: (width, height, ground) =>

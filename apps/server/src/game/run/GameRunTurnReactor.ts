@@ -557,7 +557,7 @@ const make = Effect.gen(function* () {
       const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
       const run = records.gameRuns.at(-1);
       if (run === undefined) return;
-      yield* operations.runChanged(root, run.status === "ended" ? null : stepLine(run));
+      yield* operations.runChanged(root, run.status === "ended" ? null : stepLine());
       // A run that ended has no work left: Off, a pause or the end stop its jobs.
       if (run.status === "ended") yield* jobs.stopRun(run.id);
     });
@@ -571,7 +571,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
       const gameRun = records.gameRuns.at(-1);
-      if (gameRun === undefined || gameRun.loop !== "turns" || gameRun.status === "ended") return;
+      if (gameRun === undefined || gameRun.status === "ended") return;
       yield* refusedOnly(
         engine.dispatch({
           type: "game-run.stop",

@@ -8,7 +8,6 @@ import {
 } from "@kurambit/contracts";
 import { Atom } from "effect/reactivity";
 
-import { useGameStageAccess } from "../../hooks/useGameStageAccess";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
@@ -80,8 +79,6 @@ export function useCharacterRoute(threadRef: ScopedThreadRef | null) {
       ? NO_PERMISSION
       : gameEnvironment.setCharacterRoute.permissionAtom(threadRef.environmentId),
   );
-  // A run's role thread never writes beside the run.
-  const access = useGameStageAccess(threadRef);
   const [pending, setPending] = useState<GameCharacterRoute | null>(null);
   const route = status.data?.characters ?? null;
   const choose = async (next: GameCharacterRoute) => {
@@ -99,7 +96,7 @@ export function useCharacterRoute(threadRef: ScopedThreadRef | null) {
     route,
     /** The choice on its way to the server, shown as chosen meanwhile. */
     shown: pending ?? route,
-    canSet: permitted && access === "writer" && route !== null,
+    canSet: permitted && route !== null,
     choose,
   };
 }

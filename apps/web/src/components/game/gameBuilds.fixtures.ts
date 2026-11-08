@@ -6,7 +6,6 @@ import {
   type GameBuildsResult,
   type GameFactDelta,
   type GameFactView,
-  type GameRunRoundRef,
 } from "@kurambit/contracts";
 
 /**
@@ -14,7 +13,7 @@ import {
  * source, every facts state, every reading and every kind of change, with
  * the not-measured reasons the server gives. The tests read it.
  */
-export const BUILD_A = GameBuildId.make("a".repeat(40));
+const BUILD_A = GameBuildId.make("a".repeat(40));
 export const BUILD_B = GameBuildId.make("b".repeat(40));
 export const BUILD_C = GameBuildId.make("c".repeat(40));
 export const BUILD_D = GameBuildId.make("d".repeat(40));
@@ -81,15 +80,13 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     id: BUILD_B,
     at: "2026-11-06T14:10:00.000Z",
     source: {
-      _tag: "round",
-      runId: "run-1",
-      round: 3,
-      rung: "Enemies chase the player",
-      move: "Add a chasing enemy",
-      outcome: "kept",
-      best: true,
-      durationMs: 720_000,
-      linesChanged: 140,
+      _tag: "turn",
+      threadId: ThreadId.make("thread-main"),
+      threadTitle: "Main chat",
+      turn: 3,
+      runId: "run:thread:thread-main:ordinal:3",
+      request: "Add a chasing enemy",
+      step: { n: 3, verdict: "kept", reason: "no fact got worse" },
     },
     summary: "Add a chasing enemy",
     files: [
@@ -99,15 +96,15 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     fileCount: 2,
     available: true,
     noPlay: null,
-    noRestore: "Stop the run to go back to a build.",
+    noRestore: null,
     base: BUILD_A,
     facts: summary("measured"),
   },
   {
     id: BUILD_A,
     at: "2026-11-05T09:00:00.000Z",
-    source: { _tag: "saved", runId: "run-1", label: "The game before restoring round 2" },
-    summary: "The game before restoring round 2",
+    source: { _tag: "saved", label: "The game before a restore" },
+    summary: "The game before a restore",
     files: [],
     fileCount: null,
     available: false,
@@ -126,11 +123,11 @@ export const FAKE_BUILDS_RESULT: GameBuildsResult = {
   restore: {
     requestId: "restore-1",
     target: BUILD_B,
-    label: "Round 3's build",
+    label: "Step 3's build",
     requestedAt: "2026-11-06T15:00:00.000Z",
     // Turns 4 and 5 changed the folder since: the restore has no undo any more.
     undo: null,
-    outcome: { restored: true, message: "Round 3's build is back in the folder." },
+    outcome: { restored: true, message: "Step 3's build is back in the folder." },
   },
 };
 
@@ -141,7 +138,7 @@ export const FAKE_UNDONE_RESULT: GameBuildsResult = {
     {
       id: BUILD_E,
       at: "2026-11-06T15:50:00.000Z",
-      source: { _tag: "saved", runId: null, label: "The game before restoring turn 4's build" },
+      source: { _tag: "saved", label: "The game before restoring turn 4's build" },
       summary: "The game before restoring turn 4's build",
       files: [],
       fileCount: null,
@@ -234,23 +231,3 @@ export const FAKE_DELTAS: ReadonlyArray<GameFactDelta> = [
     why: "this game has no skilled bot",
   },
 ];
-
-export const fakeRound = (overrides: Partial<GameRunRoundRef>): GameRunRoundRef => ({
-  round: 3,
-  move: "Add a chasing enemy",
-  branch: "round-3",
-  kept: true,
-  current: true,
-  outcome: "kept",
-  verdicts: [],
-  linesChanged: 140,
-  durationMs: 720_000,
-  note: null,
-  steer: [],
-  rung: null,
-  build: BUILD_B,
-  base: BUILD_A,
-  endedAt: "2026-11-06T14:10:00.000Z",
-  tokens: 84_000,
-  ...overrides,
-});

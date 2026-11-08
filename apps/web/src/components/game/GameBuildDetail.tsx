@@ -36,7 +36,6 @@ export function GameBuildDetail({
   loaded,
   writer,
   turnRunning,
-  runActive,
   onCompare,
   onPlay,
 }: {
@@ -47,7 +46,6 @@ export function GameBuildDetail({
   loaded: ReadonlyArray<GameBuild>;
   writer: boolean;
   turnRunning: boolean;
-  runActive: boolean;
   /** The other build to compare with; null picks it on the timeline. */
   onCompare: (b: GameBuildRef | null) => void;
   /** Plays it on the Stage, from a copy, or in its own window. */
@@ -76,17 +74,9 @@ export function GameBuildDetail({
   const isCurrent = list?.current === build.id && list.folderEdited !== true;
   // The server stays authoritative; these say why before the person presses.
   const restoreBlocked =
-    build.noRestore ??
-    (!writer
-      ? "Only the game's own chat can go back to a build."
-      : runActive
-        ? "Stop the run to go back; while it is live, steer it."
-        : turnRunning
-          ? "Wait for the agent's turn to end."
-          : null);
+    build.noRestore ?? (turnRunning ? "Wait for the agent's turn to end." : null);
   const index = loaded.findIndex((entry) => entry.id === build.id);
   const previous = index === -1 ? undefined : loaded[index + 1];
-  const best = loaded.find((entry) => entry.source._tag === "round" && entry.source.best) ?? null;
   const factsData = facts.data;
   const measureAnswer = measure.answer(build.id);
   const turnSource = build.source._tag === "turn" ? build.source : null;
@@ -122,9 +112,6 @@ export function GameBuildDetail({
               >
                 The folder's build
               </MenuItem>
-            ) : null}
-            {best !== null && best.id !== build.id ? (
-              <MenuItem onClick={() => onCompare(refOf(best))}>The run's best</MenuItem>
             ) : null}
             <MenuItem onClick={() => onCompare(null)}>Pick on the timeline…</MenuItem>
           </MenuPopup>

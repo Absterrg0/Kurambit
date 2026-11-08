@@ -77,7 +77,6 @@ const run = (
             resolve: () => Effect.succeed(ROOT),
             read: () => Effect.succeed(manifest(engine)),
             refreshGuidance: () => Effect.void,
-            runHold: () => Effect.succeed(null),
           }),
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
             getThreadShell: () =>

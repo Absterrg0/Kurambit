@@ -25,18 +25,14 @@ import { engineProfile } from "../../../game/engineProfile.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
-/**
- * One tool call: the calling thread's work on the game service, as an agent's.
- * Whether it is a production run's own role comes from the MCP session, never
- * from the thread a person may be viewing.
- */
+/** One tool call: the calling thread's work on the game service, as an agent's. */
 const withGame = <A, E>(
   work: (game: GameService.GameService["Service"], threadId: ThreadId) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
     const scope = yield* caller;
     return yield* work(yield* GameService.GameService, scope.thread.threadId).pipe(
-      Effect.provideService(GameCaller, { kind: "agent", runRole: scope.gameRunRole === "run" }),
+      Effect.provideService(GameCaller, { kind: "agent" }),
     );
   });
 /** One tool call on the calling thread's game builds, as an agent's. */
@@ -46,7 +42,7 @@ const withBuilds = <A, E>(
   Effect.gen(function* () {
     const scope = yield* caller;
     return yield* work(yield* GameBuilds.GameBuilds, scope.thread.threadId).pipe(
-      Effect.provideService(GameCaller, { kind: "agent", runRole: scope.gameRunRole === "run" }),
+      Effect.provideService(GameCaller, { kind: "agent" }),
     );
   });
 /** One tool call on the calling chat's keep going, its refusals as operation errors. */

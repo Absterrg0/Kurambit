@@ -5,7 +5,7 @@ import { GameBuildId, GameFactDelta, GameStepVerdict } from "./gameBuilds.ts";
 /**
  * Keep going as a Kurambit service: the agent takes the next step of a game
  * itself, in the person's chat, and the run keeps or undoes each step by its
- * facts. Runs made by an earlier Kurambit (the stage era) are read, never continued.
+ * facts.
  */
 
 // The profile and the refusal reasons live in a leaf module: game.ts names them
@@ -18,25 +18,20 @@ export const GameRunCommandKey = Schema.optionalKey(
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
 );
 
-/** Why a run made by an earlier Kurambit is never continued (design §6.4): the server's refusal and the Past runs line say it alike. */
-export const GAME_RUN_STAGE_ERA_SENTENCE =
-  "This run was made by an earlier Kurambit whose stages (vision, prototypes, plan) no longer exist. Its builds stay on the timeline. Keep going starts from the game as it is now.";
-
+// "ready", "no-ladder", "incomplete", "low-memory" and "busy" are only on runs an
+// earlier Kurambit wrote; stored records keep them, so they still decode.
 export const GameRunEnding = Schema.Literals([
   "ready",
   "done",
   "stopped",
   "stalled",
-  /** Stage era only: the plan wrote no valid ladder. */
   "no-ladder",
-  /** Stage era only: the ladder had set-aside rungs, or the ship review said not shippable. */
   "incomplete",
   "budget",
   "failed",
   "usage-limit",
   "provider-down",
   "low-memory",
-  /** Stage era only: a sample's explore start kept waiting behind other starts on this machine. */
   "busy",
   /** A program Kurambit runs kept failing while measuring a build: nothing was judged. */
   "tool-failed",
@@ -165,76 +160,3 @@ export const GameKeepGoingSteerResult = Schema.Struct({
   message: Schema.String,
 });
 export type GameKeepGoingSteerResult = typeof GameKeepGoingSteerResult.Type;
-
-// ── Stage-era rounds, as the round cards read them. ──────────────────────────
-/**
- * How a stage-era round ended: merged, tied or split (best stands), lost both
- * orders, never judged, or dropped mid-way by the creator's restore of another round.
- */
-export const GameRunRoundOutcome = Schema.Literals([
-  "kept",
-  "inconclusive",
-  "rejected",
-  "unjudged",
-  "abandoned",
-]);
-export type GameRunRoundOutcome = typeof GameRunRoundOutcome.Type;
-
-/** One check of a ladder rung, as the round's tester declared it. */
-export const GameRunCheckResult = Schema.Struct({
-  what: Schema.String,
-  pass: Schema.Boolean,
-  evidence: Schema.String,
-});
-export type GameRunCheckResult = typeof GameRunCheckResult.Type;
-
-/** What a ladder round did with its rung: landed, failed, or set aside on its second failure. */
-export const GameRunRungResult = Schema.Struct({
-  is: Schema.String,
-  checks: Schema.Array(GameRunCheckResult),
-  outcome: Schema.Literals(["landed", "failed", "set-aside"]),
-  why: Schema.String,
-});
-export type GameRunRungResult = typeof GameRunRungResult.Type;
-
-/** One stage-era round, short on purpose: every push resends it. */
-export const GameRunRoundRef = Schema.Struct({
-  round: Schema.Number,
-  move: Schema.String,
-  branch: Schema.String,
-  kept: Schema.Boolean,
-  /** This round's build is the game's current best. */
-  current: Schema.Boolean,
-  outcome: GameRunRoundOutcome,
-  verdicts: Schema.Array(Schema.Struct({ order: Schema.String, verdict: Schema.String })),
-  linesChanged: Schema.Number,
-  durationMs: Schema.Number,
-  note: Schema.NullOr(Schema.String),
-  /** The creator's steering notes this round started from. */
-  steer: Schema.Array(Schema.String),
-  /** The ladder rung this round built; null for a finish round or an older record. */
-  rung: Schema.NullOr(GameRunRungResult),
-  /** The round's candidate build (a commit oid); absent before builds were listed. */
-  build: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  /** The best build it was judged against. */
-  base: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  /** When the round ended (ISO): where its card sits in the chat. */
-  endedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  /** Tokens its role turns used, summed from the providers' own usage; null when none was reported. */
-  tokens: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-});
-export type GameRunRoundRef = typeof GameRunRoundRef.Type;
-
-/** The runs that talk to one chat, newest first, for its round cards. */
-export const GameRunRoundsInput = Schema.Struct({ threadId: ThreadId });
-export const GameRunRoundsResult = Schema.Struct({
-  runs: Schema.Array(
-    Schema.Struct({
-      runId: Schema.String,
-      active: Schema.Boolean,
-      best: Schema.NullOr(Schema.String),
-      rounds: Schema.Array(GameRunRoundRef),
-    }),
-  ),
-});
-export type GameRunRoundsResult = typeof GameRunRoundsResult.Type;

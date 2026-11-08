@@ -71,7 +71,6 @@ const layerFor = (root: string) =>
         Layer.mock(GameProjectService.GameProjectService)({
           resolve: () => Effect.succeed(root),
           read: () => Effect.succeed(manifest),
-          admitWrite: () => Effect.void,
           list: () => Effect.succeed([]),
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
@@ -88,7 +87,6 @@ const layerFor = (root: string) =>
           measure: () => Effect.succeed({} as GameBuildFactsShape),
         }),
         Layer.mock(GameRunControl.GameRunControl)({
-          runBuilds: () => Effect.succeed(null),
           steps: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameService.GameService)({ closeLiveEditors: () => Effect.void }),

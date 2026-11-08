@@ -2179,7 +2179,6 @@ const layerHost = Layer.effect(
           Effect.map((records) => {
             const run = records.gameRuns.findLast(
               (candidate) =>
-                candidate.loop === "turns" &&
                 candidate.status !== "ended" &&
                 candidate.threadId === threadId &&
                 candidate.inFlight !== null,

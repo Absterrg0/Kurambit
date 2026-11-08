@@ -47,7 +47,6 @@ import {
 import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useGameStageAccess } from "../../hooks/useGameStageAccess";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import {
@@ -203,9 +202,6 @@ function ThreadGameStage({
   const navigate = useNavigate();
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
-  // A run's role thread shows the game but never writes beside the run.
-  const access = useGameStageAccess(threadRef);
-  const canOperate = canAct && access === "writer";
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const chatWidth = useGameWorkspaceStore((state) => state.chatWidth);
   const chatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
@@ -220,7 +216,6 @@ function ThreadGameStage({
     turnUndo.action?.kind === kind &&
     turnUndo.action.blocked === null &&
     turnUndo.canRestore &&
-    turnUndo.writer &&
     !turnUndo.pending;
   const live = useAtomValue(liveSignal(threadRef));
   // Which live change the frame shows (A6): while this chat's turn runs, at
@@ -552,16 +547,11 @@ function ThreadGameStage({
   // The turn's own build is coming: a Build & play now would race it and be refused.
   const awaitingTurnBuild = phase.kind === "first-build";
   const building = busy !== null || operationState === "running";
-  // Play of a build that exists only reads, so a run's role thread may play it.
   // A parked engine's game builds and plays nothing here.
   const webPlay = engine.status === "active" && data.exportTargets.includes("Web");
   const playEnabled =
-    !awaitingTurnBuild &&
-    webPlay &&
-    canAct &&
-    (access === "writer" || webBuild !== undefined) &&
-    (data.previewUrl !== null || !building);
-  const stagingEnabled = canOperate && !building;
+    !awaitingTurnBuild && webPlay && canAct && (data.previewUrl !== null || !building);
+  const stagingEnabled = canAct && !building;
   const rebuildEnabled = stagingEnabled && webPlay && !awaitingTurnBuild;
   const buildingStartedAt =
     busy?.startedAt ??
@@ -945,7 +935,7 @@ function ThreadGameStage({
                 </IconAction>
                 <IconAction
                   label="Stop the game and its preview"
-                  disabled={!canOperate || !runningSomething}
+                  disabled={!canAct || !runningSomething}
                   onClick={() => void perform("stop")}
                 >
                   <SquareIcon className="size-3.5" aria-hidden="true" />
@@ -997,7 +987,7 @@ function ThreadGameStage({
                   {choosing > 0 ? `Generated art… (${choosing} to pick)` : "Generated art…"}
                 </MenuItem>
                 <MenuItem
-                  disabled={!canOperate || !runningSomething}
+                  disabled={!canAct || !runningSomething}
                   onClick={() => void perform("stop")}
                 >
                   <SquareIcon />
@@ -1121,7 +1111,7 @@ function ThreadGameStage({
           }
           frameKey={frameKey}
           hidden={frameHidden}
-          canOperate={canOperate}
+          canOperate={canAct}
           operation={
             busy !== null
               ? { name: BUSY_LABELS[busy.action], own: true }
@@ -1147,7 +1137,7 @@ function ThreadGameStage({
       </div>
       <GameBuildTimeline
         threadRef={threadRef}
-        writer={canOperate}
+        writer={canAct}
         turnRunning={turnRunning}
         live={stageKind === "live"}
         playing={playTarget?.build ?? null}
@@ -1173,7 +1163,7 @@ function ThreadGameStage({
               live={stageKind === "live"}
               webBuildStale={data.webBuildStale}
               sourcesDifferFromPlay={data.sourcesDifferFromPlay}
-              canOperate={canOperate}
+              canOperate={canAct}
               operationRunning={building}
               onPlay={() => {
                 setExportOpen(false);

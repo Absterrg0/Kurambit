@@ -30,14 +30,12 @@ import {
   manifestProject,
 } from "@kurambit/contracts";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
-import { GameCaller, type GameCallerValue } from "./GameCaller.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import { gameRunHold } from "../orchestration-v2/CommandPolicy.ts";
 import { stepLine } from "./run/runView.ts";
 import { stepNumber } from "./run/state.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
@@ -96,38 +94,6 @@ const gitInitError = (root: string) => (cause: unknown) =>
     cause,
   });
 
-const HELD: Record<"live" | "finishing" | "restoring", string> = {
-  live: "A production run is working on this game; this would change the folder its builds and checks read.",
-  finishing: "The production run is finishing: it is exporting the game's best build.",
-  restoring: "A round of the production run is being restored into this game's folder.",
-};
-const ROLE_HELD =
-  "This chat is one of the production run's roles; only the run's own agent works here while the run is live. Stop the run to work in it yourself.";
-
-/**
- * Whether a write is admitted while a production run holds the game: null to
- * admit, else why not. The one rule, for the service and its test fake. A
- * role's thread (game folder or copy) is written only by its own agent while
- * the run is live; a person looking at it is not that agent. Any other thread
- * is refused only on the run's own game folder.
- */
-export const admitDecision = (facts: {
-  readonly hold: "live" | "finishing" | "restoring" | null;
-  readonly role: boolean | "unknown";
-  readonly onRunFolder: boolean;
-  readonly caller: GameCallerValue;
-}): string | null => {
-  if (facts.hold === null) return null;
-  if (facts.role === true)
-    return facts.hold === "live" && facts.caller.kind === "agent" && facts.caller.runRole
-      ? null
-      : facts.hold === "live"
-        ? ROLE_HELD
-        : HELD[facts.hold];
-  if (facts.role === "unknown" || facts.onRunFolder) return HELD[facts.hold];
-  return null;
-};
-
 export class GameProjectService extends Context.Service<
   GameProjectService,
   {
@@ -150,27 +116,6 @@ export class GameProjectService extends Context.Service<
       threadId: ThreadId,
       options?: { readonly deleted?: "allowed" },
     ) => Effect.Effect<string, GameOperationError>;
-    /**
-     * How a production run holds this thread's game now: "live", or while its
-     * ending's exports ("finishing") or a restore ("restoring") still work the
-     * folder; null when no run does.
-     */
-    readonly runHold: (
-      threadId: ThreadId,
-    ) => Effect.Effect<"live" | "finishing" | "restoring" | null>;
-    /**
-     * Refuses an operation that writes the game while a production run holds
-     * it, unless the run itself or a role's own agent (GameCaller) asks: the
-     * run's builds, checks and exports read the folder as its own, and a
-     * creator's Rebuild or edit beside them would make a check fail for a
-     * cause that is not the build. `root` names the folder in the refusal.
-     */
-    readonly admitWrite: (
-      threadId: ThreadId,
-      root: string,
-      operation: string,
-      owner: string,
-    ) => Effect.Effect<void, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /** Between turns: the game's AGENTS.md sections and studio skills brought up to this server. */
     readonly refreshGuidance: (root: string) => Effect.Effect<void, GameOperationError>;
@@ -198,14 +143,10 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const run = yield* projections.getProjectGameRun(projectId);
       if (run === null || run.status === "ended") return null;
-      const n =
-        run.loop === "turns"
-          ? stepNumber(
-              (yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" }))
-                .gameRunRounds,
-            )
-          : undefined;
-      return { step: stepLine(run, n), startedAt: run.startedAt } satisfies GameSummary["run"];
+      const n = stepNumber(
+        (yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" })).gameRunRounds,
+      );
+      return { step: stepLine(n), startedAt: run.startedAt } satisfies GameSummary["run"];
     }).pipe(Effect.orElseSucceed(() => null));
   const path = yield* Path.Path;
   /**
@@ -551,55 +492,7 @@ const make = Effect.gen(function* () {
     return root;
   });
 
-  const projectRun = (threadId: ThreadId) =>
-    threads
-      .getThreadShell(threadId)
-      .pipe(
-        Effect.flatMap((shell) =>
-          shell === null ? Effect.succeed(null) : projections.getProjectGameRun(shell.projectId),
-        ),
-      );
-  const holdOf = gameRunHold;
-  const runHold: GameProjectService["Service"]["runHold"] = (threadId) =>
-    projectRun(threadId).pipe(
-      Effect.map(holdOf),
-      // Unknown is held: a read that fails never lets a Stop game reach the run's work.
-      Effect.orElseSucceed(() => "live" as const),
-    );
-
-  const admitWrite: GameProjectService["Service"]["admitWrite"] = (threadId, root, operation) =>
-    Effect.gen(function* () {
-      // Unknown is held, as for Stop game.
-      const run = yield* projectRun(threadId).pipe(Effect.option);
-      const hold = Option.isSome(run) ? holdOf(run.value) : "live";
-      if (hold === null) return;
-      const gameRoot =
-        Option.isSome(run) && run.value !== null
-          ? yield* resolve(run.value.threadId, { deleted: "allowed" }).pipe(Effect.option)
-          : Option.none();
-      const refusal = admitDecision({
-        hold,
-        // An unreadable record is never taken for a role's, and never admitted as one.
-        role: yield* threads.getThreadRecords(threadId, []).pipe(
-          Effect.map(({ thread }) => thread.launchedBy === "game_run"),
-          Effect.orElseSucceed(() => "unknown" as const),
-        ),
-        onRunFolder: Option.isNone(gameRoot) || gameRoot.value === root,
-        caller: yield* GameCaller,
-      });
-      if (refusal !== null)
-        return yield* new GameOperationError({
-          operation,
-          path: root,
-          reason: "busy",
-          runReason: "run-live",
-          detail: refusal,
-        });
-    });
-
   return GameProjectService.of({
-    runHold,
-    admitWrite,
     create,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(

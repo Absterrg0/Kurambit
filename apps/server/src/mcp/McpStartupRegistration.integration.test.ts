@@ -195,9 +195,9 @@ it(
         expect(tool.inputSchema.type, `inputSchema.type of ${tool.name}`).toBe("object");
       }
 
-      // Game tools are listed only to a thread whose game's engine and moment fit
-      // them (toolkits/game/placement.ts). A signed-in client has no thread, so it
-      // is offered none and cannot call one by name.
+      // Game tools are listed only to a thread whose game's engine fits them
+      // (toolkits/game/placement.ts). A signed-in client has no thread, so it is
+      // offered none and cannot call one by name.
       expect(names.filter((name) => name.startsWith("game_"))).toEqual([]);
       const called = await postMcp({
         origin: server.url,

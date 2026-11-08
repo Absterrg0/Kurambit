@@ -11,7 +11,6 @@ import {
   type ScopedThreadRef,
   ThreadId,
   WS_METHODS,
-  type GameRunRoundsResult,
 } from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
@@ -390,25 +389,6 @@ export type GameBuildPlaying = GameStatus["buildPlays"][number];
 export const buildPlaysOf = (status: GameStatus): ReadonlyArray<GameBuildPlaying> =>
   status.buildPlays;
 
-/** Every run whose chat is this thread, newest first (CONTRACT A4, `game.runRounds`). */
-export type GameChatRun = GameRunRoundsResult["runs"][number];
-const chatRunsAtom = Atom.family((key: string) => {
-  const [environmentId = "", threadId = ""] = key.split("\0");
-  return Atom.make((get) =>
-    AsyncResult.map(
-      get(
-        gameEnvironment.runRounds({
-          environmentId: EnvironmentId.make(environmentId),
-          input: { threadId: ThreadId.make(threadId) },
-        }),
-      ),
-      (result): ReadonlyArray<GameChatRun> => result.runs,
-    ),
-  ).pipe(Atom.withLabel(`game:chat-runs:${key}`));
-});
-export const chatRuns = (ref: ScopedThreadRef) =>
-  chatRunsAtom(`${ref.environmentId}\0${ref.threadId}`);
-
 export const gameEnvironment = {
   toolchain: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:toolchain",
@@ -519,14 +499,6 @@ export const gameEnvironment = {
   keepValues: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:keepValues",
     tag: WS_METHODS.gameKeepValues,
-  }),
-  // Every run whose chat is this thread, for the round cards: reread on run pushes only.
-  runRounds: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:runRounds",
-    tag: WS_METHODS.gameRunRounds,
-    staleTimeMs: 5_000,
-    idleTtlMs: 60_000,
-    refreshTrigger: threadSignal("run"),
   }),
   // Keep going's status for one chat: reread on run pushes only, so a step's
   // progress re-renders the control and the banner once per change, never on a timer.

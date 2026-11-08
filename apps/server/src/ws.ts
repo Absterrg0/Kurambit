@@ -1836,14 +1836,6 @@ const layerWsRpc = (
             things,
             ...(commandId === undefined ? {} : { commandId }),
           }),
-        [WS_METHODS.gameRunRounds]: ({ threadId }) =>
-          gameRun
-            .rounds(threadId)
-            .pipe(
-              Effect.mapError((cause) =>
-                GameRunControl.GameRunError.toOperationError("game-run-rounds", cause),
-              ),
-            ),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined ? game.libraryEvents : game.threadEvents(input.threadId),

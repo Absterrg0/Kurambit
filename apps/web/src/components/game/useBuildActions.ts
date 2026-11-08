@@ -125,8 +125,6 @@ export function useTurnUndo(threadRef: ScopedThreadRef | null, runId: string | n
   return {
     view,
     action,
-    /** A run's role thread sees the builds but never restores beside the run. */
-    writer: shell?.lineage.relationshipToParent !== "role",
     canRestore: restores.canRestore,
     pending: restores.pending,
     restoring: action !== null && restores.restoring(action.target),

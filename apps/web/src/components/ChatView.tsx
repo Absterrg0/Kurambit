@@ -355,9 +355,7 @@ import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
 import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useGameNextBanner } from "./game/GameNextBanner";
 import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
-import { useGameRoundCards } from "./game/GameRoundCard";
 import { useGameGenerationCards } from "./game/GameGenerationCard";
-import { mergeAnchoredCards } from "./game/gameGeneration.logic";
 import { useEnvironmentScope } from "~/state/session";
 import {
   environmentServerConfigsAtom,
@@ -2719,9 +2717,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     return urls;
   })();
-  // A game run's round cards sit in the run's chat at each round's end.
-  const gameRoundCards = useGameRoundCards(isGameThread ? routeThreadDetailRef : null);
-  // And a card per generation the chat's agent started, at its start.
+  // A card per generation the chat's agent started, at its start.
   const gameGenerationCards = useGameGenerationCards(isGameThread ? routeThreadDetailRef : null);
   const anchoredTimelineMessages = feedbackSubmissions.flatMap((submission) =>
     submission.status === "interrupted"
@@ -2735,7 +2731,7 @@ export default function ChatView(props: ChatViewProps) {
     visibleTurnItems: serverVisibleTurnItems,
     optimisticMessages: optimisticUserMessages,
     anchoredMessages: anchoredTimelineMessages,
-    anchoredCards: mergeAnchoredCards(gameRoundCards, gameGenerationCards),
+    anchoredCards: gameGenerationCards,
     attachmentUrlById: timelineAttachmentUrlById,
     ...(serverProjection === null
       ? {}

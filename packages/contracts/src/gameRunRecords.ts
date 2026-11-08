@@ -19,14 +19,12 @@ import {
   GameStepVerdict,
 } from "./gameBuilds.ts";
 import { GameRunEnding, GameRunProfile, GameRunStepWhy } from "./gameRun.ts";
-import { ModelSelection } from "./modelSelection.ts";
-import { RuntimeMode } from "./providerPolicy.ts";
 
 /**
  * Keep going as records of the chat it runs in: the run, its steps and its
  * rounds (one per step). Each event carries the new full record of one entity.
- * A run made by an earlier Kurambit (the stage era) has no `loop`: its records
- * still decode, so its round cards and Past runs read, but it is never continued.
+ * Records an earlier Kurambit's production runs wrote are still in event logs,
+ * so the shapes below keep decoding them; nothing reads their extra fields.
  */
 
 export const GameRunId = TrimmedNonEmptyString.pipe(Schema.brand("GameRunId"));
@@ -290,30 +288,17 @@ export const GameRun = Schema.Struct({
   id: GameRunId,
   /** The chat the run lives on: its stream holds the run's records. */
   threadId: ThreadId,
-  /** "turns": a keep-going run on its chat's turns. Absent: a stage-era run, read and stopped, never continued. */
-  loop: Schema.optionalKey(Schema.Literal("turns")),
-  /** Stage era: the chat the creator last moved the run from. */
-  chat: Schema.optionalKey(ThreadId),
-  /** Stage era: every chat the run's questions may have gone to. */
-  chats: Schema.optionalKey(Schema.Array(ThreadId)),
   projectId: ProjectId,
   /** The engine project directory the manifest names (`godot`, `web`, `unity`). */
   lane: Schema.String,
   /** The game's engine; absent on runs started before it was recorded (read through runEngine). */
   engine: Schema.optionalKey(GameEngineId),
-  brief: Schema.optionalKey(Schema.String),
-  artDirection: Schema.optionalKey(Schema.String),
   profile: GameRunProfile,
-  /** Stage era: what every role thread ran on. A step uses its chat's model. */
-  modelSelection: Schema.optionalKey(ModelSelection),
-  runtimeMode: Schema.optionalKey(RuntimeMode),
   budgetMinutes: Schema.NullOr(Schema.Number),
   /** Epoch ms; null without a budget. */
   budgetEndsAt: Schema.NullOr(Schema.Number),
   status: GameRunStatus,
   ending: Schema.NullOr(GameRunEnding),
-  /** Stage era: the best build's checkpoint oid. */
-  best: Schema.optionalKey(Schema.String),
   /** The person's notes for the next step. */
   steer: Schema.Array(Schema.String),
   /** Never-repeat (design §4.2): proposals the run will not make again, with why. */
@@ -329,29 +314,6 @@ export const GameRun = Schema.Struct({
   inFlight: Schema.NullOr(Schema.Number),
   /** When the run last ended. */
   endedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
-  /** Stage era: "checkpoints" when it kept its builds under its own refs, absent on git-era runs. */
-  versions: Schema.optionalKey(Schema.Literal("checkpoints")),
-  // Stage era: what the stage machine, the blind gate, the ladder and the run's
-  // own restore kept. Decoded as they are, so old records still read, and never used.
-  stage: Schema.optionalKey(Schema.Unknown),
-  trunk: Schema.optionalKey(Schema.Unknown),
-  ladder: Schema.optionalKey(Schema.Unknown),
-  decided: Schema.optionalKey(Schema.Unknown),
-  pendingDecision: Schema.optionalKey(Schema.Unknown),
-  shipNoReasons: Schema.optionalKey(Schema.Unknown),
-  shipCheckedOn: Schema.optionalKey(Schema.Unknown),
-  ledger: Schema.optionalKey(Schema.Unknown),
-  lastDirection: Schema.optionalKey(Schema.Unknown),
-  buildNotes: Schema.optionalKey(Schema.Unknown),
-  pickNotes: Schema.optionalKey(Schema.Unknown),
-  picked: Schema.optionalKey(Schema.Unknown),
-  protos: Schema.optionalKey(Schema.Unknown),
-  played: Schema.optionalKey(Schema.Unknown),
-  pending: Schema.optionalKey(Schema.Unknown),
-  task: Schema.optionalKey(Schema.Unknown),
-  finished: Schema.optionalKey(Schema.Unknown),
-  restore: Schema.optionalKey(Schema.Unknown),
-  resumeSave: Schema.optionalKey(Schema.Unknown),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -393,10 +355,6 @@ export const GameRunStep = Schema.Struct({
   ]),
   step: GameRunPlannedStep,
   status: GameRunStepStatus,
-  // Stage era: role turns, a pair's ended halves, and a landing's outputs.
-  roles: Schema.optionalKey(Schema.Unknown),
-  endedHalves: Schema.optionalKey(Schema.Unknown),
-  outputs: Schema.optionalKey(Schema.Unknown),
   result: Schema.NullOr(GameRunStepResult),
   /** The run's decisions about this step, in order, for the run log. */
   logs: Schema.Array(Schema.String),

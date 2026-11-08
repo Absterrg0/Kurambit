@@ -4,8 +4,6 @@ import {
   GameKeepGoingInput,
   GameKeepGoingStatus,
   GameKeepGoingStatusInput,
-  GameRunRoundsInput,
-  GameRunRoundsResult,
 } from "./gameRun.ts";
 import {
   GameArtProvidersResult,
@@ -382,7 +380,6 @@ export const WS_METHODS = {
   gameBuildRestore: "game.buildRestore",
   gameBuildStop: "game.buildStop",
   gameKeepValues: "game.keepValues",
-  gameRunRounds: "game.runRounds",
   subscribeGameEvents: "subscribeGameEvents",
 
   shellOpenInEditor: "shell.openInEditor",
@@ -1574,11 +1571,6 @@ const WsGameBuildStopRpc = Rpc.make(WS_METHODS.gameBuildStop, {
   success: Schema.Struct({}),
   error: gameError,
 });
-const WsGameRunRoundsRpc = Rpc.make(WS_METHODS.gameRunRounds, {
-  payload: GameRunRoundsInput,
-  success: GameRunRoundsResult,
-  error: gameError,
-});
 const WsGameBuildRestoreRpc = Rpc.make(WS_METHODS.gameBuildRestore, {
   payload: GameBuildRestoreInput,
   success: GameBuildRestoreResult,
@@ -1634,7 +1626,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameBuildRestoreRpc,
   WsGameBuildStopRpc,
   WsGameKeepValuesRpc,
-  WsGameRunRoundsRpc,
   WsSubscribeGameEventsRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

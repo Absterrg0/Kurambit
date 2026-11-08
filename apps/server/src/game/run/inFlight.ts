@@ -52,8 +52,7 @@ export const projectStep = (
 ) =>
   Effect.gen(function* () {
     const run = yield* projections.getProjectGameRun(projectId);
-    if (run === null || run.loop !== "turns" || run.status === "ended" || run.inFlight === null)
-      return null;
+    if (run === null || run.status === "ended" || run.inFlight === null) return null;
     const records = yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" });
     const record = records.gameRunSteps.find(
       (each) => each.runId === run.id && each.seq === run.inFlight,

@@ -35,7 +35,6 @@ Use the game_* tools to check, play, export and package the game; never launch y
   },
   resourcePath: (projectRelative) => `./${projectRelative}`,
   importRoot: null,
-  sharedEditor: false,
   importStep: false,
   compressedModels: true,
   groundHint: (_width, height, ground) => {

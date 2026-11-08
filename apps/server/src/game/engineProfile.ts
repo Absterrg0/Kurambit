@@ -84,11 +84,6 @@ export interface GameEngineProfile {
    * project (Unity's case-sensitive Assets/); null when anywhere under it does.
    */
   readonly importRoot: string | null;
-  /**
-   * Whether its games play and measure through the server's one live editor
-   * (Unity's batchmode editor), so a measurement waits while a run holds it.
-   */
-  readonly sharedEditor: boolean;
   /** Whether game_import does work here; false when the project's files are the game as they are. */
   readonly importStep: boolean;
   /**

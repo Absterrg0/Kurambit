@@ -10,7 +10,6 @@ import {
   type OrchestrationV2Actor,
   type OrchestrationV2CreationSource,
   type OrchestrationV2ProviderThreadNativeMetadata,
-  type OrchestrationV2ThreadLauncher,
   type OrchestrationV2ThreadProjection,
   type ProviderDriverKind,
   type ProviderInteractionMode,
@@ -96,9 +95,6 @@ export interface ThreadLaunchInput {
   };
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
-  /** Groups the new thread under this thread as a `role` child; see the lineage contract. */
-  readonly parentThreadId?: ThreadId;
-  readonly launchedBy?: OrchestrationV2ThreadLauncher;
 }
 
 type PreparationInput = Pick<
@@ -923,10 +919,6 @@ const make = Effect.gen(function* () {
                 ...(input.importedNativeThread === undefined
                   ? {}
                   : { importedNativeThread: input.importedNativeThread }),
-                ...(input.parentThreadId === undefined
-                  ? {}
-                  : { parentThreadId: input.parentThreadId }),
-                ...(input.launchedBy === undefined ? {} : { launchedBy: input.launchedBy }),
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,
               });

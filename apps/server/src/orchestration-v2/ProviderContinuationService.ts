@@ -5,7 +5,6 @@ import * as Ref from "effect/Ref";
 
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as ProviderContinuationRequests from "@kurambit/provider-core/server/ProviderContinuationRequests";
-import { threadTurnsOwnedByRun } from "./CommandPolicy.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import { isUndeliveredMailboxSteer } from "./NotificationMailbox.ts";
 
@@ -86,20 +85,11 @@ export const layer = Layer.effectDiscard(
                 : [request.delegatedCompletion.messageId],
           },
         );
-        // A wake on a role thread would run behind the step's turn, uncapped;
-        // the run's own next turn reads whatever that background work left.
-        const ownedByRun = threadTurnsOwnedByRun(projection.thread);
-        if (
-          ownedByRun ||
-          projection.thread.archivedAt !== null ||
-          projection.thread.deletedAt !== null
-        ) {
-          yield* Effect.logInfo(
-            ownedByRun
-              ? "orchestration-v2.provider-continuation.owned-by-game-run"
-              : "orchestration-v2.provider-continuation.thread-archived",
-            { threadId: request.threadId, providerThreadId: request.providerThreadId },
-          );
+        if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) {
+          yield* Effect.logInfo("orchestration-v2.provider-continuation.thread-archived", {
+            threadId: request.threadId,
+            providerThreadId: request.providerThreadId,
+          });
           if (request.delegatedCompletion !== undefined) {
             yield* clearRetryAttempt(
               delegatedCompletionRetryKey(request, request.delegatedCompletion),

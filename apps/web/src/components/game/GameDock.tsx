@@ -11,7 +11,6 @@ import {
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
-import { useGameStageAccess } from "../../hooks/useGameStageAccess";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameDockTab, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn, newMessageId, randomUUID } from "../../lib/utils";
@@ -253,7 +252,6 @@ function ValuesSection({ threadRef, thing }: { threadRef: ScopedThreadRef; thing
   );
   const before = useThreadStageBridge(threadKey, (state) => state.tunedFrom[thing.id], undefined);
   const canKeep = useAtomValue(gameEnvironment.keepValues.permissionAtom(threadRef.environmentId));
-  const writer = useGameStageAccess(threadRef) === "writer";
   const keep = useAtomCommand(gameEnvironment.keepValues, { reportFailure: false });
   const [keeping, setKeeping] = useState(false);
   const [said, setSaid] = useState<{ readonly text: string; readonly failed: boolean } | null>(
@@ -310,7 +308,7 @@ function ValuesSection({ threadRef, thing }: { threadRef: ScopedThreadRef; thing
       <div className="flex flex-wrap items-center gap-1.5">
         <Button
           size="sm"
-          disabled={changed.length === 0 || keeping || !canKeep || !writer}
+          disabled={changed.length === 0 || keeping || !canKeep}
           onClick={() => void keepAsBuild()}
         >
           {keeping ? "Keeping…" : "Keep as a build"}
@@ -428,7 +426,6 @@ function AskSection({
   selection: StageSelection;
 }) {
   const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
-  const writer = useGameStageAccess(threadRef) === "writer";
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -480,7 +477,7 @@ function AskSection({
         size="sm"
         value={text}
         placeholder={`What should change about the ${selection.thing.name.toLowerCase()}?`}
-        disabled={!writer || sending}
+        disabled={sending}
         onChange={(event) => setText(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -497,7 +494,7 @@ function AskSection({
         <Button
           size="icon-sm"
           aria-label="Send to the agent"
-          disabled={!writer || sending || text.trim() === ""}
+          disabled={sending || text.trim() === ""}
           onClick={() => void send()}
         >
           <ArrowUpIcon className="size-4" aria-hidden="true" />
@@ -624,7 +621,6 @@ function FactsPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       input: { threadId: threadRef.threadId },
     }),
   ).data;
-  const writer = useGameStageAccess(threadRef) === "writer";
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
   const build =
     list === null
@@ -640,9 +636,8 @@ function FactsPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         build={build}
         list={list}
         loaded={list.builds}
-        writer={writer}
+        writer
         turnRunning={false}
-        runActive={false}
         onCompare={(other) =>
           requestStage(
             other === null ? { kind: "compare" } : { kind: "compare", pair: [refOf(build), other] },

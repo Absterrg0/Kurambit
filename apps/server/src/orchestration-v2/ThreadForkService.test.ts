@@ -171,14 +171,6 @@ it.effect("keeps a fork awake when its source thread is snoozed", () =>
   }),
 );
 
-it.effect("a fork of a production run's role thread is the user's own thread", () =>
-  Effect.gen(function* () {
-    const roleThread = { ...makeSourceThread(), launchedBy: "game_run" as const };
-    const result = yield* planFork(makeSourceRun("completed"), roleThread);
-    assert.isUndefined(result.targetThread.launchedBy);
-  }),
-);
-
 it.effect("forks from a usage-limited failed run", () =>
   Effect.gen(function* () {
     const result = yield* planFork(makeSourceRun("failed"));

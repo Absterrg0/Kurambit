@@ -7,11 +7,7 @@ import {
   sortGameThreadsByActivity,
 } from "./game/gameLibrary.logic";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
-import {
-  type EnvironmentId,
-  GAME_RUN_STAGE_ERA_SENTENCE,
-  type ScopedProjectRef,
-} from "@kurambit/contracts";
+import { type EnvironmentId, type ScopedProjectRef } from "@kurambit/contracts";
 import type { EnvironmentServerConfig } from "@kurambit/client-runtime/connection";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
@@ -179,7 +175,6 @@ import { environmentProjects } from "../state/projects";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
-import { gameEnvironment } from "../state/game";
 import { useThreadSearch } from "../state/queries";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
@@ -242,7 +237,6 @@ import {
   partitionGameChats,
   resolveGameSidebarStatus,
   type GameChats,
-  type GameRunThreads,
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
@@ -1648,87 +1642,25 @@ function GameDisclosureSection({ title, children }: { title: string; children: R
   );
 }
 
-function GameDisclosureLine(props: {
-  label: string;
-  at: string;
-  onOpen: () => void;
-  /** Why the line reads as it does, on hover. */
-  tooltip?: string;
-}) {
-  const button = (
-    <button
-      type="button"
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        props.onOpen();
-      }}
-      className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-    />
-  );
-  const content = (
-    <>
-      <span className="min-w-0 flex-1 truncate">{props.label}</span>
-      <span className="shrink-0 text-2xs tabular-nums">
-        <RelativeTimeLabel timestamp={props.at} />
-      </span>
-    </>
-  );
+function GameDisclosureLine(props: { label: string; at: string; onOpen: () => void }) {
   return (
     <li className="list-none">
-      <Tooltip disabled={props.tooltip === undefined}>
-        <TooltipTrigger render={button}>{content}</TooltipTrigger>
-        {props.tooltip === undefined ? null : (
-          <TooltipPopup side="right">{props.tooltip}</TooltipPopup>
-        )}
-      </Tooltip>
+      <button
+        type="button"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          props.onOpen();
+        }}
+        className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+      >
+        <span className="min-w-0 flex-1 truncate">{props.label}</span>
+        <span className="shrink-0 text-2xs tabular-nums">
+          <RelativeTimeLabel timestamp={props.at} />
+        </span>
+      </button>
     </li>
-  );
-}
-
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
-
-/**
- * The runs that talked to one chat. Mounted only while the disclosure is
- * open, so their rounds are read on open; the line opens the first role
- * thread, whose relationship control walks the rest.
- */
-function GamePastRunLine(props: {
-  environmentId: EnvironmentId;
-  run: GameRunThreads<SidebarThreadSummary>;
-  onOpen: (threadId: ThreadId) => void;
-}) {
-  const { run } = props;
-  const first = run.threads[0]!;
-  const rounds = useEnvironmentQuery(
-    run.chatLive
-      ? gameEnvironment.runRounds({
-          environmentId: props.environmentId,
-          input: { threadId: ThreadId.make(run.chatId) },
-        })
-      : null,
-  ).data;
-  const roleChats = plural(run.threads.length, "role chat");
-  const label = !run.chatLive
-    ? `Run from a deleted chat · ${roleChats}`
-    : rounds === null || rounds.runs.length === 0
-      ? `Run · ${roleChats}`
-      : [
-          rounds.runs.length === 1 ? "Run" : plural(rounds.runs.length, "run"),
-          plural(
-            rounds.runs.reduce((sum, entry) => sum + entry.rounds.length, 0),
-            "round",
-          ),
-          ...(rounds.runs.some((entry) => entry.active) ? ["live"] : []),
-        ].join(" · ");
-  return (
-    <GameDisclosureLine
-      label={label}
-      at={run.updatedAt}
-      tooltip={GAME_RUN_STAGE_ERA_SENTENCE}
-      onOpen={() => props.onOpen(first.id)}
-    />
   );
 }
 
@@ -2213,8 +2145,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const initial = gameInitial(gameSummary.name);
     const [pigment, pigmentInk] = gamePigment(gameSummary.name);
     const otherChats = (gameChats?.others ?? []).filter((chat) => chat.id !== thread.id);
-    const pastRuns = gameChats?.runs ?? [];
-    const disclosureCount = otherChats.length + pastRuns.length;
+    const disclosureCount = otherChats.length;
     const openFromDisclosure = (threadId: ThreadId) => {
       onThreadActivate(scopeThreadRef(thread.environmentId, threadId));
       setChatsOpen(false);
@@ -2360,18 +2291,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       label={chat.title === gameSummary.name ? "Chat" : chat.title}
                       at={chat.updatedAt}
                       onOpen={() => openFromDisclosure(chat.id)}
-                    />
-                  ))}
-                </GameDisclosureSection>
-              ) : null}
-              {pastRuns.length > 0 ? (
-                <GameDisclosureSection title="Past runs">
-                  {pastRuns.map((run) => (
-                    <GamePastRunLine
-                      key={run.chatId}
-                      environmentId={thread.environmentId}
-                      run={run}
-                      onOpen={openFromDisclosure}
                     />
                   ))}
                 </GameDisclosureSection>

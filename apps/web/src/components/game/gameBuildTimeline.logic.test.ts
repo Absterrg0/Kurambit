@@ -33,7 +33,7 @@ describe("the build timeline", () => {
 
   it("names and tones a mark from what the list already says", () => {
     expect(markLabel(build(FAKE_BUILDS_RESULT, BUILD_C))).toBe("5");
-    expect(markLabel(build(FAKE_BUILDS_RESULT, BUILD_B))).toBe("R3");
+    expect(markLabel(build(FAKE_BUILDS_RESULT, BUILD_B))).toBe("3");
     // One bad fact marks the build, whatever else is good.
     expect(markTone(build(FAKE_BUILDS_RESULT, BUILD_B))).toBe("bad");
     expect(markTone(build(FAKE_BUILDS_RESULT, BUILD_C))).toBe("neutral");

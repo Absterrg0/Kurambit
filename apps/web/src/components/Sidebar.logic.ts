@@ -1335,68 +1335,34 @@ export function gameMainThread<T extends GameChatShell>(threads: readonly T[]): 
   return main;
 }
 
-/** The role threads of the runs that talked to one chat, oldest first. */
-export interface GameRunThreads<T> {
-  readonly chatId: string;
-  /** The chat still exists, so `game.runRounds` can read its runs. */
-  readonly chatLive: boolean;
-  readonly threads: readonly T[];
-  readonly updatedAt: string;
-}
-
 export interface GameChats<T> {
   /** The main chat; when the game has no top-level chat left, its newest other chat. */
   readonly main: T | null;
   /** Every other chat of the game, newest first. */
   readonly others: readonly T[];
-  /** Past runs, newest first, by the chat each run talked to. */
-  readonly runs: readonly GameRunThreads<T>[];
 }
 
 const byNewest = <T extends { readonly updatedAt: string }>(left: T, right: T) =>
   Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
 
 /**
- * One game's live threads, by lineage alone: the shell carries no
- * `launchedBy`, so `role` is what marks a run's thread. A role thread never
- * lists as a chat, even after its parent chat is deleted; a subagent under a
- * listed parent stays nested there, as everywhere in the sidebar.
+ * One game's live threads, by lineage alone. A `role` thread is one an earlier
+ * Kurambit's production run launched: it never lists as a chat. A subagent
+ * under a listed parent stays nested there, as everywhere in the sidebar.
  */
 export function partitionGameChats<T extends GameChatShell>(
   threads: readonly T[],
   liveThreadIds: ReadonlySet<string>,
 ): GameChats<T> {
   const chats: T[] = [];
-  const roleThreadsByChat = new Map<string, T[]>();
   for (const thread of threads) {
     if (thread.deletedAt !== null || thread.archivedAt !== null) continue;
-    if (thread.lineage.relationshipToParent === "role") {
-      const chatId = thread.lineage.parentThreadId ?? "";
-      const group = roleThreadsByChat.get(chatId);
-      if (group === undefined) roleThreadsByChat.set(chatId, [thread]);
-      else group.push(thread);
-      continue;
-    }
+    if (thread.lineage.relationshipToParent === "role") continue;
     if (!isNestedUnderLiveParent(thread, liveThreadIds)) chats.push(thread);
   }
   chats.sort(byNewest);
   const main = gameMainThread(chats) ?? chats[0] ?? null;
-  const runs = [...roleThreadsByChat].map(([chatId, group]) => {
-    const oldestFirst = group.toSorted(
-      (left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt),
-    );
-    return {
-      chatId,
-      chatLive: chatId !== "" && liveThreadIds.has(chatId),
-      threads: oldestFirst,
-      updatedAt: group.toSorted(byNewest)[0]!.updatedAt,
-    };
-  });
-  return {
-    main,
-    others: chats.filter((thread) => thread !== main),
-    runs: runs.sort(byNewest),
-  };
+  return { main, others: chats.filter((thread) => thread !== main) };
 }
 
 // The sidebar's precedence for one thread (resolveSidebarThreadStatus), most urgent first.
@@ -1410,12 +1376,7 @@ const SIDEBAR_STATUS_URGENCY: readonly SidebarThreadStatus[] = [
   "ready",
 ];
 
-/**
- * A game row's status is the whole game's: the most urgent of its chats and
- * its runs' role threads. A role thread's failure is its run's to report (the
- * row's run progress), so a stage-era run that ended badly never leaves the
- * game reading "Needs attention".
- */
+/** A game row's status is the whole game's: the most urgent of its chats. */
 export function resolveGameSidebarStatus(
   chats: GameChats<SidebarThreadStatusInput>,
 ): SidebarThreadStatus {
@@ -1425,10 +1386,5 @@ export function resolveGameSidebarStatus(
   };
   for (const chat of chats.main === null ? chats.others : [chats.main, ...chats.others])
     consider(resolveSidebarThreadStatus(chat));
-  for (const run of chats.runs)
-    for (const thread of run.threads) {
-      const status = resolveSidebarThreadStatus(thread);
-      if (status !== "failed" && status !== "limited") consider(status);
-    }
   return SIDEBAR_STATUS_URGENCY[urgency]!;
 }

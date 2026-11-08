@@ -87,14 +87,6 @@ export const OrchestrationV2CreationSource = Schema.Literals([
 ]);
 export type OrchestrationV2CreationSource = typeof OrchestrationV2CreationSource.Type;
 
-/**
- * A thread launched by a server job rather than a person. A production run's
- * role threads carry `game_run`: the MCP server keeps them from the thread,
- * worktree and project tools, which would tell a blind judge which build is which.
- */
-export const OrchestrationV2ThreadLauncher = Schema.Literal("game_run");
-export type OrchestrationV2ThreadLauncher = typeof OrchestrationV2ThreadLauncher.Type;
-
 export const OrchestrationV2ThreadHistoryOrigin = Schema.Literals(["native", "v1_import"]);
 export type OrchestrationV2ThreadHistoryOrigin = typeof OrchestrationV2ThreadHistoryOrigin.Type;
 
@@ -116,8 +108,9 @@ export const OrchestrationV2ProviderRef = Schema.Struct({
 export type OrchestrationV2ProviderRef = typeof OrchestrationV2ProviderRef.Type;
 
 /**
- * `role` records a parent only for grouping (a game run's role threads under the creator's
- * chat). It carries none of the subagent semantics: no event takeover, no parent controls,
+ * `role` records a parent only for grouping: the role threads an earlier Kurambit's
+ * production runs launched under the creator's chat, which stored threads still carry.
+ * It carries none of the subagent semantics: no event takeover, no parent controls,
  * no completion delivery.
  */
 export const OrchestrationV2ThreadRelationship = Schema.Literals(["fork", "subagent", "role"]);
@@ -387,7 +380,6 @@ export const OrchestrationV2AppThread = Schema.Struct({
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
-  launchedBy: Schema.optional(OrchestrationV2ThreadLauncher),
   lineage: OrchestrationV2AppThreadLineage,
   forkedFrom: Schema.NullOr(
     Schema.Union([
@@ -2651,9 +2643,6 @@ export const OrchestrationV2Command = Schema.Union([
     interactionMode: ProviderInteractionMode,
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
-    /** Groups the new thread as a `role` child of a thread in the same project. */
-    parentThreadId: Schema.optional(ThreadId),
-    launchedBy: Schema.optional(OrchestrationV2ThreadLauncher),
     importedNativeThread: Schema.optional(
       Schema.Struct({
         ref: Schema.Struct({
@@ -3040,7 +3029,7 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     /** Null is no limit. */
     budgetMinutes: Schema.NullOr(PositiveInt),
   }),
-  /** Continues a turns run that ended resumably; a stage-era run is refused `not-resumable`. */
+  /** Continues a run that ended resumably; any other ending is refused `not-resumable`. */
   Schema.Struct({
     type: Schema.Literal("game-run.resume"),
     ...GameRunCommandFields,

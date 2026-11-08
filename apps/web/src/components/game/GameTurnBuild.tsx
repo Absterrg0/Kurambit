@@ -33,7 +33,7 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
           ? { kind: "live" }
           : { kind: "play", build: { _tag: "build", build: build.id } },
       );
-  const action = undo.writer ? undo.action : null;
+  const action = undo.action;
   const label = action === null ? null : RESTORE_LABEL[action.kind];
   const step = build.source._tag === "turn" ? build.source.step : null;
   return (

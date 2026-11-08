@@ -32,7 +32,7 @@ export interface RunState {
   readonly n: number;
 }
 
-/** Every ending resumes but `done` (design §4.3); stage-era runs never do. */
+/** Every ending resumes but `done`; the ones only an earlier Kurambit wrote never do. */
 export const RESUMABLE: ReadonlySet<GameRunEnding> = new Set<GameRunEnding>([
   "stopped",
   "stalled",
@@ -42,9 +42,6 @@ export const RESUMABLE: ReadonlySet<GameRunEnding> = new Set<GameRunEnding>([
   "provider-down",
   "tool-failed",
 ]);
-
-/** A run made by an earlier Kurambit: read, stopped when live, never continued. */
-export const stageEra = (run: GameRun): boolean => run.loop !== "turns";
 
 export const isStepRecord = (round: GameRunRoundRecord): round is StepRecord =>
   round.step !== undefined;

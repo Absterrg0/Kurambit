@@ -49,7 +49,6 @@ Use the game_* tools to check, play, export and package the game, and the game_u
   },
   resourcePath: (projectRelative) => projectRelative,
   importRoot: "Assets",
-  sharedEditor: true,
   importStep: true,
   compressedModels: false,
   groundHint: (_width, height, ground) => {

@@ -275,7 +275,6 @@ it.effect(
         const live: GameRun = {
           id: GameRunId.make("run_deleted_chat"),
           threadId: chat,
-          loop: "turns",
           projectId,
           lane: "web",
           engine: "three",

@@ -17,7 +17,6 @@ import * as Effect from "effect/Effect";
 import * as Random from "effect/Random";
 import * as Result from "effect/Result";
 
-import * as State from "../../game/run/state.ts";
 import type * as EffectOutbox from "../EffectOutbox.ts";
 import type * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecide from "./decide.ts";
@@ -65,8 +64,7 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
       latest === undefined ||
       inFlight === null ||
       inFlight.seq < 2 ||
-      !CYCLE_KINDS.has(inFlight.step.kind) ||
-      State.stageEra(latest)
+      !CYCLE_KINDS.has(inFlight.step.kind)
         ? []
         : (yield* projections.getGameRunRecords(threadId, {
             steps: [inFlight.seq - 1, inFlight.seq - 2]

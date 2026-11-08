@@ -3,9 +3,7 @@
 // outbox, so it runs behind whatever its thread still owes; every step is
 // safe to repeat. A step turn T3 carried over a restart that its run no
 // longer wants (the run ended, or moved past that step) is stopped, so
-// nothing edits a game the person turned keep going off for. A run made by
-// an earlier Kurambit (the stage era) cannot go on: one still live is stopped
-// with why, and every role turn such a run launched is stopped too.
+// nothing edits a game the person turned keep going off for.
 import {
   CommandId,
   type GameRunId,
@@ -18,8 +16,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { retrying } from "../../game/run/retrying.ts";
-import { STAGE_ERA_SENTENCE } from "../../game/run/runView.ts";
-import { stageEra } from "../../game/run/state.ts";
 import * as EffectOutbox from "../EffectOutbox.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
@@ -44,7 +40,7 @@ interface StopDeps {
 }
 
 /**
- * Stops every live step turn on the thread that `keep` does not want (K11): a
+ * Stops every live step turn on the thread that `keep` does not want: a
  * queued one is cancelled, a running one interrupted, and its work still
  * becomes a build like any turn's. Only turns a step message started are
  * touched; the person's own turns never are.
@@ -98,33 +94,6 @@ const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const outbox = yield* EffectOutbox.EffectOutboxV2;
 
-  // No keep-going run launches a thread of its own: every live role turn is a stage-era run's.
-  const stopRoleTurns = Effect.gen(function* () {
-    const turns = yield* retrying(projections.listLiveGameRunRoleTurns());
-    for (const turn of turns)
-      yield* engine
-        .dispatch({
-          type: "run.interrupt",
-          commandId: CommandId.make(`server:game-run-unnamed-role:${turn.runId}`),
-          threadId: turn.threadId,
-          runId: turn.runId,
-          reason: "The production run that launched this role turn no longer exists.",
-        })
-        .pipe(
-          retrying,
-          Effect.catchCause((cause) =>
-            Effect.logWarning("a stage-era role turn could not be stopped", {
-              threadId: turn.threadId,
-              cause,
-            }),
-          ),
-        );
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.logWarning("game run recovery could not list role turns", { cause }),
-    ),
-  );
-
   /** A step turn on a thread with a turn running, checked against that thread's run. */
   const stopUnwantedStepTurns = Effect.gen(function* () {
     const shell = yield* retrying(projections.getShellSnapshot({ location: "active" }));
@@ -144,7 +113,7 @@ const make = Effect.gen(function* () {
         { projections, engine },
         thread.id,
         stepTurnsWanted(
-          run === null ? null : { id: run.id, live: run.status !== "ended" && !stageEra(run) },
+          run === null ? null : { id: run.id, live: run.status !== "ended" },
           step === null
             ? null
             : { id: step.id, attempt: step.attempt, turn: step.step.kind === "turn" },
@@ -162,20 +131,6 @@ const make = Effect.gen(function* () {
       const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
       const run = records.gameRuns.at(-1);
       if (run === undefined || run.status === "ended") return;
-      if (stageEra(run)) {
-        yield* Effect.logWarning("stopping a game run made by an earlier Kurambit", {
-          threadId,
-          runId: run.id,
-        });
-        yield* engine.dispatch({
-          type: "game-run.stop",
-          commandId: CommandId.make(`server:game-run-stage-era:${run.id}`),
-          threadId,
-          runId: run.id,
-          reason: STAGE_ERA_SENTENCE,
-        });
-        return;
-      }
       // A live run on a chat deleted before deletion stopped its run: nothing
       // could reach it, so it stops now.
       const chat = yield* projections.getThread(threadId);
@@ -227,8 +182,7 @@ const make = Effect.gen(function* () {
     );
 
   const recover = () =>
-    stopRoleTurns.pipe(
-      Effect.andThen(retrying(projections.listGameRunThreadsToRecover())),
+    retrying(projections.listGameRunThreadsToRecover()).pipe(
       Effect.flatMap((threads) => Effect.forEach(threads, recoverThread, { discard: true })),
       Effect.andThen(stopUnwantedStepTurns),
       Effect.catchCause((cause) => Effect.logWarning("game run recovery failed", { cause })),

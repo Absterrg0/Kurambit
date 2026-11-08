@@ -9,7 +9,6 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@kurambit/contracts";
-import { McpSchema } from "effect/ai";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -43,8 +42,6 @@ export const clientRuntimeModeCeiling = (client: McpClientCaller | undefined): R
  */
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
-  /** Threads the production run launched. They get play-level tools only. */
-  readonly gameRunRole?: "run" | null;
   /** The engine of the calling thread's game; null when the thread works in no game. */
   readonly gameEngine?: GameEngineId | null;
   readonly capabilities: ReadonlySet<McpCapability>;
@@ -140,16 +137,3 @@ export const currentInvocation = (): McpInvocationScope | undefined => {
     ? undefined
     : Context.getOrUndefined(fiber.context, McpInvocationContext);
 };
-
-/** True inside a tool call from a thread the production run launched. */
-const isGameRunThread = () => currentInvocation()?.gameRunRole === "run";
-
-/**
- * A tool that says nothing about production-run threads hides from them. A
- * blind sample or comparator that could list threads, worktrees or projects
- * could read which build is which; the game tools choose for themselves.
- */
-export const runThreadDefault = <I>(annotations: Context.Context<I>) =>
-  Context.getOrUndefined(annotations, McpSchema.EnabledWhen) === undefined
-    ? Context.add(annotations, McpSchema.EnabledWhen, () => !isGameRunThread())
-    : annotations;

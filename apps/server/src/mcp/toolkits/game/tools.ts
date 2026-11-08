@@ -587,7 +587,7 @@ const buildDependencies = [
 ];
 const BuildsTool = Tool.make("game_builds", {
   description:
-    "This game's builds, newest first: every turn of any chat that changed the engine project, art or ASSETS.md (and an earlier Kurambit's run rounds), each with when, which turn or round, what changed, its base and its facts once measured (facts.chips, and how many were not measured). base is the build it was made from, so restoring base undoes that build (null when unknown); current is the build the folder was last made from; restore is the latest restore, whose undo build undoes it. Pass before with a next cursor for older builds, or compare with two build ids to diff their facts: each delta reads up, down, same, changed or not-comparable with why. Facts are read as measured; game_facts measures. Read-only.",
+    "This game's builds, newest first: every turn of any chat that changed the engine project, art or ASSETS.md, each with when, which turn or round, what changed, its base and its facts once measured (facts.chips, and how many were not measured). base is the build it was made from, so restoring base undoes that build (null when unknown); current is the build the folder was last made from; restore is the latest restore, whose undo build undoes it. Pass before with a next cursor for older builds, or compare with two build ids to diff their facts: each delta reads up, down, same, changed or not-comparable with why. Facts are read as measured; game_facts measures. Read-only.",
   parameters: Schema.Struct({
     compare: Schema.optionalKey(Schema.Tuple([GameBuildId, GameBuildId])),
     before: Schema.optionalKey(Schema.String),

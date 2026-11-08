@@ -1,6 +1,5 @@
-// What a restart leaves behind: a stage-era run still live, a keep-going step
-// whose job died with the server, and a step turn T3 carried over that its run
-// no longer wants (K11, K12).
+// What a restart leaves behind: a keep-going step whose job died with the
+// server, and a step turn T3 carried over that its run no longer wants.
 import { assert, it } from "@effect/vitest";
 import {
   type GameRun,
@@ -14,7 +13,6 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { STAGE_ERA_SENTENCE } from "../../game/run/runView.ts";
 import * as EffectOutbox from "../EffectOutbox.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
@@ -23,7 +21,6 @@ import { stepTurnMessageId } from "./ids.ts";
 
 const live = ThreadId.make("thread:live");
 const ended = ThreadId.make("thread:ended");
-const legacy = ThreadId.make("thread:legacy");
 const fresh = ThreadId.make("thread:fresh");
 const liveRun = GameRunId.make("run_live");
 const olderRun = GameRunId.make("run_older");
@@ -34,7 +31,6 @@ const run = (id: GameRunId, threadId: ThreadId, patch: Partial<GameRun>) =>
   ({
     id,
     threadId,
-    loop: "turns",
     status: "running",
     ending: null,
     inFlight: 4,
@@ -63,13 +59,11 @@ it.effect("recovery stops what a restart left behind, and runs the cut-off step 
     const runs: Record<string, GameRun> = {
       [live]: run(liveRun, live, {}),
       [ended]: run(endedRun, ended, { status: "ended", ending: "stopped", inFlight: null }),
-      [legacy]: run(GameRunId.make("run_legacy"), legacy, { loop: undefined } as never),
       [fresh]: run(freshRun, fresh, {}),
     };
     const steps: Record<string, GameRunStep[]> = {
       [live]: [step(liveRun, live, 4, "judge")],
       [ended]: [],
-      [legacy]: [],
       // An older paused run of the chat holds its judge at the same seq as
       // the new run's live turn: the lookup must go by run, not seq alone.
       [fresh]: [step(olderRun, fresh, 4, "judge"), step(freshRun, fresh, 4, "turn")],
@@ -92,8 +86,7 @@ it.effect("recovery stops what a restart left behind, and runs the cut-off step 
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
-            listLiveGameRunRoleTurns: () => Effect.succeed([]),
-            listGameRunThreadsToRecover: () => Effect.succeed([live, legacy]),
+            listGameRunThreadsToRecover: () => Effect.succeed([live]),
             getThread: () => Effect.succeed({ deletedAt: null } as never),
             getGameRunRecords: (threadId) =>
               Effect.succeed({
@@ -132,12 +125,10 @@ it.effect("recovery stops what a restart left behind, and runs the cut-off step 
       sent.map((c) => [c.type, c.threadId, c.runId ?? null]),
       [
         ["game-run.step.schedule", live, liveRun],
-        ["game-run.stop", legacy, "run_legacy"],
         ["run.interrupt", live, "t3-old"],
         ["run.interrupt", ended, "t3-ended"],
         ["queued-run.cancel", ended, "t3-queued"],
       ],
     );
-    assert.strictEqual(sent[1]?.reason, STAGE_ERA_SENTENCE);
   }),
 );

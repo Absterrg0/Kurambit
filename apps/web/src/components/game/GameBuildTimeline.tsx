@@ -348,7 +348,6 @@ export function GameBuildTimeline({
                         loaded={loaded}
                         writer={writer}
                         turnRunning={turnRunning}
-                        runActive={false}
                         onCompare={(other) => {
                           setOpen(null);
                           if (other === null) setPicking(refOf(build));

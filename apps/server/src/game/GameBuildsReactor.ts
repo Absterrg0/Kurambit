@@ -103,8 +103,7 @@ const make = Effect.gen(function* () {
           ),
           Effect.orElseSucceed(() => false),
         );
-      // While a run holds the game the folder is the run's: no Play beside it.
-      if (!stopped && (yield* projects.runHold(event.threadId)) === null)
+      if (!stopped)
         yield* game
           .playCurrent(event.threadId)
           .pipe(

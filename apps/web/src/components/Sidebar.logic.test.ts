@@ -2394,27 +2394,18 @@ describe("a game's chats", () => {
     );
   });
 
-  it("lists a run's role threads under past runs, never as chats, even when their chat is gone", () => {
+  it("never lists a role thread an earlier Kurambit's run launched as a chat", () => {
     const main = chat("main", "2026-11-01T10:00:00Z");
-    const other = chat("other", "2026-11-02T10:00:00Z");
-    const live = new Set(["main", "other", "r1", "r2", "o1"]);
     const result = partitionGameChats(
       [
         main,
-        other,
-        role("r2", "main", "2026-11-01T12:00:00Z"),
         role("r1", "main", "2026-11-01T11:00:00Z"),
-        // Its parent chat was deleted: today it would surface as a session.
-        role("o1", "deleted-chat", "2026-10-01T10:00:00Z"),
+        role("o1", "gone", "2026-10-01T10:00:00Z"),
       ],
-      live,
+      new Set(["main", "r1", "o1"]),
     );
     expect(result.main?.id).toBe("main");
-    expect(result.others.map((thread) => thread.id)).toEqual(["other"]);
-    expect(result.runs.map((run) => [run.chatId, run.chatLive, run.threads[0]?.id])).toEqual([
-      ["main", true, "r1"],
-      ["deleted-chat", false, "o1"],
-    ]);
+    expect(result.others).toEqual([]);
   });
 
   it("keeps a subagent nested under its listed parent and lists an orphaned one", () => {
@@ -2455,34 +2446,25 @@ describe("a game row's status", () => {
     pendingSubagentRequest: null,
     runtime: status === null ? null : ({ status } as never),
   });
-  const game = (
-    main: ReturnType<typeof thread>,
-    others: ReturnType<typeof thread>[] = [],
-    roles: ReturnType<typeof thread>[] = [],
-  ) => ({
+  const game = (main: ReturnType<typeof thread>, others: ReturnType<typeof thread>[] = []) => ({
     main,
     others,
-    runs:
-      roles.length === 0 ? [] : [{ chatId: "c", chatLive: true, threads: roles, updatedAt: "" }],
   });
 
-  it("is the most urgent state among every chat and run thread of the game", () => {
+  it("is the most urgent state among every chat of the game", () => {
     expect(resolveGameSidebarStatus(game(thread(null)))).toBe("ready");
     // Another chat works while the main chat is idle: the game is working.
     expect(resolveGameSidebarStatus(game(thread("idle"), [thread("running")]))).toBe("working");
-    // A live run's role thread works.
-    expect(resolveGameSidebarStatus(game(thread(null), [], [thread("running")]))).toBe("working");
     // A question anywhere outranks work anywhere.
     expect(resolveGameSidebarStatus(game(thread("running"), [thread(null, { input: true })]))).toBe(
       "input",
     );
     expect(
       resolveGameSidebarStatus(
-        game(thread(null, { input: true }), [], [thread(null, { approvals: true })]),
+        game(thread(null, { input: true }), [thread(null, { approvals: true })]),
       ),
     ).toBe("approval");
-    // A failed chat needs attention; a role thread's failure is its run's to report.
+    // A failed chat needs attention.
     expect(resolveGameSidebarStatus(game(thread(null), [thread("failed")]))).toBe("failed");
-    expect(resolveGameSidebarStatus(game(thread(null), [], [thread("failed")]))).toBe("ready");
   });
 });

@@ -87,7 +87,6 @@ const THREAD = ThreadId.make("chat");
 const GAME_RUN = {
   id: GameRunId.make("run-1"),
   threadId: THREAD,
-  loop: "turns",
   status: "running",
   inFlight: null,
 } as unknown as GameRun;

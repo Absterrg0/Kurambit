@@ -1,8 +1,7 @@
 // PURE. How keep going reads to people and tools: the status the control,
 // the banner and game_keep_going_status share, the game card's line, and the
-// one plain sentence for each way it stops (design §4.3, §7.2).
+// one plain sentence for each way it stops.
 import {
-  GAME_RUN_STAGE_ERA_SENTENCE,
   type GameKeepGoingPhase,
   type GameKeepGoingStatus,
   type GameKeepGoingStepRef,
@@ -14,22 +13,15 @@ import {
 import * as DateTime from "effect/DateTime";
 
 import { proposalSummary } from "./loop.ts";
-import { RESUMABLE, type StepRecord, stageEra } from "./state.ts";
-
-/** Why a run made by an earlier Kurambit is never continued (design §6.4). */
-export const STAGE_ERA_SENTENCE = GAME_RUN_STAGE_ERA_SENTENCE;
+import { RESUMABLE, type StepRecord } from "./state.ts";
 
 /** The engine refusal and the control's tooltip. */
 export const NO_TURN_LOOP_SENTENCE =
   "Keep going needs an engine Kurambit plays after every turn (three.js).";
 
 /** A live run's line on the game's row and card: "Keep going · step 3". A paused run is not live. */
-export const stepLine = (run: GameRun, n: number | null = null): string =>
-  stageEra(run)
-    ? "Stopping: made by an earlier Kurambit"
-    : n === null
-      ? "Keep going"
-      : `Keep going · step ${n}`;
+export const stepLine = (n: number | null = null): string =>
+  n === null ? "Keep going" : `Keep going · step ${n}`;
 
 const budgetText = (minutes: number) =>
   minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}` : `${minutes} minutes`;
@@ -37,7 +29,6 @@ const sentence = (text: string) => text.trim().replace(/[.\s]+$/, "");
 
 /** Why keep going stopped, in one plain line for the paused and done states. */
 const endingMessage = (run: GameRun, records: ReadonlyArray<StepRecord>): string => {
-  if (stageEra(run)) return STAGE_ERA_SENTENCE;
   const why = sentence(run.lastFailure);
   switch (run.ending) {
     case null:
@@ -124,9 +115,9 @@ export interface StatusInput {
 export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
   const { run, inFlight } = input;
   const records = input.records.map((r) => r.record);
-  if (run === null || stageEra(run))
+  if (run === null)
     return {
-      runId: run?.id ?? null,
+      runId: null,
       chat: null,
       mode: "off",
       profile: null,
@@ -141,7 +132,7 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
       ending: null,
       resumable: false,
       blocked: input.blocked,
-      message: run === null ? "Keep going is off." : STAGE_ERA_SENTENCE,
+      message: "Keep going is off.",
     };
   const live = run.status !== "ended";
   const phase = live ? phaseOf(inFlight) : null;

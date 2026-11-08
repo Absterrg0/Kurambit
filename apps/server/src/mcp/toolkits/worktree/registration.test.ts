@@ -37,8 +37,6 @@ import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
-const roleThread = ThreadId.make("thread-role");
-const unreadableThread = ThreadId.make("thread-unreadable");
 const noGameThread = ThreadId.make("thread-no-game");
 
 const layerStubServices = Layer.mergeAll(
@@ -65,17 +63,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.empty,
-  Layer.mock(ThreadManagementService.ThreadManagementService)({
-    getThreadRecords: (threadId) =>
-      threadId === unreadableThread
-        ? Effect.fail(
-            new Orchestrator.OrchestratorProjectionError({ threadId, cause: "unreadable" }),
-          )
-        : // Only the thread record is read; the rest of a real one is beside the point here.
-          Effect.succeed({
-            thread: threadId === roleThread ? { launchedBy: "game_run" } : {},
-          } as never),
-  }),
+  Layer.mock(ThreadManagementService.ThreadManagementService)({}),
   Layer.mock(ProviderRegistry.ProviderRegistry)({}),
   Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({}),
   Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
@@ -219,40 +207,6 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       for (const tool of tools) {
         expect(tool.inputSchema.type, `inputSchema.type of ${tool.name}`).toBe("object");
       }
-    }),
-  ).pipe(Effect.provide(layerTestRuntime)),
-);
-
-// Blind judging rests on this: a sample or comparator that could list threads,
-// worktrees or projects could tell which build is which.
-it.effect("a production run's role thread gets no thread, worktree or project tools", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      yield* serveMcp;
-      const hidden = [
-        "kurambit_thread_launch",
-        "kurambit_thread_search",
-        "kurambit_worktree_status",
-        "kurambit_worktree_handoff",
-        "kurambit_project_list",
-        "delegate_task",
-      ];
-      const names = (threadId: ThreadId) =>
-        Effect.map(listTools(threadId), (tools) => tools.map((tool) => tool.name));
-
-      const creator = yield* names(ThreadId.make("thread-creator"));
-      for (const name of hidden) expect(creator).toContain(name);
-
-      const role = yield* names(roleThread);
-      for (const name of hidden) expect(role).not.toContain(name);
-      expect(role).toContain("game_status");
-      // A role plays the game itself: what a chat must ask for is listed for it.
-      expect(role).toContain("game_explore_start");
-      expect(role).not.toContain("game_more");
-
-      // A record that cannot be read fails closed.
-      const unreadable = yield* names(unreadableThread);
-      for (const name of hidden) expect(unreadable).not.toContain(name);
     }),
   ).pipe(Effect.provide(layerTestRuntime)),
 );

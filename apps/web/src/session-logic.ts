@@ -172,13 +172,6 @@ export type TimelineEntry = (
     }
   | {
       readonly id: string;
-      readonly kind: "game-round";
-      readonly createdAt: string;
-      readonly runId: string;
-      readonly round: number;
-    }
-  | {
-      readonly id: string;
       readonly kind: "game-generation";
       readonly createdAt: string;
       readonly generationId: string;
@@ -582,23 +575,14 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
  */
 /**
  * A card the client derives from records it already holds, placed by time: a
- * production run's round card in the run's chat, or a generation the chat's
- * agent started. It adds no message and starts no turn.
+ * generation the chat's agent started. It adds no message and starts no turn.
  */
-export type TimelineAnchoredCard =
-  | {
-      readonly kind: "game-round";
-      readonly id: string;
-      readonly createdAt: string;
-      readonly runId: string;
-      readonly round: number;
-    }
-  | {
-      readonly kind: "game-generation";
-      readonly id: string;
-      readonly createdAt: string;
-      readonly generationId: string;
-    };
+export type TimelineAnchoredCard = {
+  readonly kind: "game-generation";
+  readonly id: string;
+  readonly createdAt: string;
+  readonly generationId: string;
+};
 
 export interface TimelineEntriesInput {
   readonly visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
@@ -833,21 +817,12 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   }
 
   for (const card of input.anchoredCards ?? []) {
-    const entry: TimelineEntry =
-      card.kind === "game-round"
-        ? {
-            id: card.id,
-            kind: "game-round",
-            createdAt: card.createdAt,
-            runId: card.runId,
-            round: card.round,
-          }
-        : {
-            id: card.id,
-            kind: "game-generation",
-            createdAt: card.createdAt,
-            generationId: card.generationId,
-          };
+    const entry: TimelineEntry = {
+      id: card.id,
+      kind: "game-generation",
+      createdAt: card.createdAt,
+      generationId: card.generationId,
+    };
     const insertionIndex = entries.findIndex((candidate) => candidate.createdAt > card.createdAt);
     if (insertionIndex === -1) entries.push(entry);
     else entries.splice(insertionIndex, 0, entry);

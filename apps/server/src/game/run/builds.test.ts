@@ -56,31 +56,27 @@ const lockOf = Effect.map(GameOperations.GameOperations, (operations) => ({
   waitUntil: null,
 }));
 
-it.effect("keeps a round beside its candidate, under names git can store, again and again", () =>
+it.effect("keeps a restore's builds under names git can store, again and again", () =>
   Effect.gen(function* () {
     const lock = yield* lockOf;
     const { root, git } = repo();
     const checkpoints = yield* CheckpointStore.CheckpointStore;
-    const runId = "run_mzx1:a";
+    const runId = "no-run";
     const capture = (name: string) => captureBuild({ checkpoints, lock }, root, runId, name);
-    // Every kind of name the run makes, as real ids and times give them.
-    const candidate = yield* capture(BuildName.candidate("round-1"));
-    yield* capture(BuildName.unfinished("round-1", 7));
-    yield* capture(BuildName.turn("run_mzx1:step:12", 2));
-    yield* capture(BuildName.ending("2026-11-05T12:00:00.000Z"));
-    yield* capture(BuildName.restoreBefore("8c1f-uuid"));
-    yield* capture(BuildName.stage("plan"));
-    yield* capture(BuildName.proto(1));
+    // Every kind of name a restore makes, as a real request id gives it.
+    const before = yield* capture(BuildName.restoreBefore("8c1f-uuid:1"));
     const keep = buildStep(
       { game, checkpoints, lock },
       { root, runId, lane: "godot" },
-      { _tag: "keep", names: [BuildName.best, BuildName.kept("round-1")], sha: candidate },
+      { _tag: "keep", names: [BuildName.restoreAfter("8c1f-uuid:1")], sha: before },
     );
-    // A keep the folder of the round's other builds would refuse, and its repeat.
+    // A keep beside the restore's other build, and its repeat.
     assert.isTrue((yield* keep).build.ok);
     assert.isTrue((yield* keep).build.ok);
-    for (const name of [BuildName.best, BuildName.kept("round-1")])
-      assert.equal(git("rev-parse", checkpointRefForGameRun(runId, name)), candidate);
+    assert.equal(
+      git("rev-parse", checkpointRefForGameRun(runId, BuildName.restoreAfter("8c1f-uuid:1"))),
+      before,
+    );
     NodeFS.rmSync(root, { recursive: true, force: true });
   }).pipe(Effect.provide(layer)),
 );

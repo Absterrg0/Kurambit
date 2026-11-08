@@ -1089,19 +1089,13 @@ const make = Effect.gen(function* () {
         if (exploreLive.get(root) === "starting") exploreLive.delete(root);
       });
       return yield* Effect.gen(function* () {
-        // A native session imports into the folder before it plays, and a
-        // player with none cached is built there: both write the game, so a
-        // production run holding it refuses them to anyone but itself. A copy
-        // is no run's game folder, and a web session only serves the sources.
-        const admit = projects.admitWrite(threadId, root, "Explore session", String(threadId));
         const native = target === "native" && engine.play === "native";
-        if (native) yield* admit;
         // The player build takes minutes and is the game's own exclusive
         // operation, before this start's gate hold; the editor that builds it
         // opens through the memory gate itself, and its refusal is marked like
         // a gated start's, so a run replays a sample turn that never played.
         const player =
-          engine.play === "player" ? yield* players.playerFor(String(threadId), root, admit) : null;
+          engine.play === "player" ? yield* players.playerFor(String(threadId), root) : null;
         const start =
           target === "web"
             ? exploreStartWeb(threadId, root, input)

@@ -1,9 +1,7 @@
 // PURE. Keep going as an orchestration domain: for each game-run command, the
 // thread's game-run records in, the events, outbox effects or a typed refusal
 // out. Every keep-going choice is the loop policy's (game/run/loop.ts); this
-// module folds the records into its state and its answers back out. A run
-// without `loop: "turns"` was made by an earlier Kurambit (the stage era): it
-// is only read and stopped.
+// module folds the records into its state and its answers back out.
 import {
   GAME_ENGINES,
   type GameRun,
@@ -24,7 +22,6 @@ import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 
 import * as Loop from "../../game/run/loop.ts";
-import { STAGE_ERA_SENTENCE } from "../../game/run/runView.ts";
 import * as State from "../../game/run/state.ts";
 import type { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
 
@@ -322,16 +319,10 @@ const start = (work: Work, command: Command<"game-run.start">) => {
   if (work.records.runs.some((r) => r.id === command.runId))
     return refuse("stale-run", `Run ${command.runId} already exists in this chat.`);
   // The person's waiting notes outlive a run: a new one on the game takes them up.
-  const carried =
-    elsewhere !== null && !State.stageEra(elsewhere)
-      ? elsewhere.steer
-      : prior !== null && !State.stageEra(prior)
-        ? prior.steer
-        : [];
+  const carried = elsewhere?.steer ?? prior?.steer ?? [];
   const run: GameRun = {
     id: command.runId,
     threadId: command.threadId,
-    loop: "turns",
     projectId: work.records.projectId,
     lane: command.lane,
     engine: command.engine,
@@ -367,7 +358,6 @@ const start = (work: Work, command: Command<"game-run.start">) => {
 const resume = (work: Work, command: Command<"game-run.resume">) =>
   Result.flatMap(current(work, command.runId), (run) => {
     if (run.status !== "ended") return refuse("run-live", "Keep going is already on.");
-    if (State.stageEra(run)) return refuse("not-resumable", STAGE_ERA_SENTENCE);
     if (run.ending === null || !State.RESUMABLE.has(run.ending))
       return refuse(
         "not-resumable",
@@ -434,8 +424,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
 /**
  * Off, or the server's own pause for a tool that kept failing. The step in
  * flight is cancelled; a judge or undo stays the run's for a resume to run
- * again. A step turn that had started gives its notes back (K14). A
- * stage-era run takes this and nothing else.
+ * again. A step turn that had started gives its notes back.
  */
 const stop = (work: Work, command: Command<"game-run.stop">) =>
   Result.flatMap(current(work, command.runId), (run) => {
@@ -464,10 +453,9 @@ const stop = (work: Work, command: Command<"game-run.stop">) =>
       ...run,
       status: "ended",
       ending: paused ? "tool-failed" : "stopped",
-      // A stage-era run keeps its last failure when stopped without a reason.
-      lastFailure: why.length > 0 ? why.slice(0, 600) : State.stageEra(run) ? run.lastFailure : "",
+      lastFailure: why.slice(0, 600),
       steer: giveBack ? [...turn.steer, ...run.steer] : run.steer,
-      inFlight: !State.stageEra(run) && keptOnPause(inFlight) ? run.inFlight : null,
+      inFlight: keptOnPause(inFlight) ? run.inFlight : null,
       endedAt: work.at,
       updatedAt: work.at,
     };
@@ -504,7 +492,6 @@ const answerProposal = (
  */
 const steer = (work: Work, command: Command<"game-run.steer">) =>
   Result.flatMap(current(work, command.runId), (run) => {
-    if (State.stageEra(run)) return refuse("not-resumable", STAGE_ERA_SENTENCE);
     const noted: GameRun = { ...run, steer: [...run.steer, command.note.trim()] };
     const state = stateOf(work, noted);
     const record = run.status === "ended" ? null : inFlightOf(work, run);
@@ -530,7 +517,6 @@ const steer = (work: Work, command: Command<"game-run.steer">) =>
 
 const profileSet = (work: Work, command: Command<"game-run.profile.set">) =>
   Result.flatMap(live(work, command.runId), (run) => {
-    if (State.stageEra(run)) return refuse("not-resumable", STAGE_ERA_SENTENCE);
     const switched: GameRun = { ...run, profile: command.profile };
     const record = inFlightOf(work, run);
     // Nobody needs to answer Autopilot: the pending proposal starts now.
@@ -797,7 +783,7 @@ const nextOf = (
       return Result.succeed(Loop.applyUndo(state, { ...cycle, judge }, undo, work.now));
     }
     default:
-      return refuse("not-resumable", STAGE_ERA_SENTENCE);
+      return refuse("wrong-kind", `A ${step.kind} step is not a keep-going step.`);
   }
 };
 
@@ -834,10 +820,6 @@ export const decide = (
   };
   if (command.type === "game-run.stop") return stop(work, command);
   if (command.type === "game-run.start") return start(work, command);
-  // A stage-era run takes only a stop (K12).
-  const latest = records.runs.at(-1);
-  if (latest !== undefined && latest.id === command.runId && State.stageEra(latest))
-    return refuse("not-resumable", STAGE_ERA_SENTENCE);
   switch (command.type) {
     case "game-run.resume":
       return resume(work, command);

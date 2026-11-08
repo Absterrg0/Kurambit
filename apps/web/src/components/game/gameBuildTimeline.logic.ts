@@ -10,16 +10,14 @@ const isRestoreBefore = (build: GameBuild) =>
 
 /**
  * A mark's short name: the turn number, a keep-going step's number (its mark
- * adds a step glyph), `R<n>` for a stage-era round, "Before" for the folder a
- * restore replaced, another saved build's first word.
+ * adds a step glyph), "Before" for the folder a restore replaced, another
+ * saved build's first word.
  */
 export const markLabel = (build: GameBuild): string => {
   const source = build.source;
   switch (source._tag) {
     case "turn":
       return String(source.step?.n ?? source.turn);
-    case "round":
-      return `R${source.round}`;
     case "saved":
       return isRestoreBefore(build) ? "Before" : (source.label.split(/\s+/)[0] ?? "Saved");
   }

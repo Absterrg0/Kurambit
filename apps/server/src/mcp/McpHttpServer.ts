@@ -151,7 +151,6 @@ const looksLikeProviderToken = (token: string) => token.length > 0 && !token.inc
 const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
   const clients = yield* McpClientAuthenticator;
-  const threads = yield* ThreadManagementService.ThreadManagementService;
   const gameProjects = yield* GameProjectService.GameProjectService;
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -173,15 +172,6 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         offerOAuth: !looksLikeProviderToken(token),
       });
     }
-    // An unreadable record counts as a run thread: hiding tools from a creator
-    // chat for one call is a lesser harm than telling a blind judge which build is which.
-    const gameRunRole =
-      invocation.thread === undefined
-        ? null
-        : yield* threads.getThreadRecords(invocation.thread.threadId, []).pipe(
-            Effect.map(({ thread }) => (thread.launchedBy === "game_run" ? "run" : null)),
-            Effect.orElseSucceed(() => "run" as const),
-          );
     // Which game tools a thread sees follows its game's engine (toolkits/game/placement.ts).
     const gameEngine =
       invocation.thread === undefined
@@ -194,7 +184,6 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
-        gameRunRole,
         gameEngine,
       }),
       Effect.map(normalizeMcpHttpResponse),
@@ -480,7 +469,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
         openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
       },
     }),
-    annotations: McpInvocationContext.runThreadDefault(tool.annotations),
+    annotations: tool.annotations,
     handle: (payload) =>
       Effect.withFiber((fiber) => {
         const invocation = Context.getUnsafe(
@@ -719,7 +708,7 @@ const registerImageTool = <T extends Tool.Any, E, R>(
           openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
         },
       }),
-      annotations: McpInvocationContext.runThreadDefault(tool.annotations),
+      annotations: tool.annotations,
       handle: (payload) =>
         Effect.withFiber((fiber) => {
           const invocation = Context.getUnsafe(
@@ -928,16 +917,6 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
   );
 });
 
-const withRunThreadDefault = <Tools extends Record<string, Tool.Any>>(
-  toolkit: Toolkit.Toolkit<Tools>,
-) =>
-  // Same tools under the same names, so the handlers still match.
-  Toolkit.make(
-    ...Object.values(toolkit.tools).map((tool) =>
-      tool.annotateMerge(McpInvocationContext.runThreadDefault(tool.annotations)),
-    ),
-  ) as unknown as Toolkit.Toolkit<Tools>;
-
 /**
  * `McpServer.toolkit` asks for every service its tools declare when it
  * registers them, but the auth middleware provides `McpInvocationContext` to
@@ -948,7 +927,7 @@ export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, 
   toolkit: Toolkit.Toolkit<Tools>,
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
 ) => {
-  const registration = McpServer.toolkit(withRunThreadDefault(toolkit));
+  const registration = McpServer.toolkit(toolkit);
   // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off - the auth middleware provides it per request.
   const registered = registration as Layer.Layer<
     never,
