@@ -437,6 +437,8 @@ const SLOW_CAPTURE_MS = 2_000;
 const STRAY_CAPTURE_INDEX_MS = 2 * 60 * 60_000;
 const CAPTURE_INDEX_FILE = /^capture-index-[0-9a-f]{16}-[0-9a-f]{16}$/;
 const CAPTURE_INDEX_REFS = "refs/kurambit/capture-index/";
+const KURAMBIT_REFS = "refs/kurambit/";
+const LEGACY_REFS = "refs/t3/";
 const CAPTURE_INDEX_TEMP =
   /^capture-index-[0-9a-f]{16}-[0-9a-f]{16}\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\.lock)?$/;
 
@@ -1761,6 +1763,47 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
    * The ref therefore never pins an object no checkpoint pins. Deleting only
    * while it still names that commit leaves a capture that just moved it alone.
    */
+  /**
+   * Checkpoints kept before the T3 to Kurambit rename live under `refs/t3/`, which nothing lists,
+   * so a folder's earlier turns and builds would vanish. On a folder's first listing, each such
+   * ref is copied to its `refs/kurambit/` name when that name is free; nothing is overwritten and
+   * the old refs stay, so a failure here loses nothing.
+   */
+  const adopted = new Set<string>();
+  const adoptLegacyRefs = (cwd: string) =>
+    Effect.gen(function* () {
+      const operation = "GitVcsDriver.checkpoints.adoptLegacyRefs";
+      const list = (prefix: string) =>
+        execute({
+          operation,
+          cwd,
+          args: ["for-each-ref", "--format=%(objectname) %(refname)", prefix],
+          maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+          outputMode: "error",
+        }).pipe(
+          Effect.map((result) =>
+            result.stdout.split("\n").flatMap((line) => {
+              const space = line.indexOf(" ");
+              return space < 0 ? [] : [{ oid: line.slice(0, space), ref: line.slice(space + 1) }];
+            }),
+          ),
+        );
+      const legacy = yield* list(LEGACY_REFS);
+      if (legacy.length === 0) return;
+      const kept = new Set((yield* list(KURAMBIT_REFS)).map((entry) => entry.ref));
+      for (const { oid, ref } of legacy) {
+        const name = `${KURAMBIT_REFS}${ref.slice(LEGACY_REFS.length)}`;
+        if (kept.has(name)) continue;
+        // An empty old value creates the ref only while it does not exist.
+        yield* execute({
+          operation,
+          cwd,
+          args: [...durableWrite, "update-ref", name, oid, ""],
+          allowNonZeroExit: true,
+        });
+      }
+    });
+
   const releaseCaptureIndexes = (cwd: string) =>
     Effect.gen(function* () {
       const operation = "GitVcsDriver.checkpoints.releaseCaptureIndexes";
@@ -2433,6 +2476,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       });
     }),
     listCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.listCheckpointRefs")(function* (input) {
+      if (input.prefix.startsWith(KURAMBIT_REFS) && !adopted.has(input.cwd)) {
+        adopted.add(input.cwd);
+        yield* adoptLegacyRefs(input.cwd).pipe(Effect.ignore);
+      }
       const listed = yield* execute({
         operation: "GitVcsDriver.checkpoints.listCheckpointRefs",
         cwd: input.cwd,
