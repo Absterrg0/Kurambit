@@ -739,12 +739,15 @@ function OpenCommandPaletteDialog(props: {
   const isGameThread = useIsGameThread(activeThreadRef);
   // The same status read the stage mounts: Play exists only for an engine that
   // makes a Web build, and Rebuild only where the Stage plays an export.
+  // A parked engine's game builds and plays nothing, so it gets no play commands.
   const gameStatus = useIsGameThreadStatus(activeThreadRef).data;
-  const gameWebBuild = gameStatus?.exportTargets.includes("Web") === true;
+  const gameEngineActive =
+    gameStatus != null && GAME_ENGINES[gameStatus.manifest.engine.name].status === "active";
+  const gameWebBuild = gameEngineActive && gameStatus?.exportTargets.includes("Web") === true;
   const gameStageKind =
-    gameStatus === null || gameStatus === undefined
-      ? null
-      : GAME_ENGINES[gameStatus.manifest.engine.name].stage;
+    gameEngineActive && gameStatus != null
+      ? GAME_ENGINES[gameStatus.manifest.engine.name].stage
+      : null;
   const gameStageBridge =
     gameStatus !== null &&
     gameStatus !== undefined &&
@@ -1770,7 +1773,7 @@ function OpenCommandPaletteDialog(props: {
         });
       }
     }
-    if (canGameAction && gameAccess === "writer")
+    if (canGameAction && gameAccess === "writer" && gameEngineActive)
       actionItems.push({
         kind: "action",
         value: "action:game-export",

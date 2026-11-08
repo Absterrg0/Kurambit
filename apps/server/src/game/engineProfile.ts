@@ -74,6 +74,8 @@ export interface GameEngineProfile {
     readonly version: string;
     readonly directories: ReadonlyArray<string>;
     readonly agents: string;
+    /** .gitignore patterns for what the engine generates; every game ignores every engine's. */
+    readonly ignores: ReadonlyArray<string>;
   };
   /** The path a game's code loads a project-relative file by (res://x, ./x, Assets/x). */
   readonly resourcePath: (projectRelative: string) => string;
@@ -116,6 +118,15 @@ export interface GameEngineProfile {
     /** Where rendered sprite strips go, under assets. */
     readonly sprites: string;
   };
+  /**
+   * How its plays on a private Linux display draw when that differs from the
+   * game's own renderer: the project settings file (under the project
+   * directory) and the note it gives, null when they draw alike.
+   */
+  readonly xvfbRenderer: {
+    readonly settings: string;
+    readonly note: (settings: string) => string | null;
+  } | null;
   /** The fixed resolution its games boot, explore and bot-play at; null when the project settings declare it. */
   readonly viewport: GameViewport | null;
   /**

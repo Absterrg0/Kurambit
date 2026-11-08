@@ -45,8 +45,8 @@ matters.
   user-folder override (`BLENDER_USER_RESOURCES`) and installs the addon where Blender itself
   says its user addons live, so no version or OS layout is assumed. Every call or operation holds the
   editor; another game's open closes it only while it is idle, and fails `busy` naming the holder.
-- `GameToolchain` detects the user's own Godot, Unity and Blender the way providers are detected,
-  and never installs them: they are other vendors' software with their own upkeep and licences on
+- `GameToolchain` detects the user's own Blender, and an active engine's own tool (Godot, Unity),
+  the way providers are detected, and never installs them: they are other vendors' software with their own upkeep and licences on
   every OS. It fetches only harness plumbing (uv, the Unity CLI) itself, through `downloadPinned`
   against vendor-published sizes and SHA-256s.
 - Every process the game layer starts goes through one process host
@@ -146,6 +146,19 @@ matters.
   known by its manifest's engine id (and its project folder by `manifestProject`), never by the
   folder's name; a run records the engine it started with (`runEngine` derives it from the lane for
   older records).
+- Which engines Kurambit works on is one switch: `GAME_ENGINES[id].status` in
+  `packages/contracts/src/game.ts`, active or parked, read by the server and every client. Only
+  three.js is active. A parked engine keeps its profile, driver and tests, and compiles; nothing
+  new is made in it, its tool is not detected, and engine work on its existing games is refused
+  `engine-parked` (`GameEngine`'s runner), while their chats, builds and history still open.
+  The game tools an agent is listed follow from the same data: each declares in
+  [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) what it needs of the
+  engine (`engineCapabilities`, derived from the profile, empty for a parked engine) and whether it
+  belongs to chats, a run's roles or both; the MCP auth middleware puts the thread's engine in the
+  invocation and `McpSchema.EnabledWhen` decides, which Effect's MCP core also applies to calls. A
+  provider reads the list once per session, so nothing waits for a request to appear: what a chat
+  uses only when the person asks stays reachable through `game_more`, which runs it through its own
+  handler.
 - Every release takes one path (`GameExport.releaseTo`): staged beside its destination, written and
   checked by the driver, compared with the sources before and after (an unidentifiable tree is
   refused before the engine runs), then published by `publishStaged`, which moves the incumbent

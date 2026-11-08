@@ -237,8 +237,8 @@ const browserOnly = (engine: GameEngineId, fact: "use" | "performance") =>
     ? null
     : notMeasured(
         fact === "use"
-          ? `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for three.js games`
-          : `${engineProfile(engine).displayName} games play in the engine's own process, which does not report its frame times to Kurambit yet; performance is measured for three.js games`,
+          ? `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for games that play in a browser`
+          : `${engineProfile(engine).displayName} games play in the engine's own process, which does not report its frame times to Kurambit yet; performance is measured for games that play in a browser`,
         false,
       );
 const useNotMeasured = (engine: GameEngineId) => browserOnly(engine, "use");
@@ -577,21 +577,22 @@ const make = Effect.gen(function* () {
       }
     });
 
-  // On Linux a bot plays on Xvfb, where the engine is forced to Compatibility
-  // (GameGodotEngine); elsewhere it draws with the project's own renderer.
-  const rendererOf = (copy: string, engine: GameEngineId) =>
-    engine !== "godot" || HOST_OS !== "linux"
+  // On Linux a bot plays on Xvfb, where an engine may draw another way than
+  // the game does (the profile's xvfbRenderer); elsewhere it draws as the game does.
+  const rendererOf = (copy: string, engine: GameEngineId) => {
+    const profile = engineProfile(engine);
+    const renderer = profile.xvfbRenderer;
+    return renderer === null || HOST_OS !== "linux"
       ? Effect.succeed(null)
-      : Effect.promise(async () => {
-          const text = await NodeFSP.readFile(
-            NodePath.join(copy, "godot", "project.godot"),
-            "utf8",
-          ).catch(() => "");
-          const method = /^renderer\/rendering_method="([^"]+)"/m.exec(text)?.[1] ?? "forward_plus";
-          return method === "gl_compatibility"
-            ? null
-            : `Compatibility; native exports draw ${method === "mobile" ? "Mobile" : "Forward+"}`;
-        });
+      : Effect.promise(async () =>
+          renderer.note(
+            await NodeFSP.readFile(
+              NodePath.join(copy, profile.projectDirectory, renderer.settings),
+              "utf8",
+            ).catch(() => ""),
+          ),
+        );
+  };
 
   // The build's own game.json names its engine folder; a copy that cannot say keeps the engine's default.
   const projectOf = (copy: string, engine: GameEngineId) =>

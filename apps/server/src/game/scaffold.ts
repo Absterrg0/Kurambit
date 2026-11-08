@@ -7,7 +7,7 @@ import {
   type GameManifest,
   type GameStageKind,
 } from "@kurambit/contracts";
-import { engineProfile } from "./engineProfile.ts";
+import { engineProfile, PROFILES } from "./engineProfile.ts";
 
 // Where stage-era runs kept their ladder's state-check bots; old games still ignore it.
 const CHECK_BOT_DIR = ".studio/bot/checks";
@@ -53,14 +53,7 @@ export const RUN_STATE_IGNORES = [
 /** What every engine generates in the game folder, beside the run's own files. */
 const GENERATED_IGNORES = [
   "builds/",
-  "godot/.godot/",
-  "unity/[Ll]ibrary/",
-  "unity/[Tt]emp/",
-  "unity/[Ll]ogs/",
-  "unity/[Uu]ser[Ss]ettings/",
-  "unity/[Oo]bj/",
-  "unity/*.csproj",
-  "unity/*.sln",
+  ...PROFILES.flatMap((profile) => profile.scaffold.ignores),
   "*.blend1",
   // Kurambit writes and refreshes these from its own templates (server start, every turn):
   // tracked, a refresh would read as the agent's change and Undo would roll the skills back.

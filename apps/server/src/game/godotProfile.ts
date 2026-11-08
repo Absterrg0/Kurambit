@@ -27,6 +27,7 @@ export const GODOT_PROFILE: GameEngineProfile = {
   scaffold: {
     version: "4.7.2",
     directories: ["godot/assets/models", "godot/scripts", "builds/web"],
+    ignores: ["godot/.godot/"],
     agents: `Build BRIEF.md's game in Godot 4.7 (GDScript; Forward+ natively, Compatibility on Web). godot/ is the project.
 
 Use the game_* tools to check, play, export and package the game; never run Godot yourself. Keep builds/ and godot/.godot/ generated.
@@ -40,6 +41,16 @@ Use the game_* tools to check, play, export and package the game; never run Godo
   groundHint: (width, height, ground) =>
     `Godot: Sprite2D offset (0, ${height / 2 - ground}) puts the node origin on the ground line (x=${width / 2} is already the origin).`,
   sidecarLoad: null,
+  // Xvfb has only software GL, so GameGodotEngine forces Compatibility there.
+  xvfbRenderer: {
+    settings: "project.godot",
+    note: (settings) => {
+      const method = /^renderer\/rendering_method="([^"]+)"/m.exec(settings)?.[1] ?? "forward_plus";
+      return method === "gl_compatibility"
+        ? null
+        : `Compatibility; native exports draw ${method === "mobile" ? "Mobile" : "Forward+"}`;
+    },
+  },
   stripLoad: (key, resource, view) =>
     `SpriteStrips.apply($AnimatedSprite2D, {${JSON.stringify(key)}: "${resource}"}, "${view}") loads it`,
   tools: {

@@ -239,7 +239,7 @@ export const isGameEngineActive = (engine: GameEngineId): boolean =>
 export const isEngineToolActive = (tool: "godot" | "unity"): boolean =>
   ACTIVE_GAME_ENGINES.some((id) => GAME_ENGINES[id].tool === tool);
 /** The engine a create request without one builds for: the first active engine. */
-export const DEFAULT_GAME_ENGINE: GameEngineId = ACTIVE_GAME_ENGINES[0] ?? "three";
+export const DEFAULT_GAME_ENGINE: GameEngineId = ACTIVE_GAME_ENGINES[0] ?? GameEngineId.literals[0];
 /** What a parked engine's game and a refused create say, naming the engines Kurambit works on now. */
 export const parkedEngineMessage = (engine: GameEngineId): string =>
   `${GAME_ENGINES[engine].name} games are paused while Kurambit focuses on ${ACTIVE_GAME_ENGINES.map((id) => GAME_ENGINES[id].name).join(" and ")}.`;

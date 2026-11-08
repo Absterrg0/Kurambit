@@ -707,6 +707,8 @@ const make = Effect.gen(function* () {
     refreshGuidance: (root) =>
       Effect.gen(function* () {
         const manifest = yield* read(root);
+        // A parked engine's game takes no new work, so a new server leaves its folder as it is.
+        if (!isGameEngineActive(manifest.engine.name)) return;
         yield* ensureTurnSections(root, manifest.engine.name, yield* templates.directory).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),

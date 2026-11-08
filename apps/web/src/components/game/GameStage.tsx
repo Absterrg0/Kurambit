@@ -553,7 +553,8 @@ function ThreadGameStage({
   const awaitingTurnBuild = phase.kind === "first-build";
   const building = busy !== null || operationState === "running";
   // Play of a build that exists only reads, so a run's role thread may play it.
-  const webPlay = data.exportTargets.includes("Web");
+  // A parked engine's game builds and plays nothing here.
+  const webPlay = engine.status === "active" && data.exportTargets.includes("Web");
   const playEnabled =
     !awaitingTurnBuild &&
     webPlay &&
@@ -989,7 +990,7 @@ function ThreadGameStage({
                 <MoreHorizontalIcon className="size-4" aria-hidden="true" />
               </MenuTrigger>
               <MenuPopup align="end">
-                <MenuItem onClick={() => setExportOpen(true)}>
+                <MenuItem disabled={engine.status === "parked"} onClick={() => setExportOpen(true)}>
                   <DownloadIcon />
                   Export…
                 </MenuItem>
