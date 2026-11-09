@@ -53,6 +53,13 @@ export interface BenchKeepGoing {
   };
   /** Phase 1's floor read on the last build, for comparison; not part of the run's score. */
   readonly finalScore: GameScore | null;
+  /** The run's play bot setup, in its own session and never a step; absent when none ran. */
+  readonly botSetup?: {
+    readonly state: string;
+    readonly tokens: number | null;
+    readonly minutes: number | null;
+    readonly reason: string;
+  };
 }
 
 export interface BenchGame {
@@ -182,6 +189,9 @@ function keepGoingTotals(run: BenchRun) {
   const kept = count("kept");
   const tokensAll = steps.reduce((sum, step) => sum + (step.tokens ?? 0), 0);
   const minutesAll = steps.reduce((sum, step) => sum + (step.minutes ?? 0), 0);
+  const setups = runs.flatMap((kg) => (kg.botSetup === undefined ? [] : [kg.botSetup]));
+  const setupTokens = setups.reduce((sum, setup) => sum + (setup.tokens ?? 0), 0);
+  const setupMinutes = setups.reduce((sum, setup) => sum + (setup.minutes ?? 0), 0);
   const tally = (moves: ReadonlyArray<BenchFactMove>) => {
     const by = new Map<string, number>();
     for (const move of moves) by.set(move.label, (by.get(move.label) ?? 0) + 1);
@@ -200,6 +210,12 @@ function keepGoingTotals(run: BenchRun) {
     minutes: minutesAll,
     tokensPerKept: kept === 0 ? null : tokensAll / kept,
     minutesPerKept: kept === 0 ? null : minutesAll / kept,
+    setups: setups.length,
+    setupsWritten: setups.filter((setup) => setup.state === "written").length,
+    setupTokens,
+    setupMinutes,
+    /** Steps and setup together over the kept steps: what keep going cost per kept step. */
+    tokensPerKeptWithSetup: kept === 0 ? null : (tokensAll + setupTokens) / kept,
     /** What kept steps made better and worse (kept-but-worse is a fact keep going does not guard). */
     improved: tally(keptSteps.flatMap((step) => step.improved)),
     regressed: tally(keptSteps.flatMap((step) => step.regressed)),
@@ -351,11 +367,17 @@ ${rows}
 `;
 }
 
+const setupText = (k: ReturnType<typeof keepGoingTotals>) =>
+  k.setups === 0
+    ? "No play bot setup ran."
+    : `Play bot setup: ${k.setupsWritten} of ${k.setups} written, ${tokens(k.setupTokens)} tokens and ${k.setupMinutes.toFixed(1)} min in their own sessions; ${perKept(k.tokensPerKeptWithSetup, tokens)} tokens per kept step with the setup counted.`;
+
 function keepGoingSummaryHtml(run: BenchRun): string {
   const k = keepGoingTotals(run);
   if (k.games === 0) return "";
   return `<h3>Keep going</h3>
 <p>${k.steps} step(s) on ${k.games} game(s): ${k.kept} kept, ${k.undone} undone, ${k.noChange} changed nothing, ${k.notMeasured} kept unjudged${k.other > 0 ? `, ${k.other} other` : ""}. ${perKept(k.tokensPerKept, tokens)} tokens and ${perKept(k.minutesPerKept, (n) => `${n.toFixed(1)} min`)} per kept step.</p>
+<p>${escape(setupText(k))}</p>
 <p class="meta">Kept steps made better: ${escape(tallyText(k.improved))}; worse: ${escape(tallyText(k.regressed))}. Undone for: ${escape(tallyText(k.undoneFor))}. First build → last: better ${escape(tallyText(k.netImproved))}; worse ${escape(tallyText(k.netRegressed))}.</p>`;
 }
 
@@ -366,6 +388,17 @@ function keepGoingMarkdown(run: BenchRun): Array<string> {
     "## Keep going",
     "",
     `${k.steps} step(s) on ${k.games} game(s): ${k.kept} kept, ${k.undone} undone, ${k.noChange} changed nothing, ${k.notMeasured} kept unjudged${k.other > 0 ? `, ${k.other} other` : ""}. ${perKept(k.tokensPerKept, tokens)} tokens and ${perKept(k.minutesPerKept, (n) => `${n.toFixed(1)} min`)} per kept step (all steps' cost over the kept ones).`,
+    "",
+    setupText(k),
+    "",
+    ...run.games.flatMap((game) => {
+      const setup = phase2(game)?.botSetup;
+      return setup === undefined
+        ? []
+        : [
+            `- ${game.name}: bot setup ${setup.state}, ${setup.tokens === null ? "–" : tokens(setup.tokens)} tokens, ${setup.minutes ?? "–"} min${setup.reason === "" ? "" : ` (${setup.reason})`}`,
+          ];
+    }),
     "",
     `- Kept steps made better: ${tallyText(k.improved)}; worse: ${tallyText(k.regressed)}`,
     `- Undone for: ${tallyText(k.undoneFor)}`,

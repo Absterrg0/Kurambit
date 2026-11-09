@@ -234,20 +234,8 @@ describe("gain", () => {
     expect(Loop.gain(input({ files: 3, verdict: "kept-moved-on" }))).toBe(false);
   });
 
-  it("also counts a closed target: the person's own step, the bot once skilled is measured", () => {
+  it("also counts a closed target: the person's own step", () => {
     expect(Loop.gain(input({ turn: { proposal: proposal(), startedBy: "creator" } }))).toBe(true);
-    const bot = { proposal: proposal({ why: "bot", key: "bot" }), startedBy: "autopilot" as const };
-    expect(Loop.gain(input({ turn: bot }))).toBe(true);
-    expect(
-      Loop.gain(
-        input({
-          turn: bot,
-          build: facts({
-            skilled: { status: "not-measured", why: "no play-mode bot", retry: false },
-          }),
-        }),
-      ),
-    ).toBe(false);
   });
 
   it("pauses the run after two steps in a row that gained nothing", () => {
@@ -303,7 +291,7 @@ describe("never repeat", () => {
     });
   });
 
-  it("sets aside a fact step the agent declined, a skipped step, and a bot step that left no bot", () => {
+  it("sets aside a fact step the agent declined and a skipped step", () => {
     const fact = turnStep({
       proposal: proposal({
         why: "fact",
@@ -323,14 +311,6 @@ describe("never repeat", () => {
     expect(skipped.state.setAside).toEqual([
       { key: "next:1", text: "Add a second enemy type.", why: "you skipped it" },
     ]);
-
-    const bot = turnStep({ proposal: proposal({ why: "bot", key: "bot" }) });
-    const noBot = Loop.applyTurn(state(), bot, turnResult({ files: 0, build: null }), {
-      now: NOW,
-      since: NOW,
-      started: true,
-    });
-    expect(noBot.state.setAside.map((s) => s.key)).toEqual(["bot"]);
   });
 });
 
@@ -349,26 +329,20 @@ describe("the proposal", () => {
     expect(Loop.applyLook(state(), look({ next: "none" }), NOW).state.ending).toBe("done");
   });
 
-  it("proposes the bot once for a booting game without one, ending or not", () => {
-    expect(Loop.propose(state(), look({ bot: false }))?.why).toBe("bot");
-    const noEnding = facts({ idle: tier("no-ending", null), masher: tier("no-ending", null) });
-    expect(Loop.propose(state(), look({ bot: false, facts: noEnding }))?.why).toBe("bot");
-    expect(Loop.propose(state(), look({ bot: true, facts: noEnding }))?.why).toBe("next");
-    const tried = Loop.applyTurn(
-      state(),
-      turnStep({ proposal: proposal({ why: "bot", key: "bot" }) }),
-      turnResult({ files: 0 }),
-      { now: NOW, since: NOW, started: true },
-    );
-    expect(tried.plan).toMatchObject({ kind: "judge" });
-    const recorded = judged(
-      state(),
-      facts(),
-      facts(),
-      cycle(turnStep({ proposal: proposal({ why: "bot", key: "bot" }) }), turnResult({ files: 0 })),
-    );
-    expect(recorded.record?.step.gain).toBe(true);
-    expect(Loop.propose(recorded.state, look({ bot: false }))?.why).toBe("next");
+  // The bot is the harness's instrument, written once as setup: never a step.
+  it("never proposes a play bot, and the run keeps the setup a look reports", () => {
+    expect(Loop.propose(state(), look({ bot: false }))?.why).toBe("next");
+    const setup = {
+      thread: ThreadId.make("thread:bot-setup"),
+      state: "failed" as const,
+      tokens: 1200,
+      minutes: 4,
+      reason: "its session failed",
+    };
+    const next = Loop.applyLook(state(), look({ bot: false, botSetup: setup }), NOW);
+    expect(next.state.botSetup).toEqual(setup);
+    expect(next.plan).toMatchObject({ kind: "turn" });
+    expect(next.log).toContain("goes on without the skilled fact");
   });
 
   it("checks the budget before each turn and caps the turn at the time left", () => {

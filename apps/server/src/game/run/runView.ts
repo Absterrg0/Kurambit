@@ -2,6 +2,7 @@
 // the banner and game_keep_going_status share, the game card's line, and the
 // one plain sentence for each way it stops.
 import {
+  type GameKeepGoingBotSetup,
   type GameKeepGoingPhase,
   type GameKeepGoingStatus,
   type GameKeepGoingStepRef,
@@ -113,6 +114,8 @@ export interface StatusInput {
   /** While undoing: what the step made worse (loop.undoReason). */
   readonly undoing: string | null;
   readonly blocked: string | null;
+  /** The run's play bot setup (botSetupView); null when it needed none. */
+  readonly botSetup: GameKeepGoingBotSetup | null;
 }
 
 export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
@@ -137,6 +140,7 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
       blocked: input.blocked,
       message: "Keep going is off.",
     };
+  const botSetup = input.botSetup === null ? {} : { botSetup: input.botSetup };
   const live = run.status !== "ended";
   const phase = live ? phaseOf(inFlight) : null;
   const n = phase === null || phase === "waiting" || phase === "looking" ? null : input.n;
@@ -182,16 +186,19 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
         ]
       : [];
   const done = input.records.map(({ record, at }) => refOf(record, at)).toReversed();
+  const settingUp = live && input.botSetup?.state === "running";
   const message = live
-    ? phase === "waiting"
-      ? "Keep going waits for this turn to end."
-      : phase === "looking"
-        ? "Keep going is reading the current build's facts."
-        : proposal !== null
-          ? `Step ${n} · ${proposal.summary}`
-          : phase === "undoing"
-            ? `Keep going · undoing step ${n}${input.undoing === null || input.undoing === "" ? "" : `: ${input.undoing}`}`
-            : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`
+    ? settingUp
+      ? "Keep going is writing a play bot in a session of its own, so it can measure skilled play."
+      : phase === "waiting"
+        ? "Keep going waits for this turn to end."
+        : phase === "looking"
+          ? "Keep going is reading the current build's facts."
+          : proposal !== null
+            ? `Step ${n} · ${proposal.summary}`
+            : phase === "undoing"
+              ? `Keep going · undoing step ${n}${input.undoing === null || input.undoing === "" ? "" : `: ${input.undoing}`}`
+              : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`
     : endingMessage(run, records);
   return {
     runId: run.id,
@@ -210,5 +217,6 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
     resumable: !live && run.ending !== null && RESUMABLE.has(run.ending),
     blocked: input.blocked,
     message,
+    ...botSetup,
   };
 };

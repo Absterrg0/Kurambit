@@ -420,7 +420,7 @@ cannot both find none.
 - **The proposal costs no tokens.** The policy writes the step from the facts' own wording and the
   agent's own `Next:` line (one parser, `packages/shared/src/gameNextLine.ts`, so the person sees in
   the Next banner exactly the line the run will use), in a fixed order: the person's notes, a
-  blocker, a retry of an undone step, the play bot, a failing fact, the agent's next line. Only
+  blocker, a retry of an undone step, a failing fact, the agent's next line. Only
   watched facts are proposed or guarded: motion, detail and colour are heuristics, and a space
   game's black sky must never cost a step. Of the scene report only buried bodies, the player in
   view and the empty view are watched, because the scene's geometry decides them (the empty view
@@ -430,7 +430,7 @@ cannot both find none.
   wall and sliding follow where random input led and how fast the machine ran it, and an undo
   must never hang on a path.
 - **The look reads the folder's build.** The current build is the newest turn build that changed
-  game files, or a later kept edit or restore target; turns that changed only notes are no builds,
+  game files, or a later kept edit, restore target or bot setup point; turns that changed only notes are no builds,
   so it is found by walking the turns page by page however far back (`GameBuilds.currentBuild`),
   never in a fixed window. A folder whose game files are no build's (edited outside a turn) pauses
   the run, since a step's undo would take those edits.
@@ -451,19 +451,33 @@ cannot both find none.
   inside the game lock the folder moves only while it still holds the step's build unedited, else
   it is refused `moved-on` and the record reads "the game changed after it". A step the person
   undid first counts as undone.
-- **Gain and stopping.** A step gains when it was kept, changed the game (lane, `art/`,
-  `ASSETS.md`) and made no watched fact worse; a closed target counts too (the person's own step,
-  a kept retry, the bot once skilled is measured). Two steps in a row without gain pause the run
+- **Gain and stopping.** A step gains when it was kept, changed what a restore covers and made no
+  watched fact worse; a closed target counts too (the person's own step, a kept retry). Two steps in a row without gain pause the run
   `stalled`; three steps in a row that never landed (a superseded proposal or turn, a turn that
   started on another build) pause it `stalled` with why, so no mix of supersedes and looks runs
   without bound, and a look after one takes the facts its cycle's look measured for the same build; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
   otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`.
   The budget is checked before each turn against a typical step (8 min), and it is what bounds an
   Autopilot that keeps adding content. Every ending but `done` resumes.
-- **Never repeat.** Each proposal has a key (`fact:<id>`, `bot`, `steer:<fnv>`, `next:<fnv>`; a
-  retry carries the undone step's). Two misses of a key (undone, or kept with its target still
-  bad), any step that changed nothing (it is never sent again as it was), Skip, or a bot step
-  that left no bot set the key aside for the run.
+- **Never repeat.** Each proposal has a key (`fact:<id>`, `steer:<fnv>`, `next:<fnv>`; a retry
+  carries the undone step's). Two misses of a key (undone, or kept with its target still bad), any
+  step that changed nothing (it is never sent again as it was), or Skip set the key aside for the
+  run.
+- **The play bot is setup, never a step.** A step must change what a person sees or fix a measured
+  fault; the bot is the harness's instrument, and a step's turn re-reads the whole chat. So a look
+  that finds a booting game with no play bot has it written once per run in a session of its own
+  ([botSetup.ts](../../apps/server/src/game/run/botSetup.ts)): a `game-round.task.request` child
+  of the chat's last finished turn (`completionWake: "never"`, so it never wakes the chat, and its
+  checkpoint is no build). The look waits on the game being busy, caps each session, sends at most
+  one fix-up session, and reports the outcome, which the run keeps (`GameRun.botSetup`); a failed
+  setup leaves the skilled fact unmeasured and the run goes on.
+- **An undo includes the bot.** `.studio/bot` (without the kits Kurambit writes) is in
+  `restoredPaths`, the one rule for what a restore writes, what a build is and when the folder is
+  edited, so an undo is exactly as before and a build's skilled fact is its own bot's. The setup's
+  bot would then make the folder differ from its build, and undoing the first step would delete
+  it: the setup instead keeps the folder as a hidden point (`game-builds/bots/<run>`, with `-from`
+  naming the build it was written on). The point stands in the folder's history like a restore
+  target (current build, and the next turn's base) but is no row of the rail, which shows `-from`.
 - **Notes and the captured prefix.** A steer step carries the run's waiting notes; its turn's
   start takes exactly that many off the front of `GameRun.steer`, and a turn that never landed
   (superseded, stopped) gives them back ahead of newer notes. A note only ever appends, so Slice 2

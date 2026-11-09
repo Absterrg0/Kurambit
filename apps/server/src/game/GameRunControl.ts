@@ -38,6 +38,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { botSetupView } from "./run/botSetup.ts";
 import { NO_TURN_LOOP_SENTENCE, keepGoingStatus } from "./run/runView.ts";
 import {
   RESUMABLE,
@@ -262,6 +263,7 @@ const make = Effect.gen(function* () {
       n: read.n,
       undoing: read.undoing,
       blocked: yield* blockedFor(threadId, root, projectRun),
+      botSetup: projectRun === null ? null : yield* botSetupView(threads, projectRun),
     });
   });
 

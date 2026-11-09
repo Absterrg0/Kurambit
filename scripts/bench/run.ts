@@ -5,7 +5,7 @@
  * through the same WebSocket RPC the client uses. One private server per run, on
  * a dev home (never an installed one); runs are kept by date so two compare.
  *
- *   vp run bench [--briefs N] [--only <id>] [--out <dir>] [--home <dir>] [--model <instance>/<model>] [--steps N]
+ *   vp run bench [--briefs N] [--only <id>[,<id>…]] [--out <dir>] [--home <dir>] [--model <instance>/<model>] [--steps N]
  *   vp run bench --remeasure <stamp> [--home <dir>] [--out <dir>]
  *
  * Phase 1 scores each brief's first turn. Phase 2 then runs keep going on the
@@ -109,8 +109,9 @@ if (home === NodePath.join(NodeOS.homedir(), ".kurambit"))
 const briefFile = JSON.parse(
   NodeFS.readFileSync(NodePath.join(checkout, "scripts/bench/briefs.json"), "utf8"),
 ) as { readonly version: number; readonly briefs: ReadonlyArray<Brief> };
+const only = args.only === undefined ? null : new Set(args.only.split(",").map((id) => id.trim()));
 const briefs = briefFile.briefs
-  .filter((brief) => args.only === undefined || brief.id === args.only)
+  .filter((brief) => only === null || only.has(brief.id))
   .slice(0, args.briefs === undefined ? undefined : Number(args.briefs));
 if (briefs.length === 0) throw new Error(`No brief matches --only ${args.only}.`);
 
@@ -545,7 +546,18 @@ async function readKeepGoing(
             build: { _tag: "build", build: final },
           }),
         )));
+  const setup = now.botSetup;
   return {
+    ...(setup === undefined
+      ? {}
+      : {
+          botSetup: {
+            state: setup.state,
+            tokens: setup.tokens,
+            minutes: setup.minutes,
+            reason: setup.reason,
+          },
+        }),
     asked: STEPS,
     ending: run.ending,
     seconds: run.seconds,

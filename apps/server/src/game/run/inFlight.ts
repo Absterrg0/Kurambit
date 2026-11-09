@@ -5,7 +5,9 @@
 import {
   type GameRun,
   type GameRunStep,
+  type OrchestrationV2Run,
   type ProjectId,
+  type RunId,
   gameRunStepCommandId,
 } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
@@ -80,3 +82,31 @@ export const supersedeProposal = (
           result: { kind: "decided", answer: "superseded", by: "server" },
         }),
       );
+
+/** PURE. Input plus output tokens of the runs' provider turns, as the provider reported them; null when none did. */
+export const tokensIn = (
+  records: {
+    readonly attempts: ReadonlyArray<{ readonly id: string; readonly runId: RunId }>;
+    readonly providerTurns: ReadonlyArray<{
+      readonly runAttemptId: string | null;
+      readonly turnTokenUsage?:
+        | { readonly inputTokens?: number | undefined; readonly outputTokens?: number | undefined }
+        | undefined;
+    }>;
+  },
+  runs: ReadonlyArray<OrchestrationV2Run>,
+): number | null => {
+  const ids = new Set<string>(runs.map((run) => run.id));
+  const attempts = new Set(
+    records.attempts.filter((each) => ids.has(each.runId)).map((each) => each.id),
+  );
+  let sum: number | null = null;
+  for (const turn of records.providerTurns) {
+    const usage = turn.turnTokenUsage;
+    if (turn.runAttemptId === null || !attempts.has(turn.runAttemptId) || usage === undefined)
+      continue;
+    if (usage.inputTokens === undefined && usage.outputTokens === undefined) continue;
+    sum = (sum ?? 0) + (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  }
+  return sum;
+};

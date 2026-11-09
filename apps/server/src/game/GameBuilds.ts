@@ -55,9 +55,9 @@ import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import * as GameStage from "./GameStage.ts";
-import { BuildName } from "./run/buildNames.ts";
+import { BOT_DIR, BuildName } from "./run/buildNames.ts";
 import { engineCapabilities, engineProfile } from "./engineProfile.ts";
-import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
+import { captureBuild, isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 import { isFirstTurnLead } from "./scaffold.ts";
 import { tuneFileText, tuneFileWith } from "./gameTune.ts";
@@ -77,6 +77,16 @@ const BASES = `${gameRunRefsFolder(NO_RUN)}bases/`;
  * folder just before it, which restoring undoes it to.
  */
 const EDITS = "edits/";
+/**
+ * Where the folder stood once a keep-going run's setup wrote its play bot
+ * (BuildName.botSetup), with the build it was written on (`-from`, written
+ * last, so a setup point counts only once it is whole). The bot is part of
+ * what a build is (restoredPaths), so this point is the folder's current build
+ * until the next turn and the base that turn's undo restores: the look reads
+ * the folder unedited and an undo of the first step keeps the setup's bot. It
+ * is no build of the rail: the rail names the build it was written on.
+ */
+const BOTS = `${gameRunRefsFolder(NO_RUN)}bots/`;
 const VALUES_LABEL = "Values kept";
 /** The folder as last compared with the build it was made from (folderEdited); no build of its own. */
 const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
@@ -97,6 +107,7 @@ const noPlayReason = (engine: GameEngineId) =>
 /** Whether a build of this engine's game is measured: never for a parked engine. */
 const measurable = (engine: GameEngineId) => engineCapabilities(engine).has("play");
 const isGameBuildId = Schema.is(GameBuildId);
+const isGameOperationError = Schema.is(GameOperationError);
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 /** One build before its facts are read. */
@@ -213,7 +224,7 @@ export class GameBuilds extends Context.Service<
       build: GameBuildRef,
     ) => Effect.Effect<void, GameOperationError>;
     /**
-     * Puts the build's engine project, art and ASSETS.md back in the game
+     * Puts the build's engine project, art, ASSETS.md and play bot back in the game
      * folder, keeping the folder before as a build. With `expect`, inside the
      * game lock, only when the folder still holds that build and is unedited;
      * else it is refused "moved-on" and nothing moves (keep going's undo).
@@ -229,7 +240,7 @@ export class GameBuilds extends Context.Service<
     >;
     /**
      * The folder's current build (currentBuild), and whether its engine
-     * project, art and ASSETS.md are no longer that build's, read under the
+     * project, art, ASSETS.md and play bot are no longer that build's, read under the
      * game's lock.
      */
     readonly current: (
@@ -238,7 +249,15 @@ export class GameBuilds extends Context.Service<
       { readonly build: GameBuildId | null; readonly edited: boolean },
       GameOperationError
     >;
-    /** The folder still holds `build` in its engine project, art and ASSETS.md, read under the game's lock. */
+    /**
+     * Keeps the folder as keep going's bot setup left it (BOTS), once per run;
+     * null when kept, else why not (it changed more than the bot, or wrote none).
+     */
+    readonly keepBotSetup: (
+      threadId: ThreadId,
+      runId: string,
+    ) => Effect.Effect<string | null, GameOperationError>;
+    /** The folder still holds `build` in what a restore covers (restoredPaths), read under the game's lock. */
     readonly holds: (
       threadId: ThreadId,
       build: GameBuildId,
@@ -255,7 +274,7 @@ export class GameBuilds extends Context.Service<
     /**
      * A chat turn's build once its checkpoint is kept, the build the folder
      * held when the turn started (its recorded base; null when none was
-     * recorded), and how many files of the engine project, art and ASSETS.md
+     * recorded), and how many files of what a restore covers (restoredPaths)
      * it changed since then (since `fallback` without one); null while the
      * turn has no kept checkpoint.
      */
@@ -449,6 +468,7 @@ const make = Effect.gen(function* () {
     before: string | undefined,
     saved: ReadonlyArray<Entry>,
     recorded: ReadonlyMap<string, string>,
+    setups: ReadonlyArray<Placed>,
   ) =>
     Effect.gen(function* () {
       const rows = yield* projections
@@ -491,6 +511,7 @@ const make = Effect.gen(function* () {
             : [{ id: e.id, at: e.at, thread: null, turn: null }],
         ),
         ...restoreTargets.map((t) => ({ id: t.id, at: t.at, thread: null, turn: null })),
+        ...setups.map((t) => ({ id: t.id, at: t.at, thread: null, turn: null })),
       ];
       const entries = yield* Effect.forEach(captures, ({ row, oid, at }) =>
         Effect.gen(function* () {
@@ -653,6 +674,12 @@ const make = Effect.gen(function* () {
           }),
       ).pipe(Effect.map((each) => each.flat()));
       const saved = [...beforeRestores, ...edits];
+      const setups = refs.flatMap((ref) => {
+        const from = byRef.get(`${ref.checkpointRef}-from`);
+        return ref.checkpointRef.startsWith(BOTS) && from !== undefined && isGameBuildId(ref.oid)
+          ? [{ id: ref.oid, at: isoOfSeconds(ref.committedAt), from }]
+          : [];
+      });
       const recorded = new Map(
         refs.flatMap((ref) =>
           ref.checkpointRef.startsWith(BASES)
@@ -661,14 +688,14 @@ const make = Effect.gen(function* () {
         ),
       );
       const turnPage = (rows: number, from: string | undefined) =>
-        turnEntries(g, byRef, rows, from, saved, recorded).pipe(
+        turnEntries(g, byRef, rows, from, saved, recorded, setups).pipe(
           Effect.map((page): TurnPage => ({
             newest: page.entries[0] ?? null,
             oldest: page.oldest,
             more: page.scanned === rows,
           })),
         );
-      const turns = yield* turnEntries(g, byRef, limit * 3, before, saved, recorded);
+      const turns = yield* turnEntries(g, byRef, limit * 3, before, saved, recorded, setups);
       const savedPage = saved.filter((entry) => before === undefined || entry.at < before);
       // A saved build is also a turn's at times; one entry each, the saved one first.
       const seen = new Set<string>();
@@ -685,6 +712,7 @@ const make = Effect.gen(function* () {
         refs: byRef,
         recorded,
         saved,
+        setups,
         // The first page as read above, then older pages of TURN_PAGE rows.
         turns: (from: string | undefined) =>
           from === undefined
@@ -709,6 +737,7 @@ const make = Effect.gen(function* () {
         ...(restore?.outcome?.restored === true
           ? [{ id: restore.target, at: restore.requestedAt }]
           : []),
+        ...listed.setups,
       ];
       const id = yield* currentBuild(others, listed.turns);
       return id !== null && isGameBuildId(id) ? id : null;
@@ -837,12 +866,69 @@ const make = Effect.gen(function* () {
       return {
         builds,
         next: more && page.length > 0 ? page.at(-1)!.at : null,
-        current,
+        current: shownAs(listed, current),
         folderEdited: current !== null ? yield* folderEditedSince(g, current) : "unknown",
         restore,
         ...(latestUse === undefined ? {} : { latestUse }),
       } satisfies GameBuildsResult;
     });
+
+  /** The build the rail shows for the folder's: a bot setup's point shows as the build it was written on. */
+  const shownAs = (
+    listed: { readonly setups: ReadonlyArray<Placed & { readonly from: string }> },
+    id: GameBuildId | null,
+  ) => {
+    const from = listed.setups.find((setup) => setup.id === id)?.from;
+    return from !== undefined && isGameBuildId(from) ? from : id;
+  };
+
+  const keepBotSetup: GameBuilds["Service"]["keepBotSetup"] = (threadId, runId) =>
+    Effect.gen(function* () {
+      const g = yield* gameOf(threadId);
+      const ref = checkpointRefForGameRun(NO_RUN, BuildName.botSetup(runId));
+      const fromRef = checkpointRefForGameRun(NO_RUN, BuildName.botSetupFrom(runId));
+      if (yield* checkpoints.hasCheckpointRef({ cwd: g.root, checkpointRef: fromRef })) return null;
+      const listed = yield* allEntries(g, 1, undefined);
+      const from = yield* currentOf(g, listed);
+      if (from === null) return "the game had no build to write its bot on";
+      const lock = { operations, owner: String(threadId), waitUntil: null };
+      const sha = yield* captureBuild(
+        { checkpoints, lock },
+        g.root,
+        NO_RUN,
+        BuildName.botSetup(runId),
+      );
+      const covered = isRestored(g.lane);
+      const inBot = (path: string) => path.startsWith(`${BOT_DIR}/`);
+      const [game, bot] = yield* Effect.all([
+        measureChange(checkpoints, g.root, (path) => covered(path) && !inBot(path), from, sha),
+        measureChange(checkpoints, g.root, (path) => covered(path) && inBot(path), from, sha),
+      ]);
+      const refused = game.changed
+        ? "the setup changed game files, not only its bot"
+        : !bot.changed
+          ? "the setup wrote no bot"
+          : null;
+      if (refused !== null) {
+        yield* checkpoints
+          .deleteCheckpointRefs({ cwd: g.root, checkpointRefs: [ref] })
+          .pipe(Effect.ignore);
+        return refused;
+      }
+      // Last: the point counts only once its `-from` names the build the rail shows for it.
+      yield* checkpoints.updateCheckpointRef({
+        cwd: g.root,
+        checkpointRef: fromRef,
+        oid: shownAs(listed, from) ?? from,
+      });
+      return null;
+    }).pipe(
+      Effect.mapError((cause) =>
+        isGameOperationError(cause)
+          ? cause
+          : failed("Bot setup", threadId, "io", "the folder could not be kept", cause),
+      ),
+    );
 
   const restoreRefOf = (g: Game, entries: ReadonlyArray<Entry>) =>
     Effect.gen(function* () {
@@ -1135,7 +1221,7 @@ const make = Effect.gen(function* () {
 
   // A game with no run restores through the same moves as the run's restore:
   // the folder parked first as a build of its own, the build's engine project,
-  // art and ASSETS.md brought back, and the result checked against the build.
+  // art, ASSETS.md and play bot brought back, and the result checked against the build.
   // The record is written before the folder moves; the moves are safe to run
   // again with the same request (the park is found, never retaken), so a
   // restart settles any restore it cut short (settleRestores).
@@ -1176,7 +1262,7 @@ const make = Effect.gen(function* () {
         Effect.map((refs) => refs.find((each) => each.checkpointRef === beforeRef)?.oid ?? null),
         Effect.orElseSucceed(() => null),
       );
-      const what = `${lane}/, art/ and ASSETS.md`;
+      const what = `${lane}/, art/, ASSETS.md and play bot`;
       // A folder that was exactly a build already (an Undo, a Redo) needs no
       // park of its own: that build is what undoes this restore.
       const same =
@@ -1529,6 +1615,7 @@ const make = Effect.gen(function* () {
     play,
     restore,
     holds,
+    keepBotSetup,
     current,
     keepValues,
     turnBuild,

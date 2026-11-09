@@ -18,7 +18,7 @@ import {
   GameFactId,
   GameStepVerdict,
 } from "./gameBuilds.ts";
-import { GameRunEnding, GameRunProfile, GameRunStepWhy } from "./gameRun.ts";
+import { GameKeepGoingBotSetup, GameRunEnding, GameRunProfile, GameRunStepWhy } from "./gameRun.ts";
 
 /**
  * Keep going as records of the chat it runs in: the run, its steps and its
@@ -244,6 +244,8 @@ export const GameRunStepResult = Schema.Union([
     bot: Schema.Boolean,
     /** The folder's game files are not `current`'s: edited outside any build. */
     edited: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+    /** The play bot setup this look finished (written or failed); the run keeps it. */
+    botSetup: Schema.optionalKey(GameKeepGoingBotSetup),
   }),
   Schema.Struct({
     kind: Schema.Literal("decided"),
@@ -322,6 +324,8 @@ export const GameRun = Schema.Struct({
   stallStreak: Schema.Number,
   /** Steps in a row that never landed (superseded, or started on another build); absent is 0. */
   supersededStreak: Schema.optionalKey(NonNegativeInt),
+  /** The run's play bot setup once it ended; absent until then, and on runs that needed none. */
+  botSetup: Schema.optionalKey(GameKeepGoingBotSetup),
   lastFailure: Schema.String,
   /** The number of the last step planned. */
   seq: NonNegativeInt,

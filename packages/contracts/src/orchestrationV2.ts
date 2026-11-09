@@ -3188,10 +3188,10 @@ const OrchestrationV2InternalCommand = Schema.Union([
     secretStatus: OrchestrationV2SecretRequestStatus,
   }),
   /**
-   * A review child dispatched by the game layer, never by a client. It reuses
-   * the delegated-task child-creation path but may attach to the originating
-   * builder run after that run completed: a live review round is the
-   * permission, and the server's review service checks it before dispatch.
+   * A child dispatched by the game layer, never by a client: a review, or
+   * keep going's play bot setup. It reuses the delegated-task child-creation
+   * path but may attach to the originating builder run after that run
+   * completed: the game layer that dispatches it is the permission.
    * `evidenceDirectory` is the child's cwd for critic and ballot sessions,
    * a directory outside the game holding only the brief, frames and checks;
    * repair children keep the game folder.
@@ -3205,8 +3205,9 @@ const OrchestrationV2InternalCommand = Schema.Union([
     originatingNodeId: NodeId,
     loopId: TrimmedNonEmptyString,
     roundId: TrimmedNonEmptyString,
-    role: Schema.Literals(["critic", "ballot", "repair"]),
-    /** Ballot order within the round; the critic and a repair use 0. */
+    /** `bot`: keep going's play bot setup, in a session of its own (`roundId` "bot-setup"). */
+    role: Schema.Literals(["critic", "ballot", "repair", "bot"]),
+    /** Ballot order within the round; the critic and a repair use 0, a bot setup's fix-up 1. */
     order: NonNegativeInt,
     task: TrimmedNonEmptyString,
     title: Schema.optional(TrimmedNonEmptyString),

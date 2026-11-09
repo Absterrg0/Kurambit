@@ -224,15 +224,17 @@ export const keepGoingBannerView = (
   const step = n === null ? "Keep going" : `Keep going · step ${n}`;
   const reason = status.steps.find((entry) => entry.n === n)?.reason ?? "";
   const title =
-    status.phase === "waiting"
-      ? `Keep going · waits for this turn to end${status.endsAt === null ? "" : ` · until ${clock(status.endsAt)}`}`
-      : status.phase === "turn"
-        ? `${step} · your agent is working on it`
-        : status.phase === "measuring"
-          ? `${step} · measuring the build before keeping it`
-          : status.phase === "undoing"
-            ? `${n === null ? "Undoing the last step" : `Undoing step ${n}`}${reason === "" ? "" : `: ${reason}`}`
-            : "Keep going · reading the current build's facts";
+    status.botSetup?.state === "running"
+      ? "Keep going · writing a play bot in a session of its own"
+      : status.phase === "waiting"
+        ? `Keep going · waits for this turn to end${status.endsAt === null ? "" : ` · until ${clock(status.endsAt)}`}`
+        : status.phase === "turn"
+          ? `${step} · your agent is working on it`
+          : status.phase === "measuring"
+            ? `${step} · measuring the build before keeping it`
+            : status.phase === "undoing"
+              ? `${n === null ? "Undoing the last step" : `Undoing step ${n}`}${reason === "" ? "" : `: ${reason}`}`
+              : "Keep going · reading the current build's facts";
   return { kind: "live", id: `keep-going:${runId}`, title };
 };
 

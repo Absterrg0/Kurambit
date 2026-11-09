@@ -193,9 +193,14 @@ To start, open the **Keep going** control in the composer, where a coding chat p
 Pick a budget in the same menu (1 hour unless you change it); while keep going runs, the menu shows
 when it ends. Choose **Off** to stop it: a step that is running stops and still becomes a build.
 
+When the game boots but has no play bot yet, keep going first has one written, once, in a session
+of its own that shows as a card in the chat: the bot is what measures whether a skilled player can
+win, so it is no step and changes nothing you see. If it cannot write one in about ten minutes,
+keep going goes on without the skilled fact and its status says why.
+
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
 and why: notes you left for it first, then a crash or freeze, then a step that was undone, then a
-missing bot for the skilled fact, then a failing fact, then the agent's own `Next:` line. The step's build is played and
+failing fact, then the agent's own `Next:` line. The step's build is played and
 measured like any turn, and its strip in the chat says what happened to it:
 
 - **kept**: no fact Kurambit watches got worse;
@@ -273,9 +278,9 @@ three facts, with:
   too.
 - **Undo** on the latest turn, which puts back the build the turn started from. After an undo,
   **Redo** puts the turn's change back.
-- **Go back** on an older build, which puts it in the game folder: the engine project, `art/` and
-  `ASSETS.md` return to that build, and notes, bots and saved media stay as
-  they are. What the folder held is saved as a build first, so going back never discards work, and
+- **Go back** on an older build, which puts it in the game folder: the engine project, `art/`,
+  `ASSETS.md` and the play bot in `.studio/bot` return to that build, and notes and saved media
+  stay as they are. What the folder held is saved as a build first, so going back never discards work, and
   **Redo** puts it back.
 
 Clicking a mark opens its detail: every fact, the evidence, the changed files, **Open diff**,

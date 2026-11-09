@@ -61,6 +61,7 @@ export interface RunState {
   readonly superseded: number;
   readonly lastFailure: string;
   readonly ending: GameRunEnding | null;
+  readonly botSetup?: NonNullable<GameRun["botSetup"]>;
   /** This run's step records, oldest first. */
   readonly records: ReadonlyArray<StepRecord>;
   /** The number the chat's next step takes. */
@@ -99,6 +100,7 @@ const toState = (run: GameRun, rounds: ReadonlyArray<GameRunRound>): RunState =>
   superseded: run.supersededStreak ?? 0,
   lastFailure: run.lastFailure,
   ending: run.ending,
+  ...(run.botSetup === undefined ? {} : { botSetup: run.botSetup }),
   records: rounds
     .filter((r) => r.runId === run.id)
     .map((r) => r.round)
@@ -118,6 +120,7 @@ const withState = (run: GameRun, state: RunState): GameRun => ({
   supersededStreak: state.superseded,
   lastFailure: state.lastFailure,
   ending: state.ending,
+  ...(state.botSetup === undefined ? {} : { botSetup: state.botSetup }),
 });
 
 type StepResult<K extends string> = Extract<GameRunStepResult, { readonly kind: K }>;
@@ -172,6 +175,7 @@ const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
   steer: "your note",
   blocker: "blocker",
   regression: "after an undo",
+  // Only an earlier Kurambit's records: the bot is now setup, never a step.
   bot: "a bot for the skilled fact",
   fact: "a failing fact",
   next: "your agent's next step",
@@ -180,8 +184,6 @@ const STEER_INTRO = "The person asked for this, in their words:";
 const STEP_TAIL =
   "This is a keep-going step: make this one change, keep `game_check` clean, and end with your `Next:` line.";
 const NEXT_FALLBACK = "Make the one change that most improves the game for BRIEF.md.";
-const BOT_TEXT =
-  "This game has no play bot, so Kurambit cannot measure whether a skilled player wins. Write `.studio/bot/play.mjs` with the bot kit (read `.studio/bot/kit/KIT-GUIDE.md`): a `policy` bot whose goal is to win one run of the core loop. Run it once with `game_bot_run` (decider `policy`), and fix it until it plays a full run. Change no game files.";
 
 const clip = (text: string, max: number) =>
   text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
@@ -226,7 +228,7 @@ export const proposalSummary = (
 ): string => {
   switch (proposal.why) {
     case "bot":
-      return "Write a play bot so Kurambit can measure skilled play";
+      return "Wrote a play bot so Kurambit could measure skilled play";
     case "regression":
       return "Try the undone step another way, or a smaller one";
     case "blocker":
@@ -387,9 +389,10 @@ const steerProposal = (state: RunState): GameRunProposal | null => {
 
 /**
  * The order of evidence, the person's first: their notes, a blocker, a retry
- * of an undone step, the play bot, a failing fact, then the agent's own next
- * line. Every candidate whose key is set aside is passed over. Null: nothing
- * left to propose.
+ * of an undone step, a failing fact, then the agent's own next line. Every
+ * candidate whose key is set aside is passed over. Null: nothing left to
+ * propose. The play bot is no candidate: a step must change what a person
+ * sees or fix a measured fault, so the look writes it once as setup.
  */
 export const propose = (state: RunState, look: LookResult): GameRunProposal | null => {
   const aside = new Set(state.setAside.map((entry) => entry.key));
@@ -414,15 +417,6 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
         target: null,
         key: last.step.key,
       };
-    },
-    () => {
-      if (look.bot || facts === null || views === null) return null;
-      if (state.records.some((r) => r.step.why === "bot")) return null;
-      // Once a booting game has no play bot: the skilled tier is the one fact
-      // that says a real player can win, and a game the idle and masher bots
-      // never finish in their minute is exactly where it is needed.
-      if (toneOf(views, "boots") !== "good") return null;
-      return { why: "bot", text: BOT_TEXT, target: null, key: "bot" };
     },
     ...(facts === null || views === null
       ? []
@@ -550,7 +544,7 @@ const startTurn = (
  * asked for. A folder edited outside any build pauses the run: a step's undo
  * restores a build and would take those edits.
  */
-export const applyLook = (state: RunState, look: LookResult, now: number): Next => {
+const proposeFrom = (state: RunState, look: LookResult, now: number): Next => {
   if (look.edited)
     return end(
       state,
@@ -577,6 +571,19 @@ export const applyLook = (state: RunState, look: LookResult, now: number): Next 
     { kind: "propose", proposal, deadline: now + PROPOSAL_WAIT_MS },
     `step ${state.n} proposed (${proposal.why}): ${headline(proposal)}`,
   );
+};
+
+/** A look that finished the run's bot setup records it on the run, then proposes as any look. */
+export const applyLook = (state: RunState, look: LookResult, now: number): Next => {
+  const setup = look.botSetup;
+  if (setup === undefined) return proposeFrom(state, look, now);
+  // The run keeps the setup this look finished, so no later look sets up again.
+  const next = proposeFrom({ ...state, botSetup: setup }, look, now);
+  const line =
+    setup.state === "written"
+      ? "the play bot is written"
+      : `the play bot setup failed (${setup.reason}); keep going goes on without the skilled fact`;
+  return { ...next, log: `${line}; ${next.log}` };
 };
 
 const setAside = (state: RunState, entry: SetAside): RunState =>
@@ -660,9 +667,9 @@ const targetStillBad = (turn: GameRunTurnStep, build: GameBuildFacts | null) =>
 
 /**
  * A step gains when it was kept, made no watched fact worse, and changed
- * the game (lane, art/, ASSETS.md). A watched fact that got better, or the
- * step's own target closing, count too: the person's own step, a kept retry,
- * the bot step once skilled is measured, a blocker or fact no longer bad.
+ * what a restore covers. A watched fact that got better, or the step's own
+ * target closing, count too: the person's own step, a kept retry, a blocker
+ * or fact no longer bad.
  */
 export const gain = (input: {
   readonly verdict: GameStepVerdict;
@@ -677,7 +684,6 @@ export const gain = (input: {
   const { proposal, startedBy } = input.turn;
   if (proposal.why === "steer" || startedBy === "creator") return true;
   if (proposal.why === "regression") return input.verdict === "kept";
-  if (proposal.why === "bot") return input.build?.skilled.status === "measured";
   if (proposal.target === null || input.build === null) return false;
   const tone = toneOf(viewsOf(input.build), proposal.target);
   return tone !== null && tone !== "bad";
@@ -724,9 +730,7 @@ const settle = (state: RunState, record: StepRecord, log: string): Next => {
 const unchangedWhy = (why: GameRunStepWhy) =>
   why === "blocker" || why === "fact"
     ? "your agent changed nothing: it may be intended for this game"
-    : why === "bot"
-      ? "the bot step left no play bot"
-      : "a step at it changed no game files";
+    : "a step at it changed no game files";
 
 /** The step's turn ended: judge what it landed, or look again. */
 export const applyTurn = (
@@ -785,10 +789,9 @@ export const applyTurn = (
       ? end(unknown, "stalled", "keep going could not tell which build its steps started from", log)
       : go(unknown, LOOK, log);
   }
-  // The bot step changes no game files by design: it is judged by its build.
-  // Any other step that changed nothing is set aside, so the same step is
-  // never sent again as it was: the policy has nothing new to add to it.
-  if (result.build === null || (result.files === 0 && turn.proposal.why !== "bot")) {
+  // A step that changed nothing is set aside, so the same step is never sent
+  // again as it was: the policy has nothing new to add to it.
+  if (result.build === null || result.files === 0) {
     const record = recordOf(state, cycle, input.now, {
       verdict: "no-change",
       reason: "the turn changed no game files",

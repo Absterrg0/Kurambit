@@ -8,6 +8,8 @@
 //   turn ends), then reads the folder's build and whether the folder still
 //   holds it, its facts (the ones the look before measured, when the build is
 //   the same), the chat's last `Next:` line and whether a play bot exists.
+//   A booting game with none gets one first, written once per run in a
+//   session of its own (botSetup.ts); the look waits for it.
 // - turn: posts the step's message in the chat as an ordinary queued turn;
 //   GameRunTurnReactor follows that turn to its build.
 // - judge: measures the step's build and its base, never superseded, and
@@ -48,6 +50,7 @@ import * as GameBot from "../GameBot.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameRunTurnReactor from "./GameRunTurnReactor.ts";
+import { makeBotSetup } from "./botSetup.ts";
 import { toolReason, toolWait } from "./handBack.ts";
 import { retrying } from "./retrying.ts";
 
@@ -78,6 +81,7 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const jobs = yield* GameRunJobs.GameRunJobs;
   const turns = yield* GameRunTurnReactor.GameRunTurnReactor;
+  const botSetup = makeBotSetup({ engine, threads, projections, turnAdmission, bots, builds });
 
   /** The run and its step in flight, if this job's attempt still holds it. */
   const current = (job: GameRunJobs.GameRunStepJob) =>
@@ -170,23 +174,54 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const step = located.record.step;
       if (step.kind !== "look") return;
-      // Never two writers: the person's turn goes first. A turn that ends wakes this job again.
-      if (!(yield* gameIdle(located))) return;
+      const setup = yield* botSetup.sessions(located);
+      // Never two writers: the person's turn goes first. A turn that ends wakes
+      // this job again, as does a setup session's end or cap.
+      if (!(yield* gameIdle(located))) return yield* botSetup.cap(located, setup);
       yield* startStep(located);
       const threadId = located.run.threadId;
       const root = yield* projects.resolve(threadId);
+      // Before the folder is read: a setup's bot is no edit once it is kept.
+      const finished = yield* botSetup.finish(located, root, setup);
+      if (finished === "wait") return;
       const { build, edited } = yield* builds.current(threadId);
+      const facts = edited
+        ? null
+        : ((step.known !== undefined && step.known.build === build
+            ? yield* lookedAt(located, step.known.look)
+            : null) ?? (yield* factsOf(threadId, build)));
+      const bot = yield* botSetup.played(root, 0);
+      // Once per run, a booting game with no play bot gets one: the skilled
+      // tier is the one fact that says a real player can win.
+      if (
+        located.run.botSetup === undefined &&
+        finished === null &&
+        !edited &&
+        !bot &&
+        facts !== null &&
+        facts.boots.status === "measured" &&
+        facts.boots.value.ok
+      ) {
+        const started = yield* botSetup.start(located);
+        if (started === "wait") return;
+        return yield* complete(located, {
+          kind: "look",
+          current: build,
+          facts,
+          next: yield* nextLine(threadId),
+          bot,
+          edited,
+          botSetup: started,
+        });
+      }
       yield* complete(located, {
         kind: "look",
         current: build,
-        facts: edited
-          ? null
-          : ((step.known !== undefined && step.known.build === build
-              ? yield* lookedAt(located, step.known.look)
-              : null) ?? (yield* factsOf(threadId, build))),
+        facts,
         next: yield* nextLine(threadId),
-        bot: (yield* bots.latestPlayBot(root)) !== null,
+        bot,
         edited,
+        ...(finished === null ? {} : { botSetup: finished }),
       });
     });
 

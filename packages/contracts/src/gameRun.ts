@@ -41,7 +41,11 @@ export type GameRunEnding = typeof GameRunEnding.Type;
 export const GameKeepGoingMode = Schema.Literals(["off", "guided", "autopilot"]);
 export type GameKeepGoingMode = typeof GameKeepGoingMode.Type;
 
-/** Why the run chose a step, in the order it looks. */
+/**
+ * Why the run chose a step, in the order it looks. "bot" is only on steps an
+ * earlier Kurambit took: the play bot is now written once, as setup, outside
+ * the steps (GameKeepGoingBotSetup).
+ */
 export const GameRunStepWhy = Schema.Literals([
   "steer",
   "blocker",
@@ -81,6 +85,23 @@ export const GameKeepGoingPhase = Schema.Literals([
   "undoing",
 ]);
 export type GameKeepGoingPhase = typeof GameKeepGoingPhase.Type;
+
+/**
+ * The play bot keep going writes once per run, in a session of its own (a
+ * subagent of the chat) so it never re-reads the game chat: the harness's
+ * measuring instrument for the skilled fact, never a step.
+ */
+export const GameKeepGoingBotSetup = Schema.Struct({
+  /** The setup's child thread (its last one, after a fix-up). */
+  thread: ThreadId,
+  state: Schema.Literals(["running", "written", "failed"]),
+  /** Input + output of its sessions as the provider reported them; null when none was. */
+  tokens: Schema.NullOr(Schema.Number),
+  minutes: Schema.NullOr(Schema.Number),
+  /** Why it failed, so keep going goes on without the skilled fact and says so; "" otherwise. */
+  reason: Schema.String,
+});
+export type GameKeepGoingBotSetup = typeof GameKeepGoingBotSetup.Type;
 
 export const GameKeepGoingStepRef = Schema.Struct({
   n: PositiveInt,
@@ -136,6 +157,8 @@ export const GameKeepGoingStatus = Schema.Struct({
   blocked: Schema.NullOr(Schema.String),
   /** The one plain line the control, the banner and the tool show. */
   message: Schema.String,
+  /** The run's play bot setup; absent when it needed none. */
+  botSetup: Schema.optionalKey(GameKeepGoingBotSetup),
 });
 export type GameKeepGoingStatus = typeof GameKeepGoingStatus.Type;
 

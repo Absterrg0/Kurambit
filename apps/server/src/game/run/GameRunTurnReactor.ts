@@ -48,8 +48,16 @@ import { forkParked } from "../../serverActivation.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameOperations from "../GameOperations.ts";
 import * as GameProjectService from "../GameProjectService.ts";
+import { stopBotSetup } from "./botSetup.ts";
 import { providerEnding } from "./handBack.ts";
-import { type Located, locateIn, projectStep, refusedOnly, supersedeProposal } from "./inFlight.ts";
+import {
+  type Located,
+  locateIn,
+  projectStep,
+  refusedOnly,
+  supersedeProposal,
+  tokensIn,
+} from "./inFlight.ts";
 import { stepLine } from "./runView.ts";
 import { type GameRunWorkBroke, retrying } from "./retrying.ts";
 
@@ -276,23 +284,10 @@ const make = Effect.gen(function* () {
         }),
       );
 
-  /** Input plus output tokens of the turn's provider turns, as the provider reported them. */
   const tokensOf = (threadId: ThreadId, chain: ReadonlyArray<OrchestrationV2Run>) =>
-    Effect.map(threads.getThreadRecords(threadId, ["attempts", "providerTurns"]), (records) => {
-      const ids = new Set(chain.map((run) => run.id));
-      const attempts = new Set(
-        records.attempts.filter((each) => ids.has(each.runId)).map((each) => each.id),
-      );
-      let sum: number | null = null;
-      for (const turn of records.providerTurns) {
-        const usage = turn.turnTokenUsage;
-        if (turn.runAttemptId === null || !attempts.has(turn.runAttemptId) || usage === undefined)
-          continue;
-        if (usage.inputTokens === undefined && usage.outputTokens === undefined) continue;
-        sum = (sum ?? 0) + (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-      }
-      return sum;
-    });
+    Effect.map(threads.getThreadRecords(threadId, ["attempts", "providerTurns"]), (records) =>
+      tokensIn(records, chain),
+    );
 
   /** The person steered the turn: a message of theirs went into one of its runs. */
   const steeredBy = (threadId: ThreadId, chain: ReadonlyArray<OrchestrationV2Run>) =>
@@ -559,8 +554,12 @@ const make = Effect.gen(function* () {
       const run = records.gameRuns.at(-1);
       if (run === undefined) return;
       yield* operations.runChanged(root, run.status === "ended" ? null : stepLine());
-      // A run that ended has no work left: Off, a pause or the end stop its jobs.
-      if (run.status === "ended") yield* jobs.stopRun(run.id);
+      // A run that ended has no work left: Off, a pause or the end stop its jobs
+      // and its bot setup's session.
+      if (run.status === "ended") {
+        yield* jobs.stopRun(run.id);
+        yield* stopBotSetup(engine, threads, run);
+      }
     });
 
   /**
