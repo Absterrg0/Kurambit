@@ -1099,12 +1099,21 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
    * watching the folder sees nothing), files the checkpoint lacks that are not
    * ignored go, and nothing outside the scope, nor the user's index, changes.
    */
-  const restoreScoped = (cwd: string, commitOid: string, filePaths: ReadonlyArray<string>) =>
+  const restoreScoped = (
+    cwd: string,
+    commitOid: string,
+    filePaths: ReadonlyArray<string>,
+    excludePaths: ReadonlyArray<string>,
+  ) =>
     Effect.gen(function* () {
       const operation = "GitVcsDriver.checkpoints.restoreCheckpoint";
       if (filePaths.length === 0) return;
       const { top, prefix } = yield* resolveTopLevel(cwd);
-      const specs = scopeSpecs(prefix, filePaths);
+      // Excluded paths are neither written nor removed: both lists below are read through these specs.
+      const specs = [
+        ...scopeSpecs(prefix, filePaths),
+        ...excludePaths.map((file) => `:(top,exclude,literal)${prefix}${file}`),
+      ];
       yield* withTempIndex(top, (env) =>
         Effect.gen(function* () {
           // A seeded copy of the user's index hashes only the files that may
@@ -2161,7 +2170,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         return false;
       }
       if (input.filePaths !== undefined) {
-        yield* restoreScoped(input.cwd, commitOid, input.filePaths);
+        yield* restoreScoped(input.cwd, commitOid, input.filePaths, input.excludePaths ?? []);
         return true;
       }
 

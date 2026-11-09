@@ -11,7 +11,7 @@ import { checkpointRefForGameRun } from "../../checkpointing/Utils.ts";
 import type * as GameOperations from "../GameOperations.ts";
 import type * as GameStage from "../GameStage.ts";
 import { causeText } from "../runSetup.ts";
-import { restoredPaths } from "./buildNames.ts";
+import { restoredPaths, unrestoredPaths } from "./buildNames.ts";
 
 type Checkpoints = CheckpointStore.CheckpointStore["Service"];
 
@@ -40,9 +40,12 @@ const isGameCode = (lane: string) => (path: string) =>
   !path.endsWith(".import") &&
   !path.endsWith(".uid");
 
-/** What a restore covers. */
+const under = (roots: ReadonlyArray<string>, path: string) =>
+  roots.some((root) => path === root || path.startsWith(`${root}/`));
+
+/** What a restore covers: the one rule for what it writes, what a build is and what "edited" means. */
 export const isRestored = (lane: string) => (path: string) =>
-  restoredPaths(lane).some((root) => path === root || path.startsWith(`${root}/`));
+  under(restoredPaths(lane), path) && !under(unrestoredPaths, path);
 
 const revision = (oid: string) => CheckpointRef.make(oid);
 
@@ -184,6 +187,7 @@ export const buildStep = (
             cwd: root,
             checkpointRef: revision(op.sha),
             filePaths: restoredPaths(lane),
+            excludePaths: unrestoredPaths,
           }),
         );
         if (!restored) return outcome({ ok: false, sha: op.sha, detail: "the build is gone" });

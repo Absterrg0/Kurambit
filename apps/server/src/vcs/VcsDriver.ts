@@ -30,6 +30,8 @@ export interface VcsRestoreCheckpointInput {
    * its index reset.
    */
   readonly filePaths?: ReadonlyArray<string>;
+  /** With `filePaths`: paths below them, relative to `cwd`, left as they are. */
+  readonly excludePaths?: ReadonlyArray<string>;
 }
 
 export interface VcsUpdateCheckpointRefInput {

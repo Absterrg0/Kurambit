@@ -30,6 +30,8 @@ export interface RestoreCheckpointInput {
    * contents), writing only the files that differ and never the index.
    */
   readonly filePaths?: ReadonlyArray<string>;
+  /** With `filePaths`: paths below them, relative to `cwd`, left as they are. */
+  readonly excludePaths?: ReadonlyArray<string>;
 }
 
 export interface UpdateCheckpointRefInput {

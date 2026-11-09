@@ -32,7 +32,7 @@ const NOT_SENDING = Atom.make(null);
 const isGameOperationError = Schema.is(GameOperationError);
 
 export const restoreQuestion = (name: string) =>
-  `Go back to ${name}?\nThe engine project, art/ and ASSETS.md become this build; what the folder holds now is saved as a build first, so you can undo this. Notes, PLAN.md, VISION.md, bots and run records stay as they are.`;
+  `Go back to ${name}?\nThe engine project, art/, ASSETS.md and the play bot become this build's; what the folder holds now is saved as a build first, so you can undo this. Notes, PLAN.md, VISION.md and run records stay as they are.`;
 
 /**
  * Asks for a build back and follows it through the Builds list: the call

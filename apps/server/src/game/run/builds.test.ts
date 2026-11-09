@@ -15,7 +15,7 @@ import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as Fiber from "effect/Fiber";
 import * as GameOperations from "../GameOperations.ts";
 import { BuildName } from "./buildNames.ts";
-import { buildStep, captureBuild, withBuildInFolder } from "./builds.ts";
+import { buildStep, captureBuild, isRestored, measureChange, withBuildInFolder } from "./builds.ts";
 
 const layer = Layer.mergeAll(
   CheckpointStore.layer.pipe(
@@ -137,6 +137,63 @@ it.effect("an undo with expect moves nothing once the folder moved on, and undoe
     expect(read()).toBe("base\n");
     expect((yield* undo("restores/held-before")).kind).toBe("done");
     expect(read()).toBe("base\n");
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }).pipe(Effect.provide(layer)),
+);
+
+// An undo is exactly as before, the play bot included: a step's bot edit goes
+// back with its game edit, while the bot kits Kurambit writes and the notes
+// stay as they are, and a kit refreshed by a new run is no edit of the folder.
+it.effect("a restore takes back the play bot, never its kits or the notes", () =>
+  Effect.gen(function* () {
+    const lock = yield* lockOf;
+    const { root } = repo();
+    const checkpoints = yield* CheckpointStore.CheckpointStore;
+    const at = (path: string) => NodePath.join(root, path);
+    const write = (path: string, text: string) => {
+      NodeFS.mkdirSync(NodePath.dirname(at(path)), { recursive: true });
+      NodeFS.writeFileSync(at(path), text);
+    };
+    const read = (path: string) =>
+      NodeFS.existsSync(at(path)) ? NodeFS.readFileSync(at(path), "utf8") : null;
+    const runId = "game-builds";
+    write("web/main.js", "base\n");
+    write(".studio/bot/play.mjs", "setup bot\n");
+    write(".studio/bot/kit/KIT-GUIDE.md", "kit v1\n");
+    write(".studio/notes.md", "notes v1\n");
+    const base = yield* captureBuild({ checkpoints, lock }, root, runId, "t/base");
+    // A new run refreshes the kit: the folder still holds the build.
+    write(".studio/bot/kit/KIT-GUIDE.md", "kit v2\n");
+    const refreshed = yield* captureBuild({ checkpoints, lock }, root, runId, "t/refreshed");
+    const restored = isRestored("web");
+    expect((yield* measureChange(checkpoints, root, restored, base, refreshed)).changed).toBe(
+      false,
+    );
+    write("web/main.js", "step\n");
+    write(".studio/bot/play.mjs", "step's bot\n");
+    write(".studio/bot/helper.mjs", "step's helper\n");
+    write(".studio/bot/kit/KIT-GUIDE.md", "kit v3\n");
+    write(".studio/notes.md", "notes v2\n");
+    const step = yield* captureBuild({ checkpoints, lock }, root, runId, "t/step");
+
+    expect(restored(".studio/bot/play.mjs")).toBe(true);
+    expect(restored(".studio/bot/kit/KIT-GUIDE.md")).toBe(false);
+    expect(restored(".studio/bot/harness-kit/kit.mjs")).toBe(false);
+    expect(restored(".studio/botany.md")).toBe(false);
+    expect(restored(".studio/notes.md")).toBe(false);
+
+    const undone = yield* withBuildInFolder(
+      { stage, checkpoints, lock },
+      { root, runId, lane: "web" },
+      { sha: base, park: "restores/bot-before", check: "restores/bot-after", expect: step },
+      (current) => Effect.succeed({ value: current, putBack: false }),
+    );
+    expect(undone.kind).toBe("done");
+    expect(read("web/main.js")).toBe("base\n");
+    expect(read(".studio/bot/play.mjs")).toBe("setup bot\n");
+    expect(read(".studio/bot/helper.mjs")).toBe(null);
+    expect(read(".studio/bot/kit/KIT-GUIDE.md")).toBe("kit v3\n");
+    expect(read(".studio/notes.md")).toBe("notes v2\n");
     NodeFS.rmSync(root, { recursive: true, force: true });
   }).pipe(Effect.provide(layer)),
 );
