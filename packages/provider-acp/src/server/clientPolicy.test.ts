@@ -14,6 +14,7 @@ import {
   makeAcpClientPolicyGrants,
   type AcpRuntimePolicy,
 } from "./clientPolicy.ts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 
 function permissionRequest(
   kind: NonNullable<EffectAcpSchema.RequestPermissionRequest["toolCall"]["kind"]>,
@@ -168,8 +169,25 @@ describe("acpPermissionDisposition", () => {
           realPolicy,
           permissionRequest("edit", [{ path: "linked-directory/../escaped-file.ts" }]),
         ),
+        // Win32 drops `link/..` before opening anything, so there the file stays inside.
+        HostProcess.Platform.defaultValue() === "win32" ? "allow" : "deny",
+        "`..` must resolve the way the platform opens the path",
+      );
+      assert.equal(
+        acpPermissionDisposition(
+          realPolicy,
+          permissionRequest("edit", [{ path: "missing/../linked-directory/new-file.ts" }]),
+        ),
         "deny",
-        "physical symlink traversal must be resolved before parent segments",
+        "`mkdir -p` would create `missing`, step back, and follow the link",
+      );
+      assert.equal(
+        acpPermissionDisposition(
+          realPolicy,
+          permissionRequest("edit", [{ path: "linked-directory./new-file.ts" }]),
+        ),
+        // Win32 drops the trailing dot and follows the link; elsewhere it is a new folder.
+        HostProcess.Platform.defaultValue() === "win32" ? "deny" : "allow",
       );
     }).pipe(Effect.provide(NodeServices.layer)),
   );

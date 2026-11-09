@@ -1,8 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import type { ProviderRequestKind, RuntimeMode } from "@kurambit/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
-import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+
+import { isPathWithinRoot, realPathForContainment } from "@kurambit/shared/pathContainment";
 
 export interface AcpRuntimePolicy {
   readonly runtimeMode: RuntimeMode;
@@ -25,54 +26,6 @@ function resolveAcpPermissionPath(path: string, cwd: string | null): string | un
   if (NodePath.isAbsolute(trimmed)) return trimmed;
   if (cwd === null || cwd.trim().length === 0) return undefined;
   return `${cwd}${cwd.endsWith(NodePath.sep) ? "" : NodePath.sep}${trimmed}`;
-}
-
-function acpPathIsWithinRoot(path: string, root: string): boolean {
-  const relative = NodePath.relative(root, path);
-  return (
-    relative === "" ||
-    (relative !== ".." &&
-      !relative.startsWith(`..${NodePath.sep}`) &&
-      !NodePath.isAbsolute(relative))
-  );
-}
-
-/**
- * `realpath` cannot resolve a file that has not been created yet, so walk up to the deepest
- * existing ancestor and append the missing suffix to that ancestor's canonical path. If an
- * existing entry cannot be canonicalized (for example, a broken symlink), fail closed.
- */
-function acpCanonicalPathForContainment(path: string): string | undefined {
-  // Do not lexically normalize before realpath. For a path such as
-  // `workspace/link/../file`, the kernel resolves `link` before `..`; an
-  // eager NodePath.resolve would erase that symlink traversal and could turn
-  // an outside target into an apparently in-workspace path.
-  let candidate = path;
-  const missingSuffix: Array<string> = [];
-
-  while (true) {
-    try {
-      return NodePath.resolve(NodeFS.realpathSync.native(candidate), ...missingSuffix);
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
-        return undefined;
-      }
-    }
-
-    try {
-      NodeFS.lstatSync(candidate);
-      return undefined;
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
-        return undefined;
-      }
-    }
-
-    const parent = NodePath.dirname(candidate);
-    if (parent === candidate) return undefined;
-    missingSuffix.unshift(NodePath.basename(candidate));
-    candidate = parent;
-  }
 }
 
 interface AcpPolicyOperation {
@@ -118,7 +71,7 @@ function acpWorkspaceWriteAllowsMutation(
       : null;
   const roots: Array<string> = [];
   if (cwd !== null) {
-    const canonicalCwd = acpCanonicalPathForContainment(cwd);
+    const canonicalCwd = realPathForContainment(cwd);
     if (canonicalCwd !== undefined) roots.push(canonicalCwd);
   }
   const writableRoots = sandboxPolicy.writableRoots;
@@ -127,7 +80,7 @@ function acpWorkspaceWriteAllowsMutation(
       if (typeof writableRoot !== "string") continue;
       const resolved = resolveAcpPermissionPath(writableRoot, cwd);
       if (resolved === undefined) continue;
-      const canonicalRoot = acpCanonicalPathForContainment(resolved);
+      const canonicalRoot = realPathForContainment(resolved);
       if (canonicalRoot !== undefined) roots.push(canonicalRoot);
     }
   }
@@ -138,11 +91,10 @@ function acpWorkspaceWriteAllowsMutation(
   }
   for (const location of locations) {
     const resolved = resolveAcpPermissionPath(location.path, cwd);
-    const canonicalPath =
-      resolved === undefined ? undefined : acpCanonicalPathForContainment(resolved);
+    const canonicalPath = resolved === undefined ? undefined : realPathForContainment(resolved);
     if (
       canonicalPath === undefined ||
-      !roots.some((root) => acpPathIsWithinRoot(canonicalPath, root))
+      !roots.some((root) => isPathWithinRoot(canonicalPath, root))
     ) {
       return false;
     }

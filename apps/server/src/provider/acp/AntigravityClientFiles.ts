@@ -3,6 +3,7 @@ import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
+import { isPathWithinRoot, realPathForContainment } from "@kurambit/shared/pathContainment";
 
 /**
  * The agent gates each write behind `session/request_permission`, so only
@@ -10,50 +11,23 @@ import type * as EffectAcpSchema from "effect-acp/compat";
  */
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
-function isInsideRoot(path: Path.Path, root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
 /**
- * Symlinks resolve before the check, including the final component, so a link
- * inside the workspace cannot read or write through to a file outside it.
+ * Links resolve before the check, including the final component and folders a
+ * write would create, so a link inside the workspace cannot reach a file
+ * outside it.
  */
 const resolveClientFilePath = Effect.fn("AntigravityClientFiles.resolveClientFilePath")(
   function* (input: {
-    readonly fileSystem: FileSystem.FileSystem;
     readonly path: Path.Path;
     readonly allowedRoots: ReadonlyArray<string>;
     readonly requestPath: string;
   }) {
-    const { path } = input;
-    const resolved = path.resolve(input.requestPath);
-    const outside = EffectAcpErrors.AcpRequestError.invalidParams(
-      `Path '${input.requestPath}' is outside the session workspace.`,
-    );
-    const real = yield* input.fileSystem.realPath(resolved).pipe(
-      Effect.catch(() =>
-        Effect.gen(function* () {
-          // Only a missing file (a new write) falls back to its parent; a
-          // dangling or unreadable link must not be followed on write.
-          const entryExists = yield* input.fileSystem.readLink(resolved).pipe(
-            Effect.as(true),
-            Effect.catch(() => input.fileSystem.exists(resolved)),
-            Effect.orElseSucceed(() => true),
-          );
-          if (entryExists) return yield* outside;
-          const parent = yield* input.fileSystem
-            .realPath(path.dirname(resolved))
-            .pipe(Effect.orElseSucceed(() => path.dirname(resolved)));
-          return path.join(parent, path.basename(resolved));
-        }),
-      ),
-    );
-    const roots = yield* Effect.forEach(input.allowedRoots, (root) =>
-      input.fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root)),
-    );
-    if (!roots.some((root) => isInsideRoot(path, root, real))) {
-      return yield* outside;
+    const real = realPathForContainment(input.path.resolve(input.requestPath));
+    const roots = input.allowedRoots.flatMap((root) => realPathForContainment(root) ?? []);
+    if (real === undefined || !roots.some((root) => isPathWithinRoot(real, root))) {
+      return yield* EffectAcpErrors.AcpRequestError.invalidParams(
+        `Path '${input.requestPath}' is outside the session workspace.`,
+      );
     }
     return real;
   },
