@@ -5,6 +5,8 @@ import {
   stripSlashPrefixedWindowsDrive,
 } from "./path.ts";
 
+const FILE_URL_SCHEME_PATTERN = /^file:/i;
+
 const POSITION_SUFFIX_CAPTURE_PATTERN = /:(\d+)(?::(\d+))?$/;
 
 const POSITION_HASH_PATTERN = /^#L(\d+)(?:C(\d+))?$/i;
@@ -17,10 +19,11 @@ const POSITION_HASH_PATTERN = /^#L(\d+)(?:C(\d+))?$/i;
 export function parseFileUrlHref(
   href: string,
 ): { readonly path: string; readonly hash: string } | null {
+  // Chromium on Windows parses `d:x` and `\\host\x` as file URLs, so the scheme is
+  // checked on the text, before `URL` sees it.
+  if (!FILE_URL_SCHEME_PATTERN.test(href)) return null;
   try {
     const parsed = new URL(href);
-    if (parsed.protocol.toLowerCase() !== "file:") return null;
-
     const uncHostname = parsed.hostname.toLowerCase() === "localhost" ? "" : parsed.hostname;
     const path = uncHostname
       ? `\\\\${uncHostname}${parsed.pathname.replaceAll("/", "\\")}`
