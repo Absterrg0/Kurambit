@@ -12,6 +12,7 @@ vi.mock("electron", () => ({
     createFromBuffer: () => ({ isEmpty: () => false, getSize: () => ({ width: 2, height: 1 }) }),
   },
 }));
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import {
   HyprlandCaptureSetup,
   captureHyprlandWindow,
@@ -85,7 +86,10 @@ it("discovery neither installs a helper nor requests a screenshot", async () => 
 });
 it("installs offline at a stable executable path and probes only capabilities", async () => {
   await setup.perform("install-hyprland-helper");
-  expect((await NodeFSP.stat(hyprlandCaptureExecutable(paths))).mode & 0o777).toBe(0o755);
+  // Windows has no execute bit to set.
+  if (HostProcess.Platform.defaultValue() !== "win32") {
+    expect((await NodeFSP.stat(hyprlandCaptureExecutable(paths))).mode & 0o777).toBe(0o755);
+  }
   expect(await setup.state()).toMatchObject({ status: "ready", feedbackAvailable: true });
   expect(execute.mock.calls.map(([file, args]) => [file, args])).toEqual([
     [hyprlandCaptureExecutable(paths), ["check"]],

@@ -178,9 +178,10 @@ const readerWorkerSource = `
 const { parentPort, workerData } = require("node:worker_threads");
 const { DatabaseSync } = require("node:sqlite");
 let db;
+let next;
 try {
   // A read-only open cannot be undone by SQL, unlike PRAGMA query_only.
-  const next = new DatabaseSync(workerData.filename, {
+  next = new DatabaseSync(workerData.filename, {
     readOnly: true,
     allowExtension: workerData.allowExtension,
   });
@@ -191,6 +192,8 @@ try {
   db = next;
   parentPort.postMessage({ type: "ready" });
 } catch (error) {
+  // An open handle outlives this message until the worker ends, and on Windows it keeps the file from being deleted.
+  try { next?.close(); } catch {}
   parentPort.postMessage({ type: "unavailable", message: String(error && error.message ? error.message : error) });
 }
 const statements = new Map();

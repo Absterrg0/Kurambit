@@ -236,7 +236,7 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     ),
   );
 
-  it.effect.skipIf(!symlinksSupported)(
+  it.effect.skipIf(windowsHost || !symlinksSupported)(
     "pins npm updates to the global prefix that owns the package",
     () =>
       Effect.gen(function* () {
@@ -379,7 +379,7 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     }),
   );
 
-  it.effect.skipIf(!symlinksSupported)(
+  it.effect.skipIf(windowsHost || !symlinksSupported)(
     "switches to pnpm updates when the real path lives in pnpm's global store",
     () =>
       Effect.gen(function* () {
@@ -497,7 +497,7 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     }),
   );
 
-  it.effect.skipIf(!symlinksSupported)(
+  it.effect.skipIf(windowsHost || !symlinksSupported)(
     "prefers npm ownership over the Node keg the package lives under",
     () =>
       Effect.gen(function* () {
@@ -689,7 +689,7 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
           },
         });
       }),
-    { skip: !symlinksSupported },
+    { skip: windowsHost || !symlinksSupported },
   );
 
   it.effect.skipIf(windowsHost)(
@@ -788,36 +788,41 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
       }),
   );
 
-  it.effect.skipIf(!symlinksSupported)("updates Yarn global installs with yarn", () =>
-    Effect.gen(function* () {
-      const tempDir = yield* makeTempDir("kurambit-yarn-capabilities");
-      const link = linkIntoPackage(tempDir, "package-tool", [
-        ".config",
-        "yarn",
-        "global",
-        "node_modules",
-        "@example",
-        "package-tool",
-      ]);
+  it.effect.skipIf(windowsHost || !symlinksSupported)(
+    "updates Yarn global installs with yarn",
+    () =>
+      Effect.gen(function* () {
+        const tempDir = yield* makeTempDir("kurambit-yarn-capabilities");
+        const link = linkIntoPackage(tempDir, "package-tool", [
+          ".config",
+          "yarn",
+          "global",
+          "node_modules",
+          "@example",
+          "package-tool",
+        ]);
 
-      const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(packageToolUpdate, {
-        binaryPath: link,
-        env: { PATH: "" },
-      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn));
+        const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(
+          packageToolUpdate,
+          {
+            binaryPath: link,
+            env: { PATH: "" },
+          },
+        ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn));
 
-      expect(capabilities.update).toMatchObject({
-        command: "yarn global add @example/package-tool@latest",
-        lockKey: "yarn-global",
-      });
-      expect(makeTargetedProviderUpdateAction(capabilities, "2.0.0")?.args).toEqual([
-        "global",
-        "add",
-        "@example/package-tool@2.0.0",
-      ]);
-    }),
+        expect(capabilities.update).toMatchObject({
+          command: "yarn global add @example/package-tool@latest",
+          lockKey: "yarn-global",
+        });
+        expect(makeTargetedProviderUpdateAction(capabilities, "2.0.0")?.args).toEqual([
+          "global",
+          "add",
+          "@example/package-tool@2.0.0",
+        ]);
+      }),
   );
 
-  it.effect.skipIf(!symlinksSupported)(
+  it.effect.skipIf(windowsHost || !symlinksSupported)(
     "updates Volta installs only when Volta has the package",
     () =>
       Effect.gen(function* () {

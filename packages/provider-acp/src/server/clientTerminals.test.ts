@@ -79,14 +79,18 @@ describe("AcpClientTerminals", () => {
         environmentForSession: () => ({ KURAMBIT_ACP_MCP_NODE: "mailbox-probe" }),
       });
       yield* Effect.addFinalizer(() => terminals.disposeAll);
+      // Shell source runs in the platform shell, which is cmd.exe on Windows.
+      const windows = yield* HostProcess.isWindows;
       const terminal = yield* terminals.create({
         sessionId: "devin",
-        command: 'printf "%s\\n" "$KURAMBIT_ACP_MCP_NODE" | tr a-z A-Z',
+        command: windows
+          ? "echo %KURAMBIT_ACP_MCP_NODE%| findstr /i PROBE"
+          : 'printf "%s\\n" "$KURAMBIT_ACP_MCP_NODE" | tr a-z A-Z',
       });
       const exit = yield* terminals.waitForExit({ sessionId: "devin", ...terminal });
       const output = yield* terminals.output({ sessionId: "devin", ...terminal });
       expect(exit.exitCode).toBe(0);
-      expect(output.output.trim()).toBe("MAILBOX-PROBE");
+      expect(output.output.trim()).toBe(windows ? "mailbox-probe" : "MAILBOX-PROBE");
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 

@@ -49,7 +49,14 @@ it.effect("reads Go limits with the instance's XDG credentials and preserves res
         FileSystem.FileSystem,
         FileSystem.makeNoop({
           readFileString: (path) => {
-            NodeAssert.equal(path, "/instance/data/opencode/auth.json");
+            // Joined with the platform's separator.
+            NodeAssert.deepEqual(path.split(/[\\/]/), [
+              "",
+              "instance",
+              "data",
+              "opencode",
+              "auth.json",
+            ]);
             return Effect.succeed(
               JSON.stringify({ "opencode-go": { type: "api", key: "instance-key" } }),
             );

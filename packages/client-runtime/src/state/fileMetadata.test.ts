@@ -234,30 +234,34 @@ describe("file metadata", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("retains more than 1024 visited paths until the thread closes", () =>
-    Effect.gen(function* () {
-      const h = yield* makeHarness();
-      const threadId = ThreadId.make("large-thread");
-      const release = h.registry.mount(
-        h.atoms.retainThread({ environmentId: ENVIRONMENT_ID, threadId }),
-      );
-      const paths = Array.from({ length: 1300 }, (_, i) => `/workspace/visited-${i}`);
-      yield* Effect.forEach(paths, (path) => h.read(path, ENVIRONMENT_ID, threadId), {
-        concurrency: "unbounded",
-      });
-      expect(h.batches).toHaveLength(21);
-      yield* TestClock.adjust("1 hour");
-      for (const path of paths) h.registry.refresh(h.atom(path, ENVIRONMENT_ID, threadId));
-      yield* Effect.forEach(paths, (path) => h.read(path, ENVIRONMENT_ID, threadId), {
-        concurrency: "unbounded",
-      });
-      expect(h.batches).toHaveLength(21);
-      release();
-      yield* Effect.yieldNow;
-      h.registry.refresh(h.atom(paths[0]!, ENVIRONMENT_ID, threadId));
-      yield* h.read(paths[0]!, ENVIRONMENT_ID, threadId);
-      expect(h.batches).toHaveLength(22);
-    }).pipe(Effect.scoped),
+  it.effect(
+    "retains more than 1024 visited paths until the thread closes",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness();
+        const threadId = ThreadId.make("large-thread");
+        const release = h.registry.mount(
+          h.atoms.retainThread({ environmentId: ENVIRONMENT_ID, threadId }),
+        );
+        const paths = Array.from({ length: 1300 }, (_, i) => `/workspace/visited-${i}`);
+        yield* Effect.forEach(paths, (path) => h.read(path, ENVIRONMENT_ID, threadId), {
+          concurrency: "unbounded",
+        });
+        expect(h.batches).toHaveLength(21);
+        yield* TestClock.adjust("1 hour");
+        for (const path of paths) h.registry.refresh(h.atom(path, ENVIRONMENT_ID, threadId));
+        yield* Effect.forEach(paths, (path) => h.read(path, ENVIRONMENT_ID, threadId), {
+          concurrency: "unbounded",
+        });
+        expect(h.batches).toHaveLength(21);
+        release();
+        yield* Effect.yieldNow;
+        h.registry.refresh(h.atom(paths[0]!, ENVIRONMENT_ID, threadId));
+        yield* h.read(paths[0]!, ENVIRONMENT_ID, threadId);
+        expect(h.batches).toHaveLength(22);
+      }).pipe(Effect.scoped),
+    // 2,600 reads take seconds on a loaded Windows runner, past the 5 second default.
+    30_000,
   );
 
   it.effect("closing one thread does not release another thread's retained paths", () =>

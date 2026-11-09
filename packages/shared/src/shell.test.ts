@@ -388,32 +388,35 @@ effectIt.layer(NodeServices.layer)("isCommandAvailable", (it) => {
       ),
   );
 
-  it.effect.each(["win32", "linux"] as const)(
-    "records available commands as successful lookups on %s",
-    (platform) =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-command-trace-" });
-        const executable = path.join(cwd, platform === "win32" ? "available.cmd" : "available");
-        yield* fs.writeFileString(executable, "");
-        yield* fs.chmod(executable, 0o700);
-        const env = { PATH: cwd, PATHEXT: ".CMD" };
-        for (const command of ["available", executable]) {
-          const { result, spans } = yield* recordCommandTrace(isCommandAvailable(command, { env }));
-          expect(Result.getOrThrow(result)).toBe(true);
-          expect(spans.length).toBeGreaterThan(0);
-          for (const span of spans) {
-            expect(span.status._tag).toBe("Ended");
-            if (span.status._tag === "Ended") {
-              expect(Exit.isSuccess(span.status.exit), span.name).toBe(true);
-            }
+  // A Windows temp folder cannot sit on a POSIX PATH: its drive colon is the delimiter.
+  it.effect.each(
+    HostProcess.Platform.defaultValue() === "win32"
+      ? (["win32"] as const)
+      : (["win32", "linux"] as const),
+  )("records available commands as successful lookups on %s", (platform) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-command-trace-" });
+      const executable = path.join(cwd, platform === "win32" ? "available.cmd" : "available");
+      yield* fs.writeFileString(executable, "");
+      yield* fs.chmod(executable, 0o700);
+      const env = { PATH: cwd, PATHEXT: ".CMD" };
+      for (const command of ["available", executable]) {
+        const { result, spans } = yield* recordCommandTrace(isCommandAvailable(command, { env }));
+        expect(Result.getOrThrow(result)).toBe(true);
+        expect(spans.length).toBeGreaterThan(0);
+        for (const span of spans) {
+          expect(span.status._tag).toBe("Ended");
+          if (span.status._tag === "Ended") {
+            expect(Exit.isSuccess(span.status.exit), span.name).toBe(true);
           }
         }
-      }).pipe(
-        Effect.provideService(HostProcess.Platform, platform),
-        Effect.provideService(CommandResolutionCache, new Map()),
-      ),
+      }
+    }).pipe(
+      Effect.provideService(HostProcess.Platform, platform),
+      Effect.provideService(CommandResolutionCache, new Map()),
+    ),
   );
 
   it.effect("returns false when PATH is empty", () =>

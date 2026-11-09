@@ -172,49 +172,53 @@ describe("stopBenchmarkServerAt", () => {
     }
   };
 
-  it("stops the detached server group left by a killed harness", () =>
-    withHome(async (home) => {
-      const checkout = NodePath.join(home, "checkout");
-      const binDirectory = NodePath.join(checkout, "apps/server/src");
-      await NodeFSP.mkdir(binDirectory, { recursive: true });
-      const stub = NodePath.join(binDirectory, "bin.ts");
-      const grandchildPidPath = NodePath.join(home, "grandchild.pid");
-      await NodeFSP.writeFile(
-        stub,
-        [
-          'import * as NodeChildProcess from "node:child_process";',
-          'import * as NodeFS from "node:fs";',
-          'const child = NodeChildProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          "NodeFS.writeFileSync(process.env.GRANDCHILD_PID_FILE, String(child.pid));",
-          "setInterval(() => {}, 1000);",
-        ].join("\n"),
-      );
-      const server = NodeChildProcess.spawn(process.execPath, [stub, "--base-dir", home], {
-        detached: true,
-        stdio: "ignore",
-        env: { ...process.env, GRANDCHILD_PID_FILE: grandchildPidPath },
-      });
-      const serverPid = server.pid;
-      assert.notEqual(serverPid, undefined);
-      let grandchildPid: number | undefined;
-      try {
-        await waitFor(() => NodeFS.existsSync(grandchildPidPath));
-        grandchildPid = Number((await NodeFSP.readFile(grandchildPidPath, "utf8")).trim());
-        assert.equal(isAlive(serverPid!), true);
-        assert.equal(isAlive(grandchildPid), true);
-        const logPath = NodePath.join(home, "server.log");
-        await NodeFSP.writeFile(`${logPath}.pid`, `${serverPid}\n${process.pid}\n`);
+  // The harness stops its server by POSIX process group, which Windows does not have.
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "stops the detached server group left by a killed harness",
+    () =>
+      withHome(async (home) => {
+        const checkout = NodePath.join(home, "checkout");
+        const binDirectory = NodePath.join(checkout, "apps/server/src");
+        await NodeFSP.mkdir(binDirectory, { recursive: true });
+        const stub = NodePath.join(binDirectory, "bin.ts");
+        const grandchildPidPath = NodePath.join(home, "grandchild.pid");
+        await NodeFSP.writeFile(
+          stub,
+          [
+            'import * as NodeChildProcess from "node:child_process";',
+            'import * as NodeFS from "node:fs";',
+            'const child = NodeChildProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+            "NodeFS.writeFileSync(process.env.GRANDCHILD_PID_FILE, String(child.pid));",
+            "setInterval(() => {}, 1000);",
+          ].join("\n"),
+        );
+        const server = NodeChildProcess.spawn(process.execPath, [stub, "--base-dir", home], {
+          detached: true,
+          stdio: "ignore",
+          env: { ...process.env, GRANDCHILD_PID_FILE: grandchildPidPath },
+        });
+        const serverPid = server.pid;
+        assert.notEqual(serverPid, undefined);
+        let grandchildPid: number | undefined;
+        try {
+          await waitFor(() => NodeFS.existsSync(grandchildPidPath));
+          grandchildPid = Number((await NodeFSP.readFile(grandchildPidPath, "utf8")).trim());
+          assert.equal(isAlive(serverPid!), true);
+          assert.equal(isAlive(grandchildPid), true);
+          const logPath = NodePath.join(home, "server.log");
+          await NodeFSP.writeFile(`${logPath}.pid`, `${serverPid}\n${process.pid}\n`);
 
-        await stopBenchmarkServerAt({ logPath, homeDir: home, ownerPid: process.pid });
+          await stopBenchmarkServerAt({ logPath, homeDir: home, ownerPid: process.pid });
 
-        await waitFor(() => !isAlive(serverPid!) && !isAlive(grandchildPid!));
-        assert.equal(NodeFS.existsSync(`${logPath}.pid`), false);
-      } finally {
-        if (serverPid !== undefined && isAlive(serverPid)) process.kill(serverPid, "SIGKILL");
-        if (grandchildPid !== undefined && isAlive(grandchildPid))
-          process.kill(grandchildPid, "SIGKILL");
-      }
-    }));
+          await waitFor(() => !isAlive(serverPid!) && !isAlive(grandchildPid!));
+          assert.equal(NodeFS.existsSync(`${logPath}.pid`), false);
+        } finally {
+          if (serverPid !== undefined && isAlive(serverPid)) process.kill(serverPid, "SIGKILL");
+          if (grandchildPid !== undefined && isAlive(grandchildPid))
+            process.kill(grandchildPid, "SIGKILL");
+        }
+      }),
+  );
 
   it("leaves an unrelated PID alone when a stale pid file names it", () =>
     withHome(async (home) => {

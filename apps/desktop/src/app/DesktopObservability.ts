@@ -394,29 +394,27 @@ const writeDevelopmentConsoleOutput = (
     output.write(chunk);
   }).pipe(Effect.ignore);
 
-const writeBackendChildLogRecord = Effect.fn("desktop.observability.writeBackendChildLogRecord")(
-  function* (
-    logFile: RotatingLogFileWriter,
-    input: {
-      readonly message: string;
-      readonly level: "INFO" | "ERROR";
-      readonly annotations: Record<string, unknown>;
-    },
-  ): Effect.fn.Return<void> {
-    return yield* Effect.gen(function* () {
-      const timestamp = DateTime.formatIso(yield* DateTime.now);
-      const encoded = yield* encodeDesktopBackendChildLogRecord({
-        message: input.message,
-        level: input.level,
-        timestamp,
-        annotations: input.annotations,
-        spans: {},
-        fiberId: DESKTOP_BACKEND_CHILD_LOG_FIBER_ID,
-      });
-      yield* logFile.writeText(`${encoded}\n`);
-    }).pipe(Effect.ignore({ log: true }));
-  },
-);
+const encodeBackendChildLogLine = (input: {
+  readonly message: string;
+  readonly level: "INFO" | "ERROR";
+  readonly annotations: Record<string, unknown>;
+}): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const timestamp = DateTime.formatIso(yield* DateTime.now);
+    const encoded = yield* encodeDesktopBackendChildLogRecord({
+      message: input.message,
+      level: input.level,
+      timestamp,
+      annotations: input.annotations,
+      spans: {},
+      fiberId: DESKTOP_BACKEND_CHILD_LOG_FIBER_ID,
+    });
+    return `${encoded}\n`;
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.as(Effect.logWarning("Could not encode a backend child log record", cause), ""),
+    ),
+  );
 
 const PRIMARY_BACKEND_LOG_INSTANCE_ID = PRIMARY_LOCAL_ENVIRONMENT_ID;
 
@@ -459,43 +457,39 @@ const makeBackendOutputLogShape = (
     onSome: (logFile) =>
       Effect.gen(function* () {
         const sessionRef = yield* Ref.make(Option.none<BackendOutputSession>());
+        // One append for the whole dump: a file open per chunk is slow on Windows.
         const writeFailure = Effect.fn("desktop.observability.backendOutput.writeFailure")(
           function* (session: BackendOutputSession, details: string) {
-            yield* writeBackendChildLogRecord(logFile, {
-              message: "backend child process failure output start",
-              level: "ERROR",
-              annotations: {
-                component: "desktop-backend-child",
-                runId: session.runId,
-                instanceId: id,
-                phase: "START",
-                details: session.startDetails,
-              },
-            });
-            for (const output of session.chunks) {
-              yield* writeBackendChildLogRecord(logFile, {
-                message: "backend child process output",
-                level: output.streamName === "stderr" ? "ERROR" : "INFO",
-                annotations: {
-                  component: "desktop-backend-child",
-                  runId: session.runId,
-                  instanceId: id,
-                  stream: output.streamName,
-                  text: textDecoder.decode(output.chunk.subarray(output.offset)),
+            const annotations = {
+              component: "desktop-backend-child",
+              runId: session.runId,
+              instanceId: id,
+            };
+            const lines = yield* Effect.forEach(
+              [
+                {
+                  message: "backend child process failure output start",
+                  level: "ERROR" as const,
+                  annotations: { ...annotations, phase: "START", details: session.startDetails },
                 },
-              });
-            }
-            yield* writeBackendChildLogRecord(logFile, {
-              message: "backend child process failure output end",
-              level: "ERROR",
-              annotations: {
-                component: "desktop-backend-child",
-                runId: session.runId,
-                instanceId: id,
-                phase: "END",
-                details: sanitizeLogValue(details),
-              },
-            });
+                ...session.chunks.map((output) => ({
+                  message: "backend child process output",
+                  level: output.streamName === "stderr" ? ("ERROR" as const) : ("INFO" as const),
+                  annotations: {
+                    ...annotations,
+                    stream: output.streamName,
+                    text: textDecoder.decode(output.chunk.subarray(output.offset)),
+                  },
+                })),
+                {
+                  message: "backend child process failure output end",
+                  level: "ERROR" as const,
+                  annotations: { ...annotations, phase: "END", details: sanitizeLogValue(details) },
+                },
+              ],
+              encodeBackendChildLogLine,
+            );
+            yield* logFile.writeText(lines.join(""));
           },
         );
         return {

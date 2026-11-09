@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import { type CliShimTarget, renderCliShim } from "./DesktopCliShim.ts";
 
 const directories: Array<string> = [];
@@ -63,8 +64,11 @@ const fakeAppImage = (canMount = true) => {
   return { root, image, appImage, shim };
 };
 
+// Linux and macOS installs get an `sh` launcher, which Windows cannot run; it gets the `.cmd` one.
+const itPosix = it.skipIf(HostProcess.Platform.defaultValue() === "win32");
+
 describe("renderCliShim", () => {
-  it("runs the AppImage's bundled CLI with every argument and unmounts after", () => {
+  itPosix("runs the AppImage's bundled CLI with every argument and unmounts after", () => {
     const { root, image, shim } = fakeAppImage();
     const result = run(shim, ["browser", "setup", "a b"]);
     expect(result.status).toBe(3);
@@ -83,7 +87,7 @@ describe("renderCliShim", () => {
     expect(NodeFS.existsSync(NodePath.join(root, "unmounted"))).toBe(true);
   });
 
-  it("extracts the AppImage where it cannot be mounted", () => {
+  itPosix("extracts the AppImage where it cannot be mounted", () => {
     const { shim } = fakeAppImage(false);
     const result = run(shim, ["--version"], { APPIMAGE_EXTRACT_AND_RUN: "1" });
     expect(result.status).toBe(3);
@@ -92,7 +96,7 @@ describe("renderCliShim", () => {
     );
   });
 
-  it("keeps the install's Kurambit home under sudo, unless one is set", () => {
+  itPosix("keeps the install's Kurambit home under sudo, unless one is set", () => {
     const root = tempRoot();
     writeExecutable(NodePath.join(root, "app"), REPORTER);
     const shim = writeShim(root, {
@@ -110,7 +114,7 @@ describe("renderCliShim", () => {
     expect(relative.stdout).toContain(`cli=${shim}`);
   });
 
-  it("runs an installed app's server directly", () => {
+  itPosix("runs an installed app's server directly", () => {
     const root = tempRoot();
     const executable = NodePath.join(root, "opt", "Kurambit", "kurambit");
     writeExecutable(executable, REPORTER);
@@ -127,7 +131,7 @@ describe("renderCliShim", () => {
     ]);
   });
 
-  it("tells a person whose app moved to reopen it", () => {
+  itPosix("tells a person whose app moved to reopen it", () => {
     const root = tempRoot();
     const shim = writeShim(root, {
       kind: "direct",

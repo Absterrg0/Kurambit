@@ -100,10 +100,13 @@ it.layer(NodeServices.layer)("writeFileStringAtomically", (it) => {
       yield* fs.symlink(linkedState, path.join(home, "state"));
       yield* fs.writeFileString(destination, "before");
       yield* fs.symlink("../config/settings.json", link);
+      // Windows stores the target with its own separators.
+      const target = yield* fs.readLink(link);
 
       yield* writeFileStringAtomically({ filePath: link, contents: "after" });
 
-      assert.strictEqual(yield* fs.readLink(link), "../config/settings.json");
+      assert.strictEqual(yield* fs.readLink(link), target);
+      assert.strictEqual(path.normalize(target), path.normalize("../config/settings.json"));
       assert.strictEqual(yield* fs.readFileString(destination), "after");
     }),
   );

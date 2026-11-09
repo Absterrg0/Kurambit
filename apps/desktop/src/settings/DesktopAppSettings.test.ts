@@ -293,7 +293,7 @@ describe("DesktopSettings", () => {
         const dotfiles = yield* fileSystem.makeTempDirectoryScoped({
           prefix: "kurambit-desktop-settings-dotfiles-",
         });
-        const linkedSettingsPath = `${dotfiles}/desktop-settings.json`;
+        const linkedSettingsPath = environment.path.join(dotfiles, "desktop-settings.json");
         yield* fileSystem.writeFileString(linkedSettingsPath, "{}\n");
         yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
         yield* fileSystem.symlink(linkedSettingsPath, environment.desktopSettingsPath);

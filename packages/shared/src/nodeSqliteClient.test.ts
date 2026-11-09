@@ -16,6 +16,7 @@ import * as Tracer from "effect/Tracer";
 import { vi } from "vite-plus/test";
 
 import * as SqliteClient from "./nodeSqliteClient.ts";
+import * as HostProcess from "./HostProcess.ts";
 
 const startedWorkers = vi.hoisted((): Array<NodeWorkerThreads.Worker> => []);
 const silentWorkers = vi.hoisted(() => ({ on: false, readyOnTerminate: false }));
@@ -603,20 +604,23 @@ const withFileClient = <A, E>(
     }).pipe(Effect.provide(SqliteClient.layer({ filename, readerWorker: true })));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
-it.effect("uses the writer when the reader cannot open the database", () =>
-  withFileClient((sql, filename) =>
-    Effect.gen(function* () {
-      yield* sql`PRAGMA journal_mode = WAL`;
-      yield* sql`CREATE TABLE entries(name TEXT NOT NULL)`;
-      yield* sql`INSERT INTO entries VALUES ('kept')`;
-      yield* (yield* FileSystem.FileSystem).remove(filename);
-      const startedBefore = startedWorkers.length;
+// Windows refuses to delete a database file the writer holds open.
+it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+  "uses the writer when the reader cannot open the database",
+  () =>
+    withFileClient((sql, filename) =>
+      Effect.gen(function* () {
+        yield* sql`PRAGMA journal_mode = WAL`;
+        yield* sql`CREATE TABLE entries(name TEXT NOT NULL)`;
+        yield* sql`INSERT INTO entries VALUES ('kept')`;
+        yield* (yield* FileSystem.FileSystem).remove(filename);
+        const startedBefore = startedWorkers.length;
 
-      assert.equal(yield* sql.withTransaction(countEntries(sql)).pipe(SqliteClient.readOnly), 1);
-      assert.equal(yield* sql.withTransaction(countEntries(sql)).pipe(SqliteClient.readOnly), 1);
-      assert.equal(startedWorkers.length, startedBefore + 1);
-    }),
-  ),
+        assert.equal(yield* sql.withTransaction(countEntries(sql)).pipe(SqliteClient.readOnly), 1);
+        assert.equal(yield* sql.withTransaction(countEntries(sql)).pipe(SqliteClient.readOnly), 1);
+        assert.equal(startedWorkers.length, startedBefore + 1);
+      }),
+    ),
 );
 
 it.effect("uses the writer for a database that is not in WAL mode", () =>
@@ -707,11 +711,10 @@ it.effect("lets a read be cancelled while its worker is still starting", () =>
 
 it.effect("logs one warning when concurrent first reads find the reader unavailable", () => {
   const { warnings, layer: logs } = captureWarnings();
-  return withFileClient((sql, filename) =>
+  // Without WAL the reader refuses the database, on every platform.
+  return withFileClient((sql) =>
     Effect.gen(function* () {
-      yield* sql`PRAGMA journal_mode = WAL`;
       yield* sql`CREATE TABLE entries(name TEXT NOT NULL)`;
-      yield* (yield* FileSystem.FileSystem).remove(filename);
       const startedBefore = startedWorkers.length;
 
       const counts = yield* Effect.all(

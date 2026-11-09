@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import {
   DISPLAY_VARIABLES,
   prepareDisplaySandbox,
@@ -41,8 +42,11 @@ describe("prepareDisplaySandbox", () => {
       const sandbox = await prepareDisplaySandbox(run);
       assert.equal(sandbox.runtimeDirectory, NodePath.join(run, "display-sandbox"));
       assert.deepStrictEqual(await NodeFSP.readdir(sandbox.runtimeDirectory), []);
-      const mode = (await NodeFSP.stat(sandbox.runtimeDirectory)).mode & 0o777;
-      assert.equal(mode, 0o700);
+      // Windows has no POSIX mode bits to make the folder private with.
+      if (HostProcess.Platform.defaultValue() !== "win32") {
+        const mode = (await NodeFSP.stat(sandbox.runtimeDirectory)).mode & 0o777;
+        assert.equal(mode, 0o700);
+      }
       assert.equal(sandbox.environment.XDG_RUNTIME_DIR, sandbox.runtimeDirectory);
       for (const name of DISPLAY_VARIABLES) assert.equal(sandbox.environment[name], undefined);
     } finally {

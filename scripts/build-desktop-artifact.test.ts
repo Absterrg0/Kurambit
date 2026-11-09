@@ -835,19 +835,23 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
                 }),
               ),
             );
+            // The helpers are Linux binaries, so resolve `cargo` the way a Linux host does.
             yield* stageLinuxCaptureHelper({
               backend,
               repoRoot,
               stageResourcesDir,
               arch,
               verbose: false,
-            }).pipe(Effect.provide(spawner));
+            }).pipe(Effect.provide(spawner), Effect.provideService(HostProcess.Platform, "linux"));
             const installed = path.join(
               stageResourcesDir,
               `${backend}-capture/kurambit-${backend}-snap-shot`,
             );
             assert.equal(yield* fs.readFileString(installed), `helper-${arch}`);
-            assert.equal((yield* fs.stat(installed)).mode & 0o777, 0o755);
+            // Windows has no execute bit to stage.
+            if (HostProcess.Platform.defaultValue() !== "win32") {
+              assert.equal((yield* fs.stat(installed)).mode & 0o777, 0o755);
+            }
             if (backend === "hyprland")
               assert.equal(
                 yield* fs.readFileString(
