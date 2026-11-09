@@ -101,6 +101,7 @@ import {
   type TerminalError,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
+  ExternalLauncherNetworkPathError,
   WS_METHODS,
   WsRpcGroup,
   GAME_RUN_EVENT_TYPES,
@@ -2555,7 +2556,14 @@ const layerWsRpc = (
                 }),
             ),
           ),
-        [WS_METHODS.shellOpenInEditor]: (input) => externalLauncher.launchEditor(input),
+        [WS_METHODS.shellOpenInEditor]: (input) =>
+          KnownWorkspaces.mayAccess(input.cwd).pipe(
+            Effect.flatMap((mayAccess) =>
+              mayAccess
+                ? externalLauncher.launchEditor(input)
+                : Effect.fail(new ExternalLauncherNetworkPathError({ target: input.cwd })),
+            ),
+          ),
         [WS_METHODS.filesystemGetMetadata]: (input) => workspaceFileSystem.getMetadata(input),
         [WS_METHODS.filesystemBrowse]: (input) =>
           workspaceEntries.browse(input).pipe(

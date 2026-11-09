@@ -3,6 +3,7 @@ import {
   fileBasename,
   workspaceRelativeFilePath,
   isExplicitRelativePath,
+  isNetworkPathOutside,
   isUncPath,
   isWindowsAbsolutePath,
   isWindowsDrivePath,
@@ -67,6 +68,41 @@ describe("path helpers", () => {
     expect(newProjectFolderName("Con")).toBe("con-project");
     expect(newProjectFolderName("LPT1")).toBe("lpt1-project");
     expect(newProjectFolderName("console")).toBe("console");
+  });
+});
+
+describe("isNetworkPathOutside", () => {
+  const roots = ["\\\\Server\\Share\\Game", "C:\\Work\\game", "/home/me/game"];
+
+  it.each([
+    "\\\\server\\share\\game\\art\\hero.png",
+    "//SERVER/share/Game/art/hero.png",
+    "/\\server\\share\\game\\hero.png",
+    "\\\\server\\share\\game",
+    "C:\\Users\\me\\shot.png",
+    "/tmp/shot.png",
+    "src/main.ts",
+  ])("lets %s through", (value) => {
+    expect(isNetworkPathOutside(value, roots)).toBe(false);
+  });
+
+  it.each([
+    "\\\\attacker\\share\\x.png",
+    "//attacker/share/x.png",
+    "/\\attacker\\share\\x.png",
+    "\\/attacker/share/x.png",
+    "\\\\server\\share\\other\\x.png",
+    "\\\\server\\share\\gamey\\x.png",
+    "\\\\server\\share\\game\\..\\..\\..\\attacker\\share\\game\\x.png",
+    "\\\\?\\UNC\\attacker\\share\\x.png",
+  ])("stops %s", (value) => {
+    expect(isNetworkPathOutside(value, roots)).toBe(true);
+  });
+
+  it("stops every network path when no project is on a share", () => {
+    expect(isNetworkPathOutside("\\\\server\\share\\game\\x.png", ["C:\\Work", undefined])).toBe(
+      true,
+    );
   });
 });
 

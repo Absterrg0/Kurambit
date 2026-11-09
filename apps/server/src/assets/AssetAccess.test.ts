@@ -2,7 +2,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeFSP from "node:fs/promises";
-import { AssetPreviewTypeValidationError, ThreadId, TurnItemId } from "@kurambit/contracts";
+import {
+  AssetPreviewTypeValidationError,
+  AssetWorkspacePathValidationError,
+  ThreadId,
+  TurnItemId,
+} from "@kurambit/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@kurambit/shared/projectFavicon";
 import { MCP_APP_MAX_HTML_BYTES } from "@kurambit/shared/mcpApp";
 import { describe, expect, it } from "@effect/vitest";
@@ -22,6 +27,7 @@ import * as ServerConfig from "../config.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as KurambitProjectFileLoader from "../project/KurambitProjectFileLoader.ts";
+import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { assetFileResponse } from "../http.ts";
 import { ASSET_ROUTE_PREFIX, issueAssetUrl, readMcpAppHtml, resolveAsset } from "./AssetAccess.ts";
@@ -89,6 +95,8 @@ const oversizedScreenshotItem = {
   },
 };
 
+const KNOWN_PROJECT_PREFIX = "kurambit-known-project-";
+
 const layerTest = Layer.mergeAll(
   NodeHttpPlatform.layer,
   Layer.mock(Orchestrator.OrchestratorV2)({
@@ -100,6 +108,10 @@ const layerTest = Layer.mergeAll(
             ? oversizedScreenshotItem
             : null,
       ),
+  }),
+  // Only a folder named as a known project counts as one.
+  Layer.mock(KnownWorkspaces.KnownWorkspaces)({
+    contains: (realPath) => Effect.succeed(realPath.includes(KNOWN_PROJECT_PREFIX)),
   }),
   layerConfig,
   WorkspacePaths.layer,
@@ -336,6 +348,67 @@ describe("AssetAccess", () => {
         }
       }).pipe(Effect.provideService(HostProcess.HomeDirectory, home));
     }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("never touches a network path outside every project", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const touched: Array<string> = [];
+      const recordingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        realPath: (target) =>
+          Effect.andThen(
+            Effect.sync(() => touched.push(target)),
+            fs.realPath(target),
+          ),
+        stat: (target) =>
+          Effect.andThen(
+            Effect.sync(() => touched.push(target)),
+            fs.stat(target),
+          ),
+      });
+      // POSIX reads `\\host\share` as a relative name, not a network path.
+      const requestedPaths =
+        HostProcess.Platform.defaultValue() === "win32"
+          ? [
+              "\\\\kurambit-test.invalid\\share\\leak.png",
+              "/\\kurambit-test.invalid\\share\\leak.png",
+              "//kurambit-test.invalid/share/leak.png",
+            ]
+          : ["//kurambit-test.invalid/share/leak.png"];
+      for (const requestedPath of requestedPaths) {
+        const error = yield* issueAssetUrl({
+          resource: {
+            _tag: "media-file",
+            threadId: ThreadId.make("thread-1"),
+            path: requestedPath,
+          },
+        }).pipe(Effect.provideService(FileSystem.FileSystem, recordingFileSystem), Effect.flip);
+        expect(error).toBeInstanceOf(AssetWorkspacePathValidationError);
+      }
+      expect(touched.filter((target) => target.includes("kurambit-test.invalid"))).toEqual([]);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "serves a network path inside a known project",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const project = yield* fs.makeTempDirectoryScoped({ prefix: KNOWN_PROJECT_PREFIX });
+        const filePath = path.join(project, "shot.png");
+        yield* fs.writeFile(filePath, screenshotPng);
+        // POSIX reads `//tmp/x` as `/tmp/x`, so this names a real file as a network path.
+        const result = yield* issueAssetUrl({
+          resource: {
+            _tag: "media-file",
+            threadId: ThreadId.make("thread-1"),
+            path: `/${filePath}`,
+          },
+        });
+        expect(result.imageDimensions).toEqual({ width: 390, height: 844 });
+      }).pipe(Effect.provide(layerTest)),
   );
 
   it.effect.skipIf(!symlinksSupported)(

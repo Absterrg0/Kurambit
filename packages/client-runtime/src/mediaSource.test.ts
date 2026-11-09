@@ -63,7 +63,13 @@ describe("resolveMediaSource", () => {
       ["file://server/share/frame.png", "\\\\server\\share\\frame.png"],
       ["\\\\server\\share\\frame.png", "\\\\server\\share\\frame.png"],
     ])("resolves %s through the environment", (href, path) => {
-      expect(resolveMediaSource(href, { threadId, workspaceRoot: "/repo" })).toEqual({
+      expect(
+        resolveMediaSource(href, {
+          threadId,
+          workspaceRoot: "/repo",
+          projectRoots: ["\\\\server\\share"],
+        }),
+      ).toEqual({
         kind: "image",
         mimeType: "image/png",
         name: path.split(/[\\/]/).at(-1),

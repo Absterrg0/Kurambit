@@ -41,6 +41,8 @@ export type ResolvedMediaSource = {
 export interface ResolveMediaSourceInput {
   readonly threadId: ThreadId | undefined;
   readonly workspaceRoot?: string | null | undefined;
+  /** Other project roots a network path may sit in besides `workspaceRoot`. */
+  readonly projectRoots?: ReadonlyArray<string> | undefined;
   readonly resolvedFilePath?: string | undefined;
   /** Image syntax can target an endpoint without a recognizable extension. */
   readonly imageEmbed?: boolean | undefined;
@@ -48,7 +50,7 @@ export interface ResolveMediaSourceInput {
 
 function classify(source: string, input: ResolveMediaSourceInput): MarkdownImageSource {
   return input.resolvedFilePath === undefined
-    ? classifyMarkdownImageSource(source, input.workspaceRoot)
+    ? classifyMarkdownImageSource(source, input.workspaceRoot, input.projectRoots)
     : { _tag: "WorkspaceFile", path: input.resolvedFilePath };
 }
 

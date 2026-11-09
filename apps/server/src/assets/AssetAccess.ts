@@ -60,6 +60,7 @@ import * as ServerConfig from "../config.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { expandHomePath } from "@kurambit/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { extractIcnsPng } from "./icns.ts";
@@ -366,6 +367,12 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     readonly downloadName?: string;
   }) {
     const path = yield* Path.Path;
+    if (!(yield* KnownWorkspaces.mayAccess(input.requestedPath))) {
+      return yield* new AssetWorkspacePathValidationError({
+        resource: input.resource,
+        cause: new Error("A network path outside every project is never read."),
+      });
+    }
     const canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
       Effect.mapError(
         (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),

@@ -6,6 +6,46 @@ export function isUncPath(value: string): boolean {
   return value.startsWith("\\\\");
 }
 
+/**
+ * `\\host\share`, `//host/share` or `/\host\share`. Windows reaches these over
+ * SMB, and any touch, even a stat, can hand the host the user's NTLM hash.
+ */
+export function isNetworkPath(value: string): boolean {
+  return /^[\\/]{2}/.test(value);
+}
+
+function networkPathSegments(value: string): string[] {
+  const segments: string[] = [];
+  for (const segment of value.toLowerCase().split(/[\\/]+/)) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") segments.pop();
+    else segments.push(segment);
+  }
+  return segments;
+}
+
+/**
+ * Whether a path an agent wrote names a network share outside every one of
+ * `roots`, the project roots the user added. Such a path is never opened,
+ * checked or loaded. Decided on the text, since resolving it would already
+ * connect; the server decides again before any I/O.
+ */
+export function isNetworkPathOutside(
+  value: string,
+  roots: Iterable<string | null | undefined>,
+): boolean {
+  if (!isNetworkPath(value)) return false;
+  const target = networkPathSegments(value);
+  for (const root of roots) {
+    if (!root || !isNetworkPath(root)) continue;
+    const prefix = networkPathSegments(root);
+    // A root names at least a host and a share.
+    if (prefix.length < 2 || prefix.length > target.length) continue;
+    if (prefix.every((segment, index) => segment === target[index])) return false;
+  }
+  return true;
+}
+
 export function isWindowsAbsolutePath(value: string): boolean {
   return isUncPath(value) || isWindowsDrivePath(value);
 }

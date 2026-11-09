@@ -32,11 +32,11 @@ describe("classifyMarkdownImageSource", () => {
     ["/workspace/project/image.png", null, "/workspace/project/image.png"],
     ["/C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
     ["C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
-    ["\\\\server\\share\\image.png", null, "\\\\server\\share\\image.png"],
+    ["\\\\server\\share\\image.png", "\\\\server\\share", "\\\\server\\share\\image.png"],
     ["file:///workspace/project/image%20one.png", null, "/workspace/project/image one.png"],
     ["file:///C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
     ["file://localhost/C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
-    ["file://server/share/image.png", null, "\\\\server\\share\\image.png"],
+    ["file://server/share/image.png", "\\\\server\\share", "\\\\server\\share\\image.png"],
   ])("maps %s to a workspace file", (source, workspaceRoot, path) => {
     expect(classifyMarkdownImageSource(source, workspaceRoot)).toEqual({
       _tag: "WorkspaceFile",
@@ -58,6 +58,17 @@ describe("classifyMarkdownImageSource", () => {
     "file://%",
   ])("blocks unsupported or unresolved source %s", (source) => {
     expect(classifyMarkdownImageSource(source)).toEqual({ _tag: "Blocked" });
+  });
+
+  it.each([
+    "\\\\attacker\\share\\x.png",
+    "/\\attacker\\share\\x.png",
+    "file://attacker/share/x.png",
+  ])("loads network image %s only inside a project root", (source) => {
+    expect(classifyMarkdownImageSource(source, "C:\\Work\\game")).toEqual({ _tag: "Blocked" });
+    expect(
+      classifyMarkdownImageSource(source, "C:\\Work\\game", ["\\\\attacker\\share"]),
+    ).toMatchObject({ _tag: "WorkspaceFile" });
   });
 });
 

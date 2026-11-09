@@ -140,9 +140,15 @@ export const make = Effect.gen(function* () {
   const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
 
+  const mayAccess = (target: string) =>
+    KnownWorkspaces.mayAccess(target).pipe(
+      Effect.provideService(KnownWorkspaces.KnownWorkspaces, knownWorkspaces),
+      Effect.provideService(Path.Path, path),
+    );
+
   const metadataForPath = Effect.fnUntraced(function* (requestedPath: string) {
     const expandedPath = expandHomePath(requestedPath, yield* HostProcess.HomeDirectory);
-    if (!path.isAbsolute(expandedPath)) return null;
+    if (!path.isAbsolute(expandedPath) || !(yield* mayAccess(expandedPath))) return null;
     const stat = yield* fileSystem.stat(expandedPath).pipe(Effect.option);
     if (stat._tag === "None") return null;
     if (stat.value.type === "Directory") return { kind: "directory" } as const;
@@ -222,13 +228,19 @@ export const make = Effect.gen(function* () {
   /**
    * Workspace-relative paths must stay inside the root, symlinks included. An
    * absolute path reads a host file in place, such as a report an agent wrote to a
-   * temp directory; it gets no root check.
+   * temp directory; it gets no root check unless it is a network path.
    */
   const resolveReadTarget = Effect.fn("WorkspaceFileSystem.resolveReadTarget")(function* (
     input: ProjectReadFileInput,
   ) {
     const requestedPath = input.relativePath.trim();
     if (path.isAbsolute(requestedPath)) {
+      if (!(yield* mayAccess(requestedPath))) {
+        return yield* new WorkspacePaths.WorkspacePathOutsideRootError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+        });
+      }
       const realTargetPath = yield* Effect.tryPromise({
         try: () => NodeFSP.realpath(requestedPath),
         catch: (cause) =>

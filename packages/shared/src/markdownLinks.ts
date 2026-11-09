@@ -1,4 +1,8 @@
-import { isWindowsAbsolutePath, stripSlashPrefixedWindowsDrive } from "./path.ts";
+import {
+  isNetworkPathOutside,
+  isWindowsAbsolutePath,
+  stripSlashPrefixedWindowsDrive,
+} from "./path.ts";
 import {
   type FilePathPosition,
   formatFilePathPosition,
@@ -374,14 +378,16 @@ export function extractMarkdownLinkHrefs(markdown: string): string[] {
   return hrefs;
 }
 
+/** `projectRoots` are the other project roots a network path may sit in besides `cwd`. */
 export function resolveMarkdownFileLinkTarget(
   href: string | undefined,
   cwd?: string,
   baseDir: string | undefined = cwd,
+  projectRoots: ReadonlyArray<string> = [],
 ): string | null {
   if (!href) return null;
   const target = parseMarkdownFileLink(href);
-  if (!target) return null;
+  if (!target || isNetworkPathOutside(target.path, [cwd, ...projectRoots])) return null;
 
   const pathWithPosition = formatFilePathPosition(target);
   if (!isRelativeFilePath(pathWithPosition)) return pathWithPosition;

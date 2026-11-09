@@ -45,6 +45,7 @@ export async function resolveMarkdownMediaPreview(input: {
   source: string;
   resolvedFilePath?: string | undefined;
   cwd?: string | undefined;
+  projectRoots?: ReadonlyArray<string> | undefined;
   threadRef?: ScopedThreadRef | undefined;
   httpBaseUrl?: string | undefined;
   onOpenFile?: ((relativePath: string) => void) | undefined;
@@ -56,6 +57,7 @@ export async function resolveMarkdownMediaPreview(input: {
   const media = resolveMediaSource(input.source, {
     threadId: input.threadRef?.threadId,
     workspaceRoot: input.cwd,
+    projectRoots: input.projectRoots,
     resolvedFilePath: input.resolvedFilePath,
   });
   if (media === null) return null;

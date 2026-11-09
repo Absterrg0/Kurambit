@@ -8,6 +8,7 @@
  * @module KnownWorkspaces
  */
 import * as HostProcess from "@kurambit/shared/HostProcess";
+import { isNetworkPath } from "@kurambit/shared/path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -52,6 +53,19 @@ export class KnownWorkspaces extends Context.Service<
     readonly assertContains: (cwd: string) => Effect.Effect<void, UnknownWorkspaceError>;
   }
 >()("kurambit/workspace/KnownWorkspaces") {}
+
+/**
+ * Whether the server may open, check or read `target` as written. A network
+ * path reaches its host on any touch, which can hand that host the user's
+ * Windows credentials, so one counts only inside a known workspace. Decided
+ * before any I/O on `target`, since resolving it would already connect.
+ */
+export const mayAccess = Effect.fn("KnownWorkspaces.mayAccess")(function* (target: string) {
+  if (!isNetworkPath(target)) return true;
+  const path = yield* Path.Path;
+  const knownWorkspaces = yield* KnownWorkspaces;
+  return yield* knownWorkspaces.contains(path.resolve(target));
+});
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

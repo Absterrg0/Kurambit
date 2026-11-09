@@ -298,10 +298,23 @@ describe("resolveMarkdownFileLinkTarget", () => {
     );
   });
 
-  it("resolves file uri authorities as windows UNC paths", () => {
-    expect(resolveMarkdownFileLinkTarget("file://server/share/workspace-image.svg")).toBe(
-      "\\\\server\\share\\workspace-image.svg",
-    );
+  it("resolves file uri authorities as windows UNC paths inside a project", () => {
+    expect(
+      resolveMarkdownFileLinkTarget("file://server/share/workspace-image.svg", "\\\\server\\share"),
+    ).toBe("\\\\server\\share\\workspace-image.svg");
+  });
+
+  it("leaves a network path outside every project as text", () => {
+    for (const href of [
+      "file://attacker/share/x.png",
+      "\\\\attacker\\share\\x.png",
+      "/\\attacker\\share\\x.png",
+    ]) {
+      expect(resolveMarkdownFileLinkTarget(href, "C:\\Work\\game")).toBeNull();
+      expect(
+        resolveMarkdownFileLinkTarget(href, "C:\\Work\\game", undefined, ["\\\\attacker\\share"]),
+      ).not.toBeNull();
+    }
   });
 
   it("resolves a localhost file uri as a local path", () => {

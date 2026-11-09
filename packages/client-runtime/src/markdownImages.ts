@@ -1,4 +1,8 @@
-import { isWindowsAbsolutePath, stripSlashPrefixedWindowsDrive } from "@kurambit/shared/path";
+import {
+  isNetworkPathOutside,
+  isWindowsAbsolutePath,
+  stripSlashPrefixedWindowsDrive,
+} from "@kurambit/shared/path";
 
 import {
   normalizeMarkdownLinkDestination,
@@ -29,10 +33,24 @@ function joinWorkspacePath(workspaceRoot: string, relativePath: string): string 
 /**
  * Filesystem paths belong to the environment host and must never reach a
  * browser or native image component without first becoming a signed asset URL.
+ * A network path outside every project root is blocked: even a check of it
+ * connects to its host.
  */
 export function classifyMarkdownImageSource(
   value: string | null | undefined,
   workspaceRoot?: string | null,
+  projectRoots: ReadonlyArray<string> = [],
+): MarkdownImageSource {
+  const source = classifySource(value, workspaceRoot);
+  return source._tag === "WorkspaceFile" &&
+    isNetworkPathOutside(source.path, [workspaceRoot, ...projectRoots])
+    ? { _tag: "Blocked" }
+    : source;
+}
+
+function classifySource(
+  value: string | null | undefined,
+  workspaceRoot: string | null | undefined,
 ): MarkdownImageSource {
   if (value === null || value === undefined) return { _tag: "Blocked" };
 

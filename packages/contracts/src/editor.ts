@@ -191,6 +191,17 @@ export class ExternalLauncherUnsupportedTargetError extends Schema.TaggedError<E
   }
 }
 
+export class ExternalLauncherNetworkPathError extends Schema.TaggedError<ExternalLauncherNetworkPathError>()(
+  "ExternalLauncherNetworkPathError",
+  {
+    target: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `${this.target} is a network path outside your projects, so it was not opened`;
+  }
+}
+
 const ExternalLauncherSpawnFields = {
   command: Schema.String,
   args: Schema.Array(Schema.String),
@@ -227,6 +238,7 @@ export const ExternalLauncherError = Schema.Union([
   ExternalLauncherUnsupportedEditorError,
   ExternalLauncherCommandNotFoundError,
   ExternalLauncherUnsupportedTargetError,
+  ExternalLauncherNetworkPathError,
   ExternalLauncherBrowserSpawnError,
   ExternalLauncherEditorSpawnError,
 ]);

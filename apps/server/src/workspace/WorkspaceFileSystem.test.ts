@@ -21,6 +21,7 @@ import { symlinksSupported } from "@kurambit/shared/testing/symlinks";
 // Temp folders count as known workspaces unless named as unknown.
 const UNKNOWN_WORKSPACE_PREFIX = "kurambit-unknown-workspace-";
 const layerKnownWorkspacesTest = Layer.mock(KnownWorkspaces.KnownWorkspaces)({
+  contains: (realPath) => Effect.succeed(!realPath.includes(UNKNOWN_WORKSPACE_PREFIX)),
   assertContains: (cwd) =>
     cwd.includes(UNKNOWN_WORKSPACE_PREFIX)
       ? Effect.fail(new KnownWorkspaces.UnknownWorkspaceError({ cwd }))
@@ -156,6 +157,37 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
       }),
     );
   });
+
+  // POSIX reads `//tmp/x` as `/tmp/x`, so these name real files as network paths.
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "checks and reads a network path only inside a known workspace",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const known = yield* makeTempDir;
+        const unknown = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: UNKNOWN_WORKSPACE_PREFIX,
+        });
+        yield* writeTextFile(known, "notes.md", "known");
+        yield* writeTextFile(unknown, "notes.md", "unknown");
+        const inside = `/${path.join(known, "notes.md")}`;
+        const outside = `/${path.join(unknown, "notes.md")}`;
+
+        expect((yield* service.getMetadata({ paths: [inside, outside] })).entries).toEqual([
+          { kind: "file", byteLength: 5 },
+          null,
+        ]);
+        expect((yield* service.readFile({ cwd: known, relativePath: inside })).contents).toBe(
+          "known",
+        );
+        const error = yield* service
+          .readFile({ cwd: known, relativePath: outside })
+          .pipe(Effect.flip);
+        expect(error).toBeInstanceOf(WorkspacePaths.WorkspacePathOutsideRootError);
+      }),
+  );
 
   describe("readFile", () => {
     it.effect("reads UTF-8 files relative to the workspace root", () =>

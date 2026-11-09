@@ -11,7 +11,7 @@ import {
   extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
 } from "@kurambit/shared/markdownLinks";
-import { isAbsolutePath } from "@kurambit/shared/path";
+import { isAbsolutePath, isNetworkPath } from "@kurambit/shared/path";
 import { AuthFilesystemReadScope, AuthOrchestrationOperateScope } from "@kurambit/contracts";
 import {
   CHAT_MARKDOWN_REMARK_PLUGINS,
@@ -2345,6 +2345,7 @@ function useChatMarkdownState({
       source,
       resolvedFilePath,
       cwd,
+      projectRoots,
       threadRef,
       // Read at click time: a reconnect replaces the prepared connection, and
       // subscribing would hand every rendered markdown element a new context.
@@ -2384,6 +2385,9 @@ function useChatMarkdownState({
     markdownServerConfigFieldsAtom(environmentId),
   );
   const projects = useProjects();
+  const projectRoots = projects
+    .filter((project) => project.environmentId === environmentId)
+    .map((project) => project.workspaceRoot);
   const [preferredEditor] = usePreferredEditor(availableEditors);
   const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor);
   const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors);
@@ -2420,7 +2424,12 @@ function useChatMarkdownState({
       if (parseComposerContextHref(href)) continue;
       const normalizedHref = normalizeMarkdownLinkHrefKey(href);
       if (metaByHref.has(normalizedHref)) continue;
-      const meta = resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd);
+      const meta = resolveMarkdownFileLinkMeta(
+        normalizedHref,
+        cwd,
+        imageBaseDir ?? cwd,
+        projectRoots,
+      );
       if (meta) {
         metaByHref.set(normalizedHref, meta);
       }
@@ -2431,7 +2440,7 @@ function useChatMarkdownState({
     const metaByText = new Map<string, MarkdownFileLinkMeta>();
     for (const span of extractInlineCodeSpans(text)) {
       if (metaByText.has(span)) continue;
-      const meta = resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd);
+      const meta = resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd, projectRoots);
       if (meta) {
         metaByText.set(span, meta);
       }
@@ -2652,6 +2661,7 @@ function useChatMarkdownState({
     openExternalLinkInPreview,
     openMarkdownMedia,
     projects,
+    projectRoots,
     resolvedTheme,
     pullRequestsEnabled,
     skills,
@@ -2791,6 +2801,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       environmentId,
       imageBaseDir,
       markdownFileLinkMetaByHref,
+      projectRoots,
       threadRef,
       openMarkdownMedia,
 
@@ -2824,10 +2835,13 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
     const fileLinkMeta = normalizedHref
       ? (markdownFileLinkMetaByHref.get(normalizedHref) ??
-        resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd))
+        resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd, projectRoots))
       : null;
     if (!fileLinkMeta) {
       const faviconHost = resolveExternalWebLinkHost(href);
+      // A network path that is not a file link points outside every project;
+      // as a link it would look clickable and do nothing.
+      if (faviconHost === null && isNetworkPath(normalizedHref)) return <span>{children}</span>;
       const hasText = hastHasText(node);
       const pullRequestAutolink = String(
         (props as Record<string, unknown>)["data-pull-request-autolink"] ?? "",
@@ -2986,14 +3000,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
     );
   },
   code: function MarkdownCode({ node, children, className, ...props }) {
-    const { cwd, imageBaseDir, inlineCodeFileLinkMetaByText, fileLinkChip } = use(
+    const { cwd, imageBaseDir, inlineCodeFileLinkMetaByText, fileLinkChip, projectRoots } = use(
       ChatMarkdownRendererContext,
     );
     if (node?.properties?.dataInlineCode != null) {
       const codeText = nodeToPlainText(children);
       const fileLinkMeta =
         inlineCodeFileLinkMetaByText.get(codeText.trim()) ??
-        resolveInlineCodeFileLinkMeta(codeText, cwd, imageBaseDir ?? cwd);
+        resolveInlineCodeFileLinkMeta(codeText, cwd, imageBaseDir ?? cwd, projectRoots);
       if (fileLinkMeta) {
         return fileLinkChip(
           fileLinkMeta,
@@ -3015,6 +3029,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       environmentId,
       githubMedia,
       imageBaseDir,
+      projectRoots,
       threadRef,
       renderContextReference,
     } = use(ChatMarkdownRendererContext);
@@ -3041,7 +3056,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const copyMarkdown = markdownImageCopy(altText, srcString, authoredTitle);
     const { className, style: _style, width, height, ...imageProps } = props;
     const authoredSizeStyle = authoredImageSizeStyle(width, height);
-    const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd);
+    const imageSource = classifyMarkdownImageSource(
+      classifiedSrc,
+      imageBaseDir ?? cwd,
+      projectRoots,
+    );
     const kind = mediaKindFromPath(classifiedSrc) ?? "image";
     const directUri = imageSource._tag === "Direct" ? imageSource.uri : null;
     const githubMediaUrl =
