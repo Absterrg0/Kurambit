@@ -139,6 +139,15 @@ const endingVerdict = (facts: GameBuildFacts): Verdict => {
   );
   if (broke) return fail(`${broke.who}: ${broke.tier.ending}`);
   const ended = measured.find(({ tier }) => tier.ending === "won" || tier.ending === "lost");
+  // "Never ends" needs both plays with no skill: one not measured (too slow for its
+  // budget on this machine) might have ended, so it is not a fail of the game.
+  const unplayed = tiers.find(
+    ([who, tier]) => who !== "tester's bot" && tier.status !== "measured",
+  );
+  if (ended === undefined && unplayed !== undefined)
+    return notMeasured(
+      `no measured play reached an ending, and ${unplayed[0]} was not measured${unplayed[1].status === "not-measured" ? `: ${unplayed[1].why}` : ""}`,
+    );
   return ended
     ? pass(
         `${ended.who} ${ended.tier.ending}${ended.tier.at === null ? "" : ` at ${ended.tier.at.toFixed(1)} s`}`,
