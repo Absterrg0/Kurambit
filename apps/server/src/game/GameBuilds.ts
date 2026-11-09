@@ -195,12 +195,12 @@ export class GameBuilds extends Context.Service<
     /**
      * A measure no thread waits for: a keep-going step's build as it lands,
      * or a chat turn's build, which with `supersede` replaces the game's earlier turn
-     * builds still queued.
+     * builds still queued. `skilled` as GameFacts.measure takes it.
      */
     readonly measureIn: (
       root: string,
       build: string,
-      options?: { readonly supersede?: boolean },
+      options?: { readonly supersede?: boolean; readonly skilled?: boolean },
     ) => Effect.Effect<void>;
     /** Plays the build from its copy; the game folder is never touched. Measures it if it never was. */
     readonly play: (
@@ -956,7 +956,11 @@ const make = Effect.gen(function* () {
       if (tree === null || tree === undefined) return;
       yield* facts.measure(
         { root, build, key: `${engine}:${tree}`, engine },
-        { queue: "background", ...(options.supersede === true ? { supersede: true } : {}) },
+        {
+          queue: "background",
+          ...(options.supersede === true ? { supersede: true } : {}),
+          ...(options.skilled === undefined ? {} : { skilled: options.skilled }),
+        },
       );
     }).pipe(Effect.ignore);
 

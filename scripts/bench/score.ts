@@ -7,8 +7,9 @@ import {
 /**
  * Bump when a score stops meaning what it meant (a criterion or threshold
  * changes): runs scored by another version are listed, never diffed.
+ * 3: a criterion not measured no longer counts against a game.
  */
-export const SCORE_VERSION = 2;
+export const SCORE_VERSION = 3;
 
 /**
  * Every number the score judges against. Change one here, never at a use site. What a person
@@ -59,9 +60,19 @@ export type Verdict =
   | { readonly result: "fail"; readonly detail: string }
   | { readonly result: "not-measured"; readonly detail: string };
 
+/**
+ * A game's floor is what was measured: `passed` of `measured`. A criterion the
+ * harness could not measure (a play too slow for its budget on a loaded or
+ * GPU-less machine) is reported with why and never lowers the floor, so
+ * measuring an unchanged build again gives the same pass and fail verdicts.
+ */
 export interface GameScore {
   readonly verdicts: Readonly<Record<Criterion, Verdict>>;
   readonly passed: number;
+  readonly failed: number;
+  /** Criteria with a verdict: passed + failed. */
+  readonly measured: number;
+  /** Every criterion, measured or not. */
   readonly total: number;
 }
 
@@ -128,6 +139,15 @@ const endingVerdict = (facts: GameBuildFacts): Verdict => {
   );
   if (broke) return fail(`${broke.who}: ${broke.tier.ending}`);
   const ended = measured.find(({ tier }) => tier.ending === "won" || tier.ending === "lost");
+  // "Never ends" needs both plays with no skill: one not measured (too slow for its
+  // budget on this machine) might have ended, so it is not a fail of the game.
+  const unplayed = tiers.find(
+    ([who, tier]) => who !== "tester's bot" && tier.status !== "measured",
+  );
+  if (ended === undefined && unplayed !== undefined)
+    return notMeasured(
+      `no measured play reached an ending, and ${unplayed[0]} was not measured${unplayed[1].status === "not-measured" ? `: ${unplayed[1].why}` : ""}`,
+    );
   return ended
     ? pass(
         `${ended.who} ${ended.tier.ending}${ended.tier.at === null ? "" : ` at ${ended.tier.at.toFixed(1)} s`}`,
@@ -247,9 +267,13 @@ export function scoreGame(input: {
             ),
           };
         })();
+  const count = (result: Verdict["result"]) =>
+    CRITERIA.filter((criterion) => verdicts[criterion].result === result).length;
   return {
     verdicts,
-    passed: CRITERIA.filter((criterion) => verdicts[criterion].result === "pass").length,
+    passed: count("pass"),
+    failed: count("fail"),
+    measured: count("pass") + count("fail"),
     total: CRITERIA.length,
   };
 }

@@ -85,6 +85,7 @@ const run = (
               } as unknown as Effect.Success<
                 ReturnType<ProjectionStore.ProjectionStoreV2["Service"]["getThreadShell"]>
               >),
+            getProjectGameRun: () => Effect.succeed(null),
             // Generic over the fields asked; this test reads only the turn's run.
             getThreadRecords: (() =>
               Effect.succeed({

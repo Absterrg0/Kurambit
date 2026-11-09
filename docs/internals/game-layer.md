@@ -388,6 +388,10 @@ outside their catalog.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.
+- **Facts skip what is already known or not needed.** The boot check is not run again when this
+  server's own `game_check` booted the same bytes (engine folder and `game.json`) clean, and the
+  tester's bot plays a chat turn's build only while keep going, which judges by it, is on; a
+  person's measure and keep going's own measures always play it.
 - **Going back with no run** makes the run's own moves (`withBuildInFolder`) under the
   `game-builds` run-ref folder. The record is written before the folder moves, and a restart
   settles a restore it cut short by running its moves again.

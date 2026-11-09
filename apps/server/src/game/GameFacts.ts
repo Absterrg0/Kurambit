@@ -29,6 +29,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import {
   GAME_FACTS_BOUNDS,
   GAME_FACTS_EVENT,
+  GAME_FACTS_SKILLED_DEFERRED,
   GameAssetFacts,
   GameAssetUse,
   GameBuildFacts,
@@ -66,6 +67,7 @@ import * as GameBuildCopies from "./GameBuildCopies.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
+import { isPathInside } from "./gameNativeUserDir.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { findExecutable } from "./GameProcesses.ts";
@@ -88,6 +90,8 @@ const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait for the one running. */
 const QUEUE_LIMIT = 3;
 const TIER_FILES = ["tier.mjs", "idle.mjs", "masher.mjs", "sensors.mjs"];
+/** Where a copy holds the harness's own tier bots, apart from the game's kit its bot imports. */
+const HARNESS_KIT = ".studio/bot/harness-kit";
 
 /** How long a tier waits for a busy machine to calm before it plays anyway, as the memory gate waits for memory. */
 const IDLE_WAIT_MS = 120_000;
@@ -283,6 +287,8 @@ interface Job {
   readonly build: ResolvedBuild;
   /** A person asked: standing faults are tried again. */
   person: boolean;
+  /** Someone needs the tester's bot to play it: keep going's judgment or a person. */
+  skilled: boolean;
   /** Only a newer turn build's measure asked: a newer one drops it while it waits. */
   supersedable: boolean;
   /** What it measures, known once it runs. */
@@ -320,6 +326,12 @@ export class GameFacts extends Context.Service<
         readonly waitFor?: Duration.Input;
         readonly queue?: "person" | "background";
         readonly supersede?: boolean;
+        /**
+         * Whether the tester's bot plays the build (default true). Only keep
+         * going's judgment and a person need it; a chat turn's build outside
+         * keep going says so instead, until one of them asks.
+         */
+        readonly skilled?: boolean;
       },
     ) => Effect.Effect<GameBuildFacts>;
     /**
@@ -551,12 +563,14 @@ const make = Effect.gen(function* () {
   // What a measurement must do: everything under a new harness, else each
   // tier never measured or not measured for a reason waiting clears (and,
   // for a person, a standing fault they may have fixed), and the skilled
-  // tier again when the tester's bot changed.
+  // tier again when the tester's bot changed, or once someone wants the play
+  // a chat turn's measure deferred.
   const planOf = (
     found: Found | null,
     bot: { readonly hash: string } | null,
     person: boolean,
     engine: GameEngineId,
+    skilledWanted: boolean,
   ): ReadonlySet<Tier> => {
     if (found === null || found.harness !== harness) return new Set(TIERS);
     const stored = found.stored;
@@ -578,7 +592,11 @@ const make = Effect.gen(function* () {
       bot === null
         ? skilled?.status === "measured"
         : skilled?.status !== "measured" || skilled.value.bot.hash !== bot.hash;
-    if (botChanged) tiers.add("skilled");
+    const stillDeferred =
+      !skilledWanted &&
+      skilled?.status === "not-measured" &&
+      skilled.why === GAME_FACTS_SKILLED_DEFERRED;
+    if (botChanged && !stillDeferred) tiers.add("skilled");
     return tiers;
   };
 
@@ -636,7 +654,12 @@ const make = Effect.gen(function* () {
       return major === null ? null : runtimeVersion(runtimesDirectory(templates), engine, major);
     });
 
-  const measureJob = (build: ResolvedBuild, tiers: ReadonlySet<Tier>, found: Found | null) =>
+  const measureJob = (
+    build: ResolvedBuild,
+    tiers: ReadonlySet<Tier>,
+    found: Found | null,
+    skilledWanted: boolean,
+  ) =>
     Effect.scoped(
       Effect.gen(function* () {
         const { root, key } = build;
@@ -696,23 +719,32 @@ const make = Effect.gen(function* () {
           };
         }
         if (tiers.has("boots")) {
-          const boots = yield* step(engines.checkIn(copy, OWNER)).pipe(
-            Effect.map(bootsFact),
-            Effect.catchTags({
-              GameOperationError: (error) =>
-                Effect.succeed(
-                  faultOf(error) ?? {
-                    status: "measured" as const,
-                    value: { ok: false, detail: (error.detail ?? error.reason).slice(0, 300) },
-                  },
-                ),
-            }),
-          );
+          // A clean game_check of these very files already booted them (GameEngine.cleanCheckOf).
+          const checked = yield* engines.cleanCheckOf(copy);
+          const boots =
+            checked !== null
+              ? bootsFact(checked, "from game_check on the same files")
+              : yield* step(engines.checkIn(copy, OWNER)).pipe(
+                  Effect.map((result) => bootsFact(result)),
+                  Effect.catchTags({
+                    GameOperationError: (error) =>
+                      Effect.succeed(
+                        faultOf(error) ?? {
+                          status: "measured" as const,
+                          value: {
+                            ok: false,
+                            detail: (error.detail ?? error.reason).slice(0, 300),
+                          },
+                        },
+                      ),
+                  }),
+                );
           yield* write({ boots });
         }
         // The harness's own bots, fresh from the server's templates, never the game's.
         const kitWritten = yield* Effect.promise(async () => {
-          const dir = NodePath.join(copy, ".studio", "bot", "kit");
+          const dir = NodePath.join(copy, HARNESS_KIT);
+          await NodeFSP.rm(dir, { recursive: true, force: true });
           await NodeFSP.mkdir(dir, { recursive: true });
           await NodeFSP.cp(kit, dir, { recursive: true, force: true });
           await NodeFSP.writeFile(NodePath.join(dir, "tier-bounds.mjs"), boundsFile);
@@ -794,7 +826,7 @@ const make = Effect.gen(function* () {
               : notMeasured("the plays' record of what the game loaded could not be kept", true);
 
         const tier = (name: "idle" | "masher", playSeconds: number) =>
-          runBot(`.studio/bot/kit/${name}.mjs`, tierWallSeconds(playSeconds), "policy").pipe(
+          runBot(`${HARNESS_KIT}/${name}.mjs`, tierWallSeconds(playSeconds), "policy").pipe(
             Effect.flatMap(({ value: result, machine }) =>
               Effect.map(moveEvidence(root, key, name, result), (evidence) => ({
                 result,
@@ -912,12 +944,22 @@ const make = Effect.gen(function* () {
             // No play ran: the other plays' reason stands when they left no record either.
             const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
             yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
+          } else if (!skilledWanted) {
+            // Only keep going's judgment and a person need the tester's bot (GameFacts.measure).
+            const skilled = notMeasured(GAME_FACTS_SKILLED_DEFERRED, false);
+            yield* write({ skilled, ...(yield* useAfter("skilled", null, noRecord(skilled))) });
           } else {
+            // The game's own bot and its copy of the kit, beside the harness's kit.
             const copied = yield* Effect.promise(() =>
               NodeFSP.cp(
                 NodePath.join(root, ".studio", "bot"),
                 NodePath.join(copy, ".studio", "bot"),
-                { recursive: true, force: true },
+                {
+                  recursive: true,
+                  force: true,
+                  // The harness's kit is its own: a game's file of that name never replaces it.
+                  filter: (from) => !isPathInside(from, NodePath.join(root, HARNESS_KIT)),
+                },
               ).then(
                 () => true,
                 () => false,
@@ -1017,7 +1059,14 @@ const make = Effect.gen(function* () {
           if (job.stopped) return;
           job.running = true;
           const found = yield* load(build.key);
-          const tiers = planOf(found, yield* currentBot(build.root), job.person, build.engine);
+          const skilled = job.skilled;
+          const tiers = planOf(
+            found,
+            yield* currentBot(build.root),
+            job.person,
+            build.engine,
+            skilled,
+          );
           job.tiers = tiers;
           if (tiers.size === 0) return;
           yield* operations.changed(
@@ -1025,7 +1074,21 @@ const make = Effect.gen(function* () {
             GAME_FACTS_EVENT,
             `Measuring build ${build.build.slice(0, 8)}.`,
           );
-          yield* measureJob(build, tiers, found);
+          yield* measureJob(build, tiers, found, skilled);
+          // Keep going or a person asked for the tester's bot while this measure
+          // ran without it: only its play is owed, the rest was just measured.
+          if (!skilled && job.skilled && !job.stopped) {
+            const now = yield* load(build.key);
+            const again = planOf(
+              now,
+              yield* currentBot(build.root),
+              job.person,
+              build.engine,
+              true,
+            );
+            job.tiers = again.has("skilled") ? new Set<Tier>(["skilled"]) : new Set<Tier>();
+            if (job.tiers.size > 0) yield* measureJob(build, job.tiers, now, true);
+          }
         }),
       );
     }).pipe(
@@ -1072,6 +1135,7 @@ const make = Effect.gen(function* () {
           const existing = jobs.get(build.key);
           if (existing !== undefined) {
             if (person) existing.person = true;
+            if (options.skilled !== false) existing.skilled = true;
             if (!supersede) existing.supersedable = false;
             return Effect.succeed({ job: existing, dropped: [] });
           }
@@ -1089,6 +1153,7 @@ const make = Effect.gen(function* () {
           const fresh: Job = {
             build,
             person,
+            skilled: options.skilled !== false,
             supersedable: supersede,
             tiers: null,
             running: false,

@@ -298,13 +298,18 @@ export const summaryOf = (facts: Facts): GameBuildFactsSummary => {
 export const tierWallSeconds = (playSeconds: number) =>
   Math.min(600, GAME_FACTS_BOUNDS.startSeconds + playSeconds + 30);
 
-/** The engine check of a build's copy as a fact, worded as the run's boot check words it. */
-export const bootsFact = (result: GameCheckResult): Facts["boots"] => ({
+/**
+ * The engine check of a build's copy as a fact, worded as the run's boot check
+ * words it; `source` names a check made elsewhere of the same files.
+ */
+export const bootsFact = (result: GameCheckResult, source?: string): Facts["boots"] => ({
   status: "measured",
   value: {
     ok: result.ok,
     detail: result.ok
-      ? "boot clean"
+      ? source === undefined
+        ? "boot clean"
+        : `boot clean (${source})`
       : `check failed: ${
           result.errors
             .slice(0, 3)
