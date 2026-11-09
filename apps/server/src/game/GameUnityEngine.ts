@@ -13,7 +13,7 @@ import {
 } from "@kurambit/contracts";
 import type * as GameToolchain from "./GameToolchain.ts";
 import * as GameUnity from "./GameUnity.ts";
-import { insideGame } from "./GameProjectService.ts";
+import { inGame } from "./gamePath.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { consoleIssues, parseCSharpDiagnostics } from "./unityDiagnostics.ts";
 import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
@@ -655,7 +655,7 @@ export const makeUnityBackend = (
     profile: UNITY_PROFILE,
     resolveProject: (root, manifest) =>
       Effect.gen(function* () {
-        const projectDir = insideGame(root, manifestProject(manifest));
+        const projectDir = yield* inGame(root, manifestProject(manifest));
         const unity = yield* tools.unity(projectDir);
         return {
           binary: { path: unity.editor, version: unity.version, templates: null },
@@ -664,10 +664,12 @@ export const makeUnityBackend = (
         };
       }),
     // The toolchain picks a Unity editor by the project's own version.
+    // A project folder leading out of the game has no editor to report: its operations refuse.
     toolStatus: (root, manifest) =>
-      Effect.map(
-        tools.status({ unityProject: insideGame(root, manifestProject(manifest)) }),
-        (status) => status.tools.find((tool) => tool.tool === "unity") ?? null,
+      inGame(root, manifestProject(manifest)).pipe(
+        Effect.flatMap((unityProject) => tools.status({ unityProject })),
+        Effect.map((status) => status.tools.find((tool) => tool.tool === "unity") ?? null),
+        Effect.orElseSucceed(() => null),
       ),
     viewport: () => Effect.succeed({ ...UNITY_VIEWPORT }),
     projectSettingsFile: "ProjectSettings/ProjectSettings.asset",

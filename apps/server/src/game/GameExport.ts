@@ -23,6 +23,7 @@ import type { GameExportTarget } from "./engineProfile.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { inGame, insideGame } from "./gamePath.ts";
 import { comparedSource, snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
 import {
   CANDIDATE_BUILDS_DIRECTORY,
@@ -56,6 +57,25 @@ const decodeSelectedBuild = Schema.decodeUnknownSync(
 const encodeSelectedBuild = Schema.encodeSync(Schema.fromJsonString(SelectedWebBuild));
 
 const SELECTED_BUILD_FILE = "builds/web-selected.json";
+
+/**
+ * Every builds path an export or a package writes, moves or deletes in. `builds` or any
+ * folder in it may be a link an agent planted, and a release staged, published, pruned or
+ * swept through one would land outside the game, so all are checked before the first write.
+ */
+const buildPathsInGame = (root: string) =>
+  Effect.forEach(
+    [
+      CANDIDATE_BUILDS_DIRECTORY,
+      WEB_BUILD_DIRECTORY,
+      "builds/linux",
+      "builds/windows",
+      WEB_PACKAGES_DIRECTORY,
+      SELECTED_BUILD_FILE,
+    ],
+    (relative) => inGame(root, relative),
+    { discard: true },
+  );
 
 /** One release a game has, as the status and the Export… dialog show it. */
 export type GameRelease = GameStatus["builds"][number];
@@ -259,7 +279,15 @@ const make = Effect.gen(function* () {
         text === null
           ? Effect.succeed(null)
           : Effect.try({
-              try: () => decodeSelectedBuild(text),
+              // The record is a game file an agent can write: a build it names outside the
+              // game is no build Kurambit made, and Play and packaging would read from there.
+              try: () => {
+                const selected = decodeSelectedBuild(text);
+                if (selected !== null)
+                  for (const directory of [selected.directory, selected.previous ?? []].flat())
+                    insideGame(root, directory);
+                return selected;
+              },
               catch: (cause) =>
                 new GameOperationError({
                   operation: "Read the selected Web build",
@@ -366,6 +394,7 @@ const make = Effect.gen(function* () {
         reason: "invalid-input",
         detail: `${profile.displayName} games export ${profile.exportTargets.join(", ")} only; ${target} is refused for this engine.`,
       });
+    yield* buildPathsInGame(root);
     yield* sweepLeftovers(root);
     const operation = `export-${target.toLowerCase()}`;
     const work = Effect.gen(function* () {
@@ -627,6 +656,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // Packaging reads files only, so it never resolves the engine's executable.
           yield* unpackaged(root, "Windows", "Package Windows build");
+          yield* buildPathsInGame(root);
           const packaged = yield* Effect.tryPromise({
             try: (signal) => packageWindowsRelease({ root, signal }),
             catch: (cause) =>
@@ -683,6 +713,7 @@ const make = Effect.gen(function* () {
       projects.exclusive(threadId, "Package Web build", (root) =>
         Effect.gen(function* () {
           yield* unpackaged(root, "Web", "Package Web build");
+          yield* buildPathsInGame(root);
           const selected = yield* readSelectedBuild(root);
           if (selected === null)
             return yield* new GameOperationError({

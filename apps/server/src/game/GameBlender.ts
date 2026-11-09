@@ -90,6 +90,7 @@ import {
 import { commandDetail } from "./commandDetail.ts";
 import { fileSha256 } from "./fileHash.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
+import { inGame, insideGame, staysInsideGame } from "./gamePath.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -941,7 +942,8 @@ const make = Effect.gen(function* () {
         );
       yield* Effect.tryPromise({
         try: async () => {
-          await NodeFSP.mkdir(homeDir, { recursive: true });
+          // Blender's whole user folder, addon install and session record live here.
+          await ensureGameDir(root, "builds/logs/blender-live");
           await NodeFSP.mkdir(NodePath.join(homeDir, "home/.config"), { recursive: true });
           await NodeFSP.mkdir(NodePath.join(homeDir, "runtime"), {
             recursive: true,
@@ -1070,7 +1072,8 @@ const make = Effect.gen(function* () {
       const logPath = NodePath.join(homeDir, "blender.log");
       // A new session reopens the saved source; starting from Blender's
       // default scene would overwrite live.blend on the next save.
-      const blendPath = NodePath.join(root, BLEND_REL);
+      // Opened and saved over, so a live.blend leading out of the game is never adopted.
+      const blendPath = yield* inGame(root, BLEND_REL);
       const reopen = yield* Effect.promise(() =>
         NodeFSP.access(blendPath)
           .then(() => [blendPath])
@@ -1321,8 +1324,11 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const absolute = NodePath.join(root, BLEND_REL);
       yield* Effect.tryPromise({
-        try: () => NodeFSP.mkdir(NodePath.dirname(absolute), { recursive: true }),
-        catch: (cause) => opError("blender-live", BLEND_REL, "io", undefined, cause),
+        try: async () => {
+          await ensureGameDir(root, NodePath.posix.dirname(BLEND_REL));
+          insideGame(root, BLEND_REL);
+        },
+        catch: (cause) => opError("blender-live", BLEND_REL, "invalid-path", undefined, cause),
       });
       // Compressed: live.blend is committed with the game after every exec, and
       // an uncompressed scene adds ~10 MB of history each time.
@@ -1984,7 +1990,7 @@ const make = Effect.gen(function* () {
           library: painted.library,
           meshes: painted.meshes,
           expectedDigest: digest.perObject,
-          dest: NodePath.join(realRoot, TEXTURES_DIR, name),
+          dest: yield* inGame(realRoot, `${TEXTURES_DIR}/${name}`),
           stamp: sheet.stamp,
         })})`,
       ).pipe(Effect.ensuring(removeScratch(out, ["alignment.png"])));
@@ -2061,7 +2067,7 @@ const make = Effect.gen(function* () {
           library: carved.library,
           object: carved.object,
           name: input.name,
-          dest: NodePath.join(realRoot, TEXTURES_DIR, input.name),
+          dest: yield* inGame(realRoot, `${TEXTURES_DIR}/${input.name}`),
           stamp: sheet.stamp,
           replace: input.replace === true,
         })})`,
@@ -2090,6 +2096,7 @@ const make = Effect.gen(function* () {
       const template = yield* templates.directory;
       const target = NodePath.join(realRoot, engineDir, MESHOPT_DECODER);
       const present = yield* Effect.tryPromise(async () => {
+        insideGame(realRoot, `${engineDir}/${MESHOPT_DECODER}`);
         if ((await NodeFSP.stat(target).catch(() => null)) === null) {
           await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
           await NodeFSP.copyFile(NodePath.join(template, THREE_RUNTIME_1, MESHOPT_DECODER), target);
@@ -2106,16 +2113,14 @@ const make = Effect.gen(function* () {
       root,
       Effect.gen(function* () {
         const realRoot = yield* realRootOf(root);
+        const paths = yield* Effect.forEach(clips, (clip) => inGame(realRoot, clip.path));
         yield* kitCall(
           root,
           "blender-motion-strip",
           decodeMotionStrip,
           `kurambit.motion_strip(${pyJson({
-            clips: clips.map((clip) => ({
-              path: NodePath.join(realRoot, clip.path),
-              label: clip.label,
-            })),
-            out: NodePath.join(realRoot, out),
+            clips: clips.map((clip, index) => ({ path: paths[index], label: clip.label })),
+            out: yield* inGame(realRoot, out),
           })})`,
         );
       }),
@@ -2131,8 +2136,8 @@ const make = Effect.gen(function* () {
           "blender-model-views",
           decodeMotionStrip,
           `kurambit.model_views(${pyJson({
-            model: NodePath.join(realRoot, model),
-            out: NodePath.join(realRoot, out),
+            model: yield* inGame(realRoot, model),
+            out: yield* inGame(realRoot, out),
           })})`,
         );
       }),
@@ -2393,7 +2398,7 @@ const make = Effect.gen(function* () {
               );
               if (
                 real === null ||
-                !real.startsWith(realRoot + NodePath.sep) ||
+                !staysInsideGame(realRoot, relative) ||
                 !/\.(glb|gltf)$/i.test(real)
               )
                 return yield* fail(

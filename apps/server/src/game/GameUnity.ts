@@ -30,6 +30,8 @@ import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { inGame } from "./gamePath.ts";
+import { ensureGameDir } from "./gameKeptSaves.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import {
   commandFlag,
@@ -636,11 +638,7 @@ const make = Effect.gen(function* () {
     );
 
   const projectDirOf = (root: string) =>
-    projects
-      .read(root)
-      .pipe(
-        Effect.map((manifest) => GameProjectService.insideGame(root, manifestProject(manifest))),
-      );
+    projects.read(root).pipe(Effect.flatMap((manifest) => inGame(root, manifestProject(manifest))));
 
   /**
    * Reaps one record file and removes it; a missing or unreadable record
@@ -844,7 +842,7 @@ const make = Effect.gen(function* () {
         const workerSettings = NodePath.join(projectDir, "UserSettings/EditorUserSettings.asset");
         const settingsText = yield* Effect.tryPromise({
           try: async () => {
-            await NodeFSP.mkdir(homeDir, { recursive: true });
+            await ensureGameDir(root, "builds/logs/unity-live");
             await NodeFSP.mkdir(records.directory, { recursive: true });
             await NodeFSP.mkdir(install.cliHome, { recursive: true });
             // Every earlier editor for this game was reaped above.

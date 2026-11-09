@@ -43,7 +43,7 @@ import type { MemoryRoom } from "./GameMemoryGate.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import { insideGame } from "./GameProjectService.ts";
+import { inGame } from "./gamePath.ts";
 import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
 import {
@@ -793,7 +793,7 @@ const make = Effect.gen(function* () {
       const opened = yield* openRunner({
         root,
         backend,
-        projectDir: insideGame(root, manifestProject(manifest)),
+        projectDir: yield* inGame(root, manifestProject(manifest)),
         player: prepared.player,
         viewport,
         id,

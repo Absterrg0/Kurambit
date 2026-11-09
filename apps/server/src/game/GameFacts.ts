@@ -67,6 +67,8 @@ import * as GameBuildCopies from "./GameBuildCopies.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
+import { insideGame } from "./gamePath.ts";
+import { copyTree } from "./gameFiles.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -950,21 +952,21 @@ const make = Effect.gen(function* () {
             yield* write({ skilled, ...(yield* useAfter("skilled", null, noRecord(skilled))) });
           } else {
             // The game's own bot and its copy of the kit, beside the harness's kit.
-            const copied = yield* Effect.promise(() =>
-              NodeFSP.cp(
-                NodePath.join(root, ".studio", "bot"),
-                NodePath.join(copy, ".studio", "bot"),
-                {
-                  recursive: true,
-                  force: true,
+            // Links out of the game are left behind, so the copy never runs or reads what they point at.
+            const copied = yield* Effect.promise(async () => {
+              try {
+                await copyTree(
+                  insideGame(root, ".studio/bot"),
+                  NodePath.join(copy, ".studio", "bot"),
+                  undefined,
                   // The harness's kit is its own: a game's file of that name never replaces it.
-                  filter: (from) => !isPathInside(from, NodePath.join(root, HARNESS_KIT)),
-                },
-              ).then(
-                () => true,
-                () => false,
-              ),
-            );
+                  (from) => isPathInside(from, NodePath.join(root, HARNESS_KIT)),
+                );
+                return true;
+              } catch {
+                return false;
+              }
+            });
             let evidence: string | null = null;
             const skilled = !copied
               ? notMeasured("the game's bot files could not be copied", true)

@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { copyTree } from "./gameFiles.ts";
+import { ensureGameDir } from "./gameKeptSaves.ts";
 import { HOST_OS } from "./processHost.ts";
 
 export const unityPlayerDirectory = (root: string, sourceId: string) =>
@@ -169,7 +170,7 @@ export const reuseMainPlayer = async (
     `.${NodePath.basename(target)}-${NodeCrypto.randomUUID()}`,
   );
   try {
-    await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
+    await ensureGameDir(root, "builds/logs");
     await copyTree(source, staging, AbortSignal.timeout(5 * 60_000));
     const [copied, still] = await Promise.all([listing(staging), listing(source)]);
     if (copied !== still || !(await completePlayer(staging)))

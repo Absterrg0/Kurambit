@@ -39,7 +39,7 @@ import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import { insideGame } from "./GameProjectService.ts";
+import { inGame } from "./gamePath.ts";
 import { findExecutable } from "./GameProcesses.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
@@ -621,6 +621,8 @@ const make = Effect.gen(function* () {
           "invalid-input",
           "The bot file must live under .studio/bot/ and end with .mjs.",
         );
+      // The run executes the file: one that leads out of the game through a link is refused.
+      yield* inGame(root, NodePath.relative(root, botFile));
       const isFile = yield* Effect.promise(() =>
         NodeFSP.stat(botFile)
           .then((stat) => stat.isFile())
@@ -645,7 +647,7 @@ const make = Effect.gen(function* () {
         return yield* GameEngine.parkedEngine(manifest.engine.name);
       const backend = yield* engines.backendFor(manifest.engine.name);
       const profile = backend.profile;
-      const projectDir = insideGame(root, manifestProject(manifest));
+      const projectDir = yield* inGame(root, manifestProject(manifest));
       const isWeb = profile.play === "browser";
       const viewport = yield* backend.viewport(projectDir);
       const browser = isWeb ? yield* gameBrowser("Bot run", root) : null;

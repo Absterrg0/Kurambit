@@ -13,7 +13,7 @@ import {
 } from "@kurambit/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import { insideGame } from "./GameProjectService.ts";
+import { inGame } from "./gamePath.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { GODOT_CHECK_SCRIPT } from "./godotCheckScript.ts";
 import { GODOT_PLAY_RUNNER } from "./godotPlayRunner.ts";
@@ -343,7 +343,7 @@ export const makeGodotBackend = (
         return {
           binary,
           projectName: manifestProject(manifest),
-          projectDir: insideGame(root, manifestProject(manifest)),
+          projectDir: yield* inGame(root, manifestProject(manifest)),
         };
       }),
     toolStatus: () =>

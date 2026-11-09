@@ -46,21 +46,12 @@ import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
+import { insideGame } from "./gamePath.ts";
 import { ensureScaffold, refreshSkills } from "./runSetup.ts";
 import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame } from "./templates.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 
-export const insideGame = (root: string, relative: string) => {
-  const target = NodePath.resolve(root, relative);
-  if (NodePath.isAbsolute(relative) || target === root || !target.startsWith(root + NodePath.sep))
-    throw new GameOperationError({
-      operation: "resolve-path",
-      path: relative,
-      reason: "invalid-path",
-    });
-  return target;
-};
 /**
  * The folder a new game gets: its name in lower-case ASCII words. Accents fold
  * to their letters; a name with no Latin letters at all (ゲーム, Игра) gets

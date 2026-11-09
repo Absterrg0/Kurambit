@@ -8,6 +8,7 @@ import * as Mime from "effect/http/Mime";
 import * as Option from "effect/Option";
 import { engineChildEnv } from "./GameProcesses.ts";
 import { runtimeRequestFile } from "./gameRuntime.ts";
+import { insideGame } from "./gamePath.ts";
 
 /** Text types carry their charset so a page without a meta tag still decodes as UTF-8. */
 const contentType = (path: string): string =>
@@ -41,7 +42,9 @@ export const serveGameDirectory = async (
     readonly runtimes?: string | null;
   } = {},
 ): Promise<WebStaticServer> => {
-  const webRoot = await NodeFSP.realpath(NodePath.join(root, directory));
+  // The served folder itself must stay in the game: a link at it (or a selection naming
+  // another folder) would serve whatever it points at to the game's page.
+  const webRoot = await NodeFSP.realpath(insideGame(root, directory, { root: "allowed" }));
   await NodeFSP.access(NodePath.join(webRoot, "index.html"));
   const server = NodeHttp.createServer((request, response) => {
     void (async () => {

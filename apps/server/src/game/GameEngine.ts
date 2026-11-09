@@ -28,6 +28,7 @@ import {
 import { commandDetail } from "./commandDetail.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { inGame } from "./gamePath.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import { makeGodotBackend } from "./GameGodotEngine.ts";
 import { makeThreeBackend } from "./GameThreeEngine.ts";
@@ -503,7 +504,7 @@ const make = Effect.gen(function* () {
     const manifest = yield* projects.read(root);
     const backend = yield* backendFor(manifest.engine.name);
     // The project folder alone answers this; no binary is resolved.
-    return yield* backend.viewport(GameProjectService.insideGame(root, manifestProject(manifest)));
+    return yield* backend.viewport(yield* inGame(root, manifestProject(manifest)));
   });
 
   // Clean checks by the identity of what they checked. Memory only: one lost costs a boot check.

@@ -14,6 +14,7 @@ import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
 import { makeCheckoutOf, reuseMainPlayer, touchPlayer } from "./unityPlayerCache.ts";
+import { inGame } from "./gamePath.ts";
 
 /** Players a game keeps under builds/logs, about 100 MB each. */
 const PLAYERS_KEPT = 3;
@@ -155,7 +156,8 @@ ${imported.message}`.slice(0, 3000),
             // The most recently built or played few players are kept, so the
             // sources a comparison's worktrees play are usually still here; a
             // cut-short build's staging goes too.
-            const logs = NodePath.join(root, "builds/logs");
+            // Swept and pruned below: never through a link out of the game.
+            const logs = yield* inGame(root, "builds/logs");
             yield* Effect.promise(async () => {
               await sweepPublished(logs, (name) => name.startsWith(".release-"));
               const players: Array<{ readonly path: string; readonly mtimeMs: number }> = [];

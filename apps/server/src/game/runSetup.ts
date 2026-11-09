@@ -18,6 +18,8 @@ import { ENGINE_SKILLS, engineProfile } from "./engineProfile.ts";
 import { RUN_STATE_IGNORES } from "./scaffold.ts";
 import { failureText } from "./run/handBack.ts";
 import { runtimesDirectory } from "./gameRuntime.ts";
+import { insideGame, staysInsideGame } from "./gamePath.ts";
+import { ensureGameDir } from "./gameKeptSaves.ts";
 
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 
@@ -30,6 +32,14 @@ const readText = (path: string): Promise<string | null> =>
     if (error.code === "ENOENT") return null;
     throw error;
   });
+
+/**
+ * Whether a copy may write `to`: the skills and the bot kit are copied over what the game
+ * already holds, and a copy writes through a link it finds there, so one that leads out of
+ * the game is skipped rather than written through.
+ */
+const writableInGame = (root: string, to: string) =>
+  staysInsideGame(root, NodePath.relative(root, to));
 
 const ioError = (operation: string, path: string, cause: unknown) =>
   new GameOperationError({
@@ -48,13 +58,15 @@ const ioError = (operation: string, path: string, cause: unknown) =>
 const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
   Effect.tryPromise({
     try: async () => {
-      const skills = NodePath.join(root, "studio-skills");
+      const skills = insideGame(root, "studio-skills");
       const own = engineProfile(engine).skill;
       const others = ENGINE_SKILLS.filter((name) => name !== own);
       await NodeFSP.cp(NodePath.join(templates, "studio"), skills, {
         recursive: true,
         force: true,
-        filter: (from) => !others.some((name) => NodePath.basename(from) === `${name}.md`),
+        filter: (from, to) =>
+          !others.some((name) => NodePath.basename(from) === `${name}.md`) &&
+          writableInGame(root, to),
       });
       await Promise.all(
         others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
@@ -72,7 +84,7 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
           NodePath.join(kits, "shell"),
           { recursive: true },
         );
-      const index = NodePath.join(skills, "AGENTS.md");
+      const index = insideGame(root, "studio-skills/AGENTS.md");
       const text = await NodeFSP.readFile(index, "utf8");
       const kept = text
         .split("\n")
@@ -100,9 +112,7 @@ export const ensureScaffold = (
   Effect.gen(function* () {
     const io = <A>(what: string, path: string, work: () => Promise<A>) =>
       Effect.tryPromise({ try: work, catch: (cause) => ioError(what, path, cause) });
-    yield* io("Run scaffold", ".studio/bot", () =>
-      NodeFSP.mkdir(NodePath.join(root, ".studio", "bot"), { recursive: true }),
-    );
+    yield* io("Run scaffold", ".studio/bot", () => ensureGameDir(root, ".studio/bot"));
     const copy = (from: string, to: string) =>
       io("Run scaffold", NodePath.relative(root, to), async () => {
         const present = await NodeFSP.access(to).then(
@@ -110,7 +120,11 @@ export const ensureScaffold = (
           () => false,
         );
         if (!fresh && present) return false;
-        await NodeFSP.cp(from, to, { recursive: true, force: true });
+        await NodeFSP.cp(from, to, {
+          recursive: true,
+          force: true,
+          filter: (_from, into) => writableInGame(root, into),
+        });
         return true;
       });
     const hasSkills = yield* io("Run scaffold", "studio-skills", () =>
@@ -124,26 +138,26 @@ export const ensureScaffold = (
     // The run-state ignores keep every build the run captures free of its
     // notes and records: a start that cannot write them fails, as for the pack.
     const ignore =
-      (yield* io("Run scaffold", ".gitignore", () =>
-        readText(NodePath.join(root, ".gitignore")),
-      )) ?? "";
+      (yield* io("Run scaffold", ".gitignore", () => readText(insideGame(root, ".gitignore")))) ??
+      "";
     const present = new Set(ignore.split("\n").map((line) => line.trim()));
     const missing = RUN_STATE_IGNORES.filter((line) => !present.has(line));
     if (missing.length > 0)
       yield* writeFileStringAtomically({
         filePath: NodePath.join(root, ".gitignore"),
+        followLink: false,
         contents: `${ignore}${ignore === "" || ignore.endsWith("\n") ? "" : "\n"}${missing.join("\n")}\n`,
       }).pipe(Effect.mapError((cause) => ioError("Run scaffold", ".gitignore", cause)));
     // The game's AGENTS.md section is a courtesy to people and the creator's
     // agent; the start goes on without it.
     yield* Effect.gen(function* () {
       const before =
-        (yield* io("Run scaffold", "AGENTS.md", () =>
-          readText(NodePath.join(root, "AGENTS.md")),
-        )) ?? "";
+        (yield* io("Run scaffold", "AGENTS.md", () => readText(insideGame(root, "AGENTS.md")))) ??
+        "";
       if (!before.includes(SKILLS_HEADING))
         yield* writeFileStringAtomically({
           filePath: NodePath.join(root, "AGENTS.md"),
+          followLink: false,
           contents: `${before}${SKILLS_LINE}`,
         });
     }).pipe(

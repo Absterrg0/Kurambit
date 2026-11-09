@@ -73,7 +73,7 @@ import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
 import { characterRoute, lockCharacterRouteRefusal } from "../gameStyle.ts";
 import * as GameProjectService from "../GameProjectService.ts";
-import { isPathInside } from "../gameNativeUserDir.ts";
+import { insideGame, staysInsideGame } from "../gamePath.ts";
 import {
   type ArtAdapter,
   type ArtContext,
@@ -371,11 +371,7 @@ const freeName = async (
 const writeGameFile = async (root: string, relative: string, bytes: Uint8Array) => {
   const dir = await ensureGameDir(root, NodePath.dirname(relative));
   const target = NodePath.join(dir, NodePath.basename(relative));
-  const realRoot = await NodeFSP.realpath(root);
-  if (
-    !isPathInside(NodePath.join(await NodeFSP.realpath(dir), NodePath.basename(relative)), realRoot)
-  )
-    throw new Error(`${relative} is outside the game folder; nothing is written there.`);
+  insideGame(root, relative);
   const staged = NodePath.join(
     dir,
     `.${NodePath.basename(relative)}.${NodeCrypto.randomUUID()}.tmp`,
@@ -391,17 +387,10 @@ const writeGameFile = async (root: string, relative: string, bytes: Uint8Array) 
 
 /** Removes a file the service wrote, if it is still a plain file inside the game. */
 const removeGameFile = async (root: string, relative: string) => {
+  if (!staysInsideGame(root, relative)) return;
   const file = NodePath.join(root, relative);
   const stat = await NodeFSP.lstat(file).catch(() => null);
   if (stat === null || !stat.isFile()) return;
-  const realRoot = await NodeFSP.realpath(root);
-  if (
-    !isPathInside(
-      NodePath.join(await NodeFSP.realpath(NodePath.dirname(file)), NodePath.basename(file)),
-      realRoot,
-    )
-  )
-    return;
   await NodeFSP.rm(file, { force: true });
 };
 
@@ -708,12 +697,10 @@ const make = Effect.gen(function* () {
       try: async (): Promise<ArtReference> => {
         if (NodePath.isAbsolute(path) || path.split(/[\\/]/).includes(".."))
           throw new Error(`${path}: use a path inside the game.`);
-        const realRoot = await NodeFSP.realpath(root);
         const absolute = await NodeFSP.realpath(NodePath.join(root, path)).catch(() => {
           throw new Error(`${path} does not exist.`);
         });
-        if (!isPathInside(absolute, realRoot))
-          throw new Error(`${path} resolves outside the game.`);
+        if (!staysInsideGame(root, path)) throw new Error(`${path} resolves outside the game.`);
         const mime = REFERENCE_MIME[NodePath.extname(absolute).toLowerCase()];
         if (mime === undefined) throw new Error(`${path} is not a PNG, JPEG or WebP image.`);
         const stat = await NodeFSP.stat(absolute);
@@ -745,11 +732,10 @@ const make = Effect.gen(function* () {
       try: async () => {
         if (NodePath.isAbsolute(path) || path.split(/[\\/]/).includes(".."))
           throw new Error("use a path inside the game.");
-        const realRoot = await NodeFSP.realpath(root);
         const absolute = await NodeFSP.realpath(NodePath.join(root, path)).catch(() => {
           throw new Error("does not exist.");
         });
-        if (!isPathInside(absolute, realRoot)) throw new Error("resolves outside the game.");
+        if (!staysInsideGame(root, path)) throw new Error("resolves outside the game.");
         if (!ext.test.test(absolute)) throw new Error(`is not ${ext.name}.`);
         const stat = await NodeFSP.stat(absolute);
         if (!stat.isFile()) throw new Error("is not a file.");

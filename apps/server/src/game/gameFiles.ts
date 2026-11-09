@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import { GameOperationError } from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
+import { copyableEntry } from "./gamePath.ts";
 
 /**
  * The shared atomic write for files the server keeps in a game folder (records,
@@ -35,15 +36,23 @@ export const makeAtomicWriter = Effect.gen(function* () {
  * (btrfs, XFS), an APFS clone on macOS (libuv's FICLONE; unverified there), a
  * plain copy elsewhere (Windows). Times are kept. An abort stops it between
  * files, because the filter rejects; `fs.cp` cannot be stopped mid-file.
+ * Links are copied as links, and only those that stay inside `source`: a game
+ * tree is agent-written, and a link out of it would carry the copy (a build,
+ * a player, a sample) to whatever it points at. `skip` leaves out more.
  */
-export const copyTree = (source: string, target: string, signal?: AbortSignal): Promise<void> =>
+export const copyTree = (
+  source: string,
+  target: string,
+  signal?: AbortSignal,
+  skip?: (from: string) => boolean,
+): Promise<void> =>
   NodeFSP.cp(source, target, {
     recursive: true,
     preserveTimestamps: true,
     verbatimSymlinks: true,
     mode: NodeFSP.constants.COPYFILE_FICLONE,
-    filter: () => {
+    filter: async (from) => {
       signal?.throwIfAborted();
-      return true;
+      return skip?.(from) !== true && (await copyableEntry(from, source));
     },
   });
