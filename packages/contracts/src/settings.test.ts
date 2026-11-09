@@ -385,21 +385,6 @@ describe("ClientSettings chat width", () => {
   });
 });
 
-describe("ClientSettings load balancing", () => {
-  it("requires opt-in when settings are new or omit load balancing", () => {
-    expect(decodeClientSettings({}).loadBalancingEnabled).toBe(false);
-    expect(decodeClientSettings({ loadBalancingWeights: {} }).loadBalancingEnabled).toBe(false);
-  });
-
-  it.each([true, false])("preserves a saved choice of %s", (loadBalancingEnabled) => {
-    const settings = decodeClientSettings({ loadBalancingEnabled });
-    expect(encodeClientSettings(settings).loadBalancingEnabled).toBe(loadBalancingEnabled);
-    expect(decodeClientSettingsPatch({ loadBalancingEnabled }).loadBalancingEnabled).toBe(
-      loadBalancingEnabled,
-    );
-  });
-});
-
 describe("ClientSettings composer context strip", () => {
   it("defaults to draft-only and accepts a persistent strip preference", () => {
     expect(decodeClientSettings({}).persistComposerContextStrip).toBe(false);

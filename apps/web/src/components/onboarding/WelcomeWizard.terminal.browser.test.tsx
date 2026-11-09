@@ -1,8 +1,5 @@
 import { RegistryContext } from "@effect/atom-react";
-import {
-  BearerConnectionTarget,
-  PrimaryConnectionTarget,
-} from "@kurambit/client-runtime/connection";
+import { PrimaryConnectionTarget } from "@kurambit/client-runtime/connection";
 import {
   AuthTerminalOperateScope,
   DEFAULT_SERVER_SETTINGS,
@@ -128,10 +125,11 @@ const remoteEnvironment = {
   connection: { phase: "connected" },
   entry: {
     enabled: true,
-    target: new BearerConnectionTarget({
+    target: new PrimaryConnectionTarget({
       environmentId: remoteId,
       label: "Paired computer",
-      connectionId: "paired-remote",
+      httpBaseUrl: "http://192.168.1.20:3773",
+      wsBaseUrl: "ws://192.168.1.20:3773",
     }),
   },
 } as const;

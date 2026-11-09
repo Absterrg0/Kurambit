@@ -10,9 +10,7 @@ import type {
   ServerInstallation,
   ServerSelfUpdateCapability,
 } from "@kurambit/contracts";
-import type { ServerUpdateStage, ServerUpdateState } from "@kurambit/client-runtime/state/server";
-
-import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import type { ServerUpdateStage } from "@kurambit/client-runtime/state/server";
 
 const UPDATE_STAGE_LABELS: Record<ServerUpdateStage, string> = {
   downloading: "Downloading…",
@@ -52,30 +50,6 @@ export function canUpdateServer(
 ): boolean {
   if (result._tag !== "Success" || !result.value.authenticated) return false;
   return sessionGrantsScope(result.value, AuthEnvironmentMaintainScope);
-}
-
-export function ServerUpdateProgress({
-  state,
-}: {
-  readonly state: Exclude<ServerUpdateState, { status: "idle" }>;
-}) {
-  if (state.status === "failed") {
-    return (
-      <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-destructive" role="alert">
-        <span className="size-1.5 shrink-0 rounded-full bg-destructive" aria-hidden="true" />
-        <Tooltip>
-          <TooltipTrigger render={<span className="min-w-0 truncate">{state.message}</span>} />
-          <TooltipPopup side="top">{state.message}</TooltipPopup>
-        </Tooltip>
-      </div>
-    );
-  }
-  return (
-    <div className="mt-1 flex items-center gap-2 text-xs font-medium text-foreground">
-      <span className="size-1.5 shrink-0 rounded-full bg-foreground" aria-hidden="true" />
-      <span>{serverUpdateStageLabel(state.stage)}</span>
-    </div>
-  );
 }
 
 /**

@@ -1,46 +1,16 @@
-import { EnvironmentId } from "@kurambit/contracts";
 import { describe, expect, it } from "@effect/vitest";
-import * as Option from "effect/Option";
 
 import {
-  BearerConnectionProfile,
-  type ConnectionCatalogEntry,
-  type ConnectionRoute,
-} from "./catalog.ts";
-import {
-  BearerConnectionTarget,
   ConnectionBlockedError,
   ConnectionTransientError,
   type SupervisorConnectionState,
 } from "./model.ts";
 import {
-  connectionCatalogDisplayUrl,
-  environmentMcpUrl,
   connectionStatusText,
   connectionStatusTitle,
   presentEnvironmentConnection,
   presentConnectionState,
 } from "./presentation.ts";
-
-const TARGET = new BearerConnectionTarget({
-  environmentId: EnvironmentId.make("environment-1"),
-  label: "Remote environment",
-  connectionId: "connection-1",
-});
-
-const ENTRY: ConnectionCatalogEntry = {
-  target: TARGET,
-  profile: Option.some(
-    new BearerConnectionProfile({
-      connectionId: TARGET.connectionId,
-      environmentId: TARGET.environmentId,
-      label: TARGET.label,
-      httpBaseUrl: "https://environment.example.test",
-      wsBaseUrl: "wss://environment.example.test",
-    }),
-  ),
-  enabled: true,
-};
 
 function supervisorState(overrides: Partial<SupervisorConnectionState>): SupervisorConnectionState {
   return {
@@ -70,42 +40,6 @@ describe("connection presentation", () => {
     expect(connection.phase).toBe("unsupported");
     expect(connection.error).toBe("Update your app.");
     expect(connectionStatusText(connection)).toBe("Client not supported");
-  });
-
-  it("preserves profile display information without exposing credentials", () => {
-    expect(connectionCatalogDisplayUrl(ENTRY)).toBe("https://environment.example.test");
-  });
-
-  it("copies the MCP address of the route this device is connected over", () => {
-    const route = (connectionId: string, httpBaseUrl: string): ConnectionRoute => {
-      const target = new BearerConnectionTarget({ ...TARGET, connectionId });
-      return {
-        target,
-        profile: Option.some(
-          new BearerConnectionProfile({
-            connectionId,
-            environmentId: TARGET.environmentId,
-            label: TARGET.label,
-            httpBaseUrl,
-            wsBaseUrl: httpBaseUrl.replace(/^http/, "ws"),
-          }),
-        ),
-      };
-    };
-    const lan = route("lan", "http://192.168.4.53:3773/");
-    const tailnet = route("tailnet", "http://100.115.1.44:3773/");
-    const serve = route("serve", "https://machine.tailnet.ts.net/");
-    const entry: ConnectionCatalogEntry = {
-      ...ENTRY,
-      target: lan.target,
-      profile: lan.profile,
-      alternateRoutes: [tailnet, serve],
-    };
-
-    expect(environmentMcpUrl({ entry, connectedTarget: tailnet.target })).toBe(
-      "http://100.115.1.44:3773/mcp",
-    );
-    expect(environmentMcpUrl({ entry })).toBe("http://192.168.4.53:3773/mcp");
   });
 
   it("distinguishes initial connection, reconnect, and retry errors", () => {

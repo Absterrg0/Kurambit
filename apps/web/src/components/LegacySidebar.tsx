@@ -1,6 +1,5 @@
 import { GameEntry } from "./game/GameEntry";
 import { useGameDialogStore } from "./game/gameDialogStore";
-import { Spinner } from "~/components/ui/spinner";
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
@@ -72,8 +71,6 @@ import {
   type SidebarThreadPreviewCount,
   type SidebarThreadSortOrder,
 } from "@kurambit/contracts/settings";
-import { isDesktopLocalConnectionTarget, isWslConnectionTarget } from "../connection/desktopLocal";
-import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
@@ -418,11 +415,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const isRemoteThread = thread.environmentId !== primaryEnvironmentId;
   const remoteEnvLabel = environment?.label ?? null;
   const remoteMachine = resolveEnvironmentMachineKind(environment?.serverConfig ?? null);
-  const isDesktopLocalThread =
-    environment !== null && isDesktopLocalConnectionTarget(environment.entry.target);
-  const threadEnvironmentLabel = isRemoteThread
-    ? (remoteEnvLabel ?? (isDesktopLocalThread ? "Local" : "Remote"))
-    : null;
+  const threadEnvironmentLabel = isRemoteThread ? (remoteEnvLabel ?? "Remote") : null;
   const isThreadRunning = !threadRuntimeCanArchive(thread.runtime);
   const threadStatus = resolveThreadStatusPill({
     thread: {
@@ -758,7 +751,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             ) : null}
             <span className={threadMetaClassName}>
               <span className="inline-flex items-center gap-1">
-                {isRemoteThread && !isDesktopLocalThread && (
+                {isRemoteThread && (
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -2438,71 +2431,6 @@ const SidebarProjectListRow = memo(function SidebarProjectListRow(props: Sidebar
   );
 });
 
-function LocalSecondaryStatus() {
-  const { environments } = useEnvironments();
-  // The desktop reports which local secondary backends (e.g. the WSL backend)
-  // exist; the hook polls because the bridge has no change event.
-  const secondaries = useDesktopLocalBootstraps();
-
-  const localEnvByUrl = (() => {
-    const map = new Map<string, { phase: string; error: string | null }>();
-    for (const environment of environments) {
-      if (
-        isDesktopLocalConnectionTarget(environment.entry.target) &&
-        environment.displayUrl !== null
-      ) {
-        map.set(environment.displayUrl, {
-          phase: environment.connection.phase,
-          error: environment.connection.error,
-        });
-      }
-    }
-    return map;
-  })();
-
-  const connecting: string[] = [];
-  const failed: Array<{ label: string; error: string | null }> = [];
-  for (const bootstrap of secondaries) {
-    const env =
-      bootstrap.httpBaseUrl !== null ? localEnvByUrl.get(bootstrap.httpBaseUrl) : undefined;
-    if (env?.phase === "connected") {
-      continue;
-    }
-    if (env?.phase === "error") {
-      failed.push({ label: bootstrap.label, error: env.error });
-      continue;
-    }
-    connecting.push(bootstrap.label);
-  }
-
-  if (connecting.length === 0 && failed.length === 0) {
-    return null;
-  }
-
-  return (
-    <SidebarGroup>
-      {connecting.length > 0 ? (
-        <Alert variant="sidebar">
-          <Spinner />
-          <AlertTitle>Connecting {connecting.join(", ")}</AlertTitle>
-        </Alert>
-      ) : null}
-      {failed.length > 0 ? (
-        <Alert variant="warning">
-          <TriangleAlertIcon />
-          <AlertTitle>Couldn't connect {failed.map((entry) => entry.label).join(", ")}</AlertTitle>
-          <AlertDescription>
-            {failed
-              .map((entry) => entry.error)
-              .filter(Boolean)
-              .join("; ") || "The backend didn't respond."}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-    </SidebarGroup>
-  );
-}
-
 type SortableProjectHandleProps = Pick<
   ReturnType<typeof useSortable>,
   "attributes" | "listeners" | "setActivatorNodeRef"
@@ -2798,7 +2726,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </Alert>
         </SidebarGroup>
       ) : null}
-      <LocalSecondaryStatus />
       <SidebarGroup>
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-xs font-medium text-sidebar-muted-foreground/80">Games</span>
@@ -2941,16 +2868,6 @@ function useLegacySidebarProjects() {
   const environmentLabelById = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
   );
-  const desktopLocalEnvironmentIds = new Set(
-    environments
-      .filter((environment) => isDesktopLocalConnectionTarget(environment.entry.target))
-      .map((environment) => environment.environmentId),
-  );
-  const wslEnvironmentIds = new Set(
-    environments
-      .filter((environment) => isWslConnectionTarget(environment.entry.target))
-      .map((environment) => environment.environmentId),
-  );
   const orderedProjects = orderItemsByPreferredIds({
     items: projects,
     preferredIds: projectOrder,
@@ -2976,8 +2893,6 @@ function useLegacySidebarProjects() {
     settings: projectGroupingSettings,
     primaryEnvironmentId,
     resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
-    isDesktopLocalEnvironment: (environmentId) => desktopLocalEnvironmentIds.has(environmentId),
-    isWslEnvironment: (environmentId) => wslEnvironmentIds.has(environmentId),
   });
   return {
     projectsLength: projects.length,

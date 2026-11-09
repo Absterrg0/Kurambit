@@ -1,9 +1,6 @@
 import type { ServerConfig } from "@kurambit/contracts";
-import * as Option from "effect/Option";
 
-import type { ConnectionCatalogEntry } from "./catalog.ts";
-import type { ConnectionTarget, SupervisorConnectionState } from "./model.ts";
-import { connectionRouteId, connectionRoutes, routeHttpBaseUrl } from "./routes.ts";
+import type { ConnectionCatalogEntry, SupervisorConnectionState } from "./model.ts";
 
 export type EnvironmentConnectionPhase =
   | "available"
@@ -100,41 +97,6 @@ export function presentEnvironmentConnection(
   return presentConnectionState(state);
 }
 
-export function environmentMcpUrl(input: {
-  readonly entry: ConnectionCatalogEntry;
-  readonly connectedTarget?: ConnectionTarget | null | undefined;
-}): string | null {
-  const connectedRouteId = input.connectedTarget ? connectionRouteId(input.connectedTarget) : null;
-  const routes = connectionRoutes(input.entry);
-  const connectedRoute = routes.find(
-    (route) => connectionRouteId(route.target) === connectedRouteId,
-  );
-  for (const route of connectedRoute ? [connectedRoute, ...routes] : routes) {
-    const httpBaseUrl = routeHttpBaseUrl(route);
-    const mcpUrl = httpBaseUrl === null ? null : mcpUrlFromBase(httpBaseUrl);
-    if (mcpUrl !== null) return mcpUrl;
-  }
-  return null;
-}
-
-function mcpUrlFromBase(httpBaseUrl: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(httpBaseUrl);
-  } catch {
-    return null;
-  }
-  url.pathname = "/mcp";
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
-
-export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): string | null {
-  switch (entry.target._tag) {
-    case "PrimaryConnectionTarget":
-      return entry.target.httpBaseUrl;
-    case "BearerConnectionTarget":
-      return Option.isSome(entry.profile) ? entry.profile.value.httpBaseUrl : null;
-  }
+export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): string {
+  return entry.target.httpBaseUrl;
 }

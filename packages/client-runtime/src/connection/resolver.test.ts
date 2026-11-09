@@ -4,73 +4,36 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 
 import * as ConnectionResolver from "./resolver.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
-import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
-import {
-  type ConnectionCatalogEntry,
-  type ConnectionCredential,
-  type ConnectionProfile,
-} from "./catalog.ts";
-import * as ConnectionCredentialStore from "./credentialStore.ts";
-import { PrimaryConnectionTarget, type ConnectionTarget } from "./model.ts";
-import * as ConnectionProfileStore from "./profileStore.ts";
+import { type ConnectionCatalogEntry, PrimaryConnectionTarget } from "./model.ts";
 import * as RpcHttp from "../rpc/http.ts";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 
-function catalogEntry(
-  target: ConnectionTarget,
-  profile: Option.Option<ConnectionProfile> = Option.none(),
-): ConnectionCatalogEntry {
-  return { target, profile, enabled: true };
+function catalogEntry(target: PrimaryConnectionTarget): ConnectionCatalogEntry {
+  return { target, enabled: true };
 }
 
 const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((options?: {
-  readonly profiles?: ReadonlyArray<ConnectionProfile>;
-  readonly profileStore?: ConnectionProfileStore.ConnectionProfileStore["Service"];
-  readonly credentials?: ReadonlyArray<readonly [string, ConnectionCredential]>;
-  readonly authorizeBearer?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeBearer"];
   readonly primaryBearerToken?: string;
   readonly descriptorProtocolVersion?: number | null | undefined;
+  readonly requests?: Array<{ readonly url: string; readonly authorization: string | null }>;
 }) => {
-  const profiles = new Map(
-    (options?.profiles ?? []).map((profile) => [profile.connectionId, profile]),
-  );
-  const credentials = new Map(options?.credentials ?? []);
-
-  const profileStore = ConnectionProfileStore.ConnectionProfileStore.of({
-    get: (connectionId) => Effect.succeed(Option.fromNullishOr(profiles.get(connectionId))),
-    put: (profile) => Effect.sync(() => void profiles.set(profile.connectionId, profile)),
-    remove: (connectionId) => Effect.sync(() => void profiles.delete(connectionId)),
-  });
-  const credentialStore = ConnectionCredentialStore.ConnectionCredentialStore.of({
-    get: (connectionId) => Effect.succeed(Option.fromNullishOr(credentials.get(connectionId))),
-    put: (connectionId, credential) =>
-      Effect.sync(() => void credentials.set(connectionId, credential)),
-    remove: (connectionId) => Effect.sync(() => void credentials.delete(connectionId)),
-  });
-  const remote = RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization.of({
-    authorizeBearer:
-      options?.authorizeBearer ??
-      ((input) =>
-        Effect.succeed({
-          environmentId: input.expectedEnvironmentId,
-          label: "Authorized bearer environment",
-          httpBaseUrl: input.httpBaseUrl,
-          socketUrl: "wss://authorized.example.test/ws?wsTicket=bearer",
-          httpAuthorization: {
-            _tag: "Bearer" as const,
-            token: input.bearerToken,
-          },
-        })),
-  });
-
   const layerDependencies = Layer.mergeAll(
-    RpcHttp.layerRemoteHttpClient((() =>
-      Promise.resolve(
+    RpcHttp.layerRemoteHttpClient(((input, init) => {
+      const url = String(input);
+      options?.requests?.push({
+        url,
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
+      if (url.endsWith("/api/auth/websocket-ticket")) {
+        return Promise.resolve(
+          Response.json({ ticket: "desktop", expiresAt: "2026-06-06T01:00:00.000Z" }),
+        );
+      }
+      return Promise.resolve(
         Response.json({
           environmentId: ENVIRONMENT_ID,
           label: "Compatible environment",
@@ -83,12 +46,8 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
               : { orchestrationProtocolVersion: options.descriptorProtocolVersion }),
           capabilities: { repositoryIdentity: true },
         }),
-      )) satisfies typeof fetch),
-    Layer.succeed(
-      ConnectionProfileStore.ConnectionProfileStore,
-      options?.profileStore ?? profileStore,
-    ),
-    Layer.succeed(ConnectionCredentialStore.ConnectionCredentialStore, credentialStore),
+      );
+    }) satisfies typeof fetch),
     Layer.succeed(
       ClientCapabilities.PrimaryEnvironmentAuth,
       ClientCapabilities.PrimaryEnvironmentAuth.of({
@@ -101,7 +60,6 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
         metadata: { label: "Test Client", deviceType: "desktop", surface: "web" },
       }),
     ),
-    Layer.succeed(RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization, remote),
   );
 
   return Effect.succeed(ConnectionResolver.layer.pipe(Layer.provide(layerDependencies)));
@@ -171,25 +129,10 @@ describe("ConnectionResolver", () => {
 
   it.effect("authorizes a desktop primary environment with its platform bearer token", () =>
     Effect.gen(function* () {
-      const bearerInputs = yield* Ref.make<ReadonlyArray<{ token: string; method: string }>>([]);
+      const requests: Array<{ readonly url: string; readonly authorization: string | null }> = [];
       const layerBroker = yield* makeDependencies({
         primaryBearerToken: "desktop-bearer",
-        authorizeBearer: (input) =>
-          Ref.update(bearerInputs, (values) => [
-            ...values,
-            { token: input.bearerToken, method: input.connectionMethod },
-          ]).pipe(
-            Effect.as({
-              environmentId: input.expectedEnvironmentId,
-              label: "Primary",
-              httpBaseUrl: input.httpBaseUrl,
-              socketUrl: "ws://127.0.0.1:3777/ws?wsTicket=desktop",
-              httpAuthorization: {
-                _tag: "Bearer" as const,
-                token: input.bearerToken,
-              },
-            }),
-          ),
+        requests,
       });
       const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(layerBroker));
       const target = new PrimaryConnectionTarget({
@@ -200,11 +143,15 @@ describe("ConnectionResolver", () => {
       });
 
       expect(yield* broker.prepare(catalogEntry(target))).toMatchObject({
-        socketUrl: "ws://127.0.0.1:3777/ws?wsTicket=desktop&orchestrationProtocol=2",
+        socketUrl:
+          "ws://127.0.0.1:3777/ws?wsTicket=desktop&clientSurface=web&clientDeviceType=desktop&connectionMethod=direct&orchestrationProtocol=2",
         httpAuthorization: { _tag: "Bearer", token: "desktop-bearer" },
         target,
       });
-      expect(yield* Ref.get(bearerInputs)).toEqual([{ token: "desktop-bearer", method: "direct" }]);
+      expect(requests.at(-1)).toEqual({
+        url: "http://127.0.0.1:3777/api/auth/websocket-ticket",
+        authorization: "Bearer desktop-bearer",
+      });
     }),
   );
 });

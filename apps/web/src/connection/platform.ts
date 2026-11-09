@@ -4,20 +4,15 @@ import {
   Persistence,
 } from "@kurambit/client-runtime/platform";
 import {
-  type ConnectionAttemptError,
   ConnectionTransientError,
   Connectivity,
   mapRemoteEnvironmentError,
-  type PlatformConnectionRegistration,
-  PrimaryConnectionRegistration,
   PrimaryConnectionTarget,
   Wakeups,
 } from "@kurambit/client-runtime/connection";
 
 import { fetchRemoteEnvironmentDescriptor } from "@kurambit/client-runtime/environment";
 import { EnvironmentRpcRequestObserver } from "@kurambit/client-runtime/rpc";
-import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@kurambit/contracts";
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -38,7 +33,6 @@ import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
-import { type DesktopSecondaryBootstrapsRead } from "./desktopLocal";
 import * as ConnectionStorage from "./storage";
 import { clientPresentationMetadata } from "./clientMetadata";
 
@@ -164,55 +158,30 @@ const layerCapabilities = Layer.effectContext(
   }),
 );
 
-const loadPrimaryConnectionRegistration = Effect.fn(
-  "web.connectionPlatform.loadPrimaryConnectionRegistration",
-)(function* (resolved: PrimaryEnvironmentTarget) {
-  const descriptor = yield* fetchRemoteEnvironmentDescriptor({
-    httpBaseUrl: resolved.target.httpBaseUrl,
-  }).pipe(
-    Effect.provide(PrimaryEnvironmentHttpLayer.layer),
-    Effect.mapError(mapRemoteEnvironmentError),
-  );
-  return new PrimaryConnectionRegistration({
-    target: new PrimaryConnectionTarget({
+const loadPrimaryConnectionTarget = Effect.fn("web.connectionPlatform.loadPrimaryConnectionTarget")(
+  function* (resolved: PrimaryEnvironmentTarget) {
+    const descriptor = yield* fetchRemoteEnvironmentDescriptor({
+      httpBaseUrl: resolved.target.httpBaseUrl,
+    }).pipe(
+      Effect.provide(PrimaryEnvironmentHttpLayer.layer),
+      Effect.mapError(mapRemoteEnvironmentError),
+    );
+    return new PrimaryConnectionTarget({
       environmentId: descriptor.environmentId,
       label: descriptor.label,
       httpBaseUrl: resolved.target.httpBaseUrl,
       wsBaseUrl: resolved.target.wsBaseUrl,
-    }),
-  });
-});
+    });
+  },
+);
 
-// Poll cadence for the desktop bootstrap topology. There is no change event on
-// the bridge, so the renderer polls; successful registrations are cached by a
-// signature of their endpoint until bearer credentials approach expiry.
+// The desktop bridge has no change event for the backend's address, so the
+// renderer polls. A discovered target is reused while its address is unchanged.
 const PLATFORM_POLL_INTERVAL = "3 seconds";
-const SECONDARY_BEARER_REFRESH_SKEW_MS = 5_000;
 
-export function secondaryBearerExpiresAtEpochMs(
-  issuedAtEpochMs: number,
-  expiresInSeconds: number,
-): number {
-  return issuedAtEpochMs + Math.max(0, expiresInSeconds * 1_000);
-}
-
-export function secondaryBearerRefreshAtEpochMs(
-  issuedAtEpochMs: number,
-  expiresInSeconds: number,
-): number {
-  return Math.max(
-    issuedAtEpochMs,
-    secondaryBearerExpiresAtEpochMs(issuedAtEpochMs, expiresInSeconds) -
-      SECONDARY_BEARER_REFRESH_SKEW_MS,
-  );
-}
-
-interface CachedPlatformRegistration {
+interface CachedPrimaryTarget {
   readonly signature: string;
-  readonly registration: PlatformConnectionRegistration;
-  readonly expiresAtEpochMs?: number;
-  readonly refreshAtEpochMs?: number;
-  readonly bootstrapToken?: string;
+  readonly target: PrimaryConnectionTarget;
 }
 
 export type PrimaryEnvironmentTargetRead =
@@ -235,158 +204,51 @@ export function readPrimaryEnvironmentTargetResult(
   }
 }
 
-export function primaryRegistrationToRetainAfterTopologyRead(
-  previous: ReadonlyMap<string, CachedPlatformRegistration>,
+/** A failed read keeps the last target; a successful read that finds none removes it. */
+export function primaryToRetainAfterTopologyRead(
+  previous: CachedPrimaryTarget | undefined,
   topologyRead: PrimaryEnvironmentTargetRead,
-): CachedPlatformRegistration | undefined {
-  return topologyRead._tag === "Failure" ? previous.get(PRIMARY_LOCAL_ENVIRONMENT_ID) : undefined;
-}
-
-export function canReuseCachedPlatformRegistration(
-  cached: CachedPlatformRegistration,
-  signature: string,
-  nowEpochMs: number,
-): boolean {
-  return (
-    cached.signature === signature &&
-    (cached.refreshAtEpochMs === undefined || nowEpochMs < cached.refreshAtEpochMs)
-  );
-}
-
-export function canRetainCachedPlatformRegistrationAfterRefreshFailure(
-  cached: CachedPlatformRegistration,
-  signature: string,
-  nowEpochMs: number,
-): boolean {
-  return (
-    cached.signature === signature &&
-    cached.expiresAtEpochMs !== undefined &&
-    nowEpochMs < cached.expiresAtEpochMs
-  );
-}
-
-const REJECTED_BOOTSTRAP_RETRY_INITIAL_MS = 60_000;
-const REJECTED_BOOTSTRAP_RETRY_MAX_MS = 30 * 60_000;
-
-export interface RejectedSecondaryBootstrap {
-  readonly signature: string;
-  readonly retryAtEpochMs: number;
-  readonly delayMs: number;
-}
-
-/**
- * A backend that rejected a bootstrap token will usually keep rejecting it, so
- * the poll backs off on that exact signature instead of re-presenting a dead
- * credential every few seconds. It still retries on a capped backoff: a backend
- * that restarts on the same port seeds a fresh grant for the same token, and
- * nothing in the topology says it restarted.
- */
-export function isRejectedSecondaryBootstrap(
-  rejected: RejectedSecondaryBootstrap | undefined,
-  signature: string,
-  nowEpochMs: number,
-): rejected is RejectedSecondaryBootstrap {
-  return (
-    rejected !== undefined &&
-    rejected.signature === signature &&
-    nowEpochMs < rejected.retryAtEpochMs
-  );
-}
-
-export function nextRejectedSecondaryBootstrap(
-  previous: RejectedSecondaryBootstrap | undefined,
-  signature: string,
-  nowEpochMs: number,
-): RejectedSecondaryBootstrap {
-  const delayMs =
-    previous?.signature === signature
-      ? Math.min(previous.delayMs * 2, REJECTED_BOOTSTRAP_RETRY_MAX_MS)
-      : REJECTED_BOOTSTRAP_RETRY_INITIAL_MS;
-  return { signature, retryAtEpochMs: nowEpochMs + delayMs, delayMs };
-}
-
-export function isRejectedBootstrapCredentialError(error: ConnectionAttemptError): boolean {
-  return error._tag === "ConnectionBlockedError" && error.reason === "authentication";
-}
-
-export function secondaryRegistrationsToRetainAfterTopologyRead(
-  previous: ReadonlyMap<string, CachedPlatformRegistration>,
-  topologyRead: DesktopSecondaryBootstrapsRead,
-  nowEpochMs: number,
-): ReadonlyMap<string, CachedPlatformRegistration> {
-  if (topologyRead._tag === "Success") {
-    return new Map();
-  }
-  return new Map(
-    [...previous].filter(
-      ([, cached]) => cached.expiresAtEpochMs !== undefined && nowEpochMs < cached.expiresAtEpochMs,
-    ),
-  );
+): CachedPrimaryTarget | undefined {
+  return topologyRead._tag === "Failure" ? previous : undefined;
 }
 
 const layerPlatformConnectionSource = Layer.effect(
   PlatformConnectionSource.PlatformConnectionSource,
   Effect.gen(function* () {
     if (isLocalEnvironmentDisabled()) {
-      return PlatformConnectionSource.PlatformConnectionSource.of({
-        registrations: Stream.empty,
-      });
+      return PlatformConnectionSource.PlatformConnectionSource.of({ primary: Stream.empty });
     }
-    const cacheRef = yield* Ref.make(new Map<string, CachedPlatformRegistration>());
+    const cacheRef = yield* Ref.make<CachedPrimaryTarget | undefined>(undefined);
 
-    const buildPlatformRegistrations = Effect.gen(function* () {
+    const readPrimary = Effect.gen(function* () {
       const previous = yield* Ref.get(cacheRef);
-      const nowEpochMs = yield* Clock.currentTimeMillis;
-      const next = new Map<string, CachedPlatformRegistration>();
-      const registrations: Array<PlatformConnectionRegistration> = [];
-
-      const primaryTopologyRead = readPrimaryEnvironmentTargetResult();
-      const retainedPrimary = primaryRegistrationToRetainAfterTopologyRead(
-        previous,
-        primaryTopologyRead,
-      );
-      if (retainedPrimary !== undefined) {
-        next.set(PRIMARY_LOCAL_ENVIRONMENT_ID, retainedPrimary);
-        registrations.push(retainedPrimary.registration);
-      }
-
-      if (primaryTopologyRead._tag === "Failure") {
+      const topologyRead = readPrimaryEnvironmentTargetResult();
+      let next = primaryToRetainAfterTopologyRead(previous, topologyRead);
+      if (topologyRead._tag === "Failure") {
         yield* Effect.logWarning("Could not read the primary environment topology.", {
-          cause: primaryTopologyRead.cause,
+          cause: topologyRead.cause,
         });
-      } else if (primaryTopologyRead.target !== null) {
-        const primaryTarget = primaryTopologyRead.target;
-        const signature = `primary|${primaryTarget.target.httpBaseUrl}|${primaryTarget.target.wsBaseUrl}`;
-        const cached = previous.get(PRIMARY_LOCAL_ENVIRONMENT_ID);
-        if (
-          cached !== undefined &&
-          canReuseCachedPlatformRegistration(cached, signature, nowEpochMs)
-        ) {
-          next.set(PRIMARY_LOCAL_ENVIRONMENT_ID, cached);
-          registrations.push(cached.registration);
+      } else if (topologyRead.target !== null) {
+        const primaryTarget = topologyRead.target;
+        const signature = `${primaryTarget.target.httpBaseUrl}|${primaryTarget.target.wsBaseUrl}`;
+        if (previous?.signature === signature) {
+          next = previous;
         } else {
-          const built = yield* loadPrimaryConnectionRegistration(primaryTarget).pipe(
+          const built = yield* loadPrimaryConnectionTarget(primaryTarget).pipe(
             Effect.tapError((error) =>
               Effect.logWarning("Could not discover the primary environment.", { error }),
             ),
             Effect.option,
           );
-          if (Option.isSome(built)) {
-            const cacheEntry = { signature, registration: built.value };
-            next.set(PRIMARY_LOCAL_ENVIRONMENT_ID, cacheEntry);
-            registrations.push(built.value);
-          }
+          next = Option.isSome(built) ? { signature, target: built.value } : undefined;
         }
       }
-
       yield* Ref.set(cacheRef, next);
-      return registrations as ReadonlyArray<PlatformConnectionRegistration>;
+      return Option.fromUndefinedOr(next?.target);
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
     return PlatformConnectionSource.PlatformConnectionSource.of({
-      registrations: Stream.tick(PLATFORM_POLL_INTERVAL).pipe(
-        Stream.mapEffect(() => buildPlatformRegistrations),
-      ),
+      primary: Stream.tick(PLATFORM_POLL_INTERVAL).pipe(Stream.mapEffect(() => readPrimary)),
     });
   }),
 );

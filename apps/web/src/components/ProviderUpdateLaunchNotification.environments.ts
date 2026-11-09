@@ -1,11 +1,8 @@
-import type { ConnectionCatalogEntry } from "@kurambit/client-runtime/connection";
-
 import {
   useEnvironmentProviders,
   useEnvironments,
   usePrimaryEnvironmentId,
 } from "~/state/environments";
-import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import {
   buildLocalEnvironmentUpdateGroups,
   deriveEnvironmentDisplayLabel,
@@ -13,10 +10,6 @@ import {
   type LocalEnvironmentProvidersInput,
   type LocalEnvironmentUpdateGroup,
 } from "./ProviderUpdateLaunchNotification.logic";
-
-function isLocalConnectionTarget(target: ConnectionCatalogEntry["target"]): boolean {
-  return target._tag === "PrimaryConnectionTarget" || isDesktopLocalConnectionTarget(target);
-}
 
 function normalizeConnectionState(phase: string | undefined): EnvironmentUpdateConnectionState {
   switch (phase) {
@@ -46,10 +39,6 @@ export function useLocalEnvironmentUpdateGroups(): {
   const inputs: LocalEnvironmentProvidersInput[] = [];
 
   for (const environment of environments) {
-    if (!isLocalConnectionTarget(environment.entry.target)) {
-      continue;
-    }
-
     const isPrimary = environment.environmentId === primaryEnvironmentId;
     const serverConfig = environment.serverConfig;
 

@@ -9,7 +9,6 @@ import { EnvironmentAuthInvalidError } from "@kurambit/contracts";
 import {
   appendClientConnectionParams,
   bootstrapRemoteBearerSession,
-  fetchRemoteSessionState,
   issueRemoteWebSocketTicket,
   RemoteEnvironmentAuthInvalidJsonError,
   RemoteEnvironmentAuthTimeoutError,
@@ -229,7 +228,7 @@ describe("remote environment authorization", () => {
     }),
   );
 
-  it.effect("loads remote session state and websocket tickets over bearer auth", () =>
+  it.effect("loads the descriptor and websocket tickets over bearer auth", () =>
     Effect.gen(function* () {
       const fetch = recordedFetch(
         Response.json(
@@ -244,27 +243,6 @@ describe("remote environment authorization", () => {
             capabilities: {
               repositoryIdentity: true,
             },
-          },
-          { status: 200 },
-        ),
-        Response.json(
-          {
-            authenticated: true,
-            auth: {
-              policy: "remote-reachable",
-              bootstrapMethods: ["one-time-token"],
-              sessionMethods: ["browser-session-cookie", "bearer-access-token"],
-              sessionCookieName: "kurambit_session",
-            },
-            scopes: [
-              "orchestration:read",
-              "orchestration:operate",
-              "terminal:operate",
-              "review:write",
-              "relay:read",
-            ],
-            sessionMethod: "bearer-access-token",
-            expiresAt: "2026-05-01T12:00:00.000Z",
           },
           { status: 200 },
         ),
@@ -285,21 +263,6 @@ describe("remote environment authorization", () => {
         label: "Remote environment",
       });
 
-      const session = yield* fetchRemoteSessionState({
-        httpBaseUrl: "https://remote.example.com/",
-        bearerToken: "bearer-token",
-      }).pipe(provideRemoteHttp(fetch.fetchFn));
-      expect(session).toMatchObject({
-        authenticated: true,
-        scopes: [
-          "orchestration:read",
-          "orchestration:operate",
-          "terminal:operate",
-          "review:write",
-          "relay:read",
-        ],
-      });
-
       const ticket = yield* issueRemoteWebSocketTicket({
         httpBaseUrl: "https://remote.example.com/",
         bearerToken: "bearer-token",
@@ -313,13 +276,6 @@ describe("remote environment authorization", () => {
         method: "GET",
       });
       expectFetchCall(fetch.calls, 2, {
-        url: "https://remote.example.com/api/auth/session",
-        method: "GET",
-        headers: {
-          authorization: "Bearer bearer-token",
-        },
-      });
-      expectFetchCall(fetch.calls, 3, {
         url: "https://remote.example.com/api/auth/websocket-ticket",
         method: "POST",
         headers: {

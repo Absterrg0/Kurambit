@@ -1,35 +1,28 @@
 import { EnvironmentId } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 
-const ConnectionTargetBase = {
-  environmentId: EnvironmentId,
-  label: Schema.String,
-};
-
+/**
+ * The one server this client talks to: the origin the web UI was served from,
+ * or the desktop app's bundled backend.
+ */
 export class PrimaryConnectionTarget extends Schema.TaggedClass<PrimaryConnectionTarget>()(
   "PrimaryConnectionTarget",
   {
-    ...ConnectionTargetBase,
+    environmentId: EnvironmentId,
+    label: Schema.String,
     httpBaseUrl: Schema.String,
     wsBaseUrl: Schema.String,
   },
 ) {}
 
-export class BearerConnectionTarget extends Schema.TaggedClass<BearerConnectionTarget>()(
-  "BearerConnectionTarget",
-  {
-    ...ConnectionTargetBase,
-    connectionId: Schema.String,
-  },
-) {}
+export type ConnectionTarget = PrimaryConnectionTarget;
 
-export const ConnectionTarget = Schema.Union([PrimaryConnectionTarget, BearerConnectionTarget]);
-export type ConnectionTarget = typeof ConnectionTarget.Type;
-
-export const PersistedConnectionTarget = BearerConnectionTarget;
-export type PersistedConnectionTarget = BearerConnectionTarget;
-
-export type ConnectionTargetKind = ConnectionTarget["_tag"];
+export interface ConnectionCatalogEntry {
+  readonly target: ConnectionTarget;
+  readonly enabled: boolean;
+  readonly unsupportedReason?: string;
+  readonly serverUpdateRequired?: boolean;
+}
 
 export type NetworkStatus = "unknown" | "offline" | "online";
 

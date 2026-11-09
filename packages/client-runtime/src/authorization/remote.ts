@@ -107,25 +107,6 @@ export const bootstrapRemoteBearerSession = Effect.fn(
   );
 });
 
-export const fetchRemoteSessionState = Effect.fn(
-  "clientRuntime.authorization.fetchRemoteSessionState",
-)(function* (input: {
-  readonly httpBaseUrl: string;
-  readonly bearerToken: string;
-  readonly timeoutMs?: number;
-}) {
-  const client = yield* makeEnvironmentHttpApiGroupClient(input.httpBaseUrl, "auth");
-  return yield* executeEnvironmentHttpRequest(
-    environmentEndpointUrl(input.httpBaseUrl, "/api/auth/session"),
-    input.timeoutMs ?? DEFAULT_REMOTE_REQUEST_TIMEOUT_MS,
-    client.session({
-      headers: {
-        authorization: `Bearer ${input.bearerToken}`,
-      },
-    }),
-  );
-});
-
 export const issueRemoteWebSocketTicket = Effect.fn(
   "clientRuntime.authorization.issueRemoteWebSocketTicket",
 )(function* (input: {

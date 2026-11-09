@@ -11,20 +11,12 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import type { ConnectionRegistration } from "../connection/catalog.ts";
 import type { DeferredShellSnapshot } from "../state/shellPullRequests.ts";
-import type { ConnectionTarget, PersistedConnectionTarget } from "../connection/model.ts";
 
 export class ConnectionPersistenceError extends Schema.TaggedError<ConnectionPersistenceError>()(
   "ConnectionPersistenceError",
   {
     operation: Schema.Literals([
-      "list-targets",
-      "list-disabled-targets",
-      "register-connection",
-      "set-connection-routes",
-      "remove-connection",
-      "set-connection-enabled",
       "load-shell",
       "save-shell",
       "load-thread",
@@ -41,41 +33,6 @@ export class ConnectionPersistenceError extends Schema.TaggedError<ConnectionPer
     message: Schema.String,
   },
 ) {}
-
-export class ConnectionTargetStore extends Context.Service<
-  ConnectionTargetStore,
-  {
-    readonly list: Effect.Effect<ReadonlyArray<ConnectionTarget>, ConnectionPersistenceError>;
-    readonly listDisabled: Effect.Effect<ReadonlyArray<EnvironmentId>, ConnectionPersistenceError>;
-  }
->()("@kurambit/client-runtime/platform/persistence/ConnectionTargetStore") {}
-
-export class ConnectionRegistrationStore extends Context.Service<
-  ConnectionRegistrationStore,
-  {
-    /**
-     * Records of routes missing from `routes` are dropped.
-     */
-    readonly register: (
-      registration: ConnectionRegistration,
-      routes: ReadonlyArray<PersistedConnectionTarget>,
-    ) => Effect.Effect<void, ConnectionPersistenceError>;
-    /**
-     * `routes` must not be empty.
-     */
-    readonly setRoutes: (
-      environmentId: EnvironmentId,
-      routes: ReadonlyArray<PersistedConnectionTarget>,
-    ) => Effect.Effect<void, ConnectionPersistenceError>;
-    readonly remove: (
-      environmentId: EnvironmentId,
-    ) => Effect.Effect<void, ConnectionPersistenceError>;
-    readonly setEnabled: (
-      environmentId: EnvironmentId,
-      enabled: boolean,
-    ) => Effect.Effect<void, ConnectionPersistenceError>;
-  }
->()("@kurambit/client-runtime/platform/persistence/ConnectionRegistrationStore") {}
 
 export class EnvironmentCacheStore extends Context.Service<
   EnvironmentCacheStore,

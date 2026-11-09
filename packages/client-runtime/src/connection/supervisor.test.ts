@@ -13,12 +13,10 @@ import * as TestClock from "effect/testing/TestClock";
 
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 
-import type { ConnectionCatalogEntry, ConnectionRoute } from "./catalog.ts";
 import * as Connectivity from "./connectivity.ts";
 import * as ConnectionDriver from "./driver.ts";
-import { BearerConnectionProfile } from "./catalog.ts";
 import {
-  BearerConnectionTarget,
+  type ConnectionCatalogEntry,
   ConnectionBlockedError,
   ConnectionTransientError,
   PrimaryConnectionTarget,
@@ -31,7 +29,6 @@ import {
 import * as RpcSession from "../rpc/session.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
-import { connectionRouteId } from "./routes.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -42,7 +39,6 @@ const TARGET = new PrimaryConnectionTarget({
 
 const TARGET_ENTRY: ConnectionCatalogEntry = {
   target: TARGET,
-  profile: Option.none(),
   enabled: true,
 };
 
@@ -56,55 +52,6 @@ const PREPARED_CONNECTION: PreparedConnection = {
 };
 
 const TEST_RPC_CLIENT = {} as WsRpcProtocolClient;
-
-const LAN_TARGET = new BearerConnectionTarget({
-  environmentId: TARGET.environmentId,
-  label: TARGET.label,
-  connectionId: "bearer:lan",
-});
-const LAN_ROUTE: ConnectionRoute = {
-  target: LAN_TARGET,
-  profile: Option.some(
-    new BearerConnectionProfile({
-      connectionId: LAN_TARGET.connectionId,
-      environmentId: TARGET.environmentId,
-      label: TARGET.label,
-      httpBaseUrl: "http://192.168.1.10:3773/",
-      wsBaseUrl: "ws://192.168.1.10:3773/",
-    }),
-  ),
-};
-const PUBLIC_TARGET = new BearerConnectionTarget({
-  environmentId: TARGET.environmentId,
-  label: TARGET.label,
-  connectionId: "bearer:public",
-});
-const PUBLIC_ROUTE: ConnectionRoute = {
-  target: PUBLIC_TARGET,
-  profile: Option.some(
-    new BearerConnectionProfile({
-      connectionId: PUBLIC_TARGET.connectionId,
-      environmentId: TARGET.environmentId,
-      label: TARGET.label,
-      httpBaseUrl: "https://desk.example.com/",
-      wsBaseUrl: "wss://desk.example.com/",
-    }),
-  ),
-};
-const LAN_THEN_PUBLIC_ENTRY: ConnectionCatalogEntry = {
-  target: LAN_ROUTE.target,
-  profile: LAN_ROUTE.profile,
-  alternateRoutes: [PUBLIC_ROUTE],
-  enabled: true,
-};
-
-const isLan = (target: ConnectionTarget) => connectionRouteId(target) === LAN_TARGET.connectionId;
-const isPublic = (target: ConnectionTarget) =>
-  connectionRouteId(target) === PUBLIC_TARGET.connectionId;
-
-function preparedFor(target: ConnectionTarget): PreparedConnection {
-  return { ...PREPARED_CONNECTION, target };
-}
 
 function transient(message = "Connection failed.") {
   return new ConnectionTransientError({
@@ -159,7 +106,6 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
   readonly ready?: (attempt: number) => Effect.Effect<void, ConnectionAttemptError>;
   readonly probe?: (attempt: number) => Effect.Effect<void, ConnectionAttemptError>;
   readonly initialConfig?: (attempt: number) => Effect.Effect<ServerConfig, ConnectionAttemptError>;
-  readonly checkRoute?: (route: ConnectionRoute) => Effect.Effect<ConnectionDriver.RouteCheck>;
 }) {
   const networkStatus = yield* SubscriptionRef.make<NetworkStatus>(
     options?.networkStatus ?? "online",
@@ -190,9 +136,6 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
     }
     return PREPARED_CONNECTION;
   });
-
-  const checkRoute = (route: ConnectionRoute) =>
-    options?.checkRoute?.(route) ?? Effect.succeed<ConnectionDriver.RouteCheck>("unchecked");
 
   const connectRoute = Effect.fn("TestConnectionDriver.connectRoute")(function* (
     target: ConnectionTarget,
@@ -229,9 +172,7 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
     reportProgress: (progress: ConnectionDriver.ConnectionDriverProgress) => Effect.Effect<void>,
   ) {
     yield* reportProgress({ stage: "preparing" });
-    return yield* ConnectionDriver.connectOverRoutes(entry, checkRoute, (route) =>
-      connectRoute(route.target, reportProgress),
-    );
+    return yield* connectRoute(entry.target, reportProgress);
   });
 
   const layerDependencies = Layer.mergeAll(
@@ -251,12 +192,7 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
     ),
     Layer.succeed(
       ConnectionDriver.ConnectionDriver,
-      ConnectionDriver.ConnectionDriver.of({
-        connect,
-        checkRoute: (_entry, route) => checkRoute(route),
-        preflight: (_entry, route) =>
-          checkRoute(route).pipe(Effect.map((check) => check === "answered")),
-      }),
+      ConnectionDriver.ConnectionDriver.of({ connect }),
     ),
   );
 
@@ -1261,305 +1197,6 @@ describe("EnvironmentSupervisor", () => {
       expect(yield* Ref.get(harness.releaseCount)).toBe(1);
       expect(Option.isNone(yield* SubscriptionRef.get(supervisor.session))).toBe(true);
       expect(Option.isNone(yield* SubscriptionRef.get(supervisor.prepared))).toBe(true);
-    }),
-  );
-});
-
-describe("EnvironmentSupervisor routes", () => {
-  it.effect("skips a silent LAN route and connects over the next route", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({
-        checkRoute: (route) => Effect.succeed(isLan(route.target) ? "silent" : "unchecked"),
-        prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-      const prepared = Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared));
-      expect(isPublic(prepared.target)).toBe(true);
-      expect(yield* Ref.get(harness.prepareCount)).toBe(1);
-    }),
-  );
-
-  it.effect("moves to a blocked route's fallback instead of stopping", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({
-        checkRoute: () => Effect.succeed("answered"),
-        prepare: (_attempt, target) =>
-          isLan(target)
-            ? Effect.fail(blocked("The environment credential is invalid."))
-            : Effect.succeed(preparedFor(target)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-      const prepared = Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared));
-      expect(isPublic(prepared.target)).toBe(true);
-    }),
-  );
-
-  it.effect("tries every route when none answers the reachability check", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({
-        checkRoute: () => Effect.succeed("silent"),
-        prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-      const prepared = Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared));
-      expect(isLan(prepared.target)).toBe(true);
-    }),
-  );
-
-  it.effect(
-    "gives the next route its own snapshot budget after a route fails while synchronizing",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness({
-          checkRoute: () => Effect.succeed("answered"),
-          prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-          ready: (attempt) =>
-            attempt === 1
-              ? Effect.sleep("50 seconds").pipe(Effect.andThen(Effect.fail(transient())))
-              : Effect.sleep("40 seconds"),
-        });
-        const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-          initiallyDesired: true,
-        }).pipe(Effect.provide(harness.dependencies));
-
-        yield* awaitState(
-          supervisor.state,
-          (state) => state.phase === "connecting" && state.stage === "synchronizing",
-        );
-        yield* TestClock.adjust("50 seconds");
-        yield* TestClock.adjust("40 seconds");
-        yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-        expect(
-          isPublic(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target),
-        ).toBe(true);
-        expect(yield* Ref.get(harness.prepareCount)).toBe(2);
-        expect(yield* Ref.get(harness.releaseCount)).toBe(1);
-      }).pipe(Effect.provide(TestClock.layer())),
-  );
-
-  it.effect("still tries a silent LAN route after the other route fails", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({
-        checkRoute: (route) => Effect.succeed(isLan(route.target) ? "silent" : "unchecked"),
-        prepare: (_attempt, target) =>
-          isPublic(target)
-            ? Effect.fail(blocked("The environment credential is invalid."))
-            : Effect.succeed(preparedFor(target)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-      expect(isLan(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target)).toBe(
-        true,
-      );
-    }),
-  );
-
-  it.effect("keeps retrying when one route is blocked and another failed transiently", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({
-        checkRoute: () => Effect.succeed("answered"),
-        prepare: (_attempt, target) =>
-          isPublic(target)
-            ? Effect.fail(blocked("The environment credential is invalid."))
-            : Effect.fail(transient("LAN socket refused.")),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      const state = yield* awaitState(supervisor.state, (value) => value.phase === "backoff");
-      expect(state.lastFailure?._tag).toBe("ConnectionTransientError");
-    }),
-  );
-
-  it.effect("moves back to the LAN route when the network changes and it answers again", () =>
-    Effect.gen(function* () {
-      const lanReachable = yield* Ref.make(false);
-      const harness = yield* makeHarness({
-        checkRoute: (route) =>
-          isLan(route.target)
-            ? Ref.get(lanReachable).pipe(
-                Effect.map((reachable) => (reachable ? "answered" : "silent")),
-              )
-            : Effect.succeed("unchecked"),
-        prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 1,
-      );
-      expect(
-        isPublic(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target),
-      ).toBe(true);
-
-      yield* Ref.set(lanReachable, true);
-      yield* harness.setNetworkStatus("unknown");
-      yield* harness.setNetworkStatus("online");
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2,
-      );
-      expect(isLan(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target)).toBe(
-        true,
-      );
-      expect(yield* Ref.get(harness.releaseCount)).toBe(1);
-    }),
-  );
-
-  it.effect("checks for a better route periodically while on a fallback", () =>
-    Effect.gen(function* () {
-      const lanReachable = yield* Ref.make(false);
-      const harness = yield* makeHarness({
-        checkRoute: (route) =>
-          isLan(route.target)
-            ? Ref.get(lanReachable).pipe(
-                Effect.map((reachable) => (reachable ? "answered" : "silent")),
-              )
-            : Effect.succeed("unchecked"),
-        prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 1,
-      );
-      yield* Ref.set(lanReachable, true);
-      yield* TestClock.adjust("60 seconds");
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2,
-      );
-      expect(isLan(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target)).toBe(
-        true,
-      );
-    }),
-  );
-
-  it.effect("does not retry a better route that answered but failed to connect", () =>
-    Effect.gen(function* () {
-      const lanAnswers = yield* Ref.make(false);
-      const harness = yield* makeHarness({
-        checkRoute: (route) =>
-          isLan(route.target)
-            ? Ref.get(lanAnswers).pipe(Effect.map((answers) => (answers ? "answered" : "silent")))
-            : Effect.succeed("unchecked"),
-        prepare: (_attempt, target) =>
-          isLan(target)
-            ? Effect.fail(transient("Socket refused."))
-            : Effect.succeed(preparedFor(target)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 1,
-      );
-      yield* Ref.set(lanAnswers, true);
-      yield* TestClock.adjust("60 seconds");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2,
-      );
-      const preparesAfterSwitch = yield* Ref.get(harness.prepareCount);
-
-      yield* TestClock.adjust("60 seconds");
-      yield* Effect.yieldNow;
-      expect(yield* Ref.get(harness.prepareCount)).toBe(preparesAfterSwitch);
-      expect(yield* SubscriptionRef.get(supervisor.state)).toMatchObject({
-        phase: "connected",
-        generation: 2,
-      });
-    }),
-  );
-
-  it.effect("stays on the preferred route without checking other routes", () =>
-    Effect.gen(function* () {
-      const checks = yield* Ref.make(0);
-      const harness = yield* makeHarness({
-        checkRoute: () => Ref.update(checks, (count) => count + 1).pipe(Effect.as("answered")),
-        prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-      const checksAtConnect = yield* Ref.get(checks);
-      yield* harness.setNetworkStatus("unknown");
-      yield* harness.setNetworkStatus("online");
-      yield* TestClock.adjust("5 minutes");
-      yield* Effect.yieldNow;
-
-      expect(yield* Ref.get(checks)).toBe(checksAtConnect);
-      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
-    }),
-  );
-
-  it.effect("moves off a dead LAN socket when the phone switches to cellular", () =>
-    Effect.gen(function* () {
-      const lanReachable = yield* Ref.make(true);
-      const harness = yield* makeHarness({
-        checkRoute: (route) =>
-          isLan(route.target)
-            ? Ref.get(lanReachable).pipe(
-                Effect.map((reachable) => (reachable ? "answered" : "silent")),
-              )
-            : Effect.succeed("unchecked"),
-        prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-        probe: () =>
-          Ref.get(lanReachable).pipe(
-            Effect.flatMap((reachable) => (reachable ? Effect.void : Effect.never)),
-          ),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_PUBLIC_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 1,
-      );
-      expect(isLan(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target)).toBe(
-        true,
-      );
-
-      yield* Ref.set(lanReachable, false);
-      yield* harness.wake("network-changed");
-      yield* TestClock.adjust("3 seconds");
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2,
-      );
-      expect(
-        isPublic(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target),
-      ).toBe(true);
     }),
   );
 });

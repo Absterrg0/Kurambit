@@ -21,10 +21,10 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
-import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import {
   AVAILABLE_CONNECTION_STATE,
+  type ConnectionCatalogEntry,
   PrimaryConnectionTarget,
   type NetworkStatus,
   type PreparedConnection,
@@ -127,16 +127,9 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
       new Map(),
     ),
     networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
-    start: Effect.void,
-    register: () => Effect.die("Unexpected environment registration"),
-    registerPlatform: () => Effect.die("Unexpected environment registration"),
-    reconcilePlatform: () => Effect.die("Unexpected environment reconciliation"),
-    remove: () => Effect.die("Unexpected environment removal"),
-    removeRoute: () => Effect.die("Unexpected route removal"),
-    reorderRoutes: () => Effect.die("Unexpected route reorder"),
+    setPrimary: () => Effect.die("Unexpected primary update"),
     retryNow: () => Effect.void,
-    setEnabled: () => Effect.die("Unexpected environment toggle"),
-    setCompatibility: () => Effect.die("Unexpected compatibility update"),
+    setUnsupported: () => Effect.die("Unexpected compatibility update"),
     state: () => SubscriptionRef.get(supervisor.state),
     stateChanges: () => SubscriptionRef.changes(supervisor.state),
     run: (_environmentId, effect) =>

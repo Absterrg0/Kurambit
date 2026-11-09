@@ -21,17 +21,21 @@ session, and only a failed probe reconnects. Offline reports are often wrong, fo
 example for a loopback server. Foregrounding also wakes a pending retry immediately and
 leaves an ordinary in-flight attempt alone.
 
-The [registry](../../packages/client-runtime/src/connection/registry.ts) scopes
-connections by environment. An involuntary disconnect retains the registration
-and cached data. Explicit removal closes the scope and clears credentials,
-projections, and platform-owned state such as drafts.
+Each client talks to one server: the web UI to the origin that served it, the
+desktop app to its bundled backend. The platform layer reports that server and
+the [registry](../../packages/client-runtime/src/connection/registry.ts) owns its
+one connection. Threads and projects still name it by environment id, so the
+registry's entries stay keyed by id. An involuntary disconnect keeps the entry
+and cached data. When the platform reports a different server, or none, the old
+entry's cached projections and drafts are cleared. The client has no list of
+servers to pick from, route between or balance across.
 
 ## HTTP authorization
 
 RPC sessions authenticate at socket upgrade. HTTP requests use the same local
 browser session cookie, or the desktop's local bearer token. The desktop exchanges
 a bootstrap credential for a session and requests a fresh ticket for each WebSocket
-upgrade. Credentials stay inside the local HTTP client and authorization service.
+upgrade. Credentials stay inside the local HTTP client and the connection resolver.
 
 ## Transport health and data freshness are separate
 

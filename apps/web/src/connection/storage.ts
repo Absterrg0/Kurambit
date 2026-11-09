@@ -1,51 +1,28 @@
 import {
-  ConnectionCatalogDocument,
-  type ConnectionCatalogDocument as ConnectionCatalogDocumentType,
-  EMPTY_CONNECTION_CATALOG_DOCUMENT,
   ORCHESTRATION_CACHE_SCHEMA_VERSION,
   ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION,
   StoredOrchestrationShellSnapshot,
   StoredOrchestrationThreadSnapshot,
   decodeOrDiscardOrchestrationCache,
-  registerConnectionInCatalog,
-  removeCatalogValue,
-  removeConnectionFromCatalog,
-  setConnectionEnabledInCatalog,
-  setRoutesInCatalog,
-  replaceCatalogValue,
   Persistence,
   makeStoredShellSnapshotEncoder,
 } from "@kurambit/client-runtime/platform";
-import {
-  ConnectionTransientError,
-  ConnectionBlockedError,
-  CredentialStore,
-  ProfileStore,
-  GitHubRoutingPermissions,
-  StoredGitHubRoutingPermission,
-  gitHubRoutingConnectionKey,
-  gitHubRoutingPermissionFor,
-} from "@kurambit/client-runtime/connection";
+import { ConnectionTransientError } from "@kurambit/client-runtime/connection";
 import { EnvironmentId, ServerConfig, ThreadId, VcsListRefsResult } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
-import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import * as Stream from "effect/Stream";
 import { projectFaviconCache } from "../assets/projectFaviconCache";
 
 const DATABASE_NAME = "kurambit:connection-runtime";
 const DATABASE_VERSION = 4;
-const CATALOG_STORE_NAME = "catalog";
 const SHELL_STORE_NAME = "shell";
 const THREAD_STORE_NAME = "thread";
 const SERVER_CONFIG_STORE_NAME = "server-config";
 const VCS_REFS_STORE_NAME = "vcs-refs";
-const CATALOG_KEY = "document";
 const StoredShellSnapshot = StoredOrchestrationShellSnapshot;
 const StoredShellSnapshotJson = Schema.fromJsonString(StoredShellSnapshot);
 const StoredThreadSnapshot = StoredOrchestrationThreadSnapshot;
@@ -63,9 +40,6 @@ const StoredVcsRefs = Schema.Struct({
   refs: VcsListRefsResult,
 });
 const StoredVcsRefsJson = Schema.fromJsonString(StoredVcsRefs);
-const ConnectionCatalogDocumentJson = Schema.fromJsonString(ConnectionCatalogDocument);
-const decodeConnectionCatalogDocument = Schema.decodeUnknownEffect(ConnectionCatalogDocumentJson);
-const encodeConnectionCatalogDocument = Schema.encodeEffect(ConnectionCatalogDocumentJson);
 const decodeStoredShellSnapshot = Schema.decodeUnknownEffect(StoredShellSnapshotJson);
 const decodeStoredThreadSnapshot = Schema.decodeUnknownEffect(StoredThreadSnapshotJson);
 const encodeStoredThreadSnapshot = Schema.encodeEffect(StoredThreadSnapshotJson);
@@ -74,21 +48,15 @@ const encodeStoredServerConfig = Schema.encodeEffect(StoredServerConfigJson);
 const decodeStoredVcsRefs = Schema.decodeUnknownEffect(StoredVcsRefsJson);
 const encodeStoredVcsRefs = Schema.encodeEffect(StoredVcsRefsJson);
 
-function catalogError(operation: string, cause: unknown) {
+function databaseError(operation: string, cause: unknown) {
   return new ConnectionTransientError({
     reason: "remote-unavailable",
-    detail: `Could not ${operation} the local connection catalog: ${String(cause)}`,
+    detail: `Could not ${operation} the local connection cache: ${String(cause)}`,
   });
 }
 
 function persistenceError(
   operation:
-    | "list-targets"
-    | "list-disabled-targets"
-    | "register-connection"
-    | "set-connection-routes"
-    | "remove-connection"
-    | "set-connection-enabled"
     | "load-shell"
     | "save-shell"
     | "load-thread"
@@ -113,16 +81,13 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
   return yield* Effect.callback<IDBDatabase, ConnectionTransientError>((resume) => {
     if (typeof indexedDB === "undefined") {
       resume(
-        Effect.fail(catalogError("open", "IndexedDB is unavailable in this browser context.")),
+        Effect.fail(databaseError("open", "IndexedDB is unavailable in this browser context.")),
       );
       return;
     }
     try {
       const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
       request.addEventListener("upgradeneeded", () => {
-        if (!request.result.objectStoreNames.contains(CATALOG_STORE_NAME)) {
-          request.result.createObjectStore(CATALOG_STORE_NAME);
-        }
         if (!request.result.objectStoreNames.contains(SHELL_STORE_NAME)) {
           request.result.createObjectStore(SHELL_STORE_NAME);
         }
@@ -137,13 +102,13 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
         }
       });
       request.addEventListener("error", () => {
-        resume(Effect.fail(catalogError("open", request.error ?? "Unknown IndexedDB error")));
+        resume(Effect.fail(databaseError("open", request.error ?? "Unknown IndexedDB error")));
       });
       request.addEventListener("success", () => {
         resume(Effect.succeed(request.result));
       });
     } catch (cause) {
-      resume(Effect.fail(catalogError("open", cause)));
+      resume(Effect.fail(databaseError("open", cause)));
     }
   });
 });
@@ -225,13 +190,13 @@ function readDatabaseValueOnConnection(database: IDBDatabase, storeName: string,
     try {
       const request = database.transaction(storeName, "readonly").objectStore(storeName).get(key);
       request.addEventListener("error", () => {
-        resume(Effect.fail(catalogError("read", request.error ?? "Unknown IndexedDB read error")));
+        resume(Effect.fail(databaseError("read", request.error ?? "Unknown IndexedDB read error")));
       });
       request.addEventListener("success", () => {
         resume(Effect.succeed(request.result));
       });
     } catch (cause) {
-      resume(Effect.fail(catalogError("read", cause)));
+      resume(Effect.fail(databaseError("read", cause)));
     }
   }).pipe(Effect.withSpan("web.connectionStorage.readDatabaseValue"));
 }
@@ -249,7 +214,7 @@ function writeDatabaseValueOnConnection(
       // QuotaExceededError, fires only "abort" and no "error".
       transaction.addEventListener("abort", () => {
         resume(
-          Effect.fail(catalogError("write", transaction.error ?? "Unknown IndexedDB write error")),
+          Effect.fail(databaseError("write", transaction.error ?? "Unknown IndexedDB write error")),
         );
       });
       transaction.addEventListener("complete", () => {
@@ -257,7 +222,7 @@ function writeDatabaseValueOnConnection(
       });
       transaction.objectStore(storeName).put(value, key);
     } catch (cause) {
-      resume(Effect.fail(catalogError("write", cause)));
+      resume(Effect.fail(databaseError("write", cause)));
     }
   }).pipe(Effect.withSpan("web.connectionStorage.writeDatabaseValue"));
 }
@@ -273,7 +238,7 @@ function removeDatabaseValueOnConnection(
       transaction.addEventListener("abort", () => {
         resume(
           Effect.fail(
-            catalogError("remove", transaction.error ?? "Unknown IndexedDB remove error"),
+            databaseError("remove", transaction.error ?? "Unknown IndexedDB remove error"),
           ),
         );
       });
@@ -282,7 +247,7 @@ function removeDatabaseValueOnConnection(
       });
       transaction.objectStore(storeName).delete(key);
     } catch (cause) {
-      resume(Effect.fail(catalogError("remove", cause)));
+      resume(Effect.fail(databaseError("remove", cause)));
     }
   }).pipe(Effect.withSpan("web.connectionStorage.removeDatabaseValue"));
 }
@@ -298,7 +263,7 @@ function removeDatabaseValuesInRangeOnConnection(
       transaction.addEventListener("abort", () => {
         resume(
           Effect.fail(
-            catalogError("remove", transaction.error ?? "Unknown IndexedDB cursor error"),
+            databaseError("remove", transaction.error ?? "Unknown IndexedDB cursor error"),
           ),
         );
       });
@@ -308,7 +273,7 @@ function removeDatabaseValuesInRangeOnConnection(
       const request = transaction.objectStore(storeName).openCursor(range);
       request.addEventListener("error", () => {
         resume(
-          Effect.fail(catalogError("remove", request.error ?? "Unknown IndexedDB cursor error")),
+          Effect.fail(databaseError("remove", request.error ?? "Unknown IndexedDB cursor error")),
         );
       });
       request.addEventListener("success", () => {
@@ -320,11 +285,11 @@ function removeDatabaseValuesInRangeOnConnection(
           cursor.delete();
           cursor.continue();
         } catch (cause) {
-          resume(Effect.fail(catalogError("remove", cause)));
+          resume(Effect.fail(databaseError("remove", cause)));
         }
       });
     } catch (cause) {
-      resume(Effect.fail(catalogError("remove", cause)));
+      resume(Effect.fail(databaseError("remove", cause)));
     }
   }).pipe(Effect.withSpan("web.connectionStorage.removeDatabaseValuesInRange"));
 }
@@ -368,233 +333,6 @@ function vcsRefsCacheKey(environmentId: EnvironmentId, cwd: string) {
   return `${environmentId}:${cwd}`;
 }
 
-const decodeCatalog = Effect.fn("web.connectionStorage.decodeCatalog")(function* (raw: string) {
-  return yield* decodeConnectionCatalogDocument(raw).pipe(
-    Effect.mapError((cause) => catalogError("decode", cause)),
-  );
-});
-
-const encodeCatalog = Effect.fn("web.connectionStorage.encodeCatalog")(function* (
-  catalog: ConnectionCatalogDocumentType,
-) {
-  return yield* encodeConnectionCatalogDocument(catalog).pipe(
-    Effect.mapError((cause) => catalogError("encode", cause)),
-  );
-});
-
-export interface CatalogBackend {
-  readonly read: Effect.Effect<string | null, ConnectionTransientError>;
-  readonly write: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
-  readonly quarantine?: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
-}
-
-export function makeCatalogBackend(database: DatabaseHandle): CatalogBackend {
-  const bridge = window.desktopBridge;
-  if (bridge?.getConnectionCatalog !== undefined && bridge.setConnectionCatalog !== undefined) {
-    return {
-      read: Effect.tryPromise({
-        try: () => bridge.getConnectionCatalog!(),
-        catch: (cause) => catalogError("load", cause),
-      }),
-      write: (raw) =>
-        Effect.tryPromise({
-          try: () => bridge.setConnectionCatalog!(raw),
-          catch: (cause) => catalogError("save", cause),
-        }).pipe(
-          Effect.flatMap((stored) =>
-            stored
-              ? Effect.void
-              : Effect.fail(
-                  catalogError(
-                    "save",
-                    "Desktop secure storage is unavailable in this system context.",
-                  ),
-                ),
-          ),
-        ),
-    };
-  }
-
-  return {
-    read: readDatabaseValue(database, CATALOG_STORE_NAME, CATALOG_KEY).pipe(
-      Effect.map((value) => (typeof value === "string" ? value : null)),
-    ),
-    write: (raw) => writeDatabaseValue(database, CATALOG_STORE_NAME, CATALOG_KEY, raw),
-    quarantine: (raw) =>
-      writeDatabaseValue(database, CATALOG_STORE_NAME, `${CATALOG_KEY}:corrupt:${Date.now()}`, raw),
-  };
-}
-
-interface CatalogStore {
-  readonly read: Effect.Effect<ConnectionCatalogDocumentType, ConnectionTransientError>;
-  readonly update: (
-    transform: (catalog: ConnectionCatalogDocumentType) => ConnectionCatalogDocumentType,
-  ) => Effect.Effect<void, ConnectionTransientError>;
-}
-
-export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStore")(function* (
-  backend: CatalogBackend,
-) {
-  const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
-  const lock = yield* Semaphore.make(1);
-
-  const loadUnlocked = Effect.fn("web.connectionStorage.loadCatalog")(function* () {
-    const cached = yield* Ref.get(state);
-    if (Option.isSome(cached)) {
-      return cached.value;
-    }
-    const raw = yield* backend.read;
-    let catalog = EMPTY_CONNECTION_CATALOG_DOCUMENT;
-    if (raw !== null && raw.trim() !== "") {
-      catalog = yield* decodeCatalog(raw).pipe(
-        Effect.catch((error) =>
-          Effect.gen(function* () {
-            yield* Effect.logWarning("Discarding a corrupt web connection catalog.", {
-              error: error.message,
-            });
-            if (backend.quarantine !== undefined) {
-              yield* backend.quarantine(raw).pipe(
-                Effect.catch((cause) =>
-                  Effect.logWarning("Could not quarantine the corrupt web connection catalog.", {
-                    error: cause.message,
-                  }),
-                ),
-              );
-            }
-            const encoded = yield* encodeCatalog(EMPTY_CONNECTION_CATALOG_DOCUMENT);
-            yield* backend.write(encoded).pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("Could not persist the recovered web connection catalog.", {
-                  error: cause.message,
-                }),
-              ),
-            );
-            return EMPTY_CONNECTION_CATALOG_DOCUMENT;
-          }),
-        ),
-      );
-    }
-    yield* Ref.set(state, Option.some(catalog));
-    return catalog;
-  });
-
-  const read = lock.withPermits(1)(loadUnlocked());
-  const update: CatalogStore["update"] = Effect.fn("web.connectionStorage.updateCatalog")(
-    function* (transform) {
-      yield* lock.withPermits(1)(
-        Effect.gen(function* () {
-          const next = transform(yield* loadUnlocked());
-          yield* backend.write(yield* encodeCatalog(next));
-          yield* Ref.set(state, Option.some(next));
-        }),
-      );
-    },
-  );
-
-  return { read, update } satisfies CatalogStore;
-});
-
-const GITHUB_ROUTING_KEY_PREFIX = "kurambit:github-routing:";
-const GITHUB_ROUTING_CHANGED = "kurambit:github-routing-changed";
-const isStoredGitHubRoutingPermission = Schema.is(StoredGitHubRoutingPermission);
-const encodeStoredGitHubRoutingPermission = Schema.encodeSync(
-  Schema.fromJsonString(StoredGitHubRoutingPermission),
-);
-
-/** Each grant has its own key so stale tabs and unrelated catalog saves cannot restore trust. */
-export function makeBrowserGitHubRoutingPermissions(
-  browser: Pick<Window, "localStorage"> & EventTarget = window,
-) {
-  const read = (key: string): StoredGitHubRoutingPermission | null => {
-    try {
-      const raw = browser.localStorage.getItem(key);
-      const value: unknown = raw === null ? null : JSON.parse(raw);
-      return isStoredGitHubRoutingPermission(value) &&
-        key === `${GITHUB_ROUTING_KEY_PREFIX}${value.environmentId}`
-        ? value
-        : null;
-    } catch {
-      return null;
-    }
-  };
-  const readAll = (): ReadonlyArray<StoredGitHubRoutingPermission> => {
-    try {
-      const values: StoredGitHubRoutingPermission[] = [];
-      const storage = browser.localStorage;
-      for (let index = 0; index < storage.length; index++) {
-        const key = storage.key(index);
-        if (key?.startsWith(GITHUB_ROUTING_KEY_PREFIX)) {
-          const value = read(key);
-          if (value !== null) values.push(value);
-        }
-      }
-      return values;
-    } catch {
-      return [];
-    }
-  };
-  const write = (environmentId: EnvironmentId, value: StoredGitHubRoutingPermission | null) =>
-    Effect.try({
-      try: () => {
-        const key = `${GITHUB_ROUTING_KEY_PREFIX}${environmentId}`;
-        if (value === null) browser.localStorage.removeItem(key);
-        else browser.localStorage.setItem(key, encodeStoredGitHubRoutingPermission(value));
-        browser.dispatchEvent(new Event(GITHUB_ROUTING_CHANGED));
-      },
-      catch: (cause) => catalogError("save GitHub routing permissions in", cause),
-    });
-  return GitHubRoutingPermissions.of({
-    get: (entry) =>
-      Effect.sync(() => {
-        const value = read(`${GITHUB_ROUTING_KEY_PREFIX}${entry.target.environmentId}`);
-        return gitHubRoutingPermissionFor(entry, value === null ? [] : [value]);
-      }),
-    changes: Stream.callback<ReadonlyArray<StoredGitHubRoutingPermission>>((queue) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          const listener = (event: Event) => {
-            if (event.type === "storage") {
-              const key = (event as StorageEvent).key;
-              if (key !== null && !key?.startsWith(GITHUB_ROUTING_KEY_PREFIX)) return;
-            }
-            Queue.offerUnsafe(queue, readAll());
-          };
-          browser.addEventListener("storage", listener);
-          browser.addEventListener(GITHUB_ROUTING_CHANGED, listener);
-          Queue.offerUnsafe(queue, readAll());
-          return listener;
-        }),
-        (listener) =>
-          Effect.sync(() => {
-            browser.removeEventListener("storage", listener);
-            browser.removeEventListener(GITHUB_ROUTING_CHANGED, listener);
-          }),
-      ).pipe(Effect.asVoid),
-    ),
-    set: (entry, permission) => {
-      const connectionKey = gitHubRoutingConnectionKey(entry);
-      if (connectionKey === null)
-        return Effect.fail(
-          new ConnectionBlockedError({
-            reason: "configuration",
-            detail: "This environment does not have a saved connection endpoint.",
-          }),
-        );
-      return write(
-        entry.target.environmentId,
-        permission === "off"
-          ? null
-          : {
-              environmentId: entry.target.environmentId,
-              connectionKey,
-              permission,
-            },
-      );
-    },
-    forget: (environmentId) => write(environmentId, null),
-  });
-}
-
 // A posted message resumes in a fresh task, so input and rendering get a turn between
 // encoding chunks. A zero-delay timer would not do: browsers clamp nested timers to
 // 4 ms and throttle them to once a second or less in a background tab.
@@ -620,92 +358,11 @@ export const layer = Layer.effectContext(
       makeDatabaseHandle(),
       (owned) => owned.close,
     );
-    const catalog = yield* makeCatalogStore(makeCatalogBackend(database));
-    const githubRoutingPermissions = makeBrowserGitHubRoutingPermissions();
     // Remembers each thread row's encoding, so a save only encodes rows that changed.
     const encodeStoredShellSnapshot = makeStoredShellSnapshotEncoder({
       yieldToHost: yieldToBrowserTask,
     });
 
-    const targetStore = Persistence.ConnectionTargetStore.of({
-      list: catalog.read.pipe(
-        Effect.map((document) => document.targets),
-        Effect.mapError((cause) => persistenceError("list-targets", cause)),
-      ),
-      listDisabled: catalog.read.pipe(
-        Effect.map((document) => document.disabledEnvironmentIds),
-        Effect.mapError((cause) => persistenceError("list-disabled-targets", cause)),
-      ),
-    });
-    const registrationStore = Persistence.ConnectionRegistrationStore.of({
-      register: (registration, routes) =>
-        catalog
-          .update((document) => registerConnectionInCatalog(document, registration, routes))
-          .pipe(Effect.mapError((cause) => persistenceError("register-connection", cause))),
-      setRoutes: (environmentId, routes) =>
-        catalog
-          .update((document) => setRoutesInCatalog(document, environmentId, routes))
-          .pipe(Effect.mapError((cause) => persistenceError("set-connection-routes", cause))),
-      remove: (environmentId) =>
-        catalog
-          .update((document) => removeConnectionFromCatalog(document, environmentId))
-          .pipe(Effect.mapError((cause) => persistenceError("remove-connection", cause))),
-      setEnabled: (environmentId, enabled) =>
-        catalog
-          .update((document) => setConnectionEnabledInCatalog(document, environmentId, enabled))
-          .pipe(Effect.mapError((cause) => persistenceError("set-connection-enabled", cause))),
-    });
-    const profileStore = ProfileStore.make({
-      get: (connectionId) =>
-        catalog.read.pipe(
-          Effect.map((document) =>
-            Option.fromUndefinedOr(
-              document.profiles.find((profile) => profile.connectionId === connectionId),
-            ),
-          ),
-        ),
-      put: (profile) =>
-        catalog.update((document) => ({
-          ...document,
-          profiles: replaceCatalogValue(document.profiles, (value) => value.connectionId, profile),
-        })),
-      remove: (connectionId) =>
-        catalog.update((document) => ({
-          ...document,
-          profiles: removeCatalogValue(
-            document.profiles,
-            (value) => value.connectionId,
-            connectionId,
-          ),
-        })),
-    });
-    const credentialStore = CredentialStore.make({
-      get: (connectionId) =>
-        catalog.read.pipe(
-          Effect.map((document) =>
-            Option.fromUndefinedOr(
-              document.credentials.find((entry) => entry.connectionId === connectionId)?.credential,
-            ),
-          ),
-        ),
-      put: (connectionId, credential) =>
-        catalog.update((document) => ({
-          ...document,
-          credentials: replaceCatalogValue(document.credentials, (value) => value.connectionId, {
-            connectionId,
-            credential,
-          }),
-        })),
-      remove: (connectionId) =>
-        catalog.update((document) => ({
-          ...document,
-          credentials: removeCatalogValue(
-            document.credentials,
-            (value) => value.connectionId,
-            connectionId,
-          ),
-        })),
-    });
     const cacheStore = Persistence.EnvironmentCacheStore.of({
       loadShell: (environmentId) =>
         readDatabaseValue(database, SHELL_STORE_NAME, environmentId).pipe(
@@ -907,12 +564,6 @@ export const layer = Layer.effectContext(
         ).pipe(Effect.mapError((cause) => persistenceError("clear-environment", cause))),
     });
 
-    return Context.make(Persistence.ConnectionTargetStore, targetStore).pipe(
-      Context.add(GitHubRoutingPermissions, githubRoutingPermissions),
-      Context.add(Persistence.ConnectionRegistrationStore, registrationStore),
-      Context.add(ProfileStore.ConnectionProfileStore, profileStore),
-      Context.add(CredentialStore.ConnectionCredentialStore, credentialStore),
-      Context.add(Persistence.EnvironmentCacheStore, cacheStore),
-    );
+    return Context.make(Persistence.EnvironmentCacheStore, cacheStore);
   }),
 );

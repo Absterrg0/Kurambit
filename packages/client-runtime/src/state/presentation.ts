@@ -199,7 +199,7 @@ function projectEnvironmentConnectionSummary(
   return {
     environmentId,
     environmentLabel: environment.entry.target.label,
-    displayUrl: connectionCatalogDisplayUrl(environment.entry) ?? "",
+    displayUrl: connectionCatalogDisplayUrl(environment.entry),
     isEnabled: environment.entry.enabled,
     connectionState: environment.connection.phase,
     connectionError: environment.connection.error,

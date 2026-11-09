@@ -72,30 +72,20 @@ export const allEnvironmentShellsBootstrappedAtom = Atom.make((get) => {
 }).pipe(Atom.withLabel("web-all-environment-shells-bootstrapped"));
 
 /**
- * The persisted catalog can emit before platform discovery registers the primary environment.
- * Neither that gap nor an empty catalog proves a project is absent.
+ * The catalog emits before platform discovery registers the local server, so
+ * an empty catalog does not prove a project is absent.
  */
-function catalogIsComplete(
-  catalog: EnvironmentCatalogState,
-  requiresPrimaryEnvironment: boolean,
-): boolean {
-  if (!catalog.isReady || catalog.entries.size === 0) return false;
-  return (
-    !requiresPrimaryEnvironment ||
-    Array.from(catalog.entries.values()).some(
-      (entry) => entry.target._tag === "PrimaryConnectionTarget",
-    )
-  );
+function catalogIsComplete(catalog: EnvironmentCatalogState): boolean {
+  return catalog.isReady && catalog.entries.size > 0;
 }
 
 export function createAllEnvironmentProjectSnapshotsReadyAtom(input: {
   readonly catalogValueAtom: Atom.Atom<EnvironmentCatalogState>;
   readonly shellStateValueAtom: (environmentId: EnvironmentId) => Atom.Atom<EnvironmentShellState>;
-  readonly requiresPrimaryEnvironment: boolean;
 }) {
   return Atom.make((get) => {
     const catalog = get(input.catalogValueAtom);
-    if (!catalogIsComplete(catalog, input.requiresPrimaryEnvironment)) return false;
+    if (!catalogIsComplete(catalog)) return false;
     for (const environmentId of enabledEnvironmentIds(catalog)) {
       const shell = get(input.shellStateValueAtom(environmentId));
       if (shell.status !== "live" || Option.isNone(shell.snapshot)) return false;
@@ -108,12 +98,11 @@ export const allEnvironmentProjectSnapshotsReadyAtom =
   createAllEnvironmentProjectSnapshotsReadyAtom({
     catalogValueAtom: environmentCatalog.catalogValueAtom,
     shellStateValueAtom: environmentShell.stateValueAtom,
-    requiresPrimaryEnvironment: true,
   });
 
 export const allReachableShellsLiveAtom = Atom.make((get) => {
   const catalog = get(environmentCatalog.catalogValueAtom);
-  if (!catalogIsComplete(catalog, true)) return false;
+  if (!catalogIsComplete(catalog)) return false;
   for (const environmentId of enabledEnvironmentIds(catalog)) {
     const shell = get(environmentShell.stateValueAtom(environmentId));
     if (shell.status === "live" && Option.isSome(shell.snapshot)) continue;
