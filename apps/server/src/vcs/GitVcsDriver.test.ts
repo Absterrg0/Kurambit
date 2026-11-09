@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
@@ -1152,7 +1153,10 @@ it.effect("GitVcsDriver flushes checkpoint objects and refs to disk before publi
   const observedArgs: ReadonlyArray<string>[] = [];
 
   return Effect.gen(function* () {
-    const driver = yield* GitVcsDriver.makeVcsDriverShape();
+    // macOS and Windows batch their object flushes; Linux flushes each one.
+    const driver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
+      Effect.provideService(HostProcess.Platform, "linux"),
+    );
 
     yield* driver.checkpoints.captureCheckpoint({
       cwd: "/repo",

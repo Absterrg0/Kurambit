@@ -1,4 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off -- The pool is plain Node; its profile folders are host paths.
 import * as NodeEvents from "node:events";
+import * as NodePath from "node:path";
 
 import { INCOGNITO_BROWSER_PROFILE_ID } from "@kurambit/contracts";
 import { chromium, type Browser, type BrowserContext, type BrowserType } from "playwright-core";
@@ -49,6 +51,8 @@ const makeBrowser = () => {
   };
 };
 
+// Profile folders are host paths under profilesDir.
+const profileDir = (name: string) => NodePath.join("/test/profiles", name);
 const options = () => ({
   profilesDir: "/test/profiles",
   executable: vi.fn(async () => "/test/chromium"),
@@ -99,10 +103,10 @@ describe("ServerBrowserContexts", () => {
     expect(await pool.contextFor("work/team")).toBe(persistent);
     expect(await pool.contextFor("work/team", "agent")).not.toBe(persistent);
     expect(launches.persistent).toHaveBeenCalledExactlyOnceWith(
-      "/test/profiles/work%2Fteam",
+      profileDir("work%2Fteam"),
       expect.objectContaining({ chromiumSandbox: true, executablePath: "/test/chromium" }),
     );
-    expect(launches.mkdir).toHaveBeenCalledWith("/test/profiles/work%2Fteam", { recursive: true });
+    expect(launches.mkdir).toHaveBeenCalledWith(profileDir("work%2Fteam"), { recursive: true });
     await pool.close();
     expect(human.close).toHaveBeenCalledTimes(1);
   });
@@ -121,7 +125,7 @@ describe("ServerBrowserContexts", () => {
     });
     await pool.clearProfile("work/team");
     expect(onContextClose).toHaveBeenCalledExactlyOnceWith(persistent);
-    expect(launches.rm).toHaveBeenCalledExactlyOnceWith("/test/profiles/work%2Fteam", {
+    expect(launches.rm).toHaveBeenCalledExactlyOnceWith(profileDir("work%2Fteam"), {
       recursive: true,
       force: true,
     });
@@ -130,7 +134,7 @@ describe("ServerBrowserContexts", () => {
     launches.persistent.mockResolvedValue(makeContext() as unknown as BrowserContext);
     expect(await pool.contextFor("work/team")).not.toBe(persistent);
     await pool.clearProfile("never-opened");
-    expect(launches.rm).toHaveBeenLastCalledWith("/test/profiles/never-opened", {
+    expect(launches.rm).toHaveBeenLastCalledWith(profileDir("never-opened"), {
       recursive: true,
       force: true,
     });

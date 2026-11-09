@@ -7,6 +7,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+import { writeFakeCli } from "@kurambit/provider-testing/fakeCli";
+
 import { checkCodexProviderStatus } from "./CodexProvider.ts";
 
 /**
@@ -16,10 +18,10 @@ import { checkCodexProviderStatus } from "./CodexProvider.ts";
  *   at spawn (the override env var, else the plain CLI's `codex_cli_rs`).
  * - The backend grants Ultrafast only to entitled accounts on app originators.
  */
-const FAKE_CODEX_APP_SERVER = String.raw`#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
-const readline = require("node:readline");
+const FAKE_CODEX_APP_SERVER = String.raw`
+import fs from "node:fs";
+import path from "node:path";
+import readline from "node:readline";
 const cachePath = path.join(process.env.CODEX_HOME, "models_cache.json");
 const originator = process.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE ?? "codex_cli_rs";
 const ultrafast = process.env.FAKE_ULTRAFAST_ENTITLED === "1" && originator !== "codex_cli_rs";
@@ -57,9 +59,7 @@ const solServiceTiers = Effect.fn("solServiceTiers")(function* (ultrafastEntitle
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const dir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambitx-catalog-" });
-  const binaryPath = path.join(dir, "codex");
-  yield* fs.writeFileString(binaryPath, FAKE_CODEX_APP_SERVER);
-  yield* fs.chmod(binaryPath, 0o755);
+  const binaryPath = writeFakeCli({ directory: dir, name: "codex", source: FAKE_CODEX_APP_SERVER });
 
   yield* fs.writeFileString(
     path.join(dir, "models_cache.json"),

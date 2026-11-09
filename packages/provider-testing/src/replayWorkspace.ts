@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off -- the removal needs Node's own EBUSY retries.
+import * as NodeFSP from "node:fs/promises";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -64,12 +66,11 @@ const makeCheckpointWorkspaceEffect = Effect.fn("makeCheckpointWorkspace")(funct
   return cwd;
 });
 
-const removeCheckpointWorkspaceEffect = Effect.fn("removeCheckpointWorkspace")(function* (
-  cwd: string,
-) {
-  const fs = yield* FileSystem.FileSystem;
-  yield* fs.remove(cwd, { recursive: true });
-});
+// Windows can hold a folder for a moment after the agent working in it exits
+// (process rundown, a virus scan), and refuses to remove it meanwhile. Node's
+// own retries cover exactly that, on real timers a test clock cannot stall.
+const removeCheckpointWorkspaceEffect = (cwd: string) =>
+  Effect.promise(() => NodeFSP.rm(cwd, { recursive: true, maxRetries: 10, retryDelay: 50 }));
 
 export const checkpointWorkspace = (fixtureName: string, files?: ReplayWorkspaceFiles) =>
   Effect.acquireRelease(makeCheckpointWorkspaceEffect(fixtureName, files), (cwd) =>

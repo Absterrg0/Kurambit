@@ -1123,7 +1123,10 @@ describe("OpenCode 2 through the orchestrator", () => {
               ),
             ),
           );
-          return yield* decodeProviderReplayNdjson(text.replaceAll("<work>", cwd));
+          // The placeholder sits inside JSON strings, so a Windows path's backslashes need escaping.
+          return yield* decodeProviderReplayNdjson(
+            text.replaceAll("<work>", JSON.stringify(cwd).slice(1, -1)),
+          );
         }).pipe(Effect.provide(NodeServices.layer));
         const projection = yield* runScenario({
           name,

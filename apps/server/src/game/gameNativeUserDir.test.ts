@@ -49,12 +49,20 @@ it("mints a fresh trio per call without touching HOME", async () => {
     expect(first.dir).not.toBe(second.dir);
     expect(first.dataDir).not.toBe(second.dataDir);
     expect(isPathInside(first.dataDir, parent)).toBe(true);
-    expect(first.env.XDG_DATA_HOME).toBe(first.dataDir);
-    expect(first.env.XDG_CONFIG_HOME).toBe(first.configDir);
-    expect(first.env.XDG_CACHE_HOME).toBe(first.cacheDir);
+    // Each OS's Godot reads its user folders from different variables.
+    if (HOST_OS === "win32") {
+      expect(first.env).toEqual({ APPDATA: first.dataDir, LOCALAPPDATA: first.cacheDir });
+    } else if (HOST_OS === "darwin") {
+      expect(first.env).toEqual({ HOME: NodePath.join(first.dir, "home") });
+    } else {
+      expect(first.env.XDG_DATA_HOME).toBe(first.dataDir);
+      expect(first.env.XDG_CONFIG_HOME).toBe(first.configDir);
+      expect(first.env.XDG_CACHE_HOME).toBe(first.cacheDir);
+    }
     // Scoped overrides only: the process environment is never rewritten.
     expect(process.env.HOME).toBe(homeBefore);
     expect(process.env.XDG_DATA_HOME).not.toBe(first.dataDir);
+    expect(process.env.APPDATA).not.toBe(first.dataDir);
     const probe = nativeUserEnv("/d", "/c", "/k");
     expect(probe).toEqual({ XDG_DATA_HOME: "/d", XDG_CONFIG_HOME: "/c", XDG_CACHE_HOME: "/k" });
   } finally {

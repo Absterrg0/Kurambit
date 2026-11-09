@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeURL from "node:url";
 import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
@@ -91,9 +92,7 @@ const delegatedTaskStatusTranscriptFile = new URL(
 const readDelegatedTaskStatusTranscript = Effect.fn("readDelegatedTaskStatusTranscript")(
   function* () {
     const fs = yield* FileSystem.FileSystem;
-    const text = yield* fs.readFileString(
-      decodeURIComponent(delegatedTaskStatusTranscriptFile.pathname),
-    );
+    const text = yield* fs.readFileString(NodeURL.fileURLToPath(delegatedTaskStatusTranscriptFile));
     return yield* decodeProviderReplayNdjson(text);
   },
   Effect.provide(NodeServices.layer),

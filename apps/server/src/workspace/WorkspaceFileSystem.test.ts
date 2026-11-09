@@ -576,7 +576,10 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
             "# Plan\n",
           );
           expect(yield* fileSystem.readFileString(path.join(cwd, "docs/README.md"))).toBe("new\n");
-          expect(yield* fileSystem.readLink(path.join(cwd, "README.md"))).toBe("docs/README.md");
+          // Windows stores a relative link target with its own separator.
+          expect(yield* fileSystem.readLink(path.join(cwd, "README.md"))).toBe(
+            path.normalize("docs/README.md"),
+          );
           expect(yield* fileSystem.readFileString(path.join(cwd, "notes.md"))).toBe("notes\n");
           expect(yield* fileSystem.readFileString(path.join(cwd, "dotdot.md"))).toBe("dotdot\n");
         }),

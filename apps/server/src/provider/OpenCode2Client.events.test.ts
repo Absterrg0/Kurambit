@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeURL from "node:url";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -22,7 +23,7 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const newerServerStream = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const recorded = (yield* fs.readFileString(RECORDING.pathname))
+  const recorded = (yield* fs.readFileString(NodeURL.fileURLToPath(RECORDING)))
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => decodeEntry(line))

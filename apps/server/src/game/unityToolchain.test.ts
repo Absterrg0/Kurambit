@@ -92,10 +92,10 @@ describe("Unity editor selection", () => {
 
   it("reads Hub layouts on each platform", () => {
     const mac = unityEditorExecutable("/Applications/Unity/Hub/Editor/6000.6.7f1", "darwin");
-    expect(unityEditorDir(mac)).toBe("/Applications/Unity/Hub/Editor/6000.6.7f1");
+    expect(unityEditorDir(mac)).toBe(NodePath.resolve("/Applications/Unity/Hub/Editor/6000.6.7f1"));
     expect(unityVersionFromPath(mac)?.text).toBe("6000.6.7f1");
     const linux = unityEditorExecutable("/home/u/Unity/Hub/Editor/6000.7.1f1", "linux");
-    expect(linux).toBe("/home/u/Unity/Hub/Editor/6000.7.1f1/Editor/Unity");
+    expect(linux).toBe(NodePath.join("/home/u/Unity/Hub/Editor/6000.7.1f1/Editor/Unity"));
     expect(unityVersionFromPath(linux)?.text).toBe("6000.7.1f1");
     expect(unityVersionFromPath("/opt/unity/Editor/Unity")).toBeNull();
     expect(parseSecondaryInstallPath('"/data/UnityEditors"')).toBe("/data/UnityEditors");
@@ -106,18 +106,22 @@ describe("Unity editor selection", () => {
 
 describe("tool candidates", () => {
   it("tries an explicit path alone, else an earlier Kurambit install before PATH", () => {
+    // Candidates are host paths, so expect them in the host's spelling.
+    const { join, resolve, delimiter } = NodePath;
     expect(toolCandidates("godot", " /x/godot ", "/env/godot", "/tools", "/bin")).toEqual([
-      { path: "/x/godot", source: "settings" },
+      { path: resolve("/x/godot"), source: "settings" },
     ]);
     expect(toolCandidates("godot", "", "/env/godot", "/tools", "/bin")).toEqual([
-      { path: "/env/godot", source: "env" },
+      { path: resolve("/env/godot"), source: "env" },
     ]);
-    expect(toolCandidates("godot", "", undefined, "/tools", "/bin:/usr/bin")).toEqual([
-      { path: "/tools/godot-4.7.2/Godot_v4.7.2-stable_linux.x86_64", source: "kurambit" },
-      { path: "/bin/godot", source: "path" },
-      { path: "/bin/godot4", source: "path" },
-      { path: "/usr/bin/godot", source: "path" },
-      { path: "/usr/bin/godot4", source: "path" },
+    expect(
+      toolCandidates("godot", "", undefined, "/tools", ["/bin", "/usr/bin"].join(delimiter)),
+    ).toEqual([
+      { path: join("/tools/godot-4.7.2/Godot_v4.7.2-stable_linux.x86_64"), source: "kurambit" },
+      { path: join("/bin/godot"), source: "path" },
+      { path: join("/bin/godot4"), source: "path" },
+      { path: join("/usr/bin/godot"), source: "path" },
+      { path: join("/usr/bin/godot4"), source: "path" },
     ]);
   });
 });

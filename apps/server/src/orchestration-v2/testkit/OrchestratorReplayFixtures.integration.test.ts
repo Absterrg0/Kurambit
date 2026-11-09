@@ -231,20 +231,35 @@ function runFixtureProviderWithRegisteredHarness(input: {
   }
 }
 
+// Claude Code keeps a running command's live output under a per-uid temp
+// folder, which Windows has no uid for, so there Kurambit streams none
+// (claudeTaskOutputRoot) and the cases that watch it cannot hold.
+const claudeLiveOutput = process.getuid !== undefined;
+
 describe("orchestrator replay fixtures", () => {
-  it.effect.each(
-    ORCHESTRATOR_REPLAY_FIXTURES.flatMap((fixture) =>
-      fixture.providers.map(
-        (provider) => [fixture.name, provider.driver, fixture, provider] as const,
-      ),
+  const fixtureCases = ORCHESTRATOR_REPLAY_FIXTURES.flatMap((fixture) =>
+    fixture.providers.map(
+      (provider) => [fixture.name, provider.driver, fixture, provider] as const,
     ),
-  )("runs %s/%s through OrchestratorV2 using deterministic replay", ([, , fixture, provider]) =>
+  );
+  const watchesClaudeLiveOutput = ([name, driver]: (typeof fixtureCases)[number]) =>
+    name === "command_output_streaming" && driver === "claudeAgent";
+  const runFixtureCase = ([, , fixture, provider]: (typeof fixtureCases)[number]) =>
     runFixtureProviderWithRegisteredHarness({
       fixtureName: fixture.name,
       buildInput: fixture.buildInput,
       driver: provider,
-    }),
+    });
+  it.effect.each(fixtureCases.filter((fixtureCase) => !watchesClaudeLiveOutput(fixtureCase)))(
+    "runs %s/%s through OrchestratorV2 using deterministic replay",
+    runFixtureCase,
   );
+  describe.skipIf(!claudeLiveOutput)("with Claude's live command output", () => {
+    it.effect.each(fixtureCases.filter(watchesClaudeLiveOutput))(
+      "runs %s/%s through OrchestratorV2 using deterministic replay",
+      runFixtureCase,
+    );
+  });
 
   const steeringFixture = ORCHESTRATOR_REPLAY_FIXTURES.find(
     (fixture) => fixture.name === "message_steering",
@@ -324,61 +339,63 @@ describe("orchestrator replay fixtures", () => {
     // A subagent's foreground Bash run during the root's turn is tailed like a
     // root call's, so the child's command row streams live.
     const SUBAGENT_BASH_ID = "toolu_01JMN3SSQCHzUTNua9AWdkiH";
-    it.effect("streams a subagent's foreground Bash output live during the root turn", () =>
-      runFixtureProviderWithRegisteredHarness({
-        fixtureName: afterRootFixture.name,
-        buildInput: afterRootFixture.buildInput,
-        driver: {
-          ...afterRootProvider,
-          assertOutput: (result) => {
-            const childThreadId = projectionFor(result, afterRootFixture.name).subagents[0]
-              ?.childThreadId;
-            assert.exists(childThreadId);
-            const command = result.projections
-              .get(childThreadId)
-              ?.turnItems.find(
-                (item) =>
-                  item.type === "command_execution" &&
-                  JSON.stringify(item.input).includes("SUB_DONE_1"),
-              );
-            assert.exists(command);
-            const streamed = result.commandOutput?.get(command.id);
-            assert.exists(streamed, "the subagent's command must stream its output");
-            assert.include(streamed.output.text, "SUB_DONE_1");
+    it.effect.skipIf(!claudeLiveOutput)(
+      "streams a subagent's foreground Bash output live during the root turn",
+      () =>
+        runFixtureProviderWithRegisteredHarness({
+          fixtureName: afterRootFixture.name,
+          buildInput: afterRootFixture.buildInput,
+          driver: {
+            ...afterRootProvider,
+            assertOutput: (result) => {
+              const childThreadId = projectionFor(result, afterRootFixture.name).subagents[0]
+                ?.childThreadId;
+              assert.exists(childThreadId);
+              const command = result.projections
+                .get(childThreadId)
+                ?.turnItems.find(
+                  (item) =>
+                    item.type === "command_execution" &&
+                    JSON.stringify(item.input).includes("SUB_DONE_1"),
+                );
+              assert.exists(command);
+              const streamed = result.commandOutput?.get(command.id);
+              assert.exists(streamed, "the subagent's command must stream its output");
+              assert.include(streamed.output.text, "SUB_DONE_1");
+            },
           },
-        },
-        transformTranscript: (transcript) => {
-          const isBashFrame = (entry: ProviderReplayEntry) => {
-            if (entry.type !== "emit_inbound") return false;
-            const frame = entry.frame as Record<string, any>;
-            return (
-              frame.message?.content?.[0]?.id === SUBAGENT_BASH_ID ||
-              frame.message?.content?.[0]?.tool_use_id === SUBAGENT_BASH_ID ||
-              (frame.type === "system" && frame.tool_use_id === SUBAGENT_BASH_ID)
+          transformTranscript: (transcript) => {
+            const isBashFrame = (entry: ProviderReplayEntry) => {
+              if (entry.type !== "emit_inbound") return false;
+              const frame = entry.frame as Record<string, any>;
+              return (
+                frame.message?.content?.[0]?.id === SUBAGENT_BASH_ID ||
+                frame.message?.content?.[0]?.tool_use_id === SUBAGENT_BASH_ID ||
+                (frame.type === "system" && frame.tool_use_id === SUBAGENT_BASH_ID)
+              );
+            };
+            // Recorded without the structured result the replay writes output files from.
+            const bashFrames = transcript.entries.filter(isBashFrame).map((entry) => {
+              const frame = (entry as { readonly frame: Record<string, any> }).frame;
+              return frame.type === "user"
+                ? {
+                    ...entry,
+                    frame: { ...frame, tool_use_result: { stdout: "SUB_DONE_1\n", stderr: "" } },
+                  }
+                : entry;
+            });
+            const rest = transcript.entries.filter((entry) => !isBashFrame(entry));
+            const resultIndex = rest.findIndex(
+              (entry) => entry.type === "emit_inbound" && entry.label === "result",
             );
-          };
-          // Recorded without the structured result the replay writes output files from.
-          const bashFrames = transcript.entries.filter(isBashFrame).map((entry) => {
-            const frame = (entry as { readonly frame: Record<string, any> }).frame;
-            return frame.type === "user"
-              ? {
-                  ...entry,
-                  frame: { ...frame, tool_use_result: { stdout: "SUB_DONE_1\n", stderr: "" } },
-                }
-              : entry;
-          });
-          const rest = transcript.entries.filter((entry) => !isBashFrame(entry));
-          const resultIndex = rest.findIndex(
-            (entry) => entry.type === "emit_inbound" && entry.label === "result",
-          );
-          assert.lengthOf(bashFrames, 4, "transcript shape changed");
-          assert.isAtLeast(resultIndex, 0, "transcript shape changed");
-          return {
-            ...transcript,
-            entries: [...rest.slice(0, resultIndex), ...bashFrames, ...rest.slice(resultIndex)],
-          };
-        },
-      }),
+            assert.lengthOf(bashFrames, 4, "transcript shape changed");
+            assert.isAtLeast(resultIndex, 0, "transcript shape changed");
+            return {
+              ...transcript,
+              entries: [...rest.slice(0, resultIndex), ...bashFrames, ...rest.slice(resultIndex)],
+            };
+          },
+        }),
     );
 
     it.effect.each(

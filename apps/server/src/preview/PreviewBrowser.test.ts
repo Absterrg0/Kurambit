@@ -126,6 +126,8 @@ const makeHarness = Effect.fn("test.makePreviewBrowser")(function* (
 it.layer(NodeServices.layer)("PreviewBrowser", (it) => {
   it.effect("installs a verified download with its file modes and then reuses it", () =>
     Effect.gen(function* () {
+      // The test clock starts at the epoch, and Windows cannot date a file before it.
+      yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00Z"));
       const { browser, fs, path, installRoot, requests } = yield* makeHarness();
       yield* fs.makeDirectory(path.join(installRoot, "1.0.0"), { recursive: true });
       const active = path.join(installRoot, ".install-other");

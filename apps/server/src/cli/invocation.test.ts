@@ -13,6 +13,8 @@ import {
   resolveServerInstallation,
 } from "./invocation.ts";
 
+const windowsHost = HostProcess.Platform.defaultValue() === "win32";
+
 it("formats package runner commands from their cache entry paths", () => {
   for (const [entryPath, expected] of [
     ["/home/theo/.npm/_npx/abc123/node_modules/kurambit/dist/bin.mjs", "npx kurambit serve"],
@@ -147,7 +149,8 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("names this install's launcher when kurambit is not on PATH", () =>
+  // A Linux PATH splits on `:`, so it cannot hold a Windows temp folder's drive path.
+  it.effect.skipIf(windowsHost)("names this install's launcher when kurambit is not on PATH", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -272,72 +275,79 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
     }),
   );
 
-  it.effect("requires the npm prefix's bin to point to the running package", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const prefix = path.join(root, "bunx-tools");
-      const packageRoot = path.join(prefix, "lib/node_modules/kurambit");
-      const entry = path.join(packageRoot, "dist/bin.mjs");
-      const globalBin = path.join(prefix, "bin/kurambit");
-      yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
-      yield* fs.makeDirectory(path.dirname(globalBin), { recursive: true });
-      yield* fs.writeFileString(entry, "");
-      yield* fs.writeFileString(
-        path.join(packageRoot, "package.json"),
-        '{"name":"kurambit","version":"0.0.45","bin":{"kurambit":"./dist/bin.mjs"}}',
-      );
-      const resolve = resolveServerInstallation.pipe(
-        Effect.provideService(HostProcess.Arguments, ["node", entry]),
-        Effect.provideService(HostProcess.IsExecutable, false),
-        Effect.provideService(HostProcess.Platform, "linux"),
-      );
-      expect(yield* resolve).toBeNull();
-      yield* fs.symlink(entry, globalBin);
-      expect(yield* resolve).toEqual({ kind: "npm-global", prefix });
-      yield* fs.remove(globalBin);
-      yield* fs.writeFileString(globalBin, "an unrelated kurambit command");
-      expect(yield* resolve).toBeNull();
-      expect(yield* resolve.pipe(Effect.provideService(HostProcess.Platform, "win32"))).toBeNull();
-    }),
-  );
-
-  it.effect("proves the downloaded executable was started by a global npm launcher", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const prefix = path.join(root, "bunx-tools");
-      const packageRoot = path.join(prefix, "lib/node_modules/kurambit");
-      const launcher = path.join(packageRoot, "bin/kurambit.mjs");
-      const executable = path.join(root, ".kurambit/runtime/versions/1.0.0/kurambit");
-      yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
-      yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
-      yield* fs.makeDirectory(path.join(prefix, "bin"));
-      yield* fs.writeFileString(launcher, "");
-      yield* fs.writeFileString(executable, "");
-      yield* fs.symlink(launcher, path.join(prefix, "bin/kurambit"));
-      const resolve = resolveServerInstallation.pipe(
-        Effect.provideService(HostProcess.ExecutablePath, executable),
-        Effect.provideService(HostProcess.Arguments, [executable, executable]),
-        Effect.provideService(HostProcess.IsExecutable, true),
-        Effect.provideService(HostProcess.Platform, "linux"),
-        Effect.provideService(HostProcess.Environment, { KURAMBIT_NPM_LAUNCHER_PATH: launcher }),
-      );
-      // A launcher for another version is some other `kurambit` the server spawned
-      // (the variable is inherited), not the install this executable runs from.
-      for (const [version, expected] of [
-        ["0.0.1", null],
-        [packageJson.version, { kind: "npm-global", prefix }],
-      ] as const) {
+  // npm's `<prefix>/lib/node_modules` layout is POSIX-only, and these checks read it on disk.
+  it.effect.skipIf(windowsHost)(
+    "requires the npm prefix's bin to point to the running package",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const prefix = path.join(root, "bunx-tools");
+        const packageRoot = path.join(prefix, "lib/node_modules/kurambit");
+        const entry = path.join(packageRoot, "dist/bin.mjs");
+        const globalBin = path.join(prefix, "bin/kurambit");
+        yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
+        yield* fs.makeDirectory(path.dirname(globalBin), { recursive: true });
+        yield* fs.writeFileString(entry, "");
         yield* fs.writeFileString(
           path.join(packageRoot, "package.json"),
-          `{"name":"kurambit","version":"${version}","bin":{"kurambit":"./bin/kurambit.mjs"}}`,
+          '{"name":"kurambit","version":"0.0.45","bin":{"kurambit":"./dist/bin.mjs"}}',
         );
-        expect(yield* resolve).toEqual(expected);
-      }
-    }),
+        const resolve = resolveServerInstallation.pipe(
+          Effect.provideService(HostProcess.Arguments, ["node", entry]),
+          Effect.provideService(HostProcess.IsExecutable, false),
+          Effect.provideService(HostProcess.Platform, "linux"),
+        );
+        expect(yield* resolve).toBeNull();
+        yield* fs.symlink(entry, globalBin);
+        expect(yield* resolve).toEqual({ kind: "npm-global", prefix });
+        yield* fs.remove(globalBin);
+        yield* fs.writeFileString(globalBin, "an unrelated kurambit command");
+        expect(yield* resolve).toBeNull();
+        expect(
+          yield* resolve.pipe(Effect.provideService(HostProcess.Platform, "win32")),
+        ).toBeNull();
+      }),
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "proves the downloaded executable was started by a global npm launcher",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const prefix = path.join(root, "bunx-tools");
+        const packageRoot = path.join(prefix, "lib/node_modules/kurambit");
+        const launcher = path.join(packageRoot, "bin/kurambit.mjs");
+        const executable = path.join(root, ".kurambit/runtime/versions/1.0.0/kurambit");
+        yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
+        yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+        yield* fs.makeDirectory(path.join(prefix, "bin"));
+        yield* fs.writeFileString(launcher, "");
+        yield* fs.writeFileString(executable, "");
+        yield* fs.symlink(launcher, path.join(prefix, "bin/kurambit"));
+        const resolve = resolveServerInstallation.pipe(
+          Effect.provideService(HostProcess.ExecutablePath, executable),
+          Effect.provideService(HostProcess.Arguments, [executable, executable]),
+          Effect.provideService(HostProcess.IsExecutable, true),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(HostProcess.Environment, { KURAMBIT_NPM_LAUNCHER_PATH: launcher }),
+        );
+        // A launcher for another version is some other `kurambit` the server spawned
+        // (the variable is inherited), not the install this executable runs from.
+        for (const [version, expected] of [
+          ["0.0.1", null],
+          [packageJson.version, { kind: "npm-global", prefix }],
+        ] as const) {
+          yield* fs.writeFileString(
+            path.join(packageRoot, "package.json"),
+            `{"name":"kurambit","version":"${version}","bin":{"kurambit":"./bin/kurambit.mjs"}}`,
+          );
+          expect(yield* resolve).toEqual(expected);
+        }
+      }),
   );
 
   it.effect("leaves local, standalone, missing and unreadable installs unknown", () =>

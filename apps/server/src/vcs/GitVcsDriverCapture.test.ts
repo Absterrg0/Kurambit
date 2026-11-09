@@ -15,7 +15,7 @@ import { CheckpointRef } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import { afterAll, beforeAll } from "vite-plus/test";
+import { afterAll, beforeAll, describe } from "vite-plus/test";
 
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
@@ -186,7 +186,19 @@ interface Case {
   /** Builds the fixture under `root` and returns the folder to capture. */
   readonly setup: (root: string) => string;
   readonly steps: ReadonlyArray<Step>;
+  /** Needs two spellings of one name to be two files, which NTFS and APFS fold into one. */
+  readonly caseSensitiveDisk?: boolean;
 }
+
+const caseSensitiveDisk = (() => {
+  const probe = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-case-probe-"));
+  try {
+    NodeFS.writeFileSync(NodePath.join(probe, "a"), "");
+    return !NodeFS.existsSync(NodePath.join(probe, "A"));
+  } finally {
+    NodeFS.rmSync(probe, { recursive: true, force: true });
+  }
+})();
 
 const cases: ReadonlyArray<Case> = [
   {
@@ -478,6 +490,7 @@ const cases: ReadonlyArray<Case> = [
   {
     // A project copied from a case-insensitive disk keeps core.ignorecase=true.
     name: "core.ignorecase on a case-sensitive disk",
+    caseSensitiveDisk: true,
     setup: (root) => {
       initRepo(root);
       git(root, ["config", "core.ignorecase", "true"]);
@@ -653,6 +666,29 @@ const cases: ReadonlyArray<Case> = [
         act: (cwd) => write(NodePath.join(cwd, "kept.log"), "back again\n"),
       },
       {
+        name: "user commits",
+        seeds: true,
+        act: (cwd) => commitAll(cwd, "user work"),
+      },
+      { name: "no-op", seeds: false },
+    ],
+  },
+  {
+    name: "file name spellings and HEAD",
+    caseSensitiveDisk: true,
+    setup: (root) => {
+      initRepo(root);
+      write(NodePath.join(root, ".gitignore"), "*.log\n");
+      write(NodePath.join(root, "kept.log"), "tracked though ignored\n");
+      git(root, ["add", "-f", "kept.log", ".gitignore"]);
+      git(root, ["commit", "-q", "-m", "ignored but tracked"]);
+      write(NodePath.join(root, "export/out.bin"), "export\n");
+      write(NodePath.join(root, "Player.gd"), "player\n");
+      return root;
+    },
+    steps: [
+      { name: "cold", seeds: true },
+      {
         // Both are distinct files to git here; the spelling check drops both, add re-adds both.
         name: "two spellings side by side without core.ignorecase",
         seeds: false,
@@ -703,92 +739,96 @@ afterAll(() => {
 });
 
 it.layer(layer)("persistent capture index oracle", (it) => {
-  it.effect.each(cases)(
-    "$name",
-    (testCase) =>
-      Effect.gen(function* () {
-        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-capture-oracle-"));
-        try {
-          const cwd = testCase.setup(root);
-          const live = yield* VcsProcess.VcsProcess;
-          let commands: string[][] = [];
-          const driver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
-            Effect.provideService(VcsProcess.VcsProcess, {
-              run: (input) => {
-                commands.push([...input.args]);
-                return live.run(input);
-              },
-            }),
-          );
-          const captured = new Map<string, string>();
-          const capture = (name: string) =>
-            driver.checkpoints.captureCheckpoint({
+  const runCase = (testCase: Case) =>
+    Effect.gen(function* () {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-capture-oracle-"));
+      try {
+        const cwd = testCase.setup(root);
+        const live = yield* VcsProcess.VcsProcess;
+        let commands: string[][] = [];
+        const driver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
+          Effect.provideService(VcsProcess.VcsProcess, {
+            run: (input) => {
+              commands.push([...input.args]);
+              return live.run(input);
+            },
+          }),
+        );
+        const captured = new Map<string, string>();
+        const capture = (name: string) =>
+          driver.checkpoints.captureCheckpoint({
+            cwd,
+            checkpointRef: CheckpointRef.make(`refs/kurambit/checkpoints/oracle/${name}`),
+          });
+        for (const [index, step] of testCase.steps.entries()) {
+          const label = `${testCase.name} / ${step.name}`;
+          step.act?.(cwd);
+          if (step.restoreTo) {
+            yield* driver.checkpoints.restoreCheckpoint({
               cwd,
-              checkpointRef: CheckpointRef.make(`refs/kurambit/checkpoints/oracle/${name}`),
+              checkpointRef: CheckpointRef.make(captured.get(step.restoreTo.step)!),
+              filePaths: step.restoreTo.paths,
             });
-          for (const [index, step] of testCase.steps.entries()) {
-            const label = `${testCase.name} / ${step.name}`;
-            step.act?.(cwd);
-            if (step.restoreTo) {
-              yield* driver.checkpoints.restoreCheckpoint({
-                cwd,
-                checkpointRef: CheckpointRef.make(captured.get(step.restoreTo.step)!),
-                filePaths: step.restoreTo.paths,
-              });
-            }
-            if (step.name.startsWith("gc'd blob")) {
-              // The index now names lonely.bin's blob; every Kurambit ref goes and gc prunes.
-              yield* capture(`pre-gc-${index}`);
-              for (const ref of git(cwd, ["for-each-ref", "--format=%(refname)", "refs/kurambit"])
-                .split("\n")
-                .filter((line) => line.length > 0))
-                git(cwd, ["update-ref", "-d", ref]);
-              git(cwd, ["reflog", "expire", "--expire=now", "--all"]);
-              git(cwd, ["gc", "-q", "--prune=now"]);
-              write(NodePath.join(cwd, "assets/after-gc.txt"), "after gc\n");
-            }
-            const before = userState(cwd);
-            commands = [];
-            const checkpointName = `${index}-${step.name.replace(/[^a-z0-9]+/gi, "-")}`;
-            if (step.fails) {
-              const exit = yield* Effect.exit(capture(checkpointName));
-              assert.isTrue(Exit.isFailure(exit), `${label}: the capture succeeded`);
-              assert.throws(() => todayTree(cwd), undefined, undefined, `${label}: today's method`);
-              assert.strictEqual(userState(cwd), before, `${label}: the user's git state changed`);
-              continue;
-            }
-            const commit = yield* capture(checkpointName);
-            const ran = commands;
+          }
+          if (step.name.startsWith("gc'd blob")) {
+            // The index now names lonely.bin's blob; every Kurambit ref goes and gc prunes.
+            yield* capture(`pre-gc-${index}`);
+            for (const ref of git(cwd, ["for-each-ref", "--format=%(refname)", "refs/kurambit"])
+              .split("\n")
+              .filter((line) => line.length > 0))
+              git(cwd, ["update-ref", "-d", ref]);
+            git(cwd, ["reflog", "expire", "--expire=now", "--all"]);
+            git(cwd, ["gc", "-q", "--prune=now"]);
+            write(NodePath.join(cwd, "assets/after-gc.txt"), "after gc\n");
+          }
+          const before = userState(cwd);
+          commands = [];
+          const checkpointName = `${index}-${step.name.replace(/[^a-z0-9]+/gi, "-")}`;
+          if (step.fails) {
+            const exit = yield* Effect.exit(capture(checkpointName));
+            assert.isTrue(Exit.isFailure(exit), `${label}: the capture succeeded`);
+            assert.throws(() => todayTree(cwd), undefined, undefined, `${label}: today's method`);
             assert.strictEqual(userState(cwd), before, `${label}: the user's git state changed`);
-            // Every object the capture names exists, before the oracle writes any.
-            git(cwd, ["fsck", "--connectivity-only", "--no-dangling", "--no-progress", commit]);
-            const tree = git(cwd, ["rev-parse", `${commit}^{tree}`]).trim();
-            captured.set(step.name, commit);
-            assert.strictEqual(tree, todayTree(cwd), `${label}: tree differs from a fresh seed`);
-            assert.strictEqual(userState(cwd), before, `${label}: the oracle changed git state`);
-            const seeded = ran.some((args) => args.includes("read-tree"));
-            assert.strictEqual(seeded, step.seeds, `${label}: seeded=${seeded}`);
-            const preWrote = ran.some((args) => args.includes("hash-object"));
-            assert.strictEqual(
-              preWrote,
-              step.preWrites ?? false,
-              `${label}: pre-wrote=${preWrote}`,
-            );
-            if (testCase.name === "split index")
-              for (const file of captureIndexes(cwd))
-                // Never a split index pointing at a shared index file git could expire.
-                assert.isFalse(NodeFS.readFileSync(file).includes("link"), `${label}: split`);
+            continue;
           }
-          if (testCase.name === "capture states") {
-            const kept = captureIndexes(cwd);
-            assert.strictEqual(kept.length, 1, "one kept index per place, no stray temp files");
-          }
-        } finally {
-          NodeFS.rmSync(root, { recursive: true, force: true });
+          const commit = yield* capture(checkpointName);
+          const ran = commands;
+          assert.strictEqual(userState(cwd), before, `${label}: the user's git state changed`);
+          // Every object the capture names exists, before the oracle writes any.
+          git(cwd, ["fsck", "--connectivity-only", "--no-dangling", "--no-progress", commit]);
+          const tree = git(cwd, ["rev-parse", `${commit}^{tree}`]).trim();
+          captured.set(step.name, commit);
+          assert.strictEqual(tree, todayTree(cwd), `${label}: tree differs from a fresh seed`);
+          assert.strictEqual(userState(cwd), before, `${label}: the oracle changed git state`);
+          const seeded = ran.some((args) => args.includes("read-tree"));
+          assert.strictEqual(seeded, step.seeds, `${label}: seeded=${seeded}`);
+          const preWrote = ran.some((args) => args.includes("hash-object"));
+          assert.strictEqual(preWrote, step.preWrites ?? false, `${label}: pre-wrote=${preWrote}`);
+          if (testCase.name === "split index")
+            for (const file of captureIndexes(cwd))
+              // Never a split index pointing at a shared index file git could expire.
+              assert.isFalse(NodeFS.readFileSync(file).includes("link"), `${label}: split`);
         }
-      }),
+        if (testCase.name === "capture states") {
+          const kept = captureIndexes(cwd);
+          assert.strictEqual(kept.length, 1, "one kept index per place, no stray temp files");
+        }
+      } finally {
+        NodeFS.rmSync(root, { recursive: true, force: true });
+      }
+    });
+  it.effect.each(cases.filter((testCase) => !testCase.caseSensitiveDisk))(
+    "$name",
+    runCase,
     120_000,
   );
+  describe.skipIf(!caseSensitiveDisk)("on a case-sensitive disk", () => {
+    it.effect.each(cases.filter((testCase) => testCase.caseSensitiveDisk))(
+      "$name",
+      runCase,
+      120_000,
+    );
+  });
 });
 
 it.layer(layer)("capture index lifetime", (it) => {

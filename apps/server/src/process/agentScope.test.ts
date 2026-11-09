@@ -125,7 +125,9 @@ const unitOf = (launch: { readonly args: ReadonlyArray<string> }) =>
 const sliceOf = (launch: { readonly args: ReadonlyArray<string> }) =>
   launch.args.find((arg) => arg.startsWith("--slice="))?.slice("--slice=".length) ?? "";
 
-describe("AgentScope service", () => {
+// Agent scopes are systemd's, so Linux-only; the fake systemd binaries are found on PATH by
+// their exec bits, which Windows files lack.
+describe.skipIf(HostProcess.Platform.defaultValue() === "win32")("AgentScope service", () => {
   it.effect("labels a thread from its newest scope until its next session clears it", () =>
     withFakeSystemd(({ scope, units }) =>
       Effect.gen(function* () {
