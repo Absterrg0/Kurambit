@@ -131,4 +131,5 @@ it("loads packaged Cursor catalog chunks without credentials or checkout depende
   } finally {
     await NodeFSP.rm(scratch, { recursive: true, force: true });
   }
-}, 60_000);
+  // Bundling and staging the SDK takes a Windows runner 58 to 60 s.
+}, 180_000);
