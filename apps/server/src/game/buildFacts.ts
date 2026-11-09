@@ -101,21 +101,23 @@ export const busyReading = (what: string, machine: MachineLoad | null): NotMeasu
  * machine neither, so it is retried; only a slow game on an idle machine,
  * drawing on its GPU, is standing (a person's measure tries again).
  */
-const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: MachineLoad | null) => {
-  const ratio = `${result.timeRatio.toFixed(2)}× real time`;
-  return machine?.software === true
-    ? notMeasured(`the harness renders in software here, so the game ran at ${ratio}`, false, true)
+const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: MachineLoad | null) =>
+  machine?.software === true
+    ? notMeasured(
+        `the harness renders in software here, so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
+        false,
+        true,
+      )
     : machineBusy(machine)
       ? notMeasured(
-          `the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so the game ran at ${ratio}`,
+          `the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
           true,
         )
       : notMeasured(
-          `the game ran at ${ratio} on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
+          `the game ran at ${result.timeRatio.toFixed(2)}× real time on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
           false,
           true,
         );
-};
 
 /** What a tier bot reports in its status evidence (templates/bot-kit/tier.mjs). */
 interface TierEvidence {
@@ -228,52 +230,6 @@ export const tierFact = (
       return notMeasured(`the tier bot ended "${status}": ${note}`, false);
   }
 };
-
-/**
- * The rows whose reading depends on how fast the machine ran the play: still
- * stretches, the first response, the frame rate, and the scene rows that
- * follow where random input led in time (keep going's loop.ts leaves them
- * unguarded for the same reason).
- */
-const TIMING_ROWS: ReadonlySet<string> = new Set([
-  "freeze",
-  "first-response",
-  "performance",
-  "clipping",
-  "fell",
-  "camera",
-  "sliding",
-]);
-
-/**
- * Whether a play that ran beside other plays may owe a reading to them: the
- * game ran below real time or stopped answering, a reading only waiting
- * clears, or a timing row that does not read good. Such a play is played
- * again alone. A good reading stands: sharing the machine never made a game
- * faster or cleaner.
- */
-export const sharedPlaySuspect = (
-  state: string | null,
-  readings: ReadonlyArray<unknown>,
-  facts: Facts,
-): boolean =>
-  state === "budget" ||
-  state === "unresponsive" ||
-  readings.some(
-    (reading) =>
-      typeof reading === "object" &&
-      reading !== null &&
-      "status" in reading &&
-      reading.status === "not-measured" &&
-      "retry" in reading &&
-      reading.retry === true,
-  ) ||
-  gameFactsView(facts).some(
-    (row) =>
-      TIMING_ROWS.has(row.id) &&
-      row.reading._tag === "measured" &&
-      (row.id === "performance" ? row.reading.tone !== "good" : row.reading.tone === "bad"),
-  );
 
 /** The masher's first-response probe as a fact. */
 export const firstResponseOf = (

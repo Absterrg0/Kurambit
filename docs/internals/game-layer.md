@@ -388,14 +388,6 @@ outside their catalog.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.
-- **A browser game's plays run at once on a GPU.** When the harness draws on the GPU, the
-  no-input, random-input and tester's-bot plays of a copy run together, each in its own GameBot
-  lane. In software they take turns: SwiftShader plays beside each other slow far more than in
-  proportion, so readings measured alone turned into "not measured". A play that ran beside others keeps a
-  reading only when sharing cannot explain it: a run below real time, a reading only waiting
-  clears, or a timing row that does not read good is played again alone (`sharedPlaySuspect` in
-  [buildFacts.ts](../../apps/server/src/game/buildFacts.ts)). A new fact read from a play's
-  timing must join that rule. A native engine's plays share its one runner and take turns.
 - **Facts skip what is already known or not needed.** The boot check is not run again when this
   server's own `game_check` booted the same bytes (engine folder and `game.json`) clean, and the
   tester's bot plays a chat turn's build only while keep going, which judges by it, is on; a

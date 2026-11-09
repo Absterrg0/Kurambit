@@ -1,16 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
-import {
-  GameOperationError,
-  type GameBotRunResult,
-  type GameBuildFacts,
-  type GameBuildId,
-} from "@kurambit/contracts";
+import { GameOperationError, type GameBotRunResult } from "@kurambit/contracts";
 
 import {
   faultOf,
   firstResponseOf,
-  notMeasured,
-  sharedPlaySuspect,
   skilledFact,
   tierFact,
   turnChangeBase,
@@ -212,49 +205,5 @@ describe("turnChangeBase", () => {
   it("finds the thread's previous turn past a run that captured nothing (a restart's continuation)", () => {
     const undo = { id: "u", at: "2026-11-06T11:00:00.000Z", thread: null, turn: null };
     expect(turnChangeBase({ ...turn, turn: 3 }, [t1, undo])).toBe("u");
-  });
-});
-
-describe("sharedPlaySuspect", () => {
-  const never = notMeasured("not measured yet", false);
-  const facts = (patch: Partial<GameBuildFacts>): GameBuildFacts => ({
-    build: "b" as GameBuildId,
-    key: "three:t",
-    harness: "h",
-    state: "measuring",
-    measuredAt: null,
-    renderer: null,
-    boots: never,
-    idle: never,
-    masher: never,
-    skilled: never,
-    winnableWithoutSkill: never,
-    liveness: never,
-    firstResponse: never,
-    assets: never,
-    use: never,
-    performance: never,
-    scene: never,
-    message: "",
-    ...patch,
-  });
-
-  it("plays a run below real time or one that stopped answering again alone", () => {
-    expect(sharedPlaySuspect("budget", [], facts({}))).toBe(true);
-    expect(sharedPlaySuspect("unresponsive", [], facts({}))).toBe(true);
-  });
-
-  it("keeps a good timing reading and plays a bad one again alone", () => {
-    const response = (seconds: number) =>
-      facts({
-        firstResponse: { status: "measured", value: { seconds, window: 3, resolution: 0.1 } },
-      });
-    expect(sharedPlaySuspect("done", [], response(0.1))).toBe(false);
-    expect(sharedPlaySuspect("done", [], response(1.2))).toBe(true);
-  });
-
-  it("plays a reading only waiting clears again alone", () => {
-    expect(sharedPlaySuspect("done", [notMeasured("busy", true)], facts({}))).toBe(true);
-    expect(sharedPlaySuspect("done", [notMeasured("no shell", false)], facts({}))).toBe(false);
   });
 });

@@ -93,19 +93,6 @@ const STOP_WAIT_MS = 60_000;
 const STOP_WAIT = Duration.millis(STOP_WAIT_MS);
 const JEV_DEFAULT_BASE = "https://api.typesafe.ai";
 
-/**
- * A browser game's measurement plays a build's copy several ways at once
- * (GameFacts): each play is one lane of the copy, a call of its own beside the
- * others. Without a lane a game has one call at a time.
- */
-export interface RunOptions {
-  readonly lane?: string;
-}
-
-/** The key one call holds: the game's own, or one lane of a build's copy. */
-const sessionKey = (root: string, options: RunOptions | undefined) =>
-  options?.lane === undefined ? root : `${root}\0${options.lane}`;
-
 /** The people-facing copy of a run in `.studio/bot-results.jsonl`, never through a planted link. */
 const appendResult = async (root: string, line: string) => {
   try {
@@ -142,7 +129,6 @@ export class GameBot extends Context.Service<
     readonly runIn: (
       root: string,
       input: GameBotRunInput,
-      options?: RunOptions,
     ) => Effect.Effect<GameBotRunResult, GameOperationError>;
     /** A quick look at a finished bot run: summary, findings and evidence paths. */
     readonly view: (
@@ -567,11 +553,10 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /** One bot call per checkout root (or lane of one), with whose it is and when it has ended. */
+  /** One bot call per checkout root, with whose it is and when it has ended. */
   const sessions = new Map<
     string,
     {
-      readonly root: string;
       readonly session: Session;
       readonly owner: ThreadId | undefined;
       readonly done: Deferred.Deferred<void>;
@@ -582,8 +567,8 @@ const make = Effect.gen(function* () {
   const botLocks = yield* KeyedLock.make<string>();
   // A stop flips the flag before it ends anything, so the run reads its end
   // as stopped, never as the game crashing.
-  const drop = (key: string) => {
-    const entry = sessions.get(key);
+  const drop = (root: string) => {
+    const entry = sessions.get(root);
     if (entry === undefined) return null;
     entry.session.stopped = true;
     Deferred.doneUnsafe(entry.stopRequested, Exit.void);
@@ -594,8 +579,8 @@ const make = Effect.gen(function* () {
   const stopWhere = (which: (root: string, owner: ThreadId | undefined) => boolean) =>
     Effect.gen(function* () {
       const ending = [...sessions.entries()]
-        .filter(([, entry]) => which(entry.root, entry.owner))
-        .map(([key]) => drop(key))
+        .filter(([root, entry]) => which(root, entry.owner))
+        .map(([root]) => drop(root))
         .filter((done) => done !== null);
       for (const done of ending) {
         const ended = yield* Deferred.await(done).pipe(Effect.timeoutOption(STOP_WAIT));
@@ -606,7 +591,7 @@ const make = Effect.gen(function* () {
 
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
-      for (const key of sessions.keys()) drop(key);
+      for (const root of sessions.keys()) drop(root);
     }),
   );
 
@@ -624,12 +609,7 @@ const make = Effect.gen(function* () {
 
   const isGameOperationError = Schema.is(GameOperationError);
 
-  const runLocked = (
-    root: string,
-    input: GameBotRunInput,
-    owner: ThreadId | undefined,
-    options: RunOptions | undefined,
-  ) =>
+  const runLocked = (root: string, input: GameBotRunInput, owner: ThreadId | undefined) =>
     Effect.gen(function* () {
       // A bot is a game file under .studio/bot/*.mjs; anything else is refused.
       const botDir = NodePath.resolve(root, ".studio/bot");
@@ -741,7 +721,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const done = yield* Deferred.make<void>();
           const stopRequested = yield* Deferred.make<void>();
-          sessions.set(sessionKey(root, options), { root, session, owner, done, stopRequested });
+          sessions.set(root, { session, owner, done, stopRequested });
           return { done, stopRequested };
         }),
         ({ stopRequested }) =>
@@ -1067,8 +1047,7 @@ const make = Effect.gen(function* () {
         // and a stop between runs still releases the game for the next call.
         ({ done }) =>
           Effect.sync(() => {
-            const key = sessionKey(root, options);
-            if (sessions.get(key)?.session === session) sessions.delete(key);
+            if (sessions.get(root)?.session === session) sessions.delete(root);
           }).pipe(Effect.andThen(Deferred.succeed(done, undefined))),
       );
       if (each.length === 0)
@@ -1108,9 +1087,9 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const run = (root: string, input: GameBotRunInput, owner?: ThreadId, options?: RunOptions) =>
+  const run = (root: string, input: GameBotRunInput, owner?: ThreadId) =>
     botLocks
-      .tryWithLock(sessionKey(root, options), 0, runLocked(root, input, owner, options))
+      .tryWithLock(root, 0, runLocked(root, input, owner))
       .pipe(
         Effect.flatMap((ran) =>
           Option.isSome(ran)
@@ -1228,7 +1207,7 @@ const make = Effect.gen(function* () {
     // Its video lands in the game folder; the run is recorded on the thread.
     run: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) => run(root, input, threadId)),
-    runIn: (root, input, options) => run(root, input, undefined, options),
+    runIn: (root, input) => run(root, input),
     latestPlayBot,
     view: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) => view(root, input)),

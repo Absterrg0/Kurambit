@@ -5,6 +5,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import {
   GameOperationError,
   gameOperationFault,
@@ -506,7 +507,12 @@ const make = Effect.gen(function* () {
   });
 
   // Clean checks by the identity of what they checked. Memory only: one lost costs a boot check.
-  const cleanChecks = new Map<string, GameCheckResult>();
+  // Entries are only set, never looked up: getOption reads without calling lookup.
+  const cleanChecks = yield* Cache.make({
+    lookup: (_identity: string): Effect.Effect<GameCheckResult> =>
+      Effect.die("clean checks are only set"),
+    capacity: CLEAN_CHECKS,
+  });
   /** The engine project's files and game.json, by content; null when they cannot be read whole. */
   const checkedIdentity = (root: string) =>
     Effect.gen(function* () {
@@ -528,14 +534,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const before = yield* checkedIdentity(root);
       const result = yield* check(root, { scene: true });
-      if (result.ok && before !== null && before === (yield* checkedIdentity(root))) {
-        cleanChecks.delete(before);
-        cleanChecks.set(before, result);
-        if (cleanChecks.size > CLEAN_CHECKS) {
-          const oldest = cleanChecks.keys().next().value;
-          if (oldest !== undefined) cleanChecks.delete(oldest);
-        }
-      }
+      if (result.ok && before !== null && before === (yield* checkedIdentity(root)))
+        yield* Cache.set(cleanChecks, before, result);
       return result;
     });
   const checkLabel = (root: string) =>
@@ -558,8 +558,10 @@ const make = Effect.gen(function* () {
         operations.exclusive(root, label, check(root), owner),
       ),
     cleanCheckOf: (root) =>
-      Effect.map(checkedIdentity(root), (identity) =>
-        identity === null ? null : (cleanChecks.get(identity) ?? null),
+      Effect.flatMap(checkedIdentity(root), (identity) =>
+        identity === null
+          ? Effect.succeed(null)
+          : Effect.map(Cache.getOption(cleanChecks, identity), Option.getOrNull),
       ),
     recompile: (threadId) =>
       projects.exclusive(threadId, "Unity recompile", (root) =>
