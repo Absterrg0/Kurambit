@@ -138,6 +138,12 @@ export async function stopBenchmarkServerAt(input: {
     owner !== input.ownerPid
   )
     return;
+  if (HostProcess.Platform.defaultValue() === "win32") {
+    // Windows reuses pids and has no group to probe, so a pid file cannot
+    // prove its process is still this server: leave it rather than guess.
+    await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
+    return;
+  }
   if (HostProcess.Platform.defaultValue() === "linux") {
     // A stale pid file must never turn into a signal for an unrelated process.
     const commandLine = await NodeFSP.readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => null);
@@ -268,6 +274,11 @@ async function stopServer(pid: number | undefined, pidPath?: string): Promise<vo
     if (pidPath !== undefined) await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
     return;
   }
+  if (HostProcess.Platform.defaultValue() === "win32") {
+    await stopWindowsServer(pid);
+    if (pidPath !== undefined) await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
+    return;
+  }
   const signal = (name: NodeJS.Signals) => {
     try {
       process.kill(-pid, name);
@@ -294,4 +305,32 @@ async function stopServer(pid: number | undefined, pidPath?: string): Promise<vo
     check();
   });
   if (pidPath !== undefined) await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
+}
+
+/**
+ * Windows has no process groups, and a negative pid is no signal target there.
+ * `pid` is the one spawn returned and its process still runs, so its tree is
+ * what this server started: end that tree, then wait for the root to exit so
+ * its files are closed.
+ */
+async function stopWindowsServer(pid: number): Promise<void> {
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!alive()) return;
+  await new Promise<void>((resolve) => {
+    NodeChildProcess.execFile(
+      "taskkill",
+      ["/PID", String(pid), "/T", "/F"],
+      { windowsHide: true },
+      () => resolve(),
+    );
+  });
+  for (let waited = 0; alive() && waited < 10_000; waited += 100)
+    await new Promise((resolve) => setTimeout(resolve, 100));
 }

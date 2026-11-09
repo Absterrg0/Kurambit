@@ -13,6 +13,7 @@ import {
   COPY_OF,
   makeCheckoutOf,
   reuseMainPlayer,
+  UNITY_PLAY,
   unityPlayerDirectory,
 } from "./unityPlayerCache.ts";
 
@@ -26,8 +27,9 @@ const SOURCE = "a".repeat(64);
 
 const writePlayer = async (directory: string) => {
   await NodeFSP.mkdir(NodePath.join(directory, "game_Data/Managed"), { recursive: true });
-  await NodeFSP.writeFile(NodePath.join(directory, "game.x86_64"), "elf");
-  await NodeFSP.writeFile(NodePath.join(directory, "UnityPlayer.so"), "so");
+  // The host's player layout: a Windows host plays game.exe, a Linux one game.x86_64.
+  await NodeFSP.writeFile(NodePath.join(directory, UNITY_PLAY.executable), "player");
+  await NodeFSP.writeFile(NodePath.join(directory, UNITY_PLAY.runtime), "runtime");
   await NodeFSP.writeFile(NodePath.join(directory, "game_Data/Managed/Assembly-CSharp.dll"), "dll");
 };
 
@@ -66,11 +68,11 @@ it("copies only a complete player of the exact sources and leaves the main's unt
     // Removing the worktree removes its copy only.
     await NodeFSP.rm(worktree, { recursive: true, force: true });
     expect(await NodeFSP.readdir(unityPlayerDirectory(main, SOURCE))).toEqual(
-      expect.arrayContaining(["game.x86_64", "game_Data", "UnityPlayer.so"]),
+      expect.arrayContaining([UNITY_PLAY.executable, "game_Data", UNITY_PLAY.runtime]),
     );
 
     // A player missing its runtime library is not complete.
-    await NodeFSP.rm(NodePath.join(unityPlayerDirectory(main, SOURCE), "UnityPlayer.so"));
+    await NodeFSP.rm(NodePath.join(unityPlayerDirectory(main, SOURCE), UNITY_PLAY.runtime));
     expect(await reuseMainPlayer(main, worktree, SOURCE)).toMatch(/no player/);
   } finally {
     await NodeFSP.rm(base, { recursive: true, force: true });

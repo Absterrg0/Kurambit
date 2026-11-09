@@ -73,9 +73,10 @@ export const makeCheckoutOf = Effect.gen(function* () {
       })
       .pipe(
         Effect.map((result) => {
-          const [common, gitDir] = result.stdout.trim().split("\n");
+          const [common, gitDir] = result.stdout.trim().split(/\r?\n/);
+          // Git prints `C:/...` on Windows; resolve to the host's spelling to compare paths.
           return result.exitCode === 0 && common !== undefined && gitDir !== undefined
-            ? ([common, gitDir] as const)
+            ? ([NodePath.resolve(common), NodePath.resolve(gitDir)] as const)
             : null;
         }),
         Effect.orElseSucceed(() => null),

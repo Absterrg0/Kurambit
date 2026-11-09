@@ -1468,15 +1468,20 @@ export const make = (
             ELECTRON_RUN_AS_NODE: "1",
             KURAMBIT_ACP_CGROUP_WRAPPER: "1",
           };
+    const spawnPlatform = yield* HostProcess.Platform;
     const child = yield* spawner
       .spawn(
         ChildProcess.make(containedSpawnCommand.command, containedSpawnCommand.args, {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
           ...(spawnEnvironment ? { env: spawnEnvironment } : {}),
           extendEnv: options.spawn.extendEnv ?? true,
+          // Windows has no process groups (its tree stop is taskkill by pid), and a
+          // detached shell never starts a `.cmd` shim's child, such as npm's.
           ...(options.ownDetachedProcessGroup === undefined
             ? {}
-            : { detached: options.ownDetachedProcessGroup }),
+            : {
+                detached: options.ownDetachedProcessGroup && spawnPlatform !== "win32",
+              }),
           shell: containedSpawnCommand.shell,
         }),
       )
@@ -1626,16 +1631,15 @@ export const make = (
       Effect.uninterruptible(terminateOwnedProcessGroupImpl),
     );
     if (options.ownDetachedProcessGroup === true) {
-      const hostPlatform = yield* HostProcess.Platform;
       const forceTerminateOwnedProcessGroup =
-        hostPlatform === "win32"
+        spawnPlatform === "win32"
           ? terminateWindowsProcessTreeWithTaskkill(Number(child.pid)).pipe(
               Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
             )
           : linuxCgroupLease !== undefined
             ? terminateLinuxCgroupLease(linuxCgroupLease)
             : options.ownDescendantProcessGroups === true
-              ? terminatePosixProcessTree(0, hostPlatform)
+              ? terminatePosixProcessTree(0, spawnPlatform)
               : signalOwnedProcessGroup("SIGKILL").pipe(Effect.asVoid);
       yield* Scope.addFinalizer(
         runtimeScope,

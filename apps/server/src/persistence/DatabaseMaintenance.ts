@@ -1,3 +1,4 @@
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as NodeSqliteClient from "@kurambit/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -144,6 +145,7 @@ const lockExclusively = (databasePath: string) =>
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const isWindows = yield* HostProcess.isWindows;
   const legacyPath = (databasePath: string) =>
     path.join(path.dirname(databasePath), "state.sqlite");
 
@@ -223,15 +225,21 @@ const make = Effect.gen(function* () {
     function* (databasePath: string) {
       const legacy = legacyPath(databasePath);
       if (!(yield* fs.exists(legacy))) return;
-      // A version before 0.1.0 may still be running against it. Keep the lock
-      // while deleting, and delete the database before its WAL so a failure
-      // never leaves it without committed transactions.
-      yield* Effect.gen(function* () {
-        yield* lockExclusively(legacy);
-        for (const suffix of ["", "-wal", "-shm"]) {
-          yield* fs.remove(legacy + suffix, { force: true });
-        }
-      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: legacy })));
+      // A version before 0.1.0 may still be running against it, so it is locked
+      // first. The database goes before its WAL so a failure never leaves it
+      // without committed transactions.
+      const removeFiles = Effect.forEach(
+        ["", "-wal", "-shm"],
+        (suffix) => fs.remove(legacy + suffix, { force: true }),
+        { discard: true },
+      );
+      const withConnection = Effect.provide(NodeSqliteClient.layer({ filename: legacy }));
+      // The lock is held while deleting, except on Windows, which refuses to
+      // delete a file SQLite holds open: there the lock proves nothing else
+      // uses it, and the files go once it is closed.
+      yield* isWindows
+        ? lockExclusively(legacy).pipe(withConnection, Effect.andThen(removeFiles))
+        : lockExclusively(legacy).pipe(Effect.andThen(removeFiles), withConnection);
     },
     (effect, databasePath) =>
       effect.pipe(

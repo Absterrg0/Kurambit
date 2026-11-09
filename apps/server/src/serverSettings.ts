@@ -585,7 +585,10 @@ const make = Effect.gen(function* () {
   const emitChange = (settings: ServerSettings) =>
     PubSub.publish(changesPubSub, settings).pipe(Effect.asVoid);
 
-  const readConfigExists = fs.exists(settingsPath).pipe(
+  // `exists` sees a dangling link itself on Windows; stat follows it, as the read does.
+  const readConfigExists = fs.stat(settingsPath).pipe(
+    Effect.as(true),
+    Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(false)),
     Effect.mapError(
       (cause) =>
         new ServerSettingsError({

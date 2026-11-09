@@ -836,8 +836,9 @@ export const playBot = async (
     };
   } finally {
     for (const reader of readers) reader.close();
-    botProcess?.signal("SIGTERM");
-    await video?.stop();
+    // Waits for the child to go: a run that returned while it still ran would
+    // leave it holding the game folder, which Windows then cannot delete.
+    await Promise.all([botProcess?.stop(), video?.stop()]);
   }
 };
 
