@@ -299,6 +299,7 @@ const decodeCarved = Schema.decodeUnknownEffect(
 const decodeAdopted = Schema.decodeUnknownEffect(
   Schema.Struct({ objects: Schema.Array(Schema.String), files: Schema.Array(Schema.String) }),
 );
+const isGameOperationError = Schema.is(GameOperationError);
 /** A one-shot run's refusal as it is; a result that does not decode is the kit's fault. */
 const protocolError =
   (operation: string, root: string) => (cause: GameOperationError | Schema.SchemaError) =>
@@ -1328,7 +1329,10 @@ const make = Effect.gen(function* () {
           await ensureGameDir(root, NodePath.posix.dirname(BLEND_REL));
           insideGame(root, BLEND_REL);
         },
-        catch: (cause) => opError("blender-live", BLEND_REL, "invalid-path", undefined, cause),
+        catch: (cause) =>
+          isGameOperationError(cause)
+            ? cause
+            : opError("blender-live", BLEND_REL, "io", undefined, cause),
       });
       // Compressed: live.blend is committed with the game after every exec, and
       // an uncompressed scene adds ~10 MB of history each time.

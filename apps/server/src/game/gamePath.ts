@@ -5,6 +5,34 @@ import * as Effect from "effect/Effect";
 import { GameOperationError } from "@kurambit/contracts";
 import { isPathWithinRoot, realPathForContainment } from "@kurambit/shared/pathContainment";
 
+const refusal = (relative: string, reason: "invalid-path" | "symlink", detail?: string) =>
+  new GameOperationError({
+    operation: "resolve-path",
+    path: relative,
+    reason,
+    ...(detail === undefined ? {} : { detail }),
+  });
+
+/**
+ * The absolute path `relative` names in the game at `root`, judged by its text
+ * alone: relative, and below the root. Enough to validate a record that names
+ * game paths (game.json); anything that opens the path uses `insideGame`.
+ */
+export const gameRelative = (
+  root: string,
+  relative: string,
+  options: { readonly root?: "allowed" } = {},
+): string => {
+  const base = NodePath.resolve(root);
+  const target = NodePath.resolve(base, relative);
+  if (
+    NodePath.isAbsolute(relative) ||
+    (target === base ? options.root !== "allowed" : !target.startsWith(base + NodePath.sep))
+  )
+    throw refusal(relative, "invalid-path");
+  return target;
+};
+
 /**
  * The absolute path of `relative` in the game at `root`, or a refusal. A game
  * folder is a repository agents write into and people bring from anywhere, so
@@ -21,20 +49,8 @@ export const insideGame = (
   relative: string,
   options: { readonly root?: "allowed" } = {},
 ): string => {
+  const target = gameRelative(root, relative, options);
   const base = NodePath.resolve(root);
-  const target = NodePath.resolve(base, relative);
-  const refuse = (reason: "invalid-path" | "symlink", detail?: string) =>
-    new GameOperationError({
-      operation: "resolve-path",
-      path: relative,
-      reason,
-      ...(detail === undefined ? {} : { detail }),
-    });
-  if (
-    NodePath.isAbsolute(relative) ||
-    (target === base ? options.root !== "allowed" : !target.startsWith(base + NodePath.sep))
-  )
-    throw refuse("invalid-path");
   const realRoot = realPathForContainment(base);
   // Joined as written, not normalized: `link/../file` opens the link's parent, not the game's.
   const real = realPathForContainment(`${base}${NodePath.sep}${relative}`);
@@ -45,7 +61,8 @@ export const insideGame = (
     (real === realRoot && options.root !== "allowed")
   )
     // The game's own files lead out (a link, a junction, a name Windows rewrites), not the request.
-    throw refuse(
+    throw refusal(
+      relative,
       "symlink",
       `${relative} leads outside the game folder${real === undefined ? "" : ` (to ${real})`}; a game operation never follows a link out of the game.`,
     );

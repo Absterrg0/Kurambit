@@ -46,7 +46,7 @@ import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
-import { insideGame } from "./gamePath.ts";
+import { gameRelative, insideGame } from "./gamePath.ts";
 import { ensureScaffold, refreshSkills } from "./runSetup.ts";
 import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame } from "./templates.ts";
@@ -183,7 +183,9 @@ const make = Effect.gen(function* () {
         const manifest = decodeManifest(
           await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8"),
         );
-        insideGame(root, manifestProject(manifest));
+        // The record is checked by its text; what opens a path checks where it really leads
+        // (insideGame), so a link in the game refuses that operation, not the whole game.
+        gameRelative(root, manifestProject(manifest));
         for (const asset of manifest.assets)
           for (const relative of [
             asset.source,
@@ -191,7 +193,7 @@ const make = Effect.gen(function* () {
             asset.export,
             ...(asset.thumbnail ? [asset.thumbnail] : []),
           ])
-            insideGame(root, relative);
+            gameRelative(root, relative);
         for (const family of manifest.families ?? [])
           for (const target of family.paths) {
             if (target.startsWith("res://")) {
@@ -207,9 +209,9 @@ const make = Effect.gen(function* () {
                   path: target,
                   reason: "invalid-path",
                 });
-              insideGame(root, `${manifestProject(manifest)}/${rest}`);
+              gameRelative(root, `${manifestProject(manifest)}/${rest}`);
             } else {
-              insideGame(root, target);
+              gameRelative(root, target);
             }
           }
         return manifest;
