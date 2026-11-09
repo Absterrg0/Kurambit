@@ -1,10 +1,12 @@
-# On-demand Windows test lane. Manual only: nothing in the suite passes on
-# Windows yet, so this exists to give contributors (and agents) a cloud Windows
-# box to iterate against. Once the suite is green here, fold it into ci.yml.
+# On-demand Windows test lane. Manual only: it gives contributors (and agents) a
+# cloud Windows box to iterate against. A run with no package tests every
+# package, with apps/server in its own shards. Once it stays green, fold it into ci.yml.
 #
+#   gh workflow run windows-tests.yml --ref <branch>
 #   gh workflow run windows-tests.yml --ref <branch> -f package=packages/shared
 #   gh workflow run windows-tests.yml --ref <branch> -f package=apps/server \
 #     -f files="src/process/externalLauncher.test.ts src/cli/theme.test.ts"
+#   gh workflow run windows-tests.yml --ref <branch> -f package=apps/server -f files="--shard=3/10"
 #   gh run watch && gh run view --log-failed
 name: Windows Tests
 
@@ -12,11 +14,11 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: "Workspace directory to test, e.g. apps/server or packages/shared. Empty runs every package except apps/server."
+        description: "Workspace directory to test, e.g. apps/server or packages/shared. Empty runs every package, apps/server in shards."
         type: string
         default: ""
       files:
-        description: "Space-separated test files relative to the package directory. Empty runs the package's whole suite. Requires package."
+        description: "Space-separated test files relative to the package directory, or vitest flags such as --shard=3/10. Empty runs the package's whole suite. Requires package."
         type: string
         default: ""
 
@@ -69,6 +71,11 @@ jobs:
         if: inputs.package == '' || inputs.package == 'apps/web'
         run: node apps/web/node_modules/playwright/cli.js install --only-shell chromium
 
+      # The server's browser integration tests launch the same headless shell.
+      - name: Install Chromium for server browser tests
+        if: inputs.package == 'apps/server'
+        run: node apps/server/node_modules/playwright-core/cli.js install --only-shell chromium
+
       # `vp run ... test -- <files>` does not forward positional args to vitest,
       # so file-scoped runs call `vp test run` inside the package instead.
       - name: Test
@@ -84,3 +91,50 @@ jobs:
             Set-Location $package
             vp test run $files.Split(' ')
           }
+
+  # apps/server runs its files one at a time (fileParallelism: false), which is
+  # too long for one Windows job, so a full run spreads it over shards as ci.yml does.
+  test_server:
+    name: Test Server ${{ matrix.shard }}
+    if: inputs.package == ''
+    runs-on: windows-2025
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Resolve package cache path
+        id: package_cache_path
+        shell: pwsh
+        run: '"path=$(vp pm cache dir)" >> $env:GITHUB_OUTPUT'
+
+      - name: Cache packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.package_cache_path.outputs.path }}
+          key: windows-tests-packages-v1-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install
+        run: vp install
+
+      - name: Install Chromium for server browser tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --only-shell chromium
+
+      - name: Test
+        run: vp run --filter kurambit test --shard ${{ matrix.shard }}/${{ strategy.job-total }}

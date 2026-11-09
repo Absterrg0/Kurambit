@@ -16,7 +16,7 @@ hosted web app or announcement.
   nightly-resolution and update-manifest scripts against a copy of the workspace. The Test job also
   runs `.github/scripts/check-nightly-release.test.cjs`.
 - [`windows-tests.yml`](../../.github/workflows/windows-tests.yml), manual only, runs one package's
-  tests, or every package except the server, on Windows. It builds no installer.
+  tests, or every package with the server in ten shards, on Windows. It builds no installer.
 
 No workflow builds a desktop installer.
 
