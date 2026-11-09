@@ -64,6 +64,11 @@ jobs:
         if: inputs.package == '' || inputs.package == 'apps/desktop'
         run: vp run --filter "@kurambit/desktop" ensure:electron
 
+      # The web package's browser project runs React tests in headless Chromium, as in ci.yml.
+      - name: Install Chromium for web browser tests
+        if: inputs.package == '' || inputs.package == 'apps/web'
+        run: node apps/web/node_modules/playwright/cli.js install --only-shell chromium
+
       # `vp run ... test -- <files>` does not forward positional args to vitest,
       # so file-scoped runs call `vp test run` inside the package instead.
       - name: Test
