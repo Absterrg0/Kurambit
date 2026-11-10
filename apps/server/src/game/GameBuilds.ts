@@ -1330,7 +1330,9 @@ const make = Effect.gen(function* () {
         },
         (current) => Effect.succeed({ value: current, putBack: false }),
       ).pipe(
-        // A failure is an answer; an interrupt is left to the settle after a restart.
+        // A failure is an answer; an interrupt is left to the settle after a restart. Only
+        // what comes before the first move (the park, the comparisons) fails out of
+        // withBuildInFolder, so the folder is as it was.
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.interrupt
@@ -1338,7 +1340,7 @@ const make = Effect.gen(function* () {
                 kind: "refused",
                 why: "broke",
                 detail: Cause.pretty(cause).split("\n")[0]!.slice(0, 300),
-                back: "the folder may be part way between the two builds",
+                back: null,
                 parked: "",
               } as const),
         ),
