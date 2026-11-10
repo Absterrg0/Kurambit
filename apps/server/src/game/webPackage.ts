@@ -22,7 +22,13 @@ import {
 import { candidateBuildId, hashWebBuild, type WebBuildFile } from "./webBuild.ts";
 
 export const WEB_PACKAGES_DIRECTORY = "builds/web-packages";
-const WEB_PACKAGE_FILE = "game-web.zip";
+/** The download's name, after the game's folder: two games' packages never share one. */
+const webPackageFile = (root: string) =>
+  `${
+    NodePath.basename(root)
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/^[-.]+|-+$/g, "") || "game"
+  }-web.zip`;
 const BUILD_ID = /^[0-9a-f]{64}$/;
 
 /** A packaged build is addressed by its build id, so an old URL can never name another build. */
@@ -301,7 +307,7 @@ export const packageWebRelease = async (input: {
     notes.push(...(await retireOtherPackages(root, selected.buildId)));
     return {
       archivePath: archive,
-      fileName: WEB_PACKAGE_FILE,
+      fileName: webPackageFile(root),
       buildId: selected.buildId,
       bytes: written.bytes,
       sha256: written.sha256,
