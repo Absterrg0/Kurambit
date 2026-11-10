@@ -1133,15 +1133,20 @@ const make = Effect.gen(function* () {
       // job not yet running cannot start while it is dropped (runJob reads
       // `stopped` and sets `running` with no yield between).
       const asked = yield* Effect.suspend(
-        (): Effect.Effect<{ job: Job | null; dropped: ReadonlyArray<Job> }> => {
+        (): Effect.Effect<{
+          job: Job | null;
+          dropped: ReadonlyArray<Job>;
+          queued: boolean;
+        }> => {
           const existing = jobs.get(build.key);
           if (existing !== undefined) {
             if (person) existing.person = true;
             if (options.skilled !== false) existing.skilled = true;
             if (!supersede) existing.supersedable = false;
-            return Effect.succeed({ job: existing, dropped: [] });
+            return Effect.succeed({ job: existing, dropped: [], queued: false });
           }
-          if (person && waiting() >= QUEUE_LIMIT) return Effect.succeed({ job: null, dropped: [] });
+          if (person && waiting() >= QUEUE_LIMIT)
+            return Effect.succeed({ job: null, dropped: [], queued: false });
           const dropped = supersede
             ? [...jobs.values()].filter(
                 (job) =>
@@ -1167,12 +1172,20 @@ const make = Effect.gen(function* () {
           return Effect.forkIn(runJob(fresh), scope).pipe(
             Effect.map((fiber) => {
               fresh.fiber = fiber;
-              return { job: fresh, dropped };
+              return { job: fresh, dropped, queued: true };
             }),
           );
         },
       );
       yield* Effect.forEach(asked.dropped, drop, { discard: true });
+      // A build read before this, as a turn's lands, says "never" until told:
+      // queued behind another measure, nothing else would tell it for minutes.
+      if (asked.queued)
+        yield* operations.changed(
+          build.root,
+          GAME_FACTS_EVENT,
+          `Build ${build.build.slice(0, 8)} queued to measure.`,
+        );
       const job = asked.job;
       if (job === null) {
         const facts = yield* read(build);
