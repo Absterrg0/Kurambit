@@ -44,6 +44,9 @@ export const loadOpenCode2Catalog = (
           name: model.name,
           ...(providerName ? { providerName } : {}),
           variants: model.variants.map((variant) => ({ id: variant.id })),
+          free:
+            model.cost.length > 0 &&
+            model.cost.every((cost) => Number(cost.input) === 0 && Number(cost.output) === 0),
         };
       });
     }),

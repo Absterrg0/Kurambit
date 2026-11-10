@@ -379,6 +379,8 @@ export interface OpenCode2Model {
   readonly name: string;
   readonly providerName?: string;
   readonly variants: ReadonlyArray<{ readonly id: string }>;
+  /** Listed at no cost: OpenCode lists its own free models with no login at all. */
+  readonly free?: boolean;
 }
 
 /**
@@ -521,6 +523,9 @@ function openCode2ModelCapabilities(model: OpenCode2Model): ModelCapabilities {
   });
 }
 
+/** OpenCode's own provider (OpenCode Zen), whose free models need no login. */
+const OPENCODE_OWN_PROVIDER = "opencode";
+
 const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
   settings: OpenCodeSettings,
   version: string,
@@ -566,6 +571,11 @@ const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
     settings.customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
+  // A fresh OpenCode, signed in to nothing, still lists its own free models, so
+  // only a model from elsewhere (another provider, or a paid one) shows a login.
+  const signedIn = result.value.some(
+    (model) => model.providerID !== OPENCODE_OWN_PROVIDER || model.free !== true,
+  );
   return buildServerProvider({
     presentation: OPENCODE_2_PRESENTATION,
     enabled: true,
@@ -573,12 +583,17 @@ const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
     models,
     slashCommands: [COMPACT_SLASH_COMMAND],
     probe:
-      result.value.length > 0
-        ? probe(
-            "ready",
-            `OpenCode ${version} lists ${result.value.length} model${result.value.length === 1 ? "" : "s"}.`,
-          )
-        : probe("warning", "OpenCode 2 is running, but it did not list any models yet."),
+      result.value.length === 0
+        ? probe("warning", "OpenCode 2 is running, but it did not list any models yet.")
+        : signedIn
+          ? probe(
+              "ready",
+              `OpenCode ${version} lists ${result.value.length} model${result.value.length === 1 ? "" : "s"}.`,
+            )
+          : probe(
+              "warning",
+              "OpenCode is signed in to nothing, so it lists only its own free models. Run `opencode auth login` to connect a provider.",
+            ),
   });
 });
 

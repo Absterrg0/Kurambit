@@ -551,6 +551,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
             id: "space-bunny-free",
             name: "Space Bunny Free",
             variants: [{ id: "low" }, { id: "medium" }, { id: "high" }],
+            free: true,
           },
         ]),
       );
@@ -579,6 +580,32 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
         ["low", "medium", "high"],
       );
       NodeAssert.equal(runtimeMock.state.sdkClientInputs.length, 0);
+    }),
+  );
+
+  it.effect("is not ready when OpenCode 2 lists only its own free models", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.versionStdout = "opencode v2.0.18\n";
+      const snapshot = yield* checkProvider(
+        makeOpenCodeSettings(),
+        process.cwd(),
+        undefined,
+        undefined,
+        Effect.succeed([
+          {
+            providerID: "opencode",
+            id: "big-pickle",
+            name: "Big Pickle",
+            variants: [],
+            free: true,
+          },
+          { providerID: "opencode", id: "beam-free", name: "Beam Free", variants: [], free: true },
+        ]),
+      );
+
+      NodeAssert.equal(snapshot.status, "warning");
+      NodeAssert.notEqual(snapshot.auth.status, "authenticated");
+      NodeAssert.match(snapshot.message ?? "", /signed in to nothing/);
     }),
   );
 
