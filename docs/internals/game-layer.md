@@ -80,8 +80,13 @@ check that matters.
   packs (checked before the pack is fetched) or of a possible character on another rig (any model
   whose clips cannot be read counts), a sprite render in another palette or mode, a Blender
   import from a source it does not list, and an import or export carrying an armature whose
-  bones are not the lock's rig. A lock without `rig` says nothing is rigged, so no armature
-  enters; one without `audio.packs` leaves sound unlocked. Each
+  bones are not the lock's rig. A lock without `rig` says no character shares library clips;
+  one without `audio.packs` leaves sound unlocked. The rig exists only so library clips fit every
+  character, so an armature marked on its own rig (`kurambit_rig`) is outside it: the mark stands
+  when a creature generation of this game delivered the armature, or, with no generation named,
+  when it carries clips of its own and none from the library (`ownRigRefusal`). Any scene code
+  can set the mark, so the review and the export check that claim, and the route treats a
+  marked armature with no generation as made in Blender. Each
   refusal names the one edit that changes direction on purpose. A lock that is a link, not JSON
   or names unknown library ids fails every art tool with the field, so a broken lock is never
   silently lifted. It is a game file, so checkpoints carry it and a run's restore brings it back

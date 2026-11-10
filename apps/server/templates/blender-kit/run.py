@@ -8,8 +8,11 @@ params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.js
          standard?: abs path of the standard armature's GLB, rig?: the lock's rig id,
          glb?: abs path to write the GLB to (default <out>/candidate.glb)}
 Writes the GLB and prints KURAMBIT_RESULT {kind, objects, measured, refusals, parts,
-usedPalette, armatures, creatures, notes}: armatures are those the lock's rig governs, creatures
-(name to its own rig id) those a generated creature brought, which keep their own skeleton. It works on its own copy of the scene: the live scene and the game folder
+usedPalette, armatures, creatures, creatureSources, ownClips, notes}: armatures are those the
+lock's rig governs; creatures (name to its own rig id) those marked kurambit_rig, which keep their
+own skeleton, with the generation that delivered each (creatureSources) and each one's clips
+(ownClips: its own, and those from the clip library), from which the server decides whether the
+mark stands. It works on its own copy of the scene: the live scene and the game folder
 are never touched, and what it measures is the GLB it wrote, so the review, the export and
 the sidecar all describe the same bytes."""
 import json
@@ -82,8 +85,8 @@ def parts_of(objects):
 
 
 def refusals_of(measured, info, params, creatures=()):
-    """creatures: armatures on their own rig (a generated creature), which the lock's rig, made
-    for humanoids, does not govern."""
+    """creatures: armatures on their own rig (kurambit_rig), which the lock's rig, made so library
+    clips fit every character, does not govern."""
     out = []
     kind = measured["kind"]
     joints = params.get("standardJoints")
@@ -93,7 +96,7 @@ def refusals_of(measured, info, params, creatures=()):
                 continue
             missing = [j for j in joints if j not in bones]
             if missing:
-                out.append({"code": "off-rig", "text": f"{name} lacks {len(missing)} joints of STYLE.json's rig ({', '.join(missing[:6])}): its clips would not fit the game's other characters. Build it with game_blender_character, which puts it on the rig."})
+                out.append({"code": "off-rig", "text": f"{name} lacks {len(missing)} joints of STYLE.json's rig ({', '.join(missing[:4])}), so library clips would not fit it. For those, build it with game_blender_character. If it carries its own clips, mark it on its own rig: armature['kurambit_rig'] = '<rig name>'."})
     dev = measured["restDeviation"]
     if dev is not None and dev > MAX_REST_DEVIATION:
         out.append({"code": "rest-frames", "text": f"{info['worstJoint']}'s rest frame is {dev:.1f}° off the standard skeleton (at most {MAX_REST_DEVIATION:.0f}°): library clips would play twisted. Build the body with game_blender_character, which conforms it."})
@@ -164,10 +167,16 @@ def run_pass(params):
     rig = params.get("rig") or ("standard-humanoid" if standard_rest else None)
     creatures = {a.name: a["kurambit_rig"] for a in arms if a.get("kurambit_rig")}
     creature_sources = {}
+    own_clips = {}
     for a in arms:
-        s = _stamp(a, "kurambit_generation") if a.get("kurambit_rig") else None
+        if not a.get("kurambit_rig"):
+            continue
+        s = _stamp(a, "kurambit_generation")
         if isinstance(s, dict) and isinstance(s.get("id"), str) and isinstance(s.get("path"), str):
             creature_sources[a.name] = {"id": s["id"][:64], "path": s["path"][:500]}
+        # game_blender_character marks the clips it brings from the library with their pack.
+        clips = [(c.get("kurambit_clip", c.name)[:120], "kurambit_from" in c) for c in exported_actions(a)]
+        own_clips[a.name] = {"own": [n for n, lib in clips if not lib][:64], "library": [n for n, lib in clips if lib][:64]}
 
     _keep_only(objects)
     notes = []
@@ -208,6 +217,7 @@ def run_pass(params):
         "armatures": {n: b for n, b in info["armatures"].items() if n not in creatures},
         "creatures": creatures,
         "creatureSources": creature_sources,
+        "ownClips": own_clips,
         "notes": [n[:400] for n in notes + styled["notes"] + still],
     }
 

@@ -2,7 +2,7 @@
 
 Adapted from OhMyGame's sprite-pipeline and game-ui-frontend skills (Apache-2.0).
 The live Blender behind the `game_blender_*` tools is your renderer and your
-modeller for props; you have no local Blender, Godot or image tools.
+modeller; you have no local Blender, Godot or image tools.
 `<assets>` is your lane's asset folder: `web/assets/`, `godot/assets/`, or
 `unity/Assets/Art/` for Unity (capital A: Unity imports nothing else).
 
@@ -58,7 +58,9 @@ change the route. An unrigged model is a prop on every route.
   library's clips. No character fits: recolour one (a family's characters
   share one small colormap texture; edit a copy of that PNG and point the
   copy's material at it).
-- `blender`: made characters, below.
+- `blender`: made characters: on the standard skeleton with the library's
+  clips (Made characters), or on their own rig with their own clips (Made
+  from scratch).
 - `generated`: from generators (Generated art, below): a humanoid is
   conformed to `standard-humanoid` and plays the clip library, a creature
   keeps its own rig and clips.
@@ -145,8 +147,7 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
    For a small change to a library pose, `kurambit.key_pose("Pounce", frame,
 {"base": "Idle_Loop", "turn": {"pelvis": ((1, 0, 0), 14)}}, arm)` keys one
    pose by world directions (the character faces -Y, +X is its left), and
-   `kurambit.mirror_pose(pose)` the other side; a clip you key with your own
-   code needs `action.use_fake_user = True`, or it is not saved.
+   `kurambit.mirror_pose(pose)` the other side.
 
 5. **Review:** `game_blender_look` with `mode: "review"`. Fix what the text
    says the export would refuse first. Then walk the image in this order:
@@ -177,6 +178,50 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
 6. **Export:** `game_blender_export` writes exactly the reviewed model and
    its sidecar; any change after the review needs a new review. Name it in
    the game by its sidecar (TEMPLATE.md).
+
+### Made from scratch: own rig, own clips
+
+A model you rig and animate yourself enters on its own rig: a creature, a
+vehicle or machine with moving parts, or a humanoid that plays only its own
+clips. The lock's rig never governs it and it never plays library clips; the
+palette, budgets, texture size and credits hold as for anything else. A
+humanoid that should play the library's clips goes through
+`game_blender_character` instead. Anything rigged, a door on hinges too,
+is a character to the person's route, so this needs `blender`: on another
+route say so in your reply. Every step runs headless in
+`game_blender_code`; write the subject's `art/CONCEPT.md` section first, as
+for any character.
+
+1. **Model or sculpt.** Sculpt brushes need a viewport and do not run here:
+   sculpt with modifiers and code. An organic body is a skin modifier on a
+   vertex skeleton (each vertex's radius) under a subdivision surface, or
+   metaballs; a voxel remesh fuses parts; a displace modifier, or vertices
+   moved in bmesh with a falloff, push and pull forms; booleans and bevels
+   cut hard parts. Apply the modifiers
+   (`bpy.ops.object.convert(target="MESH")`) and stay in STYLE.json's budget
+   (a decimate modifier).
+2. **UV and texture.** Colours by palette role (`kurambit.material`) need no
+   UVs. For a texture, `bpy.ops.uv.smart_project()` in edit mode, then paint
+   the image's pixels with numpy or bake into it, or `game_blender_paint`
+   from a turnaround sheet. Save or pack every image.
+3. **Rig.** An armature whose bones follow the body, standing on the ground
+   at the origin, facing -Y. `bpy.ops.object.parent_set(type="ARMATURE_AUTO")`
+   weights a connected body; bind what automatic weights miss (eyes, a beak,
+   a wheel) with `kurambit.skin_rigid(part, "head")`. Then mark it:
+   `arm["kurambit_rig"] = "clockwork-owl"`, the rig's name, which the sidecar
+   gives as its skeleton.
+4. **Animate.** One action per clip, keyed on the armature's pose bones and
+   named as the game plays it: an idle (`Idle`) and the moves (`Wake`,
+   `Hop`, `Peck`, `Walk`). A loop's last key equals its first, and keeps its
+   travel in place: the game moves it. Every action that keys the armature's
+   bones ships with it, assigned or not.
+5. **Look.** `game_blender_look` mode `angles` for the shape; for a clip,
+   assign it (`arm.animation_data.action`) and look with mode `frames` and
+   `frames` from its range. Mode `review` shows the turnaround and a strip
+   of every clip, and says what the export would refuse.
+6. **Export** with `game_blender_export`. In three.js
+   `animate(ctx.assets.model("owl"))` plays the clips by name or word:
+   `owl.play("Wake", { once: true })`, then `owl.play("idle")`.
 
 ### Painted from a sheet
 

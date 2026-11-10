@@ -9,8 +9,8 @@ agent's materials and modifiers. From STYLE.json:
            materials result, Palette and Glow (shading.glow), on the one atlas. Without a hex list
            the materials are kept, their textures scaled down to budget.texture.
   scale    scale.character: a character is scaled to that standing height on its armature's
-           object, so clip units are unchanged. Props and generated creatures keep their
-           modelled metres.
+           object, so clip units are unchanged. Props and models on their own rig
+           (kurambit_rig: a creature, a vehicle) keep their modelled metres.
 A character's meshes are joined into one skinned mesh: one mesh, two draw calls."""
 import math
 import os
@@ -368,7 +368,7 @@ def style_pass(objects, style, out_dir, texture_side):
         notes = fit_textures(meshes, texture_side)
     scaled = None
     want = (style.get("scale") or {}).get("character")
-    # A generated creature (kurambit_rig) keeps the size it was made at: a wolf is no hero's height.
+    # A model on its own rig (kurambit_rig) keeps the size it was made at: a wolf is no hero's height.
     if arms and want and not any(a.get("kurambit_rig") for a in arms):
         h = rest_height(meshes)
         if h > 1e-6:

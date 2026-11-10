@@ -102,6 +102,7 @@ import {
   characterRoute,
   lockArmatureRefusal,
   lockCharacterRouteRefusal,
+  ownRigRefusal,
   lockImportRefusal,
   lockPackRefusal,
   readGameStyle,
@@ -193,8 +194,8 @@ const EXPORT_TOOL = "game_blender_export";
 /**
  * Python that prints `STUDIO_ARMATURES {name: [bones]}` for the armatures that
  * would travel with `objs` into a GLB: the objects themselves, their parents
- * and the armatures their modifiers deform with. A generated creature's
- * armature (kurambit_rig) is on its own rig, which the lock does not govern.
+ * and the armatures their modifiers deform with. An armature marked on its own
+ * rig (kurambit_rig) is left to the review's own-rig check, not the lock's rig.
  */
 const ARMATURES_OF = `
 def studio_armatures(objs):
@@ -206,6 +207,14 @@ def studio_armatures(objs):
                 found[a.name] = [b.name for b in a.data.bones]
     print("STUDIO_ARMATURES " + json.dumps(found))
 `;
+
+/**
+ * Python run before every save: Blender drops an action nothing uses when it saves, so a clip
+ * keyed and then swapped off its armature (the plain way to key several) would vanish from
+ * live.blend, and from the review's copy, which then differs from the live scene.
+ */
+const KEEP_CLIPS =
+  "for a in bpy.data.actions:\n    if a.users == 0:\n        a.use_fake_user = True\n";
 
 const armaturesIn = (text: string): Record<string, ReadonlyArray<string>> | null => {
   const found = /STUDIO_ARMATURES (\{.*\})/.exec(text)?.[1];
@@ -400,9 +409,10 @@ const routeRefusalOf = (candidate: Candidate, route: GameCharacterRoute) =>
     ? null
     : candidate.parts.some((part) => part.from === "mpfb2")
       ? lockCharacterRouteRefusal("mpfb-body", route)
-      : // The body or a creature's own rig: a generated prop it holds (a sword, a hat) is no character.
+      : // The body or a generated creature's rig: a generated prop it holds (a sword, a hat) is no
+        // character. A rig marked with no generation behind it is made here, so its mesh is.
         candidate.parts.some((part) => part.ai && part.what === "body") ||
-          Object.keys(candidate.creatures ?? {}).length > 0
+          Object.keys(candidate.creatureSources ?? {}).length > 0
         ? lockCharacterRouteRefusal("generated-body", route)
         : // A texture painted from the person's own sheet makes no mesh.
           candidate.parts.some(
@@ -1337,7 +1347,7 @@ const make = Effect.gen(function* () {
       // Compressed: live.blend is committed with the game after every exec, and
       // an uncompressed scene adds ~10 MB of history each time.
       const text = yield* callText(root, "execute_blender_code", {
-        code: `import bpy\nbpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(absolute)}, compress=True)\nprint("STUDIO_SAVED")\n`,
+        code: `import bpy\n${KEEP_CLIPS}bpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(absolute)}, compress=True)\nprint("STUDIO_SAVED")\n`,
       });
       if (!text.includes("STUDIO_SAVED"))
         return yield* opError("blender-live", BLEND_REL, "command-failed", text.slice(0, 1000));
@@ -1468,7 +1478,7 @@ const make = Effect.gen(function* () {
       const paramsFile = NodePath.join(out, `params.${run}.json`);
       if (job.copy) {
         const saved = yield* callText(root, "execute_blender_code", {
-          code: `import bpy\nbpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(copy)}, copy=True, compress=True)\nprint("STUDIO_SAVED")\n`,
+          code: `import bpy\n${KEEP_CLIPS}bpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(copy)}, copy=True, compress=True)\nprint("STUDIO_SAVED")\n`,
         });
         if (!saved.includes("STUDIO_SAVED"))
           return yield* opError(job.operation, copy, "command-failed", saved.slice(0, 1000));
@@ -1621,19 +1631,27 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The lock's rig check skips an armature marked as a generated creature (kurambit_rig), and
-   * any scene code can set that mark. So each one must name the finished creature generation of
-   * this game that delivered it, as the import wrote it; anything else is refused here, at the
-   * review and again at the export. The route itself is routeRefusalOf's.
+   * The lock's rig check skips an armature marked on its own rig (kurambit_rig), and any scene
+   * code can set that mark. It stands when the import of a finished creature generation of this
+   * game wrote it with that generation, or, with no generation named, when the armature carries
+   * clips of its own and none from the library (a model rigged and animated here). Anything else
+   * is refused here, at the review and again at the export. The route is routeRefusalOf's.
    */
   const creatureRefusal = (root: string, candidate: Candidate) =>
     Effect.gen(function* () {
       for (const name of Object.keys(candidate.creatures ?? {})) {
         const source = candidate.creatureSources?.[name];
-        const row =
-          source === undefined ? null : yield* art.delivered(root, source.id, source.path);
+        if (source === undefined) {
+          const refused = ownRigRefusal(
+            name,
+            candidate.ownClips?.[name] ?? { own: [], library: [] },
+          );
+          if (refused !== null) return refused;
+          continue;
+        }
+        const row = yield* art.delivered(root, source.id, source.path);
         if (row === null || row.generation.lane !== "creature")
-          return `${name} is marked as a creature on its own rig (kurambit_rig), but no finished creature generation of this game delivered it, so the lock's rig check cannot skip it. Bring the creature game_generate made in with game_blender_assets_import (source generated), or build the character on STYLE.json's rig with game_blender_character.`;
+          return `${name} names a creature generation (kurambit_generation), but no finished creature generation of this game delivered it. Bring the creature game_generate made in with game_blender_assets_import (source generated), or take the generation stamp off a model you rigged and animated yourself.`;
       }
       return null;
     });

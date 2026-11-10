@@ -14,6 +14,7 @@ import {
   lockRigRefusal,
   lockSpriteInput,
   mayBeCharacter,
+  ownRigRefusal,
   readGameStyle,
   characterRoute,
   lockCharacterRouteRefusal,
@@ -125,6 +126,20 @@ it("refuses imports the lock does not list, and armatures off its rig", () => {
   const { rig: _, ...noRig } = kaykit;
   expect(lockArmatureRefusal({ Hero: ["root"] }, noRig)).toMatch(/names no rig/);
   expect(lockArmatureRefusal({}, noRig)).toBeNull();
+  // Both refusals name the way onto an own rig, so a made creature is never told "props only".
+  expect(lockArmatureRefusal({ Owl: ["body"] }, noRig)).toMatch(/kurambit_rig/);
+  expect(lockArmatureRefusal({ Owl: ["body"] }, kaykit)).toMatch(/kurambit_rig/);
+});
+
+it("lets a rig marked as its own in only on clips of its own", () => {
+  // A creature rigged and animated here: its clips are its own, so library clips are never needed.
+  expect(ownRigRefusal("Owl", { own: ["Idle", "Wake", "Peck"], library: [] })).toBeNull();
+  // No clips at all: it could only borrow library clips, which fit the lock's rig alone.
+  expect(ownRigRefusal("Owl", { own: [], library: [] })).toMatch(/carries no clips/);
+  // A conformed character's library clips do not ride along on a mark, even beside its own.
+  expect(ownRigRefusal("Hero", { own: ["Wave"], library: ["Idle_Loop"] })).toMatch(
+    /library clips \(Idle_Loop\)/,
+  );
 });
 
 it("fills sprite renders from a pixel lock and refuses a palette it does not hold", () => {

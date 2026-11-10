@@ -229,7 +229,8 @@ def _unweighted(meshes):
 
 def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, rig=None, own_rig=None):
     """GameModelMeasure of a candidate GLB, plus {armatures: {name: [bones]}, worstJoint}. own_rig
-    names a creature's own skeleton ("tripo-quadruped"): its sidecar's skeleton, off the standard."""
+    names a model's own skeleton (kurambit_rig: "tripo-quadruped", "clockwork-owl"): its sidecar's
+    skeleton, off the standard."""
     doc = skeleton.gltf_json(glb)
     bpy.ops.wm.read_factory_settings(use_empty=True)  # one-shot only: nothing of the source scene remains
     # At the clips' own rate, or a 30 fps clip lands between 24 fps frames and its length and seam read wrong.
@@ -248,7 +249,8 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
     textures = [{"width": i.size[0], "height": i.size[1]} for i in bpy.data.images if i.size[0] > 0]
     joints = skeleton.skin_joints(doc)
     deviation, worst = None, None
-    if standard_rest and arm is not None:
+    # A model on its own rig plays only its own clips, so the standard rest frames say nothing of it.
+    if standard_rest and arm is not None and own_rig is None:
         found = skeleton.rest_deviation(skeleton.local_rest(doc), standard_rest)
         if found is not None:
             deviation, worst = round(found[0], 2), found[1]

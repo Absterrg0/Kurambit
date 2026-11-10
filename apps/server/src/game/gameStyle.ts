@@ -336,11 +336,15 @@ export const lockImportRefusal = (
     ? null
     : `${GAME_STYLE_FILE} locks this game's look to its library packs (${style.packs.join(", ")}) and allows no imports from ${source}. If ${source} models fit that look, add "${source}" to ${GAME_STYLE_FILE}'s imports and import again; otherwise take the piece from the lock's packs or build it in Blender in their style.`;
 
+/** How an armature says it is on its own rig; the name becomes its sidecar's skeleton. */
+const OWN_RIG_MARK = `armature["kurambit_rig"] = "<rig name>"`;
+
 /**
  * Why the lock refuses armatures about to enter the game (name to bone names),
  * or null: a lock with a rig takes only armatures holding every bone of that
- * rig (when its bones are known); a lock without one takes no armature. The
- * rig governs humanoids: a generated creature on its own rig is never passed here.
+ * rig (when its bones are known); a lock without one takes no armature. An
+ * armature on its own rig (kurambit_rig) is never passed here: ownRigRefusal
+ * and the generation it came from decide it.
  */
 export const lockArmatureRefusal = (
   armatures: Readonly<Record<string, ReadonlyArray<string>>>,
@@ -348,8 +352,9 @@ export const lockArmatureRefusal = (
 ): string | null => {
   const names = Object.keys(armatures);
   if (style === null || names.length === 0) return null;
+  const ownRig = `A model you rig and animate yourself (a creature, a vehicle, a humanoid that never plays library clips) enters on its own rig: key its own clips on its armature and mark it, ${OWN_RIG_MARK}.`;
   if (style.rig === undefined)
-    return `${names.join(", ")} ${names.length === 1 ? "is an armature" : "are armatures"}, and ${GAME_STYLE_FILE} names no rig: its characters are not rigged. Characters come from the lock's packs; to bring rigged characters in, set ${GAME_STYLE_FILE}'s rig to the rig they share first.`;
+    return `${names.join(", ")} ${names.length === 1 ? "is an armature" : "are armatures"}, and ${GAME_STYLE_FILE} names no rig, so no character shares library clips. ${ownRig} To bring characters on a shared rig, set ${GAME_STYLE_FILE}'s rig to the rig they share first.`;
   const rig = resolveRig(style.rig);
   const joints = LIBRARY_RIG_JOINTS[rig];
   if (joints === undefined) return null;
@@ -359,7 +364,24 @@ export const lockArmatureRefusal = (
   });
   if (off.length === 0) return null;
   const packs = LIBRARY_CATALOG.filter((pack) => pack.rig === rig).map((pack) => pack.id);
-  return `${off.join(", ")} ${off.length === 1 ? "is not" : "are not"} on ${GAME_STYLE_FILE}'s rig ${rig}, so ${off.length === 1 ? "its" : "their"} clips would not fit the game's other characters. ${rig === STANDARD_RIG ? `Build characters with game_blender_character, which puts them on it, or take them from ${packs.join(", ")}` : `Characters come from ${packs.join(", ")}; build only props in Blender`}, or change ${GAME_STYLE_FILE}'s rig to move every character.`;
+  return `${off.join(", ")} ${off.length === 1 ? "is not" : "are not"} on ${GAME_STYLE_FILE}'s rig ${rig}, so library clips would not fit ${off.length === 1 ? "it" : "them"}. ${rig === STANDARD_RIG ? `A character that plays them is built with game_blender_character, which puts it on the rig, or taken from ${packs.join(", ")}` : `Characters that play them come from ${packs.join(", ")}`}. ${ownRig} Or change ${GAME_STYLE_FILE}'s rig to move every character.`;
+};
+
+/**
+ * Why an armature may not enter on its own rig, or null. The lock's rig exists so library clips
+ * fit every character; a rigged model carrying clips of its own needs none, so it enters on its
+ * own rig: the rig never governs it and it plays only its own clips. One with no clips would need
+ * library clips, and one carrying them is the rig's.
+ */
+export const ownRigRefusal = (
+  name: string,
+  clips: { readonly own: ReadonlyArray<string>; readonly library: ReadonlyArray<string> },
+): string | null => {
+  if (clips.library.length > 0)
+    return `${name} is marked on its own rig (kurambit_rig) but carries library clips (${clips.library.slice(0, 6).join(", ")}), which fit only ${GAME_STYLE_FILE}'s rig. A model on its own rig plays only clips keyed on it: remove those, or leave the mark off and keep the character on the rig.`;
+  if (clips.own.length === 0)
+    return `${name} is marked on its own rig (kurambit_rig) but carries no clips, so it could only play library clips, which fit only ${GAME_STYLE_FILE}'s rig. Key its clips on it as named actions (an idle first: Idle, Walk, Attack, or its own moves), or build the character with game_blender_character.`;
+  return null;
 };
 
 /** The export budgets a lock sets, each falling back to its default. */

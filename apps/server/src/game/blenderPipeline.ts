@@ -113,7 +113,7 @@ export const PassResult = Schema.Struct({
   usedPalette: Schema.Array(Schema.String),
   /** Every armature the candidate carries, with its bone names: the lock's rig is checked on them. */
   armatures: Schema.Record(Schema.String, Schema.Array(Schema.String)),
-  /** Generated creatures' armatures, each to its own rig id: kept off the lock's rig check. */
+  /** Armatures marked on their own rig (kurambit_rig), each to its rig id: kept off the lock's rig check. */
   creatures: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /**
    * The generation and file each creature armature was imported from, as the import wrote them;
@@ -126,6 +126,17 @@ export const PassResult = Schema.Struct({
         id: Schema.String.check(Schema.isMaxLength(64)),
         path: Schema.String.check(Schema.isMaxLength(500)),
       }),
+    ),
+  ),
+  /**
+   * Each marked armature's clips by name: its own (made here or brought with its body) and those
+   * game_blender_character brought from the clip library. A mark no generation delivered stands
+   * only on its own clips (ownRigRefusal).
+   */
+  ownClips: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({ own: Schema.Array(Schema.String), library: Schema.Array(Schema.String) }),
     ),
   ),
   /** What the pass changed on its way, such as a texture it scaled down to the budget; never a refusal. */
