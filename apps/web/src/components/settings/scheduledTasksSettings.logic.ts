@@ -106,10 +106,42 @@ export function taskToDraft(task: ScheduledTask): DraftState {
   };
 }
 
+/**
+ * A game's agent: the model of the game chat the person last wrote in, in the
+ * game's own folder. A task in a game runs as a turn there would.
+ */
+export function gameAgentModel(
+  threads: ReadonlyArray<{
+    readonly projectId: string;
+    readonly modelSelection: ModelSelection;
+    readonly worktreePath: string | null;
+    readonly archivedAt: string | null;
+    readonly latestUserAuthoredMessageAt?: string | null;
+    readonly updatedAt: string;
+  }>,
+  projectId: string,
+): ModelSelection | null {
+  const at = (thread: (typeof threads)[number]) =>
+    thread.latestUserAuthoredMessageAt ?? thread.updatedAt;
+  const latest = threads
+    .filter(
+      (thread) =>
+        thread.projectId === projectId &&
+        thread.worktreePath === null &&
+        thread.archivedAt === null,
+    )
+    .reduce<(typeof threads)[number] | null>(
+      (best, thread) => (best === null || at(thread) > at(best) ? thread : best),
+      null,
+    );
+  return latest?.modelSelection ?? null;
+}
+
 export function scheduledTaskDefaultModel(
   settings: ServerSettings,
   project: (LegacyProjectSettingsFields & { readonly id: ProjectId }) | null,
   entries: readonly ProviderInstanceEntry[],
+  preferred: ModelSelection | null = null,
 ): ModelSelection | null {
   const available = entries.filter(
     (entry) =>
@@ -120,7 +152,7 @@ export function scheduledTaskDefaultModel(
   );
   const configured = resolveProjectSettings(settings, project?.id ?? null, project).settings
     .defaultModelSelection;
-  for (const selection of [configured, settings.defaultModelSelection]) {
+  for (const selection of [preferred, configured, settings.defaultModelSelection]) {
     if (
       selection &&
       available.some(

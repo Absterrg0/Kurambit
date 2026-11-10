@@ -1,15 +1,26 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import { ScheduledTaskId, type EnvironmentId, type ScheduledTask } from "@kurambit/contracts";
+import {
+  ScheduledTaskId,
+  type EnvironmentId,
+  type ModelSelection,
+  type ScheduledTask,
+} from "@kurambit/contracts";
 
+import { requestConfirmDialog } from "~/confirmDialog";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { Radio, RadioGroup } from "../ui/radio-group";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { useGameLibrary } from "../game/useGameLibrary";
+import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment, EMPTY_SERVER_PROVIDERS } from "../../state/server";
-import { useProjects } from "../../state/entities";
+import { useProjects, useThreadShells } from "../../state/entities";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -23,6 +34,7 @@ import {
   scheduledTaskUpsert,
 } from "../../state/scheduledTasks";
 import {
+  gameAgentModel,
   scheduleFromDraft,
   scheduledTaskDefaultModel,
   taskToDraft,
@@ -136,7 +148,13 @@ function TaskRow({
             variant="ghost"
             disabled={disabled}
             onClick={() =>
-              void run("delete", () => remove({ environmentId, input: { id: task.id } }))
+              void run("delete", async () => {
+                const question = `Delete the scheduled task "${task.title}"?\nIt stops running, and it cannot be brought back.`;
+                const confirmed =
+                  (await requestConfirmDialog(question, { variant: "destructive" })) ??
+                  window.confirm(question);
+                if (confirmed) await remove({ environmentId, input: { id: task.id } });
+              })
             }
           >
             Delete
@@ -158,10 +176,14 @@ function DraftForm({
   environmentId: EnvironmentId;
   projectId: string;
   canOperate: boolean;
-  /** The task being edited: what the form cannot change (its chat, folder, agent) stays its own. */
+  /** The task being edited: what the form cannot change (its chat, folder) stays its own. */
   editing: ScheduledTask | null;
   onDone: () => void;
 }) {
+  const isGame = useGameLibrary().games.some(
+    (game) => game.environmentId === environmentId && game.projectId === projectId,
+  );
+  const threads = useThreadShells();
   const initial = editing === null ? null : taskToDraft(editing);
   const upsert = useAtomCommand(scheduledTaskUpsert, { reportFailure: true });
   const settings = useEnvironmentSettings(environmentId);
@@ -192,6 +214,29 @@ function DraftForm({
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [picked, setPicked] = useState<ModelSelection | null>(null);
+  const instanceEntries = sortProviderInstanceEntries(
+    applyProviderInstanceSettings(
+      deriveProviderInstanceEntries(providers),
+      settings,
+      (draft.projectId || projectId) as never,
+    ),
+  );
+  // A task in a game uses the game's agent unless the person picks another.
+  const model =
+    picked ??
+    editing?.modelSelection ??
+    scheduledTaskDefaultModel(
+      settings,
+      null,
+      instanceEntries,
+      isGame
+        ? gameAgentModel(
+            threads.filter((thread) => thread.environmentId === environmentId),
+            projectId,
+          )
+        : null,
+    );
 
   const save = async () => {
     const schedule = scheduleFromDraft(draft);
@@ -208,15 +253,7 @@ function DraftForm({
       setError("Title or prompt is required.");
       return;
     }
-    const instanceEntries = sortProviderInstanceEntries(
-      applyProviderInstanceSettings(
-        deriveProviderInstanceEntries(providers),
-        settings,
-        resolvedProjectId as never,
-      ),
-    );
-    const modelSelection =
-      editing?.modelSelection ?? scheduledTaskDefaultModel(settings, null, instanceEntries);
+    const modelSelection = model;
     if (modelSelection === null) {
       setError("No available provider model. Connect a provider first.");
       return;
@@ -239,11 +276,15 @@ function DraftForm({
         schedule,
         projectId: resolvedProjectId as never,
         threadId: editing?.threadId ?? null,
-        workspaceStrategy: editing?.workspaceStrategy ?? {
-          type: "worktree",
-          baseRef: "main",
-          startFromOrigin: true,
-        },
+        // Kurambit never commits a game's work, so a worktree of its branch
+        // would hold only the scaffold: a game's task runs in its own folder.
+        workspaceStrategy: isGame
+          ? { type: "root" }
+          : (editing?.workspaceStrategy ?? {
+              type: "worktree",
+              baseRef: "main",
+              startFromOrigin: true,
+            }),
         modelSelection,
         runtimeMode: draft.runtimeMode,
         interactionMode: draft.interactionMode,
@@ -270,28 +311,28 @@ function DraftForm({
         placeholder="Prompt run on schedule"
         onChange={(event) => setDraft({ ...draft, prompt: event.target.value })}
       />
-      <div className="flex gap-2">
-        <label className="flex items-center gap-1 text-xs">
-          <input
-            type="radio"
-            checked={draft.scheduleMode === "interval"}
-            onChange={() => setDraft({ ...draft, scheduleMode: "interval" })}
-          />
-          Interval
-        </label>
-        <label className="flex items-center gap-1 text-xs">
-          <input
-            type="radio"
-            checked={draft.scheduleMode === "fixed"}
-            onChange={() => setDraft({ ...draft, scheduleMode: "fixed" })}
-          />
-          Fixed time
-        </label>
-        <label className="flex items-center gap-1 text-xs">
-          <input
-            type="checkbox"
+      <div className="flex flex-wrap items-center gap-4">
+        <RadioGroup
+          aria-label="Schedule"
+          className="flex-row"
+          value={draft.scheduleMode}
+          onValueChange={(value) =>
+            setDraft({ ...draft, scheduleMode: value === "fixed" ? "fixed" : "interval" })
+          }
+        >
+          <label className="flex items-center gap-2 text-xs">
+            <Radio value="interval" />
+            Interval
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            <Radio value="fixed" />
+            Fixed time
+          </label>
+        </RadioGroup>
+        <label className="flex items-center gap-2 text-xs">
+          <Checkbox
             checked={draft.enabled}
-            onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
+            onCheckedChange={(checked) => setDraft({ ...draft, enabled: checked === true })}
           />
           Enabled
         </label>
@@ -313,6 +354,39 @@ function DraftForm({
           onChange={(event) => setDraft({ ...draft, timeOfDay: event.target.value })}
         />
       )}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        Agent
+        {model === null ? (
+          "none available"
+        ) : (
+          <ProviderModelPicker
+            environmentId={environmentId}
+            activeInstanceId={model.instanceId}
+            model={model.model}
+            lockedProvider={null}
+            instanceEntries={instanceEntries}
+            modelOptionsByInstance={getCustomModelOptionsByInstance(
+              settings,
+              providers,
+              model.instanceId,
+              model.model,
+            )}
+            disabled={saving}
+            onInstanceModelChange={(instanceId, selectedModel) =>
+              setPicked(
+                model.instanceId === instanceId && model.model === selectedModel
+                  ? model
+                  : { instanceId, model: selectedModel },
+              )
+            }
+          />
+        )}
+        {isGame ? (
+          <span>
+            {editing?.threadId ? "· runs in its chat" : "· runs in a new chat in the game's folder"}
+          </span>
+        ) : null}
+      </div>
       {error !== null ? <p className="text-xs text-destructive">{error}</p> : null}
       <div className="flex gap-2">
         <Button size="xs" disabled={saving || !canOperate} onClick={() => void save()}>
@@ -361,7 +435,7 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
   const tasks = (query.data?.tasks ?? []).filter(
     (task) => projectFilter === "" || task.projectId === projectFilter,
   );
-  const defaultProjectId = projects[0]?.id ?? tasks[0]?.projectId ?? "";
+  const defaultProjectId = projectFilter || (projects[0]?.id ?? tasks[0]?.projectId ?? "");
 
   return (
     <div className="space-y-3 p-4">
