@@ -127,7 +127,7 @@ export const playBot = async (
   if (!can.has("realtime"))
     throw new Error(
       play.protocol === 0
-        ? "This game's in-game runner predates real-time play, so bots cannot drive it. A fresh production run refreshes the harness's runner files."
+        ? "This game's in-game runner predates real-time play, so bots cannot drive it."
         : "This game's in-game runner does not play in real time, so bots cannot drive it.",
     );
   let botChild: NodeChildProcess.ChildProcess | undefined;
@@ -789,7 +789,7 @@ export const playBot = async (
       (videoFacts === null
         ? can.has("frames")
           ? " The game sent no frames, so this run has no video."
-          : " This game's in-game runner predates engine frames, so this run has no video; a fresh production run refreshes the harness's runner files."
+          : " This game's in-game runner predates engine frames, so this run has no video."
         : ` Video (engine frames): ${args.videoPath}, ${videoFacts.distinctFrames} distinct frames` +
           (videoFacts.longestStallMs >= 2000
             ? `; the game drew no new frame for ${(videoFacts.longestStallMs / 1000).toFixed(1)} s at its longest.`

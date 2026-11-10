@@ -1079,17 +1079,12 @@ const make = Effect.gen(function* () {
       return yield* facts.read(yield* resolve(g, ref));
     });
 
-  const notMeasuredWhy = (g: Game) =>
-    engineCapabilities(g.engine).has("play")
-      ? `The production run holds the ${engineProfile(g.engine).displayName} editor; this build is measured once the run stops.`
-      : parkedEngineMessage(g.engine);
-
   const measure: GameBuilds["Service"]["measure"] = (threadId, ref, options = {}) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
       if (!measurable(g.engine))
-        return { ...(yield* facts.read(build)), message: notMeasuredWhy(g) };
+        return { ...(yield* facts.read(build)), message: parkedEngineMessage(g.engine) };
       return yield* facts.measure(build, options);
     });
 
