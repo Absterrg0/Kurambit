@@ -421,10 +421,14 @@ const download = async (url: string, destination: string, cap: number) => {
 };
 
 /** The rig its characters share, or none when each model is on a skeleton of its own. */
+/** A model's name: its file name without folder or extension, so one model in two formats counts once. */
+const modelName = (path: string) => path.slice(path.lastIndexOf("/") + 1).replace(/\.[^.]+$/, "");
+
 const rigOf = async (directory: string, index: LibraryIndex, id: string) => {
   const signatures = new Map<string, string[]>();
-  let animated = 0;
-  let skinned = 0;
+  // By model name, like the description's model count.
+  const animatedNames = new Set<string>();
+  const skinnedNames = new Set<string>();
   for (const file of index.files) {
     if (file.format !== "glb" && file.format !== "gltf") continue;
     const read = await readGltfJson(NodePath.join(directory, file.path), 64 * 1024 * 1024);
@@ -434,16 +438,18 @@ const rigOf = async (directory: string, index: LibraryIndex, id: string) => {
       nodes?: Array<{ name?: string }>;
       animations?: unknown[];
     };
-    if ((doc.animations?.length ?? 0) > 0) animated += 1;
+    if ((doc.animations?.length ?? 0) > 0) animatedNames.add(modelName(file.path));
     const skin = doc.skins?.[0];
     if (skin === undefined) continue;
-    skinned += 1;
+    skinnedNames.add(modelName(file.path));
     const joints = skin.joints
       .map((joint) => doc.nodes?.[joint]?.name ?? "")
       .toSorted()
       .join(",");
     signatures.set(joints, [...(signatures.get(joints) ?? []), file.path]);
   }
+  const animated = animatedNames.size;
+  const skinned = skinnedNames.size;
   if (signatures.size !== 1) return { rig: undefined, animated, skinned };
   const joints = [...signatures.keys()][0]!.split(",");
   const known = Object.entries(LIBRARY_RIG_JOINTS).find(
@@ -519,13 +525,7 @@ const pinPack = async (candidate: Candidate, scratch: string): Promise<LibraryPa
       console.warn(`${candidate.id}: no models; skipped`);
       return null;
     }
-    const stems = [
-      ...new Set(
-        models.map((file) =>
-          file.path.slice(file.path.lastIndexOf("/") + 1).replace(/\.[^.]+$/, ""),
-        ),
-      ),
-    ];
+    const stems = [...new Set(models.map((file) => modelName(file.path)))];
     const words = [
       ...new Set(
         stems
