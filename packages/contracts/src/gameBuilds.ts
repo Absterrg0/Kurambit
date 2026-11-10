@@ -875,25 +875,37 @@ const rank = (id: GameFactId, kind: string): number | null => {
 const notComparable = (id: GameFactId, why: string, a: string | null, b: string | null) =>
   ({ id, label: LABELS[id], a, b, change: "not-comparable", tone: "neutral", why }) as const;
 
-const sideWhy = (side: "A" | "B", read: Read) =>
+const sideWhy = (side: string, read: Read) =>
   read._tag === "pending"
-    ? `${side} is still measuring`
+    ? `${side} had not finished measuring`
     : read._tag === "not-measured"
       ? `${side} not measured: ${read.why}`
       : "";
 
+/** What a reason calls each build: A and B where both are on screen, words where they are not. */
+export interface BuildSides {
+  readonly a: string;
+  readonly b: string;
+}
+
 /**
- * PURE. The one diff of two builds' facts, shared by the compare view and
- * game_builds. A fact not measured on either side is
+ * PURE. The one diff of two builds' facts, shared by the compare view,
+ * game_builds and keep going's judge. A fact not measured on either side is
  * not-comparable with its reason, never "same".
  */
 export const diffBuildFacts = (
   a: GameBuildFacts | null,
   b: GameBuildFacts | null,
+  sides: BuildSides = { a: "A", b: "B" },
 ): ReadonlyArray<GameFactDelta> =>
   GameFactId.literals.map((id): GameFactDelta => {
     if (a === null || b === null)
-      return notComparable(id, `${a === null ? "A" : "B"} has never been measured`, null, null);
+      return notComparable(
+        id,
+        `${a === null ? sides.a : sides.b} has never been measured`,
+        null,
+        null,
+      );
     const ra = readFact(a, id);
     const rb = readFact(b, id);
     const textA = ra._tag === "measured" ? ra.reading.text : null;
@@ -901,7 +913,7 @@ export const diffBuildFacts = (
     if (ra._tag !== "measured" || rb._tag !== "measured")
       return notComparable(
         id,
-        [sideWhy("A", ra), sideWhy("B", rb)].filter((why) => why !== "").join("; "),
+        [sideWhy(sides.a, ra), sideWhy(sides.b, rb)].filter((why) => why !== "").join("; "),
         textA,
         textB,
       );
@@ -911,7 +923,7 @@ export const diffBuildFacts = (
     if (a.renderer !== b.renderer)
       return notComparable(
         id,
-        `measured on different renderers (A: ${a.renderer ?? "not recorded"}; B: ${b.renderer ?? "not recorded"})`,
+        `measured on different renderers (${sides.a}: ${a.renderer ?? "not recorded"}; ${sides.b}: ${b.renderer ?? "not recorded"})`,
         textA,
         textB,
       );
@@ -919,7 +931,7 @@ export const diffBuildFacts = (
     if (a.runtime !== b.runtime)
       return notComparable(
         id,
-        `measured with different Kurambit runtimes (A: ${a.runtime ?? "the game's own"}; B: ${b.runtime ?? "the game's own"})`,
+        `measured with different Kurambit runtimes (${sides.a}: ${a.runtime ?? "the game's own"}; ${sides.b}: ${b.runtime ?? "the game's own"})`,
         textA,
         textB,
       );

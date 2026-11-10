@@ -297,6 +297,9 @@ const blockers = (facts: GameBuildFacts, views: Views): ReadonlyArray<GameFactId
       : toneOf(views, id) === "bad",
   );
 
+// A step's reasons are read in the chat, where no A and B are on screen.
+const STEP_SIDES = { a: "the build before the step", b: "the step's build" } as const;
+
 /** A watched fact that crossed into bad between two builds, and whether it is health or design. */
 interface Regression {
   readonly delta: GameFactDelta;
@@ -317,7 +320,7 @@ export const regressions = (
 ): ReadonlyArray<Regression> => {
   const before = viewsOf(base);
   const after = viewsOf(build);
-  return diffBuildFacts(base, build).flatMap((delta): ReadonlyArray<Regression> => {
+  return diffBuildFacts(base, build, STEP_SIDES).flatMap((delta): ReadonlyArray<Regression> => {
     if (!WATCHED.has(delta.id) || delta.change === "not-comparable") return [];
     const a = toneOf(before, delta.id);
     const b = toneOf(after, delta.id);
@@ -339,7 +342,7 @@ export const regressions = (
 };
 
 const watchedDeltas = (base: GameBuildFacts, build: GameBuildFacts) =>
-  diffBuildFacts(base, build).filter((d) => WATCHED.has(d.id));
+  diffBuildFacts(base, build, STEP_SIDES).filter((d) => WATCHED.has(d.id));
 const comparable = (deltas: ReadonlyArray<GameFactDelta>) =>
   deltas.filter((d) => d.change !== "not-comparable");
 const deltaText = (d: GameFactDelta) => `${d.label}: ${d.a ?? "?"} → ${d.b ?? "?"}`;
