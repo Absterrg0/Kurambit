@@ -653,7 +653,7 @@ const mirror = async () => {
       for (const file of files) {
         const destination = NodePath.join(work, ...file.path.split("/"));
         await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
-        const copy = local.get(file.sha256);
+        const copy = file.sha256 === undefined ? undefined : local.get(file.sha256);
         if (copy !== undefined) await NodeFSP.copyFile(copy, destination);
         // The quota page is 2 KB, so a smaller pin must not refuse it before it is recognised.
         else await download(file.url, destination, Math.max(file.bytes, 64 * 1024));
