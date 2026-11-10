@@ -385,7 +385,10 @@ outside their catalog.
   recorded as a ref (`game-builds/bases/<build>`) on the turn's checkpoint, the way T3 records
   checkpoints, because reading it later from the game's latest restore goes wrong once a second
   restore replaces the first. Undo is that restore, never T3's conversation revert, which is
-  refused in a game's shared folder and would make the agent forget the attempt. A live Stage shows
+  refused in a game's shared folder and would make the agent forget the attempt. A restore that
+  moved the folder, and a kept edit, set the next-turn base of the game's chats to the folder they
+  left, so a chat card and its Open diff count the next turn from there, as the rail does, and
+  never list an undo as the agent's change. A live Stage shows
   a restore through its watch; on a turn-loop engine staged from a Web export, a restore plays
   what it brought back, through the same `playCurrent`.
   `folderEdited` compares the folder's restored paths, captured with T3's capture, against

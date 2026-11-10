@@ -1149,11 +1149,47 @@ const make = Effect.gen(function* () {
         : ({ _tag: "window", message: result.message } as const);
     });
 
+  /**
+   * A restore or a kept edit moved the folder outside any turn: each of the
+   * game's chats lists its next turn's changes from where the folder now is,
+   * as the rail does, so an undo never reads as the agent's work. T3's
+   * next-turn base (CheckpointService), as the bot setup sets it.
+   */
+  const nextTurnsFrom = (g: Game, threadId: ThreadId, oid: string) =>
+    Effect.gen(function* () {
+      const recent = yield* projections.listProjectTurnCheckpoints(g.projectId, { limit: 50 });
+      const chats = new Set([
+        threadId,
+        ...recent.filter((row) => row.cwd === g.root).map((row) => row.threadId),
+      ]);
+      for (const chat of chats)
+        yield* checkpoints.updateCheckpointRef({
+          cwd: g.root,
+          checkpointRef: yield* nextTurnBaseRefForThread(chat).pipe(
+            Effect.provideService(Crypto.Crypto, crypto),
+          ),
+          oid,
+        });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("The next turn's base could not be set.", { root: g.root, cause }),
+      ),
+    );
+
   const restore: GameBuilds["Service"]["restore"] = (threadId, ref, commandId, options = {}) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
       const result = yield* restoreWithoutRun(threadId, g, build, commandId, options.expect);
+      // The move's own check captured the folder as it left it.
+      if (result.moved === "restored") {
+        const afterRef = checkpointRefForGameRun(NO_RUN, BuildName.restoreAfter(result.requestId));
+        const after = yield* checkpoints.listCheckpointRefs({ cwd: g.root, prefix: afterRef }).pipe(
+          Effect.map((refs) => refs.find((each) => each.checkpointRef === afterRef)?.oid),
+          Effect.orElseSucceed(() => undefined),
+        );
+        if (after !== undefined) yield* nextTurnsFrom(g, threadId, after);
+      }
       if (result.moved !== "moved-on") yield* playRestored(threadId, g);
       // Undo, Redo or Go back moved the folder a Guided proposal read: the person goes first.
       if (result.moved === "restored")
@@ -1563,6 +1599,7 @@ const make = Effect.gen(function* () {
         owner,
       );
       const result = yield* answer(kept.build, kept.base, kept.summary);
+      yield* nextTurnsFrom(g, threadId, kept.build);
       yield* operations.changed(g.root, GAME_BUILDS_EVENT, result.message);
       // Measured like a turn's build, so its facts sit beside the build before it.
       yield* measureIn(g.root, kept.build, { supersede: true });
