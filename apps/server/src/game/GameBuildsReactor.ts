@@ -18,7 +18,7 @@ import * as GameStage from "./GameStage.ts";
 
 /**
  * Keeps the Builds rail current without polling: a turn's checkpoint, a
- * run's round and a run's restore each push "builds" to the game's clients.
+ * run's round, a run's end and a run's restore each push "builds" to the game's clients.
  * A run's round is measured as it lands, so its card
  * has facts without anyone opening it; Unity builds are left to an open, as
  * a measurement would take the one editor from the run.
@@ -145,6 +145,12 @@ const make = Effect.gen(function* () {
           Effect.ignore,
         );
       }
+      // A run that ends with a step unjudged (stopped, paused) relabels that
+      // step's build: no round lands for it, so the end itself is the push.
+      case "game-run.updated":
+        return event.payload.status === "ended"
+          ? pushTo(event, "Keep going ended.").pipe(Effect.ignore)
+          : Effect.void;
       default:
         return Effect.void;
     }
