@@ -257,6 +257,7 @@ export const openPagePlay = (input: {
     const project = NodePath.relative(root, input.projectDir);
     const loads = new Set<string>();
     const sounds = new Set<string>();
+    const icons = new Set<string>();
     // Interruptible only while the page boots, which ends its browser on abort.
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
@@ -283,6 +284,10 @@ export const openPagePlay = (input: {
                 keptStorage: input.keptStorage,
                 onSoundStarted:
                   input.recordUse === true ? (sound) => void sounds.add(sound) : undefined,
+                onPageIcons:
+                  input.recordUse === true
+                    ? (urls) => urls.forEach((url) => icons.add(url))
+                    : undefined,
                 sceneReport: input.sceneReport === true,
               }),
             // The page not booting or crashing is the game's; the browser is ours.
@@ -314,6 +319,7 @@ export const openPagePlay = (input: {
                       origin: new URL(served.url).origin,
                       served: loads,
                       sounds,
+                      icons,
                     }).catch(() => null)
                   : null,
             };

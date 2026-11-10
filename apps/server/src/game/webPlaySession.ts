@@ -308,6 +308,7 @@ const SOUND_TAP = `(() => {
 })()`;
 
 const READY = "window.__studio?.ready === true";
+const PAGE_ICONS = `[...document.querySelectorAll('link[rel~="icon" i]')].slice(0, 16).map((link) => link.href)`;
 
 /** What a kept session's page left in its storage, for the caller to write back. */
 export interface KeptStorage {
@@ -363,6 +364,11 @@ export const openWebPlaySession = async (input: {
    * element's URL, or "sha256:<hex>:<bytes>" of the bytes a Web Audio buffer was decoded from.
    */
   readonly onSoundStarted?: ((sound: string) => void) | undefined;
+  /**
+   * Hears, once the page is ready, the URLs of its tab icons (`<link rel="icon">`): a tab
+   * shows them, but a headless browser never fetches them, so asset use counts them here.
+   */
+  readonly onPageIcons?: ((urls: ReadonlyArray<string>) => void) | undefined;
   /**
    * Ends the boot wait once a page error or a failed script came before the
    * bridge: the check reports that page as broken. A player's page (explore,
@@ -439,7 +445,7 @@ export const openWebPlaySession = async (input: {
     let dropped = 0;
     const record = (level: GameConsoleMessage["level"], text: string): void => {
       // The browser's own chrome, not the game: a missing favicon is not a
-      // game failure (the starter links a data-URI icon so it never fires).
+      // game failure (the starter links its own icon so it never fires).
       if (/favicon\.ico/i.test(text)) return;
       if (pending.length >= MAX_MESSAGES) {
         pending.shift();
@@ -621,6 +627,14 @@ export const openWebPlaySession = async (input: {
       throw cause;
     } finally {
       input.signal?.removeEventListener("abort", abortBoot);
+    }
+    if (input.onPageIcons !== undefined) {
+      const icons = await bounded(
+        page.evaluate(PAGE_ICONS).catch(() => null),
+        PLAY_BOUNDS.webCallMs,
+      );
+      if (Array.isArray(icons))
+        input.onPageIcons(icons.filter((url): url is string => typeof url === "string"));
     }
     // The scene report looks only at a measured play: started once the page is ready.
     let sceneStarted: boolean | null = null;

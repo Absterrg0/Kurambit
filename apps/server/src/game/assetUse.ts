@@ -58,6 +58,16 @@ const sizeOf = (path: string) =>
     () => null,
   );
 
+/** The served file a URL on the served origin names; null for any other URL. */
+const servedPath = (text: string, origin: string): string | null => {
+  try {
+    const url = new URL(text);
+    return url.origin === origin ? decodeURIComponent(url.pathname).replace(/^\/+/, "") : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * A play's served files and its sound reports, as game-relative paths. A Web Audio sound is
  * named by the bytes it was decoded from, so it is the served file of that length and hash; a
@@ -72,6 +82,8 @@ export const resolvePlayUse = async (input: {
   readonly origin: string;
   readonly served: ReadonlySet<string>;
   readonly sounds: ReadonlySet<string>;
+  /** The page's tab icon URLs: a tab loads them, a headless play never does. */
+  readonly icons?: ReadonlySet<string>;
 }): Promise<PlayUse> => {
   const served = [...input.served].slice(0, MAX_FILES);
   const hash = hasher();
@@ -98,18 +110,18 @@ export const resolvePlayUse = async (input: {
         }
       continue;
     }
-    try {
-      const url = new URL(sound);
-      if (url.origin !== input.origin) continue;
-      const path = decodeURIComponent(url.pathname).replace(/^\/+/, "");
-      if (input.served.has(path)) played.add(path);
-    } catch {
-      // Not a URL on the served origin: nothing shipped.
-    }
+    const path = servedPath(sound, input.origin);
+    if (path !== null && input.served.has(path)) played.add(path);
+  }
+  const loaded = new Set(served);
+  for (const icon of input.icons ?? []) {
+    const path = servedPath(icon, input.origin);
+    if (path !== null && !path.split("/").includes("..") && (await size(path)) !== null)
+      loaded.add(path);
   }
   const relative = (path: string) => (input.project === "" ? path : `${input.project}/${path}`);
   return {
-    loaded: served.map(relative).toSorted(),
+    loaded: [...loaded].map(relative).toSorted(),
     played: [...played].map(relative).toSorted(),
   };
 };
