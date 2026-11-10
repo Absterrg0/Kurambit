@@ -43,6 +43,8 @@ export const ResourceTelemetrySourceStatus = Schema.Literals([
   "degraded",
   "unavailable",
   "stopped",
+  // This build or platform has no monitor at all, so there is nothing to retry.
+  "unsupported",
 ]);
 export type ResourceTelemetrySourceStatus = typeof ResourceTelemetrySourceStatus.Type;
 

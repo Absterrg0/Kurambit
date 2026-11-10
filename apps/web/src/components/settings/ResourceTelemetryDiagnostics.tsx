@@ -97,7 +97,9 @@ const NO_READING = "—";
 
 /** Why the native monitor gives no counters (a build without it, a monitor that stopped), else null. */
 function noCountersReason(health: ResourceTelemetrySourceHealth): string | null {
-  return health.status === "unavailable" || health.status === "stopped"
+  return health.status === "unavailable" ||
+    health.status === "stopped" ||
+    health.status === "unsupported"
     ? Option.getOrElse(health.lastError, () => "The process monitor is not running.")
     : null;
 }
@@ -173,7 +175,7 @@ function booleanStateLabel(
 
 function sourceStatusTone(status: ResourceTelemetrySourceStatus): "default" | "warning" | "danger" {
   if (status === "healthy") return "default";
-  if (status === "starting" || status === "degraded") return "warning";
+  if (status === "starting" || status === "degraded" || status === "unsupported") return "warning";
   return "danger";
 }
 

@@ -352,7 +352,7 @@ export function canRequestNativeTelemetryRetry(
   status: ResourceTelemetrySourceStatus,
   hasHandle: boolean,
 ): boolean {
-  return status !== "healthy" && status !== "starting" && !hasHandle;
+  return status !== "healthy" && status !== "starting" && status !== "unsupported" && !hasHandle;
 }
 
 export function canCommandNativeTelemetrySidecar(
@@ -719,6 +719,21 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
       }
 
       const error = result.failure;
+      // No binary for this build or platform: a restart finds the same nothing.
+      if (
+        error._tag === "ResourceMonitorBinaryNotFound" ||
+        error._tag === "ResourceMonitorBinaryUnsupported"
+      ) {
+        yield* Ref.update(state, (current) => ({
+          ...current,
+          status: "unsupported" as const,
+          hello: Option.none(),
+          lastError: Option.some(errorMessage(error)),
+        }));
+        yield* publishHealth;
+        yield* failPending(error);
+        return;
+      }
       const now = DateTime.toEpochMillis(yield* DateTime.now);
       const recentFailures = retainRecentNativeTelemetryFailures(failures, now);
       if (recentFailures.length === 0) {
