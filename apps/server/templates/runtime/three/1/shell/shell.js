@@ -739,7 +739,7 @@ function draw(dt) {
 }
 
 // Every resize, whatever the state: fullscreen is toggled from the pause menu.
-window.addEventListener("resize", () => {
+function onResize() {
   look.resize(window.innerWidth, window.innerHeight);
   const aspect = window.innerWidth / window.innerHeight;
   for (const camera of [run?.ctx.camera, titleCtx?.camera]) fit(camera, aspect);
@@ -752,7 +752,11 @@ window.addEventListener("resize", () => {
       run.reported = true;
     }
   redraw = true;
-});
+}
+window.addEventListener("resize", onResize);
+// A cross-site Stage frame gets its size after its scripts start: one that arrived
+// during createLook's awaits fired no listener and left the canvas at 0 x 0, a black game.
+onResize();
 
 function fit(camera, aspect) {
   if (camera?.isPerspectiveCamera) {
