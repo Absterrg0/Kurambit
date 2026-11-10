@@ -182,7 +182,7 @@ const throughBlender = (engine: GameEngineId, format: string) =>
 const reachable = (engine: GameEngineId, format: string) =>
   loadableIn(engine, format) || throughBlender(engine, format);
 const BLENDER_NOTE =
-  "loads through game_blender_assets_import (source library, this entry and path), then a review and export to GLB";
+  "loads through game_blender_assets_import (through game_more where it is not listed; source library, this entry and path), then a review and export to GLB";
 
 const megabytes = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1)} MB`;
 const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".");

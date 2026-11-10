@@ -114,7 +114,7 @@ const fits = (placement: GameToolPlacement, scope: McpInvocationScope | undefine
  */
 const BLENDER_ROUTES: ReadonlySet<GameCharacterRoute> = new Set(["blender", "generated"]);
 const BLENDER_ASKED =
-  "when the person asks for a model, sprite render or animation made in Blender rather than taken from the library";
+  "when the person asks for a model, sprite render or animation made in Blender rather than taken from the library, or for a library file that loads only through Blender (FBX)";
 
 /** The line game_more names it with, or undefined when it is listed. */
 const askedIn = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
