@@ -776,6 +776,14 @@ const cliRuntimeLayer = Layer.mergeAll(
 );
 
 if (import.meta.main) {
+  // Node 22's recursive fs.watch on Linux misses atomic saves, so the server
+  // and the game previews would stop reloading without saying why.
+  if (Number(process.versions.node.split(".")[0]) < 24) {
+    console.error(
+      `[dev-runner] Node ${process.versions.node} is too old: use Node 24, because older Node's file watcher misses atomic saves and live reload breaks.`,
+    );
+    process.exit(1);
+  }
   Command.run(devRunnerCli, { version: "0.0.0" }).pipe(
     Effect.scoped,
     Effect.provide(cliRuntimeLayer),

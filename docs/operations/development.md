@@ -2,8 +2,9 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24;
-Bun is optional. From the repository root:
+Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24,
+and the dev runner refuses older Node: its file watcher misses atomic saves, so live reload
+breaks. Bun is optional. From the repository root:
 
 ```sh
 vp i
