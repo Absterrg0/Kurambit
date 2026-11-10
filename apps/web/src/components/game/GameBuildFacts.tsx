@@ -75,9 +75,10 @@ export function GameBuildFactsList({
                 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2"
               >
                 <dt className="w-36 shrink-0 text-xs text-muted-foreground">{line.label}</dt>
+                {/* A floor on its width wraps the evidence buttons below, never the text into a sliver. */}
                 <dd
                   className={cn(
-                    "min-w-0 flex-1 text-xs",
+                    "min-w-48 flex-1 text-xs",
                     line.tone === null ? "text-muted-foreground" : TONE_TEXT[line.tone],
                   )}
                 >
