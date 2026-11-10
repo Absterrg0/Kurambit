@@ -2711,8 +2711,13 @@ const make = Effect.gen(function* () {
             });
             const count = Number(/STUDIO_STAMPED (\d+)/.exec(stamped)?.[1] ?? 0);
             const blend = yield* saveBlend(root);
+            // A library entry is credited on the credits screen as its add would credit it.
+            const credited =
+              libraryFile === undefined || count === 0
+                ? ""
+                : `\n${yield* library.credit(root, libraryFile.pack, "Blender assets import")}`;
             return {
-              text: `${text}\nSaved .blend source: ${blend}\n${count === 0 ? "The import added no model to the scene (an HDRI or a texture)." : `The import stays in the live scene, marked with its source and licence (${licence})${ownRig.length === 0 ? "" : `; ${ownRig.join(", ")} came with clips of ${ownRig.length === 1 ? "its" : "their"} own (${ownRig.map((name) => (importedClips[name] ?? []).slice(0, 6).join(", ")).join("; ")}), so ${ownRig.length === 1 ? "it enters" : "they enter"} on ${ownRig.length === 1 ? "its" : "their"} own rig (kurambit_rig) and plays only those clips`}; review and export it like anything you build (game_blender_look mode review, then game_blender_export).`}`,
+              text: `${text}${credited}\nSaved .blend source: ${blend}\n${count === 0 ? "The import added no model to the scene (an HDRI or a texture)." : `The import stays in the live scene, marked with its source and licence (${licence})${ownRig.length === 0 ? "" : `; ${ownRig.join(", ")} came with clips of ${ownRig.length === 1 ? "its" : "their"} own (${ownRig.map((name) => (importedClips[name] ?? []).slice(0, 6).join(", ")).join("; ")}), so ${ownRig.length === 1 ? "it enters" : "they enter"} on ${ownRig.length === 1 ? "its" : "their"} own rig (kurambit_rig) and plays only those clips`}; review and export it like anything you build (game_blender_look mode review, then game_blender_export).`}`,
               blend,
             };
           }),

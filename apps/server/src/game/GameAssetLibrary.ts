@@ -137,6 +137,12 @@ export class GameAssetLibrary extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<PackClips>, GameOperationError>;
     /** One library entry by id (a pack, an indexed asset or a Poly Pizza model). */
     readonly entry: (id: string) => Effect.Effect<LibraryPack, GameOperationError>;
+    /** Gives the game's credits file the entry's line, as an add does; says what it did. */
+    readonly credit: (
+      root: string,
+      pack: LibraryPack,
+      operation: string,
+    ) => Effect.Effect<string, GameOperationError>;
     /** The pack's own overview picture of its look; refused when it ships none (every KayKit pack). */
     readonly packPicture: (
       pack: string,
@@ -1442,6 +1448,58 @@ const make = Effect.gen(function* () {
       return yield* searchFiles(root, engine, yield* packOf(input.pack), input);
     });
 
+  /**
+   * The player reads the credits screen, not ASSETS.md: every library entry the game holds
+   * gets one line in its credits file, in the source's own credit wording when its licence
+   * asks for it. Says what it did, for the tool's reply.
+   */
+  const creditGame = (
+    root: string,
+    engine: GameEngineId,
+    project: string,
+    pack: LibraryPack,
+    operation: string,
+  ) =>
+    Effect.gen(function* () {
+      const creditsRel = gamePaths(engine, project).credits;
+      const playerCredit = creditLine(pack);
+      const realRoot = yield* realRootOf(root, operation);
+      const creditsDir = yield* realDir(realRoot, dirOf(creditsRel), operation);
+      const written = yield* Effect.tryPromise({
+        try: async () => {
+          const creditsPath = NodePath.join(creditsDir, nameOf(creditsRel));
+          const there = await NodeFSP.lstat(creditsPath).catch(() => null);
+          if (there !== null && !there.isFile()) return "refused" as const;
+          const before = there === null ? "" : await NodeFSP.readFile(creditsPath, "utf8");
+          if (before.split("\n").some((line) => line.trim() === playerCredit))
+            return "present" as const;
+          // O_NOFOLLOW: a link planted after the check above is refused, not written through.
+          const handle = await NodeFSP.open(
+            creditsPath,
+            NodeFSP.constants.O_WRONLY |
+              NodeFSP.constants.O_APPEND |
+              NodeFSP.constants.O_CREAT |
+              (NodeFSP.constants.O_NOFOLLOW ?? 0),
+            0o644,
+          );
+          try {
+            await handle.appendFile(
+              `${before.length > 0 && !before.endsWith("\n") ? "\n" : ""}${playerCredit}\n`,
+            );
+          } finally {
+            await handle.close();
+          }
+          return "added" as const;
+        },
+        catch: io(operation, creditsRel),
+      });
+      return written === "added"
+        ? `${creditsRel} (the credits screen) now reads: ${playerCredit}`
+        : written === "refused"
+          ? `${creditsRel} is not a plain file, so the credits screen was not given: ${playerCredit}. Add that line yourself.`
+          : `${creditsRel} already credits it.`;
+    });
+
   const add = (root: string, input: GameAssetsAddInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
@@ -1743,52 +1801,10 @@ const make = Effect.gen(function* () {
           catch: io("Library add", "ASSETS.md"),
         });
       }
-      // The player reads the credits screen, not ASSETS.md: every entry the game now holds gets
-      // one line there, the source's own credit wording for a licence that asks for it.
-      const creditsRel = gamePaths(engine, project).credits;
-      const playerCredit = creditLine(pack);
-      const creditsDir =
+      const creditsLine =
         added.length + present.length === 0
           ? undefined
-          : yield* realDir(realRoot, dirOf(creditsRel), "Library add");
-      const creditsWritten =
-        creditsDir === undefined
-          ? "none"
-          : yield* Effect.tryPromise({
-              try: async () => {
-                const creditsPath = NodePath.join(creditsDir, nameOf(creditsRel));
-                const there = await NodeFSP.lstat(creditsPath).catch(() => null);
-                if (there !== null && !there.isFile()) return "refused" as const;
-                const before = there === null ? "" : await NodeFSP.readFile(creditsPath, "utf8");
-                if (before.split("\n").some((line) => line.trim() === playerCredit))
-                  return "present" as const;
-                const handle = await NodeFSP.open(
-                  creditsPath,
-                  NodeFSP.constants.O_WRONLY |
-                    NodeFSP.constants.O_APPEND |
-                    NodeFSP.constants.O_CREAT |
-                    (NodeFSP.constants.O_NOFOLLOW ?? 0),
-                  0o644,
-                );
-                try {
-                  await handle.appendFile(
-                    `${before.length > 0 && !before.endsWith("\n") ? "\n" : ""}${playerCredit}\n`,
-                  );
-                } finally {
-                  await handle.close();
-                }
-                return "added" as const;
-              },
-              catch: io("Library add", creditsRel),
-            });
-      const creditsLine =
-        creditsWritten === "added"
-          ? `${creditsRel} (the credits screen) now reads: ${playerCredit}`
-          : creditsWritten === "refused"
-            ? `${creditsRel} is not a plain file, so the credits screen was not given: ${playerCredit}. Add that line yourself.`
-            : creditsWritten === "present"
-              ? `${creditsRel} already credits it.`
-              : undefined;
+          : yield* creditGame(root, engine, project, pack, "Library add");
       const loadPath = `${profile.resourcePath(directoryRel.slice(project.length + 1))}/…`;
       const credited = single.length;
       const assetsLine =
@@ -1922,6 +1938,10 @@ const make = Effect.gen(function* () {
     packFile,
     packClips,
     entry: packOf,
+    credit: (root, pack, operation) =>
+      Effect.flatMap(projects.read(root), (manifest) =>
+        creditGame(root, manifest.engine.name, manifestProject(manifest), pack, operation),
+      ),
     packPicture,
   });
 });
