@@ -1,4 +1,4 @@
-import { Link, Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { RotateCcwIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -172,21 +172,6 @@ function SettingsRouteLayout() {
   );
 }
 
-/** A settings path with no page (a mistyped or old link), shown in the settings pane. */
-function SettingsNotFound() {
-  return (
-    <SettingsPageContainer>
-      <div className="flex flex-col items-start gap-3 py-6">
-        <h2 className="text-lg font-medium text-foreground">Page not found</h2>
-        <p className="text-sm text-muted-foreground">
-          There is no settings page at this address. Pick one from the list, or go back to General.
-        </p>
-        <Button render={<Link to="/settings/general" replace />}>Back to General</Button>
-      </div>
-    </SettingsPageContainer>
-  );
-}
-
 export const Route = createFileRoute("/settings")({
   validateSearch: validateSettingsRouteSearch,
   search: { middlewares: [retainSettingsScope] },
@@ -200,5 +185,4 @@ export const Route = createFileRoute("/settings")({
     }
   },
   component: SettingsRouteLayout,
-  notFoundComponent: SettingsNotFound,
 });
