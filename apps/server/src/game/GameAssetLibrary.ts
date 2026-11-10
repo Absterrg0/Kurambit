@@ -561,9 +561,15 @@ const make = Effect.gen(function* () {
           },
           catch: io("Library fetch", destination),
         });
+        // The host only: a query string can carry a key. Logged in fetchPinned's span, so it
+        // reaches the server's trace file: the desktop keeps no server console.
+        yield* Effect.logInfo("asset library: fetched a pinned file", {
+          pack: label,
+          host: URL.canParse(pin.url) ? new URL(pin.url).host : "unknown",
+        });
         return fetched.sha256;
       }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(part, { force: true }))));
-    });
+    }).pipe(Effect.withSpan("GameAssetLibrary.fetchPinned"));
 
   /** Downloads, verifies, unpacks and indexes a pack; runs under that pack's own lock. */
   const fetchPack = (pack: LibraryPack) =>
