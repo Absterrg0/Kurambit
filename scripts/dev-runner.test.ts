@@ -7,16 +7,22 @@ import * as NetService from "@kurambit/shared/Net";
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   checkPortAvailabilityOnHosts,
+  childGroupRefusal,
+  DevRunnerSignals,
+  stopChildGroup,
   createDevRunnerEnv,
   devPortProbeHosts,
   findFirstAvailableOffset,
@@ -53,6 +59,40 @@ function mockProcess(exit: number | PlatformError.PlatformError) {
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
   });
+}
+
+/**
+ * Records what the runner would signal and lets a test raise the runner's own
+ * signals. It never calls `process.kill`, so no test reaches a real process.
+ */
+function makeFakeSignals() {
+  const sent: Array<readonly [number, NodeJS.Signals]> = [];
+  let handler: ((signal: "SIGINT" | "SIGTERM" | "SIGHUP") => void) | undefined;
+  let onKill: (pid: number, signal: NodeJS.Signals) => void = () => undefined;
+  const listening = Deferred.makeUnsafe<void>();
+  return {
+    sent,
+    listening: Deferred.await(listening),
+    raise: (signal: "SIGINT" | "SIGTERM" | "SIGHUP") => handler?.(signal),
+    onKill: (callback: (pid: number, signal: NodeJS.Signals) => void) => {
+      onKill = callback;
+    },
+    signals: {
+      runnerPid: 700,
+      runnerGroup: 690,
+      kill: (pid: number, signal: NodeJS.Signals) => {
+        sent.push([pid, signal]);
+        onKill(pid, signal);
+      },
+      listen: (next: (signal: "SIGINT" | "SIGTERM" | "SIGHUP") => void) => {
+        handler = next;
+        Deferred.doneUnsafe(listening, Effect.void);
+        return () => {
+          handler = undefined;
+        };
+      },
+    },
+  };
 }
 
 const devServerInput = {
@@ -831,6 +871,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("preserves invalid configuration as the exact cause", () =>
       Effect.gen(function* () {
         const error = yield* runDevRunnerWithInput({ ...devServerInput, dryRun: true }).pipe(
+          Effect.provideService(DevRunnerSignals, makeFakeSignals().signals),
           Effect.provide(
             Layer.merge(
               netServiceLayer,
@@ -867,6 +908,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const error = yield* runDevRunnerWithInput(devServerInput).pipe(
           Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
           Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(DevRunnerSignals, makeFakeSignals().signals),
           Effect.flip,
         );
 
@@ -926,6 +968,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         }).pipe(
           Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
           Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(DevRunnerSignals, makeFakeSignals().signals),
         );
 
         assert.equal(spawnCount, 1);
@@ -949,6 +992,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         }).pipe(
           Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
           Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(DevRunnerSignals, makeFakeSignals().signals),
         );
 
         assert.equal(spawnCount, 1);
@@ -965,6 +1009,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const error = yield* runDevRunnerWithInput(devServerInput).pipe(
           Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
           Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(DevRunnerSignals, makeFakeSignals().signals),
           Effect.flip,
         );
 
@@ -998,6 +1043,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const error = yield* runDevRunnerWithInput(devServerInput).pipe(
           Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
           Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(DevRunnerSignals, makeFakeSignals().signals),
           Effect.flip,
         );
 
@@ -1054,6 +1100,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           }).pipe(
             Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
             Effect.provideService(HostProcess.Platform, "linux"),
+            Effect.provideService(DevRunnerSignals, makeFakeSignals().signals),
             Effect.provideService(HostProcess.WorkingDirectory, input.cwd),
             Effect.provideService(HostProcess.Environment, {
               KURAMBIT_HOME: input.ambientHome,
@@ -1125,5 +1172,130 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         }),
       );
     });
+  });
+
+  describe("child group signals", () => {
+    const allowed = { pid: 4242, exited: false, runnerPid: 700, runnerGroup: 690 };
+
+    it("refuses anything but a live child of its own", () => {
+      assert.equal(childGroupRefusal(allowed), undefined);
+      for (const pid of [0, 1, -1, -4242, 1.5, Number.NaN]) {
+        assert.isString(childGroupRefusal({ ...allowed, pid }), `pid ${pid}`);
+      }
+      assert.isString(childGroupRefusal({ ...allowed, pid: 700 }));
+      assert.isString(childGroupRefusal({ ...allowed, pid: 690 }));
+      assert.isString(childGroupRefusal({ ...allowed, exited: true }));
+    });
+
+    it.effect("signals the group once when the child exits in time", () =>
+      Effect.gen(function* () {
+        const fake = makeFakeSignals();
+        const exited = yield* Deferred.make<void>();
+        fake.onKill(() => Deferred.doneUnsafe(exited, Effect.void));
+        yield* stopChildGroup({
+          pid: 4242,
+          isRunning: Effect.map(Deferred.isDone(exited), (done) => !done),
+          awaitExit: Deferred.await(exited),
+          signal: "SIGINT",
+          grace: "5 seconds",
+        }).pipe(Effect.provideService(DevRunnerSignals, fake.signals));
+        assert.deepStrictEqual(fake.sent, [[-4242, "SIGINT"]]);
+      }),
+    );
+
+    it.effect("kills the group after the grace when the child stays", () =>
+      Effect.gen(function* () {
+        const fake = makeFakeSignals();
+        const stopping = yield* stopChildGroup({
+          pid: 4242,
+          isRunning: Effect.succeed(true),
+          awaitExit: Effect.never,
+          signal: "SIGTERM",
+          grace: "5 seconds",
+        }).pipe(Effect.provideService(DevRunnerSignals, fake.signals), Effect.forkChild);
+        yield* TestClock.adjust("5 seconds");
+        yield* Fiber.join(stopping);
+        assert.deepStrictEqual(fake.sent, [
+          [-4242, "SIGTERM"],
+          [-4242, "SIGKILL"],
+        ]);
+      }),
+    );
+
+    it.effect("signals nothing for a refused pid or an exited child", () =>
+      Effect.gen(function* () {
+        const fake = makeFakeSignals();
+        for (const [pid, running] of [
+          [1, true],
+          [0, true],
+          [700, true],
+          [690, true],
+          [4242, false],
+        ] as const) {
+          yield* stopChildGroup({
+            pid,
+            isRunning: Effect.succeed(running),
+            awaitExit: Effect.never,
+            signal: "SIGTERM",
+            grace: "5 seconds",
+          }).pipe(Effect.provideService(DevRunnerSignals, fake.signals));
+        }
+        assert.deepStrictEqual(fake.sent, []);
+      }),
+    );
+
+    const runningChild = (exited: Deferred.Deferred<void>) =>
+      ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(4242),
+        exitCode: Effect.as(Deferred.await(exited), ChildProcessSpawner.ExitCode(0)),
+        isRunning: Effect.map(Deferred.isDone(exited), (done) => !done),
+        kill: () => Effect.void,
+        unref: Effect.succeed(Effect.void),
+        stdin: Sink.drain,
+        stdout: Stream.empty,
+        stderr: Stream.empty,
+        all: Stream.empty,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+      });
+
+    const runWithChild = (fake: ReturnType<typeof makeFakeSignals>) =>
+      Effect.gen(function* () {
+        const exited = yield* Deferred.make<void>();
+        fake.onKill(() => Deferred.doneUnsafe(exited, Effect.void));
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() => Effect.succeed(runningChild(exited))),
+        );
+        return yield* runDevRunnerWithInput(devServerInput).pipe(
+          Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(DevRunnerSignals, fake.signals),
+          Effect.scoped,
+          Effect.forkChild,
+        );
+      });
+
+    it.effect("forwards Ctrl+C to the child's group when runMain interrupts", () =>
+      Effect.gen(function* () {
+        const fake = makeFakeSignals();
+        const runner = yield* runWithChild(fake);
+        yield* fake.listening;
+        fake.raise("SIGINT");
+        yield* Fiber.interrupt(runner);
+        assert.deepStrictEqual(fake.sent, [[-4242, "SIGINT"]]);
+      }),
+    );
+
+    it.effect("stops on SIGHUP, which runMain does not handle", () =>
+      Effect.gen(function* () {
+        const fake = makeFakeSignals();
+        const runner = yield* runWithChild(fake);
+        yield* fake.listening;
+        fake.raise("SIGHUP");
+        yield* Fiber.await(runner);
+        assert.deepStrictEqual(fake.sent, [[-4242, "SIGHUP"]]);
+      }),
+    );
   });
 });

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- reads /proc/self/stat synchronously, inside a Context.Reference default.
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -9,12 +11,15 @@ import { resolveGitWorktreePath, resolveWorktreeKurambitHome } from "@kurambit/s
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import { resolveSpawnCommand } from "@kurambit/shared/shell";
 import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Hash from "effect/Hash";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { Argument, Command, Flag } from "effect/cli";
 import { ChildProcess } from "effect/process";
@@ -584,6 +589,100 @@ interface DevRunnerCliInput {
   readonly runArgs: ReadonlyArray<string>;
 }
 
+const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+type ForwardedSignal = (typeof FORWARDED_SIGNALS)[number];
+
+/**
+ * How the runner hears its own signals and signals its child's process group.
+ * Tests replace it, so they never reach the real process table.
+ */
+export const DevRunnerSignals = Context.Reference<{
+  readonly runnerPid: number;
+  /** The runner's own process group, where the OS shows it (Linux). */
+  readonly runnerGroup: number | undefined;
+  readonly kill: (pid: number, signal: NodeJS.Signals) => void;
+  readonly listen: (handler: (signal: ForwardedSignal) => void) => () => void;
+}>("@kurambit/scripts/dev-runner/DevRunnerSignals", {
+  defaultValue: () => ({
+    runnerPid: process.pid,
+    runnerGroup: readOwnProcessGroup(),
+    kill: (pid, signal) => process.kill(pid, signal),
+    listen: (handler) => {
+      const listeners = FORWARDED_SIGNALS.map((signal) => {
+        const listener = () => handler(signal);
+        process.on(signal, listener);
+        return [signal, listener] as const;
+      });
+      return () => {
+        for (const [signal, listener] of listeners) process.off(signal, listener);
+      };
+    },
+  }),
+});
+
+function readOwnProcessGroup(): number | undefined {
+  try {
+    // Field 5 of /proc/self/stat; the name in field 2 may hold spaces and parentheses.
+    const stat = NodeFS.readFileSync("/proc/self/stat", "utf8");
+    const group = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]);
+    return Number.isInteger(group) ? group : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why the runner must not signal `pid`'s process group, or undefined when it may. */
+export function childGroupRefusal(input: {
+  readonly pid: number;
+  readonly exited: boolean;
+  readonly runnerPid: number;
+  readonly runnerGroup: number | undefined;
+}): string | undefined {
+  // -0, -1 and -(the runner's group) would signal the runner's group or every process.
+  if (!Number.isInteger(input.pid) || input.pid <= 1) return "not a child pid";
+  if (input.pid === input.runnerPid) return "the runner itself";
+  if (input.pid === input.runnerGroup) return "the runner's own process group";
+  if (input.exited) return "the child has exited";
+  return undefined;
+}
+
+/**
+ * Sends `signal` to the child's process group, then SIGKILL to the same group
+ * if the child has not exited within `grace`. Every signal passes the guard.
+ */
+export const stopChildGroup = Effect.fn("stopChildGroup")(function* (input: {
+  readonly pid: number;
+  readonly isRunning: Effect.Effect<boolean, PlatformError.PlatformError>;
+  readonly awaitExit: Effect.Effect<unknown, PlatformError.PlatformError>;
+  readonly signal: NodeJS.Signals;
+  readonly grace: Duration.Input;
+}) {
+  const signals = yield* DevRunnerSignals;
+  const signalGroup = (signal: NodeJS.Signals) =>
+    Effect.map(
+      Effect.orElseSucceed(input.isRunning, () => false),
+      (running) => {
+        const refusal = childGroupRefusal({
+          pid: input.pid,
+          exited: !running,
+          runnerPid: signals.runnerPid,
+          runnerGroup: signals.runnerGroup,
+        });
+        if (refusal !== undefined) return false;
+        try {
+          signals.kill(-input.pid, signal);
+          return true;
+        } catch {
+          // ESRCH: the group is already gone.
+          return false;
+        }
+      },
+    );
+  if (!(yield* signalGroup(input.signal))) return;
+  const exited = yield* input.awaitExit.pipe(Effect.ignore, Effect.timeoutOption(input.grace));
+  if (Option.isNone(exited)) yield* signalGroup("SIGKILL");
+});
+
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
     const { portOffset, devInstance } = yield* OffsetConfig.pipe(
@@ -664,6 +763,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     }
 
     const args = [...MODE_ARGS[input.mode], ...input.runArgs];
+    const isWindows = yield* HostProcess.isWindows;
     const spawnCommand = yield* resolveSpawnCommand("vp", args, { env });
     const processContext = {
       mode: input.mode,
@@ -678,10 +778,13 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       env,
       extendEnv: false,
       shell: spawnCommand.shell,
-      // Keep Vite+ in the same process group so terminal signals (Ctrl+C)
-      // reach it directly. Effect defaults to detached: true on non-Windows,
-      // which would put the runner in a new group and require manual forwarding.
-      detached: false,
+      // Vite+ does not pass signals on to its tasks, so a signal sent to the
+      // runner alone used to orphan Vite and the server. On POSIX the child
+      // leads its own group (and session), and the runner forwards SIGINT
+      // (Ctrl+C), SIGTERM and SIGHUP (terminal closed) to that group below.
+      // A detached child on Windows opens its own console window; there
+      // Effect's release ends the tree with taskkill /T.
+      detached: !isWindows,
       forceKillAfter: "1500 millis",
     }).pipe(
       Effect.mapError(
@@ -693,6 +796,34 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
           }),
       ),
     );
+
+    if (!isWindows) {
+      const signals = yield* DevRunnerSignals;
+      const fiber = yield* Effect.fiber;
+      let received: ForwardedSignal | undefined;
+      // Added after the spawn, so it runs before the child's own release, and
+      // before listening, so no signal can arrive while it is missing.
+      yield* Effect.addFinalizer(() =>
+        stopChildGroup({
+          pid: child.pid,
+          isRunning: child.isRunning,
+          awaitExit: child.exitCode,
+          signal: received ?? "SIGTERM",
+          grace: "5 seconds",
+        }),
+      );
+      // runMain interrupts this fiber on SIGINT and SIGTERM but not on SIGHUP,
+      // whose default would exit without running the finalizer above.
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          signals.listen((signal) => {
+            received ??= signal;
+            if (signal === "SIGHUP") fiber.interruptUnsafe();
+          }),
+        ),
+        (unlisten) => Effect.sync(unlisten),
+      );
+    }
 
     const exitCode = yield* child.exitCode.pipe(
       Effect.mapError(
@@ -779,8 +910,8 @@ if (import.meta.main) {
   // Node 22's recursive fs.watch on Linux misses atomic saves, so the server
   // and the game previews would stop reloading without saying why.
   if (Number(process.versions.node.split(".")[0]) < 24) {
-    console.error(
-      `[dev-runner] Node ${process.versions.node} is too old: use Node 24, because older Node's file watcher misses atomic saves and live reload breaks.`,
+    process.stderr.write(
+      `[dev-runner] Node ${process.versions.node} is too old: use Node 24, because older Node's file watcher misses atomic saves and live reload breaks.\n`,
     );
     process.exit(1);
   }
