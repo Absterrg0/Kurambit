@@ -11,6 +11,15 @@ import { useKeepGoing } from "./useKeepGoing";
 const modeLabel = (mode: string) =>
   KEEP_GOING_MODES.find((entry) => entry.mode === mode)?.label ?? mode;
 
+const endingTitle = (text: string) => (
+  <Tooltip>
+    <TooltipTrigger render={<span className="min-w-0 truncate font-normal" />}>
+      {text}
+    </TooltipTrigger>
+    <TooltipPopup side="top">{text}</TooltipPopup>
+  </Tooltip>
+);
+
 /**
  * Keep going above the composer, in its own chat: what
  * the live run is doing with Stop, a Guided proposal with Start now, Edit
@@ -125,9 +134,12 @@ export function useKeepGoingBanner(
         item: {
           id: view.id,
           variant: "info",
-          priority: "notice",
+          // Before the Next chip, so a stall never reads as keep going quietly
+          // off; its reason keeps the row, with Resume under it.
+          priority: "activity",
+          layout: "wrap-actions",
           icon,
-          title: view.title,
+          title: endingTitle(view.title),
           actions: (
             <Button
               size="xs"
@@ -148,9 +160,10 @@ export function useKeepGoingBanner(
         item: {
           id: view.id,
           variant: "info",
-          priority: "notice",
+          priority: "activity",
+          layout: "wrap-actions",
           icon,
-          title: view.title,
+          title: endingTitle(view.title),
           dismissLabel: "Dismiss why keep going ended",
           onDismiss: () => setDismissed(view.id),
         },

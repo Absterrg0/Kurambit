@@ -14,6 +14,8 @@ export interface ComposerBannerStackItem {
   readonly id: string;
   readonly variant: ComposerBannerVariant;
   readonly priority?: "urgent" | "activity" | "notice";
+  /** An activity row lays out inline, others wrap their actions under the title. */
+  readonly layout?: "inline" | "wrap-actions";
   readonly icon: ReactNode;
   readonly title: ReactNode;
   readonly description?: ReactNode;
@@ -346,7 +348,9 @@ function ComposerBannerStackAlert({
       variant={item.variant}
       density="comfortable"
     >
-      <ComposerBanner.Row layout={item.priority === "activity" ? "inline" : "wrap-actions"}>
+      <ComposerBanner.Row
+        layout={item.layout ?? (item.priority === "activity" ? "inline" : "wrap-actions")}
+      >
         <ComposerBanner.Icon className="h-(--composer-banner-icon-column) self-start">
           {item.icon}
         </ComposerBanner.Icon>
