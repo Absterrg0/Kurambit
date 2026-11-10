@@ -610,7 +610,9 @@ export const DevRunnerSignals = Context.Reference<{
     listen: (handler) => {
       const listeners = FORWARDED_SIGNALS.map((signal) => {
         const listener = () => handler(signal);
-        process.on(signal, listener);
+        // Ahead of runMain's own listener, whose interrupt runs the finalizer
+        // at once: the child's group then gets the signal the runner got.
+        process.prependListener(signal, listener);
         return [signal, listener] as const;
       });
       return () => {
