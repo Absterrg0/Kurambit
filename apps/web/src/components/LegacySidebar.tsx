@@ -18,6 +18,7 @@ import {
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { useAtomValue } from "@effect/atom-react";
+import { allReachableShellsLiveAtom } from "~/state/shell";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useEffect, useEffectEvent, memo, useRef, useState } from "react";
 import { cn } from "~/lib/utils";
@@ -2674,6 +2675,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     attachProjectListAutoAnimateRef,
     projectsLength,
   } = props;
+  const shellsBootstrapped = useAtomValue(allReachableShellsLiveAtom);
 
   const handleProjectSortOrderChange = (sortOrder: SidebarProjectSortOrder) => {
     updateSettings({ sidebarProjectSortOrder: sortOrder });
@@ -2831,8 +2833,14 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
         {projectsLength === 0 && (
           <div className="px-2 pt-4 text-center text-secondary-label text-xs">
-            No games yet
-            <GameEntry />
+            {shellsBootstrapped ? (
+              <>
+                No games yet
+                <GameEntry />
+              </>
+            ) : (
+              "Loading games…"
+            )}
           </div>
         )}
       </SidebarGroup>

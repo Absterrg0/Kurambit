@@ -21,6 +21,7 @@ import {
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useAtomValue } from "@effect/atom-react";
+import { allReachableShellsLiveAtom } from "~/state/shell";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import { replaceComposerContextReferences } from "@kurambit/shared/composerContextReferences";
@@ -2914,6 +2915,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 
 export default function Sidebar() {
   const gameLibrary = useGameLibrary();
+  // Until every reachable shell is live, no projects means "not loaded", not "none".
+  const shellsBootstrapped = useAtomValue(allReachableShellsLiveAtom);
   const gameProjectKeys = new Set(
     gameLibrary.games.map((game) => `${game.environmentId}:${game.projectId}`),
   );
@@ -5309,7 +5312,7 @@ export default function Sidebar() {
             settledThreads.length ===
             0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {gameLibrary.isLoading ? (
+              {gameLibrary.isLoading || !shellsBootstrapped ? (
                 "Loading games…"
               ) : projects.length === 0 ? (
                 <>
