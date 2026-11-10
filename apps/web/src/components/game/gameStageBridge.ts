@@ -37,7 +37,7 @@ interface StageBridgeState {
   readonly capabilities: ReadonlyArray<GameStageCapability>;
   readonly things: ReadonlyArray<GameThing>;
   readonly frozen: boolean;
-  /** Frozen because the Stage lost focus (useStageAwayFreeze), not by the person. */
+  /** The last freeze was asked for because the Stage lost focus (useStageAwayFreeze), not by the person. */
   readonly autoFrozen: boolean;
   readonly hover: { readonly id: string; readonly rect?: GameStageRect | undefined } | null;
   readonly selected: StageSelection | null;
@@ -128,9 +128,7 @@ export function useStageBridgeFrame(
           return;
         case "studio-frozen":
           // Playing on keeps the selection, so its values can be tuned while playing.
-          useStageBridge.setState(
-            message.on ? { frozen: true } : { frozen: false, autoFrozen: false, hover: null },
-          );
+          useStageBridge.setState(message.on ? { frozen: true } : { frozen: false, hover: null });
           return;
         case "studio-frame":
           settleCapture(message.png);
@@ -167,7 +165,9 @@ export const useThreadStageBridge = <T>(
 const setStageFrozen = (on: boolean, auto: boolean) => {
   const state = useStageBridge.getState();
   if (state.owner === null) return;
-  useStageBridge.setState({ autoFrozen: on && auto });
+  // Recorded as asked, before the game answers: a focus that leaves while a
+  // play-on is still in flight must see it and hold the game again.
+  useStageBridge.setState({ autoFrozen: on && auto, frozen: on });
   if (state.frozen === on) return;
   if (state.status === "ready" && state.capabilities.includes("freeze") && state.post !== null)
     state.post({ type: "studio-freeze", on });
@@ -192,9 +192,8 @@ export function useStageAwayFreeze(threadKey: string, away: boolean) {
   useEffect(() => {
     if (owner === null || status === "waiting") return;
     const state = useStageBridge.getState();
-    if (away) {
-      if (!state.frozen) setStageFrozen(true, true);
-    } else if (state.autoFrozen) setStageFrozen(false, false);
+    if (away && !state.frozen) setStageFrozen(true, true);
+    else if (!away && state.frozen && state.autoFrozen) setStageFrozen(false, false);
   }, [away, owner, status]);
 }
 

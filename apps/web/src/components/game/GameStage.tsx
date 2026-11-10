@@ -255,7 +255,7 @@ function ThreadGameStage({
     (state) => state.frozen && !state.autoFrozen,
     false,
   );
-  const away = useThreadStageBridge(threadKey, (state) => state.autoFrozen, false);
+  const away = useThreadStageBridge(threadKey, (state) => state.frozen && state.autoFrozen, false);
   const bridgeStatus = useThreadStageBridge(threadKey, (state) => state.status, null);
   const selectedId = useThreadStageBridge(
     threadKey,
