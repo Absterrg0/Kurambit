@@ -2599,7 +2599,7 @@ const make = Effect.gen(function* () {
             const text =
               libraryFile !== undefined
                 ? `${yield* callText(root, "execute_blender_code", {
-                    code: `import kurambit.skeleton\nnew, clips = kurambit.skeleton.import_model(${pyJson(libraryFile.file)})\nprint(f"Imported {len(new)} objects and {len(clips)} clips")`,
+                    code: `import json\nimport kurambit.skeleton\nnew, clips = kurambit.skeleton.import_model(${pyJson(libraryFile.file)})\nprint(f"Imported {len(new)} objects and {len(clips)} clips")`,
                   })}\nFrom library entry ${libraryFile.pack.id}: ${input.path}.`
                 : yield* callText(root, "import_asset", {
                     source,
