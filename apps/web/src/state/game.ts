@@ -7,6 +7,7 @@ import {
   type GameBuildPlayResult,
   type GameBuildRef,
   type GameBuildsResult,
+  type GameOperationEvent,
   type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadId,
@@ -17,6 +18,7 @@ import {
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "@kurambit/client-runtime/state/runtime";
+import * as Stream from "effect/Stream";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -31,7 +33,17 @@ const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRunt
   // Game operations are minutes apart; keep the stream warm while a game
   // surface is open without holding it for the life of the app.
   idleTtlMs: 5 * 60_000,
+  // A stream atom holds only the last value of each chunk, and a run's end
+  // arrives as one chunk ("builds" then "run"): each value is the whole batch,
+  // so no push is hidden behind the one after it.
+  transform: Stream.chunks,
 });
+
+/** The newest event of the latest batch whose scope is wanted, or undefined. */
+const newestOf = (
+  result: AsyncResult.AsyncResult<ReadonlyArray<GameOperationEvent>, unknown>,
+  wanted: (event: GameOperationEvent) => boolean,
+) => (AsyncResult.isSuccess(result) ? result.value.findLast(wanted) : undefined);
 
 /**
  * A value that changes on every push of the given scopes for one thread's
@@ -51,8 +63,8 @@ const threadScopeSignal = Atom.family((key: string) => {
         input: { threadId: ThreadId.make(threadId) },
       }),
     );
-    if (AsyncResult.isSuccess(result) && wanted.has(gameEventScope(result.value)))
-      last = `${result.value.at}\0${result.value.revision ?? ""}`;
+    const event = newestOf(result, (each) => wanted.has(gameEventScope(each)));
+    if (event !== undefined) last = `${event.at}\0${event.revision ?? ""}`;
     return last;
   }).pipe(Atom.withLabel(`game:thread-signal:${key}`));
 });
@@ -92,13 +104,14 @@ const liveSignalAtom = Atom.family((key: string) => {
         input: { threadId: ThreadId.make(threadId) },
       }),
     );
-    if (!AsyncResult.isSuccess(result) || gameEventScope(result.value) !== "live") return last;
-    const event = result.value;
-    if (LIVE_SERVE_MESSAGES.has(event.message)) return last;
-    const id = `${event.revision ?? ""}\0${event.at}`;
-    if (id !== lastEvent) {
-      lastEvent = id;
-      last = { revision: last.revision + 1, message: event.message, at: event.at };
+    if (!AsyncResult.isSuccess(result)) return last;
+    for (const event of result.value) {
+      if (gameEventScope(event) !== "live" || LIVE_SERVE_MESSAGES.has(event.message)) continue;
+      const id = `${event.revision ?? ""}\0${event.at}`;
+      if (id !== lastEvent) {
+        lastEvent = id;
+        last = { revision: last.revision + 1, message: event.message, at: event.at };
+      }
     }
     return last;
   }).pipe(Atom.withLabel(`game:live-signal:${key}`));
@@ -142,12 +155,11 @@ const statusSignalAtom = Atom.family((key: string) => {
         input: { threadId: ThreadId.make(threadId) },
       }),
     );
-    if (
-      AsyncResult.isSuccess(result) &&
-      gameEventScope(result.value) === "live" &&
-      LIVE_SERVE_MESSAGES.has(result.value.message)
-    )
-      serve = `${result.value.at}\0${result.value.revision ?? ""}`;
+    const opened = newestOf(
+      result,
+      (event) => gameEventScope(event) === "live" && LIVE_SERVE_MESSAGES.has(event.message),
+    );
+    if (opened !== undefined) serve = `${opened.at}\0${opened.revision ?? ""}`;
     return `${get(threadScopeSignal(`${key}\0operation|builds`))}\0${serve}`;
   }).pipe(Atom.withLabel(`game:status-signal:${key}`));
 });
@@ -165,24 +177,25 @@ const gameListSignal = Atom.family((environmentId: string) => {
     // A card shows no saved media, builds, facts or live serve, so their pushes
     // never reread the list: an agent's saves on a live game are many.
     if (!AsyncResult.isSuccess(result)) return changes;
-    const scope = gameEventScope(result.value);
-    if (
-      scope === "saved" ||
-      scope === "builds" ||
-      scope === "facts" ||
-      scope === "live" ||
-      scope === "art"
-    )
-      return changes;
-    const event = result.value;
-    // A run event's message is its current step, which the card shows.
-    const state =
-      event.name === "run"
-        ? `run\0${event.state}\0${event.message}`
-        : `${event.name}\0${event.state}`;
-    if (states.get(event.root) !== state) {
-      states.set(event.root, state);
-      changes += 1;
+    for (const event of result.value) {
+      const scope = gameEventScope(event);
+      if (
+        scope === "saved" ||
+        scope === "builds" ||
+        scope === "facts" ||
+        scope === "live" ||
+        scope === "art"
+      )
+        continue;
+      // A run event's message is its current step, which the card shows.
+      const state =
+        event.name === "run"
+          ? `run\0${event.state}\0${event.message}`
+          : `${event.name}\0${event.state}`;
+      if (states.get(event.root) !== state) {
+        states.set(event.root, state);
+        changes += 1;
+      }
     }
     return changes;
   }).pipe(Atom.withLabel(`game:list-signal:${environmentId}`));
@@ -203,8 +216,9 @@ const savedMediaSignal = Atom.family((key: string) => {
         input: { threadId: ThreadId.make(threadId) },
       }),
     );
-    if (!AsyncResult.isSuccess(result) || gameEventScope(result.value) !== "saved") return changes;
-    const seen = `${result.value.at}\0${result.value.revision ?? ""}`;
+    const event = newestOf(result, (each) => gameEventScope(each) === "saved");
+    if (event === undefined) return changes;
+    const seen = `${event.at}\0${event.revision ?? ""}`;
     if (seen !== last) {
       last = seen;
       changes += 1;
