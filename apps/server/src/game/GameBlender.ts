@@ -98,6 +98,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { recordProvenance, renderSprites } from "./blenderSprites.ts";
+import { LIBRARY_LICENCES } from "./assetLibraryFiles.ts";
 import {
   characterRoute,
   lockArmatureRefusal,
@@ -2554,7 +2555,31 @@ const make = Effect.gen(function* () {
             const source = input.source;
             // Refused before the live scene changes.
             const style = yield* styleOf(root);
-            const outside = lockImportRefusal(source, style);
+            // A library file comes in under the library's lock (its family and packs), and is
+            // fetched and checked against its pin first; an outside source under imports.
+            const libraryFile =
+              source === "library"
+                ? yield* Effect.gen(function* () {
+                    const pack = yield* library.entry(id);
+                    const refused = lockPackRefusal(pack, style);
+                    if (refused !== null)
+                      return yield* opError(
+                        "blender-assets-import",
+                        root,
+                        "invalid-input",
+                        refused,
+                      );
+                    if (input.path === undefined || !/\.(glb|gltf|fbx)$/i.test(input.path))
+                      return yield* opError(
+                        "blender-assets-import",
+                        root,
+                        "invalid-input",
+                        "source library takes path: a .glb, .gltf or .fbx file of the entry, as game_assets_search with pack lists it.",
+                      );
+                    return { pack, file: yield* library.packFile(pack.id, input.path) };
+                  })
+                : undefined;
+            const outside = source === "library" ? null : lockImportRefusal(source, style);
             if (outside !== null)
               return yield* opError("blender-assets-import", root, "invalid-input", outside);
             // The import adds to the live scene; only what it added is exported,
@@ -2571,14 +2596,19 @@ const make = Effect.gen(function* () {
                 "tool-failed",
                 `Blender did not list the scene's objects before the import: ${before.slice(0, 500)}`,
               );
-            const text = yield* callText(root, "import_asset", {
-              source,
-              id,
-              ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
-              ...(input.targetSize === undefined ? {} : { target_size: input.targetSize }),
-              ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
-              ...(input.applyTo === undefined ? {} : { apply_to: input.applyTo }),
-            });
+            const text =
+              libraryFile !== undefined
+                ? `${yield* callText(root, "execute_blender_code", {
+                    code: `import kurambit.skeleton\nnew, clips = kurambit.skeleton.import_model(${pyJson(libraryFile.file)})\nprint(f"Imported {len(new)} objects and {len(clips)} clips")`,
+                  })}\nFrom library entry ${libraryFile.pack.id}: ${input.path}.`
+                : yield* callText(root, "import_asset", {
+                    source,
+                    id,
+                    ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
+                    ...(input.targetSize === undefined ? {} : { target_size: input.targetSize }),
+                    ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+                    ...(input.applyTo === undefined ? {} : { apply_to: input.applyTo }),
+                  });
             // A rigged import must be on the lock's rig; one that is not leaves the scene again.
             const rigged = yield* callText(root, "execute_blender_code", {
               code: [
@@ -2596,7 +2626,40 @@ const make = Effect.gen(function* () {
                 "tool-failed",
                 `Blender did not list the import's armatures: ${rigged.slice(0, 500)}`,
               );
-            const offRig = lockArmatureRefusal(armatures, style);
+            // An armature the import brings with clips of its own (an animated Poly Pizza
+            // animal) enters on its own rig under the one own-rig rule (ownRigRefusal): it is
+            // marked, so the lock's rig no longer governs it and the review checks it again.
+            const clipsOf = /STUDIO_IMPORT_CLIPS (\{.*\})/.exec(
+              yield* callText(root, "execute_blender_code", {
+                code: [
+                  "import bpy, json",
+                  "from kurambit.digest import exported_actions",
+                  `before_actions = set(${knownActions})`,
+                  `names = ${pyJson(Object.keys(armatures))}`,
+                  "print('STUDIO_IMPORT_CLIPS ' + json.dumps({n: [a.name for a in exported_actions(bpy.data.objects[n]) if a.name not in before_actions] for n in names if n in bpy.data.objects}))",
+                ].join("\n"),
+              }),
+            )?.[1];
+            const importedClips = (() => {
+              try {
+                return clipsOf === undefined
+                  ? {}
+                  : (JSON.parse(clipsOf) as Record<string, ReadonlyArray<string>>);
+              } catch {
+                return {};
+              }
+            })();
+            const ownRig = Object.keys(armatures).filter(
+              (name) =>
+                (importedClips[name]?.length ?? 0) > 0 &&
+                ownRigRefusal(name, { own: importedClips[name] ?? [], library: [] }) === null,
+            );
+            const offRig = lockArmatureRefusal(
+              Object.fromEntries(
+                Object.entries(armatures).filter(([name]) => !ownRig.includes(name)),
+              ),
+              style,
+            );
             if (offRig !== null) {
               yield* callText(root, "execute_blender_code", {
                 code: [
@@ -2619,12 +2682,15 @@ const make = Effect.gen(function* () {
             // export composes the ledger from the stamps, after a review like anything built here.
             // Its clips are stamped too, so a rigged import's animations are credited to it, not
             // called made here; a clip keyed later on its armature carries no stamp and is.
-            const licence = importLicence(source, id, text);
+            const licence =
+              libraryFile === undefined
+                ? importLicence(source, id, text)
+                : `${LIBRARY_LICENCES[libraryFile.pack.licence].name}${libraryFile.pack.credit === undefined ? "" : `, credit: ${libraryFile.pack.credit}`}`;
             const stampOf = (what: "mesh" | "clips") =>
               JSON.stringify(
                 JSON.stringify({
                   what,
-                  from: source,
+                  from: libraryFile?.pack.id ?? source,
                   licence: licence.slice(0, 200),
                   ai: false,
                   credits: null,
@@ -2638,6 +2704,7 @@ const make = Effect.gen(function* () {
                 `stamp = ${stampOf("mesh")}`,
                 "added = [o for o in bpy.context.scene.objects if o.name not in before and o.type in ('MESH', 'ARMATURE')]",
                 "for o in added: o['kurambit_source'] = stamp",
+                `for n in ${pyJson(ownRig)}: bpy.data.objects[n]['kurambit_rig'] = n`,
                 `for a in [a for a in bpy.data.actions if a.name not in before_actions]: a['kurambit_source'] = ${stampOf("clips")}`,
                 "print(f'STUDIO_STAMPED {len(added)}')",
               ].join("\n"),
@@ -2645,7 +2712,7 @@ const make = Effect.gen(function* () {
             const count = Number(/STUDIO_STAMPED (\d+)/.exec(stamped)?.[1] ?? 0);
             const blend = yield* saveBlend(root);
             return {
-              text: `${text}\nSaved .blend source: ${blend}\n${count === 0 ? "The import added no model to the scene (an HDRI or a texture)." : `The import stays in the live scene, marked with its source and licence (${licence}); review and export it like anything you build (game_blender_look mode review, then game_blender_export).`}`,
+              text: `${text}\nSaved .blend source: ${blend}\n${count === 0 ? "The import added no model to the scene (an HDRI or a texture)." : `The import stays in the live scene, marked with its source and licence (${licence})${ownRig.length === 0 ? "" : `; ${ownRig.join(", ")} came with clips of ${ownRig.length === 1 ? "its" : "their"} own (${ownRig.map((name) => (importedClips[name] ?? []).slice(0, 6).join(", ")).join("; ")}), so ${ownRig.length === 1 ? "it enters" : "they enter"} on ${ownRig.length === 1 ? "its" : "their"} own rig (kurambit_rig) and plays only those clips`}; review and export it like anything you build (game_blender_look mode review, then game_blender_export).`}`,
               blend,
             };
           }),

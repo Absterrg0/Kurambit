@@ -135,6 +135,8 @@ export class GameAssetLibrary extends Context.Service<
     readonly packClips: (
       pack: string,
     ) => Effect.Effect<ReadonlyArray<PackClips>, GameOperationError>;
+    /** One library entry by id (a pack, an indexed asset or a Poly Pizza model). */
+    readonly entry: (id: string) => Effect.Effect<LibraryPack, GameOperationError>;
     /** The pack's own overview picture of its look; refused when it ships none (every KayKit pack). */
     readonly packPicture: (
       pack: string,
@@ -159,10 +161,21 @@ export interface PackClips {
 const MODEL_KINDS: ReadonlySet<GameLibraryKind> = new Set(["character", "model", "animation"]);
 const kindsIn = (engine: GameEngineId, pack: LibraryPack): ReadonlyArray<GameLibraryKind> => {
   const models = pack.formats.filter((format) => mediaOf(`x.${format}`) === "model");
-  return models.length > 0 && !models.some((format) => loadableIn(engine, format))
+  return models.length > 0 && !models.some((format) => reachable(engine, format))
     ? pack.kinds.filter((kind) => !MODEL_KINDS.has(kind))
     : pack.kinds;
 };
+
+/**
+ * A model format the engine does not load but game_blender_assets_import (source library)
+ * brings in and the export ships as a GLB: how an FBX-only pack reaches a three.js game.
+ */
+const throughBlender = (engine: GameEngineId, format: string) =>
+  !loadableIn(engine, format) && (format === "fbx" || format === "glb" || format === "gltf");
+const reachable = (engine: GameEngineId, format: string) =>
+  loadableIn(engine, format) || throughBlender(engine, format);
+const BLENDER_NOTE =
+  "loads through game_blender_assets_import (source library, this entry and path), then a review and export to GLB";
 
 const megabytes = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1)} MB`;
 const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".");
@@ -505,8 +518,24 @@ const make = Effect.gen(function* () {
           catch: io("Library fetch", part),
         });
         const problem = pinProblem(pin, fetched);
-        if (problem !== null)
+        if (problem !== null) {
+          // A host that refuses for now (Google Drive past a file's download quota) answers 200
+          // with a web page: say that, not that the source changed.
+          const head = yield* Effect.promise(() =>
+            NodeFSP.readFile(part).then(
+              (bytes) => bytes.subarray(0, 256).toString("latin1"),
+              () => "",
+            ),
+          );
+          if (/^\s*<(?:!doctype html|html)/i.test(head) && !/\.html?$/i.test(pin.url))
+            return yield* fail(
+              "Library fetch",
+              pin.url,
+              "download",
+              `${label}: its host answered with a web page (${/<title>([^<]{0,80})/i.exec(head)?.[1] ?? "no title"}) instead of the file, as Google Drive does when a file's download quota is used up. The pin still holds; try again later, or use another entry meanwhile.`,
+            );
           return yield* fail("Library fetch", pin.url, "source-changed", `${label}: ${problem}`);
+        }
         // Renaming over a copy another server just finished is fine: the pin makes them identical.
         yield* Effect.tryPromise({
           try: async () => {
@@ -896,12 +925,19 @@ const make = Effect.gen(function* () {
     if (kinds.length === 0 || (kind !== undefined && !kinds.includes(kind))) return null;
     const usable = pack.formats.filter(
       (format) =>
-        loadableIn(engine, format) &&
+        reachable(engine, format) &&
         (wanted === undefined
           ? mediaOf(`x.${format}`) !== "data"
           : mediaOf(`x.${format}`) === wanted),
     );
-    return usable.length === 0 ? null : { kinds, usable };
+    return usable.length === 0
+      ? null
+      : {
+          kinds,
+          usable: usable.map((format) =>
+            throughBlender(engine, format) ? `${format} (${BLENDER_NOTE})` : format,
+          ),
+        };
   };
 
   /**
@@ -1135,7 +1171,7 @@ const make = Effect.gen(function* () {
           const folders = new Map<string, Map<string, number>>();
           const pictureOnly = new Map<string, boolean>();
           for (const file of index.files) {
-            if (!loadableIn(engine, file.format) || file.media === "data") continue;
+            if (!reachable(engine, file.format) || file.media === "data") continue;
             const folder = dirOf(file.path);
             const formats = folders.get(folder) ?? new Map<string, number>();
             formats.set(file.format, (formats.get(file.format) ?? 0) + 1);
@@ -1181,7 +1217,7 @@ const make = Effect.gen(function* () {
       const wanted = input.kind === undefined ? undefined : KIND_MEDIA[input.kind];
       let pictures = 0;
       const scored = index.files.flatMap((file) => {
-        if (file.media === "data" || !loadableIn(engine, file.format)) return [];
+        if (file.media === "data" || !reachable(engine, file.format)) return [];
         if (wanted !== undefined && file.media !== wanted) return [];
         const score = matchScore(words, file.path);
         if (words.length > 0 && score === 0) return [];
@@ -1264,7 +1300,8 @@ const make = Effect.gen(function* () {
       );
       const audio = shown.every(({ file }) => file.media === "audio");
       const lines = shown.map(
-        ({ file }, i) => `${offset + i + 1}. ${file.path} (${describe(file)})`,
+        ({ file }, i) =>
+          `${offset + i + 1}. ${file.path} (${describe(file)}${throughBlender(engine, file.format) ? `; ${BLENDER_NOTE}` : ""})`,
       );
       const end = offset + shown.length;
       const numbering =
@@ -1444,7 +1481,9 @@ const make = Effect.gen(function* () {
       const folders = new Set<string>();
       const take = (file: LibraryFile) => {
         if (!loadableIn(engine, file.format)) {
-          skipped.push(`${file.path}: ${file.format} does not load in this ${engine} game`);
+          skipped.push(
+            `${file.path}: ${file.format} does not load in this ${engine} game${throughBlender(engine, file.format) ? `; it ${BLENDER_NOTE}` : ""}`,
+          );
           return;
         }
         chosen.set(file.path, file);
@@ -1882,6 +1921,7 @@ const make = Effect.gen(function* () {
       projects.exclusive(threadId, "Library add", (root) => add(root, input)),
     packFile,
     packClips,
+    entry: packOf,
     packPicture,
   });
 });

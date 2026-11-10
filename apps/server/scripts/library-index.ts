@@ -8,7 +8,7 @@
 // Haven's own MD5 and size, ambientCG's size. Review the diff before committing: a changed pin
 // or licence is a change to what games ship.
 //
-//   node apps/server/scripts/library-index.ts polyhaven|ambientcg|packs [--only <id regex>]
+//   node apps/server/scripts/library-index.ts polyhaven|ambientcg|packs [--only <id regex>] [--sources kenney,quaternius,quaternius-site,kaykit]
 //
 // TMPDIR holds one pack at a time while it is hashed and indexed.
 import * as NodeFS from "node:fs";
@@ -563,6 +563,12 @@ const pinPack = async (candidate: Candidate, scratch: string): Promise<LibraryPa
 };
 
 const KAYKIT_REPOS = ["KayKit-Prototype-Bits-1.0"];
+/** Quaternius OGA uploads whose models no site Drive folder holds (Wolf, Eagle, Piranha…). */
+const QUATERNIUS_OGA_ONLY = new Set(["Animated Animales Low Poly"]);
+/** Which crawls run (--sources a,b): a re-pin of one source need not crawl the others. */
+const sources = process.argv.includes("--sources")
+  ? (process.argv[process.argv.indexOf("--sources") + 1] ?? "").split(",")
+  : ["kenney", "quaternius", "quaternius-site", "kaykit"];
 const packs = async () => {
   // Only the curated packs: the generated file is what this run rewrites.
   const pinnedUrls = new Set(CURATED_PACKS.map((pack) => pack.download));
@@ -574,11 +580,17 @@ const packs = async () => {
     known.add(unique);
     return unique;
   };
-  for (const user of ["kenney", "quaternius"])
+  for (const user of ["kenney", "quaternius"].filter((name) => sources.includes(name)))
     for (const found of await openGameArt(user)) {
       if (pinnedUrls.has(found.archive!.url)) continue;
-      // Quaternius' Drive folders carry the same packs per model; only the itch-only megakits come from here.
-      if (user === "quaternius" && !/megakit/i.test(found.title)) continue;
+      // Quaternius' Drive folders carry the same packs per model; from here come only the
+      // itch-only megakits and the packs no Drive folder holds (checked by their model files).
+      if (
+        user === "quaternius" &&
+        !/megakit/i.test(found.title) &&
+        !QUATERNIUS_OGA_ONLY.has(found.title)
+      )
+        continue;
       candidates.push({
         ...found,
         id: named(`${user}-${slug(found.title)}`),
@@ -589,9 +601,9 @@ const packs = async () => {
             : "stylised low-poly, textured",
       });
     }
-  for (const candidate of await quaterniusSite())
+  for (const candidate of sources.includes("quaternius-site") ? await quaterniusSite() : [])
     candidates.push({ ...candidate, id: named(candidate.id) });
-  for (const repo of KAYKIT_REPOS) {
+  for (const repo of sources.includes("kaykit") ? KAYKIT_REPOS : []) {
     const commit = (
       (await json(`https://api.github.com/repos/KayKit-Game-Assets/${repo}/commits/main`)) as {
         sha: string;

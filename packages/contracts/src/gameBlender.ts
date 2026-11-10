@@ -76,11 +76,14 @@ export const GameBlenderAssetsSearchResult = Schema.Struct({ text: Schema.String
 export type GameBlenderAssetsSearchResult = typeof GameBlenderAssetsSearchResult.Type;
 
 export const GameBlenderAssetsImportInput = Schema.Struct({
-  /** generated: a file game_generate delivered, by its game path (`path`), not a download. */
-  source: Schema.Literals(["polyhaven", "sketchfab", "polypizza", "generated"]),
-  /** The library's asset id; every source but generated needs it. */
+  /**
+   * generated: a file game_generate delivered, by its game path (`path`), not a download.
+   * library: a model file of a game_assets_search entry (`id` the entry, `path` the file).
+   */
+  source: Schema.Literals(["polyhaven", "sketchfab", "polypizza", "generated", "library"]),
+  /** The source's asset id, or the library entry id; every source but generated needs it. */
   id: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,80}$/))),
-  /** generated: the game-relative model under art/generated/ (.glb, .gltf or .fbx). */
+  /** generated: the game-relative model under art/generated/ (.glb, .gltf or .fbx); library: the entry's file. */
   path: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
   assetType: Schema.optionalKey(Schema.String),
   targetSize: Schema.optionalKey(Schema.Number),
