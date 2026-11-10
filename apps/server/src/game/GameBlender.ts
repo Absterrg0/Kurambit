@@ -2705,6 +2705,8 @@ const make = Effect.gen(function* () {
                 "added = [o for o in bpy.context.scene.objects if o.name not in before and o.type in ('MESH', 'ARMATURE')]",
                 "for o in added: o['kurambit_source'] = stamp",
                 `for n in ${pyJson(ownRig)}: bpy.data.objects[n]['kurambit_rig'] = n`,
+                // Its clips belong to it alone: an animal on the same bone names never takes them.
+                `for n, names in ${pyJson(Object.fromEntries(ownRig.map((name) => [name, importedClips[name] ?? []])))}.items():\n    for c in names:\n        if c in bpy.data.actions: bpy.data.actions[c]['kurambit_owner'] = n`,
                 `for a in [a for a in bpy.data.actions if a.name not in before_actions]: a['kurambit_source'] = ${stampOf("clips")}`,
                 "print(f'STUDIO_STAMPED {len(added)}')",
               ].join("\n"),
