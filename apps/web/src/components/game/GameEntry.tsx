@@ -111,17 +111,8 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const entries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, null),
   );
-  // A game's first turn builds the whole game, so it gets the provider's own chat default (its
-  // flagship) at the provider's default effort: never the cheap model and low effort the app
-  // summarises text with, which gave up on every brief of the first-ten-minutes benchmark.
-  const textDefault = resolveAppModelSelectionState(settings, providers);
-  const defaultSelection: ModelSelection = {
-    instanceId: textDefault.instanceId,
-    model: getDefaultProviderInstanceModel(providers, textDefault.instanceId) ?? textDefault.model,
-  };
   const [selection, setSelection] = useState<ModelSelection | null>(null);
-  // The model the person last picked for a game, while its provider is usable; otherwise the
-  // default above. The key moved once: the old one also kept an untouched cheap default.
+  // The provider and model of the person's last game, while that provider is usable.
   const [lastGameModel, setLastGameModel] = useLocalStorage(
     `game-entry-picked-model:${environmentId}`,
     null,
@@ -135,17 +126,20 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
     );
   const remembered =
     lastGameModel !== null && isReady(lastGameModel.instanceId) ? lastGameModel : null;
-  const firstReady = entries.find(isProviderInstancePickerReady);
-  const readyFallback =
-    firstReady === undefined || isReady(defaultSelection.instanceId)
-      ? null
-      : {
-          instanceId: firstReady.instanceId,
-          model:
-            getDefaultProviderInstanceModel(providers, firstReady.instanceId) ??
-            defaultSelection.model,
-        };
-  const model = selection ?? remembered ?? readyFallback ?? defaultSelection;
+  // With no game yet: Claude when it is ready, then the first ready provider. A game's first turn
+  // builds the whole game, so it gets the provider's own default (its flagship) at the provider's
+  // default effort, never the cheap model the app summarises text with.
+  const firstChoice =
+    entries.find(
+      (entry) => entry.driverKind === "claudeAgent" && isProviderInstancePickerReady(entry),
+    ) ?? entries.find(isProviderInstancePickerReady);
+  const textDefault = resolveAppModelSelectionState(settings, providers);
+  const freshInstanceId = firstChoice?.instanceId ?? textDefault.instanceId;
+  const fresh: ModelSelection = {
+    instanceId: freshInstanceId,
+    model: getDefaultProviderInstanceModel(providers, freshInstanceId) ?? textDefault.model,
+  };
+  const model = selection ?? remembered ?? fresh;
   const options = getCustomModelOptionsByInstance(
     settings,
     providers,
@@ -232,7 +226,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
       setError(String(squashAtomCommandFailure(result)));
       return;
     }
-    if (selection !== null) setLastGameModel(selection);
+    setLastGameModel(model);
     refreshLibrary();
     setDialog(null);
     // The thread route sends a thread this client has not received yet back
