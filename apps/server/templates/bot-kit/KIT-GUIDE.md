@@ -110,9 +110,16 @@ t)`: walk to a point (or () => point, re-read every tick: follows moving
 
 ## Facts that play well
 
-Read the game's code for exact rules (ranges, cooldowns, what a pickup
-needs) and check them in play before relying on them. Put the numbers into
-executors. Every option gets its own facts. Reflexes (dodge a telegraphed
+Read the game's code for its rules and verbs (which key does what, what a
+pickup needs, how a run is won), then take everything about where things are
+and how fast they go from what the game reports while it plays: its state
+values, the player's position and body, the HUD. Never copy a position, a
+layout, a speed or a timing from the game's code into the bot. A later step
+that moves a platform or tunes a jump then breaks the bot, the skilled fact
+reads that step as making the game unwinnable, and keep going undoes a step
+a person might have kept. When the game reports nothing the bot needs, play
+from what it does report (progress, the player's position and whether it is
+on the ground) rather than a route. Every option gets its own facts. Reflexes (dodge a telegraphed
 hit) go in executor code every tick, never in a Jev decision: a decision
 takes ~0.3s from sight to action, too slow for a fast hit.
 
@@ -152,4 +159,5 @@ verbs, run it with `game_bot_run` (decider `policy`) and fix it until it
 plays a full run. Change no game files in that step: its build is the game
 as it was, so only `skilled` is measured again. From then on every build is
 played with it, so keep it general to the game's verbs and goal rather than
-one level's layout, and update it when the game's rules change.
+one level's layout: it reads the game's state as it plays, never numbers
+copied from the code. Update it when the game's rules change.
