@@ -177,7 +177,13 @@ export type KeepGoingBannerView =
       readonly detail: string;
       readonly held: boolean;
     }
-  | { readonly kind: "live"; readonly id: string; readonly title: string }
+  | {
+      readonly kind: "live";
+      readonly id: string;
+      readonly title: string;
+      /** Why keep going wrote no play bot, through its first step; else null. */
+      readonly note: string | null;
+    }
   | {
       readonly kind: "paused";
       readonly id: string;
@@ -207,6 +213,11 @@ export const keepGoingBannerView = (
   }
   const n = status.step;
   const proposal = status.proposal;
+  // Said once: through the run's first step, then the run goes on without it.
+  const note =
+    status.botSetup?.state === "skipped" && (n === null || n <= 1)
+      ? `No play bot: ${status.botSetup.reason}`
+      : null;
   if (proposal !== null && (status.phase === "proposed" || status.phase === "held")) {
     const held = proposal.deadline === null;
     return {
@@ -216,8 +227,10 @@ export const keepGoingBannerView = (
       lead: `${n === null ? "Next step" : `Step ${n}`} · ${stepWhyLabel(proposal.why)}:`,
       line: proposal.summary,
       text: proposal.text,
-      detail:
+      detail: [
         proposal.deadline === null ? "Waits for you" : `Starts at ${clock(proposal.deadline)}`,
+        ...(note === null ? [] : [note]),
+      ].join(" · "),
       held,
     };
   }
@@ -235,7 +248,7 @@ export const keepGoingBannerView = (
             : status.phase === "undoing"
               ? `${n === null ? "Undoing the last step" : `Undoing step ${n}`}${reason === "" ? "" : `: ${reason}`}`
               : "Keep going · reading the current build's facts";
-  return { kind: "live", id: `keep-going:${runId}`, title };
+  return { kind: "live", id: `keep-going:${runId}`, title, note };
 };
 
 /**

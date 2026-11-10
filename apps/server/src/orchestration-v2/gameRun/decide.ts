@@ -585,7 +585,9 @@ export const applyLook = (state: RunState, look: LookResult, now: number): Next 
   const line =
     setup.state === "written"
       ? "the play bot is written"
-      : `the play bot setup failed (${setup.reason}); keep going goes on without the skilled fact`;
+      : setup.state === "skipped"
+        ? `no play bot: ${setup.reason}`
+        : `the play bot setup failed (${setup.reason}); keep going goes on without the skilled fact`;
   return { ...next, log: `${line}; ${next.log}` };
 };
 

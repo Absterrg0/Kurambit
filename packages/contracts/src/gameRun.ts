@@ -94,11 +94,12 @@ export type GameKeepGoingPhase = typeof GameKeepGoingPhase.Type;
 export const GameKeepGoingBotSetup = Schema.Struct({
   /** The setup's child thread (its last one, after a fix-up). */
   thread: ThreadId,
-  state: Schema.Literals(["running", "written", "failed"]),
+  /** "skipped": this machine cannot measure skilled play, so no bot was written. */
+  state: Schema.Literals(["running", "written", "failed", "skipped"]),
   /** Input + output of its sessions as the provider reported them; null when none was. */
   tokens: Schema.NullOr(Schema.Number),
   minutes: Schema.NullOr(Schema.Number),
-  /** Why it failed, so keep going goes on without the skilled fact and says so; "" otherwise. */
+  /** Why it failed or was skipped, so keep going goes on without the skilled fact and says so; "" otherwise. */
   reason: Schema.String,
 });
 export type GameKeepGoingBotSetup = typeof GameKeepGoingBotSetup.Type;

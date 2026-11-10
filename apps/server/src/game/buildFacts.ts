@@ -95,6 +95,15 @@ export const busyReading = (what: string, machine: MachineLoad | null): NotMeasu
       )
     : null;
 
+const SOFTWARE_TOO_SLOW = "the harness renders in software here";
+
+/**
+ * A tier the harness could not play in real time because it draws on the CPU.
+ * Every tier plays the same span, so the skilled tier would not be measured either.
+ */
+export const tooSlowInSoftware = (fact: TierFact): fact is NotMeasured =>
+  fact.status === "not-measured" && fact.why.startsWith(SOFTWARE_TOO_SLOW);
+
 /**
  * A run below real time: its span of play did not fit the wall budget. In a
  * browser drawing on the CPU it says nothing about the game; on a busy
@@ -104,7 +113,7 @@ export const busyReading = (what: string, machine: MachineLoad | null): NotMeasu
 const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: MachineLoad | null) =>
   machine?.software === true
     ? notMeasured(
-        `the harness renders in software here, so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
+        `${SOFTWARE_TOO_SLOW}, so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
         false,
         true,
       )

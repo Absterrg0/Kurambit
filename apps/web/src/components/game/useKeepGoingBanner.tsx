@@ -115,6 +115,7 @@ export function useKeepGoingBanner(
               <TooltipPopup side="top">Your message goes before its next step.</TooltipPopup>
             </Tooltip>
           ),
+          ...(view.note === null ? {} : { description: view.note }),
           actions: stop,
         },
       };
