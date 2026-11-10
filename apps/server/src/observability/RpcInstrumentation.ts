@@ -35,6 +35,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameAction]: "game",
   [WS_METHODS.gameWindowsPackage]: "game",
   [WS_METHODS.gameWebPackage]: "game",
+  [WS_METHODS.gameWebExportUrl]: "game",
   [WS_METHODS.gameToolchainStatus]: "game",
   [WS_METHODS.gameToolchainInstall]: "game",
   [WS_METHODS.gameToolchainRemove]: "game",

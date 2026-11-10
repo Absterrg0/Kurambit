@@ -554,4 +554,8 @@ export const gameEnvironment = {
     label: "game:packageWeb",
     tag: WS_METHODS.gameWebPackage,
   }),
+  webExportUrl: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:webExportUrl",
+    tag: WS_METHODS.gameWebExportUrl,
+  }),
 };

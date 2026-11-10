@@ -1816,6 +1816,8 @@ const layerWsRpc = (
             .pipe(
               Effect.flatMap((packaged) => signPackage(threadId, "Package Web build", packaged)),
             ),
+        [WS_METHODS.gameWebExportUrl]: ({ threadId }) =>
+          gameExport.webExportUrl(threadId).pipe(Effect.map((url) => ({ url }))),
         [WS_METHODS.gameMediaSave]: ({ threadId, source, label }) =>
           gameSaved.save(threadId, source, label),
         [WS_METHODS.gameSavedList]: ({ threadId }) => gameSaved.list(threadId),

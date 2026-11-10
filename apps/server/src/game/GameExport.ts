@@ -249,6 +249,8 @@ export class GameExport extends Context.Service<
      * static-host ZIP. It never exports and never chooses another build.
      */
     readonly packageWeb: (threadId: ThreadId) => Effect.Effect<GameWebPackage, GameOperationError>;
+    /** Serves the Web export Play's selection names, for a browser; it never exports. */
+    readonly webExportUrl: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
   }
 >()("kurambit/game/GameExport") {}
 
@@ -709,6 +711,19 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
+    webExportUrl: (threadId) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        const served = yield* selectedPreview(root);
+        if (served === null)
+          return yield* new GameOperationError({
+            operation: "Open Web export",
+            path: NodePath.join(root, WEB_BUILD_DIRECTORY),
+            reason: "invalid-input",
+            detail: "There is no finished Web export to open. Export Web first.",
+          });
+        return served.url;
+      }),
     packageWeb: (threadId) =>
       projects.exclusive(threadId, "Package Web build", (root) =>
         Effect.gen(function* () {

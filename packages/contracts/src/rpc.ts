@@ -358,6 +358,7 @@ export const WS_METHODS = {
   gameAction: "game.action",
   gameWindowsPackage: "game.windowsPackage",
   gameWebPackage: "game.webPackage",
+  gameWebExportUrl: "game.webExportUrl",
   gameToolchainStatus: "game.toolchainStatus",
   gameToolchainInstall: "game.toolchainInstall",
   gameToolchainRemove: "game.toolchainRemove",
@@ -1470,6 +1471,12 @@ const WsGameWebPackageRpc = Rpc.make(WS_METHODS.gameWebPackage, {
   success: GameWebPackageResult,
   error: gameError,
 });
+/** Serves the Web export Play's selection names and returns its URL, to open in a browser. */
+const WsGameWebExportUrlRpc = Rpc.make(WS_METHODS.gameWebExportUrl, {
+  payload: GameThreadInput,
+  success: Schema.Struct({ url: Schema.String }),
+  error: gameError,
+});
 const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   /** With a thread, its game's own engine tool (Unity's editor by the project's version). */
   payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
@@ -1604,6 +1611,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameActionRpc,
   WsGameWindowsPackageRpc,
   WsGameWebPackageRpc,
+  WsGameWebExportUrlRpc,
   WsGameToolchainStatusRpc,
   WsGameToolchainInstallRpc,
   WsGameToolchainRemoveRpc,

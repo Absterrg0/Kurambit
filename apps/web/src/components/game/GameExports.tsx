@@ -1,6 +1,7 @@
 import type { GameStatus, ScopedThreadRef } from "@kurambit/contracts";
 import {
   DownloadIcon,
+  ExternalLinkIcon,
   FolderOpenIcon,
   Gamepad2Icon,
   LaptopIcon,
@@ -20,6 +21,7 @@ import { resolveAssetUrl } from "../../assets/assetUrls";
 import { usePreparedConnection } from "../../state/session";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { Button } from "../ui/button";
+import { useOpenLink } from "../../browser/useOpenLink";
 
 type BuildEntry = GameStatus["builds"][number];
 type ExportTarget = "Windows" | "Linux";
@@ -94,6 +96,11 @@ export function GameExports({
   const canPackageWeb = useAtomValue(
     gameEnvironment.packageWeb.permissionAtom(threadRef.environmentId),
   );
+  const webExportUrl = useAtomCommand(gameEnvironment.webExportUrl, { reportFailure: false });
+  const canOpenWeb = useAtomValue(
+    gameEnvironment.webExportUrl.permissionAtom(threadRef.environmentId),
+  );
+  const openLink = useOpenLink(threadRef);
   const preparedConnection = usePreparedConnection(threadRef.environmentId);
   const [packaging, setPackaging] = useState<"Windows" | "Web" | null>(null);
   const [packageNotice, setPackageNotice] = useState<{
@@ -139,6 +146,20 @@ export function GameExports({
   };
   const reveal = (relativePath: string) =>
     useRightPanelStore.getState().openFile(threadRef, relativePath);
+  // The way every other link opens: the app's browser or the system one, as Settings choose.
+  const openWebExport = async () => {
+    const failed = (error: string) =>
+      setPackageNotice({ target: "Web", buildKey: buildKey(webBuild) ?? "", status: null, error });
+    setPackageNotice(null);
+    const result = await webExportUrl({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    });
+    if (result._tag === "Failure") return failed(String(squashAtomCommandFailure(result)));
+    await openLink(result.value.url).catch((cause: unknown) =>
+      failed(cause instanceof Error ? cause.message : String(cause)),
+    );
+  };
   const downloadPackage = async (target: "Windows" | "Web") => {
     if (operationRunning || packaging !== null) return;
     const targetBuildKey = buildKey(target === "Windows" ? windowsBuild : webBuild) ?? "";
@@ -324,6 +345,17 @@ export function GameExports({
                       </Button>
                     </>
                   )}
+                  {target === "Web" ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!canOpenWeb || operationRunning}
+                      onClick={() => void openWebExport()}
+                    >
+                      <ExternalLinkIcon className="size-3.5" aria-hidden="true" />
+                      Open in browser
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"
