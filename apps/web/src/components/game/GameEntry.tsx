@@ -19,6 +19,7 @@ import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime
 import { FolderIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Radio, RadioGroup } from "../ui/radio-group";
 import { Textarea } from "../ui/textarea";
 import {
   Dialog,
@@ -296,22 +297,38 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                 {ENGINE_OPTIONS.length > 1 ? (
                   <fieldset className="flex flex-col gap-2 text-sm">
                     <legend className="font-medium">Engine</legend>
-                    {ENGINE_OPTIONS.map((option) => (
-                      <EngineOption
-                        key={option.id}
-                        {...option}
-                        tool={toolchain === null ? null : engineToolFor(toolchain, option.id)}
-                        ready={engineReady(option.id)}
-                        checked={engine === option.id}
-                        onPick={() => setEngine(option.id)}
-                        disabled={busy}
-                      />
-                    ))}
+                    <RadioGroup
+                      aria-label="Engine"
+                      value={engine}
+                      onValueChange={(value) => {
+                        const picked = ENGINE_OPTIONS.find((option) => option.id === value);
+                        if (picked !== undefined) setEngine(picked.id);
+                      }}
+                      disabled={busy}
+                    >
+                      {ENGINE_OPTIONS.map((option) => (
+                        <EngineOption
+                          key={option.id}
+                          {...option}
+                          tool={toolchain === null ? null : engineToolFor(toolchain, option.id)}
+                          ready={engineReady(option.id)}
+                        />
+                      ))}
+                    </RadioGroup>
                   </fieldset>
                 ) : null}
                 <fieldset className="flex flex-col gap-2 text-sm">
                   <legend className="font-medium">Make characters with</legend>
-                  <div className="grid grid-cols-3 gap-2">
+                  <RadioGroup
+                    aria-label="Make characters with"
+                    value={characters}
+                    onValueChange={(value) => {
+                      const picked = CHARACTER_ROUTES.find((option) => option.route === value);
+                      if (picked !== undefined) setCharacters(picked.route);
+                    }}
+                    disabled={busy}
+                    className="grid grid-cols-3"
+                  >
                     {CHARACTER_ROUTES.map((option) => {
                       const blocked = routeBlocker(option.route);
                       return (
@@ -319,18 +336,14 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                           key={option.route}
                           className={
                             blocked === null
-                              ? "flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5"
+                              ? "flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-data-checked:border-primary has-data-checked:bg-primary/5"
                               : "flex items-start gap-2 rounded-lg border border-border/70 px-3 py-2 opacity-64"
                           }
                         >
-                          <input
-                            type="radio"
-                            name="game-characters"
+                          <Radio
                             value={option.route}
-                            checked={characters === option.route}
-                            onChange={() => setCharacters(option.route)}
-                            disabled={busy || blocked !== null}
-                            className="mt-1"
+                            disabled={blocked !== null}
+                            className="mt-0.5"
                           />
                           <span>
                             <span className="font-medium">{option.label}</span>
@@ -341,7 +354,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                         </label>
                       );
                     })}
-                  </div>
+                  </RadioGroup>
                   {GAME_CHARACTER_ROUTE_UNAVAILABLE.generated === undefined &&
                   routeBlocker("generated") !== null ? (
                     <p className="text-xs text-muted-foreground">
@@ -520,35 +533,21 @@ function EngineOption({
   description,
   tool,
   ready,
-  checked,
-  onPick,
-  disabled,
 }: {
   id: GameEngineId;
   title: string;
   description: string;
   tool: GameToolStatus | null;
   ready: boolean;
-  checked: boolean;
-  onPick: () => void;
-  disabled: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5">
+    <div className="flex flex-col gap-2 rounded-lg border border-border/70 px-3 py-2 has-data-checked:border-primary has-data-checked:bg-primary/5">
       <label
         className={
           ready ? "flex cursor-pointer items-start gap-2" : "flex items-start gap-2 opacity-64"
         }
       >
-        <input
-          type="radio"
-          name="game-engine"
-          value={id}
-          checked={checked}
-          onChange={onPick}
-          disabled={disabled || !ready}
-          className="mt-1"
-        />
+        <Radio value={id} disabled={!ready} className="mt-0.5" />
         <span>
           <span className="font-medium">{title}</span>
           <span className="block text-xs text-muted-foreground">{description}</span>
