@@ -470,7 +470,12 @@ cannot both find none.
   of the chat's last finished turn (`completionWake: "never"`, so it never wakes the chat, and its
   checkpoint is no build). The look waits on the game being busy, caps each session, sends at most
   one fix-up session, and reports the outcome, which the run keeps (`GameRun.botSetup`); a failed
-  setup leaves the skilled fact unmeasured and the run goes on.
+  setup leaves the skilled fact unmeasured and the run goes on. It decides only once the idle and
+  random-input tiers have played: they play the skilled tier's span, so when they ran out of time
+  because the harness draws in software (`tooSlowInSoftware`), the setup is kept as skipped
+  instead. The kept setup point is the chat's next-turn base
+  (`CheckpointService.nextTurnBaseRefForThread`), so the next turn's chat diff, like the rail,
+  does not list the bot as its change.
 - **An undo includes the bot.** `.studio/bot` (without the kits Kurambit writes) is in
   `restoredPaths`, the one rule for what a restore writes, what a build is and when the folder is
   edited, so an undo is exactly as before and a build's skilled fact is its own bot's. The setup's

@@ -196,7 +196,9 @@ when it ends. Choose **Off** to stop it: a step that is running stops and still 
 When the game boots but has no play bot yet, keep going first has one written, once, in a session
 of its own that shows as a card in the chat: the bot is what measures whether a skilled player can
 win, so it is no step and changes nothing you see. If it cannot write one in about ten minutes,
-keep going goes on without the skilled fact and its status says why.
+keep going goes on without the skilled fact and its status says why. On a computer that draws the
+game in software too slowly for its plays to finish, no bot is written, since nothing could measure
+it there; the status says so.
 
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
 and why: notes you left for it first, then a crash or freeze, then a step that was undone, then a

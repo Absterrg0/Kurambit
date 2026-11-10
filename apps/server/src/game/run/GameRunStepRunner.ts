@@ -201,7 +201,11 @@ const make = Effect.gen(function* () {
         !bot &&
         facts !== null &&
         facts.boots.status === "measured" &&
-        facts.boots.value.ok
+        facts.boots.value.ok &&
+        // Whether this machine can measure skilled play is known only once these
+        // have played: a later look of the run decides it then.
+        facts.masher.status !== "pending" &&
+        facts.idle.status !== "pending"
       ) {
         // A bot nobody can measure here is tokens spent on nothing.
         const unmeasurable = [facts.masher, facts.idle].find(tooSlowInSoftware);
