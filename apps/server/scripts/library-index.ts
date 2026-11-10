@@ -9,7 +9,7 @@
 // or licence is a change to what games ship.
 //
 //   node apps/server/scripts/library-index.ts polyhaven|ambientcg|packs [--only <id regex>] [--sources kenney,quaternius,quaternius-site,kaykit]
-//   node apps/server/scripts/library-index.ts mirror <out dir> [--only <id regex>]
+//   node apps/server/scripts/library-index.ts mirror <out dir> [--only <id regex>] [--from <dir>]
 //
 // TMPDIR holds one pack at a time while it is hashed and indexed.
 //
@@ -17,6 +17,9 @@
 // once it is mirrored: `mirror` zips its pinned files, each checked against its pin, as
 // <id>.zip; upload those to the MIRROR release (gh release upload, never --clobber); then
 // `packs` pins every candidate the release holds as that archive instead of its source's files.
+// When Drive throttles every script, a person can still download a pack's folder in a browser:
+// `--from <dir>` takes each pinned file from there (any layout, found by its SHA-256) before
+// asking Drive, so the pin still guards every byte.
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -616,7 +619,7 @@ const MIRROR_ZIP_DATE = new Date("2026-01-01T00:00:00Z");
 const mirror = async () => {
   const out = process.argv[3];
   if (out === undefined || out.startsWith("--")) {
-    console.error("usage: library-index.ts mirror <out dir> [--only <id regex>]");
+    console.error("usage: library-index.ts mirror <out dir> [--only <id regex>] [--from <dir>]");
     process.exit(2);
   }
   await NodeFSP.mkdir(out, { recursive: true });
@@ -627,6 +630,16 @@ const mirror = async () => {
     (pack) => awaitsMirror(pack) && pack.files !== undefined && (only?.test(pack.id) ?? true),
   );
   console.log(`mirror: ${held.length} packs wait for the mirror`);
+  const local = new Map<string, string>();
+  const from = process.argv.includes("--from")
+    ? process.argv[process.argv.indexOf("--from") + 1]
+    : undefined;
+  if (from !== undefined)
+    for (const entry of await NodeFSP.readdir(from, { recursive: true, withFileTypes: true }))
+      if (entry.isFile()) {
+        const path = NodePath.join(entry.parentPath, entry.name);
+        local.set((await hashFile(path)).sha256, path);
+      }
   for (const pack of held) {
     const zipPath = NodePath.join(out, `${pack.id}.zip`);
     // A stopped run is picked up again: what is already zipped stays.
@@ -640,8 +653,10 @@ const mirror = async () => {
       for (const file of files) {
         const destination = NodePath.join(work, ...file.path.split("/"));
         await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
+        const copy = local.get(file.sha256);
+        if (copy !== undefined) await NodeFSP.copyFile(copy, destination);
         // The quota page is 2 KB, so a smaller pin must not refuse it before it is recognised.
-        await download(file.url, destination, Math.max(file.bytes, 64 * 1024));
+        else await download(file.url, destination, Math.max(file.bytes, 64 * 1024));
         const head = (await NodeFSP.readFile(destination)).subarray(0, 512).toString("latin1");
         if (head.includes(DRIVE_QUOTA))
           throw new DriveRefused(
@@ -654,7 +669,7 @@ const mirror = async () => {
           date: MIRROR_ZIP_DATE,
           createFolders: false,
         });
-        await sleep(1000);
+        if (copy === undefined) await sleep(1000);
       }
       await NodeStreamPromises.pipeline(
         zip.generateNodeStream({ type: "nodebuffer", streamFiles: true, compression: "DEFLATE" }),
