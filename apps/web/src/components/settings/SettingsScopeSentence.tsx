@@ -73,12 +73,15 @@ export function SettingsScopeSentence() {
         <span className="shrink-0">Applying settings for</span>
         <ProjectScopeMenu {...props} />
       </span>
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="shrink-0">
-          {scope.search.machine || scope.scope.kind === "checkout" ? "on" : "across"}
+      {/* One environment is the only one there is: naming it, or "all" of it, says nothing. */}
+      {environments.length <= 1 ? null : (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">
+            {scope.search.machine || scope.scope.kind === "checkout" ? "on" : "across"}
+          </span>
+          <EnvironmentScopeMenu {...props} />
         </span>
-        <EnvironmentScopeMenu {...props} />
-      </span>
+      )}
     </p>
   );
 }
