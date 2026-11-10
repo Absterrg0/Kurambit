@@ -476,18 +476,38 @@ const make = Effect.gen(function* () {
             verdict: round.step.verdict,
             reason: round.step.reason,
           });
+      // A judge or undo still held: the run is at work on it, or was stopped or
+      // paused with it, so its turn's build stays the step's (never a person's
+      // turn). Only the chat's latest run: `n` is the chat's next step number.
       const run = records.gameRuns.at(-1);
-      if (run !== undefined && run.status !== "ended") {
-        const read = yield* readRun("steps", threadId, run);
-        if (read.turnRun !== null && read.turnRun !== undefined)
-          marks.set(read.turnRun, {
-            n: read.n,
-            verdict: null,
-            reason:
-              read.inFlight?.step.kind === "undo"
-                ? `undoing it: ${read.undoing ?? "it made a fact worse"}`
-                : "measuring before keeping it",
-          });
+      const read =
+        run === undefined || run.inFlight === null ? null : yield* readRun("steps", threadId, run);
+      if (
+        run !== undefined &&
+        read !== null &&
+        read.turnRun !== null &&
+        read.turnRun !== undefined &&
+        !marks.has(read.turnRun)
+      ) {
+        const undoing = read.inFlight?.step.kind === "undo";
+        marks.set(
+          read.turnRun,
+          run.status !== "ended"
+            ? {
+                n: read.n,
+                verdict: null,
+                reason: undoing
+                  ? `undoing it: ${read.undoing ?? "it made a fact worse"}`
+                  : "measuring before keeping it",
+              }
+            : run.ending === "stopped"
+              ? { n: read.n, verdict: "stopped", reason: "" }
+              : {
+                  n: read.n,
+                  verdict: null,
+                  reason: `keep going paused before ${undoing ? "undoing" : "judging"} it`,
+                },
+        );
       }
       return marks as ReadonlyMap<RunId, GameRunStepMark>;
     }).pipe(

@@ -265,8 +265,9 @@ type StepSource = NonNullable<Extract<GameBuildSource, { _tag: "turn" }>["step"]
 /** PURE. What a step's verdict says, after "Step N · ". */
 export const stepVerdictText = (step: StepSource): string => {
   switch (step.verdict) {
+    // The server says what holds it: measuring, undoing, or a pause.
     case null:
-      return "measuring before keeping it";
+      return step.reason || "measuring before keeping it";
     case "kept":
       return `kept: ${step.reason || "no fact got worse"}`;
     case "undone":
