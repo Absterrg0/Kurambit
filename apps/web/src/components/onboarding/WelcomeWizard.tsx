@@ -573,10 +573,13 @@ function AgentCard({
       />
       <div className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-foreground">{displayName}</span>
-        <p className="mt-0.5 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
-          {providerState === "ready" ? "Ready." : summary.headline}
-          {providerState !== "ready" && summary.detail ? ` · ${summary.detail}` : ""}
-        </p>
+        {/* Ready needs no line: the badge says it. */}
+        {providerState === "ready" ? null : (
+          <p className="mt-0.5 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
+            {summary.headline}
+            {summary.detail ? ` · ${summary.detail}` : ""}
+          </p>
+        )}
       </div>
       <div className="shrink-0">
         {providerState === "ready" ? (
@@ -621,13 +624,13 @@ function OtherAgentCard({ provider }: { readonly provider: ServerProvider }) {
       />
       <div className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-foreground">{displayName}</span>
-        <p className="mt-0.5 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
-          {providerState === "ready"
-            ? "Ready."
-            : providerState === "checking"
+        {providerState === "ready" ? null : (
+          <p className="mt-0.5 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
+            {providerState === "checking"
               ? "Checking..."
               : `${summary.headline}${summary.detail ? ` · ${summary.detail}` : ""} Fix it in Settings → Providers.`}
-        </p>
+          </p>
+        )}
       </div>
       {providerState === "ready" ? (
         <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-success-foreground">
