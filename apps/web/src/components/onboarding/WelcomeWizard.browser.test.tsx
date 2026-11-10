@@ -99,7 +99,7 @@ it("finishes from Agents after Connect, without offering coding-project imports"
   expect(document.body.textContent).toContain("Create games on this computer");
   expect(document.body.textContent).not.toContain("Projects");
   await click("Continue");
-  expect(document.body.textContent).toContain("Choose the agent that builds your games.");
+  expect(document.body.textContent).toContain("Sign in to the agents that build your games");
   await click("Start making games");
   expect(mocks.complete).toHaveBeenCalledOnce();
   expect(onDone).toHaveBeenCalledExactlyOnceWith();

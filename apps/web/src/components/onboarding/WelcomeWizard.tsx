@@ -256,7 +256,7 @@ function AgentsStep({
   return (
     <StepShell
       title="Connect your agents"
-      description="Choose the agent that builds your games. Agents already installed here are listed; add another, such as Cursor, in Settings → Providers."
+      description="Sign in to the agents that build your games; you pick one for each new game. Agents already installed here are listed; add another, such as Cursor, in Settings → Providers."
     >
       {/* The list gets what the dialog's header, title and button leave, so the
           button stays on screen on short windows. */}
