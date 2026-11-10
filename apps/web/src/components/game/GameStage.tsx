@@ -117,6 +117,9 @@ const folderBuildName = (result: AsyncResult.AsyncResult<GameBuildsResult, unkno
   return build === undefined ? null : buildName(build);
 };
 
+const hasAnyBuild = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
+  AsyncResult.isSuccess(result) && result.value.builds.length > 0;
+
 /** The folder's own game frame, not a build copy's. */
 const isFolderGameFrame = (target: EventTarget) =>
   target instanceof HTMLIFrameElement && target.closest('[data-game-play-surface="true"]') !== null;
@@ -349,6 +352,15 @@ function ThreadGameStage({
         }),
     folderBuildName,
   );
+  // Before the first build the Stage plays only the starter shell: no game is paused.
+  const hasBuild =
+    useEnvironmentQuerySelector(
+      gameEnvironment.builds({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId },
+      }),
+      hasAnyBuild,
+    ) === true;
   const stageRef = useRef<HTMLElement | null>(null);
   // A compact switch unmounts nothing, but focus would die with the hidden
   // pane's button. Move it to the stage when the stage comes back.
@@ -826,7 +838,7 @@ function ThreadGameStage({
             <h2 className="min-w-0 truncate font-display text-xl leading-6">
               <TruncatedText text={data.manifest.name} />
             </h2>
-            {away ? (
+            {away && hasBuild ? (
               <span className="truncate text-xs leading-4 text-muted-foreground">
                 Paused while you are away from the Stage · click the game to play on
               </span>
