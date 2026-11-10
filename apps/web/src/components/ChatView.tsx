@@ -5270,6 +5270,10 @@ export default function ChatView(props: ChatViewProps) {
       "game.freeze": () => requestGameStage({ kind: "freeze" }),
       "game.playPrevious": () => requestGameStage({ kind: "step", by: -1 }),
       "game.playNext": () => requestGameStage({ kind: "step", by: 1 }),
+      "game.keepGoing.stop": ({ event }) => {
+        if (keepGoingBanner.stop === null) return false;
+        if (!event.repeat) keepGoingBanner.stop();
+      },
       "rightPanel.toggleMaximized": ({ event }) => {
         if (!event.repeat) toggleRightPanelMaximizedStable();
       },

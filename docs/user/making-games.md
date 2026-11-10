@@ -191,7 +191,8 @@ To start, open the **Keep going** control in the composer, where a coding chat p
 - **Autopilot:** the agent takes each step at once.
 
 Pick a budget in the same menu (1 hour unless you change it); while keep going runs, the menu shows
-when it ends. Choose **Off** to stop it: a step that is running stops and still becomes a build.
+when it ends. Choose **Off**, or press `mod+Alt+X`, to stop it: a step that is running stops and
+still becomes a build.
 
 When the game boots but has no play bot yet, keep going first has one written, once, in a session
 of its own that shows as a card in the chat: the bot is what measures whether a skilled player can

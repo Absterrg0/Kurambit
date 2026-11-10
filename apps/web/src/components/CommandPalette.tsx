@@ -1723,6 +1723,7 @@ function OpenCommandPaletteDialog(props: {
           title: "Stop keep going",
           searchTerms: ["keep going", "stop", "off", "pause", "game"],
           icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+          shortcutCommand: "game.keepGoing.stop",
           run: () => keepGoing.set({ mode: "off" }),
         });
       const proposal = keepGoingStatus.proposal;

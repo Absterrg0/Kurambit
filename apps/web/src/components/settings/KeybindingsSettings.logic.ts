@@ -370,6 +370,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "view.reopenClosed") return "Reopen Closed Tab";
   if (command === "game.chat.toggle") return "Game: Show or Hide the Dock";
   if (command === "game.freeze") return "Game: Freeze or Play On";
+  if (command === "game.keepGoing.stop") return "Game: Stop Keep Going";
   if (command === "preview.focusUrl") return "Preview: Focus URL";
   const raw = String(command);
   if (raw.startsWith("script.") && raw.endsWith(".run")) {

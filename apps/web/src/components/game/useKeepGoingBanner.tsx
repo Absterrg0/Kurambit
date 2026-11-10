@@ -30,21 +30,30 @@ const endingTitle = (text: string) => (
 export function useKeepGoingBanner(
   threadRef: ScopedThreadRef | null,
   onEdit: (text: string) => void,
-): { readonly item: ComposerBannerStackItem | null; readonly hidesNext: boolean } {
+): {
+  readonly item: ComposerBannerStackItem | null;
+  readonly hidesNext: boolean;
+  /** Ends the run, for the stop shortcut; `null` while nothing runs or it may not. */
+  readonly stop: (() => void) | null;
+} {
   const keepGoing = useKeepGoing(threadRef);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const status = keepGoing.status;
   const threadId = threadRef?.threadId ?? "";
   const view = keepGoingBannerView(status, threadId);
   const hidesNext = keepGoingHidesNext(status, threadId);
-  if (view === null || dismissed === view.id) return { item: null, hidesNext };
   const busy = keepGoing.sending;
+  const stopRun =
+    status !== null && status.mode !== "off" && keepGoing.canOperate && !busy
+      ? () => void keepGoing.set({ mode: "off" })
+      : null;
+  if (view === null || dismissed === view.id) return { item: null, hidesNext, stop: stopRun };
   const stop = (
     <Button
       size="xs"
       variant="ghost"
       disabled={busy || !keepGoing.canOperate}
-      onClick={() => void keepGoing.set({ mode: "off" })}
+      onClick={() => stopRun?.()}
     >
       Stop
     </Button>
@@ -54,6 +63,7 @@ export function useKeepGoingBanner(
     case "proposal":
       return {
         hidesNext,
+        stop: stopRun,
         item: {
           id: view.id,
           variant: "default",
@@ -111,6 +121,7 @@ export function useKeepGoingBanner(
     case "live":
       return {
         hidesNext,
+        stop: stopRun,
         item: {
           id: view.id,
           variant: "default",
@@ -131,6 +142,7 @@ export function useKeepGoingBanner(
     case "paused":
       return {
         hidesNext,
+        stop: stopRun,
         item: {
           id: view.id,
           variant: "info",
@@ -157,6 +169,7 @@ export function useKeepGoingBanner(
     case "ended":
       return {
         hidesNext,
+        stop: stopRun,
         item: {
           id: view.id,
           variant: "info",
