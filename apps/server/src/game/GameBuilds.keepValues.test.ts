@@ -79,6 +79,11 @@ const layerFor = (root: string) =>
               ReturnType<ProjectionStore.ProjectionStoreV2["Service"]["getThreadShell"]>
             >),
           listProjectTurnCheckpoints: () => Effect.succeed([]),
+          // No other chat of the game is at work.
+          getShellSnapshot: () =>
+            Effect.succeed({ threads: [] } as unknown as Effect.Success<
+              ReturnType<ProjectionStore.ProjectionStoreV2["Service"]["getShellSnapshot"]>
+            >),
         }),
         Layer.mock(GameFacts.GameFacts)({
           harness: "test",

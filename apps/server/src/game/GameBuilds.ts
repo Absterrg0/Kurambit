@@ -127,6 +127,15 @@ interface Entry {
   readonly base: string | null;
 }
 
+/** A chat's turn is running, queued or being captured in these. */
+const TURN_AT_WORK: ReadonlySet<string> = new Set([
+  "preparing",
+  "queued",
+  "starting",
+  "running",
+  "waiting",
+]);
+
 /** What a restore did to the folder; a failure is the restore's error instead. */
 export type RestoreMoved = "restored" | "current" | "moved-on";
 
@@ -1183,10 +1192,42 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * A chat of the game, outside the asking chat and its own subagents, whose turn is
+   * running, queued or being captured: its writes could land while the folder moves.
+   */
+  const otherChatAtWork = (g: Game, threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const { threads } = yield* projections
+        .getShellSnapshot({ projectId: g.projectId, location: "active" })
+        .pipe(
+          Effect.mapError((cause) =>
+            failed("Restore build", g.root, "io", "the game's chats could not be read", cause),
+          ),
+        );
+      const family = threads.find((shell) => shell.id === threadId)?.lineage.rootThreadId;
+      return (
+        threads.find(
+          (shell) =>
+            shell.id !== threadId &&
+            shell.lineage.rootThreadId !== family &&
+            (shell.activeRunId !== null || TURN_AT_WORK.has(shell.status)),
+        ) ?? null
+      );
+    });
+
   const restore: GameBuilds["Service"]["restore"] = (threadId, ref, commandId, options = {}) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
+      const working = yield* otherChatAtWork(g, threadId);
+      if (working !== null)
+        return yield* failed(
+          "Restore build",
+          g.root,
+          "busy",
+          `Another chat of this game ("${working.title}") is working on it, so nothing was restored. Try again once its turn ends.`,
+        );
       const result = yield* restoreWithoutRun(threadId, g, build, commandId, options.expect);
       if (result.moved !== "moved-on") yield* playRestored(threadId, g);
       // Undo, Redo or Go back moved the folder a Guided proposal read: the person goes first.
