@@ -48,6 +48,7 @@
     "effect": "catalog:",
     "gltfpack": "1.3.0",
     "jose": "catalog:",
+    "lru-cache": "11.5.3",
     "node-pty": "1.2.0-beta.15",
     "playwright-core": "1.60.0",
     "pngjs": "7.0.0",

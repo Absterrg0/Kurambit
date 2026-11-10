@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off preferSchemaOverJson:off -- Streams pinned archives to disk with an AbortSignal and a stall timer like the toolchain downloader, unpacks them, and reads glTF JSON headers of any shape.
-// The pinned CC0 library's file boundary: pins, safe unpacking and cheap facts about the files.
+// The pinned open library's file boundary: pins, safe unpacking and cheap facts about the files.
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -13,16 +14,119 @@ import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 import { readGltfJson } from "./gltfJson.ts";
 import { walkFiles } from "./walkFiles.ts";
 
+/**
+ * The licences a person may ship and sell a game under, by SPDX id. Anything else (NC, ND,
+ * SA, editorial, unversioned or unclear) is never indexed. OFL covers fonts only.
+ */
+export const LIBRARY_LICENCES = {
+  "CC0-1.0": {
+    name: "CC0 1.0",
+    url: "https://creativecommons.org/publicdomain/zero/1.0/",
+    credit: false,
+  },
+  "CC-BY-3.0": {
+    name: "CC BY 3.0",
+    url: "https://creativecommons.org/licenses/by/3.0/",
+    credit: true,
+  },
+  "CC-BY-4.0": {
+    name: "CC BY 4.0",
+    url: "https://creativecommons.org/licenses/by/4.0/",
+    credit: true,
+  },
+  MIT: { name: "MIT", url: "https://opensource.org/license/mit", credit: true },
+  "Apache-2.0": {
+    name: "Apache 2.0",
+    url: "https://www.apache.org/licenses/LICENSE-2.0",
+    credit: true,
+  },
+  "OFL-1.1": { name: "SIL OFL 1.1", url: "https://openfontlicense.org", credit: true },
+} as const;
+export type LibraryLicence = keyof typeof LIBRARY_LICENCES;
+
+/**
+ * The licence a source's own words name, when a game under it may be shipped and sold;
+ * null for anything else, including a CC BY without a version. Pure.
+ */
+export const shippableLicence = (text: string): LibraryLicence | null => {
+  const words = text
+    .toUpperCase()
+    .replace(/CREATIVE\s*COMMONS/g, "CC")
+    .replace(/ATTRIBUTION/g, "BY")
+    .replace(/[^A-Z0-9.]+/g, " ")
+    .trim();
+  if (/\b(NC|ND|SA|NONCOMMERCIAL|NODERIVATIVES|SHAREALIKE|EDITORIAL|GPL|LGPL|AGPL)\b/.test(words))
+    return null;
+  if (/^(CC0|CC ZERO)( 1\.0)?( UNIVERSAL)?$/.test(words)) return "CC0-1.0";
+  if (/^CC BY 3\.0( UNPORTED)?$/.test(words)) return "CC-BY-3.0";
+  if (/^CC BY 4\.0( INTERNATIONAL)?$/.test(words)) return "CC-BY-4.0";
+  if (/^MIT( LICEN[CS]E)?$/.test(words)) return "MIT";
+  if (/^APACHE( LICEN[CS]E)?( VERSION)? 2\.0$/.test(words)) return "Apache-2.0";
+  if (/^(SIL )?(OFL|OPEN FONT LICEN[CS]E) 1\.1$/.test(words)) return "OFL-1.1";
+  return null;
+};
+
+/**
+ * Why an entry may not be in the library, or null: a licence outside the shippable set, one
+ * that asks for credit with no credit line to give, or the font licence on anything but fonts.
+ */
+export const entryLicenceProblem = (
+  entry: Pick<LibraryPack, "id" | "licence" | "credit" | "kinds">,
+): string | null => {
+  const licence = LIBRARY_LICENCES[entry.licence] as
+    | (typeof LIBRARY_LICENCES)[LibraryLicence]
+    | undefined;
+  if (licence === undefined)
+    return `${entry.id}: ${entry.licence} is not a licence a sold game may ship under`;
+  if (licence.credit && (entry.credit ?? "").trim() === "")
+    return `${entry.id}: ${licence.name} asks for credit and the entry has no credit line`;
+  if (entry.licence === "OFL-1.1" && entry.kinds.some((kind) => kind !== "font"))
+    return `${entry.id}: the OFL covers fonts only`;
+  return null;
+};
+
+/** The line a game's credits give an entry: the source's own credit wording when it has one. */
+export const creditLine = (pack: Pick<LibraryPack, "title" | "author" | "licence" | "credit">) =>
+  `${pack.credit ?? `${pack.title} by ${pack.author}`} · ${LIBRARY_LICENCES[pack.licence].name}`;
+
+/** One file of a pack made of loose files, pinned by what its source publishes. */
+export interface LibraryPackFile {
+  /** Pack-relative, forward slashes: where it lands, as the model beside it names it. */
+  readonly path: string;
+  readonly url: string;
+  readonly bytes: number;
+  readonly sha256?: string;
+  /** The source's own MD5 (Poly Haven publishes no other hash). */
+  readonly md5?: string;
+  /** The source publishes no size or hash (Poly Pizza): bytes is only a ceiling. */
+  readonly capped?: true;
+}
+
 export interface LibraryPack {
   readonly id: string;
   readonly title: string;
   readonly author: string;
   readonly source: string;
+  /** The archive, or for a pack of loose `files` the first of them. */
   readonly download: string;
-  readonly sha256: string;
+  /**
+   * The archive's SHA-256, or a pack of loose files' manifest digest (filesDigest). Absent
+   * when the source publishes no hash and the pack is pinned by its size alone (ambientCG).
+   */
+  readonly sha256?: string;
   readonly bytes: number;
-  readonly licence: "CC0-1.0";
+  readonly licence: LibraryLicence;
   readonly licenceEvidence: string;
+  /** Who to credit and how, in the source's own words; every licence that asks for credit has one. */
+  readonly credit?: string;
+  /** A pack of loose files, each pinned, instead of one archive. */
+  readonly files?: ReadonlyArray<LibraryPackFile>;
+  /** The per-asset source it is one asset of (polyhaven, ambientcg): a lock lists the source. */
+  readonly group?: string;
+  /** How many of its models carry clips of their own, read at pin time. */
+  readonly animated?: number;
+  /** The source's picture of it, shown before anything is fetched. */
+  readonly preview?: string;
   readonly kinds: ReadonlyArray<GameLibraryKind>;
   readonly formats: ReadonlyArray<string>;
   readonly style: string;
@@ -77,10 +181,13 @@ export const INDEX_VERSION = 2;
 export interface LibraryIndex {
   readonly version: typeof INDEX_VERSION;
   readonly pack: string;
+  /** pinOf the pack it was built from. */
   readonly sha256: string;
   readonly files: ReadonlyArray<LibraryFile>;
   /** The pack's own overview images (Preview.png, Sample.png). */
   readonly previews: ReadonlyArray<string>;
+  /** The SHA-256 of what arrived, for a pack whose pin holds none (size only, or a ceiling). */
+  readonly fetched?: string;
 }
 
 const MEDIA: Record<string, LibraryMedia> = {
@@ -89,6 +196,8 @@ const MEDIA: Record<string, LibraryMedia> = {
   jpeg: "image",
   webp: "image",
   svg: "image",
+  hdr: "image",
+  exr: "image",
   glb: "model",
   gltf: "model",
   fbx: "model",
@@ -113,7 +222,7 @@ const MEDIA: Record<string, LibraryMedia> = {
 // the three.js template vendors only GLTFLoader, so neither is offered there.
 const LOADABLE: Record<GameEngineId, ReadonlySet<string>> = {
   godot: new Set(
-    "png jpg jpeg webp svg glb gltf fbx obj dae ogg wav mp3 ttf otf txt xml json tmx tsx mtl bin".split(
+    "png jpg jpeg webp svg hdr exr glb gltf fbx obj dae ogg wav mp3 ttf otf txt xml json tmx tsx mtl bin".split(
       " ",
     ),
   ),
@@ -121,7 +230,7 @@ const LOADABLE: Record<GameEngineId, ReadonlySet<string>> = {
     "png jpg jpeg webp svg glb gltf ogg wav mp3 ttf otf txt xml json tmx tsx bin".split(" "),
   ),
   unity: new Set(
-    "png jpg jpeg glb gltf fbx obj ogg wav mp3 ttf otf txt xml json mtl bin".split(" "),
+    "png jpg jpeg hdr exr glb gltf fbx obj ogg wav mp3 ttf otf txt xml json mtl bin".split(" "),
   ),
 };
 
@@ -146,12 +255,44 @@ export const modelRank = (engine: GameEngineId, format: string) => {
 
 /** Null when the bytes are the pinned ones; otherwise what differs, for the error detail. */
 export const pinProblem = (
-  pack: Pick<LibraryPack, "sha256" | "bytes">,
-  actual: { readonly sha256: string; readonly bytes: number },
-) =>
-  actual.sha256 === pack.sha256 && actual.bytes === pack.bytes
-    ? null
-    : `Pinned sha256 ${pack.sha256} (${pack.bytes} bytes); got ${actual.sha256} (${actual.bytes} bytes).`;
+  pin: {
+    readonly sha256?: string | undefined;
+    readonly md5?: string | undefined;
+    readonly bytes: number;
+    readonly capped?: true | undefined;
+  },
+  actual: { readonly sha256: string; readonly md5?: string; readonly bytes: number },
+) => {
+  const hashOk =
+    (pin.sha256 === undefined || actual.sha256 === pin.sha256) &&
+    (pin.md5 === undefined || actual.md5 === pin.md5);
+  const sizeOk = pin.capped === true ? actual.bytes <= pin.bytes : actual.bytes === pin.bytes;
+  if (hashOk && sizeOk) return null;
+  const pinned = pin.sha256 ?? (pin.md5 === undefined ? undefined : `md5 ${pin.md5}`);
+  return `Pinned ${pinned === undefined ? "" : `${pin.sha256 === undefined ? pinned : `sha256 ${pinned}`} `}(${pin.bytes} bytes); got sha256 ${actual.sha256}${pin.md5 === undefined ? "" : ` md5 ${actual.md5}`} (${actual.bytes} bytes).`;
+};
+
+/** A pack of loose files is pinned by this digest of its files' paths and pins. Pure. */
+export const filesDigest = (files: ReadonlyArray<LibraryPackFile>) =>
+  NodeCrypto.createHash("sha256")
+    .update(
+      files
+        .map(
+          (file) =>
+            `${file.path}\t${file.bytes}\t${file.sha256 ?? ""}\t${file.md5 ?? ""}\t${file.url}`,
+        )
+        .toSorted()
+        .join("\n"),
+    )
+    .digest("hex");
+
+/** The short pin a pack's cache folders are keyed by: its hash, or its size when it has none. */
+export const pinKey = (pack: Pick<LibraryPack, "sha256" | "bytes">) =>
+  pack.sha256 === undefined ? `b${pack.bytes}` : pack.sha256.slice(0, 12);
+
+/** What a saved index was built from: the pack's hash, or its size when it has none. */
+export const pinOf = (pack: Pick<LibraryPack, "sha256" | "bytes">) =>
+  pack.sha256 ?? `bytes:${pack.bytes}`;
 
 /**
  * Streams one pinned archive to `destination`. Never keeps more bytes than the pin
@@ -160,10 +301,11 @@ export const pinProblem = (
  * Module-level so Effect's fetch diagnostic never sees it; reached only through Effect.tryPromise.
  */
 export async function downloadPinned(
-  pack: Pick<LibraryPack, "download" | "bytes">,
+  pack: { readonly download: string; readonly bytes: number },
   destination: string,
   signal: AbortSignal,
   stallMs = 60_000,
+  headers: Readonly<Record<string, string>> = {},
 ) {
   const stall = new AbortController();
   const stalled = () =>
@@ -174,7 +316,7 @@ export async function downloadPinned(
     const response = await fetch(pack.download, {
       signal: requestSignal,
       redirect: "follow",
-      headers: { "user-agent": "Kurambit asset library" },
+      headers: { "user-agent": "Kurambit asset library", ...headers },
     });
     if (response.status >= 400 && response.status < 500)
       // The source answered and does not have it: no network change or retry brings it back.
@@ -205,6 +347,33 @@ export async function downloadPinned(
     clearTimeout(timer);
   }
 }
+
+/**
+ * One JSON answer from a source's API, given up on after `timeoutMs`; the HTTP status rides on
+ * the error so a caller can tell a refused key from a source that is down.
+ * Module-level so Effect's fetch diagnostic never sees it; reached only through Effect.tryPromise.
+ */
+export async function fetchJson(
+  url: string,
+  headers: Readonly<Record<string, string>>,
+  signal: AbortSignal,
+  timeoutMs = 20_000,
+): Promise<unknown> {
+  const response = await fetch(url, {
+    signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+    headers: { "user-agent": "Kurambit asset library", ...headers },
+  });
+  if (!response.ok)
+    throw Object.assign(new Error(`HTTP ${response.status}`), { status: response.status });
+  return await response.json();
+}
+
+/** A file's MD5, streamed: the hash Poly Haven publishes beside each file. */
+export const hashFileMd5 = async (path: string) => {
+  const hash = NodeCrypto.createHash("md5");
+  await NodeStreamPromises.pipeline(NodeFS.createReadStream(path), hash);
+  return hash.digest("hex");
+};
 
 export interface UnpackLimits {
   readonly entries: number;
@@ -463,7 +632,7 @@ export const modelPictures = (
 
 /** Facts about every usable file in an unpacked pack. Reads headers only, except glTF JSON. */
 export const indexPack = async (
-  pack: Pick<LibraryPack, "id" | "sha256">,
+  pack: Pick<LibraryPack, "id" | "sha256" | "bytes">,
   directory: string,
 ): Promise<LibraryIndex> => {
   const paths = (await walkFiles(directory)).map((full) =>
@@ -555,7 +724,7 @@ export const indexPack = async (
   return {
     version: INDEX_VERSION,
     pack: pack.id,
-    sha256: pack.sha256,
+    sha256: pinOf(pack),
     files: withPictures,
     previews,
   };

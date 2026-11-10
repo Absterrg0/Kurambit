@@ -59,6 +59,7 @@ Use the game_* tools to check, play, export and package the game; never launch y
     library: "library",
     blender: "assets/blender",
     sprites: "sprites",
+    credits: "credits.txt",
   },
   viewport: THREE_VIEWPORT,
   play: "browser",

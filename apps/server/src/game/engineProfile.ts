@@ -112,6 +112,8 @@ export interface GameEngineProfile {
     readonly blender: string;
     /** Where rendered sprite strips go, under assets. */
     readonly sprites: string;
+    /** The file the game's credits screen reads, under the project directory. */
+    readonly credits: string;
   };
   /**
    * How its plays on a private Linux display draw when that differs from the
@@ -210,6 +212,7 @@ export const gamePaths = (engine: GameEngineId, project: string) => {
     library: `${assets}/${layout.library}`,
     blender: `${project}/${layout.blender}`,
     sprites: `${assets}/${layout.sprites}`,
+    credits: `${project}/${layout.credits}`,
   };
 };
 

@@ -72,6 +72,8 @@ export default defineConfig({
       // Third-party three.js, its addons and postprocessing, vendored into the
       // game template as published.
       "apps/server/templates/runtime/*/*/vendor/**",
+      // The asset library's index, written compact by apps/server/scripts/library-index.ts.
+      "apps/server/src/game/library/*.json",
     ],
     sortPackageJson: {},
     overrides: [

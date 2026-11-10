@@ -18,11 +18,14 @@ modeller; you have no local Blender, Godot or image tools.
 
 ## Lock the look: STYLE.json
 
-`game_assets_search` with no words lists the library by style family. Look
-at a pack's contact sheet (pass `pack`) before choosing, then pass the
-family and the view as `lock` with the first `game_assets_add`: it writes
-`STYLE.json` at the game root with the family's packs, rig and pixel
-palette. What you may add to it later, on purpose:
+`game_assets_search` with no words lists the library by style family; with
+words it ranks packs and single assets (Poly Haven, ambientCG, Poly Pizza)
+with their pictures. Look at the contact sheet before choosing, then pass
+the family and the view as `lock` with the first `game_assets_add`: it
+writes `STYLE.json` at the game root with the family, its rig and pixel
+palette. Every pack of the family fits the lock; `packs` lists the curated
+ones and whatever you add beyond the family on purpose (a source such as
+`ambientcg` admits all its assets). What you may add to it later, on purpose:
 
 - `anchor`: the image the look answers to (`art/key-art.png`): its palette is
   the lock's, and every generation passes it as a reference.
@@ -57,7 +60,10 @@ change the route. An unrigged model is a prop on every route.
   (`quaternius-universal-base-characters`) puts it on the skeleton with the
   library's clips. No character fits: recolour one (a family's characters
   share one small colormap texture; edit a copy of that PNG and point the
-  copy's material at it).
+  copy's material at it). Animals and creatures (Quaternius' animals,
+  dinosaurs, fish and monsters, animated Poly Pizza models) each come on a
+  skeleton of their own with their own clips: play a model's clips on that
+  model only.
 - `blender`: made characters: on the standard skeleton with the library's
   clips (Made characters), or on their own rig with their own clips (Made
   from scratch).
@@ -351,9 +357,11 @@ three-view sheet is carved. What no pack has, build in the live Blender:
 proportions, its bevel (never flat boxes) and colours by palette role
 (`kurambit.material("#RRGGBB")`). Design set pieces for the camera: a
 third-person or top-down camera needs low partitions (about 1.8 m in a 4 m
-cell), not full-height walls. Realistic models and textures
-(`game_blender_assets_search`: Poly Haven is CC0, no key; Sketchfab and Poly
-Pizza need the person's keys) belong only in a realistic lock.
+cell), not full-height walls. Realistic models and materials (Poly Haven
+and ambientCG in `game_assets_search`; Sketchfab in
+`game_blender_assets_search` with the person's key) belong only in a
+realistic lock; an HDR sky that only lights the scene suits any 3D look.
+A CC BY entry is credited by the add; keep its line in the credits file.
 
 ## Key art
 

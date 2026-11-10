@@ -20,8 +20,13 @@
 // every body to it). kenney-blocky is a shared node hierarchy without a skin;
 // kenney-character, quaternius-knight and quaternius-ultimate ship as FBX and are named
 // from the author's description.
+//
+// The packs above are curated by hand; library/packs.json holds the rest of Kenney's 3D kits,
+// Quaternius' site packs and KayKit, pinned by scripts/library-index.ts with the same facts
+// read from their bytes, and joins them in LIBRARY_CATALOG.
 import { STANDARD_SKELETON } from "@kurambit/contracts";
 import type { LibraryFamily, LibraryPack } from "./assetLibraryFiles.ts";
+import generatedPacks from "./library/packs.json" with { type: "json" };
 
 /**
  * The bones of each rig read from its GLBs at pin time, as Blender names them after a glTF
@@ -190,7 +195,7 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
   {
     id: "quaternius-lowpoly",
     title: "Quaternius low-poly 3D",
-    look: "low-poly 3D: animated knights, monsters and people, a textured medieval village and stylised nature",
+    look: "flat-coloured low-poly 3D, rounded and friendly: animated animals, dinosaurs, fish, monsters, mechs, knights and people (each kind on its own skeleton with its own clips), vehicles, guns, food, nature, dungeons and towns; the megakits are the same shapes with soft textures",
   },
   {
     id: "quaternius-universal",
@@ -224,7 +229,12 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
   {
     id: "photo-pbr",
     title: "Photo-scanned PBR",
-    look: "realistic photo-scanned textures",
+    look: "realistic photo-scanned materials, photographed HDR skies and photo-real models (Poly Haven, ambientCG): a realistic look, or skies that light any 3D game",
+  },
+  {
+    id: "polypizza",
+    title: "Poly Pizza low-poly",
+    look: "untextured flat-colour low-poly models by many makers (Google Poly's archive, Quaternius, Kenney and others): keep to one maker's style per game",
   },
   {
     id: "kenney-audio",
@@ -243,7 +253,8 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
   },
 ];
 
-export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
+/** The hand-curated packs; a derived lock lists its family's among them. */
+export const CURATED_PACKS: ReadonlyArray<LibraryPack> = [
   {
     id: "kenney-pixel-platformer",
     title: "Pixel Platformer",
@@ -1229,4 +1240,12 @@ export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
     description: "Tileable 1K PBR wood-plank floor material.",
     family: "photo-pbr",
   },
+];
+
+/** Every pinned pack: the curated ones, then the generated ones whose ids they do not take. */
+export const LIBRARY_CATALOG: ReadonlyArray<LibraryPack> = [
+  ...CURATED_PACKS,
+  ...(generatedPacks.packs as ReadonlyArray<LibraryPack>).filter(
+    (pack) => !CURATED_PACKS.some((curated) => curated.id === pack.id),
+  ),
 ];

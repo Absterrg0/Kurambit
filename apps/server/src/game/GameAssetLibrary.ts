@@ -7,6 +7,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
+import { LRUCache } from "lru-cache";
 import {
   GameOperationError,
   type GameEngineId,
@@ -20,6 +21,15 @@ import {
   type ThreadId,
 } from "@kurambit/contracts";
 import { LIBRARY_CATALOG, LIBRARY_FAMILIES } from "./assetLibraryCatalog.ts";
+import {
+  INDEXED_ON,
+  LIBRARY_ASSETS,
+  LIBRARY_SOURCES,
+  polyPizzaEntry,
+  polyPizzaModelId,
+  type PolyPizzaModel,
+} from "./assetLibrarySources.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { parseEbur128 } from "./audioLoudness.ts";
 import {
   lockPackRefusal,
@@ -34,8 +44,16 @@ import { hashFile } from "./sourceSnapshot.ts";
 import { readGltfJson } from "./gltfJson.ts";
 import {
   INDEX_VERSION,
+  LIBRARY_LICENCES,
   UNPACK_LIMITS,
+  creditLine,
   downloadPinned,
+  entryProblem,
+  fetchJson,
+  filesDigest,
+  hashFileMd5,
+  pinKey,
+  pinOf,
   indexPack,
   loadableIn,
   matchScore,
@@ -55,6 +73,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import { toolsDirectory } from "./GameToolchain.ts";
 import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
 import * as GameTemplates from "./GameTemplates.ts";
+import { walkFiles } from "./walkFiles.ts";
 
 /** Beside the pinned tools, shared by every game on this machine. */
 const libraryDirectory = () => NodePath.join(NodePath.dirname(toolsDirectory()), "asset-library");
@@ -88,6 +107,7 @@ const KIND_MEDIA: Record<GameLibraryKind, LibraryMedia> = {
   ui: "image",
   icon: "image",
   texture: "image",
+  hdri: "image",
   character: "model",
   model: "model",
   animation: "model",
@@ -99,7 +119,7 @@ const KIND_MEDIA: Record<GameLibraryKind, LibraryMedia> = {
 export class GameAssetLibrary extends Context.Service<
   GameAssetLibrary,
   {
-    /** The pinned CC0 library: packs, or files inside one pack with a contact sheet. */
+    /** The pinned open library: packs and single assets, or files inside one pack with a contact sheet. */
     readonly search: (
       threadId: ThreadId,
       input: GameAssetsSearchInput,
@@ -189,14 +209,10 @@ const keepNewest = async (directory: string, keep: number, pick: (name: string) 
 
 /** Scratch names carry the pid of the server that made them, so a sweep spares a live server's fetch. */
 const SCRATCH_NAME =
-  /^(?:(\d+)-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\.part)?$/;
+  /^[a-z0-9][a-z0-9-]*?-(?:(\d+)-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\.part)?$/;
 const scratchPid = (name: string): number | null | undefined => {
-  for (const pack of LIBRARY_CATALOG) {
-    if (!name.startsWith(`${pack.id}-`)) continue;
-    const match = SCRATCH_NAME.exec(name.slice(pack.id.length + 1));
-    if (match !== null) return match[1] === undefined ? null : Number(match[1]);
-  }
-  return undefined;
+  const match = SCRATCH_NAME.exec(name);
+  return match === null ? undefined : match[1] === undefined ? null : Number(match[1]);
 };
 const alive = (pid: number) => {
   try {
@@ -213,7 +229,7 @@ const readSaved = (pack: LibraryPack, dir: string) =>
     (text) => {
       const saved = JSON.parse(text) as LibraryIndex;
       return saved.version === INDEX_VERSION &&
-        saved.sha256 === pack.sha256 &&
+        saved.sha256 === pinOf(pack) &&
         Array.isArray(saved.files)
         ? saved
         : null;
@@ -223,7 +239,27 @@ const readSaved = (pack: LibraryPack, dir: string) =>
 
 // The index version is part of the folder name: servers of different versions
 // share this cache, and each must only ever replace a folder of its own version.
-const packKey = (pack: LibraryPack) => `${pack.id}-${pack.sha256.slice(0, 12)}-i${INDEX_VERSION}`;
+const packKey = (pack: LibraryPack) => `${pack.id}-${pinKey(pack)}-i${INDEX_VERSION}`;
+
+/**
+ * The library cache's ceiling: least recently used packs go past it. Every server on the
+ * machine shares the folder and each keeps its own ledger of it, so this bounds what one
+ * server grows it to; KURAMBIT_ASSET_LIBRARY_MB changes it.
+ */
+const CACHE_BYTES = (Number(process.env.KURAMBIT_ASSET_LIBRARY_MB) || 4096) * 1024 * 1024;
+
+/** Bytes under a folder, links not followed. */
+const folderBytes = async (path: string) => {
+  let total = 0;
+  for (const file of await walkFiles(path)) {
+    const stat = await NodeFSP.lstat(file).catch(() => null);
+    total += stat?.size ?? 0;
+  }
+  return total;
+};
+
+/** The pack's archive in the cache, kept beside its folder for packs (not single assets). */
+const archiveName = (pack: LibraryPack) => `${pack.id}-${pinKey(pack)}.zip`;
 
 /** Moves a finished staging folder into place; another server sharing the cache may have placed it first. */
 const place = async (pack: LibraryPack, staging: string, dir: string, built: LibraryIndex) => {
@@ -246,14 +282,44 @@ type DirOutcome =
   | { readonly kind: "dir"; readonly path: string }
   | { readonly kind: "link" | "file"; readonly at: string };
 
+/** Every pinned entry by id: packs, then the per-asset sources' assets. */
+const ENTRIES: ReadonlyMap<string, LibraryPack> = new Map(
+  [...LIBRARY_CATALOG, ...LIBRARY_ASSETS].map((pack) => [pack.id, pack]),
+);
+
+const POLY_PIZZA_API = "https://api.poly.pizza/v1.1";
+
 const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const projects = yield* GameProjectService.GameProjectService;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const directory = libraryDirectory();
   const scratch = NodePath.join(directory, "tmp");
   const locks = yield* KeyedLock.make<string>();
   const writeAtomic = yield* makeAtomicWriter;
   const indexes = new Map<string, LibraryIndex>();
+  /** Poly Pizza models this server has seen in a search or looked up, by entry id. */
+  const polyPizzaSeen = new Map<string, LibraryPack>();
+  // The cache's ledger: each placed pack folder (and its archive) by its bytes. Going past the
+  // ceiling removes the least recently used; a pack in use is the most recent, so it stays.
+  const ledger = new LRUCache<string, number>({
+    maxSize: CACHE_BYTES,
+    sizeCalculation: (bytes) => Math.max(1, Math.min(bytes, CACHE_BYTES)),
+    dispose: (_bytes, key, reason) => {
+      if (reason !== "evict") return;
+      if (key.startsWith("previews/")) {
+        void NodeFSP.rm(NodePath.join(directory, key), { force: true }).catch(() => undefined);
+        return;
+      }
+      void NodeFSP.rm(NodePath.join(directory, "packs", key), { recursive: true, force: true })
+        .then(() =>
+          NodeFSP.rm(NodePath.join(directory, "archives", `${key.replace(/-i\d+$/, "")}.zip`), {
+            force: true,
+          }),
+        )
+        .catch(() => undefined);
+    },
+  });
   const fontDirectory = yield* labelFontDirectory(yield* GameTemplates.GameTemplates);
   if (fontDirectory === undefined)
     yield* Effect.logWarning(
@@ -289,6 +355,31 @@ const make = Effect.gen(function* () {
     }
   });
 
+  // The ledger starts from what is on disk, oldest first, so the oldest go first.
+  yield* Effect.promise(async () => {
+    const packs = NodePath.join(directory, "packs");
+    const found: Array<{ key: string; bytes: number; at: number }> = [];
+    for (const name of await NodeFSP.readdir(packs).catch(() => [] as string[])) {
+      const stat = await NodeFSP.stat(NodePath.join(packs, name)).catch(() => null);
+      if (stat === null || !stat.isDirectory()) continue;
+      const archive = await NodeFSP.stat(
+        NodePath.join(directory, "archives", `${name.replace(/-i\d+$/, "")}.zip`),
+      ).catch(() => null);
+      found.push({
+        key: name,
+        bytes: (await folderBytes(NodePath.join(packs, name))) + (archive?.size ?? 0),
+        at: stat.mtimeMs,
+      });
+    }
+    const previews = NodePath.join(directory, "previews");
+    for (const name of await NodeFSP.readdir(previews).catch(() => [] as string[])) {
+      const stat = await NodeFSP.stat(NodePath.join(previews, name)).catch(() => null);
+      if (stat !== null && stat.isFile())
+        found.push({ key: `previews/${name}`, bytes: stat.size, at: stat.mtimeMs });
+    }
+    for (const entry of found.toSorted((a, b) => a.at - b.at)) ledger.set(entry.key, entry.bytes);
+  });
+
   const fail = (
     operation: string,
     path: string,
@@ -313,21 +404,120 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const packOf = (id: string) => {
-    const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
-    return pack === undefined
-      ? Effect.fail(
-          fail(
+  const polyPizzaKey = settings.getSettings.pipe(
+    Effect.map((current) => current.gamePolyPizzaApiKey),
+    Effect.orElseSucceed(() => ""),
+  );
+  /** One Poly Pizza API answer with the person's key; the key never reaches a log or a reply. */
+  const polyPizzaGet = (path: string, key: string) =>
+    Effect.tryPromise({
+      try: (signal) => fetchJson(`${POLY_PIZZA_API}${path}`, { "x-auth-token": key }, signal),
+      catch: (cause) => {
+        const status = (cause as { status?: number }).status;
+        return fail(
+          "Library Poly Pizza",
+          "poly.pizza",
+          status === 401 || status === 403 ? "invalid-input" : "download",
+          status === 401 || status === 403
+            ? "Poly Pizza refused the API key set in Settings → Game tools; the person needs to check it."
+            : `Poly Pizza did not answer (${status === undefined ? reasonText(cause) : `HTTP ${status}`}).`,
+        );
+      },
+    });
+
+  const packOf = (id: string): Effect.Effect<LibraryPack, GameOperationError> =>
+    Effect.gen(function* () {
+      const pack = ENTRIES.get(id) ?? polyPizzaSeen.get(id);
+      if (pack !== undefined) return pack;
+      const model = polyPizzaModelId(id);
+      if (model !== null) {
+        const key = yield* polyPizzaKey;
+        if (key === "")
+          return yield* fail(
             "Library",
             id,
             "invalid-input",
-            "No library pack has that id. Search without pack to list the packs.",
-          ),
-        )
-      : Effect.succeed(pack);
-  };
+            "Poly Pizza models need the person's own Poly Pizza API key (Settings → Game tools); none is set, so say so in your reply and use another source.",
+          );
+        const entry = polyPizzaEntry(
+          (yield* polyPizzaGet(`/model/${encodeURIComponent(model)}`, key)) as PolyPizzaModel,
+        );
+        if (entry === null)
+          return yield* fail(
+            "Library",
+            id,
+            "invalid-input",
+            "That Poly Pizza model's licence is not one a sold game may ship under (only CC0 and CC BY are), or it has no GLB.",
+          );
+        polyPizzaSeen.set(entry.id, entry);
+        return entry;
+      }
+      return yield* fail(
+        "Library",
+        id,
+        "invalid-input",
+        "No library pack or asset has that id. Search to find one.",
+      );
+    });
 
   const packDir = (pack: LibraryPack) => NodePath.join(directory, "packs", packKey(pack));
+
+  /** Downloads one pinned file into place and checks it against its pin. */
+  const fetchPinned = (
+    pin: {
+      readonly url: string;
+      readonly bytes: number;
+      readonly sha256?: string | undefined;
+      readonly md5?: string | undefined;
+      readonly capped?: true | undefined;
+    },
+    destination: string,
+    label: string,
+    headers: Readonly<Record<string, string>> = {},
+  ) =>
+    Effect.gen(function* () {
+      const part = NodePath.join(
+        scratch,
+        `${label}-${process.pid}-${NodeCrypto.randomUUID()}.part`,
+      );
+      return yield* Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: () => NodeFSP.mkdir(scratch, { recursive: true }),
+          catch: io("Library fetch", scratch),
+        });
+        yield* Effect.tryPromise({
+          try: (signal) =>
+            downloadPinned({ download: pin.url, bytes: pin.bytes }, part, signal, 60_000, headers),
+          catch: (cause) =>
+            fail(
+              "Library fetch",
+              pin.url,
+              "download",
+              `Could not download ${label} (${pin.capped === true ? "up to " : ""}${megabytes(pin.bytes)}) from its source: ${reasonText(cause)}`,
+              cause,
+            ),
+        });
+        const fetched = yield* Effect.tryPromise({
+          try: async () => ({
+            ...(await hashFile(part)),
+            ...(pin.md5 === undefined ? {} : { md5: await hashFileMd5(part) }),
+          }),
+          catch: io("Library fetch", part),
+        });
+        const problem = pinProblem(pin, fetched);
+        if (problem !== null)
+          return yield* fail("Library fetch", pin.url, "source-changed", `${label}: ${problem}`);
+        // Renaming over a copy another server just finished is fine: the pin makes them identical.
+        yield* Effect.tryPromise({
+          try: async () => {
+            await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
+            await NodeFSP.rename(part, destination);
+          },
+          catch: io("Library fetch", destination),
+        });
+        return fetched.sha256;
+      }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(part, { force: true }))));
+    });
 
   /** Downloads, verifies, unpacks and indexes a pack; runs under that pack's own lock. */
   const fetchPack = (pack: LibraryPack) =>
@@ -339,6 +529,7 @@ const make = Effect.gen(function* () {
       const saved = yield* Effect.promise(() => readSaved(pack, dir));
       if (saved !== null && (yield* exists(NodePath.join(dir, "files")))) {
         indexes.set(pack.id, saved);
+        ledger.get(packKey(pack));
         return saved;
       }
       const archives = NodePath.join(directory, "archives");
@@ -349,95 +540,114 @@ const make = Effect.gen(function* () {
         },
         catch: io("Library fetch", directory),
       });
-      const archive = NodePath.join(archives, `${pack.id}-${pack.sha256.slice(0, 12)}.zip`);
-      if (yield* exists(archive)) {
-        const cached = yield* Effect.tryPromise({
-          try: () => hashFile(archive),
-          catch: io("Library fetch", archive),
-        });
-        if (pinProblem(pack, cached) !== null) {
-          // Our own copy changed on disk; the pin still names the source's bytes, so fetch them again.
-          yield* Effect.logWarning("asset library: cached archive failed its pin; fetching again", {
-            pack: pack.id,
-          });
-          yield* Effect.promise(() => NodeFSP.rm(archive, { force: true }));
-        }
-      }
-      if (!(yield* exists(archive))) {
-        const part = NodePath.join(
-          scratch,
-          `${pack.id}-${process.pid}-${NodeCrypto.randomUUID()}.part`,
-        );
-        yield* Effect.gen(function* () {
-          yield* Effect.tryPromise({
-            try: (signal) => downloadPinned(pack, part, signal),
-            catch: (cause) =>
-              fail(
-                "Library fetch",
-                pack.download,
-                "download",
-                `Could not download ${pack.id} (${megabytes(pack.bytes)}) from its source: ${reasonText(cause)}`,
-                cause,
-              ),
-          });
-          const fetched = yield* Effect.tryPromise({
-            try: () => hashFile(part),
-            catch: io("Library fetch", part),
-          });
-          const problem = pinProblem(pack, fetched);
-          if (problem !== null)
-            return yield* fail(
-              "Library fetch",
-              pack.download,
-              "source-changed",
-              `${pack.id}: ${problem}`,
-            );
-          // Renaming over a copy another server just finished is fine: the pin makes them identical.
-          yield* Effect.tryPromise({
-            try: () => NodeFSP.rename(part, archive),
-            catch: io("Library fetch", archive),
-          });
-        }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(part, { force: true }))));
-      }
       const staging = NodePath.join(
         scratch,
         `${pack.id}-${process.pid}-${NodeCrypto.randomUUID()}`,
       );
       const files = NodePath.join(staging, "files");
-      // A pack inside a deeper folder (a GitHub commit archive's <repo>-<commit>/...)
-      // unpacks whole beside files/, and that folder becomes files/.
-      const unpacked = pack.root === undefined ? files : NodePath.join(staging, "archive");
+      const archive = NodePath.join(archives, archiveName(pack));
       const index = yield* Effect.gen(function* () {
-        yield* Effect.tryPromise({
-          try: () => NodeFSP.mkdir(unpacked, { recursive: true }),
-          catch: io("Library unpack", staging),
-        });
-        yield* unpackArchive(archive, unpacked, UNPACK_LIMITS);
-        if (pack.root !== undefined) {
-          const inner = NodePath.join(unpacked, ...pack.root.split("/"));
+        /** The SHA-256 of what arrived, recorded for a pin that has none of its own. */
+        let fetched: string | undefined;
+        if (pack.files !== undefined) {
+          // Loose files: each lands at its pack path, which must stay inside the pack.
+          for (const file of pack.files) {
+            const problem = entryProblem({
+              fileName: file.path,
+              externalFileAttributes: 0,
+              generalPurposeBitFlag: 0,
+              compressionMethod: 0,
+            });
+            if (problem !== null)
+              return yield* fail(
+                "Library fetch",
+                pack.id,
+                "unsafe-archive",
+                `${pack.id} names ${JSON.stringify(file.path.slice(0, 120))}, ${problem}.`,
+              );
+          }
+          const key = pack.group === "polypizza" ? yield* polyPizzaKey : "";
+          const sums = yield* Effect.forEach(
+            pack.files,
+            (file) =>
+              fetchPinned(
+                file,
+                NodePath.join(files, ...file.path.split("/")),
+                pack.id,
+                // Poly Pizza asks for the key on its file host too (poly.pizza/apispec/v1.1.yaml).
+                key === "" || !file.url.startsWith("https://static.poly.pizza/")
+                  ? {}
+                  : { "x-auth-token": key },
+              ),
+            { concurrency: 4 },
+          );
+          if (pack.files.some((file) => file.sha256 === undefined))
+            fetched =
+              sums.length === 1
+                ? sums[0]
+                : filesDigest(pack.files.map((file, i) => ({ ...file, sha256: sums[i] ?? "" })));
+        } else {
+          if (yield* exists(archive)) {
+            const cached = yield* Effect.tryPromise({
+              try: () => hashFile(archive),
+              catch: io("Library fetch", archive),
+            });
+            if (pinProblem(pack, cached) !== null) {
+              // Our own copy changed on disk; the pin still names the source's bytes, so fetch them again.
+              yield* Effect.logWarning(
+                "asset library: cached archive failed its pin; fetching again",
+                { pack: pack.id },
+              );
+              yield* Effect.promise(() => NodeFSP.rm(archive, { force: true }));
+            } else if (pack.sha256 === undefined) fetched = cached.sha256;
+          }
+          if (!(yield* exists(archive)))
+            fetched = yield* fetchPinned(
+              { url: pack.download, bytes: pack.bytes, sha256: pack.sha256 },
+              archive,
+              pack.id,
+            );
+          // A pack inside a deeper folder (a GitHub commit archive's <repo>-<commit>/...)
+          // unpacks whole beside files/, and that folder becomes files/.
+          const unpacked = pack.root === undefined ? files : NodePath.join(staging, "archive");
           yield* Effect.tryPromise({
-            try: () => NodeFSP.rename(inner, files),
-            catch: (cause) =>
-              new GameOperationError({
-                operation: "Library unpack",
-                path: pack.download,
-                reason: "invalid-input",
-                detail: `The ${pack.id} archive has no ${pack.root} folder.`,
-                cause,
-              }),
+            try: () => NodeFSP.mkdir(unpacked, { recursive: true }),
+            catch: io("Library unpack", staging),
           });
-          // The rest of the archive is not the pack; only files/ and the index are placed.
-          yield* Effect.tryPromise({
-            try: () => NodeFSP.rm(unpacked, { recursive: true, force: true }),
-            catch: io("Library unpack", unpacked),
-          });
+          yield* unpackArchive(archive, unpacked, UNPACK_LIMITS);
+          if (pack.root !== undefined) {
+            const inner = NodePath.join(unpacked, ...pack.root.split("/"));
+            yield* Effect.tryPromise({
+              try: () => NodeFSP.rename(inner, files),
+              catch: (cause) =>
+                new GameOperationError({
+                  operation: "Library unpack",
+                  path: pack.download,
+                  reason: "invalid-input",
+                  detail: `The ${pack.id} archive has no ${pack.root} folder.`,
+                  cause,
+                }),
+            });
+            // The rest of the archive is not the pack; only files/ and the index are placed.
+            yield* Effect.tryPromise({
+              try: () => NodeFSP.rm(unpacked, { recursive: true, force: true }),
+              catch: io("Library unpack", unpacked),
+            });
+          }
+          // One asset's archive is never read again once unpacked; a pack's stays for older servers.
+          if (pack.group !== undefined)
+            yield* Effect.promise(() => NodeFSP.rm(archive, { force: true }));
         }
         return yield* Effect.tryPromise({
           try: async () => {
             const built = await indexPack(pack, files);
-            await NodeFSP.writeFile(NodePath.join(staging, "index.json"), JSON.stringify(built));
+            const withFetched = fetched === undefined ? built : { ...built, fetched };
+            await NodeFSP.writeFile(
+              NodePath.join(staging, "index.json"),
+              JSON.stringify(withFetched),
+            );
             await NodeFSP.mkdir(NodePath.dirname(dir), { recursive: true });
-            return await place(pack, staging, dir, built);
+            return await place(pack, staging, dir, withFetched);
           },
           catch: io("Library index", staging),
         });
@@ -447,6 +657,11 @@ const make = Effect.gen(function* () {
         ),
       );
       indexes.set(pack.id, index);
+      const placed = yield* Effect.promise(async () => {
+        const archived = await NodeFSP.stat(archive).catch(() => null);
+        return (await folderBytes(dir)) + (archived?.size ?? 0);
+      });
+      ledger.set(packKey(pack), placed);
       return index;
     });
 
@@ -455,7 +670,10 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const memo = indexes.get(pack.id);
       if (memo !== undefined) {
-        if (yield* exists(NodePath.join(packDir(pack), "files"))) return memo;
+        if (yield* exists(NodePath.join(packDir(pack), "files"))) {
+          ledger.get(packKey(pack));
+          return memo;
+        }
         // The cache was cleared while the server ran: fetch again instead of failing until restart.
         indexes.delete(pack.id);
       }
@@ -651,7 +869,90 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /** A source's thumbnail in the cache (fetched once, at most 2 MB), or undefined when it cannot be had. */
+  const previewFile = (url: string) =>
+    Effect.gen(function* () {
+      const name = `${NodeCrypto.createHash("sha256").update(url).digest("hex").slice(0, 24)}${/\.(png|jpe?g|webp)(?:\?|$)/i.exec(url)?.[0]?.replace(/\?$/, "") ?? ".png"}`;
+      const path = NodePath.join(directory, "previews", name);
+      if (yield* exists(path)) {
+        ledger.get(`previews/${name}`);
+        return path;
+      }
+      const sum = yield* fetchPinned(
+        { url, bytes: 2 * 1024 * 1024, capped: true },
+        path,
+        "preview",
+      ).pipe(Effect.option);
+      if (sum._tag === "None") return undefined;
+      const stat = yield* Effect.promise(() => NodeFSP.stat(path).catch(() => null));
+      ledger.set(`previews/${name}`, stat?.size ?? 1);
+      return path;
+    });
+
+  /** The kinds and formats an entry offers a game of this engine, or null when it offers none. */
+  const offer = (engine: GameEngineId, pack: LibraryPack, kind: GameLibraryKind | undefined) => {
+    const kinds = kindsIn(engine, pack);
+    const wanted = kind === undefined ? undefined : KIND_MEDIA[kind];
+    if (kinds.length === 0 || (kind !== undefined && !kinds.includes(kind))) return null;
+    const usable = pack.formats.filter(
+      (format) =>
+        loadableIn(engine, format) &&
+        (wanted === undefined
+          ? mediaOf(`x.${format}`) !== "data"
+          : mediaOf(`x.${format}`) === wanted),
+    );
+    return usable.length === 0 ? null : { kinds, usable };
+  };
+
+  /**
+   * Poly Pizza's models for these words, searched live with the person's own key; the note
+   * says why there are none when no key is set or the source failed.
+   */
+  const polyPizzaSearch = (input: GameAssetsSearchInput) =>
+    Effect.gen(function* () {
+      const words = queryWords(input.query);
+      const fits =
+        words.length > 0 &&
+        (input.family === undefined || input.family === "polypizza") &&
+        (input.kind === undefined || MODEL_KINDS.has(input.kind));
+      if (!fits) return { entries: [] as LibraryPack[], note: undefined };
+      const key = yield* polyPizzaKey;
+      if (key === "")
+        return {
+          entries: [] as LibraryPack[],
+          note: "Poly Pizza (about 10,000 low-poly models, CC0 and CC BY) is searched only with the person's own API key, in Settings → Game tools; none is set.",
+        };
+      const params = new URLSearchParams({ Limit: "32" });
+      if (input.licence === "cc0") params.set("License", "1");
+      if (input.animated === true) params.set("Animated", "1");
+      const answer = yield* polyPizzaGet(
+        `/search/${encodeURIComponent(words.join(" "))}?${params}`,
+        key,
+      ).pipe(Effect.result);
+      if (answer._tag === "Failure")
+        return {
+          entries: [] as LibraryPack[],
+          note: `Poly Pizza: ${answer.failure.detail ?? "no answer"}`,
+        };
+      const results = (answer.success as { results?: ReadonlyArray<PolyPizzaModel> }).results ?? [];
+      const entries = results.flatMap((model) => {
+        const entry = polyPizzaEntry(model);
+        if (entry === null) return [];
+        polyPizzaSeen.set(entry.id, entry);
+        return [entry];
+      });
+      const refused = results.length - entries.length;
+      return {
+        entries,
+        note:
+          refused > 0
+            ? `${refused} Poly Pizza results were left out: their licence is not one a sold game may ship under, or they have no GLB.`
+            : undefined,
+      };
+    });
+
   const searchPacks = (
+    root: string,
     engine: GameEngineId,
     input: GameAssetsSearchInput,
     style: Parameters<typeof lockPackRefusal>[1],
@@ -660,7 +961,6 @@ const make = Effect.gen(function* () {
       const words = queryWords(input.query);
       const cached = yield* cachedIds;
       const kind = input.kind;
-      const wanted = kind === undefined ? undefined : KIND_MEDIA[kind];
       const fetched = (pack: LibraryPack) => (cached.has(packKey(pack)) ? ", fetched" : "");
       const locked = (pack: LibraryPack) =>
         style === null
@@ -668,75 +968,154 @@ const make = Effect.gen(function* () {
           : lockPackRefusal(pack, style) === null
             ? ", in STYLE.json"
             : ", outside STYLE.json";
-      const rig = (pack: LibraryPack) => (pack.rig === undefined ? "" : `; rig ${pack.rig}`);
-      let hidden = 0;
-      const ranked = LIBRARY_CATALOG.flatMap((pack, order) => {
-        const kinds = kindsIn(engine, pack);
-        if (kind !== undefined && !pack.kinds.includes(kind)) return [];
-        const score =
-          2 * matchScore(words, `${pack.id} ${pack.title} ${pack.tags} ${pack.kinds.join(" ")}`) +
-          matchScore(words, `${pack.style} ${pack.description}`);
-        if (words.length > 0 && score === 0) return [];
-        if (kinds.length === 0 || (kind !== undefined && !kinds.includes(kind))) {
-          hidden += 1;
-          return [];
-        }
-        // The game's own packs first, so the lock's look is what a search shows.
-        const own = style !== null && lockPackRefusal(pack, style) === null ? 1 : 0;
-        const usable = pack.formats.filter(
-          (format) =>
-            loadableIn(engine, format) &&
-            (wanted === undefined
-              ? mediaOf(`x.${format}`) !== "data"
-              : mediaOf(`x.${format}`) === wanted),
-        );
-        if (usable.length === 0) {
-          hidden += 1;
-          return [];
-        }
-        return [{ pack, kinds, score, own, order, usable }];
-      }).toSorted((a, b) => b.own - a.own || b.score - a.score || a.order - b.order);
-      const hiddenLine =
-        hidden > 0 ? [`${hidden} more packs hold no format this ${engine} game loads.`] : [];
-      // Browsing: every pack on one short line each, grouped by style family, so a look can be
-      // chosen from the whole library and locked in STYLE.json.
-      if (words.length === 0 && kind === undefined)
+      const rig = (pack: LibraryPack) =>
+        `${pack.rig === undefined ? "" : `; rig ${pack.rig}`}${(pack.animated ?? 0) > 0 ? `; ${pack.animated} with clips of their own` : ""}`;
+      const licence = (pack: LibraryPack) =>
+        `${LIBRARY_LICENCES[pack.licence].name}${pack.credit === undefined ? "" : ` (credit: ${pack.credit})`}`;
+      const lockLine =
+        style === null
+          ? "No STYLE.json yet: choose one family's look and pass it as lock (family and view) with your first game_assets_add, which writes STYLE.json; then take the game's art from that family."
+          : `STYLE.json locks this game to ${style.family === undefined ? "" : `the ${style.family} family (all its packs), `}packs ${style.packs.join(", ")}${style.rig === undefined ? "" : `, rig ${style.rig}`}.`;
+      // Browsing: each family's look, its packs on one line, and its sources' counts, so a look
+      // can be chosen from the whole library and locked in STYLE.json.
+      if (
+        words.length === 0 &&
+        kind === undefined &&
+        input.family === undefined &&
+        input.animated !== true
+      ) {
+        let hidden = 0;
+        const families = LIBRARY_FAMILIES.flatMap((family) => {
+          const packs = LIBRARY_CATALOG.filter((pack) => {
+            if (pack.family !== family.id) return false;
+            if (input.licence === "cc0" && pack.licence !== "CC0-1.0") return false;
+            if (offer(engine, pack, undefined) === null) {
+              hidden += 1;
+              return false;
+            }
+            return true;
+          });
+          const sources = LIBRARY_SOURCES.filter((source) => source.family === family.id).map(
+            (source) => {
+              const counts = new Map<string, number>();
+              for (const asset of LIBRARY_ASSETS)
+                if (asset.group === source.id && offer(engine, asset, undefined) !== null)
+                  for (const k of asset.kinds) counts.set(k, (counts.get(k) ?? 0) + 1);
+              const indexed =
+                source.id in INDEXED_ON
+                  ? INDEXED_ON[source.id as keyof typeof INDEXED_ON]
+                  : undefined;
+              return `- source ${source.id}: ${counts.size === 0 ? "searched by words" : [...counts].map(([k, n]) => `${n} ${k}`).join(", ")}; ${source.terms}${indexed === undefined ? "" : `; indexed ${indexed}`}`;
+            },
+          );
+          if (packs.length === 0 && sources.length === 0) return [];
+          return [
+            `## ${family.id}: ${family.title}. ${family.look}${family.palette === undefined ? "" : `. Pixel palette: ${family.palette}`}`,
+            ...(packs.length === 0
+              ? []
+              : [
+                  `packs: ${packs
+                    .map(
+                      (pack) =>
+                        `${pack.id}${pack.rig === undefined ? "" : ` (rig ${pack.rig})`}${(pack.animated ?? 0) > 0 && pack.rig === undefined ? " (animated)" : ""}${style !== null && lockPackRefusal(pack, style) === null ? "*" : ""}`,
+                    )
+                    .join(", ")}`,
+                ]),
+            ...sources,
+          ];
+        });
         return {
           text: [
-            style === null
-              ? "No STYLE.json yet: choose one family's look and pass it as lock (family and view) with your first game_assets_add, which writes STYLE.json; then take the game's art from its packs."
-              : `STYLE.json locks this game to ${style.family === undefined ? "" : `the ${style.family} family, `}packs ${style.packs.join(", ")}${style.rig === undefined ? "" : `, rig ${style.rig}`}.`,
-            `The library's ${ranked.length} CC0 packs this ${engine} game loads, by style family (id: style; kinds; rig):`,
-            ...LIBRARY_FAMILIES.flatMap((family) => {
-              const members = ranked.filter(({ pack }) => pack.family === family.id);
-              return members.length === 0
-                ? []
-                : [
-                    `## ${family.id}: ${family.title}. ${family.look}${family.palette === undefined ? "" : `. Pixel palette: ${family.palette}`}`,
-                    ...members.map(
-                      ({ pack, kinds }) =>
-                        `- ${pack.id}: ${pack.style}; ${kinds.join(", ")}${rig(pack)}${locked(pack)}${fetched(pack)}`,
-                    ),
-                  ];
-            }),
-            ...hiddenLine,
-            "Search with words or a kind for each pack's details, or pass pack to look inside one. Every pack is CC0 1.0. One family per game; characters from one rig.",
+            lockLine,
+            `The library this ${engine} game loads, by style family (* fits STYLE.json). Every pack is CC0 unless a search says otherwise; game_assets_add credits whatever asks for credit.`,
+            ...families,
+            ...(hidden > 0
+              ? [`${hidden} more packs hold no format this ${engine} game loads.`]
+              : []),
+            "Search with words, and kind, family, animated or licence, for entries with pictures; pass pack to look inside one. One family per game; characters from one rig, or animated models on skeletons of their own.",
           ].join("\n"),
         };
+      }
+      const live = yield* polyPizzaSearch(input);
+      let hidden = 0;
+      const ranked = [...LIBRARY_CATALOG, ...LIBRARY_ASSETS, ...live.entries]
+        .flatMap((pack, order) => {
+          if (kind !== undefined && !pack.kinds.includes(kind)) return [];
+          if (input.family !== undefined && pack.family !== input.family) return [];
+          if (input.licence === "cc0" && pack.licence !== "CC0-1.0") return [];
+          if (input.animated === true && (pack.animated ?? 0) === 0 && pack.rig === undefined)
+            return [];
+          const score =
+            2 * matchScore(words, `${pack.id} ${pack.title} ${pack.tags} ${pack.kinds.join(" ")}`) +
+            matchScore(words, `${pack.style} ${pack.description} ${pack.author}`);
+          if (words.length > 0 && score === 0) return [];
+          const offered = offer(engine, pack, kind);
+          if (offered === null) {
+            hidden += 1;
+            return [];
+          }
+          // The game's own look first, so the lock is what a search shows.
+          const own = style !== null && lockPackRefusal(pack, style) === null ? 1 : 0;
+          return [{ pack, ...offered, score, own, order }];
+        })
+        .toSorted((a, b) => b.own - a.own || b.score - a.score || a.order - b.order);
+      const hiddenLine =
+        hidden > 0 ? [`${hidden} more entries hold no format this ${engine} game loads.`] : [];
       const shown = ranked.slice(0, input.limit ?? 8);
       const lines = shown.map(
-        ({ pack, kinds, usable }) =>
-          `- ${pack.id}: ${pack.title} by ${pack.author}. ${pack.description} Style: ${pack.style} (family ${pack.family}${rig(pack)}). Kinds: ${kinds.join(", ")}. Loads here: ${usable.join(", ")}. ${megabytes(pack.bytes)}${fetched(pack)}${locked(pack)}.`,
+        ({ pack, kinds, usable }, i) =>
+          `${i + 1}. ${pack.id}: ${pack.title} by ${pack.author}. ${pack.description} Style: ${pack.style} (family ${pack.family}${rig(pack)}). Kinds: ${kinds.join(", ")}. Loads here: ${usable.join(", ")}. ${pack.files?.some((file) => file.capped === true) === true ? "Size unknown" : megabytes(pack.bytes)}. Licence: ${licence(pack)}${fetched(pack)}${locked(pack)}.`,
       );
+      const pictures = yield* Effect.forEach(
+        shown,
+        ({ pack }) =>
+          pack.preview === undefined
+            ? Effect.succeed(undefined as string | undefined)
+            : previewFile(pack.preview),
+        { concurrency: 6 },
+      );
+      const tiles: Tile[] = shown.map((_, i) => ({
+        number: i + 1,
+        ...(pictures[i] === undefined ? {} : { image: pictures[i] }),
+        small: false,
+      }));
+      const pictured = pictures.filter((picture) => picture !== undefined).length;
+      const { sheet, unavailable } =
+        pictured === 0
+          ? { sheet: undefined, unavailable: undefined }
+          : yield* contactSheet(
+              root,
+              `search-${NodeCrypto.createHash("sha256")
+                .update(
+                  `${input.query ?? ""}|${kind ?? ""}|${input.family ?? ""}|${input.animated ?? ""}|${input.licence ?? ""}|${input.limit ?? ""}`,
+                )
+                .digest("hex")
+                .slice(0, 8)}`,
+              tiles,
+              false,
+            );
+      const total = LIBRARY_CATALOG.length + LIBRARY_ASSETS.length;
       const text = [
+        lockLine,
         shown.length === 0
-          ? "No library pack matches. Try fewer or broader words, or another kind."
-          : `${ranked.length} of ${LIBRARY_CATALOG.length} CC0 library packs match${ranked.length > shown.length ? `; the best ${shown.length}` : ""}:`,
+          ? "Nothing in the library matches. Try fewer or broader words, or another kind."
+          : `${ranked.length} of ${total} library entries${live.entries.length > 0 ? ` and Poly Pizza's live results` : ""} match${ranked.length > shown.length ? `; the best ${shown.length}` : ""}:`,
         ...lines,
         ...hiddenLine,
-        "Every pack is CC0 1.0 (public domain, no attribution needed). Pass pack to look inside one: it is fetched once, and its files come with a contact sheet to look at. Keep one style per game.",
-      ].join("\n");
-      return { text };
+        ...(live.note === undefined ? [] : [live.note]),
+        sheet === undefined
+          ? (unavailable ??
+            (shown.length === 0
+              ? ""
+              : "No pictures: these entries have none before they are fetched; pass pack to look inside one."))
+          : `Contact sheet ${sheet.relative} shows ${pictured} of them, the source's own pictures, numbered like the list. Look at it before adding.`,
+        "Pass pack to look inside an entry (fetched once into a shared, size-capped cache), or add its files with game_assets_add. A licence that asks for credit is credited in ASSETS.md and the game's credits by the add. Keep one family's look per game.",
+      ]
+        .filter((line) => line !== "")
+        .join("\n");
+      return sheet === undefined
+        ? { text }
+        : { text, sheet: sheet.relative, screenshot: sheet.screenshot };
     });
 
   const searchFiles = (
@@ -749,7 +1128,7 @@ const make = Effect.gen(function* () {
       const index = yield* ensure(pack);
       const filesDir = NodePath.join(packDir(pack), "files");
       const words = queryWords(input.query);
-      const head = `${pack.id}: ${pack.title} by ${pack.author}, CC0 1.0 (${pack.source}). Style: ${pack.style}.`;
+      const head = `${pack.id}: ${pack.title} by ${pack.author}, ${LIBRARY_LICENCES[pack.licence].name}${pack.credit === undefined ? "" : ` (credit: ${pack.credit})`} (${pack.source}). Style: ${pack.style}.`;
       // Overview: the pack's own pictures and its folders, for choosing what to look at or add whole.
       const overview = (note?: string) =>
         Effect.gen(function* () {
@@ -1018,6 +1397,7 @@ const make = Effect.gen(function* () {
       const engine = manifest.engine.name;
       if (input.pack === undefined)
         return yield* searchPacks(
+          root,
           engine,
           input,
           yield* readGameStyle(yield* realRootOf(root, "Library search")),
@@ -1264,7 +1644,8 @@ const make = Effect.gen(function* () {
               try: () => NodeFSP.readFile(assetsPath, "utf8"),
               catch: io("Library add", "ASSETS.md"),
             });
-      const credit = `library pack ${pack.id} (${pack.source}), CC0 1.0`;
+      const licenceName = LIBRARY_LICENCES[pack.licence].name;
+      const credit = `library pack ${pack.id} (${pack.source}), ${licenceName}${pack.credit === undefined ? "" : `, credit: ${pack.credit}`}`;
       const grouped = new Map<string, string[]>();
       const single: string[] = [];
       for (const relative of [...added, ...present]) {
@@ -1289,9 +1670,19 @@ const make = Effect.gen(function* () {
         .toSorted()
         .map((path) => `- \`${path}\` — ${credit}`);
       if (lines.length > 0) {
+        const pinned =
+          pack.files?.some((file) => file.capped === true) === true
+            ? `The source publishes no size or hash; fetched sha256 ${index.fetched ?? "unknown"}`
+            : pack.files?.some((file) => file.md5 !== undefined) === true
+              ? `Each file pinned by the source's MD5 and size; files digest ${pack.sha256 ?? ""}`
+              : pack.files !== undefined
+                ? `Files pinned by sha256; files digest ${pack.sha256 ?? ""}`
+                : pack.sha256 === undefined
+                  ? `Pinned by size (${pack.bytes} bytes; the source publishes no hash); fetched sha256 ${index.fetched ?? "unknown"}`
+                  : `Pinned download sha256 ${pack.sha256}`;
         const header = current.includes(`## Library: ${pack.title} (${pack.id})`)
           ? ""
-          : `\n## Library: ${pack.title} (${pack.id})\n\n${pack.title} by ${pack.author}, ${pack.source}. CC0 1.0 (public domain): ${pack.licenceEvidence}. Pinned download sha256 ${pack.sha256}.\n\n`;
+          : `\n## Library: ${pack.title} (${pack.id})\n\n${pack.title} by ${pack.author}, ${pack.source}. ${licenceName}${pack.licence === "CC0-1.0" ? " (public domain)" : ` (${LIBRARY_LICENCES[pack.licence].url})`}: ${pack.licenceEvidence}.${pack.credit === undefined ? "" : ` Credit: ${pack.credit}.`} ${pinned}.\n\n`;
         const prefix = current.length === 0 ? "# ASSETS\n" : current.endsWith("\n") ? "" : "\n";
         yield* Effect.tryPromise({
           try: async () => {
@@ -1313,6 +1704,52 @@ const make = Effect.gen(function* () {
           catch: io("Library add", "ASSETS.md"),
         });
       }
+      // The player reads the credits screen, not ASSETS.md: every entry the game now holds gets
+      // one line there, the source's own credit wording for a licence that asks for it.
+      const creditsRel = gamePaths(engine, project).credits;
+      const playerCredit = creditLine(pack);
+      const creditsDir =
+        added.length + present.length === 0
+          ? undefined
+          : yield* realDir(realRoot, dirOf(creditsRel), "Library add");
+      const creditsWritten =
+        creditsDir === undefined
+          ? "none"
+          : yield* Effect.tryPromise({
+              try: async () => {
+                const creditsPath = NodePath.join(creditsDir, nameOf(creditsRel));
+                const there = await NodeFSP.lstat(creditsPath).catch(() => null);
+                if (there !== null && !there.isFile()) return "refused" as const;
+                const before = there === null ? "" : await NodeFSP.readFile(creditsPath, "utf8");
+                if (before.split("\n").some((line) => line.trim() === playerCredit))
+                  return "present" as const;
+                const handle = await NodeFSP.open(
+                  creditsPath,
+                  NodeFSP.constants.O_WRONLY |
+                    NodeFSP.constants.O_APPEND |
+                    NodeFSP.constants.O_CREAT |
+                    (NodeFSP.constants.O_NOFOLLOW ?? 0),
+                  0o644,
+                );
+                try {
+                  await handle.appendFile(
+                    `${before.length > 0 && !before.endsWith("\n") ? "\n" : ""}${playerCredit}\n`,
+                  );
+                } finally {
+                  await handle.close();
+                }
+                return "added" as const;
+              },
+              catch: io("Library add", creditsRel),
+            });
+      const creditsLine =
+        creditsWritten === "added"
+          ? `${creditsRel} (the credits screen) now reads: ${playerCredit}`
+          : creditsWritten === "refused"
+            ? `${creditsRel} is not a plain file, so the credits screen was not given: ${playerCredit}. Add that line yourself.`
+            : creditsWritten === "present"
+              ? `${creditsRel} already credits it.`
+              : undefined;
       const loadPath = `${profile.resourcePath(directoryRel.slice(project.length + 1))}/…`;
       const credited = single.length;
       const assetsLine =
@@ -1340,6 +1777,7 @@ const make = Effect.gen(function* () {
         ...(skipped.length > 20 ? [`… and ${skipped.length - 20} more skipped.`] : []),
         assetsLine,
         ...lines.slice(0, 12),
+        ...(creditsLine === undefined ? [] : [creditsLine]),
         ...(lines.length > 12 ? [`… and ${lines.length - 12} more lines.`] : []),
         ...(yield* loudnessLines(
           root,

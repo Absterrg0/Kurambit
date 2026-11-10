@@ -54,30 +54,50 @@ check that matters.
   spare what is the user's. Free memory is `os.freemem()` (libuv's MemAvailable
   on Linux). Every in-game runner quits when its control socket closes, so a crashed server leaves
   no game running; only the live editors outlive it, and their records reap them.
-- `GameAssetLibrary` serves the curated CC0 library in `assetLibraryCatalog.ts`. Each pack is a
-  download URL pinned by SHA-256 and size, fetched on first look into `asset-library/` beside Kurambit's
-  tools folder, and unpacked with path, link and size limits. Bytes that differ from the pin are
-  refused, never re-pinned at runtime: a source can change contents or licence silently, and a
-  refusal is the only honest answer. A pin changes only in a reviewed commit that rechecks the
-  licence. Kenney packs come from Kenney's own OpenGameArt uploads, because kenney.nl hands out
-  short-lived signed links behind a session cookie, which cannot be pinned. KayKit packs are
-  GitHub commit archives of Kay Lousberg's own repositories, pinned by commit; itch.io links are
-  signed and cannot be pinned either, so Quaternius' itch-only packs (the 65-joint Universal
-  Animation Library and the Universal Base Characters) are pinned from a Kurambit release mirror of
-  the same zips, by SHA-256. A pack's `root` names the archive folder that holds it. Every server on the
-  machine (the installed app and any dev server) shares that cache, so fetches lock per pack only
-  within one process, scratch names carry the fetching server's pid (a start-up sweep spares live
-  ones), and placing a pack accepts a complete copy another server placed first.
-- Every pack belongs to a style family (`LIBRARY_FAMILIES`), and a pack with rigged characters
-  names its rig, read from its GLBs' skin joints when it is pinned (`LIBRARY_RIG_JOINTS`; the
-  FBX-only rigs are named from their authors' descriptions): a game whose characters share
-  one rig can play any clip on any character. Made characters share the `standard-humanoid`
-  skeleton, so every standard clip plays on every made or library body on it.
+- `GameAssetLibrary` serves the pinned open library. Every entry is a "pack": a curated one in
+  `assetLibraryCatalog.ts`, a generated one in `library/packs.json` (the rest of Kenney's 3D kits,
+  Quaternius' site packs, KayKit), or one asset of a per-asset source (`assetLibrarySources.ts`:
+  Poly Haven and ambientCG from the shipped `library/*.json`, Poly Pizza searched live with the
+  person's own key). The index files are written by `apps/server/scripts/library-index.ts`, one
+  adapter per source, and shipped rather than crawled per install: ambientCG is one person's
+  server, and search then works offline. An entry is a download URL, or a list of loose files,
+  pinned by what its source publishes: a SHA-256 we hashed when pinning, Poly Haven's MD5 and size,
+  ambientCG's size, or only a ceiling for Poly Pizza, which publishes neither; when the pin holds no
+  hash, ASSETS.md records the SHA-256 that arrived. Bytes that differ from the pin are refused,
+  never re-pinned at runtime: a source can change contents or licence silently, and a refusal is
+  the only honest answer. A pin changes only in a reviewed commit that rechecks the licence.
+  Only licences a sold game may ship under are indexed (`shippableLicence`: CC0, CC BY 3.0 and 4.0
+  with a credit line, MIT, Apache-2.0, the OFL for fonts); per-asset licences (Poly Pizza) are
+  checked one by one. The add credits each entry in ASSETS.md and gives the game's credits file one
+  line, in the source's own credit wording when its licence asks for credit. Kenney packs come from
+  Kenney's own OpenGameArt uploads, because kenney.nl hands out short-lived signed links behind a
+  session cookie, which cannot be pinned. Quaternius' packs come from the public Drive folders his
+  site links, one file per model; KayKit packs are GitHub commit archives of Kay Lousberg's own
+  repositories, pinned by commit; itch.io links are signed and cannot be pinned either, so
+  Quaternius' itch-only packs (the 65-joint Universal Animation Library and the Universal Base
+  Characters) are pinned from a Kurambit release mirror of the same zips, by SHA-256. A pack's
+  `root` names the archive folder that holds it. Entries are fetched on first look into
+  `asset-library/` beside Kurambit's tools folder, unpacked with path, link and size limits, and
+  kept under a size ceiling by an LRU ledger (`lru-cache`) that removes the least recently used
+  pack folders. Every server on the machine (the installed app and any dev server) shares that
+  cache, so fetches lock per pack only within one process, scratch names carry the fetching
+  server's pid (a start-up sweep spares live ones), and placing a pack accepts a complete copy
+  another server placed first; a pack another server evicted is fetched again.
+- Every entry belongs to a style family (`LIBRARY_FAMILIES`), and a pack whose characters share a
+  skeleton names its rig, read from its GLBs' skin joints when it is pinned (`LIBRARY_RIG_JOINTS`;
+  the FBX-only rigs are named from their authors' descriptions): a game whose characters share one
+  rig can play any clip on any character. A pack whose animated models each have a skeleton of
+  their own (animals, creatures, vehicles) names no rig: each model comes with its own clips, and
+  the lock's rig never refuses it. Made characters share the `standard-humanoid` skeleton, so
+  every standard clip plays on every made or library body on it.
 - `STYLE.json` at the game root is the style lock (`packages/contracts/src/gameStyle.ts`), read
   by `gameStyle.ts` on every call of every tool that brings art in, and never cached, so an edit
   takes effect at once. `game_assets_add`'s `lock` writes it from a style family
-  (`styleFromLock`), keeping what else the lock holds, so agents never hand-write its shape. The tools refuse what drifts rather than warn: a library add outside its
-  packs (checked before the pack is fetched) or of a possible character on another rig (any model
+  (`styleFromLock`), keeping what else the lock holds, so agents never hand-write its shape. A lock
+  admits every pack of its family (one look by definition); `packs` lists the family's curated
+  packs and what comes from beyond it, and a source id there (`polyhaven`) admits all its assets.
+  The tools refuse what drifts rather than warn: a library add outside its family and packs
+  (checked before the pack is fetched) or of a possible character on another rig (any model
   whose clips cannot be read counts), a sprite render in another palette or mode, a Blender
   import from a source it does not list, and an import or export carrying an armature whose
   bones are not the lock's rig. A lock without `rig` says no character shares library clips;

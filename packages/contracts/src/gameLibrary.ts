@@ -5,7 +5,7 @@ import { GameStyleLock } from "./gameStyle.ts";
 
 export { GameLibraryPackId } from "./gameLibraryPackId.ts";
 
-/** The pinned CC0 asset library behind game_assets_search and game_assets_add. */
+/** The pinned open asset library behind game_assets_search and game_assets_add. */
 export const GameLibraryKind = Schema.Literals([
   "sprite",
   "tile",
@@ -13,6 +13,7 @@ export const GameLibraryKind = Schema.Literals([
   "model",
   "animation",
   "texture",
+  "hdri",
   "ui",
   "icon",
   "font",
@@ -27,6 +28,12 @@ export const GameAssetsSearchInput = Schema.Struct({
   /** Words matched against pack titles, styles and tags, or file paths inside one pack. */
   query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   kind: Schema.optionalKey(GameLibraryKind),
+  /** Only entries of this style family (the browse lists them). */
+  family: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))),
+  /** Only entries with models that carry clips of their own. */
+  animated: Schema.optionalKey(Schema.Boolean),
+  /** cc0: only public-domain entries; any (the default) also lists those that ask for credit. */
+  licence: Schema.optionalKey(Schema.Literals(["cc0", "any"])),
   /** Look inside this pack: it is fetched once, and matching files come with a contact sheet. */
   pack: Schema.optionalKey(GameLibraryPackId),
   limit: Schema.optionalKey(

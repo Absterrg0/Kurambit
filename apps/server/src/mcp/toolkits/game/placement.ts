@@ -73,7 +73,7 @@ export const GAME_TOOL_PLACEMENTS = {
   game_blender_carve: chat(["blender"], "for an organic hard prop carved from a three-view sheet"),
   game_blender_assets_search: chat(
     ["blender"],
-    "for a Poly Haven, Sketchfab or Poly Pizza asset the CC0 library lacks",
+    "for a Sketchfab model the library lacks, or to bring an asset straight into the live Blender scene",
   ),
   game_blender_assets_import: chat(["blender"]),
   game_blender_render_sprites: chat(["blender"]),

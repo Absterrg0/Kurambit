@@ -11,6 +11,7 @@ import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameTemplates from "./GameTemplates.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 let data = "";
 const previous = process.env.XDG_DATA_HOME;
@@ -28,6 +29,7 @@ afterAll(async () => {
 // packFile never reaches processes or games; a refusal must come before any fetch.
 const layer = GameAssetLibrary.layer.pipe(
   Layer.provide(NodeServices.layer),
+  Layer.provide(ServerSettings.layerTest()),
   Layer.provide(
     Layer.succeed(GameProcesses.GameProcesses, {} as GameProcesses.GameProcesses["Service"]),
   ),

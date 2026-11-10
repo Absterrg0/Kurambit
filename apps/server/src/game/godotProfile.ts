@@ -66,6 +66,7 @@ Use the game_* tools to check, play, export and package the game; never run Godo
     library: "library",
     blender: "assets/blender",
     sprites: "sprites",
+    credits: "credits.txt",
   },
   viewport: null,
   play: "native",

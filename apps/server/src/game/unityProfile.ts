@@ -74,6 +74,7 @@ Use the game_* tools to check, play, export and package the game, and the game_u
     library: "Library",
     blender: "Assets/Blender",
     sprites: "Art/Sprites",
+    credits: "Assets/credits.txt",
   },
   viewport: UNITY_VIEWPORT,
   play: "player",

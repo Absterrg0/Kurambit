@@ -201,7 +201,7 @@ it("says a glTF clip list was not read when the header is past the read limit", 
   header.writeUInt32LE(5 * 1024 * 1024, 12);
   header.write("JSON", 16, "latin1");
   await NodeFSP.writeFile(NodePath.join(root, "big.glb"), header);
-  const index = await indexPack({ id: "test", sha256: "a".repeat(64) }, root);
+  const index = await indexPack({ id: "test", sha256: "a".repeat(64), bytes: 1 }, root);
   expect(index.files[0]?.clipsUnread).toBe(true);
 });
 

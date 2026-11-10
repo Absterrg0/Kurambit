@@ -24,7 +24,9 @@ import {
 } from "@kurambit/contracts";
 import type { LibraryFile, LibraryPack } from "./assetLibraryFiles.ts";
 import { stableStringify } from "@kurambit/shared/stableJson";
+import { LIBRARY_SOURCES } from "./assetLibrarySources.ts";
 import {
+  CURATED_PACKS,
   LIBRARY_CATALOG,
   LIBRARY_FAMILIES,
   LIBRARY_RIG_ALIASES,
@@ -64,15 +66,21 @@ const PACK_ID = /^[a-z0-9][a-z0-9-]{1,63}$/;
 export const resolveRig = (rig: string) => LIBRARY_RIG_ALIASES[rig] ?? rig;
 
 /** What in a decoded lock names nothing in the library, or null. */
+const PACK_IDS: ReadonlyArray<string> = [
+  ...LIBRARY_CATALOG.map((pack) => pack.id),
+  ...LIBRARY_SOURCES.map((source) => source.id),
+];
+const PACK_ID_SET: ReadonlySet<string> = new Set(PACK_IDS);
+
 const styleProblem = (style: GameStyle): string | null => {
-  const packIds = LIBRARY_CATALOG.map((pack) => pack.id);
+  const packIds = PACK_IDS;
   for (const [field, ids] of [
     ["packs", style.packs],
     ["audio.packs", style.audio?.packs ?? []],
   ] as const)
     for (const [index, id] of ids.entries())
-      if (!packIds.includes(id))
-        return `${field}[${index}]: no library pack "${id}"${near(id, packIds)}`;
+      if (!PACK_ID_SET.has(id))
+        return `${field}[${index}]: no library pack or source "${id}"${near(id, packIds)}`;
   const familyIds = LIBRARY_FAMILIES.map((family) => family.id);
   if (style.family !== undefined && !familyIds.includes(style.family))
     return `family: no library family "${style.family}"; the families are ${familyIds.join(", ")}`;
@@ -82,7 +90,7 @@ const styleProblem = (style: GameStyle): string | null => {
   if (
     typeof style.palette === "string" &&
     PACK_ID.test(style.palette) &&
-    !packIds.includes(style.palette)
+    !PACK_ID_SET.has(style.palette)
   )
     return `palette: no library pack "${style.palette}"${near(style.palette, packIds)}; a palette is a pack id or a PNG or folder in the game`;
   if (style.rig === undefined) return null;
@@ -211,19 +219,23 @@ const soundOnly = (pack: LibraryPack) =>
   pack.kinds.every((kind) => kind === "sfx" || kind === "music");
 
 /**
- * Why the lock refuses a pack before anything is fetched, or null. A pixel
- * lock's palette pack is part of the look; sound is locked only once the lock
- * lists audio.packs, as characters are only once it names a rig.
+ * Why the lock refuses a pack before anything is fetched, or null. The lock's family is one
+ * look, so every pack of it may come in; beyond it, the packs it lists, and every asset of a
+ * source it lists (polyhaven). A pixel lock's palette pack is part of the look; sound is
+ * locked only once the lock lists audio.packs, as characters are only once it names a rig.
  */
 export const lockPackRefusal = (pack: LibraryPack, style: GameStyle | null): string | null => {
   if (style === null) return null;
   if (style.packs.includes(pack.id) || style.palette === pack.id) return null;
+  if (!soundOnly(pack) && style.family !== undefined && pack.family === style.family) return null;
+  if (pack.group !== undefined && style.packs.includes(pack.group)) return null;
   if (soundOnly(pack) && style.audio?.packs === undefined) return null;
   const audio = style.audio?.packs ?? [];
   if (audio.includes(pack.id)) return null;
   const list = soundOnly(pack) ? "audio.packs" : "packs";
   const holds = soundOnly(pack) ? audio : style.packs;
-  return `${GAME_STYLE_FILE} locks this game's ${soundOnly(pack) ? "sound" : "look"} to ${holds.length === 0 ? "no sound packs yet" : holds.join(", ")}; ${pack.id} (${pack.style}) is outside it. If it fits the game, add "${pack.id}" to ${GAME_STYLE_FILE}'s ${list} and add again; to change the game's ${soundOnly(pack) ? "sound" : "look"}, change ${GAME_STYLE_FILE} first.`;
+  const allow = pack.group ?? pack.id;
+  return `${GAME_STYLE_FILE} locks this game's ${soundOnly(pack) ? "sound" : "look"} to ${soundOnly(pack) || style.family === undefined ? "" : `the ${style.family} family and `}${holds.length === 0 ? "no sound packs yet" : holds.join(", ")}; ${pack.id} (${pack.family}: ${pack.style}) is outside it. If it fits the game, add "${allow}" to ${GAME_STYLE_FILE}'s ${list}${pack.group === undefined ? "" : ` (every ${pack.group} asset then fits)`} and add again; to change the game's ${soundOnly(pack) ? "sound" : "look"}, change ${GAME_STYLE_FILE} first.`;
 };
 
 /**
@@ -270,18 +282,30 @@ export const styleFromLock = (
   existing: GameStyle | null,
 ): { readonly style: GameStyle } | { readonly refusal: string } => {
   const family = LIBRARY_FAMILIES.find((candidate) => candidate.id === lock.family);
-  const members = LIBRARY_CATALOG.filter((pack) => pack.family === lock.family && !soundOnly(pack));
-  if (family === undefined || family.id === INTERFACE_FAMILY || members.length === 0) {
+  // The family admits all its packs; the lock lists its curated ones (a short, readable list,
+  // well under the lock's limit) and the per-asset sources that share its look.
+  const members = CURATED_PACKS.filter((pack) => pack.family === lock.family && !soundOnly(pack));
+  const sources = LIBRARY_SOURCES.filter((source) => source.family === lock.family).map(
+    (source) => source.id,
+  );
+  const hasLook = (id: string) =>
+    LIBRARY_CATALOG.some((pack) => pack.family === id && !soundOnly(pack)) ||
+    LIBRARY_SOURCES.some((source) => source.family === id);
+  if (family === undefined || family.id === INTERFACE_FAMILY || !hasLook(family.id)) {
     const looks = LIBRARY_FAMILIES.filter(
-      (candidate) =>
-        candidate.id !== INTERFACE_FAMILY &&
-        LIBRARY_CATALOG.some((pack) => pack.family === candidate.id && !soundOnly(pack)),
+      (candidate) => candidate.id !== INTERFACE_FAMILY && hasLook(candidate.id),
     ).map((candidate) => candidate.id);
     return {
       refusal: `lock.family "${lock.family}" is not a look to lock; the families are ${looks.join(", ")} (game_assets_search with no words describes each).`,
     };
   }
-  const rigs = [...new Set(members.flatMap((pack) => (pack.rig === undefined ? [] : [pack.rig])))];
+  const rigs = [
+    ...new Set(
+      LIBRARY_CATALOG.filter((pack) => pack.family === family.id).flatMap((pack) =>
+        pack.rig === undefined ? [] : [pack.rig],
+      ),
+    ),
+  ];
   const lockedRig = existing?.rig === undefined ? undefined : resolveRig(existing.rig);
   const rig =
     adding.family === family.id && adding.rig !== undefined
@@ -292,9 +316,18 @@ export const styleFromLock = (
           ? lockedRig
           : undefined;
   const packs = [
-    ...members.filter((pack) => pack.rig === undefined || pack.rig === rig),
-    ...LIBRARY_CATALOG.filter((pack) => pack.family === INTERFACE_FAMILY && !soundOnly(pack)),
-  ].map((pack) => pack.id);
+    ...new Set([
+      ...members
+        .filter((pack) => pack.rig === undefined || pack.rig === rig)
+        .map((pack) => pack.id),
+      // A generated pack added with the lock is listed, so its characters on their own rig come in.
+      ...(adding.family === family.id && adding.group === undefined ? [adding.id] : []),
+      ...sources,
+      ...LIBRARY_CATALOG.filter((pack) => pack.family === INTERFACE_FAMILY && !soundOnly(pack)).map(
+        (pack) => pack.id,
+      ),
+    ]),
+  ];
   const pixel = family.palette !== undefined;
   // A pack palette and a rig belong to the family; what else a lock holds is the person's.
   const kept = existing === null ? {} : Struct.omit(existing, ["tile", "palette", "rig"]);
