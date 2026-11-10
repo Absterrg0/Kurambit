@@ -33,7 +33,7 @@ import { GameBuildDetail, refOf } from "./GameBuildDetail";
 import { GameBuildFactChips } from "./GameBuildFacts";
 import { GameReel } from "./GameReel";
 import { buildName, formatBuildTime } from "./gameBuilds.logic";
-import { isUndone, markLabel, markTone, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
+import { isUndone, markLabels, markTone, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
 import { turnStripRestore } from "./gameTurnBuild.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { restoreQuestion, useBuildRestore } from "./useBuildActions";
@@ -135,6 +135,7 @@ export function GameBuildTimeline({
       loaded.push(build);
     }
   const marks = timelineMarks(loaded, list?.current ?? null);
+  const labels = markLabels(marks);
   const order = marks.map((build) => build.id);
   const lastPage = olderPages.at(-1);
   const olderNext =
@@ -325,7 +326,7 @@ export function GameBuildTimeline({
                     {step === null ? null : (
                       <FastForwardIcon className="size-2.5" aria-hidden="true" />
                     )}
-                    {markLabel(build)}
+                    {labels.get(build.id)}
                   </span>
                   <span
                     aria-hidden="true"

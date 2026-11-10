@@ -7,7 +7,7 @@ import {
   FAKE_BUILDS_RESULT,
   FAKE_UNDONE_RESULT,
 } from "./gameBuilds.fixtures";
-import { isUndone, markLabel, markTone, stepMark } from "./gameBuildTimeline.logic";
+import { isUndone, markLabels, markTone, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
 
 const build = (list: typeof FAKE_BUILDS_RESULT, id: string) => {
   const found = list.builds.find((entry) => entry.id === id);
@@ -32,8 +32,12 @@ describe("the build timeline", () => {
   });
 
   it("names and tones a mark from what the list already says", () => {
-    expect(markLabel(build(FAKE_BUILDS_RESULT, BUILD_C))).toBe("5");
-    expect(markLabel(build(FAKE_BUILDS_RESULT, BUILD_B))).toBe("3");
+    // A person's turns count by their place in the rail, so turns 4 and 5 read 1 and 2
+    // after step 3 and the saved build; the step keeps its own number.
+    const labels = markLabels(timelineMarks(FAKE_BUILDS_RESULT.builds, FAKE_BUILDS_RESULT.current));
+    expect(labels.get(BUILD_D)).toBe("1");
+    expect(labels.get(BUILD_C)).toBe("2");
+    expect(labels.get(BUILD_B)).toBe("3");
     // One bad fact marks the build, whatever else is good.
     expect(markTone(build(FAKE_BUILDS_RESULT, BUILD_B))).toBe("bad");
     expect(markTone(build(FAKE_BUILDS_RESULT, BUILD_C))).toBe("neutral");
