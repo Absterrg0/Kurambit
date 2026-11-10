@@ -9,8 +9,14 @@
 // or licence is a change to what games ship.
 //
 //   node apps/server/scripts/library-index.ts polyhaven|ambientcg|packs [--only <id regex>] [--sources kenney,quaternius,quaternius-site,kaykit]
+//   node apps/server/scripts/library-index.ts mirror <out dir> [--only <id regex>]
 //
 // TMPDIR holds one pack at a time while it is hashed and indexed.
+//
+// A pack whose bytes come from a host that throttles every install (awaitsMirror) is offered
+// once it is mirrored: `mirror` zips its pinned files, each checked against its pin, as
+// <id>.zip; upload those to the MIRROR release (gh release upload, never --clobber); then
+// `packs` pins every candidate the release holds as that archive instead of its source's files.
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -20,8 +26,10 @@ import * as NodeStreamPromises from "node:stream/promises";
 import * as NodeURL from "node:url";
 import * as Effect from "effect/Effect";
 import { CURATED_PACKS, LIBRARY_RIG_JOINTS } from "../src/game/assetLibraryCatalog.ts";
+import JSZip from "jszip";
 import {
   UNPACK_LIMITS,
+  awaitsMirror,
   entryLicenceProblem,
   filesDigest,
   indexPack,
@@ -470,7 +478,10 @@ const pinPack = async (candidate: Candidate, scratch: string): Promise<LibraryPa
       await Effect.runPromise(unpackArchive(archive, unpacked, UNPACK_LIMITS));
       // A GitHub commit archive holds the pack one folder down, in addons/<pack> when there is one.
       const top = await NodeFSP.readdir(unpacked);
-      if (candidate.archive.url.includes("github.com") && top.length === 1) {
+      if (
+        /^https:\/\/github\.com\/[^/]+\/[^/]+\/archive\//.test(candidate.archive.url) &&
+        top.length === 1
+      ) {
         root = top[0]!;
         const addons = await NodeFSP.readdir(NodePath.join(unpacked, root, "addons")).catch(
           () => [],
@@ -562,6 +573,108 @@ const pinPack = async (candidate: Candidate, scratch: string): Promise<LibraryPa
   }
 };
 
+/**
+ * The release of this repository that re-hosts CC0 packs whose own host throttles (Google Drive)
+ * or hands out expiring links (itch). The mirror is only a byte host: `source` and
+ * `licenceEvidence` stay the author's pages, and the SHA-256 pin still guards every byte.
+ */
+const MIRROR_RELEASE = "Absterrg0/Kurambit/releases/tags/library-mirror-2026-11";
+const MIRROR = "https://github.com/Absterrg0/Kurambit/releases/download/library-mirror-2026-11/";
+const mirroredZips = async () => {
+  const release = (await json(`https://api.github.com/repos/${MIRROR_RELEASE}`)) as {
+    assets: Array<{ name: string }>;
+  };
+  return new Set(release.assets.map((asset) => asset.name));
+};
+
+const MODEL_FORMATS = new Set(["gltf", "glb", "fbx", "obj"]);
+/**
+ * The files of a held-back pack worth mirroring: the library loads glTF first, so an FBX or OBJ
+ * (and its .mtl) goes when the same model ships as glTF, matched by name with the format
+ * folders (FBX/, glTF/, OBJ/) left out. Textures, licences and previews stay. Pure.
+ */
+const mirrorFiles = (files: ReadonlyArray<LibraryPackFile>) => {
+  const model = (path: string) => {
+    const parts = path.toLowerCase().split("/");
+    const name = parts.pop()!;
+    const dot = name.lastIndexOf(".");
+    return [...parts.filter((part) => !MODEL_FORMATS.has(part)), name.slice(0, dot)].join("/");
+  };
+  const asGltf = new Set(
+    files.filter((file) => /\.(gltf|glb)$/i.test(file.path)).map((file) => model(file.path)),
+  );
+  return files.filter(
+    (file) => !(/\.(fbx|obj|mtl)$/i.test(file.path) && asGltf.has(model(file.path))),
+  );
+};
+
+/** Drive's throttle answers with this page (status 200), for every file once it starts. */
+const DRIVE_QUOTA = "Google Drive - Quota exceeded";
+class DriveRefused extends Error {}
+// A fixed date keeps a pack's zip, and so its pin, the same whenever it is rebuilt.
+const MIRROR_ZIP_DATE = new Date("2026-01-01T00:00:00Z");
+const mirror = async () => {
+  const out = process.argv[3];
+  if (out === undefined || out.startsWith("--")) {
+    console.error("usage: library-index.ts mirror <out dir> [--only <id regex>]");
+    process.exit(2);
+  }
+  await NodeFSP.mkdir(out, { recursive: true });
+  const { packs: indexed } = JSON.parse(
+    await NodeFSP.readFile(NodePath.join(OUT, "packs.json"), "utf8"),
+  ) as { packs: LibraryPack[] };
+  const held = indexed.filter(
+    (pack) => awaitsMirror(pack) && pack.files !== undefined && (only?.test(pack.id) ?? true),
+  );
+  console.log(`mirror: ${held.length} packs wait for the mirror`);
+  for (const pack of held) {
+    const zipPath = NodePath.join(out, `${pack.id}.zip`);
+    // A stopped run is picked up again: what is already zipped stays.
+    if (NodeFS.existsSync(zipPath)) continue;
+    const files = mirrorFiles(pack.files!).toSorted((a, b) => a.path.localeCompare(b.path));
+    const work = await NodeFSP.mkdtemp(
+      NodePath.join(process.env.TMPDIR ?? NodeOS.tmpdir(), "mirror-"),
+    );
+    try {
+      const zip = new JSZip();
+      for (const file of files) {
+        const destination = NodePath.join(work, ...file.path.split("/"));
+        await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
+        // The quota page is 2 KB, so a smaller pin must not refuse it before it is recognised.
+        await download(file.url, destination, Math.max(file.bytes, 64 * 1024));
+        const head = (await NodeFSP.readFile(destination)).subarray(0, 512).toString("latin1");
+        if (head.includes(DRIVE_QUOTA))
+          throw new DriveRefused(
+            `${pack.id}: Drive is refusing downloads (quota); run again later`,
+          );
+        const hashed = await hashFile(destination);
+        if (hashed.sha256 !== file.sha256 || hashed.bytes !== file.bytes)
+          throw new Error(`${file.path}: not the pinned bytes; re-pin the pack from its source`);
+        zip.file(file.path, NodeFS.createReadStream(destination), {
+          date: MIRROR_ZIP_DATE,
+          createFolders: false,
+        });
+        await sleep(1000);
+      }
+      await NodeStreamPromises.pipeline(
+        zip.generateNodeStream({ type: "nodebuffer", streamFiles: true, compression: "DEFLATE" }),
+        NodeFS.createWriteStream(`${zipPath}.part`),
+      );
+      await NodeFSP.rename(`${zipPath}.part`, zipPath);
+      const dropped = pack.files!.length - files.length;
+      console.log(
+        `${pack.id}: ${(await NodeFSP.stat(zipPath)).size} bytes, ${files.length} files${dropped > 0 ? ` (${dropped} FBX/OBJ beside glTF left out)` : ""}`,
+      );
+    } catch (error) {
+      await NodeFSP.rm(`${zipPath}.part`, { force: true });
+      if (error instanceof DriveRefused) throw error;
+      console.warn(`${pack.id}: ${String(error)}`);
+    } finally {
+      await NodeFSP.rm(work, { recursive: true, force: true });
+    }
+  }
+};
+
 const KAYKIT_REPOS = ["KayKit-Prototype-Bits-1.0"];
 /** Quaternius OGA uploads whose models no site Drive folder holds (Wolf, Eagle, Piranha…). */
 const QUATERNIUS_OGA_ONLY = new Set(["Animated Animales Low Poly"]);
@@ -622,7 +735,14 @@ const packs = async () => {
       archive: { url: `https://github.com/KayKit-Game-Assets/${repo}/archive/${commit}.zip` },
     });
   }
-  const chosen = candidates.filter((candidate) => only === undefined || only.test(candidate.id));
+  const mirrored = await mirroredZips();
+  const chosen = candidates
+    .filter((candidate) => only === undefined || only.test(candidate.id))
+    .map(({ files, ...candidate }): Candidate =>
+      mirrored.has(`${candidate.id}.zip`)
+        ? { ...candidate, archive: { url: `${MIRROR}${candidate.id}.zip` } }
+        : { ...candidate, ...(files === undefined ? {} : { files }) },
+    );
   console.log(`packs: ${chosen.length} candidates`);
   const scratch = await NodeFSP.mkdtemp(
     NodePath.join(process.env.TMPDIR ?? NodeOS.tmpdir(), "library-index-"),
@@ -661,9 +781,9 @@ const packs = async () => {
 };
 
 const command = process.argv[2];
-const run = { polyhaven: polyHaven, ambientcg: ambientCg, packs }[command ?? ""];
+const run = { polyhaven: polyHaven, ambientcg: ambientCg, packs, mirror }[command ?? ""];
 if (run === undefined) {
-  console.error("usage: library-index.ts polyhaven|ambientcg|packs [--only <id regex>]");
+  console.error("usage: library-index.ts polyhaven|ambientcg|packs|mirror [--only <id regex>]");
   process.exit(2);
 }
 await run();
