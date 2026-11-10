@@ -598,7 +598,13 @@ function ThingsPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
                   key={thing.id}
                   type="button"
                   aria-current={selectedId === thing.id ? "true" : undefined}
-                  onClick={() => selectStageThing(thing.id)}
+                  onClick={() =>
+                    // The game answers a pick of the selected thing with no change, so the
+                    // Stage's switch to its Inspector never fires: open it here.
+                    selectedId === thing.id
+                      ? useGameWorkspaceStore.getState().showDockTab("inspector")
+                      : selectStageThing(thing.id)
+                  }
                   onPointerEnter={() => hoverStageThing(thing.id)}
                   onPointerLeave={() => hoverStageThing(null)}
                   className={cn(
