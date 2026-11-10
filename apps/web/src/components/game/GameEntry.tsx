@@ -105,6 +105,7 @@ export function GameDialogHost() {
 }
 
 const lastGameModelSchema = Schema.NullOr(ModelSelection);
+const lastGameFolderSchema = Schema.String;
 
 function GameEntryForEnvironment({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
@@ -157,7 +158,13 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const setDialog = useGameDialogStore((state) => state.show);
   const draft = useGameDialogStore((state) => state.draft);
   const [name, setName] = useState("");
-  const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
+  // The folder the person's last new game went in, beside its agent.
+  const [lastGameFolder, setLastGameFolder] = useLocalStorage(
+    `game-entry-parent-folder:${environmentId}`,
+    "~/Games",
+    lastGameFolderSchema,
+  );
+  const [directory, setDirectory] = useState(dialog === "create" ? lastGameFolder : "");
   const [brief, setBrief] = useState(draft?.brief ?? "");
   const [artDirection, setArtDirection] = useState("");
   const { toolchain, ready: engineReady } = useEngineReadiness(environmentId);
@@ -228,6 +235,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
       return;
     }
     setLastGameModel(model);
+    if (isCreate && directory.trim()) setLastGameFolder(directory.trim());
     refreshLibrary();
     setDialog(null);
     // The thread route sends a thread this client has not received yet back
