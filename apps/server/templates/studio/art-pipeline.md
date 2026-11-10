@@ -97,7 +97,7 @@ through the review and the export is not finished.
 true` swings arms out of the torso, `calm` (0..1) calms a waddle or a
    rolling head on a wide or big-headed body.
 3. **Parts** with `game_blender_code`, in world space at the rest pose.
-   `kurambit` is already imported:
+   `import kurambit` first in each call (every call starts afresh):
    - `kurambit.material("#RRGGBB", glow=0)`: a colour by palette role;
    - `kurambit.skin_rigid(obj, "Head")`, or a `{bone: weight}` dict, or a
      function of a vertex's world position (with `armature=`): binds a part;
@@ -189,8 +189,8 @@ humanoid that should play the library's clips goes through
 `game_blender_character` instead. Anything rigged, a door on hinges too,
 is a character to the person's route, so this needs `blender`: on another
 route say so in your reply. Every step runs headless in
-`game_blender_code`; write the subject's `art/CONCEPT.md` section first, as
-for any character.
+`game_blender_code` (`import kurambit` for its helpers); write the subject's
+`art/CONCEPT.md` section first, as for any character.
 
 1. **Model or sculpt.** Sculpt brushes need a viewport and do not run here:
    sculpt with modifiers and code. An organic body is a skin modifier on a
