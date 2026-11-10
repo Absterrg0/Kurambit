@@ -415,6 +415,12 @@ outside their catalog.
   not comparable, and a too-slow run in software is "not measured", never the game's slowness.
   The browser keeps what each backend printed to the probe, and a play drawn in software leaves
   the performance fact "not measured" with that output: a harness fault, never the game's.
+- **On a GPU, the no-input and random-input plays share it.** Measured on the Iris Xe laptop
+  (5 builds of 5 games, 3 runs each way): facts took 132 s alone and 70 s shared at the median,
+  with no verdict changed beyond the run-to-run noise and no play re-played. A shared play whose
+  reading sharing could explain is played again alone before it is stored (`sharedPlaySuspect`).
+  In SwiftShader plays slowed from 1× to 0.08× real time beside each other, so there they take
+  turns; the tester's bot always plays alone. Revisit only with new measurements.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.

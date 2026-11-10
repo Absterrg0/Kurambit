@@ -57,7 +57,7 @@ export const parseProbeRenderer = (dom: string): string | null => {
 };
 
 /** A renderer that draws on the CPU. */
-const isSoftwareRenderer = (renderer: string): boolean =>
+export const isSoftwareRenderer = (renderer: string): boolean =>
   /swiftshader|llvmpipe|softpipe|software/i.test(renderer);
 
 export interface RenderBackend {

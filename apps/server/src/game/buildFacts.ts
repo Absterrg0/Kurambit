@@ -240,6 +240,73 @@ export const tierFact = (
   }
 };
 
+/** Rows whose reading follows how fast the machine ran the play (keep going's loop.ts leaves the scene ones unguarded for the same reason). */
+const TIMING_ROWS: ReadonlySet<string> = new Set([
+  "freeze",
+  "motion",
+  "first-response",
+  "performance",
+  "clipping",
+  "fell",
+  "camera",
+  "sliding",
+]);
+/** Timing rows whose best reading is neutral, never good. */
+const NEUTRAL_AT_BEST: ReadonlySet<string> = new Set(["motion"]);
+/** A play beside another that kept at least this share of real time ran as it would alone. */
+const SHARED_REAL_TIME = 0.9;
+const UNREAD = notMeasured("not part of this play", false);
+
+/**
+ * Why a play that ran beside another may owe its reading to it, or null when
+ * it cannot: the game ran below real time, a reading only waiting clears, or
+ * a timing row reads worse than its best. Such a play is played again alone
+ * before anything is stored. A good reading stands: sharing the machine never
+ * made a game faster or smoother.
+ */
+export const sharedPlaySuspect = (
+  result: GameBotRunResult | null,
+  patch: Partial<Facts>,
+): string | null => {
+  if (result !== null && result.timeRatio < SHARED_REAL_TIME)
+    return `it ran at ${result.timeRatio.toFixed(2)}× real time`;
+  for (const fact of Object.values(patch))
+    if (typeof fact === "object" && fact !== null && "status" in fact)
+      if (fact.status === "not-measured" && fact.retry)
+        return `a reading only waiting clears: ${fact.why}`;
+  const facts: Facts = {
+    build: "",
+    key: "",
+    harness: "",
+    state: "measuring",
+    measuredAt: null,
+    renderer: null,
+    message: "",
+    boots: UNREAD,
+    idle: UNREAD,
+    masher: UNREAD,
+    skilled: UNREAD,
+    winnableWithoutSkill: UNREAD,
+    liveness: UNREAD,
+    firstResponse: UNREAD,
+    assets: UNREAD,
+    use: UNREAD,
+    performance: UNREAD,
+    scene: UNREAD,
+    ...patch,
+  } as Facts;
+  const slow = gameFactsView(facts).find(
+    (row) =>
+      TIMING_ROWS.has(row.id) &&
+      row.reading._tag === "measured" &&
+      (row.reading.tone === "bad" ||
+        (row.reading.tone === "neutral" && !NEUTRAL_AT_BEST.has(row.id))),
+  );
+  return slow === undefined || slow.reading._tag !== "measured"
+    ? null
+    : `its ${slow.id} reading is below its best (${slow.reading.text})`;
+};
+
 /** The masher's first-response probe as a fact. */
 export const firstResponseOf = (
   result: GameBotRunResult,

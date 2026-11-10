@@ -4,6 +4,8 @@ import { GameOperationError, type GameBotRunResult } from "@kurambit/contracts";
 import {
   faultOf,
   firstResponseOf,
+  notMeasured,
+  sharedPlaySuspect,
   skilledFact,
   tierFact,
   turnChangeBase,
@@ -135,6 +137,41 @@ describe("a busy machine", () => {
     expect(firstResponseOf(probe(null), busy)).toMatchObject({ status: "not-measured" });
     expect(firstResponseOf(probe(0.1), busy)).toMatchObject({ status: "measured" });
     expect(firstResponseOf(probe(0.9), quiet)).toMatchObject({ status: "measured" });
+  });
+});
+
+describe("sharedPlaySuspect", () => {
+  const live = (motion: number, longestFreeze = 0) => ({
+    status: "measured" as const,
+    value: {
+      freezes: [],
+      longestFreeze,
+      motion,
+      detail: 40,
+      dominantColour: 0.3,
+      longestStall: 0,
+      seconds: 60,
+    },
+  });
+  const perf = (fps: number) => ({
+    status: "measured" as const,
+    value: { fps, low1: fps, gpuMs: 4, scale: 1, width: 1280, height: 720, frames: 3000 },
+  });
+
+  it("keeps a shared play whose readings are at their best", () => {
+    expect(sharedPlaySuspect(run("done", {}), { liveness: live(20), performance: perf(60) })).toBe(
+      null,
+    );
+  });
+
+  it("plays alone again what sharing could explain", () => {
+    expect(sharedPlaySuspect({ ...run("done", {}), timeRatio: 0.8 }, {})).toMatch(/0\.80/);
+    expect(
+      sharedPlaySuspect(run("done", {}), { firstResponse: notMeasured("busy", true) }),
+    ).toMatch(/waiting/);
+    expect(sharedPlaySuspect(run("done", {}), { performance: perf(45) })).toMatch(/performance/);
+    expect(sharedPlaySuspect(run("done", {}), { liveness: live(20, 4) })).toMatch(/freeze/);
+    expect(sharedPlaySuspect(run("done", {}), { liveness: live(0.5) })).toMatch(/motion/);
   });
 });
 
