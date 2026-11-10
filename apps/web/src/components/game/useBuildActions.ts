@@ -81,9 +81,13 @@ export function useBuildRestore(
     if (result._tag === "Failure") {
       setBuildRestoreSending(threadRef, null);
       const failure = squashAtomCommandFailure(result);
+      // The server's own answer (why it refused) before the reason's generic advice.
+      const text = isGameOperationError(failure)
+        ? (failure.detail ?? failure.message)
+        : String(failure);
       if (isGameOperationError(failure)) key.current = null;
-      setError({ target, text: String(failure) });
-      return String(failure);
+      setError({ target, text });
+      return text;
     }
     key.current = null;
     // A request answered earlier is already in the list; a new one makes it move.

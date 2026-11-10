@@ -462,7 +462,12 @@ function ThreadGameStage({
         return;
       case "undo":
       case "redo":
-        if (turnUndoAllowed(request.kind)) void turnUndo.send();
+        // The header, the palette and the keys restore here: a refusal (another chat at
+        // work) is the person's news, not the game's failure.
+        if (turnUndoAllowed(request.kind))
+          void turnUndo.send().then((refused) => {
+            if (refused !== null) setMessage(refused);
+          });
         return;
       case "export":
         setExportOpen(true);
