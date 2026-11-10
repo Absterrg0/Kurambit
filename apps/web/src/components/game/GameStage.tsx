@@ -77,6 +77,7 @@ import { GameStageOverlay } from "./GameStageOverlay";
 import {
   clearStageSelection,
   toggleStageFreeze,
+  useStageAwayFreeze,
   useStageBridge,
   useThreadStageBridge,
 } from "./gameStageBridge";
@@ -248,7 +249,13 @@ function ThreadGameStage({
   const [exportOpen, setExportOpen] = useState(false);
   const showDockTab = useGameWorkspaceStore((state) => state.showDockTab);
   const threadKey = scopedThreadKey(threadRef);
-  const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
+  // Frozen by the person; a game held while the Stage has no focus reads as away instead.
+  const frozen = useThreadStageBridge(
+    threadKey,
+    (state) => state.frozen && !state.autoFrozen,
+    false,
+  );
+  const away = useThreadStageBridge(threadKey, (state) => state.autoFrozen, false);
   const bridgeStatus = useThreadStageBridge(threadKey, (state) => state.status, null);
   const selectedId = useThreadStageBridge(
     threadKey,
@@ -300,6 +307,8 @@ function ThreadGameStage({
   const [frameFold, setFrameFold] = useState<GameFrameFold | null>(null);
   // The person is in the game: its frame is the document's focused element.
   const [gameFocused, setGameFocused] = useState(false);
+  const [stageFocused, setStageFocused] = useState(false);
+  useStageAwayFreeze(threadKey, !stageFocused);
   // The live game's first page error, for the frame that threw it.
   const [studioError, setStudioError] = useState<{ key: string; text: string } | null>(null);
   // A shown live game opens itself while the server says nobody asked for it
@@ -757,9 +766,18 @@ function ThreadGameStage({
       aria-hidden={hidden}
       inert={hidden}
       tabIndex={-1}
-      onFocus={(event) => setGameFocused(isFolderGameFrame(event.target))}
+      onFocus={(event) => {
+        setGameFocused(isFolderGameFrame(event.target));
+        setStageFocused(true);
+      }}
       onBlur={(event) => {
         if (isFolderGameFrame(event.target)) setGameFocused(false);
+        if (
+          !(
+            event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)
+          )
+        )
+          setStageFocused(false);
       }}
       onKeyDown={(event) => {
         // Tab freezes and plays on, and Esc clears the selection, when the Stage itself
@@ -808,7 +826,11 @@ function ThreadGameStage({
             <h2 className="min-w-0 truncate font-display text-xl leading-6">
               <TruncatedText text={data.manifest.name} />
             </h2>
-            {frozen ? (
+            {away ? (
+              <span className="truncate text-xs leading-4 text-muted-foreground">
+                Paused while you are away from the Stage · click the game to play on
+              </span>
+            ) : frozen ? (
               <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
                 <span className="size-1.5 shrink-0 rounded-full bg-stage-mark" aria-hidden="true" />
                 <span className="truncate">

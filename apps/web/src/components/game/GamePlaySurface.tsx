@@ -115,7 +115,12 @@ export function GamePlaySurface({
   const playing = phase.kind === "playing" && previewUrl !== null;
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   // Frozen, the game is pointed at, not played: its "Click to play" cover would sit on the selection.
-  const frozen = useThreadStageBridge(bridge.threadKey, (state) => state.frozen, false);
+  // Held because the Stage lost focus, it is played again by a click, so the cover stays.
+  const frozen = useThreadStageBridge(
+    bridge.threadKey,
+    (state) => state.frozen && !state.autoFrozen,
+    false,
+  );
   useStageBridgeFrame(`${bridge.threadKey}\0${frameKey}`, playing ? frame : null, bridge.enabled);
   return (
     <div

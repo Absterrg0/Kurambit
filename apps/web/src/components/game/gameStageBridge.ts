@@ -37,6 +37,8 @@ interface StageBridgeState {
   readonly capabilities: ReadonlyArray<GameStageCapability>;
   readonly things: ReadonlyArray<GameThing>;
   readonly frozen: boolean;
+  /** Frozen because the Stage lost focus (useStageAwayFreeze), not by the person. */
+  readonly autoFrozen: boolean;
   readonly hover: { readonly id: string; readonly rect?: GameStageRect | undefined } | null;
   readonly selected: StageSelection | null;
   /** What each value was before the person tuned it here and has not kept: id → key → value. */
@@ -51,6 +53,7 @@ const EMPTY: Omit<StageBridgeState, "owner" | "post" | "hold"> = {
   capabilities: [],
   things: [],
   frozen: false,
+  autoFrozen: false,
   hover: null,
   selected: null,
   tunedFrom: {},
@@ -125,7 +128,9 @@ export function useStageBridgeFrame(
           return;
         case "studio-frozen":
           // Playing on keeps the selection, so its values can be tuned while playing.
-          useStageBridge.setState(message.on ? { frozen: true } : { frozen: false, hover: null });
+          useStageBridge.setState(
+            message.on ? { frozen: true } : { frozen: false, autoFrozen: false, hover: null },
+          );
           return;
         case "studio-frame":
           settleCapture(message.png);
@@ -159,14 +164,39 @@ export const useThreadStageBridge = <T>(
   );
 
 /** Freeze or play on: the game's own pause with a bridge, the visibility hold without one. */
-export const toggleStageFreeze = () => {
+const setStageFrozen = (on: boolean, auto: boolean) => {
   const state = useStageBridge.getState();
   if (state.owner === null) return;
-  const on = !state.frozen;
+  useStageBridge.setState({ autoFrozen: on && auto });
+  if (state.frozen === on) return;
   if (state.status === "ready" && state.capabilities.includes("freeze") && state.post !== null)
     state.post({ type: "studio-freeze", on });
   else state.hold?.(on);
 };
+
+/** A game held because the Stage lost focus counts as playing: the toggle freezes it for the person. */
+export const toggleStageFreeze = () => {
+  const { frozen, autoFrozen } = useStageBridge.getState();
+  setStageFrozen(!(frozen && !autoFrozen), false);
+};
+
+/**
+ * Holds the game, as Freeze does, while the Stage has no focus, so nothing
+ * plays on unwatched while the person reads the chat; a frame that comes up
+ * meanwhile (a live reload) is held as it says it is ready. The Stage's
+ * focus coming back plays on, unless the person froze it themselves.
+ */
+export function useStageAwayFreeze(threadKey: string, away: boolean) {
+  const owner = useThreadStageBridge(threadKey, (state) => state.owner, null);
+  const status = useThreadStageBridge(threadKey, (state) => state.status, "waiting");
+  useEffect(() => {
+    if (owner === null || status === "waiting") return;
+    const state = useStageBridge.getState();
+    if (away) {
+      if (!state.frozen) setStageFrozen(true, true);
+    } else if (state.autoFrozen) setStageFrozen(false, false);
+  }, [away, owner, status]);
+}
 
 export const clearStageSelection = () => {
   const { post, selected } = useStageBridge.getState();
