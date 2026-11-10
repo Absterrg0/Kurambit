@@ -26,6 +26,8 @@ const TOOL_PURPOSE = {
   blender: "Models, rigs and renders game art. Blender 4.2 or later.",
   uv: "Runs the live Blender view's helper. Kurambit fetches it itself when it is not installed.",
   mpfb: "MPFB2 2.0.18 makes human bodies for characters built in Blender. Its code is GPL-3.0 and is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender settings; the bodies it makes are CC0. Without it, characters use library bodies.",
+  ffmpeg:
+    "Records each bot play. A build's play facts and Keep going are read from these recordings; without ffmpeg a build is only checked for booting.",
 } as const satisfies Record<GameToolStatus["tool"], string>;
 
 const SOURCE_LABELS = {

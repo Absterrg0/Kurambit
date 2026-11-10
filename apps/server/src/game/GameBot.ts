@@ -673,7 +673,7 @@ const make = Effect.gen(function* () {
           "Bot run",
           "ffmpeg",
           "tool-missing",
-          "ffmpeg is needed for the run video.",
+          "ffmpeg is needed to record the play; install it (Settings > General > Game tools).",
         );
       const host = isWeb ? null : yield* Effect.promise(() => findWindowHost(processHost));
       if (host === null && !isWeb)

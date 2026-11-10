@@ -9,6 +9,7 @@ import {
   skilledFact,
   tierFact,
   turnChangeBase,
+  unmeasurableTier,
   winnableOf,
 } from "./buildFacts.ts";
 
@@ -182,6 +183,23 @@ describe("faultOf", () => {
     expect(faultOf(error("low-memory"))).toMatchObject({ retry: true });
     expect(faultOf(error("tool-missing"))).toMatchObject({ retry: false });
     expect(faultOf(error("command-failed"))).toBeNull();
+  });
+});
+
+describe("unmeasurableTier", () => {
+  it("is a tier a missing tool kept from playing, never one waiting or the build itself can clear", () => {
+    const missing = faultOf(
+      new GameOperationError({
+        operation: "Bot run",
+        path: "ffmpeg",
+        reason: "tool-missing",
+        detail: "ffmpeg is needed for the run video.",
+      }),
+    )!;
+    const busy = notMeasured("the machine was busy", true);
+    const own = notMeasured("the tier bot did not play: no canvas", false);
+    expect(unmeasurableTier({ idle: missing, masher: busy })).toBe(missing);
+    expect(unmeasurableTier({ idle: busy, masher: own })).toBeUndefined();
   });
 });
 

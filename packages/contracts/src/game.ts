@@ -465,7 +465,7 @@ export type GameToolSource = typeof GameToolSource.Type;
  * `error` is not usable.
  */
 export const GameToolStatus = Schema.Struct({
-  tool: Schema.Literals(["blender", "godot", "uv", "unity", "mpfb"]),
+  tool: Schema.Literals(["blender", "godot", "uv", "unity", "mpfb", "ffmpeg"]),
   installed: Schema.Boolean,
   path: Schema.NullOr(Schema.String),
   version: Schema.NullOr(Schema.String),

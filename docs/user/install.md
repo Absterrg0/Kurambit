@@ -9,9 +9,15 @@ it makes export to Windows, Linux and the web.
 - Node.js 24 and [Vite+](https://viteplus.dev) (`vp`) to build from source.
 - At least one installed, signed-in provider (see [Providers](#providers)). You can launch
   Kurambit first and configure providers afterwards.
+- ffmpeg, installed yourself. Kurambit records each bot play with it, and a build's play facts
+  (does it freeze, can it be won or lost) and **Keep going** are read from those recordings.
+  Without it a build is only checked for booting. Install it with your package manager:
+  `sudo apt install ffmpeg` (Debian, Ubuntu), `sudo dnf install ffmpeg` (Fedora, with RPM
+  Fusion), `brew install ffmpeg` (macOS) or `winget install ffmpeg` (Windows), or get it from
+  [ffmpeg.org/download](https://ffmpeg.org/download.html).
 - For game art, Blender 4.2 or later, installed yourself. **Settings → General → Game tools**
-  shows what Kurambit found and links to the download. Games are three.js browser games and need
-  nothing else installed.
+  shows what Kurambit found, ffmpeg included, and links to each download. Games are three.js
+  browser games and need nothing else installed.
 
 ## Run from source
 

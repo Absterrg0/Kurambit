@@ -8,7 +8,10 @@ three.js: see [Godot and Unity games](#godot-and-unity-games).
 
 ## Game tools
 
-three.js games need nothing installed. Art tools are programs you install yourself, the same
+three.js games play without anything installed, but measuring them needs **ffmpeg**: Kurambit
+records each bot play with it, and a build's play facts and **Keep going** are read from those
+recordings. Without ffmpeg a build is only checked for booting, and Keep going cannot set up a
+play bot. Art tools are programs you install yourself, the same
 way you install your coding agents: Kurambit finds them, checks their versions, and
 **Settings → General → Game tools** shows each one's status, where it was found, and a **Get**
 link to the vendor's download page when it is missing or the wrong version. After installing
@@ -18,13 +21,17 @@ something, press **Check again**.
   [blender.org/download](https://www.blender.org/download/).
 - **MPFB2** is optional: it gives characters built in Blender a human body. See
   [Characters](#characters).
+- **ffmpeg** records bot plays. Install it with your package manager (`sudo apt install ffmpeg`
+  on Debian and Ubuntu, `sudo dnf install ffmpeg` on Fedora with RPM Fusion, `brew install ffmpeg`
+  on macOS, `winget install ffmpeg` on Windows), or get it from
+  [ffmpeg.org/download](https://ffmpeg.org/download.html).
 
 Kurambit looks for Blender in this order: the path you enter in **Game tools**, the
 `KURAMBIT_BLENDER` environment variable, a copy an earlier Kurambit installed, then your PATH
 (`blender`). A path you enter is the only
 place it looks, so a wrong one shows as an error instead of being skipped.
 
-ffmpeg records bot runs' videos, so bot runs need it; the asset library also uses it to draw
+The asset library also uses ffmpeg to draw
 contact sheets of a pack's pictures, and without it lists the pack's files with no picture.
 Kurambit finds it on your PATH or at `KURAMBIT_FFMPEG`.
 

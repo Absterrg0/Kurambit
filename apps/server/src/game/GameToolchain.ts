@@ -60,6 +60,7 @@ const DOWNLOADS = {
   uv: "https://docs.astral.sh/uv/getting-started/installation/",
   unity: UNITY_DOWNLOAD_URL,
 } as const;
+const FFMPEG_DOWNLOAD = "https://ffmpeg.org/download.html";
 const NAMES = { blender: "Blender", godot: "Godot", uv: "uv", unity: "Unity" } as const;
 const REQUIRED = {
   blender: "Blender 4.2 or later",
@@ -926,6 +927,35 @@ const make = Effect.gen(function* () {
       downloadUrl: null,
     } satisfies GameToolStatus;
   });
+  // Found exactly as a bot run finds it (GameBot): KURAMBIT_FFMPEG, then PATH. Only the
+  // person installs it; without it no play is measured, so the row says what is lost.
+  const ffmpegStatus = Effect.promise(async (): Promise<GameToolStatus> => {
+    const override = process.env.KURAMBIT_FFMPEG;
+    const path = await GameProcesses.findExecutable("ffmpeg", {
+      pathEnv: process.env.PATH ?? "",
+      override,
+    });
+    const base = { tool: "ffmpeg" as const, version: null };
+    return path !== null
+      ? {
+          ...base,
+          installed: true,
+          path,
+          source: path === override?.trim() ? "env" : "path",
+          status: "ready",
+          message: "Records each bot play, which a build's play facts are read from.",
+          downloadUrl: null,
+        }
+      : {
+          ...base,
+          installed: false,
+          path: null,
+          source: null,
+          status: "error",
+          message: `ffmpeg was not found (Kurambit looks at KURAMBIT_FFMPEG, then PATH). Without it a build is only checked for booting: its plays are not measured, and Keep going cannot set up a play bot. Install it with your package manager (apt install ffmpeg, dnf install ffmpeg, brew install ffmpeg, winget install ffmpeg), or get it from ${FFMPEG_DOWNLOAD}, then press Check again.`,
+          downloadUrl: FFMPEG_DOWNLOAD,
+        };
+  });
   // A parked engine's tool is never looked for (GAME_ENGINES status).
   const status: GameToolchain["Service"]["status"] = (options) =>
     Effect.all([
@@ -934,6 +964,7 @@ const make = Effect.gen(function* () {
       binaryStatus("uv"),
       ...(isEngineToolActive("unity") ? [unityStatus(options?.unityProject)] : []),
       mpfbStatus,
+      ffmpegStatus,
     ]).pipe(Effect.map((tools) => ({ tools })));
   /** Fetched into a private stage and verified against its pin before it is moved into place. */
   const installMpfb = fetchLock.withPermits(1)(

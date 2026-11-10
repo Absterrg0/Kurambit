@@ -8,6 +8,7 @@ export const GAME_TOOL_NAMES = {
   uv: "uv",
   unity: "Unity",
   mpfb: "MPFB2",
+  ffmpeg: "ffmpeg",
 } as const satisfies Record<GameToolStatus["tool"], string>;
 
 /** "Get <tool>": the vendor's download page, opened in the system browser on desktop. */

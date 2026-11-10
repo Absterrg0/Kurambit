@@ -184,6 +184,8 @@ export const GameFactNotMeasured = Schema.Struct({
   why: Schema.String,
   /** Waiting can clear it (a tool or the machine): the next measure tries again. */
   retry: Schema.Boolean,
+  /** A tool or the machine that waiting will not fix (a missing program, a game too slow to play here). */
+  standing: Schema.optionalKey(Schema.Literal(true)),
 });
 export const GameFactPending = Schema.Struct({ status: Schema.Literal("pending") });
 const gameFact = <S extends Schema.Top>(value: S) =>

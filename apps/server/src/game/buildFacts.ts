@@ -98,11 +98,15 @@ export const busyReading = (what: string, machine: MachineLoad | null): NotMeasu
 const SOFTWARE_TOO_SLOW = "the harness renders in software here";
 
 /**
- * A tier the harness could not play in real time because it draws on the CPU.
- * Every tier plays the same span, so the skilled tier would not be measured either.
+ * The no-input or random-input tier this machine cannot measure until a person
+ * fixes it (a missing tool such as ffmpeg, or a game it cannot play in real
+ * time). The skilled tier plays the same way, so it would not be measured either.
  */
-export const tooSlowInSoftware = (fact: TierFact): fact is NotMeasured =>
-  fact.status === "not-measured" && fact.why.startsWith(SOFTWARE_TOO_SLOW);
+export const unmeasurableTier = (facts: Pick<Facts, "idle" | "masher">) =>
+  [facts.masher, facts.idle].find(
+    (fact): fact is Extract<TierFact, { status: "not-measured" }> =>
+      fact.status === "not-measured" && isStanding(fact),
+  );
 
 /**
  * A run below real time: its span of play did not fit the wall budget. In a

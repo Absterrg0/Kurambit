@@ -46,7 +46,7 @@ import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
-import { tooSlowInSoftware } from "../buildFacts.ts";
+import { unmeasurableTier } from "../buildFacts.ts";
 import * as GameBot from "../GameBot.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameProjectService from "../GameProjectService.ts";
@@ -208,7 +208,7 @@ const make = Effect.gen(function* () {
         facts.idle.status !== "pending"
       ) {
         // A bot nobody can measure here is tokens spent on nothing.
-        const unmeasurable = [facts.masher, facts.idle].find(tooSlowInSoftware);
+        const unmeasurable = unmeasurableTier(facts);
         const started =
           unmeasurable === undefined
             ? yield* botSetup.start(located)
@@ -217,7 +217,7 @@ const make = Effect.gen(function* () {
                 state: "skipped",
                 tokens: null,
                 minutes: null,
-                reason: `${unmeasurable.why}, so skilled play cannot be measured on this machine and keep going goes on without it`,
+                reason: `${unmeasurable.why.replace(/[.\s]+$/, "")}, so skilled play cannot be measured on this machine and keep going goes on without it`,
               } as const);
         if (started === "wait") return;
         return yield* complete(located, {
