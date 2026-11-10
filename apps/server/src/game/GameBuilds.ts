@@ -38,9 +38,10 @@ import {
   GameOperationError,
   manifestProject,
   parkedEngineMessage,
+  type ProjectId,
   RESTORE_BEFORE_LABEL,
   type RunId,
-  type ThreadId,
+  ThreadId,
 } from "@kurambit/contracts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
@@ -137,6 +138,8 @@ const NoRunRestore = Schema.Struct({
   before: Schema.NullOr(GameBuildId),
   /** Restore only while the folder holds this build (keep going's undo); kept so a settle honours it. */
   expect: Schema.optionalKey(GameBuildId),
+  /** The chat that asked, whose next turn a settle counts from the restored build too. */
+  thread: Schema.optionalKey(ThreadId),
   outcome: Schema.NullOr(
     Schema.Struct({
       restored: Schema.Boolean,
@@ -1155,11 +1158,15 @@ const make = Effect.gen(function* () {
    * as the rail does, so an undo never reads as the agent's work. T3's
    * next-turn base (CheckpointService), as the bot setup sets it.
    */
-  const nextTurnsFrom = (g: Game, threadId: ThreadId, oid: string) =>
+  const nextTurnsFrom = (
+    g: Pick<Game, "root" | "projectId">,
+    threadId: ThreadId | undefined,
+    oid: string,
+  ) =>
     Effect.gen(function* () {
       const recent = yield* projections.listProjectTurnCheckpoints(g.projectId, { limit: 50 });
       const chats = new Set([
-        threadId,
+        ...(threadId === undefined ? [] : [threadId]),
         ...recent.filter((row) => row.cwd === g.root).map((row) => row.threadId),
       ]);
       for (const chat of chats)
@@ -1181,15 +1188,6 @@ const make = Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
       const result = yield* restoreWithoutRun(threadId, g, build, commandId, options.expect);
-      // The move's own check captured the folder as it left it.
-      if (result.moved === "restored") {
-        const afterRef = checkpointRefForGameRun(NO_RUN, BuildName.restoreAfter(result.requestId));
-        const after = yield* checkpoints.listCheckpointRefs({ cwd: g.root, prefix: afterRef }).pipe(
-          Effect.map((refs) => refs.find((each) => each.checkpointRef === afterRef)?.oid),
-          Effect.orElseSucceed(() => undefined),
-        );
-        if (after !== undefined) yield* nextTurnsFrom(g, threadId, after);
-      }
       if (result.moved !== "moved-on") yield* playRestored(threadId, g);
       // Undo, Redo or Go back moved the folder a Guided proposal read: the person goes first.
       if (result.moved === "restored")
@@ -1317,6 +1315,7 @@ const make = Effect.gen(function* () {
     record: NoRunRestore,
     owner: string,
     folderBuild: GameBuildId | null,
+    projectId: ProjectId | null,
   ) =>
     Effect.gen(function* () {
       const moved = yield* withBuildInFolder(
@@ -1387,6 +1386,17 @@ const make = Effect.gen(function* () {
                   message: `${record.label} could not be restored (${moved.detail}). ${moved.back === null ? "The folder is back as it was." : `Putting the folder back failed too (${moved.back}).`}${kept}`,
                   moved: "refused" as const,
                 };
+      // Before the outcome is saved, so a restart that settles the restore sets it too. The
+      // move's own check captured the folder as it left it.
+      if (moved.kind === "done") {
+        const afterRef = checkpointRefForGameRun(NO_RUN, BuildName.restoreAfter(record.requestId));
+        const after = yield* checkpoints.listCheckpointRefs({ cwd: root, prefix: afterRef }).pipe(
+          Effect.map((refs) => refs.find((each) => each.checkpointRef === afterRef)?.oid),
+          Effect.orElseSucceed(() => undefined),
+        );
+        if (after !== undefined && projectId !== null)
+          yield* nextTurnsFrom({ root, projectId }, record.thread, after);
+      }
       // Nothing moved: the park is the folder as it still is, no build of its own.
       if (moved.kind === "current" || movedOn)
         yield* checkpoints
@@ -1480,13 +1490,14 @@ const make = Effect.gen(function* () {
               requestedAt: DateTime.formatIso(yield* DateTime.now),
               before: null,
               ...(expect === undefined ? {} : { expect }),
+              thread: threadId,
               outcome: null,
             };
       yield* saveNoRunRestore(g.root, record);
       // In the service's own fiber: a caller that goes away (a closed client)
       // stops waiting, never the folder's move.
       const fiber = yield* Effect.forkIn(
-        moveWithoutRun(g.root, g.lane, record, owner, folderBuild),
+        moveWithoutRun(g.root, g.lane, record, owner, folderBuild, g.projectId),
         scope,
       );
       const outcome = yield* Fiber.join(fiber);
@@ -1613,24 +1624,30 @@ const make = Effect.gen(function* () {
     const rows = yield* sql<{ readonly root: string; readonly payload_json: string }>`
       SELECT root, payload_json FROM game_build_restores
     `.pipe(Effect.orElseSucceed(() => []));
-    for (const row of rows) {
+    const unsettled = rows.flatMap((row) => {
       const decoded = decodeNoRunRestore(row.payload_json);
-      if (Option.isNone(decoded) || decoded.value.outcome !== null) continue;
+      return Option.isSome(decoded) && decoded.value.outcome === null
+        ? [{ root: row.root, record: decoded.value }]
+        : [];
+    });
+    if (unsettled.length === 0) return;
+    const games = yield* projects.list().pipe(Effect.orElseSucceed(() => []));
+    for (const row of unsettled)
       yield* projects.read(row.root).pipe(
         Effect.flatMap((manifest) =>
           moveWithoutRun(
             row.root,
             manifestProject(manifest),
-            decoded.value,
+            row.record,
             "game-builds:settle",
             null,
+            games.find((game) => game.root === row.root)?.projectId ?? null,
           ),
         ),
         Effect.catchCause((cause) =>
           Effect.logWarning("A cut-short restore could not be settled.", { root: row.root, cause }),
         ),
       );
-    }
   });
 
   // A chat turn's work is registered after its checkpoint commits, so a
