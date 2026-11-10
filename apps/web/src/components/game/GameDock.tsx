@@ -126,6 +126,21 @@ function Notice({ children }: { children: string }) {
   return <p className="p-5 text-sm text-muted-foreground">{children}</p>;
 }
 
+// A pick in Things switches the dock to the Inspector, unmounting the list
+// under the focus; the Inspector takes it so Esc and the controls still answer.
+const takeLostFocus = (node: HTMLDivElement | null) => {
+  if (
+    node !== null &&
+    (document.activeElement === null || document.activeElement === document.body)
+  )
+    node.focus();
+};
+
+const isTextEntry = (target: EventTarget) =>
+  target instanceof HTMLTextAreaElement ||
+  (target instanceof HTMLInputElement && (target.type === "text" || target.type === "search")) ||
+  (target instanceof HTMLElement && target.isContentEditable);
+
 function InspectorPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const threadKey = scopedThreadKey(threadRef);
   const selected = useThreadStageBridge(threadKey, (state) => state.selected, null);
@@ -139,7 +154,18 @@ function InspectorPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     );
   const { thing } = selected;
   return (
-    <div className="flex flex-col gap-5 p-4">
+    <div
+      ref={takeLostFocus}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        // The header and the close button promise Esc; a field being typed in keeps it.
+        if (event.key !== "Escape" || event.altKey || event.ctrlKey || event.metaKey) return;
+        if (isTextEntry(event.target)) return;
+        event.preventDefault();
+        clearStageSelection();
+      }}
+      className="flex flex-col gap-5 p-4 outline-none"
+    >
       <header className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h2 className="truncate font-display text-3xl leading-none">{thing.name}</h2>
