@@ -165,7 +165,7 @@ export const make = Effect.gen(function* () {
         input.fromTurnCount === 0
           ? projection.checkpointScopes.find((scope) => scope.kind === "root_run")
           : undefined;
-      const fromCheckpointRef =
+      const turnStart =
         input.fromTurnCount === 0
           ? firstScope === undefined
             ? undefined
@@ -175,6 +175,17 @@ export const make = Effect.gen(function* () {
               }).pipe(Effect.provideService(Crypto.Crypto, crypto))
           : readyCheckpoints.find((checkpoint) => checkpoint.appRunOrdinal === input.fromTurnCount)
               ?.ref;
+      // One turn's diff starts where its own changes did (OrchestrationV2Checkpoint.baseRef).
+      const ownBase =
+        input.toTurnCount - input.fromTurnCount === 1 && toCheckpoint.baseRef !== null
+          ? toCheckpoint.baseRef
+          : undefined;
+      const baseExists =
+        ownBase !== undefined &&
+        (yield* checkpointStore
+          .hasCheckpointRef({ cwd: toScope.cwd, checkpointRef: ownBase })
+          .pipe(Effect.orElseSucceed(() => false)));
+      const fromCheckpointRef = baseExists ? ownBase : turnStart;
       if (fromCheckpointRef === undefined) {
         return yield* new CheckpointRefUnavailableError({
           operation,

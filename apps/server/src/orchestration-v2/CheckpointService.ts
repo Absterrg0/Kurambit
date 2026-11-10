@@ -162,15 +162,30 @@ export class CheckpointServiceV2 extends Context.Service<
   CheckpointServiceV2Shape
 >()("kurambit/orchestration-v2/CheckpointService/CheckpointServiceV2") {}
 
+const refKey = Effect.fn("checkpointRefKey")(function* (id: string) {
+  const crypto = yield* Crypto.Crypto;
+  const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(id)).pipe(Effect.orDie);
+  return Base64Url.encode(Hex.encode(digest).slice(0, 32));
+});
+
+/**
+ * Where work done between a thread's turns left its folder (a game's play-bot
+ * setup, a session of its own). The thread's next turn measures its changes
+ * from there rather than from the previous turn's end, so that work is not
+ * listed as the turn's own. The next capture takes it.
+ */
+export const nextTurnBaseRefForThread = Effect.fn("nextTurnBaseRefForThread")(function* (
+  threadId: ThreadId,
+) {
+  const key = yield* refKey(threadId);
+  return CheckpointRef.make(`refs/kurambit/orchestration-v2/next-turn-base/${key}`);
+});
+
 export const checkpointRefForScopeOrdinal = Effect.fn("checkpointRefForScopeOrdinal")(
   function* (input: { readonly scopeId: CheckpointScopeId; readonly ordinalWithinScope: number }) {
-    const crypto = yield* Crypto.Crypto;
-    const digest = yield* crypto
-      .digest("SHA-256", new TextEncoder().encode(input.scopeId))
-      .pipe(Effect.orDie);
-    const scopeKey = Hex.encode(digest).slice(0, 32);
+    const scopeKey = yield* refKey(input.scopeId);
     return CheckpointRef.make(
-      `${CHECKPOINT_REFS_PREFIX}/${Base64Url.encode(scopeKey)}/ordinal/${input.ordinalWithinScope}`,
+      `${CHECKPOINT_REFS_PREFIX}/${scopeKey}/ordinal/${input.ordinalWithinScope}`,
     );
   },
 );
@@ -229,6 +244,7 @@ function makeCheckpoint(input: {
   readonly ref: CheckpointRef;
   readonly status: OrchestrationV2Checkpoint["status"];
   readonly files: OrchestrationV2Checkpoint["files"];
+  readonly baseRef?: CheckpointRef | null;
   readonly capturedAt: DateTime.Utc;
 }): OrchestrationV2Checkpoint {
   return {
@@ -243,6 +259,7 @@ function makeCheckpoint(input: {
     ref: input.ref,
     status: input.status,
     files: input.files,
+    ...(input.baseRef == null ? {} : { baseRef: input.baseRef }),
     capturedAt: input.capturedAt,
   };
 }
@@ -380,6 +397,46 @@ export const layer: Layer.Layer<
           ),
         );
 
+    const refEntry = (cwd: string, checkpointRef: CheckpointRef) =>
+      checkpointStore.listCheckpointRefs({ cwd, prefix: checkpointRef }).pipe(
+        Effect.map((entries) => entries.find((entry) => entry.checkpointRef === checkpointRef)),
+        Effect.orElseSucceed(() => undefined),
+      );
+
+    /**
+     * The thread's next-turn base, when work between turns set one after the
+     * previous checkpoint: copied beside this checkpoint (deleted with it) and
+     * returned. The thread's ref is taken either way, so it never outlives a turn.
+     */
+    const takeNextTurnBase = (
+      scope: OrchestrationV2CheckpointScope,
+      ordinalWithinScope: number,
+      previous: { readonly previousCheckpointRef: CheckpointRef; readonly previousExists: boolean },
+    ) =>
+      Effect.gen(function* () {
+        const cwd = scope.cwd;
+        const nextRef = yield* nextTurnBaseRefForThread(scope.threadId).pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
+        );
+        const next = yield* refEntry(cwd, nextRef);
+        if (next === undefined) return null;
+        yield* checkpointStore
+          .deleteCheckpointRefs({ cwd, checkpointRefs: [nextRef] })
+          .pipe(Effect.ignore);
+        const before = previous.previousExists
+          ? yield* refEntry(cwd, previous.previousCheckpointRef)
+          : undefined;
+        if (before === undefined || next.committedAt < before.committedAt) return null;
+        const scopeKey = yield* refKey(scope.id).pipe(Effect.provideService(Crypto.Crypto, crypto));
+        const kept = CheckpointRef.make(
+          `${CHECKPOINT_REFS_PREFIX}/${scopeKey}/base/${ordinalWithinScope}`,
+        );
+        const moved = yield* checkpointStore
+          .updateCheckpointRef({ cwd, checkpointRef: kept, oid: next.oid })
+          .pipe(Effect.orElseSucceed(() => false));
+        return moved ? kept : null;
+      });
+
     const capture: CheckpointServiceV2Shape["capture"] = (input) =>
       withWorkspaceLock(
         input.scope.cwd,
@@ -466,49 +523,54 @@ export const layer: Layer.Layer<
                 }).pipe(Effect.as(false)),
               ),
             );
+          const baseRef = yield* takeNextTurnBase(input.scope, input.ordinalWithinScope, {
+            previousCheckpointRef,
+            previousExists,
+          });
           const refs = {
             cwd: input.scope.cwd,
-            fromCheckpointRef: previousCheckpointRef,
+            fromCheckpointRef: baseRef ?? previousCheckpointRef,
             toCheckpointRef: checkpointRef,
           };
           // A pull or rebase can change thousands of files the turn did not write.
-          const files = previousExists
-            ? yield* Effect.all([
-                checkpointStore.diffCheckpoints({
-                  ...refs,
-                  fallbackFromToHead: false,
-                  ignoreWhitespace: false,
-                  format: "numstat",
-                }),
-                checkpointStore.listAuthoredPaths(refs).pipe(
+          const files =
+            previousExists || baseRef !== null
+              ? yield* Effect.all([
+                  checkpointStore.diffCheckpoints({
+                    ...refs,
+                    fallbackFromToHead: false,
+                    ignoreWhitespace: false,
+                    format: "numstat",
+                  }),
+                  checkpointStore.listAuthoredPaths(refs).pipe(
+                    Effect.catch((cause) =>
+                      Effect.logWarning("orchestration V2 checkpoint authored paths failed", {
+                        scopeId: input.scope.id,
+                        checkpointRef,
+                        cause: String(cause),
+                      }).pipe(Effect.as(null)),
+                    ),
+                  ),
+                ]).pipe(
+                  Effect.map(([diff, authoredPaths]) =>
+                    parseTurnDiffFilesFromNumstat(diff)
+                      .filter((file) => !isGitImport(file, authoredPaths))
+                      .map((file) => ({
+                        path: file.path,
+                        kind: "modified",
+                        additions: file.additions,
+                        deletions: file.deletions,
+                      })),
+                  ),
                   Effect.catch((cause) =>
-                    Effect.logWarning("orchestration V2 checkpoint authored paths failed", {
+                    Effect.logWarning("orchestration V2 checkpoint diff summary failed", {
                       scopeId: input.scope.id,
                       checkpointRef,
                       cause: String(cause),
-                    }).pipe(Effect.as(null)),
+                    }).pipe(Effect.as([])),
                   ),
-                ),
-              ]).pipe(
-                Effect.map(([diff, authoredPaths]) =>
-                  parseTurnDiffFilesFromNumstat(diff)
-                    .filter((file) => !isGitImport(file, authoredPaths))
-                    .map((file) => ({
-                      path: file.path,
-                      kind: "modified",
-                      additions: file.additions,
-                      deletions: file.deletions,
-                    })),
-                ),
-                Effect.catch((cause) =>
-                  Effect.logWarning("orchestration V2 checkpoint diff summary failed", {
-                    scopeId: input.scope.id,
-                    checkpointRef,
-                    cause: String(cause),
-                  }).pipe(Effect.as([])),
-                ),
-              )
-            : [];
+                )
+              : [];
 
           return makeCheckpoint({
             id: checkpointId,
@@ -521,6 +583,7 @@ export const layer: Layer.Layer<
             ref: checkpointRef,
             status: "ready",
             files,
+            baseRef,
             capturedAt: input.capturedAt,
           });
         }),
@@ -576,7 +639,11 @@ export const layer: Layer.Layer<
         input.scope.cwd,
         checkpointStore.deleteCheckpointRefs({
           cwd: input.scope.cwd,
-          checkpointRefs: input.checkpoints.map((checkpoint) => checkpoint.ref),
+          checkpointRefs: input.checkpoints.flatMap((checkpoint) =>
+            checkpoint.baseRef === undefined
+              ? [checkpoint.ref]
+              : [checkpoint.ref, checkpoint.baseRef],
+          ),
         }),
       ).pipe(
         Effect.mapError(

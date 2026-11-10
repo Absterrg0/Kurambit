@@ -40,6 +40,7 @@ function makeProjection(): ProjectionCheckpointContext {
         appRunOrdinal: 2,
         status: "ready",
         ref: secondRef,
+        baseRef: null,
       },
     ],
   };

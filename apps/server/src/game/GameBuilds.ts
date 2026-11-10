@@ -45,7 +45,10 @@ import {
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../checkpointing/Utils.ts";
-import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
+import {
+  checkpointRefForScopeOrdinal,
+  nextTurnBaseRefForThread,
+} from "../orchestration-v2/CheckpointService.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { type EarlierBuild, summaryOf, turnChangeBase } from "./buildFacts.ts";
@@ -915,6 +918,14 @@ const make = Effect.gen(function* () {
           .pipe(Effect.ignore);
         return refused;
       }
+      // The chat's next turn (keep going's step) lists its changes from here, as the rail does.
+      yield* checkpoints.updateCheckpointRef({
+        cwd: g.root,
+        checkpointRef: yield* nextTurnBaseRefForThread(threadId).pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
+        ),
+        oid: sha,
+      });
       // Last: the point counts only once its `-from` names the build the rail shows for it.
       yield* checkpoints.updateCheckpointRef({
         cwd: g.root,

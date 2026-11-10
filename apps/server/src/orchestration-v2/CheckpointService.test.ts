@@ -1,6 +1,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it, vi } from "@effect/vitest";
 import {
+  CheckpointRef,
   CheckpointScopeId,
   NodeId,
   ProviderThreadId,
@@ -104,3 +105,98 @@ it.effect.each([false, true, "interrupt"] as const)(
     }).pipe(Effect.provide(layerTest));
   },
 );
+
+it.effect.each([
+  { when: "after the previous turn", baseCommittedAt: 200, used: true },
+  { when: "before the previous turn ended", baseCommittedAt: 50, used: false },
+] as const)("measures a turn from a next-turn base set $when", ({ baseCommittedAt, used }) => {
+  const scope: OrchestrationV2CheckpointScope = {
+    id: CheckpointScopeId.make("checkpoint-scope:next-turn-base"),
+    threadId: ThreadId.make("thread:next-turn-base"),
+    runId: RunId.make("run:next-turn-base:2"),
+    nodeId: NodeId.make("node:next-turn-base:2"),
+    parentScopeId: null,
+    providerThreadId: ProviderThreadId.make("provider-thread:next-turn-base"),
+    kind: "root_run",
+    ordinalWithinParent: 0,
+    advancesAppRunCount: true,
+    cwd: "/repo",
+    createdAt: DateTime.makeUnsafe("2026-07-28T00:00:00.000Z"),
+  };
+  // Refs as git would hold them: name -> [oid, commit time].
+  const refs = new Map<string, readonly [string, number]>();
+  const diffedFrom: Array<string> = [];
+  const layerTest = CheckpointService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        IdAllocator.layer,
+        Layer.mock(CheckpointStore.CheckpointStore)({
+          isGitRepository: () => Effect.succeed(true),
+          hasCheckpointRef: (input) => Effect.succeed(refs.has(input.checkpointRef)),
+          captureCheckpoint: (input) =>
+            Effect.sync(() => {
+              refs.set(input.checkpointRef, ["c".repeat(40), 300]);
+              return "c".repeat(40);
+            }),
+          listCheckpointRefs: (input) =>
+            Effect.succeed(
+              [...refs]
+                .filter(([name]) => name.startsWith(input.prefix))
+                .map(([name, [oid, committedAt]]) => ({
+                  checkpointRef: CheckpointRef.make(name),
+                  oid,
+                  committedAt,
+                })),
+            ),
+          updateCheckpointRef: (input) =>
+            Effect.sync(() => {
+              refs.set(input.checkpointRef, [input.oid, 0]);
+              return true;
+            }),
+          deleteCheckpointRefs: (input) =>
+            Effect.sync(() => {
+              for (const ref of input.checkpointRefs) refs.delete(ref);
+            }),
+          diffCheckpoints: (input) =>
+            Effect.sync(() => {
+              diffedFrom.push(input.fromCheckpointRef);
+              return "";
+            }),
+          listAuthoredPaths: () => Effect.succeed(null),
+          withWorkspaceLock: (_cwd, effect) => effect,
+        }),
+      ),
+    ),
+    Layer.provideMerge(NodeCrypto.layer),
+  );
+
+  return Effect.gen(function* () {
+    const checkpoints = yield* CheckpointService.CheckpointServiceV2;
+    const previous = yield* CheckpointService.checkpointRefForScopeOrdinal({
+      scopeId: scope.id,
+      ordinalWithinScope: 1,
+    });
+    const next = yield* CheckpointService.nextTurnBaseRefForThread(scope.threadId);
+    refs.set(previous, ["a".repeat(40), 100]);
+    refs.set(next, ["b".repeat(40), baseCommittedAt]);
+
+    const checkpoint = yield* checkpoints.capture({
+      scope,
+      ordinalWithinScope: 2,
+      runId: scope.runId!,
+      nodeId: scope.nodeId!,
+      appRunOrdinal: 2,
+      capturedAt: scope.createdAt,
+    });
+
+    assert.isFalse(refs.has(next), "the next-turn base is taken either way");
+    if (used) {
+      assert.isDefined(checkpoint.baseRef);
+      assert.equal(refs.get(checkpoint.baseRef!)?.[0], "b".repeat(40));
+      assert.deepEqual(diffedFrom, [checkpoint.baseRef]);
+    } else {
+      assert.isUndefined(checkpoint.baseRef);
+      assert.deepEqual(diffedFrom, [previous]);
+    }
+  }).pipe(Effect.provide(layerTest));
+});

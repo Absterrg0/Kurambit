@@ -44,6 +44,7 @@ import type {
   RunAttemptId,
 } from "@kurambit/contracts";
 import {
+  CheckpointRef,
   isGameRunEventType,
   GameRun as GameRunSchema,
   GameRunRound as GameRunRoundSchema,
@@ -235,6 +236,7 @@ const ProjectionCheckpointContext = Schema.Struct({
         appRunOrdinal,
         status,
         ref,
+        baseRef: Schema.NullOr(CheckpointRef),
       }),
     ),
   ),
@@ -4929,7 +4931,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               sql`
               SELECT scope_id AS "scopeId", run_id AS "runId",
                 app_run_ordinal AS "appRunOrdinal", status,
-                json_extract(payload_json, '$.ref') AS ref
+                json_extract(payload_json, '$.ref') AS ref,
+                json_extract(payload_json, '$.baseRef') AS "baseRef"
               FROM orchestration_v2_projection_checkpoints
               WHERE thread_id = ${threadId}
               ORDER BY scope_id ASC, ordinal_within_scope ASC
@@ -7030,12 +7033,13 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               cwd,
             })),
             checkpoints: projection.checkpoints.map(
-              ({ scopeId, runId, appRunOrdinal, status, ref }) => ({
+              ({ scopeId, runId, appRunOrdinal, status, ref, baseRef }) => ({
                 scopeId,
                 runId,
                 appRunOrdinal,
                 status,
                 ref,
+                baseRef: baseRef ?? null,
               }),
             ),
           };

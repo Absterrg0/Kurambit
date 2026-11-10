@@ -1237,6 +1237,11 @@ export const OrchestrationV2Checkpoint = Schema.Struct({
   ref: CheckpointRef,
   status: Schema.Literals(["ready", "missing", "error", "stale"]),
   files: Schema.Array(OrchestrationV2CheckpointFileSummary),
+  /**
+   * What `files` and the turn's diff are measured from, when work between turns
+   * moved the folder (a game's play-bot setup); absent: the previous checkpoint.
+   */
+  baseRef: Schema.optionalKey(CheckpointRef),
   capturedAt: Schema.DateTimeUtc,
 });
 export type OrchestrationV2Checkpoint = typeof OrchestrationV2Checkpoint.Type;
