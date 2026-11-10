@@ -49,6 +49,29 @@ function describeSchedule(schedule: ScheduledTask["schedule"]): string {
   return "Webhook (no longer supported; edit to give it a time)";
 }
 
+/**
+ * A run's status is its sending: a sent prompt's turn can still fail in its
+ * chat (a usage limit), so "sent" never claims the turn went well.
+ */
+const RUN_STATUS: Record<ScheduledTask["lastRunStatus"], string> = {
+  never: " · not run yet",
+  running: " · sending now",
+  succeeded: " · last sent to its chat",
+  failed: " · last could not be sent",
+};
+
+const localTime = (iso: string) => {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+};
+
 function TaskRow({
   environmentId,
   task,
@@ -79,8 +102,8 @@ function TaskRow({
           <div className="truncate text-sm font-medium">{task.title}</div>
           <div className="text-xs text-muted-foreground">
             {describeSchedule(task.schedule)}
-            {task.nextRunAt ? ` · next ${task.nextRunAt}` : ""}
-            {task.lastRunStatus ? ` · last ${task.lastRunStatus}` : ""}
+            {task.nextRunAt ? ` · next ${localTime(task.nextRunAt)}` : ""}
+            {RUN_STATUS[task.lastRunStatus]}
             {task.enabled ? "" : " · paused"}
           </div>
         </div>
@@ -129,15 +152,17 @@ function DraftForm({
   environmentId,
   projectId,
   canOperate,
-  initial,
+  editing,
   onDone,
 }: {
   environmentId: EnvironmentId;
   projectId: string;
   canOperate: boolean;
-  initial: DraftState | null;
+  /** The task being edited: what the form cannot change (its chat, folder, agent) stays its own. */
+  editing: ScheduledTask | null;
   onDone: () => void;
 }) {
+  const initial = editing === null ? null : taskToDraft(editing);
   const upsert = useAtomCommand(scheduledTaskUpsert, { reportFailure: true });
   const settings = useEnvironmentSettings(environmentId);
   const providers =
@@ -190,7 +215,8 @@ function DraftForm({
         resolvedProjectId as never,
       ),
     );
-    const modelSelection = scheduledTaskDefaultModel(settings, null, instanceEntries);
+    const modelSelection =
+      editing?.modelSelection ?? scheduledTaskDefaultModel(settings, null, instanceEntries);
     if (modelSelection === null) {
       setError("No available provider model. Connect a provider first.");
       return;
@@ -212,8 +238,12 @@ function DraftForm({
         enabled: draft.enabled,
         schedule,
         projectId: resolvedProjectId as never,
-        threadId: null,
-        workspaceStrategy: { type: "worktree", baseRef: "main", startFromOrigin: true },
+        threadId: editing?.threadId ?? null,
+        workspaceStrategy: editing?.workspaceStrategy ?? {
+          type: "worktree",
+          baseRef: "main",
+          startFromOrigin: true,
+        },
         modelSelection,
         runtimeMode: draft.runtimeMode,
         interactionMode: draft.interactionMode,
@@ -267,11 +297,15 @@ function DraftForm({
         </label>
       </div>
       {draft.scheduleMode === "interval" ? (
-        <Input
-          value={draft.intervalMinutes}
-          placeholder="Minutes (e.g. 60)"
-          onChange={(event) => setDraft({ ...draft, intervalMinutes: event.target.value })}
-        />
+        <label className="flex items-center gap-2 text-xs">
+          Every
+          <Input
+            value={draft.intervalMinutes}
+            placeholder="60"
+            onChange={(event) => setDraft({ ...draft, intervalMinutes: event.target.value })}
+          />
+          minutes
+        </label>
       ) : (
         <Input
           value={draft.timeOfDay}
@@ -368,7 +402,7 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
           environmentId={environmentId}
           projectId={defaultProjectId}
           canOperate={canOperate}
-          initial={null}
+          editing={null}
           onDone={() => setCreating(false)}
         />
       ) : null}
@@ -377,7 +411,7 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
           environmentId={environmentId}
           projectId={editing.projectId}
           canOperate={canOperate}
-          initial={taskToDraft(editing)}
+          editing={editing}
           onDone={() => setEditing(null)}
         />
       ) : null}
