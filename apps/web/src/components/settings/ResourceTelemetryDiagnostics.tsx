@@ -92,6 +92,16 @@ function formatSampleInterval(valueMs: number): string {
   }`;
 }
 
+/** Shown for a counter nobody read: never a 0 that looks measured. */
+const NO_READING = "—";
+
+/** Why the native monitor gives no counters (a build without it, a monitor that stopped), else null. */
+function noCountersReason(health: ResourceTelemetrySourceHealth): string | null {
+  return health.status === "unavailable" || health.status === "stopped"
+    ? Option.getOrElse(health.lastError, () => "The process monitor is not running.")
+    : null;
+}
+
 function processIdentityKey(process: ResourceTelemetryProcess): string {
   return `${process.identity.pid}:${process.identity.startTimeMs}`;
 }
@@ -533,8 +543,10 @@ function ProcessTable({
   canMaintainEnvironment,
   signalingKeys,
   onSignal,
+  emptyLabel,
 }: {
   processes: ReadonlyArray<ResourceTelemetryProcess>;
+  emptyLabel: string;
   canMaintainEnvironment: boolean;
   signalingKeys: ReadonlySet<string>;
   onSignal: (process: ResourceTelemetryProcess, signal: ServerProcessSignal) => void;
@@ -595,7 +607,7 @@ function ProcessTable({
             {visible.length === 0 ? (
               <tr>
                 <td colSpan={11} className="px-4 py-5 text-xs text-muted-foreground sm:px-5">
-                  Waiting for the native process monitor.
+                  {emptyLabel}
                 </td>
               </tr>
             ) : null}
@@ -836,7 +848,10 @@ export function ResourceTelemetryDiagnostics({
   }, [environmentId]);
   const [isRetrying, setIsRetrying] = useState(false);
   const snapshot = telemetry.data;
-  const allKurambit = snapshot?.groups.allKurambit;
+  const noCounters = snapshot ? noCountersReason(snapshot.health.native) : null;
+  // Without the native monitor its zeros are no reading: the tiles show NO_READING.
+  const allKurambit = noCounters === null ? snapshot?.groups.allKurambit : undefined;
+  const pendingValue = noCounters === null ? "..." : NO_READING;
 
   const signalProcess = async (process: ResourceTelemetryProcess, signal: ServerProcessSignal) => {
     const targetEnvironmentId = environmentIdRef.current;
@@ -997,15 +1012,21 @@ export function ResourceTelemetryDiagnostics({
               </p>
             </div>
             <div className="flex items-center gap-2 text-3xs text-muted-foreground/65">
-              <span className="size-1.5 rounded-full bg-success" />
-              Sampling every {snapshot ? formatSampleInterval(snapshot.sampleIntervalMs) : "..."}
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  noCounters === null ? "bg-success" : "bg-muted-foreground/55",
+                )}
+              />
+              {noCounters ??
+                `Sampling every ${snapshot ? formatSampleInterval(snapshot.sampleIntervalMs) : "..."}`}
             </div>
           </div>
           <div className="grid grid-cols-2 divide-x divide-y divide-border/55 md:grid-cols-3">
             <IconStat
               icon={<CpuIcon className="size-3.5" />}
               label="Current CPU"
-              value={allKurambit ? `${allKurambit.currentCpuPercent.toFixed(1)}%` : "..."}
+              value={allKurambit ? `${allKurambit.currentCpuPercent.toFixed(1)}%` : pendingValue}
               detail={
                 allKurambit
                   ? `${formatCpuTime(allKurambit.cpuTimeMs)} observed CPU time`
@@ -1015,7 +1036,7 @@ export function ResourceTelemetryDiagnostics({
             <IconStat
               icon={<MemoryStickIcon className="size-3.5" />}
               label="Resident memory"
-              value={allKurambit ? formatBytes(allKurambit.currentRssBytes) : "..."}
+              value={allKurambit ? formatBytes(allKurambit.currentRssBytes) : pendingValue}
               detail={
                 allKurambit
                   ? `${formatBytes(allKurambit.peakRssBytes)} combined process peaks`
@@ -1025,7 +1046,7 @@ export function ResourceTelemetryDiagnostics({
             <IconStat
               icon={<ActivityIcon className="size-3.5" />}
               label="Process count"
-              value={allKurambit ? String(allKurambit.processCount) : "..."}
+              value={allKurambit ? String(allKurambit.processCount) : pendingValue}
               detail={
                 allKurambit
                   ? `${allKurambit.processStarts} starts · ${allKurambit.processExits} exits`
@@ -1035,13 +1056,13 @@ export function ResourceTelemetryDiagnostics({
             <IconStat
               icon={<HardDriveIcon className="size-3.5" />}
               label="Read throughput"
-              value={allKurambit ? formatRate(allKurambit.ioReadBytesPerSecond) : "..."}
+              value={allKurambit ? formatRate(allKurambit.ioReadBytesPerSecond) : pendingValue}
               detail={allKurambit ? `${formatBytes(allKurambit.ioReadBytes)} observed` : undefined}
             />
             <IconStat
               icon={<DatabaseIcon className="size-3.5" />}
               label="Write throughput"
-              value={allKurambit ? formatRate(allKurambit.ioWriteBytesPerSecond) : "..."}
+              value={allKurambit ? formatRate(allKurambit.ioWriteBytesPerSecond) : pendingValue}
               detail={allKurambit ? `${formatBytes(allKurambit.ioWriteBytes)} observed` : undefined}
               tone={
                 allKurambit && allKurambit.ioWriteBytesPerSecond >= 10 * 1_024 * 1_024
@@ -1067,7 +1088,7 @@ export function ResourceTelemetryDiagnostics({
               <span>{telemetry.error}</span>
             </div>
           ) : null}
-          {snapshot ? (
+          {snapshot && noCounters === null ? (
             <div className="grid border-t border-border/60 bg-muted/10 md:grid-cols-3">
               <AggregateCard
                 label="Backend + agents"
@@ -1164,8 +1185,10 @@ export function ResourceTelemetryDiagnostics({
                   Desktop host signals not connected
                 </div>
                 <p className="mt-1.5 max-w-sm text-2xs leading-relaxed text-muted-foreground/70">
-                  Power, idle, lock, and thermal state are supplied by the desktop host. Process
-                  telemetry remains fully active in this browser session.
+                  Power, idle, lock, and thermal state are supplied by the desktop host.
+                  {noCounters === null
+                    ? " Process telemetry remains fully active in this browser session."
+                    : null}
                 </p>
               </div>
             )}
@@ -1183,15 +1206,27 @@ export function ResourceTelemetryDiagnostics({
                 <HealthSource label="Electron main process" health={snapshot.health.desktop} />
                 <DetailRow
                   label="Collection time"
-                  value={formatDurationMicros(snapshot.health.collectionDurationMicros)}
+                  value={
+                    noCounters === null
+                      ? formatDurationMicros(snapshot.health.collectionDurationMicros)
+                      : NO_READING
+                  }
                 />
                 <DetailRow
                   label="Process scan"
-                  value={`${snapshot.health.retainedProcessCount}/${snapshot.health.scannedProcessCount} retained`}
+                  value={
+                    noCounters === null
+                      ? `${snapshot.health.retainedProcessCount}/${snapshot.health.scannedProcessCount} retained`
+                      : NO_READING
+                  }
                 />
                 <DetailRow
                   label="Inaccessible"
-                  value={String(snapshot.health.inaccessibleProcessCount)}
+                  value={
+                    noCounters === null
+                      ? String(snapshot.health.inaccessibleProcessCount)
+                      : NO_READING
+                  }
                   valueClassName={
                     snapshot.health.inaccessibleProcessCount > 0
                       ? "text-warning-foreground"
@@ -1267,6 +1302,7 @@ export function ResourceTelemetryDiagnostics({
             canMaintainEnvironment={canMaintainEnvironment}
             signalingKeys={signalingKeys}
             onSignal={signalProcess}
+            emptyLabel={noCounters ?? "Waiting for the native process monitor."}
           />
         </div>
       </SettingsSection>

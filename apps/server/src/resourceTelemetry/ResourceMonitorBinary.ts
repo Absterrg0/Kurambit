@@ -30,7 +30,7 @@ export class ResourceMonitorBinaryNotFound extends Schema.TaggedError<ResourceMo
   },
 ) {
   override get message(): string {
-    return `Resource monitor binary was not found for ${this.platform}/${this.architecture}.`;
+    return `Not available in this build: it has no resource monitor for ${this.platform}/${this.architecture}.`;
   }
 }
 

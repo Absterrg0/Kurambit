@@ -919,6 +919,12 @@ export function DiagnosticsSettingsPanel() {
   };
 
   const processDiagnosticsError = processData ? Option.getOrNull(processData.error) : null;
+  // An error with no process read is no reading: its zero totals would look measured.
+  const processTotals =
+    processData && !(processDiagnosticsError !== null && processData.processes.length === 0)
+      ? processData
+      : null;
+  const processPending = processData ? "—" : "...";
   const processResourceError = resourceData ? Option.getOrNull(resourceData.error) : null;
   const traceDiagnosticsError = data ? Option.getOrNull(data.error) : null;
   const traceDiagnosticsPartialFailure = data
@@ -959,16 +965,16 @@ export function DiagnosticsSettingsPanel() {
         <StatsGrid>
           <StatBlock
             label="Child Processes"
-            value={processData ? formatCount(processData.processCount) : "..."}
+            value={processTotals ? formatCount(processTotals.processCount) : processPending}
           />
           <StatBlock
             label="CPU"
-            value={processData ? `${processData.totalCpuPercent.toFixed(1)}%` : "..."}
+            value={processTotals ? `${processTotals.totalCpuPercent.toFixed(1)}%` : processPending}
             tooltip="Total CPU across live child processes of the current server process. The desktop shell and other parent processes are not included."
           />
           <StatBlock
             label="Memory"
-            value={processData ? formatBytes(processData.totalRssBytes) : "..."}
+            value={processTotals ? formatBytes(processTotals.totalRssBytes) : processPending}
             tooltip="Total resident memory across live child processes of the current server process. The desktop shell and other parent processes are not included."
           />
           <StatBlock
@@ -1000,7 +1006,9 @@ export function DiagnosticsSettingsPanel() {
           emptyLabel={
             isProcessInitialLoading
               ? "Loading live processes..."
-              : "No live descendant processes found."
+              : processTotals === null && processDiagnosticsError !== null
+                ? "No processes could be read."
+                : "No live descendant processes found."
           }
         />
       </SettingsSection>
