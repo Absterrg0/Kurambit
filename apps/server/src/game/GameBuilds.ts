@@ -345,6 +345,10 @@ export const currentBuild = <E, R>(
 
 /** Turn rows a page of the current-build walk reads. */
 const TURN_PAGE = 30;
+/** Every turn row older than a page, read to number its person builds. */
+const ALL_TURNS = 1_000_000;
+
+const isPersonBuild = (entry: Entry) => entry.source._tag === "turn" && entry.source.step === null;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -359,6 +363,8 @@ const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const crypto = yield* Crypto.Crypto;
   const engine = yield* Orchestrator.OrchestratorV2;
+  // Older turns never change their builds: a page's count below it is read once per ref set.
+  const personCounts = new Map<string, number>();
   // A round's change against the build before it never changes: read once.
   const roundFiles = new Map<string, { files: GameBuild["files"]; count: number | null }>();
 
@@ -712,6 +718,21 @@ const make = Effect.gen(function* () {
         entries: listed,
         kept,
         more: floor !== null || listed.length > limit,
+        // How many person builds the game has from before `at`: every older
+        // turn read, so a page's numbers never depend on what else was loaded.
+        personBefore: (at: string) => {
+          const key = `${g.root}\0${at}\0${refs.length}`;
+          const known = personCounts.get(key);
+          if (known !== undefined) return Effect.succeed(known);
+          return turnEntries(g, byRef, ALL_TURNS, at, saved, recorded, setups).pipe(
+            Effect.map(({ entries }) => {
+              const count = entries.filter(isPersonBuild).length;
+              if (personCounts.size > 200) personCounts.clear();
+              personCounts.set(key, count);
+              return count;
+            }),
+          );
+        },
         refs: byRef,
         recorded,
         saved,
@@ -746,6 +767,21 @@ const make = Effect.gen(function* () {
       return id !== null && isGameBuildId(id) ? id : null;
     });
 
+  /** Each person build's number among `entries`, a contiguous stretch of the game's builds. */
+  const numbersOf = (
+    listed: Effect.Success<ReturnType<typeof allEntries>>,
+    entries: ReadonlyArray<Entry>,
+  ) =>
+    Effect.gen(function* () {
+      const people = entries
+        .filter(isPersonBuild)
+        .toSorted((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+      const oldest = people[0];
+      if (oldest === undefined) return new Map<string, number>();
+      let n = yield* listed.personBefore(oldest.at);
+      return new Map(people.map((entry) => [entry.id as string, (n += 1)] as const));
+    });
+
   /** The content key of each build: its engine folder's tree. */
   const resolveOf = (g: Game, ids: ReadonlyArray<GameBuildId>) =>
     Effect.gen(function* () {
@@ -772,7 +808,12 @@ const make = Effect.gen(function* () {
       );
     });
 
-  const rowsOf = (g: Game, entries: ReadonlyArray<Entry>, kept: ReadonlySet<string>) =>
+  const rowsOf = (
+    g: Game,
+    entries: ReadonlyArray<Entry>,
+    kept: ReadonlySet<string>,
+    numbers: ReadonlyMap<string, number>,
+  ) =>
     Effect.gen(function* () {
       const resolved = yield* resolveOf(
         g,
@@ -786,6 +827,7 @@ const make = Effect.gen(function* () {
           id: entry.id,
           at: entry.at,
           source: entry.source,
+          number: numbers.get(entry.id) ?? null,
           // Only a build still kept can be restored to undo this one.
           base:
             entry.base !== null && isGameBuildId(entry.base) && kept.has(entry.base)
@@ -853,7 +895,7 @@ const make = Effect.gen(function* () {
       const listed = yield* allEntries(g, limit, input.before);
       const { entries, kept, more } = listed;
       const page = entries.slice(0, limit);
-      const { builds, measured } = yield* rowsOf(g, page, kept);
+      const { builds, measured } = yield* rowsOf(g, page, kept, yield* numbersOf(listed, page));
       // The generation cards read the newest build whose asset use was measured.
       const latestUse =
         input.before === undefined
@@ -1001,11 +1043,7 @@ const make = Effect.gen(function* () {
     });
 
   /** The list row of one build: found among the given builds, else a bare row. */
-  const rowOf = (
-    g: Game,
-    id: GameBuildId,
-    listed: { readonly entries: ReadonlyArray<Entry>; readonly kept: ReadonlySet<string> },
-  ) =>
+  const rowOf = (g: Game, id: GameBuildId, listed: Effect.Success<ReturnType<typeof allEntries>>) =>
     Effect.gen(function* () {
       const entry =
         listed.entries.find((each) => each.id === id) ??
@@ -1018,7 +1056,8 @@ const make = Effect.gen(function* () {
           fileCount: null,
           base: null,
         } satisfies Entry);
-      const [row] = (yield* rowsOf(g, [entry], new Set([...listed.kept, id]))).builds;
+      const kept = new Set([...listed.kept, id]);
+      const [row] = (yield* rowsOf(g, [entry], kept, yield* numbersOf(listed, [entry]))).builds;
       return row!;
     });
 

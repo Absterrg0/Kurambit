@@ -84,7 +84,7 @@ export function GameBuildDetail({
     <div className="space-y-4">
       <header className="space-y-1">
         <p className="text-2xs text-muted-foreground">
-          {formatBuildTime(build.at)} · {buildSourceLabel(build.source)}
+          {formatBuildTime(build.at)} · {buildSourceLabel(build)}
         </p>
         <h3 className="text-sm font-medium">{build.summary}</h3>
       </header>

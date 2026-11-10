@@ -3,7 +3,6 @@ import {
   type GameAssetUse,
   type GameBuild,
   type GameBuildFactsSummary,
-  type GameBuildSource,
   type GameBuildsResult,
   type GameFactDelta,
   type GameFactTone,
@@ -13,26 +12,28 @@ import {
 /** The game's latest restore, as the Builds list carries it. */
 export type GameBuildRestore = NonNullable<GameBuildsResult["restore"]>;
 
-/** Where a build came from, in the rail's words. */
-export const buildSourceLabel = (source: GameBuildSource): string => {
+/**
+ * A build named in a sentence: "Build 5", "Step 2's build", a saved build's
+ * label. A person's build goes by the server's number for it, never its turn's:
+ * a resumed or stopped turn is no extra build.
+ */
+export const buildName = (build: Pick<GameBuild, "id" | "source" | "number">): string => {
+  const source = build.source;
   switch (source._tag) {
     case "turn":
-      return `Turn ${source.turn} · ${source.threadTitle}`;
+      return source.step !== null
+        ? `Step ${source.step.n}'s build`
+        : `Build ${build.number ?? build.id.slice(0, 8)}`;
     case "saved":
       return source.label;
   }
 };
 
-/** A build named in a sentence: "Turn 5's build", "Step 2's build", a saved build's label. */
-export const buildName = (build: Pick<GameBuild, "source">): string => {
-  const source = build.source;
-  switch (source._tag) {
-    case "turn":
-      return source.step === null ? `Turn ${source.turn}'s build` : `Step ${source.step.n}'s build`;
-    case "saved":
-      return source.label;
-  }
-};
+/** Where a build came from: its name and the chat that made it, or a saved build's label. */
+export const buildSourceLabel = (build: Pick<GameBuild, "id" | "source" | "number">): string =>
+  build.source._tag === "turn"
+    ? `${buildName(build)} · ${build.source.threadTitle}`
+    : build.source.label;
 
 /** Today's builds by time; older ones by day and time. */
 export const formatBuildTime = (at: string, now: Date = new Date()): string => {

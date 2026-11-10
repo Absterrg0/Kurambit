@@ -110,11 +110,11 @@ const BUSY_LABELS: Record<GameAction, string> = {
   "export-windows": "Exporting for Windows",
 };
 
-// The turn whose build the folder holds, for the held build's chip.
-const folderBuildTurn = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+// The build the folder holds, by name, for the held build's chip.
+const folderBuildName = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result)) return null;
-  const source = result.value.builds.find((build) => build.id === result.value.current)?.source;
-  return source?._tag === "turn" ? source.turn : null;
+  const build = result.value.builds.find((each) => each.id === result.value.current);
+  return build === undefined ? null : buildName(build);
 };
 
 /** The folder's own game frame, not a build copy's. */
@@ -339,15 +339,15 @@ function ThreadGameStage({
     useAtomValue(
       turnBuild(sawTurnEnd && latestRun !== null ? threadRef : null, latestRun?.runId ?? null),
     ) !== null;
-  // Read only while an export engine's build is held: the Builds list names its turn.
-  const heldTurn = useEnvironmentQuerySelector(
+  // Read only while an export engine's build is held: the Builds list names it.
+  const heldName = useEnvironmentQuerySelector(
     frameFold?.held == null || frameFold.serve.servedArtifactId?.startsWith("live:") === true
       ? null
       : gameEnvironment.builds({
           environmentId: threadRef.environmentId,
           input: { threadId: threadRef.threadId },
         }),
-    folderBuildTurn,
+    folderBuildName,
   );
   const stageRef = useRef<HTMLElement | null>(null);
   // A compact switch unmounts nothing, but focus would die with the hidden
@@ -627,7 +627,7 @@ function ThreadGameStage({
       : stageKind === "live"
         ? { label: "Your agent changed the game while you were playing", action: "Reload" }
         : {
-            label: heldTurn === null ? "New build" : `New build from turn ${heldTurn}`,
+            label: heldName === null ? "New build" : `New build from ${heldName}`,
             action: "Play",
           };
   const stagePhaseLabel =

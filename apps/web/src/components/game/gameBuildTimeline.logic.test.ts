@@ -32,8 +32,8 @@ describe("the build timeline", () => {
   });
 
   it("names and tones a mark from what the list already says", () => {
-    // A person's turns count by their place in the rail, so turns 4 and 5 read 1 and 2
-    // after step 3 and the saved build; the step keeps its own number.
+    // A person's turns read the server's numbers, not their turn ordinals 4 and 5;
+    // the step keeps its own number.
     const labels = markLabels(timelineMarks(FAKE_BUILDS_RESULT.builds, FAKE_BUILDS_RESULT.current));
     expect(labels.get(BUILD_D)).toBe("1");
     expect(labels.get(BUILD_C)).toBe("2");
