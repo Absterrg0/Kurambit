@@ -63,7 +63,7 @@ const withKeepGoing = <A>(
     );
   });
 // Within the shortest tool-call timeout a provider gives an MCP server (Codex's is 60s).
-const TOOL_RESTORE_WAIT = "30 seconds";
+const TOOL_FACTS_WAIT = "30 seconds";
 
 const handlers = {
   game_status: McpToolAccess.readsAsCaller((input) =>
@@ -210,16 +210,14 @@ const handlers = {
         return yield* builds.measure(
           threadId,
           { _tag: "build", build },
-          { waitFor: TOOL_RESTORE_WAIT, queue: "background" },
+          { waitFor: TOOL_FACTS_WAIT, queue: "background" },
         );
       }),
     ),
   ),
   game_build_restore: McpToolAccess.actsAsCaller((input) =>
     withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-      builds.restore(threadId, { _tag: "build", build: input.build }, input.commandId, {
-        waitFor: TOOL_RESTORE_WAIT,
-      }),
+      builds.restore(threadId, { _tag: "build", build: input.build }, input.commandId),
     ),
   ),
   game_tune: McpToolAccess.actsAsCaller((input) =>

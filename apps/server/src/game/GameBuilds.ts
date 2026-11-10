@@ -248,7 +248,7 @@ export class GameBuilds extends Context.Service<
       threadId: ThreadId,
       build: GameBuildRef,
       commandId: string | undefined,
-      options?: { readonly waitFor?: Duration.Input; readonly expect?: GameBuildId },
+      options?: { readonly expect?: GameBuildId },
     ) => Effect.Effect<
       typeof GameBuildRestoreResult.Type & { readonly moved: RestoreMoved },
       GameOperationError
