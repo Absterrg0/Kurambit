@@ -41,7 +41,7 @@ const endingMessage = (run: GameRun, records: ReadonlyArray<StepRecord>): string
       return why === "" ? "Keep going is off." : `Keep going paused: ${why}.`;
     case "stalled":
       return why === ""
-        ? "Keep going paused: the last two steps changed nothing the facts can see. Tell your agent what to do next, or turn it on to try again."
+        ? "Keep going paused: the last two steps gained nothing; each changed nothing or was undone. Tell your agent what to do next, or turn it on to try again."
         : `Keep going paused: ${why}. Tell your agent what to do next, or turn it on to try again.`;
     case "budget": {
       const kept = records.filter((r) => r.step.verdict !== "undone").length;

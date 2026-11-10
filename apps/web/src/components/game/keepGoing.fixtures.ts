@@ -104,7 +104,7 @@ export const PAUSED_STALLED: GameKeepGoingStatus = {
   ending: "stalled",
   resumable: true,
   message:
-    "Keep going paused: the last two steps changed nothing the facts can see. Tell your agent what to do next, or turn it on to try again.",
+    "Keep going paused: the last two steps gained nothing; each changed nothing or was undone. Tell your agent what to do next, or turn it on to try again.",
 };
 
 export const FINISHED_DONE: GameKeepGoingStatus = {
