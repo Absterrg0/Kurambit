@@ -375,15 +375,8 @@ function ThreadGameStage({
   const data = query.data;
   const liveStaged = data != null && GAME_ENGINES[data.manifest.engine.name].stage === "live";
   if (seenRevision === null && data) setSeenRevision(data.operation?.revision ?? 0);
+  // Operation pushes reread the status (statusSignal in state/game), so nothing polls it.
   const operationState = data?.operation?.state ?? null;
-  // Operation events invalidate the status query, so this is only a fallback
-  // for a missed push while something is running. A whole-project status read
-  // must never be a two-second loop.
-  useEffect(() => {
-    if (operationState !== "running") return;
-    const interval = window.setInterval(refresh, 10_000);
-    return () => window.clearInterval(interval);
-  }, [operationState, refresh]);
   // The moment a turn settles, the game on disk is probably different.
   const previousTurnRunning = useRef(turnRunning);
   useEffect(() => {
