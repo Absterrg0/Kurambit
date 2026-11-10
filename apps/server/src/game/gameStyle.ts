@@ -22,7 +22,7 @@ import {
   GameStyle,
   type GameStyleLock,
 } from "@kurambit/contracts";
-import type { LibraryFile, LibraryPack } from "./assetLibraryFiles.ts";
+import { awaitsMirror, type LibraryFile, type LibraryPack } from "./assetLibraryFiles.ts";
 import { stableStringify } from "@kurambit/shared/stableJson";
 import { LIBRARY_SOURCES } from "./assetLibrarySources.ts";
 import {
@@ -71,6 +71,8 @@ const PACK_IDS: ReadonlyArray<string> = [
   ...LIBRARY_SOURCES.map((source) => source.id),
 ];
 const PACK_ID_SET: ReadonlySet<string> = new Set(PACK_IDS);
+/** The packs a lock may be derived from or a refusal may point to: none waiting for a mirror. */
+const OFFERED = LIBRARY_CATALOG.filter((pack) => !awaitsMirror(pack));
 
 const styleProblem = (style: GameStyle): string | null => {
   const packIds = PACK_IDS;
@@ -261,7 +263,7 @@ export const lockRigRefusal = (pack: LibraryPack, style: GameStyle | null): stri
     return null;
   const rig = resolveRig(style.rig);
   if (pack.rig === rig) return null;
-  const same = LIBRARY_CATALOG.filter((other) => other.rig === rig).map((other) => other.id);
+  const same = OFFERED.filter((other) => other.rig === rig).map((other) => other.id);
   const from = same.length > 1 ? `${same.slice(0, -1).join(", ")} or ${same.at(-1)}` : same[0];
   return `${pack.id}'s characters are on the ${pack.rig} rig and ${GAME_STYLE_FILE}'s rig is ${style.rig}, so their clips would not fit the game's other characters. Take characters from ${from}; from this pack add only props known to have no clips (glTF without animations: an FBX's clips cannot be read, so it counts as a character); or, if its characters belong in the game on their own rig, add "${pack.id}" to ${GAME_STYLE_FILE}'s packs.`;
 };
@@ -289,7 +291,7 @@ export const styleFromLock = (
     (source) => source.id,
   );
   const hasLook = (id: string) =>
-    LIBRARY_CATALOG.some((pack) => pack.family === id && !soundOnly(pack)) ||
+    OFFERED.some((pack) => pack.family === id && !soundOnly(pack)) ||
     LIBRARY_SOURCES.some((source) => source.family === id);
   if (family === undefined || family.id === INTERFACE_FAMILY || !hasLook(family.id)) {
     const looks = LIBRARY_FAMILIES.filter(
@@ -301,7 +303,7 @@ export const styleFromLock = (
   }
   const rigs = [
     ...new Set(
-      LIBRARY_CATALOG.filter((pack) => pack.family === family.id).flatMap((pack) =>
+      OFFERED.filter((pack) => pack.family === family.id).flatMap((pack) =>
         pack.rig === undefined ? [] : [pack.rig],
       ),
     ),
@@ -396,7 +398,7 @@ export const lockArmatureRefusal = (
     return joints.some((joint) => !bones.has(joint));
   });
   if (off.length === 0) return null;
-  const packs = LIBRARY_CATALOG.filter((pack) => pack.rig === rig).map((pack) => pack.id);
+  const packs = OFFERED.filter((pack) => pack.rig === rig).map((pack) => pack.id);
   return `${off.join(", ")} ${off.length === 1 ? "is not" : "are not"} on ${GAME_STYLE_FILE}'s rig ${rig}, so library clips would not fit ${off.length === 1 ? "it" : "them"}. ${rig === STANDARD_RIG ? `A character that plays them is built with game_blender_character, which puts it on the rig, or taken from ${packs.join(", ")}` : `Characters that play them come from ${packs.join(", ")}`}. ${ownRig} Or change ${GAME_STYLE_FILE}'s rig to move every character.`;
 };
 

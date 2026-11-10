@@ -66,7 +66,9 @@ check that matters.
   hash, ASSETS.md records the SHA-256 that arrived. Bytes that differ from the pin are refused,
   never re-pinned at runtime: a source can change contents or licence silently, and a refusal is
   the only honest answer. A pin changes only in a reviewed commit that rechecks the licence.
-  Only licences a sold game may ship under are indexed (`shippableLicence`: CC0, CC BY 3.0 and 4.0
+  An entry with bytes on a host that throttles every install (Google Drive, `awaitsMirror`) stays
+  in the index with its pins but is not offered, and a direct request says it waits for the
+  mirror; re-pinning it to the release mirror is all it takes to offer it. Only licences a sold game may ship under are indexed (`shippableLicence`: CC0, CC BY 3.0 and 4.0
   with a credit line, MIT, Apache-2.0, the OFL for fonts); per-asset licences (Poly Pizza) are
   checked one by one. The add credits each entry in ASSETS.md and gives the game's credits file one
   line, in the source's own credit wording when its licence asks for credit. Kenney packs come from

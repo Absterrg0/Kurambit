@@ -195,7 +195,7 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
   {
     id: "quaternius-lowpoly",
     title: "Quaternius low-poly 3D",
-    look: "flat-coloured low-poly 3D, rounded and friendly: animated animals, dinosaurs, fish, monsters, mechs, knights and people (each kind on its own skeleton with its own clips), vehicles, guns, food, nature, dungeons and towns; the megakits are the same shapes with soft textures",
+    look: "flat-coloured low-poly 3D, rounded and friendly: animated animals (wolf, dog, cat, eagle), monsters, knights and people, each kind on its own skeleton with its own clips; a textured medieval village, stylised nature and props in the megakits",
   },
   {
     id: "quaternius-universal",

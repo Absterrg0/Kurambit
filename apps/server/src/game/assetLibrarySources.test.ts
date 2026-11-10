@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
 import {
+  awaitsMirror,
   creditLine,
   entryLicenceProblem,
   pinProblem,
@@ -106,5 +107,34 @@ describe("pins", () => {
   it("treats a size the source does not publish as a ceiling only", () => {
     expect(pinProblem({ bytes: 64, capped: true }, got)).toBeNull();
     expect(pinProblem({ bytes: 9, capped: true }, got)).not.toBeNull();
+  });
+});
+
+describe("entries waiting for a mirror", () => {
+  it("holds back an entry with any byte on Google Drive, and offers it once re-pinned elsewhere", () => {
+    const drive = {
+      download: "https://drive.usercontent.google.com/download?id=abc&export=download&confirm=t",
+      files: [
+        {
+          path: "glTF/Fox.gltf",
+          url: "https://drive.usercontent.google.com/download?id=abc&export=download&confirm=t",
+          bytes: 1,
+        },
+      ],
+    };
+    expect(awaitsMirror(drive)).toBe(true);
+    expect(
+      awaitsMirror({
+        download: "https://github.com/Absterrg0/Kurambit/releases/download/library-mirror/x.zip",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the OpenGameArt-hosted Quaternius animals offered", () => {
+    const animals = LIBRARY_CATALOG.find(
+      (pack) => pack.id === "quaternius-animated-animales-low-poly",
+    );
+    expect(animals).toBeDefined();
+    expect(animals === undefined ? true : awaitsMirror(animals)).toBe(false);
   });
 });

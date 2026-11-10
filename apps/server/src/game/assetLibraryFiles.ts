@@ -89,6 +89,30 @@ export const entryLicenceProblem = (
 export const creditLine = (pack: Pick<LibraryPack, "title" | "author" | "licence" | "credit">) =>
   `${pack.credit ?? `${pack.title} by ${pack.author}`} · ${LIBRARY_LICENCES[pack.licence].name}`;
 
+/**
+ * Hosts whose downloads are throttled for everyone (Google Drive answers "Quota exceeded" with
+ * a web page), so an entry pinned there is held back until it is mirrored on a host that serves
+ * every install. Re-pinning the entry to the mirror is all it takes to offer it.
+ */
+const UNRELIABLE_HOSTS: ReadonlySet<string> = new Set([
+  "drive.usercontent.google.com",
+  "drive.google.com",
+  "docs.google.com",
+]);
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+};
+
+/** Whether an entry waits to be mirrored before it is offered: any of its bytes come from such a host. Pure. */
+export const awaitsMirror = (pack: Pick<LibraryPack, "download" | "files">) =>
+  [pack.download, ...(pack.files ?? []).map((file) => file.url)].some((url) =>
+    UNRELIABLE_HOSTS.has(hostOf(url)),
+  );
+
 /** One file of a pack made of loose files, pinned by what its source publishes. */
 export interface LibraryPackFile {
   /** Pack-relative, forward slashes: where it lands, as the model beside it names it. */

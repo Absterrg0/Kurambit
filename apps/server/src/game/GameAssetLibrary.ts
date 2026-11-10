@@ -45,6 +45,7 @@ import { readGltfJson } from "./gltfJson.ts";
 import {
   INDEX_VERSION,
   LIBRARY_LICENCES,
+  awaitsMirror,
   UNPACK_LIMITS,
   creditLine,
   downloadPinned,
@@ -308,6 +309,9 @@ const ENTRIES: ReadonlyMap<string, LibraryPack> = new Map(
 
 const POLY_PIZZA_API = "https://api.poly.pizza/v1.1";
 
+/** The packs search shows: those waiting for a mirror stay in the index, out of sight. */
+const OFFERED_PACKS = LIBRARY_CATALOG.filter((pack) => !awaitsMirror(pack));
+
 const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const projects = yield* GameProjectService.GameProjectService;
@@ -447,6 +451,13 @@ const make = Effect.gen(function* () {
   const packOf = (id: string): Effect.Effect<LibraryPack, GameOperationError> =>
     Effect.gen(function* () {
       const pack = ENTRIES.get(id) ?? polyPizzaSeen.get(id);
+      if (pack !== undefined && awaitsMirror(pack))
+        return yield* fail(
+          "Library",
+          id,
+          "invalid-input",
+          `${pack.id} (${pack.title}) is in the library's index but waits to be mirrored: its source host (Google Drive) throttles downloads for everyone, so it is not offered yet. Use another entry; game_assets_search lists only what can be fetched.`,
+        );
       if (pack !== undefined) return pack;
       const model = polyPizzaModelId(id);
       if (model !== null) {
@@ -1028,7 +1039,7 @@ const make = Effect.gen(function* () {
       ) {
         let hidden = 0;
         const families = LIBRARY_FAMILIES.flatMap((family) => {
-          const packs = LIBRARY_CATALOG.filter((pack) => {
+          const packs = OFFERED_PACKS.filter((pack) => {
             if (pack.family !== family.id) return false;
             if (input.licence === "cc0" && pack.licence !== "CC0-1.0") return false;
             if (offer(engine, pack, undefined) === null) {
@@ -1080,7 +1091,7 @@ const make = Effect.gen(function* () {
       }
       const live = yield* polyPizzaSearch(input);
       let hidden = 0;
-      const ranked = [...LIBRARY_CATALOG, ...LIBRARY_ASSETS, ...live.entries]
+      const ranked = [...OFFERED_PACKS, ...LIBRARY_ASSETS, ...live.entries]
         .flatMap((pack, order) => {
           if (kind !== undefined && !pack.kinds.includes(kind)) return [];
           if (input.family !== undefined && pack.family !== input.family) return [];
@@ -1136,7 +1147,7 @@ const make = Effect.gen(function* () {
               tiles,
               false,
             );
-      const total = LIBRARY_CATALOG.length + LIBRARY_ASSETS.length;
+      const total = OFFERED_PACKS.length + LIBRARY_ASSETS.length;
       const text = [
         lockLine,
         shown.length === 0

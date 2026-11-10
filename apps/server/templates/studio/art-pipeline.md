@@ -60,8 +60,8 @@ change the route. An unrigged model is a prop on every route.
   (`quaternius-universal-base-characters`) puts it on the skeleton with the
   library's clips. No character fits: recolour one (a family's characters
   share one small colormap texture; edit a copy of that PNG and point the
-  copy's material at it). Animals and creatures (Quaternius' animals,
-  dinosaurs, fish and monsters, animated Poly Pizza models) each come on a
+  copy's material at it). Animals and creatures (Quaternius' animals and
+  monsters, animated Poly Pizza models) each come on a
   skeleton of their own with their own clips: play a model's clips on that
   model only.
 - `blender`: made characters: on the standard skeleton with the library's
