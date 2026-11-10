@@ -39,8 +39,10 @@ const CAP_MS = 10 * 60_000;
 /** The first session, then at most one fix-up. */
 const SESSIONS = [0, 1] as const;
 
+// Stops at the first finished run: measured setups that kept polishing a bot
+// that had already won spent most of their tokens re-reading their own session.
 const TASK =
-  "Write a play bot for this game, so Kurambit can measure whether a skilled player wins. Read `BRIEF.md` and only as much of the game's code as you need for its controls and how a run is won. Write `.studio/bot/play.mjs` with the bot kit (read `.studio/bot/kit/KIT-GUIDE.md`): a `policy` bot whose goal is to win one run of the core loop. Run it with `game_bot_run` (decider `policy`) and fix it until it plays a full run. Change only files under `.studio/bot/`, outside `kit/`.";
+  "Write a play bot for this game, so Kurambit can measure whether a skilled player wins. Read `BRIEF.md` and only as much of the game's code as you need for its controls and how a run is won. Write `.studio/bot/play.mjs` with the bot kit (read `.studio/bot/kit/KIT-GUIDE.md`): a `policy` bot whose goal is to win one run of the core loop. Run it with `game_bot_run` (decider `policy`) and fix it until one run ends: stop as soon as a run is won, or plays out in full if the game cannot be won. Don't polish a bot that has finished a run, and don't run it again to confirm. Change only files under `.studio/bot/`, outside `kit/`.";
 
 const commandIdOf = (runId: string, n: number) =>
   CommandId.make(`server:game-run-bot-setup:${runId}:${n}`);
