@@ -158,6 +158,7 @@ function AgentsStep({
   readonly onContinue: () => void;
 }) {
   const { environments } = useEnvironments();
+  const primaryEnvironmentId = usePrimaryEnvironment()?.environmentId ?? null;
   return (
     <StepShell
       title="Connect your agents"
@@ -171,9 +172,12 @@ function AgentsStep({
             <ConnectedAgentsStep
               key={environmentId}
               environmentId={environmentId}
+              // This computer goes without saying; only another one is named.
               machineLabel={
-                environments.find((environment) => environment.environmentId === environmentId)
-                  ?.label ?? "Computer"
+                environmentId === primaryEnvironmentId && environmentIds.length === 1
+                  ? null
+                  : (environments.find((environment) => environment.environmentId === environmentId)
+                      ?.label ?? "Computer")
               }
             />
           ))}
@@ -194,7 +198,7 @@ function ConnectedAgentsStep({
   machineLabel,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly machineLabel: string;
+  readonly machineLabel: string | null;
 }) {
   const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
@@ -245,7 +249,7 @@ function ConnectedAgentsStep({
   }
   return (
     <section>
-      <h2 className="mb-2 text-sm font-medium">{machineLabel}</h2>
+      {machineLabel === null ? null : <h2 className="mb-2 text-sm font-medium">{machineLabel}</h2>}
       {!canOperateTerminal ? (
         <p className="mb-2 text-sm text-muted-foreground">
           This connection cannot control terminals.
