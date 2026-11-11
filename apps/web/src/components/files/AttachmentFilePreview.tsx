@@ -6,13 +6,22 @@ import { settlePromise } from "@kurambit/client-runtime/state/runtime";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import * as Cause from "effect/Cause";
 import { filePreviewKind, FILE_TEXT_PREVIEW_MAX_BYTES } from "@kurambit/shared/filePreview";
-import { ChevronRightIcon, DownloadIcon, Trash2Icon, WrapTextIcon, XIcon } from "lucide-react";
-import { Check, Code2, Copy, Eye, Table2 } from "lucide";
+import {
+  ChevronRightIcon,
+  DownloadIcon,
+  Trash2Icon,
+  WrapTextIcon,
+  XIcon,
+  CheckIcon,
+  Code2Icon,
+  CopyIcon,
+  EyeIcon,
+  Table2Icon,
+} from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { useAssetUrlRefresh } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
-import { MorphIcon } from "~/components/MorphIcon";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { toastManager } from "~/components/ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -284,10 +293,13 @@ export function AttachmentFilePreview(props: {
             pressed={rendered}
             onPress={() => setRendered((value) => !value)}
           >
-            <MorphIcon
-              className="size-3.5"
-              icon={rendered ? Code2 : renderedMode === "table" ? Table2 : Eye}
-            />
+            {rendered ? (
+              <Code2Icon className="size-3.5" />
+            ) : renderedMode === "table" ? (
+              <Table2Icon className="size-3.5" />
+            ) : (
+              <EyeIcon className="size-3.5" />
+            )}
           </FileSurfaceAction>
         ) : null}
         {showsRawText ? (
@@ -304,7 +316,7 @@ export function AttachmentFilePreview(props: {
             label={isCopied ? "Copied" : content.truncated ? "Copy preview" : "Copy contents"}
             onPress={() => copyToClipboard(content.text, undefined)}
           >
-            <MorphIcon className="size-3.5" icon={isCopied ? Check : Copy} />
+            {isCopied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
           </FileSurfaceAction>
         ) : null}
         {url ? (

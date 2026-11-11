@@ -43,8 +43,11 @@ import {
   WorkflowIcon,
   WrapTextIcon,
   type LucideIcon,
+  CheckIcon,
+  CopyIcon,
+  Maximize2Icon,
+  Minimize2Icon,
 } from "lucide-react";
-import { Check, Copy, Maximize2, Minimize2 } from "lucide";
 import {
   AuthPreviewOperateScope,
   type AssetResource,
@@ -135,7 +138,6 @@ import {
 import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from "../pierre-icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { ContextChip } from "./ContextChip";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { ScrollArea } from "./ui/scroll-area";
@@ -657,7 +659,11 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
                 />
               }
             >
-              <MorphIcon className="size-3" icon={expanded ? Minimize2 : Maximize2} />
+              {expanded ? (
+                <Minimize2Icon className="size-3" />
+              ) : (
+                <Maximize2Icon className="size-3" />
+              )}
             </TooltipTrigger>
             <TooltipPopup side="top">{expandLabel}</TooltipPopup>
           </Tooltip>
@@ -680,7 +686,7 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
                 />
               }
             >
-              <MorphIcon className="size-3" icon={copied ? Check : Copy} />
+              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
             </TooltipTrigger>
             <TooltipPopup side="top">{copyLabel}</TooltipPopup>
           </Tooltip>
@@ -928,7 +934,7 @@ function MarkdownCodeBlock({
           />
         }
       >
-        <MorphIcon className="size-3" icon={copied ? Check : Copy} />
+        {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </TooltipTrigger>
       <TooltipPopup side="top">{copyLabel}</TooltipPopup>
     </Tooltip>
