@@ -345,6 +345,28 @@ describe("the proposal", () => {
     expect(next.log).toContain("goes on without the skilled fact");
   });
 
+  it("ends rather than start a step no play tier here could judge", () => {
+    const missing = {
+      status: "not-measured" as const,
+      why: "Bot run: ffmpeg is needed to record the play.",
+      retry: false,
+      standing: true as const,
+    };
+    const blind = Loop.applyLook(
+      state(),
+      look({ facts: facts({ idle: missing, masher: missing }) }),
+      NOW,
+    );
+    expect(blind.plan).toBeNull();
+    expect(blind.state.ending).toBe("tool-failed");
+    expect(blind.state.lastFailure).toBe(
+      "it can't judge steps here: Bot run: ffmpeg is needed to record the play; then measure the build again",
+    );
+    // One tier still measured judges a step.
+    const oneTier = Loop.applyLook(state(), look({ facts: facts({ idle: missing }) }), NOW);
+    expect(oneTier.plan).toMatchObject({ kind: "turn" });
+  });
+
   it("checks the budget before each turn and caps the turn at the time left", () => {
     const ends = (minutes: number) => state({ budgetEndsAt: NOW + minutes * 60_000 });
     expect(Loop.applyLook(ends(7), look(), NOW).state.ending).toBe("budget");

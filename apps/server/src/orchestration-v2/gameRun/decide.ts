@@ -542,6 +542,23 @@ const startTurn = (
 };
 
 /**
+ * The no-input and random-input tiers both not measured for a fault waiting
+ * will not fix (ffmpeg missing, say; `unmeasurableTier` in game/buildFacts.ts):
+ * the skilled tier plays the same way, so every step would be kept on Boots
+ * alone, which is tokens spent on nothing. Stored facts re-measure such a
+ * fault only on a person's measure, hence the ending's "measure again".
+ */
+const bothTiersStanding = (facts: GameBuildFacts) => {
+  const { idle, masher } = facts;
+  return idle.status === "not-measured" &&
+    idle.standing === true &&
+    masher.status === "not-measured" &&
+    masher.standing === true
+    ? masher
+    : null;
+};
+
+/**
  * The look's evidence becomes a proposal: Autopilot starts it at once; Guided
  * shows it with a deadline, except the person's own note, which they already
  * asked for. A folder edited outside any build pauses the run: a step's undo
@@ -554,6 +571,14 @@ const proposeFrom = (state: RunState, look: LookResult, now: number): Next => {
       "stalled",
       "the game folder has changes no build holds, and an undo would take them; send them in a turn first",
       "the folder holds no build",
+    );
+  const unjudgeable = look.facts === null ? null : bothTiersStanding(look.facts);
+  if (unjudgeable !== null)
+    return end(
+      state,
+      "tool-failed",
+      `it can't judge steps here: ${unjudgeable.why.trim().replace(/[.\s]+$/, "")}; then measure the build again`,
+      "no play tier can be measured on this machine, so no step could be judged",
     );
   if (!fitsBudget(state, now)) return end(state, "budget", "", "the budget holds no other step");
   const proposal = propose(state, look);

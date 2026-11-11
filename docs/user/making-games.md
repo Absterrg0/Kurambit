@@ -10,8 +10,8 @@ three.js: see [Godot and Unity games](#godot-and-unity-games).
 
 three.js games play without anything installed, but measuring them needs **ffmpeg**: Kurambit
 records each bot play with it, and a build's play facts and **Keep going** are read from those
-recordings. Without ffmpeg a build is only checked for booting, and Keep going cannot set up a
-play bot. Art tools are programs you install yourself, the same
+recordings. Without ffmpeg a build is only checked for booting, and Keep going stops at once,
+since it could not judge a step; once ffmpeg is installed, measure the build again. Art tools are programs you install yourself, the same
 way you install your coding agents: Kurambit finds them, checks their versions, and
 **Settings → General → Game tools** shows each one's status, where it was found, and a **Get**
 link to the vendor's download page when it is missing or the wrong version. After installing
