@@ -98,9 +98,8 @@ then have the art redone. Delete it to lift the lock.
 ## Characters
 
 Each game has one setting for how its characters are made, **Make characters with**: **Library**
-(the default), **Blender** or **Generated**. Pick it under the home screen box's options button, so the first turn builds the cast your way, and change it later from the game's **More** menu (**⋯** above the
-stage) or the command palette's **Make characters with…**; the stage's build detail shows the
-current choice. On **Library** the agent takes characters from the asset library and will not model
+(the default), **Blender** or **Generated**. Pick it under the home screen box's options button, so the first turn builds the cast your way, and change it later in the Inspector's **Scene** tab
+(**Characters**) or the command palette's **Make characters with…**. On **Library** the agent takes characters from the asset library and will not model
 one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the
 head, clothes, tail or ears it models itself, with the library's animations already fitted. On
 **Generated** an art provider makes them (see [Generated art](#generated-art)): Tripo or Meshy on your
@@ -168,8 +167,7 @@ model the game already has, such as a creature you modelled in Blender or a free
 no new model made: its shape and textures stay as they were, and only the skeleton and moves are
 added. A model that already has a skeleton is refused. Props can be made in clean low-poly at the
 game's triangle budget, or in separate parts (a door, a turret, a wheel) that the game can move.
-**Generated art**, under Look in the Inspector's **Scene** tab (also in the game's **⋯** menu and the
-command palette), lists everything the game has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
+**Generated art**, under Look in the Inspector's **Scene** tab (also in the command palette), lists everything the game has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
 Once a three.js build has been measured, a finished image or sound reads **In the game** when the
 build's plays loaded it, or **Not in the game yet**; it is recognised by its file's bytes, so a copy
 the agent changed (or a model exported through Blender) is not matched.
@@ -241,9 +239,10 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 ## Play and revise
 
 A game opens as a studio. The top bar says in one line what the game is doing (playing a build,
-making the next one, frozen, keep going's step, or that your agent needs a choice), with Undo, Redo,
-**Keep going**, **Export** and the **⋯** menu. The game fills the middle; its builds sit under it as
-pictures; and under them is the one box where you tell the game what to change, with your agent's
+making the next one, frozen, keep going's step, or that your agent needs a choice), with Undo, Redo
+and the **⋯** menu of stage controls; the game's name opens its menu (rename, folder, **Export…**).
+The game fills the middle; its builds sit under it as pictures, with **Compare** and **Keep going**;
+and under them is the one box where you tell the game what to change, with your agent's
 latest words just above it (**Log** opens the whole conversation). On the right, the **Inspector**
 has three tabs: **Build** (a build's checks and changes), **Scene** (the game's look and its things)
 and **Log** (the full conversation). `mod+Alt+C` shows or hides the Inspector; in a narrow window it
@@ -256,7 +255,7 @@ takes the place of the game until you switch back.
 - **Stop game**, in the stage's **More** menu, ends only the processes Kurambit started for this
   game and closes its preview server. A stopped game stays stopped, in every window and for your
   agent, until **Play** starts it again.
-- **Export…**, in the stage's **More** menu or the command palette, lists the targets the game's
+- **Export…**, in the game's name menu or the command palette, lists the targets the game's
   engine makes, each with its time, folder, logs and a freshness check against the current sources.
   A release replaces the previous one only once it is complete and checked, so a failed or
   interrupted export leaves the last good build in place.
