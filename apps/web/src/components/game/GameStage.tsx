@@ -69,6 +69,7 @@ import {
 } from "../ui/dialog";
 import { Kbd } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
+import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
@@ -1235,15 +1236,7 @@ function GameStatusLine({ status }: { status: ReadonlyArray<GameStatusPart> }) {
               ·
             </Text>
           ) : null}
-          {part.dot === null ? null : (
-            <span
-              aria-hidden="true"
-              className={cn(
-                "size-1.5 shrink-0 rounded-full",
-                part.dot === "live" ? "bg-live" : "bg-muted-foreground",
-              )}
-            />
-          )}
+          {part.dot === "live" ? <StatusDot tone="live" pulse /> : null}
           <Text variant="meta" tone={part.strong ? "default" : "muted"} truncate>
             {part.text}
           </Text>

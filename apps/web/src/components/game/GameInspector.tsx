@@ -188,7 +188,7 @@ function Section({
 /** Rows on one field surface, split by hairlines. */
 function Rows({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col divide-y divide-border overflow-hidden rounded-lg bg-card">
+    <div className="surface-card-settings flex flex-col divide-y divide-border overflow-hidden rounded-lg">
       {children}
     </div>
   );
@@ -343,7 +343,11 @@ function BuildDetail({
         </Section>
       )}
       <Section
-        title="Checks"
+        title={
+          factsData !== null && factsData.state !== "never" && build.available
+            ? `Checks · ${checksSummary(factsData)}`
+            : "Checks"
+        }
         aside={
           measure.canMeasure &&
           build.available &&
@@ -410,6 +414,25 @@ const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextI
  * measurement folded away. Facts not measured for the same reason are said
  * once, with the reason, so a missing tool is named once with its fix.
  */
+/**
+ * The Checks heading's count, of the rows it heads, so it never disagrees with
+ * what the person sees. Before any reading lands, "0 pass" would read as a verdict.
+ */
+function checksSummary(facts: GameBuildFacts): string {
+  const view = gameChecksView(facts);
+  const busy = facts.state === "measuring" || facts.state === "queued";
+  const shownPass = view.checks.filter(
+    (check) => check.reading._tag === "measured" && check.reading.tone === "good",
+  ).length;
+  return [
+    ...(shownPass > 0 || view.toLook > 0 || !busy
+      ? [`${shownPass} of ${view.checks.length} pass`]
+      : []),
+    ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
+    ...(busy && facts.message.trim() !== "" ? [facts.message.replace(/\.$/, "")] : []),
+  ].join(" · ");
+}
+
 function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameBuildFacts }) {
   const characters = useCharacterRoute(threadRef).route;
   const [moreOpen, setMoreOpen] = useState(false);
@@ -417,7 +440,6 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
   const measured = view.checks.filter((check) => check.reading._tag === "measured");
   const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
   const moreMeasured = view.more.filter((more) => more.reading._tag === "measured");
-  const busy = facts.state === "measuring" || facts.state === "queued";
   const detailOf = (fact: GameFactView): ReadonlyArray<string> =>
     fact.id === "assets" && facts.assets.status === "measured"
       ? [
@@ -431,25 +453,11 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
       : fact.id === "use" && facts.use.status === "measured"
         ? assetUseLines(facts.use.value)
         : [];
-  const shownPass = measured.filter(
-    (check) => check.reading._tag === "measured" && check.reading.tone === "good",
-  ).length;
   const morePass = moreMeasured.filter(
     (fact) => fact.reading._tag === "measured" && fact.reading.tone === "good",
   ).length;
   return (
     <div className="flex flex-col gap-2">
-      <Text variant="meta" tone="muted" render={<p />}>
-        {[
-          // Before any reading lands, "0 pass" would read as a verdict. The count is of the
-          // rows below, so it never disagrees with what the person sees.
-          ...(shownPass > 0 || view.toLook > 0 || !busy
-            ? [`${shownPass} of ${view.checks.length} pass`]
-            : []),
-          ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
-          ...(busy && facts.message.trim() !== "" ? [facts.message.replace(/\.$/, "")] : []),
-        ].join(" · ")}
-      </Text>
       <Rows>
         {measured.map((check) => (
           <CheckRow

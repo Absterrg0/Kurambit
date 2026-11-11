@@ -2,11 +2,11 @@ import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
 import { AsyncResult, Atom } from "effect/reactivity";
 import {
+  ImagesIcon,
   BoxIcon,
   CheckIcon,
   PencilIcon,
   PersonStandingIcon,
-  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import {
@@ -696,7 +696,7 @@ export function GenerationHeading({ generation }: { generation: GameGeneration }
         : STATE_BADGES[generation.state];
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <SparklesIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <ImagesIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 truncate font-medium">
         {GAME_ART_LANE_LABELS[generation.lane]}: {generation.name}
       </span>

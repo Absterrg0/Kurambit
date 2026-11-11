@@ -6,6 +6,7 @@ import { cn } from "../../lib/utils";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuerySelector } from "../../state/query";
 import { useRelativeTimeState } from "../../hooks/useRelativeTimeState";
+import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
 import type { SidebarThreadSummary } from "../../types";
@@ -69,7 +70,7 @@ export function useGameLibraryLine(input: {
   return { status, build };
 }
 
-/** A game's one status line: a dot for live work, the words, then its time. */
+/** A game's one status line: a dot for live work or a failure, the words, then its time. */
 export function GameLibraryStatusText({
   status,
   className,
@@ -79,17 +80,12 @@ export function GameLibraryStatusText({
 }) {
   return (
     <span className={cn("flex min-w-0 items-center gap-1.5", className)}>
-      <span
-        aria-hidden
-        className={cn(
-          "size-1.5 shrink-0 rounded-full",
-          status.tone === "live"
-            ? "bg-live"
-            : status.tone === "failed"
-              ? "bg-destructive"
-              : "bg-dim-foreground",
-        )}
-      />
+      {/* A dot only when it says something: live work, or a failure. Idle needs none. */}
+      {status.tone === "live" ? (
+        <StatusDot tone="live" pulse />
+      ) : status.tone === "failed" ? (
+        <StatusDot tone="danger" />
+      ) : null}
       <Text variant="meta" tone={status.tone === "live" ? "default" : "muted"} truncate>
         {status.text}
         {status.at === null ? null : (
