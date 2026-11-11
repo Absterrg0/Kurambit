@@ -401,17 +401,20 @@ function BuildCard({
                 : "ring-1 ring-border group-hover/card:ring-foreground/25 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring group-focus-visible/card:ring-inset",
             )}
           />
-          <Text
-            variant="micro"
-            tone="inherit"
-            numeric
-            render={
-              <span className="absolute top-1.5 left-1.5 z-10 flex items-center gap-0.5 rounded bg-black/60 px-1 py-0.5 text-stage-foreground" />
-            }
-          >
-            {step === null ? null : <FastForwardIcon className="size-2.5" aria-hidden="true" />}
-            {label}
-          </Text>
+          {/* A saved build's caption already starts with its name. */}
+          {caption.toLowerCase().startsWith(label.toLowerCase()) ? null : (
+            <Text
+              variant="micro"
+              tone="inherit"
+              numeric
+              render={
+                <span className="absolute top-1.5 left-1.5 z-10 flex items-center gap-0.5 rounded bg-black/60 px-1 py-0.5 text-stage-foreground" />
+              }
+            >
+              {step === null ? null : <FastForwardIcon className="size-2.5" aria-hidden="true" />}
+              {label}
+            </Text>
+          )}
           {good > 0 || bad > 0 ? (
             <span className="absolute right-1.5 bottom-1.5 z-10 flex gap-1">
               {good > 0 ? <CheckMark tone="good" count={good} /> : null}
