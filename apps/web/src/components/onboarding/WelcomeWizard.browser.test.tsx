@@ -93,12 +93,10 @@ async function click(label: string) {
   await act(async () => button(label).click());
 }
 
-it("finishes from Agents after Connect, without offering coding-project imports", async () => {
+it("opens on Agents and finishes, without offering coding-project imports", async () => {
   const onDone = vi.fn();
   await act(async () => root.render(<WelcomeWizard onDone={onDone} />));
-  expect(document.body.textContent).toContain("Create games on this computer");
   expect(document.body.textContent).not.toContain("Projects");
-  await click("Continue");
   expect(document.body.textContent).toContain("Sign in to the agents that build your games");
   await click("Start making games");
   expect(mocks.complete).toHaveBeenCalledOnce();
@@ -125,7 +123,6 @@ it("keeps Agents open when saving completion fails and allows retry", async () =
   mocks.complete.mockRejectedValueOnce(new Error("settings unavailable"));
   const onDone = vi.fn();
   await act(async () => root.render(<WelcomeWizard onDone={onDone} />));
-  await click("Continue");
   await click("Start making games");
   expect(onDone).not.toHaveBeenCalled();
   expect(mocks.toast).toHaveBeenCalledWith(
@@ -145,7 +142,6 @@ it("saves completion once and waits for it before leaving setup", async () => {
   );
   const onDone = vi.fn();
   await act(async () => root.render(<WelcomeWizard onDone={onDone} />));
-  await click("Continue");
   const finish = button("Start making games");
   await act(async () => {
     finish.click();
