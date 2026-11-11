@@ -239,6 +239,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
      by the composer, its context strip and attached banners. */
   --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
   --shadow-composer-dark: 0 14px 32px -18px rgb(0 0 0 / 75%);
+  /* Home's brief sheet and game pictures sit on the pane like prints on a desk. */
+  --shadow-sheet: 0 1px 0 rgb(255 255 255 / 3%) inset, 0 24px 48px -28px rgb(0 0 0 / 55%);
+  --shadow-print: 0 28px 56px -36px rgb(0 0 0 / 55%);
   /* Dark-mode shade where an attached surface meets the composer: 10px of
      shadow fading away from the seam. Inline, so the offsets resolve on the
      element. below: the context strip under the composer (1rem seam, faint

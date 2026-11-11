@@ -565,7 +565,9 @@ const make = Effect.gen(function* () {
             const summary: GameSummary = {
               projectId: project.id,
               root,
-              name: manifest.value.name,
+              // The project's title is the name the person sees and renames;
+              // game.json keeps the name the game was created with.
+              name: project.title,
               template: manifest.value.template ?? null,
               operation:
                 currentOperation === null

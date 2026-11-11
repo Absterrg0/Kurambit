@@ -386,10 +386,6 @@ export default defineConfig({
         rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 4 }] },
       },
       {
-        files: ["apps/web/src/components/game/GamesHome.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 1 }] },
-      },
-      {
         files: ["apps/web/src/components/game/useKeepGoingBanner.tsx"],
         rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 3 }] },
       },

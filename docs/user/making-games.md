@@ -57,14 +57,13 @@ You also need a signed-in agent. Codex and Claude are enabled by default; enable
 
 ## Making a game
 
-Describe the game in the box on the home screen. **New game** in the sidebar, `mod+N` and the
-command palette all bring you back to that box. Under it sit today's choices, each one a click to
-change: the agent and model (your last game's, else Claude), how characters are made, where the
-game is saved (`~/Games/<name>`), and **+ Art direction** for an optional look. Kurambit drafts a
-name from your brief and shows it under the box; click it to change it before you start, because a
-game cannot be renamed later. **Start building** creates the folder and opens the game while its
-first build is being made, with your brief sent as the first message, so you see exactly what the
-agent was told. Your agent builds a first playable version in a few minutes; every message after
+Describe the game in the box on the home screen, including the look you want. **New game** in the
+sidebar, `mod+N` and the command palette all bring you back to that box. Under it are the agent and
+model (your last game's, else Claude) and one options button for how characters are made. New games
+are saved in `~/Games`. Kurambit names the game from your brief; rename it any time from the game's
+name above the stage, or by double-clicking or right-clicking it in the sidebar. **Start building**
+creates the folder and opens the game while its first build is being made, with your brief sent as
+the first message, so you see exactly what the agent was told. Your agent builds a first playable version in a few minutes; every message after
 that makes it better.
 
 A three.js game is live on the stage from the moment it exists: Kurambit serves the game folder and
@@ -99,7 +98,7 @@ then have the art redone. Delete it to lift the lock.
 ## Characters
 
 Each game has one setting for how its characters are made, **Make characters with**: **Library**
-(the default), **Blender** or **Generated**. Pick it on the home screen's characters chip, so the first turn builds the cast your way, and change it later from the game's **More** menu (**⋯** above the
+(the default), **Blender** or **Generated**. Pick it under the home screen box's options button, so the first turn builds the cast your way, and change it later from the game's **More** menu (**⋯** above the
 stage) or the command palette's **Make characters with…**; the stage's build detail shows the
 current choice. On **Library** the agent takes characters from the asset library and will not model
 one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the

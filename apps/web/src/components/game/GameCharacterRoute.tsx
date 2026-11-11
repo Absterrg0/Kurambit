@@ -14,6 +14,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { generatedRouteBlocker, generatedRouteNote } from "./gameGeneration.logic";
 import { MenuRadioGroup, MenuRadioItem, MenuSub, MenuSubPopup, MenuSubTrigger } from "../ui/menu";
+import { Text } from "../ui/text";
 
 /** The ways a game's characters are made, in the order the person picks from. */
 export const CHARACTER_ROUTES: ReadonlyArray<{
@@ -105,6 +106,7 @@ export function useCharacterRoute(threadRef: ScopedThreadRef | null) {
 export function GameCharacterRouteMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
   const { shown, canSet, choose } = useCharacterRoute(threadRef);
   const blocker = useCharacterRouteBlockers(threadRef.environmentId);
+  const generatedNote = useGeneratedRouteNote(threadRef.environmentId);
   return (
     <MenuSub>
       <MenuSubTrigger disabled={!canSet}>Make characters with…</MenuSubTrigger>
@@ -127,6 +129,11 @@ export function GameCharacterRouteMenu({ threadRef }: { threadRef: ScopedThreadR
             );
           })}
         </MenuRadioGroup>
+        {shown === "generated" && generatedNote !== null ? (
+          <Text variant="meta" tone="muted" render={<p className="max-w-64 px-2 py-1.5" />}>
+            {generatedNote}
+          </Text>
+        ) : null}
       </MenuSubPopup>
     </MenuSub>
   );

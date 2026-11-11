@@ -38,13 +38,6 @@ export const gamePigment = (name: string): readonly [string, string] => {
   return GAME_PIGMENTS[hash % GAME_PIGMENTS.length]!;
 };
 
-/** The New game dialog and the server derive the folder name the same way. */
-export const gameSlug = (name: string): string =>
-  name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-
 // Words that frame a brief rather than name the game.
 const NAME_FRAMING =
   /^(?:(?:please|let'?s|i\s+want(?:\s+to)?|make|build|create|design|write|me|a|an|the|some)\s+)+/;
@@ -94,16 +87,37 @@ const titleWord = (word: string) =>
  * thing that follows ("A cozy fishing game on a floating island at dusk" is
  * "Cozy Fishing Island"). Empty when the brief has no words to use.
  */
-export const draftGameName = (brief: string): string => {
-  const clause = brief.trim().toLowerCase().split(NAME_CLAUSE_END)[0] ?? "";
-  const words = clause
+const NAME_FILLER = new Set([
+  "will",
+  "would",
+  "should",
+  "can",
+  "be",
+  "is",
+  "are",
+  "it",
+  "related",
+  "basically",
+  "really",
+  "very",
+  "kind",
+  "sort",
+  "like",
+  "just",
+]);
+
+const nameWords = (clause: string) =>
+  clause
     .replace(NAME_FRAMING, "")
     .split(/\s+/)
     .map((word) => word.replace(/[^a-z0-9'-]/g, "").replace(/^[-']+|[-']+$/g, ""))
     .filter((word) => word !== "");
+
+export const draftGameName = (brief: string): string => {
+  const [first = "", second = ""] = brief.trim().toLowerCase().split(NAME_CLAUSE_END);
   // Phrases between prepositions: the first says what the game is, the next where or what.
   const phrases: string[][] = [[]];
-  for (const word of words) {
+  for (const word of nameWords(first)) {
     if (NAME_PREPOSITIONS.has(word)) phrases.push([]);
     else if (!NAME_SKIP.has(word)) phrases.at(-1)!.push(word);
   }
@@ -113,6 +127,14 @@ export const draftGameName = (brief: string): string => {
     ...lead.slice(0, place === undefined ? 3 : 2),
     ...(place === undefined ? [] : [place]),
   ];
+  // "A cozy game which will be fishing related": one word says too little, so
+  // the next clause's first real words finish the name.
+  if (name.length === 1)
+    name.push(
+      ...nameWords(second)
+        .filter((word) => !NAME_SKIP.has(word) && !NAME_FILLER.has(word))
+        .slice(0, 1),
+    );
   return name.map(titleWord).join(" ").slice(0, 60).trim();
 };
 

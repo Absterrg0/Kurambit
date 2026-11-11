@@ -54,6 +54,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill } from "./GameBuildStill";
 import { characterRouteLabel, useCharacterRoute } from "./GameCharacterRoute";
+import { useGameName } from "./GameName";
 import { GameGeneratedArt } from "./GameGeneratedArt";
 import {
   GameGenerationBody,
@@ -202,8 +203,13 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     state.inspectedBuild?.threadKey === threadKey ? state.inspectedBuild : null,
   );
   const asked = useAtomValue(stagePlayTarget(threadRef));
-  const gameName = useIsGameThreadStatus(threadRef).data?.manifest.name ?? "";
-  const working = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
+  const shell = useQuietThreadShell(threadRef);
+  const gameName = useGameName(
+    threadRef.environmentId,
+    shell?.projectId ?? null,
+    useIsGameThreadStatus(threadRef).data?.manifest.name ?? "",
+  );
+  const working = threadRuntimeIsActive(shell?.runtime);
   const data = list.data;
   if (data === null) return <Notice>{list.error ?? "Reading the builds…"}</Notice>;
   const onStageId = asked?.build ?? data.current;

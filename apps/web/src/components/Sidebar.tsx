@@ -19,7 +19,7 @@ import {
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useAtomValue } from "@effect/atom-react";
-import { allReachableShellsLiveAtom } from "~/state/shell";
+import { allReachableShellsLiveAtom, shellEnvironment } from "~/state/shell";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import { replaceComposerContextReferences } from "@kurambit/shared/composerContextReferences";
@@ -124,6 +124,8 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isMacPlatform } from "~/lib/utils";
 import { readLocalApi } from "../localApi";
+import { useAtomCommand } from "../state/use-atom-command";
+import { GameNameInput, useGameName, useGameRenameStore, useRenameGame } from "./game/GameName";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import {
@@ -1606,19 +1608,30 @@ function SidebarGameRowBody(props: {
     chats: props.chats,
     read: props.read,
   });
+  const name = useGameName(props.game.environmentId, props.game.projectId, props.game.name);
+  const renaming = useGameRenameStore((state) => state.renaming === props.game.projectId);
+  const rename = useRenameGame(props.game.environmentId);
   return (
     <div className="flex items-center gap-2.5 px-2 py-1.5 pe-7">
       <GamePicture
         environmentId={props.game.environmentId}
         root={props.game.root}
         path={build?.still ?? null}
-        gameName={props.game.name}
+        gameName={name}
         className="size-7.5 shrink-0 rounded-md"
       />
       <span className="flex min-w-0 flex-1 flex-col">
-        <Text variant="label" tone={props.active ? "strong" : "default"} truncate>
-          {props.game.name}
-        </Text>
+        {renaming ? (
+          <GameNameInput
+            name={name}
+            onRename={(next) => void rename(props.game.projectId, next)}
+            onDone={() => useGameRenameStore.getState().stop()}
+          />
+        ) : (
+          <Text variant="label" tone={props.active ? "strong" : "default"} truncate>
+            {name}
+          </Text>
+        )}
         <GameLibraryStatusText status={status} />
       </span>
     </div>
@@ -1833,7 +1846,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     }
     if ((event.target as HTMLElement).closest("button, a, input")) return;
     event.preventDefault();
-    onStartRename(threadRef, thread.title);
+    // A game's row renames the game; the thread under it keeps its own title.
+    if (game !== null) useGameRenameStore.getState().start(game.projectId);
+    else onStartRename(threadRef, thread.title);
   };
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const fileDropHandlers = onFileDropThreads
@@ -2673,6 +2688,7 @@ export default function Sidebar() {
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const openInEditor = useAtomCommand(shellEnvironment.openInEditor, { reportFailure: true });
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({
@@ -3976,6 +3992,43 @@ export default function Sidebar() {
         }
         const thread = threadByKeyRef.current.get(threadKey);
         if (!thread) return;
+        // A game's row stands for the game, so its menu acts on the game, not on a thread.
+        const rowGame = gameByProjectKey.get(`${thread.environmentId}:${thread.projectId}`);
+        if (rowGame !== undefined) {
+          const canOpenFolder =
+            serverConfigs.get(thread.environmentId)?.availableEditors.includes("file-manager") ===
+            true;
+          const clicked = await settlePromise(() =>
+            api.contextMenu.show(
+              [
+                {
+                  id: "rename" as const,
+                  label: "Rename",
+                  icon: "pencil",
+                  disabled: !readEnvironmentScope(
+                    threadRef.environmentId,
+                    AuthOrchestrationOperateScope,
+                  ),
+                },
+                ...(canOpenFolder
+                  ? [{ id: "open-folder" as const, label: "Open folder", icon: "folder" }]
+                  : []),
+                { id: "copy-path" as const, label: "Copy path", icon: "copy" },
+              ],
+              position,
+            ),
+          );
+          if (clicked._tag === "Failure" || clicked.value === null) return;
+          if (clicked.value === "rename") useGameRenameStore.getState().start(rowGame.projectId);
+          if (clicked.value === "open-folder")
+            void openInEditor({
+              environmentId: thread.environmentId,
+              input: { cwd: rowGame.root, editor: "file-manager" },
+            });
+          if (clicked.value === "copy-path")
+            copyPathToClipboard(rowGame.root, { path: rowGame.root });
+          return;
+        }
         const threadWorkspacePath =
           thread.worktreePath ??
           projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.workspaceRoot ??

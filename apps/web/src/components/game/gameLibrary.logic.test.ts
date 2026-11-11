@@ -4,7 +4,6 @@ import type { GameSummary } from "@kurambit/contracts";
 import {
   draftGameName,
   gameInitial,
-  gameSlug,
   gameTemplateAppearance,
   newestThreadByProject,
   sortGameSummaries,
@@ -20,14 +19,6 @@ const summary = (name: string, updatedAt: string): GameSummary => ({
   run: null,
   keyArt: null,
   updatedAt,
-});
-
-describe("gameSlug", () => {
-  it("matches the folder the server creates", () => {
-    expect(gameSlug("The Sunlit Isle")).toBe("the-sunlit-isle");
-    expect(gameSlug("  Lava & Lasers!  ")).toBe("lava-lasers");
-    expect(gameSlug("!!!")).toBe("");
-  });
 });
 
 describe("gameInitial", () => {
@@ -99,6 +90,9 @@ describe("draftGameName", () => {
       "Puzzle Platformer",
     );
     expect(draftGameName("Snake")).toBe("Snake");
+    expect(
+      draftGameName("A cozy game which will be fishing related where a fisherman will basically"),
+    ).toBe("Cozy Fishing");
   });
 
   it("has nothing to say for a brief without words", () => {

@@ -13,6 +13,7 @@ import {
   MinimizeIcon,
   MoreHorizontalIcon,
   PanelRightIcon,
+  PencilIcon,
   PlayIcon,
   Redo2Icon,
   RefreshCwIcon,
@@ -77,6 +78,7 @@ import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./Gam
 import { GameExports } from "./GameExports";
 import { useChoosingCount } from "./GameGenerationCard";
 import { GameKeepGoingMenuContent } from "./GameKeepGoingControl";
+import { GameNameInput, useGameName, useRenameGame } from "./GameName";
 import { GameStageOverlay } from "./GameStageOverlay";
 import {
   clearStageSelection,
@@ -386,6 +388,13 @@ function ThreadGameStage({
   const refresh = query.refresh;
   const data = query.data;
   const liveStaged = data != null && GAME_ENGINES[data.manifest.engine.name].stage === "live";
+  const gameName = useGameName(
+    threadRef.environmentId,
+    quietShell?.projectId ?? null,
+    data?.manifest.name ?? "",
+  );
+  const renameGame = useRenameGame(threadRef.environmentId);
+  const [renamingGame, setRenamingGame] = useState(false);
   if (seenRevision === null && data) setSeenRevision(data.operation?.revision ?? 0);
   // Operation pushes reread the status (statusSignal in state/game), so nothing polls it.
   const operationState = data?.operation?.state ?? null;
@@ -778,7 +787,7 @@ function ThreadGameStage({
     <section
       ref={stageRef}
       data-game-stage="true"
-      aria-label={`${data.manifest.name} game stage`}
+      aria-label={`${gameName} game stage`}
       aria-hidden={hidden}
       inert={hidden}
       tabIndex={-1}
@@ -830,32 +839,45 @@ function ThreadGameStage({
             (compact || inspectorCollapsed) && "wco:pr-(--workspace-native-controls-inset)",
           )}
         >
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`${data.manifest.name}, game menu`}
-                  className="-ms-2 min-w-0 shrink"
-                />
-              }
-            >
-              <Text variant="label" tone="strong" truncate>
-                {data.manifest.name}
-              </Text>
-              <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
-            </MenuTrigger>
-            <MenuPopup align="start">
-              <GameFolderMenuItem threadRef={threadRef} root={data.root} />
-              <MenuItem
-                onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
+          {renamingGame && quietShell !== null ? (
+            <GameNameInput
+              name={gameName}
+              onRename={(name) => void renameGame(quietShell.projectId, name)}
+              onDone={() => setRenamingGame(false)}
+              className="-ms-2 w-56"
+            />
+          ) : (
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`${gameName}, game menu`}
+                    className="-ms-2 min-w-0 shrink"
+                  />
+                }
               >
-                <WrenchIcon />
-                Game tools settings
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+                <Text variant="label" tone="strong" truncate>
+                  {gameName}
+                </Text>
+                <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
+              </MenuTrigger>
+              <MenuPopup align="start">
+                <MenuItem disabled={quietShell === null} onClick={() => setRenamingGame(true)}>
+                  <PencilIcon />
+                  Rename
+                </MenuItem>
+                <GameFolderMenuItem threadRef={threadRef} root={data.root} />
+                <MenuItem
+                  onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
+                >
+                  <WrenchIcon />
+                  Game tools settings
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          )}
           <GameStatusLine status={statusLine} />
           <span className="min-w-2 flex-1" />
           <IconAction
@@ -1032,7 +1054,7 @@ function ThreadGameStage({
             threadRef={threadRef}
             pair={compare}
             viewport={data.viewport}
-            gameName={data.manifest.name}
+            gameName={gameName}
             compact={compact}
             hidden={hidden}
             onClose={() => setCompare(null)}
@@ -1055,12 +1077,12 @@ function ThreadGameStage({
               : "hidden"
           }
         >
-          <GameFrameBox viewport={data.viewport} gameName={data.manifest.name} playing>
+          <GameFrameBox viewport={data.viewport} gameName={gameName} playing>
             {playTarget.result._tag === "web" ? (
               <GameFrame
                 key={`${playTarget.build}\0${playTarget.result.url}`}
                 url={playTarget.result.url}
-                title={`${data.manifest.name}, ${playTarget.label}`}
+                title={`${gameName}, ${playTarget.label}`}
                 hidden={hidden || compare !== null}
                 focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
               />
@@ -1084,7 +1106,7 @@ function ThreadGameStage({
         <GamePlaySurface
           phase={shownPhase}
           viewport={data.viewport}
-          gameName={data.manifest.name}
+          gameName={gameName}
           // A live remount lands in play, the first load and Reload on the title.
           previewUrl={
             stageKind === "live" && frame.intoPlay && data.previewUrl !== null
@@ -1120,7 +1142,7 @@ function ThreadGameStage({
       </div>
       <GameBuildStrip
         threadRef={threadRef}
-        gameName={data.manifest.name}
+        gameName={gameName}
         playing={playTarget?.build ?? null}
         slot={buildSlot}
         request={timelineRequest}

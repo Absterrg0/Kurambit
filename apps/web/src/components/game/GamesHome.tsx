@@ -11,27 +11,17 @@ import {
   type GameEngineId,
 } from "@kurambit/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import * as Schema from "effect/Schema";
-import {
-  ChevronDownIcon,
-  FolderIcon,
-  FolderOpenIcon,
-  PlusIcon,
-  UserIcon,
-  XIcon,
-} from "lucide-react";
+import { CornerDownLeftIcon, FolderOpenIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import { isElectron } from "../../env";
-import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
-import { ensureLocalApi } from "../../localApi";
+import { cn } from "../../lib/utils";
 import { useThreadShells, waitForThreadShell } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { KurambitMark } from "../brand/KurambitBrand";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import {
   gameMainThread,
@@ -41,9 +31,10 @@ import {
   type SidebarThreadStatus,
 } from "../Sidebar.logic";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
 import {
   Menu,
+  MenuGroup,
+  MenuGroupLabel,
   MenuItem,
   MenuPopup,
   MenuRadioGroup,
@@ -58,22 +49,34 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { GamePicture } from "./GameBuildStill";
 import {
   CHARACTER_ROUTES,
+  characterRouteLabel,
   useCharacterRouteBlockers,
   useGeneratedRouteNote,
 } from "./GameCharacterRoute";
 import { showOpenGameDialog, useGameEntryStore } from "./gameEntryStore";
 import { GameLibraryStatusText, useGameLibraryLine } from "./GameLibraryStatus";
-import { draftGameName, gameSlug, sortGameThreadsByActivity } from "./gameLibrary.logic";
+import { useGameName } from "./GameName";
+import { draftGameName, sortGameThreadsByActivity } from "./gameLibrary.logic";
 import { engineToolFor } from "./gameStageLogic";
 import { GameToolLink } from "./GameToolLink";
 import { useGameLibrary, useGameLibraryRefresh, type GameLibraryEntry } from "./useGameLibrary";
 import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import { useGameModelChoice } from "./useGameModelChoice";
 
-// Short enough to sit on one line under the box with Open a game.
-const BRIEF_IDEAS = ["A cozy fishing game at dusk", "A roguelike in a flooded cathedral"] as const;
+const BRIEF_IDEAS = [
+  "A cozy fishing game at dusk",
+  "A roguelike in a flooded cathedral",
+  "A paper boat racing down a storm drain",
+] as const;
 
-const lastGameFolderSchema = Schema.String;
+// The ledger beside the latest game holds this many before it folds the rest away.
+const LEDGER_ROWS = 3;
+
+type GameCover = {
+  readonly game: GameLibraryEntry;
+  readonly main: EnvironmentThreadShell | null;
+  readonly chats: SidebarThreadStatus | null;
+};
 
 export function GamesHome() {
   const { games, isLoading, error } = useGameLibrary();
@@ -92,7 +95,7 @@ export function GamesHome() {
     if (list === undefined) threadsByProject.set(thread.projectId, [thread]);
     else list.push(thread);
   }
-  const cards = games.map((game) => {
+  const covers = games.map((game) => {
     const list = threadsByProject.get(game.projectId) ?? [];
     const chats = partitionGameChats(list, liveThreadIds);
     // A game opens on its main chat, as its sidebar row does.
@@ -103,17 +106,17 @@ export function GamesHome() {
       chats: list.length === 0 ? null : resolveGameSidebarStatus(chats),
     } satisfies GameCover;
   });
-  const openGame = (card: GameCover) => {
-    if (card.main !== null) {
+  const openGame = (cover: GameCover) => {
+    if (cover.main !== null) {
       void navigate({
         to: "/$environmentId/$threadId",
-        params: { environmentId: card.main.environmentId, threadId: card.main.id },
+        params: { environmentId: cover.main.environmentId, threadId: cover.main.id },
       });
       return;
     }
-    void handleNewThread(scopeProjectRef(card.game.environmentId, card.game.projectId));
+    void handleNewThread(scopeProjectRef(cover.game.environmentId, cover.game.projectId));
   };
-  const hasGames = !isLoading && cards.length > 0;
+  const firstRun = !isLoading && covers.length === 0;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -121,13 +124,16 @@ export function GamesHome() {
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
-          <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-14 px-6 pt-20 pb-16 lg:pt-28">
-            {environmentId ? (
-              <BriefBox environmentId={environmentId} hasGames={hasGames || isLoading} />
-            ) : null}
+          <div
+            className={cn(
+              "mx-auto flex w-full max-w-266 flex-col px-8 lg:px-12",
+              firstRun ? "min-h-full justify-center pb-32" : "gap-14 pt-20 pb-16 lg:pt-28",
+            )}
+          >
+            {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
 
             {error ? (
-              <div className="flex w-full max-w-160 flex-col gap-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
+              <div className="flex flex-col gap-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
                 <Text variant="label" tone="destructive">
                   Could not load your games.
                 </Text>
@@ -137,27 +143,8 @@ export function GamesHome() {
               </div>
             ) : null}
 
-            {isLoading ? (
-              <GameCoversSkeleton />
-            ) : hasGames ? (
-              <section
-                aria-labelledby="your-games"
-                className="flex w-full max-w-205 flex-col gap-2.5"
-              >
-                <Text variant="meta" tone="muted" render={<h2 id="your-games" />}>
-                  Your games
-                </Text>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {cards.map((card) => (
-                    <GameCoverCard
-                      key={card.game.projectId}
-                      card={card}
-                      onOpen={() => openGame(card)}
-                    />
-                  ))}
-                  {environmentId ? <OpenGameCard environmentId={environmentId} /> : null}
-                </div>
-              </section>
+            {covers.length > 0 && environmentId ? (
+              <ContinueShelf covers={covers} environmentId={environmentId} onOpen={openGame} />
             ) : null}
           </div>
         </div>
@@ -166,30 +153,13 @@ export function GamesHome() {
   );
 }
 
-function OpenGameCard({ environmentId }: { environmentId: EnvironmentId }) {
-  const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
-  if (!canOpen) return null;
-  return (
-    <button
-      type="button"
-      onClick={showOpenGameDialog}
-      className="flex min-h-36 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-dashed border-border text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground"
-    >
-      <FolderOpenIcon className="size-3.5" aria-hidden />
-      <Text variant="meta" tone="inherit">
-        Open a game
-      </Text>
-    </button>
-  );
-}
-
-/** The new-game form: the brief, today's defaults as chips, and the name it will take. */
+/** The new-game form: the brief, the model, Start. Everything else has a sensible default. */
 function BriefBox({
   environmentId,
-  hasGames,
+  firstRun,
 }: {
   environmentId: EnvironmentId;
-  hasGames: boolean;
+  firstRun: boolean;
 }) {
   const navigate = useNavigate();
   const choice = useGameModelChoice(environmentId);
@@ -198,24 +168,10 @@ function BriefBox({
   const create = useAtomCommand(gameEnvironment.create, { reportFailure: false });
   const refreshLibrary = useGameLibraryRefresh(environmentId);
   const { toolchain, ready: engineReady } = useEngineReadiness(environmentId);
-  const routeBlocker = useCharacterRouteBlockers(environmentId);
-  const generatedNote = useGeneratedRouteNote(environmentId);
   const [brief, setBrief] = useState("");
-  const [nameOverride, setNameOverride] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState(false);
-  const [artOpen, setArtOpen] = useState(false);
-  const [artDirection, setArtDirection] = useState("");
   const [characters, setCharacters] = useState<GameCharacterRoute>("library");
   const [chosenEngine, setEngine] = useState<GameEngineId | null>(null);
   const engine = chooseEngine(chosenEngine, engineReady);
-  // The folder the person's last new game went in.
-  const [parentFolder, setParentFolder] = useLocalStorage(
-    `game-entry-parent-folder:${environmentId}`,
-    "~/Games",
-    lastGameFolderSchema,
-  );
-  const [editingFolder, setEditingFolder] = useState(false);
-  const [pickingFolder, setPickingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -225,10 +181,7 @@ function BriefBox({
   const [seenRequest, setSeenRequest] = useState<number | null>(null);
   if (request !== null && request.id !== seenRequest) {
     setSeenRequest(request.id);
-    if (request.brief !== null) {
-      setBrief(request.brief);
-      setNameOverride(null);
-    }
+    if (request.brief !== null) setBrief(request.brief);
   }
   const requestId = request?.id ?? null;
   useEffect(() => {
@@ -241,33 +194,26 @@ function BriefBox({
   }, [requestId]);
 
   const trimmedBrief = brief.trim();
-  const nameField = nameOverride ?? draftGameName(trimmedBrief);
-  const name = nameField.trim() || "Untitled Game";
-  const parent = parentFolder.replace(/\/+$/, "");
-  // Until the brief names the game, the chip shows where games go.
-  const folder = trimmedBrief.length === 0 ? parent : `${parent}/${gameSlug(name) || "your-game"}`;
   const engineTool = toolchain === null ? null : engineToolFor(toolchain, engine);
   const ffmpeg = toolchain?.tools.find((tool) => tool.tool === "ffmpeg") ?? null;
-  const canStart =
-    canCreate &&
-    choice.ready &&
-    engineReady(engine) &&
-    trimmedBrief.length > 0 &&
-    parentFolder.trim().length > 0 &&
-    !busy &&
-    !pickingFolder;
+  const ready = canCreate && choice.ready && engineReady(engine);
 
   const start = async () => {
-    if (!canStart) return;
+    if (busy) return;
+    if (trimmedBrief.length === 0 || !ready) {
+      textareaRef.current?.focus();
+      return;
+    }
     setBusy(true);
     setError(null);
     const result = await create({
       environmentId,
       input: {
-        name,
-        parentDirectory: parentFolder.trim(),
+        // A working title the person renames whenever they like; the folder takes it too.
+        name: draftGameName(trimmedBrief) || "Untitled Game",
+        // Empty: the server's default games folder.
+        parentDirectory: "",
         brief: trimmedBrief,
-        artDirection: artDirection.trim(),
         engine,
         characters,
         modelSelection: choice.model,
@@ -289,26 +235,6 @@ function BriefBox({
     });
   };
 
-  const chooseFolder = async () => {
-    if (busy || pickingFolder) return;
-    if (!isElectron) {
-      setEditingFolder(true);
-      return;
-    }
-    setPickingFolder(true);
-    setError(null);
-    // No try/finally: React Compiler cannot analyse a finalizer, and the picker
-    // either answers or throws once, so cleanup follows the await.
-    const picked = await ensureLocalApi()
-      .dialogs.pickFolder({ initialPath: parentFolder })
-      .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : String(cause));
-        return null;
-      });
-    setPickingFolder(false);
-    if (picked) setParentFolder(picked);
-  };
-
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -316,371 +242,387 @@ function BriefBox({
     }
   };
 
-  const characterLabel =
-    CHARACTER_ROUTES.find((option) => option.route === characters)?.label ?? "Library";
+  const generatedNote = useGeneratedRouteNote(environmentId);
+  const notes = [
+    error === null ? null : { text: error, tone: "destructive" as const },
+    characters === "generated" && generatedNote !== null ? { text: generatedNote } : null,
+    canCreate ? null : { text: "This connection cannot make games here." },
+    choice.notReadyReason === null ? null : { text: choice.notReadyReason },
+    engineTool !== null && engineTool.status !== "ready"
+      ? {
+          text: `${GAME_ENGINES[engine].name} needs ${engineTool.message}`,
+          action: <GameToolLink tool={engineTool} />,
+        }
+      : null,
+    ffmpeg !== null && ffmpeg.status !== "ready"
+      ? {
+          text: "Without ffmpeg, builds are only checked for starting: no recordings, so no play checks.",
+          action: <GameToolLink tool={ffmpeg} />,
+        }
+      : null,
+  ].filter((note) => note !== null);
 
   return (
-    <section className="flex w-full max-w-200 flex-col items-center gap-6 text-center">
-      <div className="flex flex-col items-center gap-3">
-        <KurambitMark className="size-14" />
-        {/* The one place Instrument Serif stays: the board keeps this headline as it is. */}
-        <h1 className="font-display text-6xl leading-none tracking-tight text-balance text-strong-foreground">
-          What are we making today?
-        </h1>
-        <Text variant="body" tone="muted" render={<p />}>
-          Describe a game. Your agent builds a playable version in a few minutes, then you direct it
-          build by build.
-        </Text>
-      </div>
-
-      <div className="flex w-full flex-col gap-2 text-left">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void start();
-          }}
-          className="flex w-full flex-col rounded-2xl border border-border bg-card shadow-lg/5 transition-colors focus-within:border-primary/50"
-        >
-          <label htmlFor="game-brief" className="sr-only">
-            Game brief
-          </label>
-          <textarea
-            id="game-brief"
-            ref={textareaRef}
-            value={brief}
-            onChange={(event) => setBrief(event.target.value)}
-            onKeyDown={onKeyDown}
-            rows={3}
-            disabled={busy}
-            placeholder="A cozy fishing game on a floating island at dusk, with a day-night cycle and a rival fisher…"
-            className="text-prompt w-full resize-none bg-transparent px-4 pt-3.5 outline-none placeholder:text-placeholder"
-          />
-          {artOpen ? (
-            <div className="mx-3 flex items-start gap-2 rounded-lg bg-muted/40 px-3 py-2">
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <Text variant="meta" tone="muted" render={<label htmlFor="game-art-direction" />}>
-                  Art direction
-                </Text>
-                <textarea
-                  id="game-art-direction"
-                  value={artDirection}
-                  onChange={(event) => setArtDirection(event.target.value)}
-                  rows={2}
-                  autoFocus
-                  disabled={busy}
-                  placeholder="Painterly low-poly, warm sunset light, chunky pixel art, no text on screen…"
-                  className="text-body w-full resize-none bg-transparent outline-none placeholder:text-placeholder"
-                />
-              </div>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost-muted"
-                aria-label="Remove the art direction"
-                onClick={() => {
-                  setArtOpen(false);
-                  setArtDirection("");
-                }}
-              >
-                <XIcon />
-              </Button>
-            </div>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-1 px-2.5 py-2.5">
-            {/* One active engine is no choice, so no picker shows. */}
-            {ACTIVE_GAME_ENGINES.length > 1 ? (
-              <ToggleGroup
-                aria-label="Engine"
-                variant="segmented"
-                value={[engine]}
-                onValueChange={(value) => {
-                  const next = ACTIVE_GAME_ENGINES.find((id) => id === value[0]);
-                  if (next !== undefined) setEngine(next);
-                }}
-              >
-                {ACTIVE_GAME_ENGINES.map((id) => (
-                  <Toggle key={id} value={id} disabled={!engineReady(id)}>
-                    {GAME_ENGINES[id].picker.short}
-                  </Toggle>
-                ))}
-              </ToggleGroup>
-            ) : null}
-            <ProviderModelPicker
-              environmentId={environmentId}
-              activeInstanceId={choice.model.instanceId}
-              model={choice.model.model}
-              lockedProvider={null}
-              instanceEntries={choice.entries}
-              modelOptionsByInstance={choice.options}
-              disabled={busy}
-              onInstanceModelChange={(instanceId, model) => choice.choose({ instanceId, model })}
-            />
-            <Menu>
-              <MenuTrigger
-                render={<Button type="button" size="sm" variant="ghost-muted" disabled={busy} />}
-              >
-                <UserIcon aria-hidden />
-                {characterLabel} characters
-                <ChevronDownIcon aria-hidden className="size-3.5 opacity-60" />
-              </MenuTrigger>
-              <MenuPopup align="start" className="w-72">
-                <MenuRadioGroup
-                  value={characters}
-                  onValueChange={(value: GameCharacterRoute) => setCharacters(value)}
-                >
-                  {CHARACTER_ROUTES.map((option) => {
-                    const blocked = routeBlocker(option.route);
-                    return (
-                      <MenuRadioItem
-                        key={option.route}
-                        value={option.route}
-                        disabled={blocked !== null}
-                      >
-                        <span className="flex flex-col">
-                          <Text variant="label">{option.label}</Text>
-                          <Text variant="meta" tone="muted">
-                            {blocked ?? option.description}
-                          </Text>
-                        </span>
-                      </MenuRadioItem>
-                    );
-                  })}
-                </MenuRadioGroup>
-                {routeBlocker("generated") !== null ? (
-                  <>
-                    <MenuSeparator />
-                    <MenuItem
-                      onClick={() =>
-                        void navigate({ to: "/settings/general", hash: "art-providers" })
-                      }
-                    >
-                      Set up an art provider…
-                    </MenuItem>
-                  </>
-                ) : null}
-              </MenuPopup>
-            </Menu>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost-muted"
-              disabled={busy || pickingFolder}
-              onClick={() => void chooseFolder()}
-              className="min-w-0 max-w-44"
-            >
-              <FolderIcon aria-hidden />
-              <span className="min-w-0 truncate">{pickingFolder ? "Choosing…" : folder}</span>
-            </Button>
-            {artOpen ? null : (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost-muted"
-                disabled={busy}
-                onClick={() => setArtOpen(true)}
-              >
-                <PlusIcon aria-hidden />
-                Art direction
-              </Button>
-            )}
-            <Button type="submit" className="ms-auto" disabled={!canStart}>
-              {busy ? "Starting…" : "Start building"}
-            </Button>
-          </div>
-        </form>
-
-        {editingFolder ? (
-          <div className="flex items-center gap-2 px-1">
-            <Text variant="meta" tone="muted" render={<label htmlFor="game-parent-folder" />}>
-              Games folder
-            </Text>
-            <Input
-              id="game-parent-folder"
-              value={parentFolder}
-              onChange={(event) => setParentFolder(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === "Escape") setEditingFolder(false);
-              }}
-              onBlur={() => setEditingFolder(false)}
-              placeholder="~/Games"
-              autoFocus
-              size="sm"
-              className="max-w-80"
-            />
-          </div>
-        ) : null}
-
-        {trimmedBrief.length > 0 ? (
-          <div className="flex min-h-8 items-center gap-1.5 px-1">
-            <Text variant="meta" tone="muted">
-              Name:
-            </Text>
-            {editingName ? (
-              <Input
-                aria-label="Game name"
-                value={nameField}
-                maxLength={100}
-                onChange={(event) => setNameOverride(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === "Escape") {
-                    event.preventDefault();
-                    setEditingName(false);
-                  }
-                }}
-                onBlur={() => setEditingName(false)}
-                autoFocus
-                size="sm"
-                className="max-w-80"
-              />
-            ) : (
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                aria-label={`Name: ${name}. Click to change it.`}
-                onClick={() => setEditingName(true)}
-              >
-                {name}
-              </Button>
-            )}
-            {editingName ? null : (
-              <Text variant="meta" tone="dim">
-                You can't rename it later.
-              </Text>
-            )}
-          </div>
-        ) : null}
-
-        <BriefNotes
-          notes={[
-            error === null ? null : { text: error, tone: "destructive" },
-            canCreate ? null : { text: "This connection cannot make games here." },
-            choice.notReadyReason === null ? null : { text: choice.notReadyReason },
-            engineTool !== null && engineTool.status !== "ready"
-              ? {
-                  text: `${GAME_ENGINES[engine].name} needs ${engineTool.message}`,
-                  action: <GameToolLink tool={engineTool} />,
-                }
-              : null,
-            ffmpeg !== null && ffmpeg.status !== "ready"
-              ? {
-                  text: "Without ffmpeg, builds are only checked for starting: no recordings, so no play checks.",
-                  action: <GameToolLink tool={ffmpeg} />,
-                }
-              : null,
-            characters === "generated" && generatedNote !== null ? { text: generatedNote } : null,
-          ]}
+    <section className="flex w-full flex-col gap-3">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void start();
+        }}
+        className="flex w-full flex-col rounded-2xl border border-border bg-card shadow-sheet transition-colors focus-within:border-foreground/20"
+      >
+        <label htmlFor="game-brief" className="sr-only">
+          Describe the game you want to make
+        </label>
+        <textarea
+          id="game-brief"
+          ref={textareaRef}
+          value={brief}
+          onChange={(event) => setBrief(event.target.value)}
+          onKeyDown={onKeyDown}
+          rows={2}
+          disabled={busy}
+          placeholder="Describe the game you want to play…"
+          className="min-h-26 w-full resize-none bg-transparent px-6 pt-5.5 font-display text-3xl/10 tracking-tight text-strong-foreground caret-primary outline-none placeholder:text-placeholder sm:px-7"
         />
-      </div>
+        <div className="flex items-center gap-1 px-3 pt-1 pb-3 sm:px-4">
+          {/* One active engine is no choice, so no picker shows. */}
+          {ACTIVE_GAME_ENGINES.length > 1 ? (
+            <ToggleGroup
+              aria-label="Engine"
+              variant="segmented"
+              value={[engine]}
+              onValueChange={(value) => {
+                const next = ACTIVE_GAME_ENGINES.find((id) => id === value[0]);
+                if (next !== undefined) setEngine(next);
+              }}
+            >
+              {ACTIVE_GAME_ENGINES.map((id) => (
+                <Toggle key={id} value={id} disabled={!engineReady(id)}>
+                  {GAME_ENGINES[id].picker.short}
+                </Toggle>
+              ))}
+            </ToggleGroup>
+          ) : null}
+          <ProviderModelPicker
+            environmentId={environmentId}
+            activeInstanceId={choice.model.instanceId}
+            model={choice.model.model}
+            lockedProvider={null}
+            instanceEntries={choice.entries}
+            modelOptionsByInstance={choice.options}
+            disabled={busy}
+            onInstanceModelChange={(instanceId, model) => choice.choose({ instanceId, model })}
+          />
+          <BriefOptions
+            environmentId={environmentId}
+            characters={characters}
+            onCharacters={setCharacters}
+            disabled={busy}
+          />
+          <span className="flex-1" />
+          <Text
+            variant="meta"
+            tone="dim"
+            render={<span className="me-3 hidden items-center gap-1.5 sm:inline-flex" />}
+          >
+            <CornerDownLeftIcon className="size-3" aria-hidden />
+            to start
+          </Text>
+          <Button type="submit" disabled={busy || !ready}>
+            {busy ? "Starting…" : "Start building"}
+          </Button>
+        </div>
+      </form>
 
-      {hasGames ? null : (
-        <div className="flex flex-wrap items-center justify-center gap-1.5">
+      {notes.length > 0 ? (
+        <ul className="flex flex-col gap-1.5 px-1">
+          {notes.map((note) => (
+            <li key={note.text} className="flex flex-wrap items-center gap-2">
+              <Text
+                variant="meta"
+                tone={"tone" in note ? note.tone : "muted"}
+                render={
+                  <p className="whitespace-pre-wrap" role={"tone" in note ? "alert" : undefined} />
+                }
+              >
+                {note.text}
+              </Text>
+              {"action" in note ? note.action : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <Text variant="meta" tone="dim" render={<p className="px-1" />}>
+          Your agent builds a playable first version in a few minutes. Then you direct it, build by
+          build. Name it, style it and change it any time.
+        </Text>
+      )}
+
+      {firstRun ? (
+        <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 px-1">
+          <Text variant="meta" tone="dim">
+            Try
+          </Text>
           {BRIEF_IDEAS.map((idea) => (
-            <Button
+            <button
               key={idea}
               type="button"
-              variant="outline"
-              size="compact"
               onClick={() => {
                 setBrief(idea);
-                setNameOverride(null);
                 textareaRef.current?.focus();
               }}
+              className="cursor-pointer text-muted-foreground underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground/40"
             >
-              {idea}
-            </Button>
+              <Text variant="meta" tone="inherit">
+                {idea}
+              </Text>
+            </button>
           ))}
-          {canOpen ? (
-            <Button type="button" variant="ghost" size="compact" onClick={showOpenGameDialog}>
-              <FolderOpenIcon aria-hidden />
-              Open a game
-            </Button>
-          ) : null}
+          {canOpen ? <OpenGameLink className="ms-auto" /> : null}
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
 
-function BriefNotes({
-  notes,
+/**
+ * The few choices that shape the first build but have a good default. One quiet
+ * button, so the box stays a place to write; a changed choice names itself.
+ */
+function BriefOptions({
+  environmentId,
+  characters,
+  onCharacters,
+  disabled,
 }: {
-  notes: ReadonlyArray<{
-    readonly text: string;
-    readonly tone?: "destructive";
-    readonly action?: ReactNode;
-  } | null>;
+  environmentId: EnvironmentId;
+  characters: GameCharacterRoute;
+  onCharacters: (route: GameCharacterRoute) => void;
+  disabled: boolean;
 }) {
-  const shown = notes.filter((note) => note !== null);
-  if (shown.length === 0) return null;
+  const navigate = useNavigate();
+  const blocker = useCharacterRouteBlockers(environmentId);
   return (
-    <ul className="flex flex-col gap-1.5 px-1">
-      {shown.map((note) => (
-        <li key={note.text} className="flex flex-wrap items-center gap-2">
-          <Text
-            variant="meta"
-            tone={note.tone ?? "muted"}
-            render={<p className="whitespace-pre-wrap" role={note.tone ? "alert" : undefined} />}
+    <Menu>
+      <MenuTrigger
+        render={
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost-muted"
+            disabled={disabled}
+            aria-label="Options for the first build"
+          />
+        }
+      >
+        <SlidersHorizontalIcon aria-hidden />
+        {characters === "library" ? null : `${characterRouteLabel(characters)} characters`}
+      </MenuTrigger>
+      <MenuPopup align="start" className="w-72">
+        <MenuGroup>
+          <MenuGroupLabel>Make characters with</MenuGroupLabel>
+          <MenuRadioGroup
+            value={characters}
+            onValueChange={(value: GameCharacterRoute) => onCharacters(value)}
           >
-            {note.text}
-          </Text>
-          {note.action}
-        </li>
-      ))}
-    </ul>
+            {CHARACTER_ROUTES.map((option) => {
+              const blocked = blocker(option.route);
+              return (
+                <MenuRadioItem key={option.route} value={option.route} disabled={blocked !== null}>
+                  <span className="flex flex-col">
+                    <Text variant="label">{option.label}</Text>
+                    <Text variant="meta" tone="muted">
+                      {blocked ?? option.description}
+                    </Text>
+                  </span>
+                </MenuRadioItem>
+              );
+            })}
+          </MenuRadioGroup>
+        </MenuGroup>
+        {blocker("generated") !== null ? (
+          <>
+            <MenuSeparator />
+            <MenuItem
+              onClick={() => void navigate({ to: "/settings/general", hash: "art-providers" })}
+            >
+              Set up an art provider…
+            </MenuItem>
+          </>
+        ) : null}
+      </MenuPopup>
+    </Menu>
   );
 }
 
-type GameCover = {
-  readonly game: GameLibraryEntry;
-  readonly main: EnvironmentThreadShell | null;
-  readonly chats: SidebarThreadStatus | null;
-};
+function OpenGameLink({ className }: { className?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={showOpenGameDialog}
+      className={cn(
+        "inline-flex cursor-pointer items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground",
+        className,
+      )}
+    >
+      <FolderOpenIcon className="size-3.5" aria-hidden />
+      <Text variant="meta" tone="inherit">
+        Open a game folder
+      </Text>
+    </button>
+  );
+}
 
-function GameCoverCard({ card, onOpen }: { card: GameCover; onOpen: () => void }) {
+/** The latest game large, the next few in a ledger beside it, the rest one click away. */
+function ContinueShelf({
+  covers,
+  environmentId,
+  onOpen,
+}: {
+  covers: ReadonlyArray<GameCover>;
+  environmentId: EnvironmentId;
+  onOpen: (cover: GameCover) => void;
+}) {
+  const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
+  const [showAll, setShowAll] = useState(false);
+  const [latest, ...others] = covers;
+  if (latest === undefined) return null;
+  const ledger = showAll ? others : others.slice(0, LEDGER_ROWS);
+  const folded = others.length - ledger.length;
+  return (
+    <section aria-labelledby="continue" className="@container flex flex-col gap-3.5">
+      <div className="flex items-baseline justify-between px-1">
+        <Text variant="label" tone="strong" render={<h2 id="continue" />}>
+          Continue
+        </Text>
+        {canOpen ? <OpenGameLink /> : null}
+      </div>
+      <div
+        className={cn(
+          "grid gap-x-6 gap-y-6 @4xl:gap-x-10",
+          others.length > 0 &&
+            "@2xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] @4xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]",
+        )}
+      >
+        <LatestGame cover={latest} onOpen={() => onOpen(latest)} />
+        {others.length > 0 ? (
+          <div className="flex min-w-0 flex-col">
+            <ul role="list" className="-mt-2 flex flex-col @4xl:-mt-3">
+              {ledger.map((cover) => (
+                <LedgerRow key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
+              ))}
+            </ul>
+            {folded > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="mt-2 cursor-pointer self-start px-2 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Text variant="meta" tone="inherit">
+                  All games ({others.length + 1})
+                </Text>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function useCoverLine(cover: GameCover) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
-  const { status, build } = useGameLibraryLine({
-    game: card.game,
-    main: card.main,
-    chats: card.chats,
+  const line = useGameLibraryLine({
+    game: cover.game,
+    main: cover.main,
+    chats: cover.chats,
     read: leaseLiveStatus,
   });
+  const name = useGameName(cover.game.environmentId, cover.game.projectId, cover.game.name);
+  return { ...line, name, rowRef };
+}
+
+function LatestGame({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
+  const { status, build, name, rowRef } = useCoverLine(cover);
   return (
     <button
       ref={rowRef}
       type="button"
       onClick={onOpen}
-      className="group flex cursor-pointer flex-col overflow-hidden rounded-xl bg-card text-left ring-1 ring-border transition-[box-shadow] hover:ring-foreground/20"
+      className="group flex min-w-0 cursor-pointer flex-col gap-3 text-left outline-none"
     >
       <GamePicture
-        environmentId={card.game.environmentId}
-        root={card.game.root}
-        path={build?.still ?? card.game.keyArt}
-        gameName={card.game.name}
-        className="aspect-[16/10] w-full"
-      />
-      <span className="flex min-w-0 flex-col gap-0.5 px-2.5 py-2">
-        <Text variant="label" tone="strong" truncate>
-          {card.game.name}
-        </Text>
-        <GameLibraryStatusText status={status} />
+        environmentId={cover.game.environmentId}
+        root={cover.game.root}
+        path={build?.still ?? cover.game.keyArt}
+        gameName={name}
+        className="aspect-video w-full rounded-xl shadow-print ring-1 ring-border ring-inset transition-[box-shadow] group-hover:ring-foreground/20 group-focus-visible:ring-2 group-focus-visible:ring-primary"
+      >
+        {(build?.still ?? cover.game.keyArt) === null ? (
+          <Text
+            variant="meta"
+            tone="inherit"
+            render={<span className="absolute inset-0 grid place-items-center text-white/55" />}
+          >
+            {build === null ? "No build yet" : "No picture of this build yet"}
+          </Text>
+        ) : null}
+      </GamePicture>
+      <span className="flex min-w-0 flex-col gap-1 px-0.5">
+        <span className="truncate font-display text-3xl/9 text-strong-foreground">{name}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <GameLibraryStatusText status={status} className="shrink-0" />
+          <CoverSummary build={build} status={status.text} />
+        </span>
       </span>
     </button>
   );
 }
 
-function GameCoversSkeleton() {
+function LedgerRow({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
+  const { status, build, name, rowRef } = useCoverLine(cover);
   return (
-    <div className="grid w-full max-w-205 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-      {[0, 1, 2].map((index) => (
-        <div key={index} className="flex flex-col overflow-hidden rounded-xl bg-card">
-          <div className="aspect-[16/10] bg-muted/60" />
-          <div className="flex flex-col gap-1.5 p-2.5">
-            <div className="h-3.5 w-2/3 rounded bg-muted" />
-            <div className="h-3 w-1/2 rounded bg-muted/70" />
-          </div>
-        </div>
-      ))}
-    </div>
+    <li className="border-b border-border last:border-b-0">
+      <button
+        ref={rowRef}
+        type="button"
+        onClick={onOpen}
+        className="group -mx-2 flex w-[calc(100%+1rem)] cursor-pointer items-center gap-3 rounded-xl p-2 @4xl:gap-4 @4xl:py-3 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+      >
+        <GamePicture
+          environmentId={cover.game.environmentId}
+          root={cover.game.root}
+          path={build?.still ?? cover.game.keyArt}
+          gameName={name}
+          className="aspect-video w-24 shrink-0 rounded-lg ring-1 ring-border @4xl:w-40 @5xl:w-44"
+        />
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <Text variant="label" tone="strong" truncate>
+            {name}
+          </Text>
+          <GameLibraryStatusText status={status} />
+          <CoverSummary build={build} status={status.text} />
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/** What the latest build was asked to do, in the person's words. */
+function CoverSummary({
+  build,
+  status,
+}: {
+  build: { readonly summary: string } | null;
+  status: string;
+}): ReactNode {
+  const summary = build?.summary.trim() ?? "";
+  // A build named by its summary already says it in the status line.
+  if (summary.length === 0 || summary === status) return null;
+  return (
+    <Text variant="meta" tone="dim" truncate>
+      {summary}
+    </Text>
   );
 }
