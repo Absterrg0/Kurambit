@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type FocusEvent,
   type ReactNode,
   type RefObject,
   useLayoutEffect,
@@ -7,7 +8,6 @@ import {
   useState,
 } from "react";
 
-import { isElectron } from "~/env";
 import {
   getPreviewPanelMaxWidth,
   type PreviewPanelInlineSize,
@@ -55,13 +55,24 @@ function ResizablePreviewPanelShell(props: PreviewPanelShellProps) {
   return <PreviewPanelShellFrame {...props} inlineSize={inlineSize} hostRef={hostRef} />;
 }
 
+// Closing the panel hands focus back to where it entered from, or to the panel
+// toggle when that place is gone or hidden, so focus never falls to the body.
+function returnFocus(host: HTMLElement, origin: HTMLElement | null) {
+  const { ownerDocument } = host;
+  // focus() is a no-op on a disabled origin, so activeElement says whether it took.
+  if (origin?.isConnected && !host.contains(origin) && origin.checkVisibility()) {
+    origin.focus({ preventScroll: true });
+    if (ownerDocument.activeElement === origin) return;
+  }
+  ownerDocument.querySelector<HTMLElement>("[data-right-panel-toggle]")?.focus();
+}
+
 function PreviewPanelShellFrame(
   props: PreviewPanelShellProps & {
     inlineSize: PreviewPanelInlineSize;
     hostRef?: RefObject<HTMLDivElement | null>;
   },
 ) {
-  const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
   const isInline = props.mode === "inline";
   const collapsible = isInline && props.open !== undefined;
   const open = props.open ?? true;
@@ -69,6 +80,28 @@ function PreviewPanelShellFrame(
   const localHostRef = useRef<HTMLDivElement | null>(null);
   const hostRef = props.hostRef ?? localHostRef;
   const { width, handlers } = props.inlineSize;
+  const focusOrigin = useRef<HTMLElement | null>(null);
+  const lastBlurred = useRef<EventTarget | null>(null);
+  // Focus moving within the panel (portalled menus included) first blurs one of
+  // its own elements, so only focus arriving from outside records an origin.
+  const rememberFocusOrigin = (event: FocusEvent<HTMLDivElement>) => {
+    const from = event.relatedTarget;
+    if (from === null || from === lastBlurred.current) return;
+    focusOrigin.current = from instanceof HTMLElement ? from : null;
+  };
+  // Focus leaves before the host goes inert, while its origin is still reachable;
+  // inert set by React in the same commit would drop focus on the body first.
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host || !collapsible) return;
+    if (!open) {
+      if (host.contains(host.ownerDocument.activeElement)) {
+        returnFocus(host, focusOrigin.current);
+      }
+      focusOrigin.current = null;
+    }
+    host.toggleAttribute("inert", !open);
+  }, [collapsible, open, hostRef]);
   // Derive suppression before the layout commits so the browser never creates
   // a width transition for resize or maximize changes.
   const [layoutTransition, setLayoutTransition] = useState(() => ({
@@ -109,6 +142,10 @@ function PreviewPanelShellFrame(
   return (
     <div
       ref={hostRef}
+      onFocus={rememberFocusOrigin}
+      onBlur={(event) => {
+        lastBlurred.current = event.target;
+      }}
       className={cn(
         "relative flex h-full min-h-0 min-w-0 max-w-full flex-col self-stretch bg-background",
         isInline
