@@ -976,7 +976,6 @@ export function ResourceTelemetryDiagnostics({
     <>
       <SettingsSection
         title="Resource monitor"
-        icon={<ActivityIcon className="size-4 text-muted-foreground" />}
         headerAction={
           <div className="flex items-center gap-2">
             {snapshot ? (
@@ -1114,7 +1113,6 @@ export function ResourceTelemetryDiagnostics({
 
       <SettingsSection
         title="Host & collection"
-        icon={<GaugeIcon className="size-4 text-muted-foreground" />}
         headerAction={
           collectorNeedsRetry ? (
             <Button size="xs" variant="outline" disabled={isRetrying} onClick={retryCollector}>
@@ -1259,7 +1257,6 @@ export function ResourceTelemetryDiagnostics({
 
       <SettingsSection
         title="Resource timeline"
-        icon={<HardDriveIcon className="size-4 text-muted-foreground" />}
         headerAction={
           <div className="flex items-center gap-2">
             <HistoryWindowSelector selectedWindowMs={windowMs} onSelect={setWindowMs} />
@@ -1289,7 +1286,6 @@ export function ResourceTelemetryDiagnostics({
 
       <SettingsSection
         title="Live process tree"
-        icon={<CpuIcon className="size-4 text-muted-foreground" />}
         headerAction={
           snapshot ? (
             <span className="text-3xs text-muted-foreground/55">
@@ -1311,7 +1307,6 @@ export function ResourceTelemetryDiagnostics({
 
       <SettingsSection
         title="Instrumented application I/O"
-        icon={<DatabaseIcon className="size-4 text-muted-foreground" />}
         headerAction={
           <span className="text-3xs text-muted-foreground/55">Logical bytes by operation</span>
         }

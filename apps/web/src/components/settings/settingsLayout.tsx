@@ -22,7 +22,9 @@ import {
 import { cn } from "../../lib/utils";
 import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
 import { Button } from "../ui/button";
+import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { settingsBreadcrumbLabel } from "./SettingsBreadcrumb";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { SettingsScopeSentence } from "./SettingsScopeSentence";
 import {
@@ -193,10 +195,14 @@ export function SettingsSection({
           className="flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4"
         >
           <div className="flex min-w-0 items-center gap-1">
-            <h2 className="flex min-h-7 items-center gap-2 text-sm font-normal text-foreground/70">
+            <Text
+              variant="meta"
+              tone="muted"
+              render={<h2 className="flex min-h-7 items-center gap-2" />}
+            >
               {icon}
               {title}
-            </h2>
+            </Text>
             {titleAction}
           </div>
           <div className="flex min-h-7 min-w-7 items-center justify-end">{headerAction}</div>
@@ -220,9 +226,11 @@ export function SettingsUnavailableGroup({
 
   return (
     <div className="border-border/60 bg-muted/20 py-1.5">
-      <div className="flex items-start gap-2 px-3 py-2 text-xs leading-relaxed text-muted-foreground sm:px-4">
+      <div className="flex items-start gap-2 px-3 py-2 text-muted-foreground sm:px-4">
         <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
-        <p>{message}</p>
+        <Text variant="meta" tone="inherit" render={<p />}>
+          {message}
+        </Text>
       </div>
       <div className="[&_h3]:opacity-64 [&_p]:opacity-64">{children}</div>
     </div>
@@ -256,6 +264,7 @@ function projectOverrides(
 }
 
 export function SettingsRow({
+  icon,
   title,
   description,
   status,
@@ -269,6 +278,8 @@ export function SettingsRow({
   className,
   ...rowProps
 }: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
+  /** The row's one leading icon; rows in a section either all have one or none do. */
+  icon?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
   status?: ReactNode;
@@ -426,26 +437,40 @@ export function SettingsRow({
       )}
     >
       <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex min-h-5 items-center gap-1.5">
-            <h3 className="text-sm font-medium text-foreground">{title}</h3>
-            {renderedInheritance ? (
-              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-                {renderedInheritance}
-              </span>
-            ) : null}
-            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-              {renderedReset}
+        <div className="flex min-w-0 flex-1 gap-3">
+          {icon ? (
+            <span
+              aria-hidden
+              className="flex h-5 shrink-0 items-center text-muted-foreground [&_svg]:size-4"
+            >
+              {icon}
             </span>
+          ) : null}
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex min-h-5 items-center gap-1.5">
+              <Text variant="label" render={<h3 />}>
+                {title}
+              </Text>
+              {renderedInheritance ? (
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                  {renderedInheritance}
+                </span>
+              ) : null}
+              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                {renderedReset}
+              </span>
+            </div>
+            {description ? (
+              <Text variant="meta" tone="muted" render={<p className="max-w-xl" />}>
+                {description}
+              </Text>
+            ) : null}
+            {renderedStatus ? (
+              <Text variant="meta" tone="muted" render={<div className="pt-0.5" />}>
+                {renderedStatus}
+              </Text>
+            ) : null}
           </div>
-          {description ? (
-            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
-              {description}
-            </p>
-          ) : null}
-          {renderedStatus ? (
-            <div className="pt-0.5 text-xs text-muted-foreground">{renderedStatus}</div>
-          ) : null}
         </div>
         {renderedControl ? (
           <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
@@ -509,6 +534,9 @@ export function SettingsPageContainer({
 }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
+  const pageTitle = useLocation({
+    select: (location) => settingsBreadcrumbLabel(location.pathname),
+  });
   const highlightTarget = useLocation({
     select: (location) => location.state.settingsTargetHighlight !== false,
   });
@@ -534,6 +562,11 @@ export function SettingsPageContainer({
         data-settings-page-scroll
       >
         <WorkspacePageContainer width={width} className={cn("gap-8", className)}>
+          {pageTitle === null ? null : (
+            <Text variant="title" tone="strong" render={<h1 className="-mb-5 px-3 sm:px-4" />}>
+              {pageTitle}
+            </Text>
+          )}
           <SettingsScopeSentence />
           {children}
         </WorkspacePageContainer>

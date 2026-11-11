@@ -156,8 +156,9 @@ terminals so native undo keeps working there.
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.
 
-`chat.new` may ask you to choose a project when there is more than one.
-`chat.newLocal` skips that chooser. Both use your
+`chat.new` (`mod+n`, or `mod+shift+o` in a browser, which keeps `mod+n` for new windows) goes to
+the home screen's brief box to start a new game; with the legacy
+sidebar it starts a thread instead. `chat.newLocal` starts a new chat in the current game, with your
 [new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
 (`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
 

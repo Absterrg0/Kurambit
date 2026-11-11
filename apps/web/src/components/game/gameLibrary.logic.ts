@@ -45,6 +45,77 @@ export const gameSlug = (name: string): string =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+// Words that frame a brief rather than name the game.
+const NAME_FRAMING =
+  /^(?:(?:please|let'?s|i\s+want(?:\s+to)?|make|build|create|design|write|me|a|an|the|some)\s+)+/;
+// A clause break: punctuation, or a word that starts the brief's details.
+const NAME_CLAUSE_END = /[,.;:!?()\n]|\s(?:with|where|that|which|who|and|but|while|until|so)\s/;
+const NAME_PREPOSITIONS = new Set([
+  "on",
+  "in",
+  "at",
+  "into",
+  "onto",
+  "inside",
+  "through",
+  "under",
+  "over",
+  "across",
+  "down",
+  "up",
+  "along",
+  "around",
+  "about",
+  "beneath",
+  "below",
+  "above",
+  "between",
+  "from",
+  "to",
+  "of",
+  "for",
+  "by",
+  "near",
+  "beyond",
+  "within",
+  "set",
+]);
+const NAME_SKIP = new Set(["a", "an", "the", "game", "games", "your", "my", "our", "its", "their"]);
+
+const titleWord = (word: string) =>
+  word
+    .split("-")
+    .map((part) => (part === "" ? part : part[0]!.toUpperCase() + part.slice(1)))
+    .join("-");
+
+/**
+ * PURE. A short title for a brief, the person's to edit before Start: the
+ * brief's opening words (what kind of game) and the main noun of the place or
+ * thing that follows ("A cozy fishing game on a floating island at dusk" is
+ * "Cozy Fishing Island"). Empty when the brief has no words to use.
+ */
+export const draftGameName = (brief: string): string => {
+  const clause = brief.trim().toLowerCase().split(NAME_CLAUSE_END)[0] ?? "";
+  const words = clause
+    .replace(NAME_FRAMING, "")
+    .split(/\s+/)
+    .map((word) => word.replace(/[^a-z0-9'-]/g, "").replace(/^[-']+|[-']+$/g, ""))
+    .filter((word) => word !== "");
+  // Phrases between prepositions: the first says what the game is, the next where or what.
+  const phrases: string[][] = [[]];
+  for (const word of words) {
+    if (NAME_PREPOSITIONS.has(word)) phrases.push([]);
+    else if (!NAME_SKIP.has(word)) phrases.at(-1)!.push(word);
+  }
+  const [lead = [], ...rest] = phrases.filter((phrase) => phrase.length > 0);
+  const place = rest[0]?.at(-1);
+  const name = [
+    ...lead.slice(0, place === undefined ? 3 : 2),
+    ...(place === undefined ? [] : [place]),
+  ];
+  return name.map(titleWord).join(" ").slice(0, 60).trim();
+};
+
 export const gameInitial = (name: string): string => {
   const letters = name
     .trim()

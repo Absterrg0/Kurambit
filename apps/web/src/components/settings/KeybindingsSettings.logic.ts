@@ -368,6 +368,8 @@ export function commandLabel(command: KeybindingCommand): string {
   const usagePeriod = WINDOW_OPTIONS.find((option) => option.command === command);
   if (usagePeriod) return `Usage: Period: ${usagePeriod.label}`;
   if (command === "view.reopenClosed") return "Reopen Closed Tab";
+  if (command === "chat.new") return "New Game";
+  if (command === "chat.newLocal") return "Game: New Chat";
   if (command === "game.chat.toggle") return "Game: Show or Hide the Inspector";
   if (command === "game.freeze") return "Game: Freeze or Play On";
   if (command === "game.keepGoing.stop") return "Game: Stop Keep Going";

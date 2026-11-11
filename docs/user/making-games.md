@@ -57,12 +57,15 @@ You also need a signed-in agent. Codex and Claude are enabled by default; enable
 
 ## Making a game
 
-Choose **New game** on the home screen or in the sidebar. Name the game, write a brief and optional
-art direction, choose where to save it (`~/Games/<slug>` by default), pick the agent
-and model, then choose **Create game**. Kurambit creates the project folder and opens the game's
-chat with your brief already sent as its first message, so you see exactly what the agent was told.
-Your agent builds a first playable version in a few minutes; every message after that makes it
-better.
+Describe the game in the box on the home screen. **New game** in the sidebar, `mod+N` and the
+command palette all bring you back to that box. Under it sit today's choices, each one a click to
+change: the agent and model (your last game's, else Claude), how characters are made, where the
+game is saved (`~/Games/<name>`), and **+ Art direction** for an optional look. Kurambit drafts a
+name from your brief and shows it under the box; click it to change it before you start, because a
+game cannot be renamed later. **Start building** creates the folder and opens the game while its
+first build is being made, with your brief sent as the first message, so you see exactly what the
+agent was told. Your agent builds a first playable version in a few minutes; every message after
+that makes it better.
 
 A three.js game is live on the stage from the moment it exists: Kurambit serves the game folder and
 plays it, so you watch the starter turn into your game while your agent works. When the agent saves,
@@ -76,10 +79,12 @@ stage names the error: quietly while the turn runs, since the agent may be mid-c
 A game is a static three.js browser game (no install step), played in real time through the same
 tools, with a Web export.
 
-To continue an existing game, choose its card under **Your games** or its row in the sidebar, or use
-**Open game** and pick a folder that contains `game.json`. A game opens on its main chat: the first
-chat it was made in, or the next oldest if you archive that one. The arrow on the game's sidebar row
-lists its **Other chats**, and **+** starts a new chat.
+Each game's sidebar row and home card show its latest build's picture and what it is doing now:
+building, keep going's step, a question waiting for you, or its latest build and when it was made.
+To continue a game, choose its card under **Your games** or its row in the sidebar, or use **Open a
+game** (on the home screen or in the command palette) and pick a folder that contains `game.json`.
+A game opens on its main chat: the first chat it was made in, or the next oldest if you archive that
+one. The arrow on the game's sidebar row lists its **Other chats** and starts a **New chat**.
 
 ## Style
 
@@ -94,7 +99,7 @@ then have the art redone. Delete it to lift the lock.
 ## Characters
 
 Each game has one setting for how its characters are made, **Make characters with**: **Library**
-(the default), **Blender** or **Generated**. Pick it in the **New game** dialog, so the first turn builds the cast your way, and change it later from the game's **More** menu (**⋯** above the
+(the default), **Blender** or **Generated**. Pick it on the home screen's characters chip, so the first turn builds the cast your way, and change it later from the game's **More** menu (**⋯** above the
 stage) or the command palette's **Make characters with…**; the stage's build detail shows the
 current choice. On **Library** the agent takes characters from the asset library and will not model
 one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the

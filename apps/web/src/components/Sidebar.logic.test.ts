@@ -13,7 +13,6 @@ import {
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
-  filterSidebarProjectScopeItems,
   filterSidebarV2VisibleThreads,
   formatWorkingDurationLabel,
   getFallbackThreadIdAfterDelete,
@@ -26,7 +25,6 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
-  reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveProjectStatusIndicator,
   resolveSidebarSweepKeys,
@@ -39,7 +37,6 @@ import {
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   pullRequestMatchesSearchQuery,
-  searchSidebarThreads,
   shouldClearThreadSelectionOnMouseDown,
   shouldShowSidebarV2Duration,
   shouldRecedeSidebarThread,
@@ -61,7 +58,6 @@ import {
   partitionGameChats,
   resolveGameSidebarStatus,
 } from "./Sidebar.logic";
-import { threadSearchMatchKey } from "@kurambit/client-runtime/state/thread-search";
 
 import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@kurambit/contracts";
 
@@ -1011,119 +1007,6 @@ describe("pullRequestMatchesSearchQuery", () => {
   it("rejects queries with a token the PR does not carry, and blank queries", () => {
     expect(pullRequestMatchesSearchQuery({ branchPullRequest }, "rebase 123")).toBe(false);
     expect(pullRequestMatchesSearchQuery({ branchPullRequest }, "   ")).toBe(false);
-  });
-});
-
-describe("searchSidebarThreads", () => {
-  const searchThread = (id: string, title: string, project: string) => ({
-    environmentId: localEnvironmentId,
-    id: ThreadId.make(id),
-    title,
-    project,
-  });
-  const threads = [
-    searchThread("thread-1", "Fix workspace search", "Alpha"),
-    searchThread("thread-2", "Review providers", "Workspace"),
-    searchThread("thread-3", "WORKTREE cleanup", "Beta"),
-  ];
-  const contentKeys = (...ids: ReadonlyArray<string>) =>
-    new Set(
-      ids.map((id) =>
-        threadSearchMatchKey({ environmentId: localEnvironmentId, threadId: ThreadId.make(id) }),
-      ),
-    );
-
-  it("matches thread titles case-insensitively and preserves their order", () => {
-    expect(searchSidebarThreads(threads, "work")).toEqual([threads[0], threads[2]]);
-  });
-
-  it("does not match project metadata", () => {
-    expect(searchSidebarThreads(threads, "workspace")).toEqual([threads[0]]);
-  });
-
-  it("returns no results for an empty query", () => {
-    expect(searchSidebarThreads(threads, "   ")).toEqual([]);
-  });
-
-  it("appends content-only matches after every title match", () => {
-    expect(searchSidebarThreads(threads, "work", contentKeys("thread-2"))).toEqual([
-      threads[0],
-      threads[2],
-      threads[1],
-    ]);
-  });
-
-  it("lists a thread matching both title and content once", () => {
-    expect(searchSidebarThreads(threads, "work", contentKeys("thread-1"))).toEqual([
-      threads[0],
-      threads[2],
-    ]);
-  });
-
-  it("ignores content matches for threads outside the sidebar collection", () => {
-    expect(searchSidebarThreads(threads, "work", contentKeys("thread-missing"))).toEqual([
-      threads[0],
-      threads[2],
-    ]);
-  });
-});
-
-describe("filterSidebarProjectScopeItems", () => {
-  const items = [
-    { value: "all", label: "All projects" },
-    { value: "alpha", label: "Alpha workspace" },
-    { value: "beta", label: "Beta tools" },
-  ] as const;
-  const filter = (query: string) =>
-    filterSidebarProjectScopeItems({
-      items,
-      query,
-      matches: (item, candidate) =>
-        item.label.toLocaleLowerCase().includes(candidate.toLocaleLowerCase()),
-    });
-
-  it("shows the default row first while the query is empty", () => {
-    expect(filter("")).toEqual(items);
-    expect(filter("   ")).toEqual(items);
-  });
-
-  it("hides the default row while filtering", () => {
-    expect(filter("all")).toEqual([]);
-  });
-
-  it("returns matching projects in source order and supports no-match results", () => {
-    expect(filter("WORK")).toEqual([items[1]]);
-    expect(filter("missing")).toEqual([]);
-  });
-});
-
-describe("reduceSidebarProjectScopeMenuState", () => {
-  const queriedOpenState = { open: true, query: "alpha" };
-
-  it("clears the query when the combobox closes through onOpenChange", () => {
-    expect(
-      reduceSidebarProjectScopeMenuState(queriedOpenState, {
-        type: "open-changed",
-        open: false,
-      }),
-    ).toEqual({ open: false, query: "" });
-  });
-
-  it("clears the query when project settings closes the combobox", () => {
-    expect(
-      reduceSidebarProjectScopeMenuState(queriedOpenState, {
-        type: "project-settings-opened",
-      }),
-    ).toEqual({ open: false, query: "" });
-  });
-
-  it("keeps the popup open while the query changes", () => {
-    expect(
-      reduceSidebarProjectScopeMenuState(
-        { open: true, query: "" },
-        { type: "query-changed", query: "beta" },
-      ),
-    ).toEqual({ open: true, query: "beta" });
   });
 });
 

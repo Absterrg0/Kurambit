@@ -85,3 +85,49 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
             : null;
   return [stage, work].filter((entry) => entry !== null);
 };
+
+export interface GameLibraryStatusInput {
+  /** The most urgent state of the game's chats (resolveGameSidebarStatus). */
+  readonly chats: "approval" | "input" | "working" | "failed" | "other";
+  /** When the running turn started, while `chats` is working. */
+  readonly turnStartedAt: string | null;
+  /** Keep going's own line while a run is live here ("Keep going · step 3"). */
+  readonly keepGoing: string | null;
+  /** An engine's own build (an export) is running. */
+  readonly operationRunning: boolean;
+  /** The folder's build, else the newest one, as a sentence names it, with when it was made. */
+  readonly build: { readonly name: string; readonly at: string } | null;
+}
+
+/** One line for a game in the library (the sidebar and Home), read from the top bar's sources. */
+export interface GameLibraryStatus {
+  readonly text: string;
+  readonly tone: "live" | "failed" | "idle";
+  /** Ticks an elapsed time after the text. */
+  readonly since: string | null;
+  /** A relative time after the text ("2m"). */
+  readonly at: string | null;
+}
+
+/** PURE. What a game is doing now, in one line; a question for the person comes first. */
+export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibraryStatus => {
+  const line = (
+    text: string,
+    tone: GameLibraryStatus["tone"],
+    more: Partial<GameLibraryStatus> = {},
+  ) => ({
+    text,
+    tone,
+    since: null,
+    at: null,
+    ...more,
+  });
+  if (input.chats === "approval" || input.chats === "input")
+    return line("Needs your answer", "live");
+  if (input.keepGoing !== null) return line(input.keepGoing, "live");
+  if (input.chats === "working") return line("Building", "live", { since: input.turnStartedAt });
+  if (input.operationRunning) return line("Building", "live");
+  if (input.chats === "failed") return line("The last turn failed", "failed");
+  if (input.build !== null) return line(input.build.name, "idle", { at: input.build.at });
+  return line("No builds yet", "idle");
+};

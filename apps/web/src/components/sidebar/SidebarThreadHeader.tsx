@@ -1,171 +1,67 @@
-import { FolderPlusIcon, PlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
-import {
-  type ComponentProps,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { SearchIcon, SquarePenIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
-import { cn } from "~/lib/utils";
-import { Button } from "../ui/button";
-import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Kbd } from "../ui/kbd";
+import { SidebarMenuButton } from "../ui/sidebar";
+import { Text } from "../ui/text";
 
 export interface SidebarThreadHeaderProps {
-  searchFieldRef?: RefObject<HTMLDivElement | null>;
-  hasProjects: boolean;
-  projectScope: ReactNode;
-  onNewProject: () => void;
   onNewGame: () => void;
-  onNewThread: (event: ReactMouseEvent) => void;
-  newThreadDisabled: boolean;
-  newThreadShortcutLabel: string | null | undefined;
-  searchInputRef: RefObject<HTMLInputElement | null>;
-  searchQuery: string;
-  onSearchQueryChange: (value: string) => void;
-  onSearchKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
-  isSearching: boolean;
-  searchResultCount: number;
-  activeSearchResultIndex: number;
-  onClearSearch: () => void;
+  newGameShortcutLabel: string | null;
+  /** Opens the command palette, which finds games, chats and what was said in them. */
+  onSearch: () => void;
+  searchShortcutLabel: string | null;
 }
 
+/** The sidebar's two quiet rows: one way to start a game, one way to find anything. */
 export function SidebarThreadHeader({
-  searchFieldRef,
-  hasProjects,
-  projectScope,
-  onNewProject,
   onNewGame,
-  onNewThread,
-  newThreadDisabled,
-  newThreadShortcutLabel,
-  searchInputRef,
-  searchQuery,
-  onSearchQueryChange,
-  onSearchKeyDown,
-  isSearching,
-  searchResultCount,
-  activeSearchResultIndex,
-  onClearSearch,
+  newGameShortcutLabel,
+  onSearch,
+  searchShortcutLabel,
 }: SidebarThreadHeaderProps) {
-  const resultsVisible = isSearching && searchResultCount > 0;
-  // Results shrink as the query narrows, so the active index can outrun the
-  // list; pointing aria-activedescendant at a removed option strands the
-  // screen reader on nothing.
-  const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
-  const newThreadLabel = newThreadShortcutLabel
-    ? `New session (${newThreadShortcutLabel})`
-    : "New session";
-
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-1">
-        <Button className="min-w-0 flex-1" onClick={onNewGame}>
-          <PlusIcon aria-hidden />
-          New game
-        </Button>
-        <SidebarHeaderIconButton
-          label="Open game folder"
-          tooltip="Open an existing game folder"
-          onClick={onNewProject}
-        >
-          <FolderPlusIcon />
-        </SidebarHeaderIconButton>
-      </div>
-      <div className="flex items-center gap-1">
-        <div
-          ref={searchFieldRef}
-          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-        >
-          <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
-          <SidebarInput
-            ref={searchInputRef}
-            nativeInput
-            type="search"
-            value={searchQuery}
-            onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
-            onKeyDown={onSearchKeyDown}
-            placeholder="Search"
-            aria-label="Search sessions"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded={resultsVisible}
-            aria-controls={resultsVisible ? "sidebar-thread-search-results" : undefined}
-            aria-activedescendant={
-              activeResultExists
-                ? `sidebar-thread-search-result-${activeSearchResultIndex}`
-                : undefined
-            }
-            className="min-w-0 flex-1"
-          />
-          {isSearching ? (
-            <Button
-              type="button"
-              size="icon-micro"
-              variant="ghost-muted"
-              className="shrink-0"
-              aria-label="Clear thread search"
-              onClick={() => {
-                onClearSearch();
-                searchInputRef.current?.focus();
-              }}
-            >
-              <XIcon className="size-3" />
-            </Button>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center">
-          {hasProjects ? projectScope : null}
-          <SidebarHeaderIconButton
-            label="New session"
-            tooltip={newThreadLabel}
-            disabled={newThreadDisabled}
-            onClick={onNewThread}
-          >
-            <SquarePenIcon />
-          </SidebarHeaderIconButton>
-        </div>
-      </div>
+    <div className="flex flex-col gap-px">
+      <SidebarHeaderRow
+        icon={<SquarePenIcon />}
+        label="New game"
+        shortcut={newGameShortcutLabel}
+        onClick={onNewGame}
+      />
+      <SidebarHeaderRow
+        icon={<SearchIcon />}
+        label="Search"
+        shortcut={searchShortcutLabel}
+        muted
+        onClick={onSearch}
+      />
+      <Text variant="meta" tone="dim" render={<h2 className="px-2 pt-4 pb-1" />}>
+        Games
+      </Text>
     </div>
   );
 }
 
-export function SidebarHeaderIconButton({
+function SidebarHeaderRow({
+  icon,
   label,
-  tooltip = label,
-  className,
-  children,
-  ...rest
+  shortcut,
+  muted = false,
+  onClick,
 }: {
+  icon: ReactNode;
   label: string;
-  tooltip?: ReactNode;
-  className?: string | undefined;
-  children?: ReactNode;
-} & Omit<
-  ComponentProps<typeof SidebarMenuButton>,
-  "children" | "className" | "tooltip" | "isActive" | "aria-label"
->) {
+  shortcut: string | null;
+  muted?: boolean;
+  onClick: () => void;
+}) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <SidebarMenuButton
-            size="icon"
-            type="button"
-            aria-label={label}
-            {...rest}
-            className={cn("relative size-7 shrink-0", className)}
-          />
-        }
-      >
-        {children}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-        />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{tooltip}</TooltipPopup>
-    </Tooltip>
+    <SidebarMenuButton type="button" onClick={onClick}>
+      {icon}
+      <Text variant="label" tone={muted ? "muted" : "default"} truncate>
+        {label}
+      </Text>
+      {shortcut === null ? null : <Kbd className="ms-auto">{shortcut}</Kbd>}
+    </SidebarMenuButton>
   );
 }

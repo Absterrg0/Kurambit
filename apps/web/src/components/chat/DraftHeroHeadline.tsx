@@ -7,7 +7,7 @@ import { FolderPlusIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 
-import { useGameDialogStore } from "../game/gameDialogStore";
+import { showOpenGameDialog } from "../game/gameEntryStore";
 import { shortcutLabelForCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
@@ -74,7 +74,7 @@ export function DraftHeroHeadline({
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   // A project without a game manifest is not useful in Kurambit, so the
   // empty state opens the game folder dialog rather than the generic flow.
-  const openGameFolder = () => useGameDialogStore.getState().show("open");
+  const openGameFolder = showOpenGameDialog;
   const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
   const openProjectDraft = useNewThreadHandler();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);

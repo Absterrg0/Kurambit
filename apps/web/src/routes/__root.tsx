@@ -1,4 +1,4 @@
-import { GameDialogHost } from "../components/game/GameEntry";
+import { GameOpenDialogHost } from "../components/game/GameEntry";
 import { PermissionUpdateNotice } from "../components/PermissionUpdateNotice";
 import { type ServerLifecycleWelcomePayload } from "@kurambit/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@kurambit/client-runtime/environment";
@@ -148,7 +148,7 @@ function RootRouteView() {
           <FontAppearanceSync />
           <ProviderAuthCallbackCoordinator />
           <CustomSnoozeDialogHost />
-          <GameDialogHost />
+          <GameOpenDialogHost />
           <CommandPalette>
             <AppSidebarLayout>
               <Outlet />
@@ -198,7 +198,7 @@ function RootRouteView() {
           <ReopenClosedViewShortcut />
           <ConfirmDialogHost />
           <CustomSnoozeDialogHost />
-          <GameDialogHost />
+          <GameOpenDialogHost />
           <SlowRpcRequestToastCoordinator />
           <PermissionUpdateNotice />
           {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}

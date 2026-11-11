@@ -1,6 +1,6 @@
 "use client";
 
-import { useGameDialogStore } from "./game/gameDialogStore";
+import { showOpenGameDialog, useNewGame } from "./game/gameEntryStore";
 import { useTurnUndo } from "./game/useBuildActions";
 import { useKeepGoing } from "./game/useKeepGoing";
 import {
@@ -65,6 +65,7 @@ import {
   FileSearchIcon,
   FolderGit2Icon,
   FolderIcon,
+  FolderOpenIcon,
   FolderPlusIcon,
   Gamepad2Icon,
   ColumnsIcon,
@@ -686,6 +687,7 @@ function OpenCommandPaletteDialog(props: {
   readonly clearOpenIntent: () => void;
 }) {
   const navigate = useNavigate();
+  const newGame = useNewGame();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
   const [query, setQuery] = useState(openIntent?.kind === "search" ? openIntent.query : "");
@@ -1779,21 +1781,26 @@ function OpenCommandPaletteDialog(props: {
       run: requestStage({ kind: "generated-art" }),
     });
   }
-  for (const [mode, title] of [
-    ["create", "New game"],
-    ["open", "Open game"],
-  ] as const) {
-    actionItems.push({
-      kind: "action",
-      value: `action:game-${mode}`,
-      title,
-      searchTerms: [title, "game studio blender godot"],
-      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        useGameDialogStore.getState().show(mode);
-      },
-    });
-  }
+  actionItems.push({
+    kind: "action",
+    value: "action:game-create",
+    title: "New game",
+    searchTerms: ["new game", "create", "start", "brief", "game studio"],
+    icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      newGame();
+    },
+  });
+  actionItems.push({
+    kind: "action",
+    value: "action:game-open",
+    title: "Open a game…",
+    searchTerms: ["open game", "folder", "existing", "game.json"],
+    icon: <FolderOpenIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      showOpenGameDialog();
+    },
+  });
   actionItems.push({
     kind: "action",
     value: "action:game-tools",

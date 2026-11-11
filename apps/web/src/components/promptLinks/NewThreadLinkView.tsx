@@ -22,6 +22,7 @@ import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "rea
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { isElectron } from "~/env";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
+import { useNewGame } from "../game/gameEntryStore";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { newProjectId } from "~/lib/utils";
 import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
@@ -53,6 +54,7 @@ type LinkLaunch =
   | { readonly kind: "thread"; readonly thread: ReturnType<typeof useThreadShells>[number] }
   | { readonly kind: "draft"; readonly project: EnvironmentProject }
   | { readonly kind: "scratch" }
+  | { readonly kind: "brief"; readonly brief: string }
   | { readonly kind: "settled" };
 
 const openedLinkKeys = new Set<string>();
@@ -66,6 +68,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const handleNewThread = useNewThreadHandler();
+  const newGame = useNewGame();
   const { scratchEnvironmentId, openScratchProject } = useScratchProject();
   const startProjectClone = useAtomCommand(sourceControlEnvironment.startProjectClone, {
     reportFailure: false,
@@ -228,6 +231,10 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
     if (pullRequestThread !== undefined) {
       setState({ status: "opened" });
       setLaunch({ kind: "thread", thread: pullRequestThread });
+    } else if (repository === null && link.kind === "new") {
+      // A link with no repository is an idea for a game: it lands in Home's brief box.
+      setState({ status: "opened" });
+      setLaunch({ kind: "brief", brief: link.prompt.text });
     } else if (repository === null) {
       setLaunch({ kind: "scratch" });
     } else if (project === undefined) {
@@ -256,6 +263,9 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
       }
       case "scratch":
         void openScratchDraft();
+        return;
+      case "brief":
+        newGame({ brief: next.brief, replace: true });
         return;
       case "draft":
         void openDraft(next.project);

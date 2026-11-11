@@ -235,6 +235,37 @@ export function shortcutLabelForCommand(
   return shortcut ? formatShortcutLabel(shortcut, platform) : null;
 }
 
+// A browser tab never receives these: the browser keeps them for new windows and tabs.
+const BROWSER_RESERVED_KEYS = new Set(["n", "t", "w"]);
+const browserReserved = (shortcut: KeybindingShortcut) =>
+  !isElectron &&
+  BROWSER_RESERVED_KEYS.has(shortcut.key) &&
+  (shortcut.modKey || shortcut.ctrlKey || shortcut.metaKey) &&
+  !shortcut.shiftKey &&
+  !shortcut.altKey;
+
+/**
+ * The label of a command's shortcut that takes the fewest keys and that this
+ * client can receive, for a hint with little room.
+ */
+export function simplestShortcutLabelForCommand(
+  keybindings: ResolvedKeybindingsConfig,
+  command: KeybindingCommand,
+): string | null {
+  const keys = (shortcut: KeybindingShortcut) =>
+    [
+      shortcut.metaKey,
+      shortcut.ctrlKey,
+      shortcut.shiftKey,
+      shortcut.altKey,
+      shortcut.modKey,
+    ].filter(Boolean).length;
+  const simplest = effectiveShortcutsForCommand(keybindings, command)
+    .filter((shortcut) => !browserReserved(shortcut))
+    .toSorted((left, right) => keys(left) - keys(right))[0];
+  return simplest ? formatShortcutLabel(simplest, resolvePlatform(undefined)) : null;
+}
+
 export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCommand | null {
   return THREAD_JUMP_KEYBINDING_COMMANDS[index] ?? null;
 }

@@ -299,16 +299,59 @@ export default defineConfig({
         rules: { "kurambit/no-raw-type-classes": "error" },
       },
       {
+        // The sidebar, Home's ways in and the settings primitives follow the same rule.
+        files: [
+          "apps/web/src/components/CommandPalette.tsx",
+          "apps/web/src/components/LegacySidebar.tsx",
+          "apps/web/src/components/Sidebar.tsx",
+          "apps/web/src/components/chat/DraftHeroHeadline.tsx",
+          "apps/web/src/components/promptLinks/NewThreadLinkView.tsx",
+          "apps/web/src/components/settings/GameArtSettings.tsx",
+          "apps/web/src/components/settings/GameToolsSettings.tsx",
+          "apps/web/src/components/settings/ResourceTelemetryDiagnostics.tsx",
+          "apps/web/src/components/settings/SettingsBreadcrumb.tsx",
+          "apps/web/src/components/settings/SettingsScopeSentence.tsx",
+          "apps/web/src/components/settings/settingsLayout.tsx",
+          "apps/web/src/components/sidebar/SidebarChrome.tsx",
+          "apps/web/src/components/sidebar/SidebarProviderUpdatePill.tsx",
+          "apps/web/src/components/sidebar/SidebarThreadHeader.tsx",
+          "apps/web/src/routes/__root.tsx",
+          "apps/web/src/routes/_chat.tsx",
+          "apps/web/src/routes/welcome.tsx",
+        ],
+        rules: { "kurambit/no-raw-type-classes": "error" },
+      },
+      {
+        files: ["apps/web/src/components/CommandPalette.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 12 }] },
+      },
+      {
+        files: ["apps/web/src/components/LegacySidebar.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 29 }] },
+      },
+      {
+        files: ["apps/web/src/components/Sidebar.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 34 }] },
+      },
+      {
+        files: ["apps/web/src/components/chat/DraftHeroHeadline.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 5 }] },
+      },
+      {
+        files: ["apps/web/src/components/settings/ResourceTelemetryDiagnostics.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 80 }] },
+      },
+      {
+        files: ["apps/web/src/routes/__root.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 6 }] },
+      },
+      {
         files: ["apps/web/src/components/game/GameBuildCompare.tsx"],
         rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 7 }] },
       },
       {
         files: ["apps/web/src/components/game/GameBuildFacts.tsx"],
         rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 7 }] },
-      },
-      {
-        files: ["apps/web/src/components/game/GameEntry.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 24 }] },
       },
       {
         files: ["apps/web/src/components/game/GameExports.tsx"],
@@ -344,7 +387,7 @@ export default defineConfig({
       },
       {
         files: ["apps/web/src/components/game/GamesHome.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 15 }] },
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 1 }] },
       },
       {
         files: ["apps/web/src/components/game/useKeepGoingBanner.tsx"],

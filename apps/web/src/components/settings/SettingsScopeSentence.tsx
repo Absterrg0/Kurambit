@@ -40,6 +40,7 @@ import {
   settingsScopeEnvironmentLabels,
   settingsScopeProjectMachines,
 } from "./settingsScopeAxis";
+import { Text } from "../ui/text";
 
 export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
   "/settings/appearance",
@@ -68,7 +69,11 @@ export function SettingsScopeSentence() {
     onChange: scope.selectScope,
   };
   return (
-    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 text-base text-muted-foreground sm:px-4">
+    <Text
+      variant="body"
+      tone="muted"
+      render={<p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 sm:px-4" />}
+    >
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="shrink-0">Applying settings for</span>
         <ProjectScopeMenu {...props} />
@@ -82,7 +87,7 @@ export function SettingsScopeSentence() {
           <EnvironmentScopeMenu {...props} />
         </span>
       )}
-    </p>
+    </Text>
   );
 }
 
@@ -101,11 +106,15 @@ function ScopeOptionLabel({ option }: { option: ScopeOption }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate">{option.label}</span>
         {option.secondary ? (
-          <span className="block truncate text-xs text-muted-foreground">{option.secondary}</span>
+          <Text variant="meta" tone="muted" render={<span className="block truncate" />}>
+            {option.secondary}
+          </Text>
         ) : null}
       </span>
       {option.offline ? (
-        <span className="shrink-0 text-xs text-muted-foreground">Offline</span>
+        <Text variant="meta" tone="muted" render={<span className="shrink-0" />}>
+          Offline
+        </Text>
       ) : null}
     </>
   );

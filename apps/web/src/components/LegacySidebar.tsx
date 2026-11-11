@@ -1,5 +1,5 @@
 import { GameEntry } from "./game/GameEntry";
-import { useGameDialogStore } from "./game/gameDialogStore";
+import { showOpenGameDialog } from "./game/gameEntryStore";
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
@@ -2860,10 +2860,6 @@ const projectCollisionDetection: CollisionDetection = (args) => {
   return closestCorners(args);
 };
 
-function openGameDialog() {
-  useGameDialogStore.getState().show("open");
-}
-
 // Project and thread derivations live in their own hooks so they reach
 // LegacySidebar frozen and cached on their real inputs; inline, its later hook
 // calls made the compiler recompute them, and the props of every row with them.
@@ -3458,7 +3454,7 @@ export default function LegacySidebar() {
         threadSortOrder={sidebarThreadSortOrder}
         threadPreviewCount={sidebarThreadPreviewCount}
         updateSettings={updateSettings}
-        openAddProject={openGameDialog}
+        openAddProject={showOpenGameDialog}
         isManualProjectSorting={isManualProjectSorting}
         projectDnDSensors={projectDnDSensors}
         projectCollisionDetection={projectCollisionDetection}

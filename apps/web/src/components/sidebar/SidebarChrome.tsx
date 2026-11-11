@@ -11,8 +11,8 @@ import {
   SidebarStageBackdrop,
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
-import { KurambitMark, KurambitWordmark } from "../brand/KurambitBrand";
-import { Badge } from "../ui/badge";
+import { KurambitMark } from "../brand/KurambitBrand";
+import { Text } from "../ui/text";
 import {
   SidebarFooter,
   SidebarMenu,
@@ -27,6 +27,9 @@ import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { observeResize } from "~/lib/observeResize";
+import { useAtomValue } from "@effect/atom-react";
+import { primaryServerProvidersAtom } from "../../state/server";
+import { collectProviderUpdateCandidates } from "../ProviderUpdateLaunchNotification.logic";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -61,12 +64,16 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       </div>
       <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
         <SidebarBrand onBackdrop={backdropVariant !== null} />
+        {/* The build channel, as quiet as a caption: it says which Kurambit this is. */}
         {pillLabel ? (
-          <div className="ml-1 flex h-7 items-center">
-            <Badge data-environment-identification="pill" size="sm" variant="secondary">
-              {pillLabel}
-            </Badge>
-          </div>
+          <Text
+            variant="caption"
+            tone="dim"
+            data-environment-identification="pill"
+            render={<span className="flex h-7 items-center" />}
+          >
+            {pillLabel}
+          </Text>
         ) : null}
       </div>
     </div>
@@ -114,11 +121,11 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
 
 function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
   return (
-    <span className="inline-flex min-w-0 items-center gap-2">
-      <KurambitMark className="size-6 shrink-0" tone={onBackdrop ? "light" : "auto"} />
-      <KurambitWordmark
-        className={cn("truncate text-xs", onBackdrop ? "text-white/90" : "text-foreground")}
-      />
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <KurambitMark className="size-5 shrink-0" tone={onBackdrop ? "light" : "auto"} />
+      <Text variant="label" tone={onBackdrop ? "inherit" : "strong"} truncate>
+        Kurambit
+      </Text>
     </span>
   );
 }
@@ -126,10 +133,13 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
 function SidebarUtilityItem({
   icon,
   label,
+  dot = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
+  /** Something waits on that page, such as a provider update. */
+  dot?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -137,8 +147,19 @@ function SidebarUtilityItem({
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton
+              aria-label={label}
+              onClick={onClick}
+              size="icon"
+              className="relative"
+            >
               {icon}
+              {dot ? (
+                <span
+                  aria-hidden
+                  className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary"
+                />
+              ) : null}
             </SidebarMenuButton>
           }
         />
@@ -160,9 +181,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       setOpenMobile(false);
     }
   };
+  const providers = useAtomValue(primaryServerProvidersAtom);
+  const providerUpdates = collectProviderUpdateCandidates(providers).length;
   const handleSettingsClick = () => {
     closeMobileSidebar();
-    void navigate({ to: "/settings" });
+    void navigate({ to: providerUpdates > 0 ? "/settings/providers" : "/settings" });
   };
 
   const handleUsageClick = () => {
@@ -190,7 +213,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         <>
           <SidebarUtilityItem
             icon={<SettingsIcon />}
-            label="Settings"
+            label={
+              providerUpdates === 0
+                ? "Settings"
+                : `Settings · ${providerUpdates === 1 ? "a provider update is" : `${providerUpdates} provider updates are`} available`
+            }
+            dot={providerUpdates > 0}
             onClick={handleSettingsClick}
           />
 

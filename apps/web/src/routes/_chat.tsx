@@ -6,14 +6,11 @@ import { useEffect } from "react";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
-import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
-import { openCommandPalette } from "../commandPaletteBus";
-import { useProjects } from "../state/entities";
+import { useLegacySidebarEnabled } from "../hooks/useSettings";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentScope } from "../state/session";
-import { selectProjectGroupingSettings } from "../logicalProject";
-import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
+import { useNewGame } from "../components/game/gameEntryStore";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useScratchProject } from "../hooks/useScratchProject";
@@ -42,16 +39,9 @@ function ChatRouteGlobalShortcuts() {
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const legacySidebarEnabled = useLegacySidebarEnabled();
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { scratchEnvironmentId, startScratchThread } = useScratchProject();
-  const projectGroupCount = buildSidebarProjectSnapshots({
-    projects,
-    settings: projectGroupingSettings,
-    primaryEnvironmentId,
-    resolveEnvironmentLabel: () => null,
-  }).length;
+  const newGame = useNewGame();
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
@@ -124,8 +114,9 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
-          openCommandPalette({ open: "new-thread-in" });
+        // A game starts in Home's brief box; the legacy sidebar keeps T3's new chat.
+        if (!legacySidebarEnabled) {
+          newGame();
           return;
         }
         void startNewThreadFromContext({
@@ -192,8 +183,8 @@ function ChatRouteGlobalShortcuts() {
     keybindings,
     defaultProjectRef,
     previewOpen,
+    newGame,
     primaryEnvironmentId,
-    projectGroupCount,
     routeThreadRef,
     scratchEnvironmentId,
     selectedThreadKeysSize,

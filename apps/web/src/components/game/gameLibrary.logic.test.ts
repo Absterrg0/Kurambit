@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { GameSummary } from "@kurambit/contracts";
 
 import {
+  draftGameName,
   gameInitial,
   gameSlug,
   gameTemplateAppearance,
@@ -78,5 +79,30 @@ describe("sortGameThreadsByActivity", () => {
         { id: "newer", updatedAt: "2026-10-20T00:00:00.000Z" },
       ]).map((thread) => thread.id),
     ).toEqual(["newer", "older"]);
+  });
+});
+
+describe("draftGameName", () => {
+  it("names a game by what it is and where it happens", () => {
+    expect(
+      draftGameName(
+        "A cozy fishing game on a floating island at dusk, with a day-night cycle and a rival fisher",
+      ),
+    ).toBe("Cozy Fishing Island");
+    expect(draftGameName("A top-down roguelike in a flooded cathedral")).toBe(
+      "Top-Down Roguelike Cathedral",
+    );
+  });
+
+  it("keeps a short brief's own words and drops framing", () => {
+    expect(draftGameName("Make me a puzzle platformer where shadows are solid")).toBe(
+      "Puzzle Platformer",
+    );
+    expect(draftGameName("Snake")).toBe("Snake");
+  });
+
+  it("has nothing to say for a brief without words", () => {
+    expect(draftGameName("   ")).toBe("");
+    expect(draftGameName("!!!")).toBe("");
   });
 });

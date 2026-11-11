@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, LayersIcon, SparklesIcon, WalletIcon } from "lucide-react";
 import {
   GAME_ART_PROVIDERS,
   type EnvironmentId,
@@ -27,6 +27,7 @@ import { Button } from "../ui/button";
 import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SecretInput } from "./SecretInput";
+import { Text } from "../ui/text";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 // The Kurambit plan is one more provider once it exists; until then it is not offered.
@@ -72,7 +73,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
   const spent = providers.data?.spentTodayUsd;
   return (
     <SettingsSection id="art-providers" title="Art providers">
-      <div className="space-y-1 px-4 py-3 text-xs text-muted-foreground">
+      <Text variant="meta" tone="muted" render={<div className="space-y-1 px-4 py-3" />}>
         <p>
           Each kind of asset goes to the provider that makes it best, on your own keys or your
           ChatGPT plan through Codex. Keys are kept in this environment&apos;s secret store and are
@@ -82,11 +83,15 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
           Generated assets are yours on a paid plan; free plans do not allow commercial use.
           ElevenLabs music has a studio-size limit; read its terms before you ship.
         </p>
-      </div>
+      </Text>
       {error ? (
-        <p role="alert" className="px-4 text-sm whitespace-pre-wrap text-destructive">
+        <Text
+          variant="body"
+          tone="destructive"
+          render={<p role="alert" className="px-4 whitespace-pre-wrap" />}
+        >
           {error}
-        </p>
+        </Text>
       ) : null}
       {SHOWN_PROVIDERS.map((provider) => {
         const info = GAME_ART_PROVIDERS[provider];
@@ -96,6 +101,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
         return (
           <SettingsRow
             key={provider}
+            icon={<SparklesIcon />}
             title={info.label}
             description={
               keySetting === null
@@ -112,7 +118,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
               )
             }
           >
-            <div className="flex min-w-0 flex-col gap-1.5 text-sm">
+            <div className="flex min-w-0 flex-col gap-1.5 ps-7">
               {keySetting === null ? null : (
                 <div className="flex flex-wrap gap-2">
                   <SecretInput
@@ -136,9 +142,9 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
                 </div>
               )}
               {status === null || status.message === "" ? null : (
-                <p className="text-xs whitespace-pre-wrap text-muted-foreground">
+                <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
                   {status.message}
-                </p>
+                </Text>
               )}
               <div>
                 <Button
@@ -155,10 +161,11 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
         );
       })}
       <SettingsRow
+        icon={<LayersIcon />}
         title="Provider per kind of asset"
         description="Auto uses the first ready provider in Kurambit's order. The agent never switches it for you."
       >
-        <div className="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-2 ps-7 sm:grid-cols-2">
           {GAME_ART_LANES.map((lane) => {
             const choice = settings.gameArtLanes[lane] ?? "auto";
             const auto = providers.data?.lanes[lane];
@@ -173,7 +180,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
             );
             return (
               <label key={lane} className="flex items-center justify-between gap-2">
-                <span>{GAME_ART_LANE_LABELS[lane]}</span>
+                <Text variant="body">{GAME_ART_LANE_LABELS[lane]}</Text>
                 <Select
                   value={choice}
                   disabled={!canWrite}
@@ -209,6 +216,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
         </div>
       </SettingsRow>
       <SettingsRow
+        icon={<WalletIcon />}
         title="Daily limit"
         description={
           spent === undefined

@@ -1,6 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import {
+  BoxIcon,
+  FilmIcon,
+  FolderIcon,
+  Gamepad2Icon,
+  KeyRoundIcon,
+  PersonStandingIcon,
+  TerminalIcon,
+} from "lucide-react";
+import {
   isEngineToolActive,
   type EnvironmentId,
   type GameToolchainChangeInput,
@@ -17,6 +26,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SecretInput } from "./SecretInput";
+import { Text } from "../ui/text";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const TOOL_PURPOSE = {
@@ -29,6 +39,15 @@ const TOOL_PURPOSE = {
   ffmpeg:
     "Records each bot play. A build's play facts and Keep going are read from these recordings; without ffmpeg a build is only checked for booting.",
 } as const satisfies Record<GameToolStatus["tool"], string>;
+
+const TOOL_ICONS = {
+  godot: Gamepad2Icon,
+  unity: Gamepad2Icon,
+  blender: BoxIcon,
+  uv: TerminalIcon,
+  mpfb: PersonStandingIcon,
+  ffmpeg: FilmIcon,
+} as const satisfies Record<GameToolStatus["tool"], unknown>;
 
 const SOURCE_LABELS = {
   settings: "path set here",
@@ -85,9 +104,11 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
     <SettingsSection id="game-tools" title="Game tools">
       {query.data?.tools.map((tool) => {
         const badge = STATUS_BADGES[tool.status];
+        const ToolIcon = TOOL_ICONS[tool.tool];
         return (
           <SettingsRow
             key={tool.tool}
+            icon={<ToolIcon />}
             title={GAME_TOOL_NAMES[tool.tool]}
             description={TOOL_PURPOSE[tool.tool]}
             status={
@@ -96,21 +117,23 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
               </Badge>
             }
           >
-            <div className="flex min-w-0 flex-col gap-1 text-sm break-words">
+            <div className="flex min-w-0 flex-col gap-1 break-words ps-7">
               {tool.path === null ? null : (
-                <p className="font-mono text-xs">
+                <Text variant="meta" mono render={<p />}>
                   {tool.path}
                   {tool.version === null ? "" : ` · ${tool.version}`}
                   {tool.source === null ? "" : ` · ${SOURCE_LABELS[tool.source]}`}
-                </p>
+                </Text>
               )}
               {tool.installed || tool.status === "ready" ? (
-                <p className="whitespace-pre-wrap text-xs text-muted-foreground">{tool.message}</p>
+                <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
+                  {tool.message}
+                </Text>
               ) : (
-                <details className="text-xs text-muted-foreground">
+                <Text variant="meta" tone="muted" render={<details />}>
                   <summary className="cursor-pointer">Not installed · Details</summary>
                   <p className="mt-1 whitespace-pre-wrap">{tool.message}</p>
-                </details>
+                </Text>
               )}
               {INSTALLABLE.has(tool.tool) ? (
                 <GameToolChange
@@ -128,7 +151,7 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           </SettingsRow>
         );
       })}
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3">
         <Button
           size="sm"
           variant="outline"
@@ -140,12 +163,15 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
         {/* A refetch cut off by the next one (a save, Check again) fails with no
             error of its own; with the last results on screen it says nothing. */}
         {query.error !== null && (query.failure !== null || query.data === null) ? (
-          <p role="alert">{query.error}</p>
+          <Text variant="body" tone="destructive" render={<p role="alert" />}>
+            {query.error}
+          </Text>
         ) : null}
       </div>
       {PATH_ROWS.filter((row) => row.shown).map((row) => (
         <SettingsRow
           key={row.key}
+          icon={<FolderIcon />}
           title={row.title}
           description="Leave blank to find it automatically."
         >
@@ -158,11 +184,15 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           />
         </SettingsRow>
       ))}
-      <div className="space-y-2 px-4 py-3 text-sm">
+      <div className="space-y-2 px-4 py-3">
         {error ? (
-          <p role="alert" className="whitespace-pre-wrap text-destructive">
+          <Text
+            variant="body"
+            tone="destructive"
+            render={<p role="alert" className="whitespace-pre-wrap" />}
+          >
             {error}
-          </p>
+          </Text>
         ) : null}
         <Button
           size="sm"
@@ -227,9 +257,13 @@ function GameToolChange({
         )}
       </div>
       {error === null ? null : (
-        <p role="alert" className="whitespace-pre-wrap text-xs text-destructive">
+        <Text
+          variant="meta"
+          tone="destructive"
+          render={<p role="alert" className="whitespace-pre-wrap" />}
+        >
           {error}
-        </p>
+        </Text>
       )}
     </div>
   );
@@ -268,21 +302,32 @@ function GameToolsKeysSection({ environmentId }: { environmentId: EnvironmentId 
     if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
   };
   return (
-    <div className="space-y-3 px-4 py-3 text-sm">
-      <p className="font-medium">Keys</p>
-      <p className="text-xs text-muted-foreground">
+    <div className="space-y-3 px-4 py-3">
+      <Text variant="label" render={<p />}>
+        Keys
+      </Text>
+      <Text variant="meta" tone="muted" render={<p />}>
         Stored in this environment&apos;s secret store. Settings only show whether a key is set,
         never the value.
-      </p>
+      </Text>
       {error ? (
-        <p role="alert" className="whitespace-pre-wrap text-destructive">
+        <Text
+          variant="body"
+          tone="destructive"
+          render={<p role="alert" className="whitespace-pre-wrap" />}
+        >
           {error}
-        </p>
+        </Text>
       ) : null}
       {KEY_ROWS.map((row) => {
         const configured = settings[row.key].length > 0;
         return (
-          <SettingsRow key={row.key} title={row.title} description={row.description}>
+          <SettingsRow
+            key={row.key}
+            icon={<KeyRoundIcon />}
+            title={row.title}
+            description={row.description}
+          >
             <div className="flex flex-wrap gap-2">
               <SecretInput
                 aria-label={`${row.title} value`}

@@ -1,26 +1,18 @@
-import { useGameDialogStore } from "./gameDialogStore";
-import { ensureLocalApi } from "../../localApi";
-import { isElectron } from "../../env";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import * as Schema from "effect/Schema";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  GAME_CHARACTER_ROUTE_UNAVAILABLE,
-  ACTIVE_GAME_ENGINES,
-  GAME_ENGINES,
-  ModelSelection,
-  type EnvironmentId,
-  type GameCharacterRoute,
-  type GameEngineId,
-  type GameToolStatus,
-} from "@kurambit/contracts";
+import type { EnvironmentId } from "@kurambit/contracts";
+import { scopeThreadRef } from "@kurambit/client-runtime/environment";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
-import { FolderIcon } from "lucide-react";
+
+import { isElectron } from "../../env";
+import { ensureLocalApi } from "../../localApi";
+import { waitForThreadShell } from "../../state/entities";
+import { usePrimaryEnvironmentId } from "../../state/environments";
+import { gameEnvironment } from "../../state/game";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Radio, RadioGroup } from "../ui/radio-group";
-import { Textarea } from "../ui/textarea";
 import {
   Dialog,
   DialogDescription,
@@ -30,169 +22,55 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { usePrimaryEnvironmentId, useEnvironmentProviders } from "../../state/environments";
-import { useEnvironmentSettings } from "../../hooks/useSettings";
-import {
-  deriveProviderInstanceEntries,
-  applyProviderInstanceSettings,
-  getDefaultProviderInstanceModel,
-  isProviderInstancePickerReady,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
-import {
-  resolveAppModelSelectionState,
-  getCustomModelOptionsByInstance,
-} from "../../modelSelection";
-import { gameEnvironment } from "../../state/game";
-import { waitForThreadShell } from "../../state/entities";
-import { scopeThreadRef } from "@kurambit/client-runtime/environment";
-import { engineToolFor } from "./gameStageLogic";
-import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
-import { GameToolLink } from "./GameToolLink";
-import {
-  CHARACTER_ROUTES,
-  useCharacterRouteBlockers,
-  useGeneratedRouteNote,
-} from "./GameCharacterRoute";
-import { useAtomCommand } from "../../state/use-atom-command";
-import { gameSlug } from "./gameLibrary.logic";
-import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { Input } from "../ui/input";
+import { Text } from "../ui/text";
+import { showOpenGameDialog, useGameEntryStore, useNewGame } from "./gameEntryStore";
 import { useGameLibraryRefresh } from "./useGameLibrary";
+import { useGameModelChoice } from "./useGameModelChoice";
 
-const BRIEF_PLACEHOLDER =
-  "Describe what the player does, what makes it fun, and what winning looks like. A few sentences is enough.";
-
-const ART_DIRECTION_PLACEHOLDER =
-  "Optional. Painterly low-poly, warm sunset light, chunky pixel art, no text on screen…";
-
+/** New game and Open game, for the legacy sidebar's empty state and header. */
 export function GameEntry() {
   const environmentId = usePrimaryEnvironmentId();
   return environmentId ? <GameEntryButtons environmentId={environmentId} /> : null;
 }
 
 function GameEntryButtons({ environmentId }: { environmentId: EnvironmentId }) {
-  const canCreate = useAtomValue(gameEnvironment.create.permissionAtom(environmentId));
+  const newGame = useNewGame();
   const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
   return (
     <div className="flex flex-wrap justify-center gap-2 p-2">
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={!canCreate}
-        onClick={() => useGameDialogStore.getState().show("create")}
-      >
+      <Button size="sm" variant="outline" onClick={() => newGame()}>
         New game
       </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={!canOpen}
-        onClick={() => useGameDialogStore.getState().show("open")}
-      >
+      <Button size="sm" variant="ghost" disabled={!canOpen} onClick={showOpenGameDialog}>
         Open game
       </Button>
     </div>
   );
 }
 
-export function GameDialogHost() {
+export function GameOpenDialogHost() {
   const environmentId = usePrimaryEnvironmentId();
-  const dialog = useGameDialogStore((state) => state.dialog);
-  return environmentId && dialog ? (
-    <GameEntryForEnvironment key={`${environmentId}:${dialog}`} environmentId={environmentId} />
-  ) : null;
+  const open = useGameEntryStore((state) => state.openDialog);
+  return environmentId && open ? <GameOpenDialog environmentId={environmentId} /> : null;
 }
 
-const lastGameModelSchema = Schema.NullOr(ModelSelection);
-const lastGameFolderSchema = Schema.String;
-
-function GameEntryForEnvironment({ environmentId }: { environmentId: EnvironmentId }) {
-  const settings = useEnvironmentSettings(environmentId);
-  const providers = useEnvironmentProviders().get(environmentId) ?? [];
-  const entries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, null),
-  );
-  const [selection, setSelection] = useState<ModelSelection | null>(null);
-  // The provider and model of the person's last game, while that provider is usable.
-  const [lastGameModel, setLastGameModel] = useLocalStorage(
-    `game-entry-picked-model:${environmentId}`,
-    null,
-    lastGameModelSchema,
-  );
-  // A game's first turn starts the moment it is created, so only an agent that
-  // can work now (installed and signed in) may make it.
-  const isReady = (instanceId: string) =>
-    entries.some(
-      (entry) => entry.instanceId === instanceId && isProviderInstancePickerReady(entry),
-    );
-  const remembered =
-    lastGameModel !== null && isReady(lastGameModel.instanceId) ? lastGameModel : null;
-  // With no game yet: Claude when it is ready, then the first ready provider. A game's first turn
-  // builds the whole game, so it gets the provider's own default (its flagship) at the provider's
-  // default effort, never the cheap model the app summarises text with.
-  const firstChoice =
-    entries.find(
-      (entry) => entry.driverKind === "claudeAgent" && isProviderInstancePickerReady(entry),
-    ) ?? entries.find(isProviderInstancePickerReady);
-  const textDefault = resolveAppModelSelectionState(settings, providers);
-  const freshInstanceId = firstChoice?.instanceId ?? textDefault.instanceId;
-  const fresh: ModelSelection = {
-    instanceId: freshInstanceId,
-    model: getDefaultProviderInstanceModel(providers, freshInstanceId) ?? textDefault.model,
-  };
-  const model = selection ?? remembered ?? fresh;
-  const options = getCustomModelOptionsByInstance(
-    settings,
-    providers,
-    model.instanceId,
-    model.model,
-  );
-  const canCreate = useAtomValue(gameEnvironment.create.permissionAtom(environmentId));
+/** Opens a game folder that already lives on this machine. */
+function GameOpenDialog({ environmentId }: { environmentId: EnvironmentId }) {
+  const choice = useGameModelChoice(environmentId);
   const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
-  const create = useAtomCommand(gameEnvironment.create, { reportFailure: false });
   const open = useAtomCommand(gameEnvironment.open, { reportFailure: false });
   const refreshLibrary = useGameLibraryRefresh(environmentId);
   const navigate = useNavigate();
-  const dialog = useGameDialogStore((state) => state.dialog);
-  const setDialog = useGameDialogStore((state) => state.show);
-  const draft = useGameDialogStore((state) => state.draft);
-  const [name, setName] = useState("");
-  // The folder the person's last new game went in, beside its agent.
-  const [lastGameFolder, setLastGameFolder] = useLocalStorage(
-    `game-entry-parent-folder:${environmentId}`,
-    "~/Games",
-    lastGameFolderSchema,
-  );
-  const [directory, setDirectory] = useState(dialog === "create" ? lastGameFolder : "");
-  const [brief, setBrief] = useState(draft?.brief ?? "");
-  const [artDirection, setArtDirection] = useState("");
-  const { toolchain, ready: engineReady } = useEngineReadiness(environmentId);
-  const [chosenEngine, setEngine] = useState<GameEngineId | null>(draft?.engine ?? null);
-  const engine = chooseEngine(chosenEngine, engineReady);
-  const [characters, setCharacters] = useState<GameCharacterRoute>("library");
-  // Read only while the New game dialog is open: it asks the server about every provider.
-  const routeBlocker = useCharacterRouteBlockers(dialog === "create" ? environmentId : null);
-  const generatedNote = useGeneratedRouteNote(dialog === "create" ? environmentId : null);
-  const [editingFolder, setEditingFolder] = useState(false);
+  const close = () => useGameEntryStore.getState().showOpenDialog(false);
+  const [directory, setDirectory] = useState("");
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isCreate = dialog === "create";
-  const slug = gameSlug(name) || "your-game";
-  const folder = `${directory.replace(/\/+$/, "")}/${slug}`;
-  const providerReady = isReady(model.instanceId);
-  const modelEntry = entries.find((entry) => entry.instanceId === model.instanceId);
-  const canSubmit = isCreate
-    ? canCreate && providerReady && name.trim().length > 0 && brief.trim().length > 0
-    : canOpen && providerReady && directory.trim().length > 0;
+  const canSubmit = canOpen && choice.ready && directory.trim().length > 0;
 
   const chooseFolder = async () => {
     if (busy || pickingFolder) return;
-    if (!isElectron) {
-      setEditingFolder(true);
-      return;
-    }
     setPickingFolder(true);
     setError(null);
     // No try/finally: React Compiler cannot analyse a finalizer, and the picker
@@ -204,40 +82,25 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
         return null;
       });
     setPickingFolder(false);
-    if (picked) {
-      setDirectory(picked);
-      setEditingFolder(false);
-    }
+    if (picked) setDirectory(picked);
   };
 
   const submit = async () => {
-    if (busy || pickingFolder || dialog === null) return;
-    if (!canSubmit) return;
+    if (busy || pickingFolder || !canSubmit) return;
     setBusy(true);
     setError(null);
-    const result = isCreate
-      ? await create({
-          environmentId,
-          input: {
-            name,
-            parentDirectory: directory,
-            brief,
-            artDirection,
-            engine,
-            characters,
-            modelSelection: model,
-          },
-        })
-      : await open({ environmentId, input: { path: directory, modelSelection: model } });
+    const result = await open({
+      environmentId,
+      input: { path: directory, modelSelection: choice.model },
+    });
     setBusy(false);
     if (result._tag === "Failure") {
       setError(String(squashAtomCommandFailure(result)));
       return;
     }
-    setLastGameModel(model);
-    if (isCreate && directory.trim()) setLastGameFolder(directory.trim());
+    choice.remember();
     refreshLibrary();
-    setDialog(null);
+    close();
     // The thread route sends a thread this client has not received yet back
     // home, so open the game only once its shell has arrived.
     await waitForThreadShell(scopeThreadRef(environmentId, result.value.threadId));
@@ -249,12 +112,12 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
 
   return (
     <Dialog
-      open={dialog !== null}
+      open
       onOpenChange={(value) => {
-        if (!value && !busy && !pickingFolder) setDialog(null);
+        if (!value && !busy && !pickingFolder) close();
       }}
     >
-      <DialogPopup className={isCreate ? "max-w-4xl" : undefined}>
+      <DialogPopup>
         <form
           className="contents"
           onSubmit={(event) => {
@@ -263,313 +126,76 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
           }}
         >
           <DialogHeader>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {isCreate
-                ? "Describe the game, and your agent builds it."
-                : "Continue a game that already lives on this machine."}
-            </div>
-            <DialogTitle>{isCreate ? "Name your game" : "Open game"}</DialogTitle>
+            <DialogTitle>Open a game</DialogTitle>
             <DialogDescription>
-              {isCreate
-                ? "Your agent builds a first playable version in a few minutes; every message after that makes it better."
-                : "Open a game folder containing game.json."}
+              Pick a game folder that holds a game.json. Opening it continues its latest session.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
-            {isCreate ? (
-              <div className="flex flex-col gap-4">
-                <label className="flex flex-col gap-1 text-sm">
-                  Game name
-                  <Input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    required
-                    maxLength={100}
-                    autoFocus
-                    placeholder="The Sunlit Isle"
-                    disabled={busy}
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  Brief
-                  <Textarea
-                    value={brief}
-                    onChange={(event) => setBrief(event.target.value)}
-                    required
-                    rows={4}
-                    placeholder={BRIEF_PLACEHOLDER}
-                    disabled={busy}
-                  />
-                </label>
-                {/* One active engine is no choice, so no picker shows. */}
-                {ENGINE_OPTIONS.length > 1 ? (
-                  <fieldset className="flex flex-col gap-2 text-sm">
-                    <legend className="font-medium">Engine</legend>
-                    <RadioGroup
-                      aria-label="Engine"
-                      value={engine}
-                      onValueChange={(value) => {
-                        const picked = ENGINE_OPTIONS.find((option) => option.id === value);
-                        if (picked !== undefined) setEngine(picked.id);
-                      }}
-                      disabled={busy}
-                    >
-                      {ENGINE_OPTIONS.map((option) => (
-                        <EngineOption
-                          key={option.id}
-                          {...option}
-                          tool={toolchain === null ? null : engineToolFor(toolchain, option.id)}
-                          ready={engineReady(option.id)}
-                        />
-                      ))}
-                    </RadioGroup>
-                  </fieldset>
-                ) : null}
-                <fieldset className="flex flex-col gap-2 text-sm">
-                  <legend className="font-medium">Make characters with</legend>
-                  <RadioGroup
-                    aria-label="Make characters with"
-                    value={characters}
-                    onValueChange={(value) => {
-                      const picked = CHARACTER_ROUTES.find((option) => option.route === value);
-                      if (picked !== undefined) setCharacters(picked.route);
-                    }}
-                    disabled={busy}
-                    className="grid grid-cols-3"
-                  >
-                    {CHARACTER_ROUTES.map((option) => {
-                      const blocked = routeBlocker(option.route);
-                      return (
-                        <label
-                          key={option.route}
-                          className={
-                            blocked === null
-                              ? "flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-data-checked:border-primary has-data-checked:bg-primary/5"
-                              : "flex items-start gap-2 rounded-lg border border-border/70 px-3 py-2 opacity-64"
-                          }
-                        >
-                          <Radio
-                            value={option.route}
-                            disabled={blocked !== null}
-                            className="mt-0.5"
-                          />
-                          <span>
-                            <span className="font-medium">{option.label}</span>
-                            <span className="block text-xs text-muted-foreground">
-                              {blocked ?? option.description}
-                            </span>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </RadioGroup>
-                  {GAME_CHARACTER_ROUTE_UNAVAILABLE.generated === undefined &&
-                  routeBlocker("generated") !== null ? (
-                    <p className="text-xs text-muted-foreground">
-                      Generated characters need an art provider: a Tripo or Meshy key, or Codex.{" "}
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="link"
-                        disabled={busy}
-                        onClick={() => {
-                          setDialog(null);
-                          void navigate({ to: "/settings/general", hash: "art-providers" });
-                        }}
-                      >
-                        Set up in Settings
-                      </Button>
-                    </p>
-                  ) : null}
-                  {characters === "generated" && generatedNote !== null ? (
-                    <p className="text-xs text-muted-foreground">{generatedNote}</p>
-                  ) : null}
-                </fieldset>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="flex items-baseline gap-1.5">
-                    Art direction
-                    <span className="text-xs font-normal text-muted-foreground">optional</span>
-                  </span>
-                  <Textarea
-                    value={artDirection}
-                    onChange={(event) => setArtDirection(event.target.value)}
-                    rows={2}
-                    placeholder={ART_DIRECTION_PLACEHOLDER}
-                    disabled={busy}
-                  />
-                </label>
-                <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5">
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
-                    <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="text-muted-foreground">Saved in</span>
-                    <span className="min-w-0 truncate font-mono text-xs text-foreground">
-                      {folder}
-                    </span>
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      className="ml-auto"
-                      disabled={busy || pickingFolder}
-                      onClick={() => void chooseFolder()}
-                    >
-                      {pickingFolder ? "Choosing…" : "Change"}
-                    </Button>
-                  </div>
-                  {editingFolder ? (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1">
+                <Text variant="label" render={<label htmlFor="game-directory" />}>
+                  Game folder
+                </Text>
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
                     <Input
-                      aria-label="Games folder"
+                      id="game-directory"
                       value={directory}
                       onChange={(event) => setDirectory(event.target.value)}
-                      placeholder="~/Games"
+                      placeholder="~/Games/my-game"
                       required
+                      autoFocus
                       disabled={busy || pickingFolder}
-                      className="h-8"
                     />
+                  </div>
+                  {isElectron ? (
+                    <div className="shrink-0">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || pickingFolder}
+                        onClick={() => void chooseFolder()}
+                      >
+                        {pickingFolder ? "Choosing folder…" : "Choose folder"}
+                      </Button>
+                    </div>
                   ) : null}
                 </div>
-                <ProviderModelPicker
-                  environmentId={environmentId}
-                  activeInstanceId={model.instanceId}
-                  model={model.model}
-                  lockedProvider={null}
-                  instanceEntries={entries}
-                  modelOptionsByInstance={options}
-                  disabled={busy}
-                  onInstanceModelChange={(instanceId, selectedModel) =>
-                    setSelection({ instanceId, model: selectedModel })
-                  }
-                />
               </div>
-            ) : (
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-1 text-sm">
-                  <label htmlFor="game-directory">Game folder</label>
-                  <div className="flex items-center gap-2">
-                    <div className="min-w-0 flex-1">
-                      <Input
-                        id="game-directory"
-                        value={directory}
-                        onChange={(event) => setDirectory(event.target.value)}
-                        placeholder="/path/to/game"
-                        required
-                        disabled={busy || pickingFolder}
-                      />
-                    </div>
-                    {isElectron ? (
-                      <div className="shrink-0">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={busy || pickingFolder}
-                          onClick={() => void chooseFolder()}
-                        >
-                          {pickingFolder ? "Choosing folder…" : "Choose folder"}
-                        </Button>
-                      </div>
-                    ) : null}
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    Opening a game you already made continues its latest session.
-                  </span>
-                </div>
-                <ProviderModelPicker
-                  environmentId={environmentId}
-                  activeInstanceId={model.instanceId}
-                  model={model.model}
-                  lockedProvider={null}
-                  instanceEntries={entries}
-                  modelOptionsByInstance={options}
-                  disabled={busy}
-                  onInstanceModelChange={(instanceId, selectedModel) =>
-                    setSelection({ instanceId, model: selectedModel })
-                  }
-                />
-              </div>
-            )}
+              <ProviderModelPicker
+                environmentId={environmentId}
+                activeInstanceId={choice.model.instanceId}
+                model={choice.model.model}
+                lockedProvider={null}
+                instanceEntries={choice.entries}
+                modelOptionsByInstance={choice.options}
+                disabled={busy}
+                onInstanceModelChange={(instanceId, model) => choice.choose({ instanceId, model })}
+              />
+            </div>
             {error ? (
-              <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">
+              <Text variant="body" tone="destructive" render={<p role="alert" />}>
                 {error}
-              </p>
+              </Text>
             ) : null}
-            {providerReady ? null : (
-              <p className="text-sm text-muted-foreground">
-                {modelEntry === undefined
-                  ? "No agent is ready."
-                  : `${modelEntry.displayName} is not ready: ${modelEntry.snapshot.message ?? "it is not signed in."}`}{" "}
-                Sign in, or add an agent in Settings → Providers, then choose its model here.
-              </p>
+            {choice.notReadyReason === null ? null : (
+              <Text variant="body" tone="muted" render={<p />}>
+                {choice.notReadyReason}
+              </Text>
             )}
           </DialogPanel>
           <DialogFooter className="sm:justify-between">
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={busy || pickingFolder}
-                onClick={() => setDialog(null)}
-              >
-                Cancel
-              </Button>
-            </div>
+            <Button type="button" variant="ghost" disabled={busy || pickingFolder} onClick={close}>
+              Cancel
+            </Button>
             <Button type="submit" disabled={busy || pickingFolder || !canSubmit}>
-              {busy
-                ? isCreate
-                  ? "Creating game…"
-                  : "Opening game…"
-                : isCreate
-                  ? "Create game"
-                  : "Open game"}
+              {busy ? "Opening game…" : "Open game"}
             </Button>
           </DialogFooter>
         </form>
       </DialogPopup>
     </Dialog>
-  );
-}
-
-const ENGINE_OPTIONS = ACTIVE_GAME_ENGINES.map((id) => ({
-  id,
-  ...GAME_ENGINES[id].picker,
-}));
-
-/** An engine that is not ready cannot be picked; it shows what is wrong and where to get it. */
-function EngineOption({
-  id,
-  title,
-  description,
-  tool,
-  ready,
-}: {
-  id: GameEngineId;
-  title: string;
-  description: string;
-  tool: GameToolStatus | null;
-  ready: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border/70 px-3 py-2 has-data-checked:border-primary has-data-checked:bg-primary/5">
-      <label
-        className={
-          ready ? "flex cursor-pointer items-start gap-2" : "flex items-start gap-2 opacity-64"
-        }
-      >
-        <Radio value={id} disabled={!ready} className="mt-0.5" />
-        <span>
-          <span className="font-medium">{title}</span>
-          <span className="block text-xs text-muted-foreground">{description}</span>
-          {tool !== null && tool.status !== "ready" && tool.installed ? (
-            <span className="mt-1 block text-xs text-muted-foreground">{tool.message}</span>
-          ) : null}
-        </span>
-      </label>
-      {tool !== null && tool.status !== "ready" ? (
-        <div className="flex items-center gap-2 pl-5 text-xs text-muted-foreground">
-          {tool.installed ? null : <span>Not installed ·</span>}
-          <GameToolLink tool={tool} />
-        </div>
-      ) : null}
-    </div>
   );
 }

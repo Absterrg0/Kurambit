@@ -1,10 +1,11 @@
-import { createFileRoute, redirect, useLocation, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useState } from "react";
 import { EnvironmentId } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 
 import { GamesHome } from "../components/game/GamesHome";
+import { useNewGame } from "../components/game/gameEntryStore";
 import { WelcomeWizard } from "../components/onboarding/WelcomeWizard";
 
 const decodeEnvironmentId = Schema.decodeOption(EnvironmentId);
@@ -20,7 +21,7 @@ export const Route = createFileRoute("/welcome")({
 });
 
 function WelcomeRouteView() {
-  const navigate = useNavigate();
+  const newGame = useNewGame();
   const hash = useLocation({ select: (location) => location.hash });
   const resumeEnvironmentId = hash.startsWith("agents:")
     ? Option.getOrUndefined(decodeEnvironmentId(hash.slice("agents:".length)))
@@ -37,7 +38,8 @@ function WelcomeRouteView() {
           resumeEnvironmentId={resumeEnvironmentId}
           onDone={async () => {
             setDismissed(true);
-            await navigate({ to: "/", replace: true });
+            // Setup ends where a game starts: Home, with the brief box focused.
+            newGame({ replace: true });
           }}
         />
       ) : null}
