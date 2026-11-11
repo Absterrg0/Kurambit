@@ -11,9 +11,8 @@ import {
 
 import { cn } from "~/lib/utils";
 import { useNativeTitlebarHeight } from "~/lib/windowControlsOverlay";
-
-// Base UI's default, restated because a padding object zeroes the sides it omits.
-const COLLISION_PADDING = 5;
+import { POPUP_COLLISION_PADDING } from "./closing-positioner";
+import { isReturningFocus } from "./focus-return";
 
 const TooltipProvider = TooltipPrimitive.Provider;
 
@@ -82,16 +81,25 @@ function Tooltip<Payload>(props: TooltipPrimitive.Root.Props<Payload>) {
   );
 }
 
-function TooltipTrigger(props: TooltipPrimitive.Trigger.Props) {
+function TooltipTrigger({ onFocus, ...props }: TooltipPrimitive.Trigger.Props) {
+  // Focus handed back by a closing menu or dialog is not the person moving to
+  // this trigger, so its tooltip stays closed.
+  const handleFocus: TooltipPrimitive.Trigger.Props["onFocus"] = (event) => {
+    onFocus?.(event);
+    if (isReturningFocus(event.currentTarget.ownerDocument)) event.preventBaseUIHandler();
+  };
   const tracker = use(TooltipScrollContext);
   const actionsRef = use(TooltipHoverContext);
   if (!tracker || !actionsRef) {
-    return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+    return (
+      <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} onFocus={handleFocus} />
+    );
   }
   return (
     <TooltipPrimitive.Trigger
       data-slot="tooltip-trigger"
       {...props}
+      onFocus={handleFocus}
       onMouseEnter={(event) => {
         props.onMouseEnter?.(event);
         tracker.hover(event.currentTarget, actionsRef);
@@ -106,10 +114,10 @@ function TooltipPositioner(props: TooltipPrimitive.Positioner.Props) {
     <TooltipPrimitive.Positioner
       className="pointer-events-none z-[140] h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
       collisionPadding={{
-        top: COLLISION_PADDING + titlebarHeight,
-        right: COLLISION_PADDING,
-        bottom: COLLISION_PADDING,
-        left: COLLISION_PADDING,
+        top: POPUP_COLLISION_PADDING + titlebarHeight,
+        right: POPUP_COLLISION_PADDING,
+        bottom: POPUP_COLLISION_PADDING,
+        left: POPUP_COLLISION_PADDING,
       }}
       data-slot="tooltip-positioner"
       {...props}
@@ -138,12 +146,11 @@ function TooltipPopup({
       <TooltipPositioner align={align} anchor={anchor} side={side} sideOffset={sideOffset}>
         <TooltipPrimitive.Popup
           className={cn(
-            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-popover-foreground text-xs transition-[width,height,scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
-            variant === "glass"
-              ? "dropdown-glass shadow-xl shadow-black/25 before:hidden"
-              : "border bg-popover not-dark:bg-clip-padding shadow-md/5",
+            "kbd-in-popover relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-meta font-normal text-popover-foreground transition-[width,height,scale,opacity] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 data-instant:duration-0 motion-reduce:transition-none",
+            // glass floats over media with the popover's deeper shadow.
+            variant === "glass" ? "surface-popover" : "surface-tooltip",
             variant === "code"
-              ? "max-w-120 wrap-anywhere text-left font-mono text-[11px] leading-relaxed"
+              ? "max-w-120 wrap-anywhere text-left font-mono text-caption leading-relaxed"
               : "max-w-80 wrap-anywhere whitespace-normal leading-snug",
             className,
           )}

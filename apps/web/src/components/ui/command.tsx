@@ -103,7 +103,7 @@ function CommandInput({
       <AutocompleteInput
         autoFocus
         className={cn(
-          "border-transparent! bg-transparent! shadow-none before:hidden has-focus-visible:ring-0 placeholder:text-placeholder *:data-[slot=autocomplete-input]:ps-9! sm:*:data-[slot=autocomplete-input]:ps-[calc(var(--command-shell-inset)+1.5rem)]!",
+          "border-transparent! [background:none]! shadow-none! placeholder:text-placeholder *:data-[slot=autocomplete-input]:ps-9! sm:*:data-[slot=autocomplete-input]:ps-[calc(var(--command-shell-inset)+1.5rem)]!",
           className,
         )}
         placeholder={placeholder}
@@ -187,13 +187,13 @@ function CommandItem({
   return (
     <AutocompleteItem
       className={cn(
-        "py-1.5 data-selected:bg-foreground/[0.06] data-highlighted:bg-foreground/[0.09] data-highlighted:text-foreground [&[data-highlighted][data-selected]]:bg-foreground/[0.09] [&[data-highlighted][data-selected]]:text-foreground",
-        active !== undefined &&
-          "cursor-pointer hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit data-selected:bg-transparent data-selected:text-inherit [&[data-highlighted][data-selected]]:bg-transparent [&[data-highlighted][data-selected]]:text-inherit",
-        active && "bg-accent! text-accent-foreground!",
+        "py-1.5",
+        active !== undefined && "cursor-pointer",
+        active && "surface-selected text-strong-foreground",
         className,
       )}
       data-active={active || undefined}
+      data-controlled={active === undefined ? undefined : ""}
       data-slot="command-item"
       {...props}
     />
@@ -204,7 +204,7 @@ function CommandShortcut({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
     <kbd
       className={cn(
-        "ms-auto font-medium font-sans text-secondary-label text-xs tracking-widest",
+        "ms-auto shrink-0 ps-4 font-sans text-meta text-secondary-label tracking-wide",
         className,
       )}
       data-slot="command-shortcut"
@@ -217,7 +217,7 @@ function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "relative flex items-center justify-between gap-2 rounded-b-[calc(var(--radius-2xl)-1px)] bg-foreground/[0.025] px-[var(--command-content-inset)] py-2.5 font-medium text-sm text-muted-foreground [&_[data-slot=kbd-group]]:font-sans [&_[data-slot=kbd]]:bg-foreground/[0.08] [&_[data-slot=kbd]]:text-foreground [&_[data-slot=kbd]]:ring-0",
+        "kbd-in-popover relative flex items-center justify-between gap-2 rounded-b-[calc(var(--radius-2xl)-1px)] bg-foreground/[0.025] px-[var(--command-content-inset)] py-2.5 text-meta text-muted-foreground",
         className,
       )}
       data-slot="command-footer"
@@ -230,14 +230,7 @@ function CommandFooterAction({
   className,
   ...props
 }: Omit<React.ComponentProps<typeof Button>, "size" | "variant">) {
-  return (
-    <Button
-      {...props}
-      variant="ghost-muted"
-      size="xs"
-      className={cn("h-auto px-2 text-xs hover:bg-transparent", className)}
-    />
-  );
+  return <Button {...props} variant="bare" size="xs" className={cn("h-auto px-2", className)} />;
 }
 
 export {

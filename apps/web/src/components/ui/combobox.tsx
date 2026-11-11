@@ -5,6 +5,9 @@ import { ChevronsUpDownIcon, SearchIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "~/lib/utils";
+import { POPUP_COLLISION_PADDING } from "./closing-positioner";
+import { MENU_ROW_TEXT_CLASS } from "./menu-row-text";
+import { RELAXED_PICKER_CLASS } from "./picker-styles";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
 
@@ -71,7 +74,7 @@ function ComboboxInput({
           <Input
             className={cn(
               "has-disabled:opacity-100",
-              unstyled && "rounded-none bg-transparent text-sm",
+              unstyled && "rounded-none bg-transparent text-label",
             )}
             nativeInput
             size={sizeValue}
@@ -142,6 +145,7 @@ function ComboboxPopup({
   alignOffset,
   align = "start",
   anchor: anchorProp,
+  spacing = "default",
   ...props
 }: ComboboxPrimitive.Popup.Props & {
   align?: ComboboxPrimitive.Positioner.Props["align"];
@@ -149,6 +153,8 @@ function ComboboxPopup({
   alignOffset?: ComboboxPrimitive.Positioner.Props["alignOffset"];
   side?: ComboboxPrimitive.Positioner.Props["side"];
   anchor?: ComboboxPrimitive.Positioner.Props["anchor"];
+  /** `relaxed` is the denser picker look (picker-styles.ts). */
+  spacing?: "default" | "relaxed";
 }) {
   const { chipsRef, multiple } = React.use(ComboboxContext);
   const anchor = anchorProp ?? (multiple ? chipsRef : undefined);
@@ -160,13 +166,15 @@ function ComboboxPopup({
         alignOffset={alignOffset}
         anchor={anchor}
         className="z-[130] select-none"
+        collisionPadding={POPUP_COLLISION_PADDING}
         data-slot="combobox-positioner"
         side={side}
         sideOffset={sideOffset}
       >
         <span
           className={cn(
-            "dropdown-glass relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] transition-[scale,opacity] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]",
+            "surface-popover kbd-in-popover relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg transition-[scale,opacity] [--popup-item-radius:calc(var(--radius-lg)-5px)]",
+            spacing === "relaxed" && RELAXED_PICKER_CLASS,
             className,
           )}
         >
@@ -194,7 +202,7 @@ function ComboboxItem({
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none not-data-disabled:hover:bg-accent data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-selected:bg-foreground/[0.08] data-selected:text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground [&[data-highlighted][data-selected]]:bg-accent [&[data-highlighted][data-selected]]:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        `flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-[var(--popup-item-radius,7px)] px-2 py-1 ${MENU_ROW_TEXT_CLASS} text-foreground outline-none not-data-disabled:hover:surface-selected-soft data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-selected:surface-selected-soft data-selected:text-strong-foreground data-highlighted:surface-selected-soft data-highlighted:text-strong-foreground data-disabled:opacity-45 sm:min-h-7 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0`,
         className,
       )}
       data-slot="combobox-item"
@@ -213,10 +221,7 @@ function ComboboxItem({
 function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
   return (
     <ComboboxPrimitive.Empty
-      className={cn(
-        "not-empty:p-2 text-center text-base text-muted-foreground sm:text-sm",
-        className,
-      )}
+      className={cn("not-empty:p-2 text-center text-body text-muted-foreground", className)}
       data-slot="combobox-empty"
       {...props}
     />
@@ -256,10 +261,7 @@ function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
 function ComboboxStatus({ className, ...props }: ComboboxPrimitive.Status.Props) {
   return (
     <ComboboxPrimitive.Status
-      className={cn(
-        "px-3 py-2 font-medium text-muted-foreground text-xs empty:m-0 empty:p-0",
-        className,
-      )}
+      className={cn("px-3 py-2 text-meta text-muted-foreground empty:m-0 empty:p-0", className)}
       data-slot="combobox-status"
       {...props}
     />

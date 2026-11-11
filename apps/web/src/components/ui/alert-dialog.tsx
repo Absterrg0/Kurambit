@@ -1,8 +1,11 @@
 "use client";
 
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
+import { useId } from "react";
 
 import { cn } from "~/lib/utils";
+import { DialogAction, dialogActionInitialFocus } from "~/components/ui/dialog";
+import { tooltipSafeFinalFocus } from "~/components/ui/focus-return";
 import {
   DIALOG_BACKDROP_CLASS,
   DIALOG_MOBILE_SHEET_CLASS,
@@ -46,6 +49,8 @@ function AlertDialogPopup({
   bottomStickOnMobile?: boolean;
   portalContainer?: AlertDialogPrimitive.Portal.Props["container"];
 }) {
+  const defaultId = useId();
+  const popupId = props.id ?? defaultId;
   return (
     <AlertDialogPortal container={portalContainer}>
       <AlertDialogBackdrop />
@@ -61,6 +66,9 @@ function AlertDialogPopup({
           )}
           data-slot="alert-dialog-popup"
           {...props}
+          id={popupId}
+          initialFocus={dialogActionInitialFocus(props.initialFocus, popupId)}
+          finalFocus={tooltipSafeFinalFocus(props.finalFocus, popupId)}
         />
       </AlertDialogViewport>
     </AlertDialogPortal>
@@ -104,7 +112,7 @@ function AlertDialogFooter({
 function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Props) {
   return (
     <AlertDialogPrimitive.Title
-      className={cn("wrap-anywhere shrink-0 font-semibold text-xl leading-none", className)}
+      className={cn("wrap-anywhere shrink-0 text-title text-strong-foreground", className)}
       data-slot="alert-dialog-title"
       {...props}
     />
@@ -115,7 +123,7 @@ function AlertDialogDescription({ className, ...props }: AlertDialogPrimitive.De
   return (
     <AlertDialogPrimitive.Description
       className={cn(
-        "wrap-anywhere max-h-[min(24rem,60dvh)] min-h-0 overflow-y-auto overscroll-contain text-muted-foreground text-sm select-text",
+        "wrap-anywhere max-h-[min(24rem,60dvh)] min-h-0 overflow-y-auto overscroll-contain text-body text-muted-foreground select-text",
         className,
       )}
       data-slot="alert-dialog-description"
@@ -140,5 +148,6 @@ export {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogClose,
+  DialogAction as AlertDialogAction,
   AlertDialogViewport,
 };

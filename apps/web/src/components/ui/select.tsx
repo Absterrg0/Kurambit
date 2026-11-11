@@ -7,11 +7,13 @@ import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import type * as React from "react";
 
 import { cn } from "~/lib/utils";
+import { POPUP_COLLISION_PADDING } from "./closing-positioner";
+import { MENU_ROW_TEXT_CLASS } from "./menu-row-text";
 
 const Select = SelectPrimitive.Root;
 
 const selectTriggerVariants = cva(
-  "relative inline-flex cursor-pointer select-none items-center justify-between gap-2 border rounded-lg text-left text-base outline-none transition-[color,box-shadow,background-color] data-disabled:pointer-events-none data-disabled:opacity-64 sm:text-sm [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4",
+  "relative inline-flex cursor-pointer select-none items-center justify-between gap-2 border rounded-lg text-left text-label outline-none transition-[color,box-shadow,background-color] data-disabled:pointer-events-none data-disabled:opacity-64 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4",
   {
     defaultVariants: {
       size: "default",
@@ -20,17 +22,18 @@ const selectTriggerVariants = cva(
     variants: {
       variant: {
         default:
-          "w-full min-w-36 border-input bg-background not-dark:bg-clip-padding text-foreground shadow-xs/5 ring-ring/24 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] not-data-disabled:not-focus-visible:not-aria-invalid:not-data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-inset aria-invalid:border-destructive/36 focus-visible:aria-invalid:border-destructive/64 focus-visible:aria-invalid:ring-destructive/16 dark:bg-input/32 dark:aria-invalid:ring-destructive/24 dark:not-data-disabled:not-focus-visible:not-aria-invalid:not-data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)] [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='text-'])]:text-icon-muted [[data-disabled],:focus-visible,[aria-invalid],[data-pressed]]:shadow-none",
+          // The raised recipe; open and focused trade the rim for the ring stroke.
+          "w-full min-w-36 surface-raised text-foreground pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 [:hover,[data-pressed]]:not-data-popup-open:surface-raised-hover focus-visible:not-data-disabled:surface-focus data-popup-open:not-data-disabled:surface-focus aria-invalid:not-data-disabled:surface-invalid focus-visible:aria-invalid:not-data-disabled:surface-invalid-focus [&_svg:not([class*='text-'])]:text-icon-muted",
         ghost:
-          "border-transparent text-secondary-label focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-foreground",
+          "border-transparent text-secondary-label focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring [:hover,[data-pressed],[data-popup-open]]:surface-ghost-hover [:hover,[data-pressed],[data-popup-open]]:text-foreground",
       },
       size: {
         compact:
-          "h-7 gap-1 rounded-md px-[calc(--spacing(2)-1px)] text-xs before:rounded-[calc(var(--radius-md)-1px)] [&_svg:not([class*='size-'])]:size-3.5",
+          "h-7 gap-1 rounded-md px-[calc(--spacing(2)-1px)] text-meta [&_svg:not([class*='size-'])]:size-3.5",
         default: "min-h-9 px-[calc(--spacing(3)-1px)] sm:min-h-8",
         lg: "min-h-10 px-[calc(--spacing(3)-1px)] sm:min-h-9",
         sm: "min-h-8 gap-1.5 px-[calc(--spacing(2.5)-1px)] sm:min-h-7",
-        xs: "h-7 gap-1 rounded-md px-[calc(--spacing(2)-1px)] text-sm before:rounded-[calc(var(--radius-md)-1px)] sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5",
+        xs: "h-7 gap-1 rounded-md px-[calc(--spacing(2)-1px)] text-meta sm:h-6 [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5",
       },
     },
   },
@@ -124,12 +127,13 @@ function SelectPopup({
         alignOffset={alignOffset}
         anchor={anchor}
         className="z-[130] select-none"
+        collisionPadding={POPUP_COLLISION_PADDING}
         data-slot="select-positioner"
         side={side}
         sideOffset={sideOffset}
       >
         <SelectPrimitive.Popup
-          className="origin-(--transform-origin) rounded-lg text-foreground outline-none"
+          className="kbd-in-popover origin-(--transform-origin) rounded-lg text-foreground outline-none"
           data-slot="select-popup"
           {...props}
         >
@@ -141,12 +145,15 @@ function SelectPopup({
           </SelectPrimitive.ScrollUpArrow>
           <div
             className={cn(
-              "dropdown-glass relative h-full rounded-lg shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]",
+              "surface-popover relative h-full rounded-lg",
               matchTriggerWidth && "min-w-(--anchor-width)",
             )}
           >
             <SelectPrimitive.List
-              className={cn("max-h-(--available-height) overflow-y-auto p-1", className)}
+              className={cn(
+                "max-h-(--available-height) overflow-y-auto p-1 [--popup-item-radius:calc(var(--radius-lg)-5px)]",
+                className,
+              )}
               data-slot="select-list"
             >
               {children}
@@ -175,7 +182,7 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none data-selected:bg-foreground/[0.08] data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        `flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-[var(--popup-item-radius,7px)] px-2 py-1 ${MENU_ROW_TEXT_CLASS} text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:surface-selected-soft data-highlighted:text-strong-foreground data-selected:surface-selected-soft data-selected:text-strong-foreground data-disabled:opacity-45 sm:min-h-7 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0`,
         className,
       )}
       data-slot="select-item"
@@ -198,7 +205,7 @@ function SelectGroup(props: SelectPrimitive.Group.Props) {
 function SelectGroupLabel(props: SelectPrimitive.GroupLabel.Props) {
   return (
     <SelectPrimitive.GroupLabel
-      className="px-2 py-1.5 font-medium text-muted-foreground text-xs"
+      className="px-2 py-1.5 text-meta text-muted-foreground"
       data-slot="select-group-label"
       {...props}
     />
