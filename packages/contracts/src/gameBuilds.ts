@@ -859,7 +859,7 @@ export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView
  * smoothly, does it keep moving, and is the picture not one colour. Every
  * other fact is a further measurement.
  */
-export const GAME_LEAD_FACTS = [
+const GAME_LEAD_FACTS = [
   "boots",
   "idle",
   "skilled",

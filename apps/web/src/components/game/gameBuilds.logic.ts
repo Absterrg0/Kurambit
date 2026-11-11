@@ -43,12 +43,6 @@ export const buildCaption = (build: Pick<GameBuild, "source" | "summary" | "numb
     : `${move.charAt(0).toUpperCase()}${move.slice(1)}`;
 };
 
-/** Where a build came from: its name and the chat that made it, or a saved build's label. */
-export const buildSourceLabel = (build: Pick<GameBuild, "id" | "source" | "number">): string =>
-  build.source._tag === "turn"
-    ? `${buildName(build)} · ${build.source.threadTitle}`
-    : build.source.label;
-
 /** Today's builds by time; older ones by day and time. */
 export const formatBuildTime = (at: string, now: Date = new Date()): string => {
   const date = new Date(at);

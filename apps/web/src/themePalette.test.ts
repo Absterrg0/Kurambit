@@ -166,13 +166,13 @@ describe("theme files", () => {
 
   it("keeps stock dark controls in the near-black surface hierarchy", () => {
     expectThemeColors(getStandardThemeColors("dark"), {
-      canvas: "#121211",
-      surface: "#181817",
-      surfaceRaised: "#1b1b1a",
-      surfaceOverlay: "#1d1d1b",
-      toolbarControl: "#1a1a19",
-      secondary: "#1c1c1b",
-      muted: "#1c1c1b",
+      canvas: "#0f0f0e",
+      surface: "#141413",
+      surfaceRaised: "#191918",
+      surfaceOverlay: "#191918",
+      toolbarControl: "#191918",
+      secondary: "#191918",
+      muted: "#191918",
       accentSurface: "#222220",
     });
   });
@@ -180,15 +180,15 @@ describe("theme files", () => {
   it("keeps the stock sidebar and chat on distinct surfaces in both appearances", () => {
     expectThemeColors(getStandardThemeColors("light"), {
       canvas: "#fdfcfa",
-      sidebar: "#f2f0eb",
-      sidebarRowActive: "#ffffff",
+      sidebar: "#e9e7e2",
+      sidebarRowActive: "#fdfcfa",
       messageSurface: "#f1efea",
     });
     expectThemeColors(getStandardThemeColors("dark"), {
-      canvas: "#121211",
-      sidebar: "#0b0b0a",
-      sidebarRowActive: "#1f1f1d",
-      messageSurface: "#1f1f1d",
+      canvas: "#0f0f0e",
+      sidebar: "#000000",
+      sidebarRowActive: "#191918",
+      messageSurface: "#191918",
     });
   });
 
@@ -292,7 +292,7 @@ describe("theme files", () => {
       colors: {
         canvas: canonical("#07152f"),
         accent: canonical("#67c2ff"),
-        placeholder: canonical("#6f6c66"),
+        placeholder: canonical("#5d5a55"),
       },
     });
   });

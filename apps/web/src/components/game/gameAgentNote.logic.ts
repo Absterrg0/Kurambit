@@ -21,7 +21,7 @@ const plain = (text: string) =>
     .trim();
 
 /** The first sentences that fit two lines, at most `max` characters. */
-export const leadSentences = (text: string, max = 220): string => {
+const leadSentences = (text: string, max = 220): string => {
   const words = plain(text);
   // A sentence ends at . ! or ? before a capital, so "0.8" and "e.g. this" stay whole.
   const sentences = words.split(/(?<=[.!?])\s+(?=["'“(]?[A-Z])/);
