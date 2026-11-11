@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import { ExternalLinkIcon, LayersIcon, SparklesIcon, WalletIcon } from "lucide-react";
+import { ExternalLinkIcon, LayersIcon, PaletteIcon, WalletIcon } from "lucide-react";
 import {
   GAME_ART_PROVIDERS,
   type EnvironmentId,
@@ -101,7 +101,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
         return (
           <SettingsRow
             key={provider}
-            icon={<SparklesIcon />}
+            icon={<PaletteIcon />}
             title={info.label}
             description={
               keySetting === null

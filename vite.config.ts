@@ -237,6 +237,15 @@ export default defineConfig({
         rules: { "kurambit/no-outset-state-indicators": "error" },
       },
       {
+        files: ["apps/web/src/**", "apps/desktop/src/**"],
+        // The two game files are exempt until the game-screen pass replaces their sparkles.
+        excludeFiles: [
+          "apps/web/src/components/game/GameGenerationCard.tsx",
+          "apps/web/src/components/game/GameStage.tsx",
+        ],
+        rules: { "kurambit/no-sparkles-icon": "error" },
+      },
+      {
         files: ["apps/web/src/**"],
         rules: { "shadcn/no-raw-colors": "error" },
       },

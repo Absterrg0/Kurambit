@@ -78,7 +78,6 @@ import {
   MonitorIcon,
   MoonIcon,
   PackageIcon,
-  SparklesIcon,
   PlayIcon,
   Redo2Icon,
   PanelRightIcon,
@@ -87,6 +86,7 @@ import {
   Undo2Icon,
   WrenchIcon,
   PaletteIcon,
+  ImagesIcon,
   RotateCcwIcon,
   SettingsIcon,
   SkipForwardIcon,
@@ -1777,7 +1777,7 @@ function OpenCommandPaletteDialog(props: {
       value: "action:game-generated-art",
       title: "Generated art…",
       searchTerms: ["generated", "art", "assets", "images", "candidates", "pick", "cost", "game"],
-      icon: <SparklesIcon className={ITEM_ICON_CLASS} />,
+      icon: <ImagesIcon className={ITEM_ICON_CLASS} />,
       run: requestStage({ kind: "generated-art" }),
     });
   }
@@ -1806,7 +1806,7 @@ function OpenCommandPaletteDialog(props: {
     value: "action:game-tools",
     title: "Game tools",
     searchTerms: ["game tools", "blender godot unity install download executable paths"],
-    icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+    icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings/general", hash: "game-tools" });
     },
@@ -1818,7 +1818,7 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: [
       "art providers generated keys codex openai gemini tripo meshy elevenlabs daily limit",
     ],
-    icon: <SparklesIcon className={ITEM_ICON_CLASS} />,
+    icon: <PaletteIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings/general", hash: "art-providers" });
     },
