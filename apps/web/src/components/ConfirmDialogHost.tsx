@@ -9,6 +9,7 @@ import {
 } from "../confirmDialog";
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogClose,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -86,9 +87,15 @@ export function ConfirmDialogHost() {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button variant={confirmVariant} onClick={onConfirm}>
-            Confirm
-          </Button>
+          {/* A plain confirmation opens on Confirm so Enter takes it; a destructive one
+              leaves focus off its button, so Enter cannot delete by accident. */}
+          {confirmVariant === "destructive" ? (
+            <Button variant="destructive" onClick={onConfirm}>
+              Confirm
+            </Button>
+          ) : (
+            <AlertDialogAction onClick={onConfirm}>Confirm</AlertDialogAction>
+          )}
         </AlertDialogFooter>
       </AlertDialogPopup>
     </AlertDialog>
