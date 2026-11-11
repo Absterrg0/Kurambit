@@ -163,6 +163,12 @@ describe("the keep-going banner", () => {
     expect(keepGoingBannerView(NEVER_RAN, MAIN_CHAT, clock)).toBeNull();
   });
 
+  it("says nothing once the person turned it off", () => {
+    expect(
+      keepGoingBannerView({ ...PAUSED_STALLED, ending: "stopped" }, MAIN_CHAT, clock),
+    ).toBeNull();
+  });
+
   it("hides the Next banner on Autopilot and while a proposal is pending", () => {
     expect(keepGoingHidesNext(AUTOPILOT_TURN, MAIN_CHAT)).toBe(true);
     expect(keepGoingHidesNext(GUIDED_PROPOSED, MAIN_CHAT)).toBe(true);
@@ -174,7 +180,7 @@ describe("the keep-going banner", () => {
 
 describe("a step's strip line", () => {
   const line = (verdict: Parameters<typeof stepLine>[0]["verdict"], reason = "") =>
-    stepLine({ n: 3, verdict, reason });
+    stepLine({ n: 3, verdict, reason, move: "" });
   it("words every verdict", () => {
     expect(line(null)).toBe("Step 3 · measuring before keeping it");
     expect(line("kept", "no fact got worse")).toBe("Step 3 · kept: no fact got worse");

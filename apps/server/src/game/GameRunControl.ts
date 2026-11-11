@@ -42,6 +42,7 @@ import { botSetupView } from "./run/botSetup.ts";
 import { NO_TURN_LOOP_SENTENCE, keepGoingStatus } from "./run/runView.ts";
 import {
   RESUMABLE,
+  headline,
   isStepRecord,
   stepNumber,
   undoReason,
@@ -80,6 +81,8 @@ export interface GameRunStepMark {
   readonly n: number;
   readonly verdict: GameStepVerdict | null;
   readonly reason: string;
+  /** What the step set out to change, in one line; empty when unknown. */
+  readonly move: string;
 }
 
 type Service = {
@@ -475,6 +478,7 @@ const make = Effect.gen(function* () {
             n: round.round,
             verdict: round.step.verdict,
             reason: round.step.reason,
+            move: round.move,
           });
       // A judge or undo still held: the run is at work on it, or was stopped or
       // paused with it, so its turn's build stays the step's (never a person's
@@ -490,6 +494,7 @@ const make = Effect.gen(function* () {
         !marks.has(read.turnRun)
       ) {
         const undoing = read.inFlight?.step.kind === "undo";
+        const move = read.turn === null ? "" : headline(read.turn.proposal);
         marks.set(
           read.turnRun,
           run.status !== "ended"
@@ -499,13 +504,15 @@ const make = Effect.gen(function* () {
                 reason: undoing
                   ? `undoing it: ${read.undoing ?? "it made a fact worse"}`
                   : "measuring before keeping it",
+                move,
               }
             : run.ending === "stopped"
-              ? { n: read.n, verdict: "stopped", reason: "" }
+              ? { n: read.n, verdict: "stopped", reason: "", move }
               : {
                   n: read.n,
                   verdict: null,
                   reason: `keep going paused before ${undoing ? "undoing" : "judging"} it`,
+                  move,
                 },
         );
       }

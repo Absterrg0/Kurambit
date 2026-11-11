@@ -4,6 +4,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   CheckIcon,
+  ChevronRightIcon,
   CircleIcon,
   ClockIcon,
   ColumnsIcon,
@@ -20,10 +21,12 @@ import {
   GAME_ENGINES,
   GAME_STYLE_FILE,
   GameStyle,
+  gameChecksView,
   gameFactsView,
   type GameBuild,
   type GameBuildFacts,
   type GameBuildsResult,
+  type GameCheck,
   type GameFactView,
   type GameThing,
   type GameThingValue,
@@ -276,10 +279,10 @@ function BuildDetail({
     source._tag === "saved"
       ? null
       : step !== null
-        ? { title: "Why", text: buildCaption(build) }
+        ? { title: "Why", text: buildCaption(build), verdict: stepVerdictText(step) }
         : source.request.trim() === ""
           ? null
-          : { title: "You asked", text: source.request };
+          : { title: "You asked", text: source.request, verdict: null };
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
   return (
     <div className="flex flex-col gap-5 p-4">
@@ -296,9 +299,6 @@ function BuildDetail({
           </Text>
           <Text variant="meta" tone="muted" truncate>
             {formatBuildTime(build.at)}
-            {step === null
-              ? ""
-              : ` · ${step.verdict === null ? step.reason : stepVerdictText(step)}`}
             {onStage ? " · on the Stage" : ""}
           </Text>
         </div>
@@ -311,6 +311,11 @@ function BuildDetail({
           >
             {asked.text}
           </Text>
+          {asked.verdict === null ? null : (
+            <Text variant="meta" tone="muted" render={<p />}>
+              {asked.verdict.charAt(0).toUpperCase() + asked.verdict.slice(1)}
+            </Text>
+          )}
         </Section>
       )}
       <Section
@@ -370,154 +375,217 @@ function BuildDetail({
 const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextIcon } as const;
 
 /**
- * One row per check, in plain words. Checks not measured for the same reason
- * fold into one notice, so a missing tool is said once with its fix.
+ * The lead checks as plain sentences under one count, then every other
+ * measurement folded away. Facts not measured for the same reason are said
+ * once, with the reason, so a missing tool is named once with its fix.
  */
 function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameBuildFacts }) {
   const characters = useCharacterRoute(threadRef).route;
-  const views = gameFactsView(facts);
-  const shown = views.filter((view) => view.reading._tag === "measured");
-  const pending = views.filter((view) => view.reading._tag === "pending").length;
-  const folded = new Map<string, Array<GameFactView>>();
-  for (const view of views)
-    if (view.reading._tag === "not-measured")
-      folded.set(view.reading.why, [...(folded.get(view.reading.why) ?? []), view]);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const view = gameChecksView(facts);
+  const measured = view.checks.filter((check) => check.reading._tag === "measured");
+  const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
+  const moreMeasured = view.more.filter((more) => more.reading._tag === "measured");
+  const busy = facts.state === "measuring" || facts.state === "queued";
+  const detailOf = (fact: GameFactView): ReadonlyArray<string> =>
+    fact.id === "assets" && facts.assets.status === "measured"
+      ? [
+          ...assetLines(facts.assets.value),
+          ...(characters === null
+            ? []
+            : [
+                `This game makes characters with ${characterRouteLabel(characters)}; change it in the ⋯ menu above the game.`,
+              ]),
+        ]
+      : fact.id === "use" && facts.use.status === "measured"
+        ? assetUseLines(facts.use.value)
+        : [];
   return (
     <div className="flex flex-col gap-2">
-      {facts.message ? (
-        <Text variant="meta" tone="muted" render={<p />}>
-          {facts.message}
-        </Text>
-      ) : null}
-      {shown.length > 0 ? (
+      <Text variant="meta" tone="muted" render={<p />}>
+        {[
+          // Before any reading lands, "0 pass" would read as a verdict.
+          ...(view.pass > 0 || view.toLook > 0 || !busy ? [`${view.pass} pass`] : []),
+          ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
+          ...(busy && facts.message.trim() !== "" ? [facts.message.replace(/\.$/, "")] : []),
+        ].join(" · ")}
+      </Text>
+      {measured.length > 0 ? (
         <Rows>
-          {shown.map((view) => (
+          {measured.map((check) => (
             <CheckRow
-              key={view.id}
+              key={check.id}
               threadRef={threadRef}
-              view={view}
-              detail={
-                view.id === "assets" && facts.assets.status === "measured"
-                  ? [
-                      ...assetLines(facts.assets.value),
-                      ...(characters === null
-                        ? []
-                        : [
-                            `This game makes characters with ${characterRouteLabel(characters)}; change it in the ⋯ menu above the game.`,
-                          ]),
-                    ]
-                  : view.id === "use" && facts.use.status === "measured"
-                    ? assetUseLines(facts.use.value)
-                    : []
-              }
+              fact={check}
+              text={check.sentence}
+              value={check.value}
+              detail={[]}
             />
           ))}
         </Rows>
       ) : null}
-      {pending > 0 ? (
-        <div className="flex items-center gap-2.5 rounded-lg bg-card px-3 py-2">
-          <ClockIcon className="size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
-          <Text variant="meta" tone="muted">
-            {pending === 1 ? "1 check" : `${pending} checks`} still to measure
-          </Text>
-        </div>
-      ) : null}
-      {[...folded].map(([why, rows]) => (
-        <div
-          key={why}
-          className="flex items-start gap-2.5 rounded-lg bg-warning-surface px-3 py-2.5"
-        >
-          <MinusIcon className="mt-0.5 size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
-          <div className="flex min-w-0 flex-col gap-0.5">
+      {pending > 0 ? <PendingRow count={pending} /> : null}
+      <NotMeasured facts={view.checks} />
+      {view.more.length > 0 ? (
+        <Rows>
+          <button
+            type="button"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen(!moreOpen)}
+            className="flex items-center gap-2.5 px-3 py-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
+          >
+            <ChevronRightIcon
+              className={cn(
+                "size-4 shrink-0 text-muted-foreground transition-transform",
+                moreOpen && "rotate-90",
+              )}
+              aria-hidden="true"
+            />
             <Text variant="meta" tone="default">
-              {rows.length === 1
-                ? `${rows[0]?.label ?? "A check"} not measured`
-                : `${rows.length} checks not measured: ${rows.map((row) => row.label).join(", ")}`}
+              More measurements ({view.more.length})
             </Text>
-            <Text variant="meta" tone="muted" render={<p className="break-words" />}>
-              {why.charAt(0).toUpperCase() + why.slice(1)}
+          </button>
+          {moreOpen
+            ? moreMeasured.map((fact) => (
+                <CheckRow
+                  key={fact.id}
+                  threadRef={threadRef}
+                  fact={fact}
+                  text={factLine(fact).text}
+                  value={null}
+                  detail={detailOf(fact)}
+                />
+              ))
+            : null}
+        </Rows>
+      ) : null}
+      {moreOpen ? (
+        <>
+          {view.more.some((fact) => fact.reading._tag === "pending") ? (
+            <PendingRow
+              count={view.more.filter((fact) => fact.reading._tag === "pending").length}
+            />
+          ) : null}
+          <NotMeasured facts={view.more} />
+          {facts.renderer ? (
+            <Text variant="caption" tone="dim" render={<p />}>
+              Played with {facts.renderer}.
             </Text>
-          </div>
-        </div>
-      ))}
-      {facts.renderer ? (
-        <Text variant="caption" tone="dim" render={<p />}>
-          Played with {facts.renderer}.
-        </Text>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
 }
 
+function PendingRow({ count }: { count: number }) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg bg-card px-3 py-2">
+      <ClockIcon className="size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
+      <Text variant="meta" tone="muted">
+        {count === 1 ? "1 check" : `${count} checks`} still to measure
+      </Text>
+    </div>
+  );
+}
+
+/** Facts not measured, one notice per reason. */
+function NotMeasured({ facts }: { facts: ReadonlyArray<GameFactView | GameCheck> }) {
+  const folded = new Map<string, Array<string>>();
+  for (const fact of facts)
+    if (fact.reading._tag === "not-measured")
+      folded.set(fact.reading.why, [
+        ...(folded.get(fact.reading.why) ?? []),
+        "sentence" in fact ? fact.sentence : fact.label,
+      ]);
+  return [...folded].map(([why, names]) => (
+    <div key={why} className="flex items-start gap-2.5 rounded-lg bg-warning-surface px-3 py-2.5">
+      <MinusIcon className="mt-0.5 size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <Text variant="meta" tone="default">
+          Not measured: {names.join(", ")}
+        </Text>
+        <Text variant="meta" tone="muted" render={<p className="break-words" />}>
+          {why.charAt(0).toUpperCase() + why.slice(1)}
+        </Text>
+      </div>
+    </div>
+  ));
+}
+
 function CheckRow({
   threadRef,
-  view,
+  fact,
+  text,
+  value,
   detail,
 }: {
   threadRef: ScopedThreadRef;
-  view: GameFactView;
+  fact: GameFactView;
+  text: string;
+  value: string | null;
   detail: ReadonlyArray<string>;
 }) {
-  const line = factLine(view);
-  const Icon =
-    view.reading._tag === "pending"
-      ? ClockIcon
-      : line.tone === "good"
-        ? CheckIcon
-        : line.tone === "bad"
-          ? TriangleAlertIcon
-          : CircleIcon;
+  const tone = fact.reading._tag === "measured" ? fact.reading.tone : null;
+  const Icon = tone === "good" ? CheckIcon : tone === "bad" ? TriangleAlertIcon : CircleIcon;
   return (
     <div className="flex flex-col gap-1 px-3 py-2">
       <div className="flex items-center gap-2.5">
-        <Icon
-          className={cn(
-            "size-4 shrink-0",
-            line.tone === "good"
-              ? "text-success"
-              : line.tone === "bad"
-                ? "text-warning"
-                : "text-dim-foreground",
-            line.tone === "neutral" && "size-2.5",
-          )}
-          aria-hidden="true"
-        />
-        <Text variant="meta" tone={line.tone === null ? "muted" : "default"} truncate>
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          <Icon
+            className={cn(
+              tone === "good"
+                ? "size-4 text-success"
+                : tone === "bad"
+                  ? "size-4 text-warning"
+                  : "size-2.5 text-dim-foreground",
+            )}
+            aria-hidden="true"
+          />
+        </span>
+        <Text variant="meta" tone="default" render={<span className="min-w-0 flex-1" />}>
           <Tooltip>
-            <TooltipTrigger render={<span />}>{line.text}</TooltipTrigger>
+            <TooltipTrigger render={<span />}>{text}</TooltipTrigger>
             <TooltipPopup side="left" className="max-w-sm">
-              {line.label}: {line.text}
+              {fact.label}: {fact.reading._tag === "measured" ? fact.reading.text : text}
             </TooltipPopup>
           </Tooltip>
         </Text>
-        <span className="ml-auto flex shrink-0 items-center">
-          {view.evidence.map((item) => {
-            const EvidenceIcon = EVIDENCE_ICON[item.kind];
-            return (
-              <Tooltip key={item.path}>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={item.label}
-                      onClick={() => useRightPanelStore.getState().openFile(threadRef, item.path)}
-                    />
-                  }
-                >
-                  <EvidenceIcon aria-hidden="true" />
-                </TooltipTrigger>
-                <TooltipPopup side="top">{item.label}</TooltipPopup>
-              </Tooltip>
-            );
-          })}
-        </span>
+        {value === null ? null : (
+          <Text variant="caption" tone="muted" numeric>
+            {value}
+          </Text>
+        )}
+        {fact.evidence.length > 0 ? (
+          <span className="flex shrink-0 items-center">
+            {fact.evidence.map((item) => {
+              const EvidenceIcon = EVIDENCE_ICON[item.kind];
+              return (
+                <Tooltip key={item.path}>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label={item.label}
+                        onClick={() => useRightPanelStore.getState().openFile(threadRef, item.path)}
+                      />
+                    }
+                  >
+                    <EvidenceIcon aria-hidden="true" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">{item.label}</TooltipPopup>
+                </Tooltip>
+              );
+            })}
+          </span>
+        ) : null}
       </div>
       {detail.length > 0 ? (
         <ul className="flex flex-col gap-0.5 ps-6.5">
-          {detail.map((text) => (
-            <Text key={text} variant="caption" tone="muted" render={<li className="break-words" />}>
-              {text}
+          {detail.map((line) => (
+            <Text key={line} variant="caption" tone="muted" render={<li className="break-words" />}>
+              {line}
             </Text>
           ))}
         </ul>

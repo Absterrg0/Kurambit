@@ -5062,7 +5062,13 @@ export default function ChatView(props: ChatViewProps) {
         })
       : null;
   const composerBannerItems = (() => {
-    const gameRunItems = [keepGoingBanner.item, gameNextBanner].filter((item) => item !== null);
+    // Under a game's Stage one row at most: a question or approval (the composer's
+    // own panel) first, then keep going's status, then the Next suggestion.
+    const gameRunItem =
+      activePendingApproval !== null || activePendingUserInput !== null
+        ? null
+        : (keepGoingBanner.item ?? gameNextBanner);
+    const gameRunItems = gameRunItem === null ? [] : [gameRunItem];
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [
       childInputBannerItem,
@@ -7929,7 +7935,8 @@ export default function ChatView(props: ChatViewProps) {
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
           {gameLayout ? (
-            <div className="flex h-full min-w-0 flex-1 items-center pr-24">
+            // Room for the panel control; under window controls the header's own inset covers those.
+            <div className="flex h-full min-w-0 flex-1 items-center pr-24 wco:pr-10">
               <GameInspectorTabs threadRef={activeThreadRef} />
             </div>
           ) : (

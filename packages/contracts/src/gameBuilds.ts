@@ -73,6 +73,8 @@ export const GameBuildSource = Schema.Union([
         verdict: Schema.NullOr(GameStepVerdict),
         /** One plain line: "no fact got worse", "Random input now crashes at 12 s". */
         reason: Schema.String,
+        /** What the step set out to change, in one line ("Make the moth flash before it dives"); empty when unknown. */
+        move: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
       }),
     ),
   }),
@@ -850,6 +852,160 @@ export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView
       evidence: read._tag === "measured" ? evidenceOf(facts, id) : [],
     };
   });
+
+/**
+ * The facts a person reads first, in order: does it start, can it be lost
+ * with no input, can it be won and does that take skill, does it run
+ * smoothly, does it keep moving, and is the picture not one colour. Every
+ * other fact is a further measurement.
+ */
+export const GAME_LEAD_FACTS = [
+  "boots",
+  "idle",
+  "skilled",
+  "winnable-without-skill",
+  "performance",
+  "freeze",
+  "colour",
+] as const satisfies ReadonlyArray<GameFactId>;
+
+/** A lead fact as a check: one plain sentence, its value apart for the right edge. */
+export interface GameCheck extends GameFactView {
+  readonly sentence: string;
+  /** The reading's number or time ("at 4.4 s", "60 fps"); null when the sentence says it all. */
+  readonly value: string | null;
+}
+
+export interface GameChecksView {
+  readonly checks: ReadonlyArray<GameCheck>;
+  /** Every other fact, as the facts view words it. */
+  readonly more: ReadonlyArray<GameFactView>;
+  /** Measured facts reading good and bad, over every fact: the build card's two counts. */
+  readonly pass: number;
+  readonly toLook: number;
+}
+
+const CHECK_LABELS: Readonly<Record<(typeof GAME_LEAD_FACTS)[number], string>> = {
+  boots: "Starts",
+  idle: "Can be lost with no input",
+  skilled: "Can be won by the play bot",
+  "winnable-without-skill": "Needs skill to win",
+  performance: "Runs smoothly",
+  freeze: "Keeps moving",
+  colour: "No one colour fills the screen",
+};
+
+const atTime = (tier: BotTier) => (tier.at === null ? null : `at ${seconds(tier.at)}`);
+
+/** A bot tier's ending as a check: who played and what it came to. */
+const tierCheck = (
+  who: "with no input" | "by the play bot",
+  tier: BotTier,
+): { sentence: string; value: string | null } => {
+  switch (tier.ending) {
+    case "won":
+      return who === "with no input"
+        ? { sentence: "Wins itself with no input", value: atTime(tier) }
+        : { sentence: "Can be won by the play bot", value: atTime(tier) };
+    case "lost":
+      return who === "with no input"
+        ? { sentence: "Can be lost with no input", value: atTime(tier) }
+        : { sentence: "The play bot loses", value: atTime(tier) };
+    case "no-ending":
+      return {
+        sentence:
+          who === "with no input" ? "Not lost with no input" : "The play bot finds no ending",
+        value: `in ${seconds(tier.played)}`,
+      };
+    case "crashed":
+      return { sentence: `Crashes when played ${who}`, value: atTime(tier) };
+    case "unresponsive":
+      return { sentence: `Stops answering when played ${who}`, value: atTime(tier) };
+    case "did-not-boot":
+      return { sentence: "Does not start", value: null };
+  }
+};
+
+const checkWords = (
+  facts: GameBuildFacts,
+  id: (typeof GAME_LEAD_FACTS)[number],
+): { sentence: string; value: string | null } | null => {
+  switch (id) {
+    case "boots":
+      return facts.boots.status !== "measured"
+        ? null
+        : facts.boots.value.ok
+          ? { sentence: "Starts without errors", value: null }
+          : { sentence: `Does not start: ${facts.boots.value.detail}`, value: null };
+    case "idle":
+      return facts.idle.status === "measured" ? tierCheck("with no input", facts.idle.value) : null;
+    case "skilled":
+      return facts.skilled.status === "measured"
+        ? tierCheck("by the play bot", facts.skilled.value)
+        : null;
+    case "winnable-without-skill":
+      return facts.winnableWithoutSkill.status !== "measured"
+        ? null
+        : facts.winnableWithoutSkill.value
+          ? { sentence: "Can be won without skill", value: null }
+          : { sentence: "Needs skill to win", value: null };
+    case "performance": {
+      if (facts.performance.status !== "measured") return null;
+      const perf = facts.performance.value;
+      const fps = `${Math.round(perf.fps)} fps`;
+      return perf.fps >= 55 && perf.low1 >= 30
+        ? { sentence: "Runs smoothly", value: fps }
+        : perf.fps < 30
+          ? { sentence: "Runs slowly", value: fps }
+          : { sentence: "Runs, with stutters", value: `${fps} · 1% low ${Math.round(perf.low1)}` };
+    }
+    case "freeze": {
+      if (facts.liveness.status !== "measured") return null;
+      const live = facts.liveness.value;
+      return live.freezes.length === 0
+        ? { sentence: "Keeps moving, no still stretches", value: null }
+        : live.longestFreeze >= 3
+          ? {
+              sentence: "Stands still for a while",
+              value: `longest ${seconds(live.longestFreeze)}`,
+            }
+          : { sentence: "Keeps moving", value: `longest still ${seconds(live.longestFreeze)}` };
+    }
+    case "colour": {
+      if (facts.liveness.status !== "measured") return null;
+      const share = Math.round(facts.liveness.value.dominantColour * 100);
+      return facts.liveness.value.dominantColour > 0.6
+        ? { sentence: "One colour fills the screen", value: `${share}%` }
+        : { sentence: "No one colour fills the screen", value: `largest ${share}%` };
+    }
+  }
+};
+
+/**
+ * PURE. A build's facts as a person reads them: the lead checks in plain
+ * sentences, then the rest as further measurements. The same readings and
+ * tones as `gameFactsView`; only the lead facts' words differ.
+ */
+export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
+  const views = gameFactsView(facts);
+  const lead: ReadonlySet<GameFactId> = new Set(GAME_LEAD_FACTS);
+  const checks = GAME_LEAD_FACTS.flatMap((id) => {
+    const view = views.find((entry) => entry.id === id);
+    if (view === undefined) return [];
+    const words = view.reading._tag === "measured" ? checkWords(facts, id) : null;
+    return [
+      { ...view, sentence: words?.sentence ?? CHECK_LABELS[id], value: words?.value ?? null },
+    ];
+  });
+  const tone = (wanted: GameFactTone) =>
+    views.filter((view) => view.reading._tag === "measured" && view.reading.tone === wanted).length;
+  return {
+    checks,
+    more: views.filter((view) => !lead.has(view.id)),
+    pass: tone("good"),
+    toLook: tone("bad"),
+  };
+};
 
 /** For these numbers lower is better, for these higher; the other numbers are neutral. */
 const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set([

@@ -92,7 +92,12 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
       turn: 3,
       runId: "run:thread:thread-main:ordinal:3",
       request: "Add a chasing enemy",
-      step: { n: 3, verdict: "kept", reason: "no fact got worse" },
+      step: {
+        n: 3,
+        verdict: "kept",
+        reason: "no fact got worse",
+        move: "Make the slime land softer",
+      },
     },
     number: null,
     summary: "Add a chasing enemy",

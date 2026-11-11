@@ -89,6 +89,7 @@ const EVERY_TURN_SECTIONS: Partial<Record<GameStageKind, string>> = {
 - **Keep the game booting between saves.** Every save reloads the person's game. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save. A save that breaks the page shows the person the error.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
+- **Write your last message for the person making the game:** what changed in the game and what they can do now. Name no tools or files.
 - **End every reply with one line,** \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done. The person can send your \`Next:\` with one click, so make it a request they could have typed: one change, in their words, not a plan.
 `,
   // The Stage plays a Web export the turn loop rebuilds when the turn ends.
@@ -97,6 +98,7 @@ ${UNDO_LINE}
 - A turn that changes the game becomes a build. When your turn ends, Kurambit plays it on the person's Stage and measures its facts: whether it boots, an idle, a random and a skilled bot, frozen frames, input response. Ending the turn is how the person sees your work, so keep turns short: one visible improvement, \`game_check\` clean with nothing left in its scene report, then end. Do not export to show it; the build is made for you.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
+- Write your last message for the person making the game: what changed in the game and what they can do now. Name no tools or files.
 - End every reply with one line: \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done.
 `,
 };

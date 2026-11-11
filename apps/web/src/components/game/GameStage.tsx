@@ -56,6 +56,8 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
+import { isElectron } from "../../env";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -820,6 +822,10 @@ function ThreadGameStage({
         <div
           className={cn(
             "flex h-(--workspace-topbar-height) min-w-0 items-center gap-1.5 px-2 pl-4",
+            // The window is dragged by its top bar; its buttons stay clickable.
+            isElectron && "drag-region",
+            // With the sidebar collapsed, its toggle (and macOS's traffic lights) sit over this corner.
+            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             // With the Inspector hidden, the top bar runs under the desktop window controls.
             (compact || inspectorCollapsed) && "wco:pr-(--workspace-native-controls-inset)",
           )}

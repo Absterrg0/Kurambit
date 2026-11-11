@@ -195,7 +195,8 @@ const firstLine = (text: string) =>
     .find((line) => line.length > 0) ?? "";
 
 /** The step's line for records, the strip and the timeline: a note's own words, not its intro. */
-const headline = (proposal: Pick<GameRunProposal, "why" | "text">, max = 140): string =>
+/** A proposal in one line: what its step sets out to change, as the step record's `move` keeps it. */
+export const headline = (proposal: Pick<GameRunProposal, "why" | "text">, max = 140): string =>
   clip(
     firstLine(
       proposal.why === "steer" && proposal.text.startsWith(STEER_INTRO)

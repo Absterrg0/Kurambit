@@ -205,7 +205,8 @@ export const keepGoingBannerView = (
   if (status === null || status.runId === null || status.chat !== threadId) return null;
   const runId = status.runId;
   if (status.mode === "off") {
-    if (status.ending === null) return null;
+    // Turned off by the person: the top bar's Keep going already says so.
+    if (status.ending === null || status.ending === "stopped") return null;
     const id = `keep-going-ended:${runId}:${status.ending}`;
     return status.resumable
       ? { kind: "paused", id, title: status.message, resume: resumeMode(status) }

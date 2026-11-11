@@ -4452,13 +4452,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerSubmissionError !== null ||
     providerInputSubmissionError !== null ||
     hasImageAttachmentAttention;
+  // Under a game's Stage there is no timeline to scroll: the composer rests at
+  // one line until the prompt wraps or something attaches, giving the Stage the room.
   const isComposerResting = shouldUseRestingComposerLayout({
     isExistingThread: routeKind === "server" && activeThreadId !== null,
     isMobileViewport,
-    isScrollCollapsed: isComposerScrollCollapsed,
-    hasExpandedChrome: composerHasExpandedChrome,
+    isScrollCollapsed: gameThread || isComposerScrollCollapsed,
+    hasExpandedChrome:
+      composerHasExpandedChrome ||
+      (gameThread && (composerImages.length > 0 || composerFiles.length > 0)),
     hasMultilinePrompt,
-    timelineOverflows,
+    timelineOverflows: gameThread || timelineOverflows,
   });
   const expandedComposerImages = isComposerResting
     ? standaloneComposerImages.filter((image) => pendingSnapShotIdSet.has(image.id))
