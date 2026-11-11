@@ -28,7 +28,17 @@ import {
  * expects. Rendered by the `_chat` layout rather than by the two leaf routes, since an element
  * only survives a route swap when the same parent renders it.
  */
-export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
+export function ThreadRouteView({
+  target,
+  behindSettings = false,
+}: {
+  target: ThreadRouteTarget;
+  /**
+   * Settings is open over this view. Its route corrections wait until Settings
+   * closes: navigating now would close the panel under the user.
+   */
+  behindSettings?: boolean;
+}) {
   const navigate = useNavigate();
   const draftId = target.kind === "draft" ? target.draftId : null;
   const draftSession = useComposerDraftStore((store) =>
@@ -103,7 +113,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   }, [draftSession?.promotedTo, inferredThreadRef]);
 
   useEffect(() => {
-    if (!canonicalThreadRef) {
+    if (!canonicalThreadRef || behindSettings) {
       return;
     }
     let cancelled = false;
@@ -120,17 +130,17 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     return () => {
       cancelled = true;
     };
-  }, [canonicalThreadRef, navigate]);
+  }, [behindSettings, canonicalThreadRef, navigate]);
 
   useEffect(() => {
-    if (target.kind !== "draft" || draftSession || canonicalThreadRef) {
+    if (target.kind !== "draft" || draftSession || canonicalThreadRef || behindSettings) {
       return;
     }
     void navigate({ to: "/", replace: true });
-  }, [canonicalThreadRef, draftSession, navigate, target.kind]);
+  }, [behindSettings, canonicalThreadRef, draftSession, navigate, target.kind]);
 
   useEffect(() => {
-    if (target.kind !== "server" || !bootstrapComplete) {
+    if (target.kind !== "server" || !bootstrapComplete || behindSettings) {
       return;
     }
     if (renderState === "missing") {
@@ -140,7 +150,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
         void navigate({ to: "/", replace: true });
       }
     }
-  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
+  }, [behindSettings, bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
 
   useEffect(() => {
     if (target.kind !== "server" || !serverThreadStarted || !draftThread) {

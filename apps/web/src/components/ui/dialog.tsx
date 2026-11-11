@@ -6,6 +6,8 @@ import { useId } from "react";
 import { cn } from "~/lib/utils";
 import { Button, type ButtonVariant } from "~/components/ui/button";
 import {
+  DIALOG_APP_PANEL_BACKDROP_CLASS,
+  DIALOG_APP_PANEL_POPUP_CLASS,
   DIALOG_BACKDROP_CLASS,
   DIALOG_MEDIA_BACKDROP_CLASS,
   DIALOG_MEDIA_POPUP_CLASS,
@@ -57,12 +59,16 @@ function DialogBackdrop({
   className,
   variant = "default",
   ...props
-}: DialogPrimitive.Backdrop.Props & { variant?: "default" | "media" }) {
+}: DialogPrimitive.Backdrop.Props & { variant?: "default" | "media" | "panel" }) {
   return (
     <DialogPrimitive.Backdrop
       forceRender
       className={cn(
-        variant === "media" ? DIALOG_MEDIA_BACKDROP_CLASS : DIALOG_BACKDROP_CLASS,
+        variant === "media"
+          ? DIALOG_MEDIA_BACKDROP_CLASS
+          : variant === "panel"
+            ? DIALOG_APP_PANEL_BACKDROP_CLASS
+            : DIALOG_BACKDROP_CLASS,
         className,
       )}
       data-slot="dialog-backdrop"
@@ -90,29 +96,43 @@ function DialogPopup({
   showCloseButton = true,
   bottomStickOnMobile = true,
   variant = "default",
+  viewportProps,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
-  variant?: "default" | "media";
+  variant?: "default" | "media" | "app-panel";
+  viewportProps?: Omit<DialogPrimitive.Viewport.Props, "className">;
 }) {
   const defaultId = useId();
   const popupId = props.id ?? defaultId;
   return (
     <DialogPortal>
       {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
-      <DialogBackdrop className={variant === "media" ? "z-[60]" : undefined} variant={variant} />
+      <DialogBackdrop
+        className={variant === "media" ? "z-[60]" : undefined}
+        variant={variant === "app-panel" ? "panel" : variant}
+      />
       <DialogViewport
+        {...viewportProps}
         className={cn(
           bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
           variant === "media" &&
             "z-[60] grid-rows-1 place-items-center px-4 py-6 [-webkit-app-region:no-drag]",
+          // Clears native window controls (macOS traffic lights, the Windows caption buttons),
+          // which the owner reports as --app-modal-titlebar-height.
+          variant === "app-panel" &&
+            "grid-rows-1 items-center max-sm:p-0 sm:p-6 sm:pt-[max(1.5rem,var(--app-modal-titlebar-height,0px))] lg:p-10",
         )}
       >
         <DialogPrimitive.Popup
           className={cn(
-            variant === "media" ? DIALOG_MEDIA_POPUP_CLASS : DIALOG_POPUP_CLASS,
-            "row-start-2 text-popover-foreground",
+            variant === "media"
+              ? DIALOG_MEDIA_POPUP_CLASS
+              : variant === "app-panel"
+                ? DIALOG_APP_PANEL_POPUP_CLASS
+                : DIALOG_POPUP_CLASS,
+            variant !== "app-panel" && "row-start-2 text-popover-foreground",
             variant === "default" && "max-h-full max-w-lg",
             bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
             className,

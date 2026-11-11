@@ -22,4 +22,4 @@ function SettingsNotFound() {
   );
 }
 
-export const Route = createFileRoute("/settings/$")({ component: SettingsNotFound });
+export const Route = createFileRoute("/_chat/settings/$")({ component: SettingsNotFound });

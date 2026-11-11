@@ -5,11 +5,8 @@ import { Button } from "../components/ui/button";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
-import { SidebarInset } from "../components/ui/sidebar";
-import { useNavigateToMainApp } from "../components/sidebar/mainAppLocation";
-import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
-import { isElectron } from "../env";
-import { useEscapeToGoBack } from "../hooks/useNavigateBack";
+import { SettingsDialog, SettingsDialogClose } from "../components/settings/SettingsDialog";
+import { SettingsSidebarNav } from "../components/settings/SettingsSidebarNav";
 import {
   SettingsScopeProvider,
   useSettingsScope,
@@ -109,8 +106,6 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
 
 function SettingsContentLayout() {
   const location = useLocation();
-  const navigateToMainApp = useNavigateToMainApp();
-  useEscapeToGoBack(navigateToMainApp);
   const { search, environment } = useSettingsScope();
   const contentScopeKey =
     location.pathname === "/settings/diagnostics" || location.pathname === "/settings/providers"
@@ -119,28 +114,30 @@ function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron}>
-          <div className="flex w-full items-center gap-3">
+    <SettingsDialog>
+      <div className="flex min-h-0 flex-1">
+        <SettingsSidebarNav pathname={location.pathname} />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <header className="flex h-13 shrink-0 items-center gap-3 ps-5 pe-3">
             <SettingsBreadcrumb pathname={location.pathname} />
-            {location.pathname === "/settings/general" ? (
-              <div className="ms-auto flex shrink-0 items-center">
+            <div className="ms-auto flex shrink-0 items-center gap-1">
+              {location.pathname === "/settings/general" ? (
                 <RestoreDeviceDefaultsButton
                   onRestored={() => setRestoreSignal((value) => value + 1)}
                 />
-              </div>
-            ) : null}
-          </div>
-        </WorkspacePageHeader>
+              ) : null}
+              <SettingsDialogClose />
+            </div>
+          </header>
 
-        <div key={`${contentScopeKey}:${restoreSignal}`} className="min-h-0 flex flex-1 flex-col">
-          <SettingsScopeBoundary pathname={location.pathname}>
-            <Outlet />
-          </SettingsScopeBoundary>
+          <div key={`${contentScopeKey}:${restoreSignal}`} className="min-h-0 flex flex-1 flex-col">
+            <SettingsScopeBoundary pathname={location.pathname}>
+              <Outlet />
+            </SettingsScopeBoundary>
+          </div>
         </div>
       </div>
-    </SidebarInset>
+    </SettingsDialog>
   );
 }
 
@@ -172,14 +169,11 @@ function SettingsRouteLayout() {
   );
 }
 
-export const Route = createFileRoute("/settings")({
+export const Route = createFileRoute("/_chat/settings")({
   validateSearch: validateSettingsRouteSearch,
   search: { middlewares: [retainSettingsScope] },
-  beforeLoad: async ({ context, location }) => {
-    if (context.authGateState.status !== "authenticated") {
-      throw redirect({ to: "/pair", replace: true });
-    }
-
+  // The `_chat` layout already sends an unpaired client to /pair.
+  beforeLoad: async ({ location }) => {
     if (location.pathname === "/settings") {
       throw redirect({ to: "/settings/general", replace: true });
     }
