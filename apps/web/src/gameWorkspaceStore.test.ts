@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
-  GAME_CHAT_DEFAULT_WIDTH,
+  GAME_INSPECTOR_DEFAULT_WIDTH,
   isGameWorkspaceCompact,
   useGameWorkspaceStore,
 } from "./gameWorkspaceStore";
 
 beforeEach(() => {
   useGameWorkspaceStore.setState({
-    chatWidth: GAME_CHAT_DEFAULT_WIDTH,
-    chatCollapsed: false,
+    inspectorWidth: GAME_INSPECTOR_DEFAULT_WIDTH,
+    inspectorCollapsed: false,
   });
 });
 
@@ -22,20 +22,20 @@ describe("game workspace width", () => {
   });
 
   it("keeps the remembered dock width while the workspace is compact", () => {
-    useGameWorkspaceStore.getState().setChatWidth(700);
-    useGameWorkspaceStore.getState().fitChatWidth(800);
+    useGameWorkspaceStore.getState().setInspectorWidth(700);
+    useGameWorkspaceStore.getState().fitInspectorWidth(800);
 
-    // Fitting a single-pane layout would have rewritten this to 360.
-    expect(useGameWorkspaceStore.getState().chatWidth).toBe(700);
+    // Fitting a single-pane layout would have rewritten this to 352.
+    expect(useGameWorkspaceStore.getState().inspectorWidth).toBe(700);
   });
 
   it("fits the remembered width once both panes can dock again", () => {
-    useGameWorkspaceStore.getState().setChatWidth(700);
-    useGameWorkspaceStore.getState().fitChatWidth(960);
-    expect(useGameWorkspaceStore.getState().chatWidth).toBe(432);
+    useGameWorkspaceStore.getState().setInspectorWidth(700);
+    useGameWorkspaceStore.getState().fitInspectorWidth(960);
+    expect(useGameWorkspaceStore.getState().inspectorWidth).toBe(432);
 
-    useGameWorkspaceStore.getState().setChatWidth(420);
-    useGameWorkspaceStore.getState().fitChatWidth(1000);
-    expect(useGameWorkspaceStore.getState().chatWidth).toBe(420);
+    useGameWorkspaceStore.getState().setInspectorWidth(420);
+    useGameWorkspaceStore.getState().fitInspectorWidth(1000);
+    expect(useGameWorkspaceStore.getState().inspectorWidth).toBe(420);
   });
 });

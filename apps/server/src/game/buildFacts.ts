@@ -372,10 +372,14 @@ export const summaryOf = (facts: Facts): GameBuildFactsSummary => {
     )
     .toSorted((a, b) => TONE_ORDER[a.tone] - TONE_ORDER[b.tone])
     .slice(0, 3);
+  const tone = (wanted: GameFactTone) =>
+    rows.filter((row) => row.reading._tag === "measured" && row.reading.tone === wanted).length;
   return {
     state: facts.state,
     chips,
     notMeasured: rows.filter((row) => row.reading._tag === "not-measured").length,
+    good: tone("good"),
+    bad: tone("bad"),
   };
 };
 

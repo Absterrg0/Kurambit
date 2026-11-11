@@ -129,6 +129,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --thread-details-panel-width: 17.5rem;
   /* The prompt on phones: iOS zooms into any input under 16px on focus. */
   --font-size-prompt-touch: max(var(--font-size-prompt, 1rem), 16px);
+  /* Type role sizes (see @theme inline). Body and label text sit on the 14px
+     base; phones read every role one step larger, and the prompt role stays at
+     16px or more so iOS does not zoom into a focused field. In rem, so the
+     interface font-size preference scales them. */
+  --type-title: 1.5rem;
+  --type-prompt: max(1rem, 16px);
+  --type-label: 0.9375rem;
+  --type-body: 0.9375rem;
+  --type-meta: 0.875rem;
+  --type-caption: 0.75rem;
+  --type-micro: 0.6875rem;
   /* Horizontal gutter shared by the page header and the chat column, clear of
      the device's safe area. */
   --workspace-gutter: 0.75rem;
@@ -137,6 +148,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 
   @variant sm {
     --workspace-gutter: 1.25rem;
+    --type-title: 1.375rem;
+    --type-prompt: 0.875rem;
+    --type-label: 0.875rem;
+    --type-body: 0.875rem;
+    --type-meta: 0.75rem;
+    --type-caption: 0.6875rem;
+    --type-micro: 0.625rem;
   }
 
   @variant dark {
@@ -187,6 +205,31 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --text-4xs--line-height: 1;
   --text-5xs: 0.4375rem;
   --text-5xs--line-height: 1;
+  /* The seven type roles: one size and weight each. Sizes come from the
+     --type-* variables on :root, which step up on phones. Text colour is
+     separate: pick a tier (strong, default, muted, dim). Render them through
+     <Text> in components/ui/text.tsx. */
+  --text-title: var(--type-title);
+  --text-title--line-height: 1.27;
+  --text-title--font-weight: 600;
+  --text-prompt: var(--type-prompt);
+  --text-prompt--line-height: 1.43;
+  --text-prompt--font-weight: 400;
+  --text-label: var(--type-label);
+  --text-label--line-height: 1.38;
+  --text-label--font-weight: 500;
+  --text-body: var(--type-body);
+  --text-body--line-height: 1.45;
+  --text-body--font-weight: 400;
+  --text-meta: var(--type-meta);
+  --text-meta--line-height: 1.33;
+  --text-meta--font-weight: 500;
+  --text-caption: var(--type-caption);
+  --text-caption--line-height: 1.45;
+  --text-caption--font-weight: 500;
+  --text-micro: var(--type-micro);
+  --text-micro--line-height: 1.4;
+  --text-micro--font-weight: 500;
   /* Motion. drawer is the decelerating curve for surfaces that slide or pop in
      (composer context, pills). */
   --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
@@ -218,17 +261,14 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     );
   --color-zinc-25: oklch(99.2% 0 0);
   --color-vermilion: #d4552b;
-  /* The letterbox around a running game: darker than the stage it sits on. */
-  --color-frame: #0b0a08;
   /* Uppercase brand labels: the wordmark and section eyebrows. */
   --tracking-brand: 0.14em;
   --tracking-eyebrow: 0.18em;
   --color-washi: #ece4d6;
   --color-sumi: #13110f;
-  /* The game viewport, like an engine's stage: always dark, in both themes,
-     because a light letterbox around a rendered game looks broken. Kept off
-     pure black so the frame reads as a picture on a surface, not a hole. */
-  --color-stage: #0e0e0d;
+  /* The game viewport, like an engine's stage: always black, in both themes,
+     so a game's letterbox blends into it instead of reading as a frame. */
+  --color-stage: #000000;
   --color-stage-foreground: #ecebe7;
   --color-stage-muted: #a19e97;
   --color-stage-subtle: #6e655a;
@@ -266,6 +306,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --color-accent-foreground: var(--contrast-accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--contrast-muted-foreground);
+  --color-strong-foreground: var(--strong-foreground);
+  --color-dim-foreground: var(--dim-foreground);
   --color-muted: var(--muted);
   --color-placeholder: var(--contrast-placeholder);
   --color-secondary-label: var(--contrast-secondary-label);
@@ -1086,6 +1128,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   animation-duration: 0s !important;
 }
 
+/* Night is the default dark theme: a true-black canvas, neutral panes split by
+   hairlines, four text tiers (strong, foreground, muted, dim), vermilion only
+   for the one primary action and focus, and green, amber and red only for
+   checks. Light is the warm Sumi paper on the same tiers. The palette is
+   mirrored in KURAMBIT_*_THEME_COLORS (packages/shared/src/themePalettes.ts)
+   and the boot script in index.html; change all three together. */
 :root {
   color-scheme: light;
   --radius: 0.75rem;
@@ -1097,19 +1145,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --toolbar-control: var(--popover);
   --toolbar-control-foreground: var(--foreground);
   --toolbar-control-hover: var(--accent);
-  --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --foreground: #1c1b19;
+  --surface-raised: #f2f0ec;
+  --foreground: #2b2926;
+  --strong-foreground: #141312;
+  --dim-foreground: #a29d95;
   --card: #ffffff;
-  --card-foreground: #1c1b19;
+  --card-foreground: #2b2926;
   --popover: #ffffff;
-  --popover-foreground: #1c1b19;
+  --popover-foreground: #2b2926;
   --primary: #d14b1f;
   --primary-foreground: #ffffff;
-  --secondary: #f3f1ed;
-  --secondary-foreground: #1c1b19;
-  --muted: #f3f1ed;
-  --muted-foreground: #6d6962;
-  --placeholder: #9a958c;
+  --secondary: #f2f0ec;
+  --secondary-foreground: #141312;
+  --muted: #f2f0ec;
+  --muted-foreground: #6f6a63;
+  --placeholder: #a29d95;
   --secondary-label: var(--muted-foreground);
   --icon-muted: #86817a;
   --message-surface: #f1efea;
@@ -1117,37 +1167,37 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --message-action: var(--primary);
   --message-action-foreground: var(--primary-foreground);
   --message-action-hover: #b9411a;
-  --accent: #f0eee9;
-  --accent-foreground: #141311;
-  --error: #d2352b;
+  --accent: #ebe8e3;
+  --accent-foreground: #141312;
+  --error: #c0392b;
   --error-foreground: #a3241c;
   --tool-error-icon: var(--error);
   --error-surface: color-mix(in srgb, var(--error) 8%, transparent);
   --destructive: var(--error);
-  --border: #e8e5df;
-  --input: #d9d5cd;
+  --border: rgb(0 0 0 / 8%);
+  --input: rgb(0 0 0 / 14%);
   --ring: var(--primary);
   --destructive-foreground: var(--error-foreground);
-  --info: #3d6f94;
-  --info-foreground: #2c5878;
-  --success: #4f8a4b;
-  --success-foreground: #3a6c37;
-  --warning: #d98b12;
-  --warning-foreground: #94590a;
-  --warning-surface: color-mix(in srgb, var(--warning) 8%, transparent);
+  --info: #4767c9;
+  --info-foreground: #3653ad;
+  --success: #2f8f55;
+  --success-foreground: #23703f;
+  --warning: #a7740f;
+  --warning-foreground: #8a5f0a;
+  --warning-surface: color-mix(in srgb, var(--warning) 9%, transparent);
   --update: var(--primary);
   --update-foreground: #b23e17;
   --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
   /* Keep every sidebar primitive on the same light surface hierarchy, including
      portaled sheets and settings navigation outside the app sidebar. */
-  --sidebar: #f2f0eb;
+  --sidebar: #e9e7e2;
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-control-surface: #ece9e3;
-  --sidebar-row-hover: #e9e6e0;
-  --sidebar-row-active: #ffffff;
-  --sidebar-row-selected: #ffffff;
-  --sidebar-border: #e8e5df;
+  --sidebar-control-surface: #e2dfd9;
+  --sidebar-row-hover: #e0ddd7;
+  --sidebar-row-active: #fdfcfa;
+  --sidebar-row-selected: #fdfcfa;
+  --sidebar-border: rgb(0 0 0 / 8%);
   --sidebar-stage-fade: var(--sidebar);
   --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
   --code-foreground: var(--foreground);
@@ -1158,54 +1208,54 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 
   @variant dark {
     color-scheme: dark;
-    /* Sumi ink: warm near-black surfaces separated by hairline borders rather
-       than grey fills, with vermilion reserved for actions and focus. */
-    --background: #121211;
-    --surface-raised: #1b1b1a;
-    --foreground: #ecebe7;
-    --card: #181817;
-    --card-foreground: #ecebe7;
-    --popover: #1d1d1b;
-    --popover-foreground: #ecebe7;
+    --background: #0f0f0e;
+    --surface-raised: #191918;
+    --foreground: #d8d5cf;
+    --strong-foreground: #f5f3ef;
+    --dim-foreground: #5d5a55;
+    --card: #141413;
+    --card-foreground: #d8d5cf;
+    --popover: #191918;
+    --popover-foreground: #d8d5cf;
     --primary: #e2582a;
     --primary-foreground: #ffffff;
-    --secondary: #1c1c1b;
-    --secondary-foreground: #ecebe7;
-    --muted: #1c1c1b;
-    --muted-foreground: #918e88;
-    --placeholder: #6f6c66;
-    --icon-muted: #7d7a74;
-    --message-surface: #1f1f1d;
+    --secondary: #191918;
+    --secondary-foreground: #f5f3ef;
+    --muted: #191918;
+    --muted-foreground: #8e8a83;
+    --placeholder: #5d5a55;
+    --icon-muted: #77736c;
+    --message-surface: #191918;
     --message-action-hover: #ec6838;
     --accent: #222220;
-    --accent-foreground: #f4f3ef;
-    --error: #f0584c;
-    --error-foreground: #ff7b6e;
+    --accent-foreground: #f5f3ef;
+    --error: #e2574c;
+    --error-foreground: #f07a70;
     --tool-error-icon: #ff9a8f;
     --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
-    --border: #262624;
-    --input: #32312e;
-    --ring: #ef6a3a;
-    --info: #6f9cc0;
-    --info-foreground: #8db5d4;
-    --success: #7fb26f;
-    --success-foreground: #9cc98c;
-    --warning: #e8a23a;
-    --warning-foreground: #f2b85a;
-    --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
-    --update: #ef6a3a;
+    --border: rgb(255 255 255 / 7.5%);
+    --input: rgb(255 255 255 / 12%);
+    --ring: #e2582a;
+    --info: #8aa2f2;
+    --info-foreground: #a5b8f5;
+    --success: #57b97c;
+    --success-foreground: #7cc996;
+    --warning: #d6a03c;
+    --warning-foreground: #e3b45a;
+    --warning-surface: color-mix(in srgb, var(--warning) 14%, transparent);
+    --update: #e2582a;
     --update-foreground: #f4875c;
     --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
-    --sidebar: #0b0b0a;
-    --sidebar-control-surface: #161615;
-    --sidebar-row-hover: #171716;
-    --sidebar-row-active: #1f1f1d;
-    --sidebar-row-selected: #1a1a19;
-    --sidebar-border: #1c1c1b;
+    --sidebar: #000000;
+    --sidebar-control-surface: #0f0f0e;
+    --sidebar-row-hover: #111110;
+    --sidebar-row-active: #191918;
+    --sidebar-row-selected: #141413;
+    --sidebar-border: rgb(255 255 255 / 7.5%);
     --sidebar-stage-fade: var(--sidebar);
-    --terminal-background: #121211;
-    --terminal-cursor: #ef6a3a;
-    --terminal-selection-background: rgb(239 106 58 / 22%);
+    --terminal-background: #0f0f0e;
+    --terminal-cursor: #e2582a;
+    --terminal-selection-background: rgb(226 88 42 / 22%);
   }
 }
 
@@ -1214,36 +1264,36 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
    surfaces. */
 [data-app-sidebar] {
   --background: #fdfcfa;
-  --foreground: #1c1b19;
+  --foreground: #2b2926;
   --card: #ffffff;
-  --card-foreground: #1c1b19;
-  --accent: #f0eee9;
-  --accent-foreground: #141311;
-  --muted: #f3f1ed;
-  --muted-foreground: #6d6962;
-  --border: #e8e5df;
-  --input: #d9d5cd;
-  --sidebar: #f2f0eb;
-  --sidebar-foreground: #1c1b19;
-  --sidebar-muted-foreground: #6d6962;
-  --sidebar-control-surface: #ece9e3;
-  --sidebar-row-hover: #e9e6e0;
-  --sidebar-row-active: #ffffff;
-  --sidebar-row-selected: #ffffff;
-  --sidebar-border: #e8e5df;
+  --card-foreground: #2b2926;
+  --accent: #ebe8e3;
+  --accent-foreground: #141312;
+  --muted: #f2f0ec;
+  --muted-foreground: #6f6a63;
+  --border: rgb(0 0 0 / 8%);
+  --input: rgb(0 0 0 / 14%);
+  --sidebar: #e9e7e2;
+  --sidebar-foreground: #2b2926;
+  --sidebar-muted-foreground: #6f6a63;
+  --sidebar-control-surface: #e2dfd9;
+  --sidebar-row-hover: #e0ddd7;
+  --sidebar-row-active: #fdfcfa;
+  --sidebar-row-selected: #fdfcfa;
+  --sidebar-border: rgb(0 0 0 / 8%);
   --sidebar-stage-fade: var(--sidebar);
 
   @variant dark {
-    --background: #0b0b0a;
-    --foreground: #e6e5e1;
-    --card: #0b0b0a;
+    --background: #000000;
+    --foreground: #d8d5cf;
+    --card: #000000;
     --card-foreground: var(--foreground);
-    --accent: #222220;
-    --accent-foreground: #f4f3ef;
-    --muted: #161615;
-    --muted-foreground: #8a8781;
-    --border: rgb(236 228 214 / 7%);
-    --input: rgb(236 228 214 / 14%);
+    --accent: #191918;
+    --accent-foreground: #f5f3ef;
+    --muted: #111110;
+    --muted-foreground: #8e8a83;
+    --border: rgb(255 255 255 / 7.5%);
+    --input: rgb(255 255 255 / 12%);
     --sidebar: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
@@ -1274,6 +1324,12 @@ html[data-theme-id]:not([data-theme-id=""]) {
   --toolbar-control-hover: var(--app-theme-toolbar-control-hover);
   --surface-raised: var(--app-theme-surface-raised);
   --foreground: var(--app-theme-text);
+  --strong-foreground: var(--app-theme-text);
+  --dim-foreground: color-mix(
+    in oklab,
+    var(--app-theme-muted-foreground) 68%,
+    var(--app-theme-canvas)
+  );
   --card: var(--app-theme-surface);
   --card-foreground: var(--app-theme-text);
   --popover: var(--app-theme-surface-overlay);
@@ -2379,5 +2435,15 @@ code {
         3rem + var(--chat-lane-inset-end, 0px) - var(--chat-timeline-gutter, 0px)
       );
     }
+  }
+}
+
+@layer components {
+  /* Under the Stage the composer spans the centre column at the Stage's own inset. */
+  [data-game-direction-bar] {
+    --chat-content-max-width: none;
+  }
+  [data-game-direction-bar] .chat-composer-lane {
+    padding-inline: 0.75rem;
   }
 }

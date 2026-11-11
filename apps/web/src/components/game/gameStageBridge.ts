@@ -197,6 +197,12 @@ export function useStageAwayFreeze(threadKey: string, away: boolean) {
   }, [away, owner, status]);
 }
 
+/** The thing pointed at on this thread's Stage, read outside render (a send). */
+export const readThreadStageSelection = (threadKey: string): StageSelection | null => {
+  const state = useStageBridge.getState();
+  return state.owner !== null && state.owner.startsWith(`${threadKey}\0`) ? state.selected : null;
+};
+
 export const clearStageSelection = () => {
   const { post, selected } = useStageBridge.getState();
   if (selected !== null) post?.({ type: "studio-select", id: null });

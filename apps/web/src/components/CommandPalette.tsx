@@ -1542,13 +1542,13 @@ function OpenCommandPaletteDialog(props: {
       });
     actionItems.push({
       kind: "action",
-      value: "action:game-toggle-chat",
-      title: "Show or hide the dock",
-      searchTerms: ["chat", "dock", "inspector", "panel", "hide", "show", "stage", "game"],
-      icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+      value: "action:game-toggle-inspector",
+      title: "Show or hide the Inspector",
+      searchTerms: ["inspector", "panel", "dock", "chat", "hide", "show", "stage", "game"],
+      icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.chat.toggle",
       run: async () => {
-        useGameWorkspaceStore.getState().toggleChat();
+        useGameWorkspaceStore.getState().toggleInspector();
       },
     });
     const requestStage = (request: GameStageRequest) => async () => {
@@ -1574,18 +1574,22 @@ function OpenCommandPaletteDialog(props: {
         run: requestStage({ kind: "freeze" }),
       });
     for (const [tab, title, terms] of [
-      ["inspector", "Show the Inspector", ["inspector", "selection", "values", "look", "ask"]],
-      ["things", "Show the game's things", ["things", "list", "objects", "hierarchy", "scene"]],
-      ["facts", "Show the build's facts", ["facts", "measured", "boots", "evidence"]],
+      ["build", "Show the build's checks", ["build", "checks", "facts", "measured", "changes"]],
+      [
+        "scene",
+        "Show the game's scene",
+        ["scene", "things", "look", "art", "selection", "values", "style"],
+      ],
+      ["log", "Show the log", ["log", "chat", "conversation", "transcript", "messages"]],
     ] as const)
       actionItems.push({
         kind: "action",
-        value: `action:game-dock-${tab}`,
+        value: `action:game-inspector-${tab}`,
         title,
-        searchTerms: [...terms, "dock", "game"],
+        searchTerms: [...terms, "inspector", "game"],
         icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
-          useGameWorkspaceStore.getState().showDockTab(tab);
+          useGameWorkspaceStore.getState().showInspectorTab(tab);
         },
       });
     // The game's latest turn build, the one the timeline selects by default.

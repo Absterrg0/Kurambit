@@ -27,7 +27,7 @@ function createCompactWorkspaceStore(): CompactWorkspaceStore {
     if (width <= 0) return;
     // The store ignores this while compact, so a temporary narrow layout never
     // rewrites the creator's remembered dock width.
-    useGameWorkspaceStore.getState().fitChatWidth(width);
+    useGameWorkspaceStore.getState().fitInspectorWidth(width);
     const next = isGameWorkspaceCompact(width);
     if (next === compact) return;
     compact = next;
@@ -65,7 +65,7 @@ function createCompactWorkspaceStore(): CompactWorkspaceStore {
 }
 
 /**
- * Tracks whether the workbench can hold the stage and the docked chat at once.
+ * Tracks whether the workbench can hold the centre and the docked Inspector at once.
  * It measures the workspace row after the sidebar, so a narrow window does not
  * dock two unusable columns just because the window itself is wide.
  */
@@ -84,7 +84,7 @@ export function useGameWorkspaceCompact(
 /**
  * The pane a compact workbench shows. Entering compact always lands on the
  * stage; leaving compact drops the temporary choice so the docked layout shows
- * the creator's saved chat preference again.
+ * the creator's saved Inspector preference again.
  */
 export function useCompactGamePane(compact: boolean) {
   const [state, setState] = useState<{ compact: boolean; pane: GameWorkspacePane }>({

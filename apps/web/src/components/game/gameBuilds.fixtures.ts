@@ -30,6 +30,8 @@ const summary = (state: GameBuild["facts"]["state"]): GameBuild["facts"] => ({
         ]
       : [],
   notMeasured: state === "incomplete" ? 2 : 0,
+  good: state === "measured" ? 1 : 0,
+  bad: state === "measured" ? 1 : 0,
 });
 
 const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
@@ -52,6 +54,7 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: true,
     noPlay: null,
     noRestore: null,
+    still: null,
     // A turn's base is the build the folder held when it started: turn 4's.
     base: BUILD_D,
     facts: summary("measuring"),
@@ -75,6 +78,7 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: true,
     noPlay: null,
     noRestore: null,
+    still: null,
     base: BUILD_B,
     facts: summary("measured"),
   },
@@ -100,6 +104,7 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: true,
     noPlay: null,
     noRestore: null,
+    still: null,
     base: BUILD_A,
     facts: summary("measured"),
   },
@@ -114,6 +119,7 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     available: false,
     noPlay: "Unity builds cannot be played here yet.",
     noRestore: "This build's history was pruned.",
+    still: null,
     base: null,
     facts: summary("incomplete"),
   },
@@ -150,6 +156,7 @@ export const FAKE_UNDONE_RESULT: GameBuildsResult = {
       available: true,
       noPlay: null,
       noRestore: null,
+      still: null,
       base: null,
       facts: summary("never"),
     },

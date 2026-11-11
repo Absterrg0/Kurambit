@@ -1,34 +1,34 @@
-import type { GameBuildRef } from "@kurambit/contracts";
+import type { GameBuild, GameBuildId, GameBuildRef } from "@kurambit/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 
-/** The chat is docked beside the game, so it starts narrow enough to leave the stage room. */
-export const GAME_CHAT_DEFAULT_WIDTH = 360;
-const GAME_CHAT_MIN_WIDTH = 300;
-const GAME_CHAT_MAX_WIDTH = 760;
+/** The Inspector sits beside the game, so it starts narrow enough to leave the stage room. */
+export const GAME_INSPECTOR_DEFAULT_WIDTH = 352;
+const GAME_INSPECTOR_MIN_WIDTH = 300;
+const GAME_INSPECTOR_MAX_WIDTH = 760;
 /**
- * The stage is the product. However wide the chat was left in an old session,
- * it never gets more than this share of the workspace.
+ * The stage is the product. However wide the Inspector was left in an old
+ * session, it never gets more than this share of the workspace.
  */
-const GAME_CHAT_MAX_WORKSPACE_SHARE = 0.45;
+const GAME_INSPECTOR_MAX_WORKSPACE_SHARE = 0.45;
 /**
  * Below this workspace width (the row after the sidebar, not the window) the
- * chat and the stage cannot both stay usable, so the workbench shows one pane
- * at a time. The threshold leaves a docked stage at least 600px at the default
- * chat width.
+ * Inspector and the stage cannot both stay usable, so the workbench shows one
+ * pane at a time. The threshold leaves the centre at least 600px at the
+ * default Inspector width.
  */
 const GAME_WORKSPACE_DOCK_MIN_WIDTH = 960;
 
 export const isGameWorkspaceCompact = (workspaceWidth: number) =>
   workspaceWidth > 0 && workspaceWidth < GAME_WORKSPACE_DOCK_MIN_WIDTH;
 
-export const clampGameChatWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
+export const clampGameInspectorWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
   Math.min(
-    GAME_CHAT_MAX_WIDTH,
-    Math.floor(workspaceWidth * GAME_CHAT_MAX_WORKSPACE_SHARE),
-    Math.max(GAME_CHAT_MIN_WIDTH, Math.round(width)),
+    GAME_INSPECTOR_MAX_WIDTH,
+    Math.floor(workspaceWidth * GAME_INSPECTOR_MAX_WORKSPACE_SHARE),
+    Math.max(GAME_INSPECTOR_MIN_WIDTH, Math.round(width)),
   );
 
 /**
@@ -49,22 +49,33 @@ export type GameStageRequest =
   | { readonly kind: "export" }
   | { readonly kind: "generated-art" };
 
-/** The dock beside the game: the thread's chat, the selection's Inspector, the game's things, its art and facts. */
-export type GameDockTab = "chat" | "inspector" | "things" | "art" | "facts";
+/** The Inspector beside the game: a build's checks and changes, the game's look and things, the full log. */
+export type GameInspectorTab = "build" | "scene" | "log";
+
+/** The build the Inspector shows, for one thread; null shows the one on the Stage. */
+export interface GameInspectedBuild {
+  readonly threadKey: string;
+  readonly build: GameBuildId;
+  /** The row as the strip had it, for a build on an older page than the Inspector reads. */
+  readonly snapshot: GameBuild;
+}
 
 interface GameWorkspaceStoreState {
-  /** Width of the docked chat column on game threads, in CSS pixels. */
-  chatWidth: number;
-  chatCollapsed: boolean;
-  setChatWidth: (width: number) => void;
+  /** Width of the Inspector column on game threads, in CSS pixels. */
+  inspectorWidth: number;
+  inspectorCollapsed: boolean;
+  setInspectorWidth: (width: number) => void;
   /** Clamp a remembered width to what the current workspace can spare. */
-  fitChatWidth: (workspaceWidth: number) => void;
-  toggleChat: () => void;
-  setChatCollapsed: (collapsed: boolean) => void;
-  /** The dock's open tab. Not persisted: a new session opens on the chat. */
-  dockTab: GameDockTab;
-  /** Opens a tab, showing the dock if it was collapsed. */
-  showDockTab: (tab: GameDockTab) => void;
+  fitInspectorWidth: (workspaceWidth: number) => void;
+  toggleInspector: () => void;
+  setInspectorCollapsed: (collapsed: boolean) => void;
+  /** The Inspector's open tab. Not persisted: a new session opens on the build. */
+  inspectorTab: GameInspectorTab;
+  /** Opens a tab, showing the Inspector if it was collapsed. */
+  showInspectorTab: (tab: GameInspectorTab) => void;
+  inspectedBuild: GameInspectedBuild | null;
+  /** Shows a build in the Inspector's Build tab; null follows the Stage again. */
+  inspectBuild: (inspected: GameInspectedBuild | null) => void;
   /** The latest Stage request; `n` makes a repeat of the same request news. Not persisted. */
   stageRequest: { readonly request: GameStageRequest; readonly n: number } | null;
   requestStage: (request: GameStageRequest) => void;
@@ -72,37 +83,42 @@ interface GameWorkspaceStoreState {
 
 /**
  * The game stage's layout preferences. One width for every game: a person who
- * widens the chat once means it everywhere, the way an editor remembers a panel.
+ * widens the Inspector once means it everywhere, the way an editor remembers a panel.
  */
 export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
   persist(
     (set) => ({
-      chatWidth: GAME_CHAT_DEFAULT_WIDTH,
-      chatCollapsed: false,
-      setChatWidth: (width) => set({ chatWidth: clampGameChatWidth(width) }),
-      fitChatWidth: (workspaceWidth) =>
+      inspectorWidth: GAME_INSPECTOR_DEFAULT_WIDTH,
+      inspectorCollapsed: false,
+      setInspectorWidth: (width) => set({ inspectorWidth: clampGameInspectorWidth(width) }),
+      fitInspectorWidth: (workspaceWidth) =>
         set((state) => {
           // A compact workspace shows one pane at a time, so its narrow width
           // says nothing about the docked width the creator chose. Fitting
           // there would quietly rewrite the remembered preference.
           if (isGameWorkspaceCompact(workspaceWidth)) return {};
-          const fitted = clampGameChatWidth(state.chatWidth, workspaceWidth);
-          return fitted === state.chatWidth ? {} : { chatWidth: fitted };
+          const fitted = clampGameInspectorWidth(state.inspectorWidth, workspaceWidth);
+          return fitted === state.inspectorWidth ? {} : { inspectorWidth: fitted };
         }),
-      toggleChat: () => set((state) => ({ chatCollapsed: !state.chatCollapsed })),
-      setChatCollapsed: (collapsed) => set({ chatCollapsed: collapsed }),
-      dockTab: "chat",
-      showDockTab: (tab) => set({ dockTab: tab, chatCollapsed: false }),
+      toggleInspector: () => set((state) => ({ inspectorCollapsed: !state.inspectorCollapsed })),
+      setInspectorCollapsed: (collapsed) => set({ inspectorCollapsed: collapsed }),
+      inspectorTab: "build",
+      showInspectorTab: (tab) => set({ inspectorTab: tab, inspectorCollapsed: false }),
+      inspectedBuild: null,
+      inspectBuild: (inspected) => set({ inspectedBuild: inspected }),
       stageRequest: null,
       requestStage: (request) =>
         set((state) => ({ stageRequest: { request, n: (state.stageRequest?.n ?? 0) + 1 } })),
     }),
     {
-      name: "kurambit:game-workspace:v2",
+      name: "kurambit:game-workspace:v3",
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
-      partialize: (state) => ({ chatWidth: state.chatWidth, chatCollapsed: state.chatCollapsed }),
+      partialize: (state) => ({
+        inspectorWidth: state.inspectorWidth,
+        inspectorCollapsed: state.inspectorCollapsed,
+      }),
       // An old session may hold a width that would starve the stage; the clamp
       // lives here so loading the store cannot reintroduce it.
       merge: (persisted, current) => {
@@ -110,7 +126,7 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
         return {
           ...current,
           ...saved,
-          chatWidth: clampGameChatWidth(saved?.chatWidth ?? current.chatWidth),
+          inspectorWidth: clampGameInspectorWidth(saved?.inspectorWidth ?? current.inspectorWidth),
         };
       },
     },

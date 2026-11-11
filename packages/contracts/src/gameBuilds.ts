@@ -145,6 +145,9 @@ export const GameBuildFactsSummary = Schema.Struct({
     Schema.Struct({ id: GameFactId, text: Schema.String, tone: GameFactTone }),
   ).check(Schema.isMaxLength(3)),
   notMeasured: NonNegativeInt,
+  /** Measured facts that read good and bad: the build card's two marks. */
+  good: NonNegativeInt,
+  bad: NonNegativeInt,
 });
 export type GameBuildFactsSummary = typeof GameBuildFactsSummary.Type;
 
@@ -170,6 +173,12 @@ export const GameBuild = Schema.Struct({
   /** Why it cannot be restored, else null. */
   noRestore: Schema.NullOr(Schema.String),
   facts: GameBuildFactsSummary,
+  /**
+   * A frame of the build playing, game-relative: a facts play's own screen
+   * (the random-input run's, else the no-input run's). Null before a play kept
+   * one; the file may since have been cleaned up with the logs.
+   */
+  still: Schema.NullOr(Schema.String),
   /**
    * The build this one was made from: restoring it undoes this build. A turn's is
    * the build the folder held when the turn started (turn 1's: the thread's start
@@ -524,7 +533,7 @@ const tierEvidence = (tier: BotTier): GameFactView["evidence"] =>
     ? []
     : [
         { kind: "video", label: "Run video", path: `${tier.evidence}/run.mp4` },
-        { kind: "frame", label: "Last frame", path: `${tier.evidence}/frames/end.png` },
+        { kind: "frame", label: "Last frame", path: `${tier.evidence}/frames/frame-end.png` },
         { kind: "log", label: "Trace", path: `${tier.evidence}/trace.json` },
       ];
 

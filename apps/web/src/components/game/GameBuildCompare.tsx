@@ -15,7 +15,7 @@ import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
 import { GameBuildFactsDiff } from "./GameBuildFacts";
-import { refOf } from "./GameBuildDetail";
+import { refOf } from "./gameBuildRef";
 import { GameFrame, GameFrameBox } from "./GamePlaySurface";
 import { buildName, formatBuildTime } from "./gameBuilds.logic";
 import { useBuildPlay, useMeasureOnOpen } from "./useBuildActions";

@@ -5,31 +5,31 @@ import { resolveGameWorkspaceLayout } from "./gameWorkspaceLayout";
 const WIDE = {
   compact: false,
   compactPane: "game",
-  chatCollapsed: false,
+  inspectorCollapsed: false,
   rightPanelMaximized: false,
 } as const;
 
 describe("game workspace layout", () => {
-  it("docks the chat beside the stage in a wide workspace", () => {
+  it("docks the Inspector beside the stage in a wide workspace", () => {
     expect(resolveGameWorkspaceLayout(WIDE)).toEqual({
       compact: false,
-      chatDocked: true,
-      chatVisible: true,
+      inspectorDocked: true,
+      inspectorVisible: true,
       stageVisible: true,
     });
   });
 
   it("keeps the saved collapse preference in a wide workspace", () => {
-    expect(resolveGameWorkspaceLayout({ ...WIDE, chatCollapsed: true })).toEqual({
+    expect(resolveGameWorkspaceLayout({ ...WIDE, inspectorCollapsed: true })).toEqual({
       compact: false,
-      chatDocked: false,
-      chatVisible: false,
+      inspectorDocked: false,
+      inspectorVisible: false,
       stageVisible: true,
     });
     expect(resolveGameWorkspaceLayout({ ...WIDE, rightPanelMaximized: true })).toEqual({
       compact: false,
-      chatDocked: false,
-      chatVisible: false,
+      inspectorDocked: false,
+      inspectorVisible: false,
       stageVisible: true,
     });
   });
@@ -37,36 +37,38 @@ describe("game workspace layout", () => {
   it("shows one usable pane at a time in a compact workspace", () => {
     expect(resolveGameWorkspaceLayout({ ...WIDE, compact: true })).toEqual({
       compact: true,
-      chatDocked: false,
-      chatVisible: false,
+      inspectorDocked: false,
+      inspectorVisible: false,
       stageVisible: true,
     });
-    expect(resolveGameWorkspaceLayout({ ...WIDE, compact: true, compactPane: "chat" })).toEqual({
+    expect(
+      resolveGameWorkspaceLayout({ ...WIDE, compact: true, compactPane: "inspector" }),
+    ).toEqual({
       compact: true,
-      chatDocked: false,
-      chatVisible: true,
+      inspectorDocked: false,
+      inspectorVisible: true,
       stageVisible: false,
     });
   });
 
-  it("lets the compact switch open chat without changing the saved collapse", () => {
+  it("lets the compact switch open the Inspector without changing the saved collapse", () => {
     expect(
       resolveGameWorkspaceLayout({
         ...WIDE,
         compact: true,
-        compactPane: "chat",
-        chatCollapsed: true,
+        compactPane: "inspector",
+        inspectorCollapsed: true,
       }),
-    ).toMatchObject({ chatVisible: true, stageVisible: false });
+    ).toMatchObject({ inspectorVisible: true, stageVisible: false });
 
     // Widening falls back to the creator's saved dock preference, not the
     // temporary compact pane.
     expect(
       resolveGameWorkspaceLayout({
         ...WIDE,
-        compactPane: "chat",
-        chatCollapsed: true,
+        compactPane: "inspector",
+        inspectorCollapsed: true,
       }),
-    ).toMatchObject({ chatDocked: false, chatVisible: false, stageVisible: true });
+    ).toMatchObject({ inspectorDocked: false, inspectorVisible: false, stageVisible: true });
   });
 });

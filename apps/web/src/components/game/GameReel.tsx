@@ -6,7 +6,7 @@ import { cn } from "../../lib/utils";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
-import { refOf } from "./GameBuildDetail";
+import { refOf } from "./gameBuildRef";
 import { GameImage } from "./GameGenerationCard";
 import { buildName } from "./gameBuilds.logic";
 import { stepVerdictText } from "./keepGoing.logic";

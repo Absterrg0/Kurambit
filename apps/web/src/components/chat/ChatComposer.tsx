@@ -264,7 +264,6 @@ import {
 } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
-import { GameKeepGoingControl, GameKeepGoingMenuContent } from "../game/GameKeepGoingControl";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
@@ -4703,23 +4702,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    // A game thread has no access level and no plan/build mode to pick: its
-    // mode position holds keep going, which needs a started thread.
+    // A game thread has no access level and no plan/build mode to pick; keep
+    // going lives in the game's top bar.
     ...(gameThread
-      ? routeKind === "server"
-        ? [
-            {
-              id: "mode",
-              content: (
-                <GameKeepGoingControl
-                  threadRef={routeThreadRef}
-                  size={composerControlsCollapsed ? "xs" : "sm"}
-                  hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-                />
-              ),
-            },
-          ]
-        : []
+      ? []
       : [
           {
             id: "mode",
@@ -4897,11 +4883,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
             showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
             showRuntimeMode={!gameThread}
-            modeMenuContent={
-              gameThread && routeKind === "server" && hiddenRestingBlockIds.includes("mode") ? (
-                <GameKeepGoingMenuContent threadRef={routeThreadRef} />
-              ) : undefined
-            }
             traitsMenuContent={
               hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
             }
@@ -6833,7 +6814,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
                                 : gameThread
-                                  ? "Describe a change to your game…"
+                                  ? "Tell your game what to change…"
                                   : phase === "disconnected"
                                     ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                     : "Ask anything, @tag files/folders, $use skills, or / for commands"

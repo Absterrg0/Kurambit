@@ -53,6 +53,7 @@ import {
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { type EarlierBuild, summaryOf, turnChangeBase } from "./buildFacts.ts";
+import { END_FRAME } from "./gameBotRuntime.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
 import * as GameFacts from "./GameFacts.ts";
 import * as GameOperations from "./GameOperations.ts";
@@ -820,6 +821,28 @@ const make = Effect.gen(function* () {
       );
     });
 
+  /**
+   * A frame of the build playing, for its card: the random-input run's (it
+   * moves the most), else the no-input run's; an early grid frame before the
+   * run's last screen, which is often its ending. Only a file still there.
+   */
+  const stillOf = (root: string, read: GameBuildFacts | undefined) =>
+    Effect.promise(async () => {
+      if (read === undefined) return null;
+      for (const fact of [read.masher, read.idle]) {
+        if (fact.status !== "measured" || fact.value.evidence === null) continue;
+        for (const name of ["frame-002.png", "frame-001.png", END_FRAME]) {
+          const path = `${fact.value.evidence}/frames/${name}`;
+          const there = await NodeFSP.access(NodePath.join(root, path)).then(
+            () => true,
+            () => false,
+          );
+          if (there) return path;
+        }
+      }
+      return null;
+    });
+
   const rowsOf = (
     g: Game,
     entries: ReadonlyArray<Entry>,
@@ -832,7 +855,12 @@ const make = Effect.gen(function* () {
         entries.map((entry) => entry.id),
       );
       const measured = yield* facts.readMany([...resolved.values()]);
-      const builds = entries.map((entry): GameBuild => {
+      const stills = yield* Effect.forEach(
+        entries,
+        (entry) => stillOf(g.root, measured.get(entry.id)),
+        { concurrency: 8 },
+      );
+      const builds = entries.map((entry, index): GameBuild => {
         const available = kept.has(entry.id) && resolved.has(entry.id);
         const read = measured.get(entry.id);
         return {
@@ -852,7 +880,10 @@ const make = Effect.gen(function* () {
           noPlay: !available ? "This build is no longer kept." : noPlayReason(g.engine),
           noRestore: !available ? "This build is no longer kept." : null,
           facts:
-            read === undefined ? { state: "never", chips: [], notMeasured: 0 } : summaryOf(read),
+            read === undefined
+              ? { state: "never", chips: [], notMeasured: 0, good: 0, bad: 0 }
+              : summaryOf(read),
+          still: stills[index] ?? null,
         };
       });
       return { builds, measured };

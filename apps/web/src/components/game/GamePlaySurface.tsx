@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   AppWindowIcon,
+  MousePointerClickIcon,
   PauseIcon,
-  HammerIcon,
   PlayIcon,
   RefreshCwIcon,
   SquareIcon,
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { GameViewport } from "@kurambit/contracts";
 import { Button } from "../ui/button";
+import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
 import { useStageBridgeFrame, useThreadStageBridge } from "./gameStageBridge";
@@ -84,6 +85,7 @@ export function GamePlaySurface({
   focusRequest,
   bridge,
   overlay,
+  note = null,
 }: {
   phase: GameStagePhase;
   /** The operation running on the game: its name, and whether it is this thread's own (Stop ends only those). */
@@ -111,6 +113,8 @@ export function GamePlaySurface({
   bridge: { readonly threadKey: string; readonly enabled: boolean };
   /** Drawn over the playing game: the frozen game's pointer layer, names and path. */
   overlay?: ReactNode;
+  /** The agent's live note, shown while the first build is made. */
+  note?: string | null;
 }) {
   const playing = phase.kind === "playing" && previewUrl !== null;
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
@@ -125,7 +129,7 @@ export function GamePlaySurface({
   return (
     <div
       data-game-play-surface="true"
-      className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-stage p-3 [container-type:size]"
+      className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage [container-type:size]"
     >
       <GameFrameBox viewport={viewport} gameName={gameName} playing={playing}>
         {playing ? (
@@ -138,6 +142,7 @@ export function GamePlaySurface({
             focusRequest={focusRequest}
             onFrame={setFrame}
             frozen={frozen}
+            freezeHint={bridge.enabled}
           />
         ) : (
           <StageStateCard
@@ -150,12 +155,13 @@ export function GamePlaySurface({
             onStop={onStop}
             onAskAgent={onAskAgent}
             onOpenTools={onOpenTools}
+            note={note}
           />
         )}
         {playing ? overlay : null}
         {playing && held !== null ? (
           <div className="absolute inset-x-0 top-2 z-20 flex justify-center px-2">
-            <div className="flex items-center gap-2 rounded-full bg-black/75 py-1 ps-3 pe-1 text-xs text-stage-foreground ring-1 ring-white/15">
+            <div className="flex items-center gap-2 rounded-full bg-black/75 py-1 ps-3 pe-1 text-caption text-stage-foreground ring-1 ring-white/15">
               <span className="min-w-0 truncate">{held.label}</span>
               <Button size="xs" variant="secondary" onClick={onTakeHeld}>
                 <RefreshCwIcon aria-hidden="true" />
@@ -170,8 +176,9 @@ export function GamePlaySurface({
 }
 
 /**
- * The game's frame in its own shape. Before there is a game to show, it is the
- * game's poster. Its parent must be a size container.
+ * The game's frame in its own shape, its letterbox the Stage's own black.
+ * Before there is a game to show, it is the game's poster across the whole
+ * Stage. Its parent must be a size container.
  */
 export function GameFrameBox({
   viewport,
@@ -187,14 +194,11 @@ export function GameFrameBox({
   const [pigment, pigmentInk] = gamePigment(gameName);
   return (
     <div
-      className="relative overflow-hidden rounded-xl bg-frame shadow-2xl shadow-black/60 ring-1 ring-washi/10"
+      className={playing ? "relative overflow-hidden" : "relative size-full overflow-hidden"}
       style={
         playing
           ? frameStyle(viewport)
-          : {
-              ...frameStyle(viewport),
-              background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${pigmentInk})`,
-            }
+          : { background: `radial-gradient(120% 90% at 50% 30%, ${pigment}, ${pigmentInk})` }
       }
     >
       {children}
@@ -215,6 +219,7 @@ export function GameFrame({
   focusRequest = 0,
   onFrame,
   frozen = false,
+  freezeHint = false,
 }: {
   url: string;
   title: string;
@@ -225,8 +230,10 @@ export function GameFrame({
   focusRequest?: number;
   /** Hands the iframe to the Stage bridge. */
   onFrame?: ((frame: HTMLIFrameElement | null) => void) | undefined;
-  /** The Stage froze the game to point at it: no "Click to play" cover. */
+  /** The Stage froze the game to point at it: its hint says how to point instead. */
   frozen?: boolean;
+  /** The Stage can freeze this game: its hint says Tab does. */
+  freezeHint?: boolean;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const setFrameRef = (node: HTMLIFrameElement | null) => {
@@ -290,11 +297,6 @@ export function GameFrame({
     // A remount does not need a repost here: onLoad restates the current state
     // to the fresh document.
   }, [visible]);
-  const focusFrame = () => {
-    frameRef.current?.focus();
-    frameRef.current?.contentWindow?.focus();
-    setFrameFocused(true);
-  };
   return (
     <>
       <iframe
@@ -320,25 +322,44 @@ export function GameFrame({
         onFocus={() => setFrameFocused(true)}
         onBlur={() => setFrameFocused(false)}
       />
-      {unacknowledged ? (
-        <div className="pointer-events-none absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs text-stage-muted ring-1 ring-white/10">
-          <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
-          Game may still be running
-        </div>
-      ) : null}
-      {frameFocused || frozen ? null : (
-        <button
-          type="button"
-          className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-black/35"
-          onClick={focusFrame}
-        >
-          <span className="flex items-center gap-2 rounded-full bg-black/75 px-4 py-2 text-sm font-medium text-stage-foreground shadow-lg ring-1 ring-white/15">
-            <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
-            Click to play
-          </span>
-        </button>
-      )}
+      {/* Hints sit in a corner and let every click through: the game's own buttons stay pressable. */}
+      <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-20 flex flex-wrap items-center gap-1.5">
+        {unacknowledged ? (
+          <StageHint>
+            <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
+            Game may still be running
+          </StageHint>
+        ) : null}
+        {frozen ? (
+          <StageHint>
+            <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
+            Frozen · click a thing to point at it
+          </StageHint>
+        ) : frameFocused ? null : (
+          <>
+            <StageHint>
+              <MousePointerClickIcon className="size-3 shrink-0" aria-hidden="true" />
+              Click to play
+            </StageHint>
+            {freezeHint ? <StageHint>Tab freezes</StageHint> : null}
+          </>
+        )}
+      </div>
     </>
+  );
+}
+
+function StageHint({ children }: { children: ReactNode }) {
+  return (
+    <Text
+      variant="caption"
+      tone="inherit"
+      render={
+        <span className="flex h-6 items-center gap-1.5 rounded-full bg-black/60 px-2.5 text-stage-foreground ring-1 ring-white/10 backdrop-blur-sm" />
+      }
+    >
+      {children}
+    </Text>
   );
 }
 
@@ -352,8 +373,10 @@ function StageStateCard({
   onStop,
   onAskAgent,
   onOpenTools,
+  note,
 }: {
   gameName: string;
+  note: string | null;
   phase: GameStagePhase;
   canOperate: boolean;
   operation: { readonly name: string; readonly own: boolean } | null;
@@ -375,9 +398,13 @@ function StageStateCard({
         className="pointer-events-none absolute inset-0 -z-10 bg-radial from-transparent to-black/45"
       />
       <div className="flex size-full flex-col items-center justify-center gap-5 overflow-y-auto p-6 text-center scrollbar-gutter-both">
-        <h2 className="font-display text-5xl leading-none text-washi text-balance @[40rem]:text-6xl">
+        <Text
+          variant="title"
+          tone="inherit"
+          render={<h2 className="text-stage-foreground text-balance" />}
+        >
           {gameName}
-        </h2>
+        </Text>
         {phase.kind === "parked" ? (
           <>
             <StageIcon tone="quiet">
@@ -416,22 +443,26 @@ function StageStateCard({
           </>
         ) : null}
         {phase.kind === "first-build" ? (
-          <>
-            <StageIcon tone="quiet">
-              <HammerIcon className="size-5" aria-hidden="true" />
-            </StageIcon>
-            <StageCopy
-              title="Your agent is making the first playable build"
-              body={
-                <span className="inline-flex items-center gap-1.5">
-                  <span>It plays here as soon as the turn ends.</span>
-                  {phase.startedAt === null ? null : (
-                    <GameElapsed since={phase.startedAt} className="shrink-0 text-stage-muted" />
-                  )}
-                </span>
-              }
-            />
-          </>
+          <div className="flex max-w-md flex-col items-center gap-3">
+            <Text variant="meta" tone="inherit" render={<p className="text-stage-muted" />}>
+              Making build 1
+              {phase.startedAt === null ? null : (
+                <GameElapsed since={phase.startedAt} prefix=" · " />
+              )}
+            </Text>
+            {note === null ? null : (
+              <Text
+                variant="body"
+                tone="inherit"
+                render={<p className="line-clamp-3 text-stage-foreground text-balance" />}
+              >
+                {note}
+              </Text>
+            )}
+            <Text variant="caption" tone="inherit" render={<p className="text-stage-muted" />}>
+              It plays here as soon as the turn ends.
+            </Text>
+          </div>
         ) : null}
         {phase.kind === "building" ? (
           <>
@@ -517,7 +548,7 @@ function StageStateCard({
                   : "The game did not build, so there is nothing to play yet."
               }
             />
-            <pre className="max-h-40 w-full max-w-xl overflow-auto rounded-md bg-white/5 p-3 text-left font-mono text-2xs leading-relaxed whitespace-pre-wrap text-stage-muted">
+            <pre className="max-h-40 w-full max-w-xl overflow-auto rounded-md bg-white/5 p-3 text-left font-mono text-caption whitespace-pre-wrap text-stage-muted">
               {phase.message}
             </pre>
             <div className="flex items-center gap-2">
@@ -557,9 +588,13 @@ function StageIcon({ tone, children }: { tone: "quiet" | "danger"; children: Rea
 
 function StageCopy({ title, body }: { title: string; body: ReactNode }) {
   return (
-    <div className="relative max-w-sm space-y-1">
-      <p className="text-sm font-medium text-stage-foreground">{title}</p>
-      <p className="text-xs leading-relaxed text-washi/70">{body}</p>
+    <div className="relative flex max-w-sm flex-col gap-1">
+      <Text variant="label" tone="inherit" render={<p className="text-stage-foreground" />}>
+        {title}
+      </Text>
+      <Text variant="meta" tone="inherit" render={<p className="text-stage-muted" />}>
+        {body}
+      </Text>
     </div>
   );
 }

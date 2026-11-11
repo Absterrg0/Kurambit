@@ -292,6 +292,65 @@ export default defineConfig({
         },
       },
       {
+        // Game text takes a type role (components/ui/text.tsx), never a raw size
+        // or weight class. The per-file ceilings below hold older files' debt and
+        // only go down: a file under its ceiling fails until it is lowered.
+        files: ["apps/web/src/components/game/**"],
+        rules: { "kurambit/no-raw-type-classes": "error" },
+      },
+      {
+        files: ["apps/web/src/components/game/GameBuildCompare.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 7 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameBuildFacts.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 7 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameEntry.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 24 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameExports.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 12 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameGeneratedArt.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 4 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameGenerationCard.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 15 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameKeepGoingControl.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 2 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameNextBanner.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 1 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameReel.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 7 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameSavedMedia.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 10 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GameStageOverlay.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 4 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/GamesHome.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 15 }] },
+      },
+      {
+        files: ["apps/web/src/components/game/useKeepGoingBanner.tsx"],
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 3 }] },
+      },
+      {
         // Every web file must compile under the React Compiler. Its bailout rules are errors here,
         // and manual memoization is redundant. No upstream rule bans useMemo/useCallback, hence
         // kurambit/no-manual-memo.

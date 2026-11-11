@@ -1,10 +1,10 @@
-export type GameWorkspacePane = "game" | "chat";
+export type GameWorkspacePane = "game" | "inspector";
 
 export interface GameWorkspaceLayout {
   readonly compact: boolean;
-  /** The chat takes its remembered width beside the stage. */
-  readonly chatDocked: boolean;
-  readonly chatVisible: boolean;
+  /** The Inspector takes its remembered width beside the centre. */
+  readonly inspectorDocked: boolean;
+  readonly inspectorVisible: boolean;
   readonly stageVisible: boolean;
 }
 
@@ -15,22 +15,22 @@ export interface GameWorkspaceLayout {
 export function resolveGameWorkspaceLayout(input: {
   readonly compact: boolean;
   readonly compactPane: GameWorkspacePane;
-  readonly chatCollapsed: boolean;
+  readonly inspectorCollapsed: boolean;
   readonly rightPanelMaximized: boolean;
 }): GameWorkspaceLayout {
   if (input.compact) {
     return {
       compact: true,
-      chatDocked: false,
-      chatVisible: input.compactPane === "chat" && !input.rightPanelMaximized,
+      inspectorDocked: false,
+      inspectorVisible: input.compactPane === "inspector" && !input.rightPanelMaximized,
       stageVisible: input.compactPane === "game",
     };
   }
-  const chatVisible = !input.chatCollapsed && !input.rightPanelMaximized;
+  const inspectorVisible = !input.inspectorCollapsed && !input.rightPanelMaximized;
   return {
     compact: false,
-    chatDocked: chatVisible,
-    chatVisible,
+    inspectorDocked: inspectorVisible,
+    inspectorVisible,
     stageVisible: true,
   };
 }
