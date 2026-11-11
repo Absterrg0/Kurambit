@@ -292,7 +292,7 @@ describe("theme files", () => {
       colors: {
         canvas: canonical("#07152f"),
         accent: canonical("#67c2ff"),
-        placeholder: canonical("#5d5a55"),
+        placeholder: canonical("#7c7872"),
       },
     });
   });

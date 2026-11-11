@@ -195,10 +195,12 @@ export function SettingsSection({
           className="flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4"
         >
           <div className="flex min-w-0 items-center gap-1">
+            {/* Section headings sit a step above the 14px row titles they head:
+                the title role at 16px. */}
             <Text
-              variant="meta"
-              tone="muted"
-              render={<h2 className="flex min-h-7 items-center gap-2" />}
+              variant="title"
+              tone="strong"
+              render={<h2 className="flex min-h-7 items-center gap-2 [--type-title:1rem]" />}
             >
               {icon}
               {title}
@@ -436,7 +438,7 @@ export function SettingsRow({
         className,
       )}
     >
-      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
         <div className="flex min-w-0 flex-1 gap-3">
           {icon ? (
             <span
@@ -461,19 +463,27 @@ export function SettingsRow({
               </span>
             </div>
             {description ? (
-              <Text variant="meta" tone="muted" render={<p className="max-w-xl" />}>
+              <Text
+                variant="body"
+                tone="muted"
+                render={<p className="text-pretty [--type-body:var(--type-meta)]" />}
+              >
                 {description}
               </Text>
             ) : null}
             {renderedStatus ? (
-              <Text variant="meta" tone="muted" render={<div className="pt-0.5" />}>
+              <Text
+                variant="body"
+                tone="muted"
+                render={<div className="pt-0.5 [--type-body:var(--type-meta)]" />}
+              >
                 {renderedStatus}
               </Text>
             ) : null}
           </div>
         </div>
         {renderedControl ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
+          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end @min-[32rem]/settings-row:[&_[data-slot=select-trigger]]:min-w-40">
             {renderedControl}
           </div>
         ) : null}

@@ -1,8 +1,6 @@
 import { memo, useEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
-import { Image as ImageGlyph, Text as TextGlyph } from "lucide";
+import { ChevronLeftIcon, ChevronRightIcon, XIcon, ImageIcon, TextIcon } from "lucide-react";
 import { Button } from "../ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import type { ExpandedImageItem, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { resolveExternalWebLinkHost } from "./externalLinkContextMenu";
@@ -256,11 +254,11 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
                       />
                     }
                   >
-                    <MorphIcon
-                      className="size-3"
-                      aria-hidden="true"
-                      icon={showingAccessibilityDetails ? ImageGlyph : TextGlyph}
-                    />
+                    {showingAccessibilityDetails ? (
+                      <ImageIcon className="size-3" aria-hidden="true" />
+                    ) : (
+                      <TextIcon className="size-3" aria-hidden="true" />
+                    )}
                   </TooltipTrigger>
                   <TooltipPopup side="top">{contentsLabel}</TooltipPopup>
                 </Tooltip>

@@ -1123,6 +1123,278 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   background-size: var(--surface-grain-size);
 }
 
+/* Surface recipes (ported from T3 Code's redesign, MIT, Copyright (c) T3 Tools
+   Inc.). A recipe is a fill, a rim and a shadow; the parts live on :root
+   below, derived from the palette tokens, so every theme file gets them. The
+   rim is painted in the border box under the fill, which lets it be a
+   gradient. The parts are non-inherited properties, so a state utility (hover,
+   focus, invalid) swaps one part and a nested surface never inherits it. */
+@property --surface-fill {
+  syntax: "*";
+  inherits: false;
+}
+@property --surface-rim {
+  syntax: "*";
+  inherits: false;
+}
+@property --surface-base-shadow {
+  syntax: "*";
+  inherits: false;
+}
+@property --surface-shadow {
+  syntax: "*";
+  inherits: false;
+}
+
+/* Secondary buttons and select triggers. */
+@utility surface-raised {
+  --surface-fill: var(--raised-fill);
+  --surface-rim: var(--raised-rim);
+  --surface-base-shadow: var(--raised-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+  border: 1px solid transparent;
+  background:
+    var(--surface-fill) padding-box,
+    var(--surface-rim) border-box,
+    var(--surface-fill) border-box;
+  box-shadow: var(--surface-shadow);
+}
+@utility surface-raised-hover {
+  --surface-fill: var(--raised-hover-fill);
+  --surface-rim: var(--raised-hover-rim);
+  --surface-base-shadow: var(--raised-hover-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+}
+/* The hover of a raised control whose action is destructive. */
+@utility surface-danger-hover {
+  --surface-fill: var(--danger-hover-fill);
+  --surface-rim: var(--danger-hover-rim);
+  --surface-base-shadow: var(--raised-hover-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+}
+
+/* The primary action: a plain light fill in dark, a dark fill in light. Never
+   vermilion, which marks only what is live. */
+@utility surface-lit {
+  --surface-fill: var(--lit-fill);
+  --surface-rim: var(--lit-rim);
+  --surface-base-shadow: var(--lit-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+  border: 1px solid transparent;
+  background:
+    var(--surface-fill) padding-box,
+    var(--surface-rim) border-box,
+    var(--surface-fill) border-box;
+  box-shadow: var(--surface-shadow);
+}
+@utility surface-lit-hover {
+  --surface-fill: var(--lit-hover-fill);
+  --surface-base-shadow: var(--lit-hover-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+}
+
+@utility surface-destructive {
+  --surface-fill: var(--destructive-fill);
+  --surface-rim: var(--destructive-rim);
+  --surface-base-shadow: var(--lit-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+  border: 1px solid transparent;
+  background:
+    var(--surface-fill) padding-box,
+    var(--surface-rim) border-box,
+    var(--surface-fill) border-box;
+  box-shadow: var(--surface-shadow);
+}
+@utility surface-destructive-hover {
+  --surface-fill: var(--destructive-hover-fill);
+  --surface-base-shadow: var(--lit-hover-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+}
+
+/* Sunken: inputs, textareas, unchecked checkboxes and radios, tracks. */
+@utility surface-well {
+  --surface-fill: var(--well-fill);
+  --surface-rim: var(--well-rim);
+  --surface-base-shadow: var(--well-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+  border: 1px solid transparent;
+  background:
+    var(--surface-fill) padding-box,
+    var(--surface-rim) border-box,
+    var(--surface-fill) border-box;
+  box-shadow: var(--surface-shadow);
+}
+/* The unchecked switch track: a shade deeper than a well, with a rim that
+   reads on cards in both themes. */
+@utility surface-well-switch {
+  --surface-fill: var(--well-switch-fill);
+  --surface-rim: var(--well-switch-rim);
+  --surface-base-shadow: var(--well-shadow);
+  --surface-shadow: var(--surface-base-shadow);
+  border: 1px solid transparent;
+  background:
+    var(--surface-fill) padding-box,
+    var(--surface-rim) border-box,
+    var(--surface-fill) border-box;
+  box-shadow: var(--surface-shadow);
+}
+/* States of a rimmed field: focus trades the rim for a ring stroke, invalid
+   for an error stroke, and focused invalid keeps the error rim with an inset
+   edge so focus stays visible on a field that is already red. */
+@utility surface-focus {
+  --surface-rim: linear-gradient(var(--ring), var(--ring));
+  --surface-shadow: inset 0 0 0 0.5px var(--ring), var(--surface-base-shadow);
+}
+@utility surface-invalid {
+  --surface-rim: linear-gradient(var(--error), var(--error));
+  --surface-shadow: var(--surface-base-shadow);
+}
+@utility surface-invalid-focus {
+  --surface-rim: linear-gradient(var(--error), var(--error));
+  --surface-shadow: inset 0 0 0 1px var(--error), var(--surface-base-shadow);
+}
+
+/* Tinted by what a control says: a check that failed, a warning to look at.
+   Set --surface-tint to the status color. The alpha fill sees the real parent;
+   a masked pseudo-element paints the gradient rim. */
+@utility surface-tint {
+  position: relative;
+  border: 1px solid transparent;
+  background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-tint, var(--muted-foreground)) 15%, transparent),
+      color-mix(in srgb, var(--surface-tint, var(--muted-foreground)) 7%, transparent)
+    )
+    padding-box;
+  &::before {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-tint, var(--muted-foreground)) 40%, transparent),
+      color-mix(in srgb, var(--surface-tint, var(--muted-foreground)) 10%, transparent)
+    );
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+  }
+}
+
+/* Unchecked checkboxes and radios draw a muted-foreground rim, so the box is
+   visible on any surface in any theme; checked ones carry the gloss fill. */
+:where([data-slot="checkbox"], [data-slot="radio"])[data-unchecked]:not([aria-invalid="true"]) {
+  --surface-rim: linear-gradient(var(--muted-foreground), var(--muted-foreground));
+}
+
+/* The design-system page shows keyboard focus without a keyboard. */
+[data-focus-preview] {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+/* Floating surfaces share one fill and rim and differ by shadow. */
+@utility surface-popover {
+  --surface-shadow: var(--popover-shadow);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, var(--popover-top), var(--popover-bottom)) padding-box,
+    var(--popover-rim) border-box,
+    linear-gradient(180deg, var(--popover-top), var(--popover-bottom)) border-box;
+  box-shadow: var(--surface-shadow);
+}
+@utility surface-tooltip {
+  @apply surface-popover;
+  --surface-shadow: var(--tooltip-shadow);
+}
+/* A small solid chip over content, such as a floating scroll-to-bottom. */
+@utility surface-floating {
+  border-color: color-mix(in oklab, var(--contrast-border) 60%, transparent);
+  background: var(--background);
+  box-shadow: var(--raised-shadow), var(--tooltip-shadow);
+}
+@utility surface-floating-hover {
+  border-color: var(--contrast-border);
+  background: var(--raised-hover-fill);
+}
+
+/* In-flow cards, such as settings groups. The rim and a faint drop let a
+   light-theme card lift off the paper; dark relies on the fill step. */
+@utility surface-card-settings {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    var(--card-rim) border-box,
+    linear-gradient(var(--card), var(--card)) border-box;
+  box-shadow: var(--card-shadow);
+}
+
+/* The composer's tray: what is attached around a text box. */
+@utility surface-tray {
+  border: 1px solid var(--tray-stroke);
+  background: linear-gradient(var(--card), var(--card)) padding-box;
+  box-shadow: var(--tray-shadow);
+}
+
+/* Key hints. Kbd reads its colors from the nearest context that sets these, so
+   a key hint inside a button, field, menu or tooltip needs no props. */
+@utility surface-kbd {
+  background: var(--kbd-fill);
+  box-shadow: var(--kbd-shadow);
+}
+@utility kbd-in-control {
+  --kbd-background: var(--kbd-fill);
+}
+@utility kbd-in-popover {
+  --kbd-background: var(--kbd-popover-fill);
+}
+@utility kbd-on-lit {
+  --kbd-background: var(--kbd-lit-fill) !important;
+  --kbd-foreground: var(--kbd-lit-foreground);
+  --kbd-box-shadow: none;
+}
+@utility kbd-on-destructive {
+  --kbd-background: var(--kbd-lit-fill) !important;
+  --kbd-foreground: color-mix(in srgb, white 80%, transparent);
+  --kbd-box-shadow: none;
+}
+
+/* Chrome-less fills: an icon button under the pointer, the current item of a
+   menu or nav, and the quieter current row of a picker. */
+@utility surface-ghost-hover {
+  background: var(--ghost-hover-fill);
+}
+@utility surface-selected {
+  background: var(--selected-fill);
+}
+@utility surface-selected-soft {
+  background: var(--selected-soft-fill);
+}
+/* The one selected row in the app sidebar and the settings nav. Reads the
+   sidebar row tokens where it is used, so the sidebar's own palette applies. */
+@utility surface-sidebar-row-selected {
+  background: linear-gradient(180deg, var(--sidebar-row-active), var(--sidebar-row-selected));
+  box-shadow: inset 0 0 0 1px var(--sidebar-row-selected-rim);
+}
+
+/* Checked controls and switch thumbs. */
+@utility surface-gloss-on {
+  background: linear-gradient(var(--primary), var(--primary));
+  box-shadow: var(--gloss-on-highlight), var(--lit-shadow);
+}
+@utility surface-gloss-thumb {
+  background: linear-gradient(var(--primary-foreground), var(--primary-foreground));
+  box-shadow: var(--raised-shadow);
+}
+@utility surface-gloss-off-thumb {
+  background: var(--gloss-off-thumb-fill);
+  box-shadow: var(--raised-shadow);
+}
+
 /* Suppress all transitions during theme changes */
 .no-transitions,
 .no-transitions *,
@@ -1153,7 +1425,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --surface-raised: #f2f0ec;
   --foreground: #2b2926;
   --strong-foreground: #141312;
-  --dim-foreground: #a29d95;
+  --dim-foreground: #8a857e;
   --card: #ffffff;
   --card-foreground: #2b2926;
   --popover: #ffffff;
@@ -1165,7 +1437,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --secondary-foreground: #141312;
   --muted: #f2f0ec;
   --muted-foreground: #6f6a63;
-  --placeholder: #a29d95;
+  --placeholder: #807b74;
   --secondary-label: var(--muted-foreground);
   --icon-muted: #86817a;
   --message-surface: #f1efea;
@@ -1218,7 +1490,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --surface-raised: #191918;
     --foreground: #d8d5cf;
     --strong-foreground: #f5f3ef;
-    --dim-foreground: #5d5a55;
+    --dim-foreground: #6e6a64;
     --card: #141413;
     --card-foreground: #d8d5cf;
     --popover: #191918;
@@ -1230,7 +1502,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --secondary-foreground: #f5f3ef;
     --muted: #191918;
     --muted-foreground: #8e8a83;
-    --placeholder: #5d5a55;
+    --placeholder: #7c7872;
     --icon-muted: #77736c;
     --message-surface: #191918;
     --message-action-hover: #ffffff;
@@ -1266,6 +1538,141 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   }
 }
 
+/* Surface recipe parts (see the surface-* utilities). Fills derive from the
+   palette tokens so theme files get them without another mirror; rims,
+   shadows and hover overlays are black alpha in light and white alpha in
+   dark. */
+:root {
+  --raised-fill: linear-gradient(var(--popover), var(--popover));
+  --raised-rim: linear-gradient(180deg, rgb(0 0 0 / 14%), rgb(0 0 0 / 2%));
+  --raised-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+  --raised-hover-fill: var(--raised-fill);
+  --raised-hover-rim: linear-gradient(180deg, rgb(0 0 0 / 20%), rgb(0 0 0 / 3%));
+  --raised-hover-shadow: 0 1px 3px rgb(0 0 0 / 7%);
+  --danger-hover-fill: linear-gradient(
+    color-mix(in srgb, var(--popover), var(--destructive) 4%),
+    color-mix(in srgb, var(--popover), var(--destructive) 4%)
+  );
+  --danger-hover-rim: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--error) 34%, transparent),
+    color-mix(in srgb, var(--error) 6%, transparent)
+  );
+  --lit-fill: linear-gradient(var(--primary), var(--primary));
+  --lit-rim: linear-gradient(180deg, rgb(255 255 255 / 24%), transparent);
+  --lit-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+  --lit-hover-fill: linear-gradient(var(--message-action-hover), var(--message-action-hover));
+  --lit-hover-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  --destructive-fill: linear-gradient(var(--destructive), var(--destructive));
+  --destructive-hover-fill: linear-gradient(
+    color-mix(in srgb, var(--destructive), white 10%),
+    color-mix(in srgb, var(--destructive), white 10%)
+  );
+  --destructive-rim: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--destructive), white 45%),
+    transparent
+  );
+  --well-fill: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--background), black 3.5%),
+    color-mix(in srgb, var(--background), black 1.5%)
+  );
+  --well-rim: linear-gradient(180deg, rgb(0 0 0 / 24%), rgb(0 0 0 / 9%));
+  --well-shadow: 0 1px 0 rgb(255 255 255 / 60%);
+  --well-switch-fill: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--background), black 16%),
+    color-mix(in srgb, var(--background), black 10%)
+  );
+  --well-switch-rim: linear-gradient(180deg, rgb(0 0 0 / 26%), rgb(0 0 0 / 12%));
+  --popover-top: var(--popover);
+  --popover-bottom: color-mix(in srgb, var(--popover), black 1.5%);
+  --popover-rim: linear-gradient(180deg, rgb(0 0 0 / 10%), rgb(0 0 0 / 5%));
+  --popover-shadow: 0 1px 3px rgb(0 0 0 / 6%), 0 16px 40px -18px rgb(0 0 0 / 40%);
+  --tooltip-shadow: 0 3px 9px rgb(0 0 0 / 8%);
+  --card-rim: linear-gradient(180deg, rgb(0 0 0 / 10%), rgb(0 0 0 / 7%));
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 6px 16px -10px rgb(0 0 0 / 14%);
+  --tray-stroke: var(--contrast-border);
+  --tray-shadow: var(--shadow-composer);
+  --kbd-fill: linear-gradient(180deg, var(--popover), color-mix(in srgb, var(--popover), black 3%));
+  --kbd-popover-fill: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--popover), black 4%),
+    color-mix(in srgb, var(--popover), black 6%)
+  );
+  --kbd-shadow: 0 0 0 1px rgb(0 0 0 / 8%), 0 1px 0 rgb(0 0 0 / 10%);
+  --kbd-lit-fill: color-mix(in srgb, var(--primary-foreground) 14%, transparent);
+  --kbd-lit-foreground: color-mix(in oklab, var(--primary-foreground) 62%, var(--primary));
+  --ghost-hover-fill: linear-gradient(180deg, rgb(0 0 0 / 7%), rgb(0 0 0 / 4%));
+  --selected-fill: linear-gradient(180deg, rgb(0 0 0 / 8%), rgb(0 0 0 / 4.5%));
+  --selected-soft-fill: linear-gradient(180deg, rgb(0 0 0 / 5.5%), rgb(0 0 0 / 3%));
+  --sidebar-row-selected-rim: rgb(0 0 0 / 6%);
+  --gloss-on-highlight: inset 0 1px 0 rgb(255 255 255 / 22%);
+  --gloss-off-thumb-fill: linear-gradient(var(--card), var(--card));
+
+  @variant dark {
+    --raised-fill: linear-gradient(
+      color-mix(in srgb, var(--popover), white 3%),
+      color-mix(in srgb, var(--popover), white 3%)
+    );
+    --raised-rim: linear-gradient(180deg, rgb(255 255 255 / 20%), rgb(255 255 255 / 2%));
+    --raised-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+    --raised-hover-fill: linear-gradient(
+      color-mix(in srgb, var(--popover), white 6%),
+      color-mix(in srgb, var(--popover), white 6%)
+    );
+    --raised-hover-rim: linear-gradient(180deg, rgb(255 255 255 / 28%), rgb(255 255 255 / 4%));
+    --raised-hover-shadow: 0 1px 3px rgb(0 0 0 / 30%);
+    --danger-hover-fill: linear-gradient(
+      color-mix(in srgb, var(--popover), var(--destructive) 10%),
+      color-mix(in srgb, var(--popover), var(--destructive) 10%)
+    );
+    --lit-rim: linear-gradient(180deg, white, transparent);
+    --lit-shadow: 0 1px 2px rgb(0 0 0 / 22%);
+    --lit-hover-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+    --well-fill: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--background), black 35%),
+      color-mix(in srgb, var(--background), black 20%)
+    );
+    --well-rim: linear-gradient(180deg, rgb(0 0 0 / 60%), rgb(255 255 255 / 14%));
+    --well-shadow: 0 1px 2px rgb(0 0 0 / 38%);
+    --well-switch-fill: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--background), black 60%),
+      color-mix(in srgb, var(--background), black 30%)
+    );
+    --well-switch-rim: linear-gradient(180deg, rgb(0 0 0 / 60%), rgb(255 255 255 / 22%));
+    --popover-top: color-mix(in srgb, var(--popover), white 1.5%);
+    --popover-bottom: color-mix(in srgb, var(--popover), black 6%);
+    --popover-rim: linear-gradient(180deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 3%));
+    --popover-shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 18px 44px -18px rgb(0 0 0 / 80%);
+    --tooltip-shadow: 0 3px 9px rgb(0 0 0 / 35%);
+    --card-rim: linear-gradient(180deg, rgb(255 255 255 / 8%), rgb(255 255 255 / 4%));
+    --card-shadow: none;
+    --tray-shadow: var(--shadow-composer-dark);
+    --kbd-fill: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--popover), white 8%),
+      color-mix(in srgb, var(--popover), white 4%)
+    );
+    --kbd-popover-fill: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--popover), white 7%),
+      color-mix(in srgb, var(--popover), white 3%)
+    );
+    --kbd-shadow: 0 1px 0 rgb(0 0 0 / 40%);
+    --ghost-hover-fill: linear-gradient(180deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 4%));
+    --selected-fill: linear-gradient(180deg, rgb(255 255 255 / 8%), rgb(255 255 255 / 4.5%));
+    --selected-soft-fill: linear-gradient(180deg, rgb(255 255 255 / 5.5%), rgb(255 255 255 / 3%));
+    --sidebar-row-selected-rim: transparent;
+    --gloss-on-highlight: inset 0 1px 0 white;
+    /* Off reads as off: a muted thumb on the sunken track, quieter than on. */
+    --gloss-off-thumb-fill: linear-gradient(var(--muted-foreground), var(--muted-foreground));
+  }
+}
+
 /* Keep both sidebar implementations (default and legacy) on the same quiet
    zinc hierarchy: zinc-50 navigation, zinc-25 hover, and white selected/raised
    surfaces. */
@@ -1277,12 +1684,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --accent: #ebe8e3;
   --accent-foreground: #141312;
   --muted: #f2f0ec;
-  --muted-foreground: #6f6a63;
+  /* The beige sidebar is darker than the paper, so its secondary tiers step
+     down to keep muted at 4.5:1 and dim at 3.5:1 there. */
+  --muted-foreground: #625d57;
+  --dim-foreground: #7d7871;
   --border: rgb(0 0 0 / 8%);
   --input: rgb(0 0 0 / 14%);
   --sidebar: #e9e7e2;
   --sidebar-foreground: #2b2926;
-  --sidebar-muted-foreground: #6f6a63;
+  --sidebar-muted-foreground: #625d57;
   --sidebar-control-surface: #e2dfd9;
   --sidebar-row-hover: #e0ddd7;
   --sidebar-row-active: #fdfcfa;
@@ -1299,6 +1709,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --accent-foreground: #f5f3ef;
     --muted: #111110;
     --muted-foreground: #8e8a83;
+    --dim-foreground: #6e6a64;
     --border: rgb(255 255 255 / 7.5%);
     --input: rgb(255 255 255 / 12%);
     --sidebar: var(--card);
@@ -1334,7 +1745,7 @@ html[data-theme-id]:not([data-theme-id=""]) {
   --strong-foreground: var(--app-theme-text);
   --dim-foreground: color-mix(
     in oklab,
-    var(--app-theme-muted-foreground) 68%,
+    var(--app-theme-muted-foreground) 78%,
     var(--app-theme-canvas)
   );
   --card: var(--app-theme-surface);

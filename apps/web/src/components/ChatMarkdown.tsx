@@ -38,13 +38,15 @@ import {
   OctagonAlertIcon,
   PlayIcon,
   PresentationIcon,
-  SparklesIcon,
   TriangleAlertIcon,
   WorkflowIcon,
   WrapTextIcon,
   type LucideIcon,
+  CheckIcon,
+  CopyIcon,
+  Maximize2Icon,
+  Minimize2Icon,
 } from "lucide-react";
-import { Check, Copy, Maximize2, Minimize2 } from "lucide";
 import {
   AuthPreviewOperateScope,
   type AssetResource,
@@ -135,7 +137,6 @@ import {
 import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from "../pierre-icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { ContextChip } from "./ContextChip";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { ScrollArea } from "./ui/scroll-area";
@@ -301,11 +302,8 @@ function CodexArtifactTemplateCard(props: {
       data-skill-name={props.template.skillName}
     >
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background text-muted-foreground shadow-xs">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background text-muted-foreground shadow-xs">
           <Icon aria-hidden className="size-5" />
-          <span className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full border border-background bg-primary text-primary-foreground shadow-xs">
-            <SparklesIcon aria-hidden className="size-2.5" />
-          </span>
         </span>
         <div className="min-w-0">
           <div className="truncate text-sm font-medium text-foreground">
@@ -657,7 +655,11 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
                 />
               }
             >
-              <MorphIcon className="size-3" icon={expanded ? Minimize2 : Maximize2} />
+              {expanded ? (
+                <Minimize2Icon className="size-3" />
+              ) : (
+                <Maximize2Icon className="size-3" />
+              )}
             </TooltipTrigger>
             <TooltipPopup side="top">{expandLabel}</TooltipPopup>
           </Tooltip>
@@ -680,7 +682,7 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
                 />
               }
             >
-              <MorphIcon className="size-3" icon={copied ? Check : Copy} />
+              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
             </TooltipTrigger>
             <TooltipPopup side="top">{copyLabel}</TooltipPopup>
           </Tooltip>
@@ -928,7 +930,7 @@ function MarkdownCodeBlock({
           />
         }
       >
-        <MorphIcon className="size-3" icon={copied ? Check : Copy} />
+        {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </TooltipTrigger>
       <TooltipPopup side="top">{copyLabel}</TooltipPopup>
     </Tooltip>

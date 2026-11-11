@@ -2,8 +2,9 @@
 
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
+import { useId } from "react";
 import { cn } from "~/lib/utils";
-import { Button } from "~/components/ui/button";
+import { Button, type ButtonVariant } from "~/components/ui/button";
 import {
   DIALOG_BACKDROP_CLASS,
   DIALOG_MEDIA_BACKDROP_CLASS,
@@ -12,6 +13,33 @@ import {
   DIALOG_POPUP_CLASS,
 } from "~/components/ui/dialog-styles";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import { tooltipSafeFinalFocus } from "~/components/ui/focus-return";
+
+type InitialFocus = Extract<
+  DialogPrimitive.Popup.Props["initialFocus"],
+  (...args: never[]) => unknown
+>;
+
+// A dialog with a DialogAction opens with focus on it, so Enter takes the
+// primary action. Touch opens keep Base UI's default, which avoids raising the
+// on-screen keyboard.
+function dialogActionInitialFocus(
+  initialFocus: DialogPrimitive.Popup.Props["initialFocus"],
+  popupId: string,
+): DialogPrimitive.Popup.Props["initialFocus"] {
+  if (initialFocus !== undefined) return initialFocus;
+  const focusAction: InitialFocus = (openType) => {
+    if (openType === "touch") return true;
+    return (
+      document
+        .getElementById(popupId)
+        ?.querySelector<HTMLElement>(
+          '[data-slot="dialog-action"]:not(:disabled):not([aria-disabled="true"])',
+        ) ?? true
+    );
+  };
+  return focusAction;
+}
 
 const Dialog = DialogPrimitive.Root;
 
@@ -68,6 +96,8 @@ function DialogPopup({
   bottomStickOnMobile?: boolean;
   variant?: "default" | "media";
 }) {
+  const defaultId = useId();
+  const popupId = props.id ?? defaultId;
   return (
     <DialogPortal>
       {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
@@ -89,6 +119,9 @@ function DialogPopup({
           )}
           data-slot="dialog-popup"
           {...props}
+          id={popupId}
+          initialFocus={dialogActionInitialFocus(props.initialFocus, popupId)}
+          finalFocus={tooltipSafeFinalFocus(props.finalFocus, popupId)}
         >
           {children}
           {showCloseButton && (
@@ -104,6 +137,18 @@ function DialogPopup({
       </DialogViewport>
     </DialogPortal>
   );
+}
+
+/**
+ * The dialog's primary action: a Button that takes focus when the dialog
+ * opens. Destructive actions never take focus, so Enter cannot delete.
+ */
+function DialogAction(
+  props: Omit<React.ComponentProps<typeof Button>, "variant"> & {
+    variant?: Exclude<ButtonVariant, `${string}destructive${string}`>;
+  },
+) {
+  return <Button data-slot="dialog-action" {...props} />;
 }
 
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
@@ -143,7 +188,7 @@ function DialogFooter({
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
-      className={cn("wrap-anywhere font-semibold text-xl leading-none", className)}
+      className={cn("wrap-anywhere text-title text-strong-foreground", className)}
       data-slot="dialog-title"
       {...props}
     />
@@ -153,7 +198,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
 function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props) {
   return (
     <DialogPrimitive.Description
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-body text-muted-foreground", className)}
       data-slot="dialog-description"
       {...props}
     />
@@ -184,6 +229,8 @@ export {
   DialogTrigger,
   DialogPortal,
   DialogClose,
+  DialogAction,
+  dialogActionInitialFocus,
   DialogBackdrop,
   DialogBackdrop as DialogOverlay,
   DialogPopup,

@@ -16,6 +16,7 @@ import noRawResizeObserver from "./rules/no-raw-resize-observer.ts";
 import noRawTypeClasses from "./rules/no-raw-type-classes.ts";
 import noTestInLoop from "./rules/no-test-in-loop.ts";
 import noRpcPermissionBypass from "./rules/no-rpc-permission-bypass.ts";
+import noSparklesIcon from "./rules/no-sparkles-icon.ts";
 import noUnscopedHas from "./rules/no-unscoped-has.ts";
 import preferCatchTags from "./rules/prefer-catch-tags.ts";
 import requireCenteredScrollGutter from "./rules/require-centered-scroll-gutter.ts";
@@ -42,6 +43,7 @@ export default definePlugin({
     "no-raw-type-classes": noRawTypeClasses,
     "no-test-in-loop": noTestInLoop,
     "no-rpc-permission-bypass": noRpcPermissionBypass,
+    "no-sparkles-icon": noSparklesIcon,
     "no-unscoped-has": noUnscopedHas,
     "prefer-catch-tags": preferCatchTags,
     "require-centered-scroll-gutter": requireCenteredScrollGutter,

@@ -2,7 +2,11 @@
 
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 
+import { useId } from "react";
+
 import { cn } from "~/lib/utils";
+import { POPUP_COLLISION_PADDING, renderClosingPositioner } from "./closing-positioner";
+import { tooltipSafeFinalFocus } from "./focus-return";
 
 const PopoverCreateHandle = PopoverPrimitive.createHandle;
 
@@ -57,6 +61,8 @@ function PopoverPopup({
   anchor?: PopoverPrimitive.Positioner.Props["anchor"];
   width?: keyof typeof popoverPopupWidthClassName;
 }) {
+  const defaultId = useId();
+  const popupId = props.id ?? defaultId;
   // Viewport rekeys its children when the active trigger clears on close. Persistent
   // single-trigger forms need a stable container to retain drafts and submit guards.
   const Viewport = keepMounted ? "div" : PopoverPrimitive.Viewport;
@@ -67,7 +73,7 @@ function PopoverPopup({
         alignOffset={alignOffset}
         anchor={anchor}
         collisionAvoidance={collisionAvoidance}
-        collisionPadding={variant === "panel" ? 0 : undefined}
+        collisionPadding={variant === "panel" ? 0 : POPUP_COLLISION_PADDING}
         className={cn(
           "h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-transform data-instant:transition-none",
           variant === "panel"
@@ -75,18 +81,15 @@ function PopoverPopup({
             : "z-[130]",
         )}
         data-slot="popover-positioner"
+        render={renderClosingPositioner}
         side={side}
         sideOffset={sideOffset}
       >
         <PopoverPrimitive.Popup
           className={cn(
-            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-lg text-popover-foreground outline-none transition-[width,height,scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] has-data-[slot=calendar]:rounded-xl has-data-[slot=calendar]:before:rounded-[calc(var(--radius-xl)-1px)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
-            variant !== "panel" && "dropdown-glass",
-            tooltipStyle &&
-              "w-fit text-balance rounded-md text-xs shadow-md/5 before:rounded-[calc(var(--radius-md)-1px)]",
-            !tooltipStyle &&
-              variant !== "panel" &&
-              "shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]",
+            "kbd-in-popover relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-lg text-popover-foreground outline-none transition-[width,height,scale,opacity] has-data-[slot=calendar]:rounded-xl data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none",
+            variant !== "panel" && !tooltipStyle && "surface-popover",
+            tooltipStyle && "surface-tooltip w-fit text-balance rounded-md text-meta font-normal",
             width !== "auto" && ["max-w-[calc(100vw-2rem)]", popoverPopupWidthClassName[width]],
             variant === "panel" &&
               "w-full overflow-visible rounded-none border-0 bg-transparent shadow-none before:hidden [backdrop-filter:none] [-webkit-backdrop-filter:none]",
@@ -94,6 +97,8 @@ function PopoverPopup({
           )}
           data-slot="popover-popup"
           {...props}
+          id={popupId}
+          finalFocus={tooltipSafeFinalFocus(props.finalFocus, popupId)}
         >
           <Viewport
             className={cn(
@@ -122,7 +127,7 @@ function PopoverClose({ ...props }: PopoverPrimitive.Close.Props) {
 function PopoverTitle({ className, ...props }: PopoverPrimitive.Title.Props) {
   return (
     <PopoverPrimitive.Title
-      className={cn("font-semibold text-sm leading-none", className)}
+      className={cn("text-label text-strong-foreground", className)}
       data-slot="popover-title"
       {...props}
     />
