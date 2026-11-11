@@ -1215,14 +1215,6 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
-      const working = yield* otherChatAtWork(g, threadId);
-      if (working !== null)
-        return yield* failed(
-          "Restore build",
-          g.root,
-          "busy",
-          `Another chat of this game ("${working.title}") is working on it, so nothing was restored. Try again once its turn ends.`,
-        );
       const result = yield* restoreWithoutRun(threadId, g, build, commandId, options.expect);
       if (result.moved !== "moved-on") yield* playRestored(threadId, g);
       // Undo, Redo or Go back moved the folder a Guided proposal read: the person goes first.
@@ -1483,6 +1475,17 @@ const make = Effect.gen(function* () {
           message: earlier.outcome.message,
           moved,
         };
+      }
+      // After the replay: a retried restore that already happened answers from its record.
+      if (earlier?.requestId !== requestId) {
+        const working = yield* otherChatAtWork(g, threadId);
+        if (working !== null)
+          return yield* failed(
+            "Restore build",
+            g.root,
+            "busy",
+            `Another chat of this game ("${working.title}") is working on it, so nothing was restored. Try again once its turn ends.`,
+          );
       }
       const owner = String(threadId);
       // Checked first, under the game's lock, so a folder that moved on keeps
